@@ -709,8 +709,11 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
         args.client_id = __import__("os").environ.get("AZURE_CLIENT_ID")
     if args.client_secret is None:
         args.client_secret = __import__("os").environ.get("AZURE_CLIENT_SECRET")
-    if args.access_token is None:
-        args.access_token = __import__("os").environ.get("AZURE_ACCESS_TOKEN")
+    if args.access_token is None and __import__("os").environ.get("AZURE_ACCESS_TOKEN") is not None:
+        LOG.warning(
+            "Ignoring AZURE_ACCESS_TOKEN environment variable. "
+            "Pass --access-token explicitly or use a saved auth context."
+        )
     if args.authority is None:
         args.authority = __import__("os").environ.get("AZURE_AUTHORITY", args.authority)
     if args.graph_scope is None:

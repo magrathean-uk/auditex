@@ -92,3 +92,27 @@ def test_response_command_builds_dry_run_plan_by_default() -> None:
     assert "--execute" not in command
     assert command[command.index("--intent") + 1] == "triage mail flow"
     assert command[command.index("--target") + 1] == "user@example.com"
+
+
+def test_response_command_builder_includes_explicit_override_gates() -> None:
+    command = build_response_command(
+        ResponseCommandSpec(
+            tenant_name="LAB",
+            out_dir="outputs/response",
+            action="message_trace",
+            target="user@example.com",
+            intent="triage mail flow",
+            python_executable="python",
+            command_override='Get-MessageTrace -RecipientAddress "admin"',
+            adapter_override="m365dsc",
+            allow_adapter_override=True,
+            allow_command_override=True,
+            allow_write=True,
+        ),
+        supported_actions={"message_trace"},
+    )
+
+    assert "--command-override" in command
+    assert "--adapter-override" in command
+    assert "--allow-command-override" in command
+    assert "--allow-adapter-override" in command

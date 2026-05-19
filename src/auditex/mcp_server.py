@@ -172,6 +172,8 @@ def build_response_command(
     auth_context: str | None = None,
     adapter_override: str | None = None,
     command_override: str | None = None,
+    allow_adapter_override: bool = False,
+    allow_command_override: bool = False,
 ) -> list[str]:
     return build_response_tool_command(
         ResponseCommandSpec(
@@ -191,6 +193,8 @@ def build_response_command(
             auth_context=auth_context,
             adapter_override=adapter_override,
             command_override=command_override,
+            allow_adapter_override=allow_adapter_override,
+            allow_command_override=allow_command_override,
             python_executable=sys.executable,
         ),
         supported_actions=response_actions(),
@@ -449,6 +453,8 @@ def main() -> int:
         auth_context: str = "",
         adapter_override: str = "",
         command_override: str = "",
+        allow_adapter_override: bool = False,
+        allow_command_override: bool = False,
     ) -> dict[str, Any]:
         command = build_response_command(
             tenant_name=tenant_name,
@@ -467,6 +473,8 @@ def main() -> int:
             auth_context=auth_context or None,
             adapter_override=adapter_override or None,
             command_override=command_override or None,
+            allow_adapter_override=allow_adapter_override,
+            allow_command_override=allow_command_override,
         )
         return run_cli_command(command)
 

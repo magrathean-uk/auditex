@@ -22,9 +22,6 @@ def default_local_auth_env_path() -> Path:
     configured = os.environ.get(LOCAL_AUTH_ENV_VAR)
     if configured:
         return Path(configured).expanduser()
-    cwd_path = Path.cwd() / ".secrets" / "m365-auth.env"
-    if cwd_path.exists():
-        return cwd_path
     return Path(__file__).resolve().parents[2] / ".secrets" / "m365-auth.env"
 
 
@@ -32,10 +29,28 @@ def default_auth_contexts_path() -> Path:
     configured = os.environ.get(AUTH_CONTEXTS_PATH_ENV_VAR)
     if configured:
         return Path(configured).expanduser()
-    cwd_path = Path.cwd() / ".secrets" / "auditex-auth-contexts.json"
-    if cwd_path.exists():
-        return cwd_path
     return Path(__file__).resolve().parents[2] / ".secrets" / "auditex-auth-contexts.json"
+
+
+def _safe_context_name(value: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in value.strip())
+    cleaned = cleaned.strip("._") or "context"
+    return cleaned[:64]
+
+
+def _token_dir() -> Path:
+    return default_auth_contexts_path().parent / ".tokens"
+
+
+def _default_token_path(name: str, token_file: str | None = None) -> Path:
+    directory = _token_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    if token_file:
+        safe_token_file = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in token_file.strip())
+        safe_token_file = safe_token_file.strip("._") or "token"
+        return directory / safe_token_file[:64]
+    return directory / f"{_safe_context_name(name)}.token"
+
 
 
 def _load_local_auth_env() -> Path:
@@ -244,6 +259,9 @@ def _product_auth_runtime() -> auth_runtime.ProductAuthRuntime:
             exchange_module_status=_pwsh_exchange_module_status,
             load_auth_context_store=_auth_context_store,
             save_auth_context_store=_save_auth_context_store,
+            resolve_token_path=_default_token_path,
+            write_token=lambda path, token: secure_write_text(path, f"{token}\n", mode=0o600),
+            read_token=lambda path: Path(path).read_text(encoding="utf-8").strip(),
             environ_get=os.environ.get,
             run_returncode=lambda command: subprocess.run(command, check=False).returncode,
         )

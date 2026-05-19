@@ -5,8 +5,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from datetime import datetime
 
 from .adapters import get_adapter
+from .adapters import ADAPTERS
 from .ai_context import build_privacy_block
 from .finalize import finalize_bundle_contract
 from .findings import build_report_pack
@@ -18,6 +20,33 @@ from .secret_hygiene import redact_argv, sanitize_token_claims
 LAB_TENANT_ENV = "AUDITEX_LAB_TENANT_IDS"
 DEFAULT_LAB_TENANT_IDS: tuple[str, ...] = ()
 RESPONSE_SENSITIVE_ARGS = {"--command-override", "--adapter-override", "--access-token", "--client-secret", "--token"}
+ALLOWED_RESPONSE_ADAPTERS = tuple(sorted(ADAPTERS.keys()))
+SAFE_RESPONSE_FIELD_BLACKLIST = frozenset("\x00\r\n\t;&|`$<>\"'")
+MAX_RESPONSE_FIELD_LENGTH = 512
+
+
+def _is_safe_response_field(value: str | None) -> bool:
+    if value is None:
+        return True
+    if not value.strip():
+        return False
+    if len(value) > MAX_RESPONSE_FIELD_LENGTH:
+        return False
+    if any(char in SAFE_RESPONSE_FIELD_BLACKLIST for char in value):
+        return False
+    if any(ord(char) < 0x20 for char in value):
+        return False
+    return True
+
+
+def _is_iso_timestamp(value: str | None) -> bool:
+    if value is None:
+        return True
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -47,6 +76,8 @@ class ResponseConfig:
     allow_lab_response: bool = False
     adapter_override: str | None = None
     command_override: str | None = None
+    allow_adapter_override: bool = False
+    allow_command_override: bool = False
 
 
 RESPONSE_ACTIONS: dict[str, ResponseAction] = {
@@ -211,8 +242,80 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
             }
         )
 
+    if config.command_override and not config.allow_command_override:
+        blockers.append(
+            {
+                "collector": "response",
+                "item": "response.command_override",
+                "status": "failed",
+                "error_class": "response_command_override_disabled",
+                "error": "Response command override is blocked unless allow_command_override is enabled.",
+                "recommendations": {"notes": "Remove --command-override or pass --allow-command-override explicitly."},
+            }
+        )
+
+    if config.adapter_override and not config.allow_adapter_override:
+        blockers.append(
+            {
+                "collector": "response",
+                "item": "response.adapter_override",
+                "status": "failed",
+                "error_class": "response_adapter_override_disabled",
+                "error": "Response adapter override is blocked unless allow_adapter_override is enabled.",
+                "recommendations": {"notes": "Remove --adapter-override or pass --allow-adapter-override explicitly."},
+            }
+        )
+
+    for field_name in ("target", "since", "until"):
+        field_value = getattr(config, field_name, None)
+        if not _is_safe_response_field(field_value):
+            blockers.append(
+                {
+                    "collector": "response",
+                    "item": f"response.argument:{field_name}",
+                    "status": "failed",
+                    "error_class": "response_argument_unsafe",
+                    "error": f"Response field '{field_name}' contains unsafe characters.",
+                    "recommendations": {"notes": f"Provide a clean {field_name} value for response execution."},
+                }
+            )
+
+    if config.since is not None and not _is_iso_timestamp(config.since):
+        blockers.append(
+            {
+                "collector": "response",
+                "item": "response.argument:since",
+                "status": "failed",
+                "error_class": "response_argument_malformed",
+                "error": "Response field 'since' must be an ISO8601 timestamp.",
+                "recommendations": {"notes": "Use a valid ISO8601 UTC timestamp for --since."},
+            }
+        )
+    if config.until is not None and not _is_iso_timestamp(config.until):
+        blockers.append(
+            {
+                "collector": "response",
+                "item": "response.argument:until",
+                "status": "failed",
+                "error_class": "response_argument_malformed",
+                "error": "Response field 'until' must be an ISO8601 timestamp.",
+                "recommendations": {"notes": "Use a valid ISO8601 UTC timestamp for --until."},
+            }
+        )
+
     adapter = None
     adapter_name = config.adapter_override or (action.adapter if action else "")
+    if config.adapter_override and config.adapter_override not in ALLOWED_RESPONSE_ADAPTERS:
+        blockers.append(
+            {
+                "collector": "response",
+                "item": f"response.adapter:{config.adapter_override}",
+                "status": "failed",
+                "error_class": "response_invalid_adapter_override",
+                "error": f"Response adapter override '{config.adapter_override}' is not supported.",
+                "recommendations": {"notes": f"Use one of: {', '.join(ALLOWED_RESPONSE_ADAPTERS)}"},
+            }
+        )
     if action is not None:
         try:
             adapter = get_adapter(adapter_name or action.adapter)
@@ -243,8 +346,18 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                         },
                     }
                 )
+            if action.name != "message_trace" and not config.allow_write:
+                blockers.append(
+                    {
+                        "collector": "response",
+                        "item": f"response.write_guard:{action.name}",
+                        "status": "failed",
+                        "error_class": "response_write_guard",
+                        "error": "Action is treated as write-capable; enable --allow-write to execute.",
+                        "recommendations": {"notes": "Use a read-only response action or pass --allow-write explicitly."},
+                    }
+                )
 
-    if action and not blockers:
         missing = [field for field in action.required_fields if not getattr(config, field, None)]
         if missing:
             blockers.append(

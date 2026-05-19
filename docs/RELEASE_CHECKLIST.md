@@ -87,4 +87,3 @@ The shipped bundle must keep these aligned:
 - provenance docs under `docs/provenance/`
 - `THIRD_PARTY_NOTICES.md`
 - this checklist
-- `improvement.md`

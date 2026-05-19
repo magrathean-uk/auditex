@@ -135,6 +135,8 @@ class ResponseCommandSpec:
     auth_context: str | None = None
     adapter_override: str | None = None
     command_override: str | None = None
+    allow_adapter_override: bool = False
+    allow_command_override: bool = False
     python_executable: str | None = None
 
 
@@ -170,6 +172,8 @@ def build_response_command(spec: ResponseCommandSpec, *, supported_actions: Iter
     _add_bool(command, "--execute", spec.execute)
     _add_bool(command, "--allow-write", spec.allow_write)
     _add_bool(command, "--allow-lab-response", spec.allow_lab_response)
+    _add_bool(command, "--allow-adapter-override", spec.allow_adapter_override)
+    _add_bool(command, "--allow-command-override", spec.allow_command_override)
     _add_option(command, "--auth-context", spec.auth_context)
     _add_option(command, "--adapter-override", spec.adapter_override)
     _add_option(command, "--command-override", spec.command_override)

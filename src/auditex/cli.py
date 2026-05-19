@@ -196,6 +196,8 @@ def _build_response_parser() -> argparse.ArgumentParser:
     run.add_argument("--execute", action="store_true", help="Execute the command plan instead of dry-running it.")
     run.add_argument("--allow-write", action="store_true", help="Allow destructive actions when a response action is classified as write-capable.")
     run.add_argument("--allow-lab-response", action="store_true", help="Allow the response plane for configured lab tenants only.")
+    run.add_argument("--allow-adapter-override", action="store_true", help="Allow override of adapter name for response execution.")
+    run.add_argument("--allow-command-override", action="store_true", help="Allow override of raw command text for response execution.")
     run.add_argument("--auth-context", default=None, help="Saved local auth context name to use for response execution.")
     run.add_argument("--adapter-override", default=None, help="Override the adapter used for the response action.")
     run.add_argument("--command-override", default=None, help="Override the command template used for the response action.")
@@ -666,6 +668,8 @@ def main(argv: list[str] | None = None) -> int:
             auth_context=args.auth_context,
             adapter_override=args.adapter_override,
             command_override=args.command_override,
+            allow_adapter_override=args.allow_adapter_override,
+            allow_command_override=args.allow_command_override,
         )
         return run_response(cfg, command_line=argv)
     return tenant_audit_main(argv)

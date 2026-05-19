@@ -164,6 +164,9 @@ class AuthRuntimeAdapters:
     load_auth_context_store: Callable[[], dict[str, Any]] = _empty_store
     save_auth_context_store: Callable[[dict[str, Any]], None] = lambda _payload: None
     environ_get: Callable[[str], str | None] = os.environ.get
+    resolve_token_path: Callable[[str, str | None], Path | None] = lambda _name, _token_file=None: None
+    write_token: Callable[[Path, str], None] = lambda _path, _token: None
+    read_token: Callable[[Path], str] = lambda _path: ""
     run_returncode: ReturncodeCommand = _default_run_returncode
 
 
@@ -308,12 +311,22 @@ class ProductAuthRuntime:
         validation = validate_token_claims(inspected, tenant_id=effective_tenant_id)
         if validation.get("blockers"):
             raise ValueError(f"refusing to save unusable token context: {', '.join(validation['blockers'])}")
+
+        token_file = _safe_token_file_name(name)
+        token_path = self.adapters.resolve_token_path(name, token_file)
+        if token_path is not None:
+            self.adapters.write_token(token_path, token)
+            token_value: str | None = None
+        else:
+            token_value = token
+
         store = self._auth_context_store()
         store["contexts"][name] = {
             "name": name,
             "auth_type": "imported_token",
             "tenant_id": effective_tenant_id,
-            "token": token,
+            "token": token_value,
+            "token_file": token_file,
             "token_preview": redacted_token_preview(token),
             "token_claims": inspected,
             "validation": validation,
@@ -325,6 +338,7 @@ class ProductAuthRuntime:
             "name": name,
             "auth_type": "imported_token",
             "tenant_id": effective_tenant_id,
+            "token_path": token_path and str(token_path),
             "token_preview": redacted_token_preview(token),
             "token_claims": {
                 "audience": inspected.get("audience"),
@@ -364,6 +378,18 @@ class ProductAuthRuntime:
         context = store.get("contexts", {}).get(selected_name)
         if not isinstance(context, dict):
             raise RuntimeError(f"auth context '{selected_name}' not found")
+
+        token = context.get("token")
+        if not token:
+            token_file = context.get("token_file")
+            if isinstance(token_file, str) and token_file:
+                token_path = self.adapters.resolve_token_path(selected_name, token_file)
+                if token_path is not None:
+                    token = self.adapters.read_token(token_path)
+                    if token:
+                        context = dict(context)
+                        context["token"] = token
+
         validation = validate_token_claims(context.get("token_claims") or {}, tenant_id=context.get("tenant_id"))
         if validation.get("blockers"):
             raise RuntimeError(
@@ -399,6 +425,12 @@ class ProductAuthRuntime:
         if not isinstance(store.get("contexts"), dict):
             store["contexts"] = {}
         return store
+
+
+def _safe_token_file_name(name: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in str(name).strip())
+    safe = safe.strip("._") or "context"
+    return f"{safe}.token"
 
 
 def b64url_json(segment: str) -> dict[str, Any]:
@@ -444,8 +476,10 @@ def inspect_token_claims(token: str, *, include_raw_claims: bool = False) -> dic
     if token.lower().startswith("bearer "):
         token = token.split(" ", 1)[1].strip()
     parts = token.split(".")
-    if len(parts) < 2:
+    if len(parts) != 3:
         raise ValueError("token is not a JWT")
+    if not all(parts):
+        raise ValueError("token is not a complete JWT")
     payload = b64url_json(parts[1])
     delegated_scopes = sorted(parse_csv_list(str(payload.get("scp", "")).replace(" ", ",")) or [])
     app_roles = sorted(str(item) for item in payload.get("roles", []) if isinstance(item, str))

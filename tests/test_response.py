@@ -31,7 +31,7 @@ def _jwt(payload: dict[str, object]) -> str:
         raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
         return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
-    return f"{_encode({'alg': 'none', 'typ': 'JWT'})}.{_encode(payload)}."
+    return f"{_encode({'alg': 'none', 'typ': 'JWT'})}.{_encode(payload)}.sig"
 
 
 def test_response_execute_requires_matching_lab_tenant_even_with_allow_flag(tmp_path: Path, monkeypatch) -> None:
@@ -216,3 +216,141 @@ def test_response_execute_uses_saved_auth_context_and_writes_auth_artifact(tmp_p
     assert manifest["session_context_path"] == "session-context.json"
     assert manifest["session_context"]["tenant_id"] == "tenant-saved"
     assert (run_dir / "session-context.json").exists()
+
+
+def test_response_execute_blocks_command_override_without_explicit_allow(tmp_path: Path, monkeypatch) -> None:
+    adapter = _FakeAdapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant"})
+
+    rc = run_response(
+        ResponseConfig(
+            tenant_name="contoso",
+            out_dir=tmp_path,
+            tenant_id="tenant",
+            action="message_trace",
+            target="user@example.com",
+            intent="review smoke",
+            auditor_profile="exchange-reader",
+            allow_lab_response=True,
+            command_override='Get-MessageTrace -RecipientAddress "admin"',
+            run_name="response-command-override-blocked",
+        )
+    )
+
+    assert rc == 1
+    assert adapter.run_calls == []
+    run_dir = tmp_path / "contoso-response-command-override-blocked"
+    blockers = json.loads((run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+    assert blockers[0]["item"] == "response.command_override"
+    assert blockers[0]["error_class"] == "response_command_override_disabled"
+
+
+def test_response_execute_blocks_adapter_override_without_explicit_allow(tmp_path: Path, monkeypatch) -> None:
+    adapter = _FakeAdapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant"})
+
+    rc = run_response(
+        ResponseConfig(
+            tenant_name="contoso",
+            out_dir=tmp_path,
+            tenant_id="tenant",
+            action="message_trace",
+            target="user@example.com",
+            intent="review smoke",
+            auditor_profile="exchange-reader",
+            allow_lab_response=True,
+            adapter_override="m365dsc",
+            run_name="response-adapter-override-blocked",
+        )
+    )
+
+    assert rc == 1
+    assert adapter.run_calls == []
+    run_dir = tmp_path / "contoso-response-adapter-override-blocked"
+    blockers = json.loads((run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+    assert blockers[0]["item"] == "response.adapter_override"
+    assert blockers[0]["error_class"] == "response_adapter_override_disabled"
+
+
+def test_response_execute_blocks_write_action_without_allow_write(tmp_path: Path, monkeypatch) -> None:
+    adapter = _FakeAdapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant"})
+
+    rc = run_response(
+        ResponseConfig(
+            tenant_name="contoso",
+            out_dir=tmp_path,
+            tenant_id="tenant",
+            action="user_audit_history",
+            target="user@example.com",
+            since="2026-01-01T00:00:00Z",
+            until="2026-01-02T00:00:00Z",
+            intent="review smoke",
+            auditor_profile="exchange-reader",
+            allow_lab_response=True,
+            run_name="response-write-guard-blocked",
+        )
+    )
+
+    assert rc == 1
+    assert adapter.run_calls == []
+    run_dir = tmp_path / "contoso-response-write-guard-blocked"
+    blockers = json.loads((run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+    assert any(item["error_class"] == "response_write_guard" for item in blockers)
+
+
+def test_response_execute_blocks_unsafe_target_field(tmp_path: Path, monkeypatch) -> None:
+    adapter = _FakeAdapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant"})
+
+    rc = run_response(
+        ResponseConfig(
+            tenant_name="contoso",
+            out_dir=tmp_path,
+            tenant_id="tenant",
+            action="message_trace",
+            target='user@example.com";Remove-Item "C:\\*',
+            intent="review smoke",
+            auditor_profile="exchange-reader",
+            allow_lab_response=True,
+            run_name="response-unsafe-target-blocked",
+        )
+    )
+
+    assert rc == 1
+    assert adapter.run_calls == []
+    run_dir = tmp_path / "contoso-response-unsafe-target-blocked"
+    blockers = json.loads((run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+    assert any(item["error_class"] == "response_argument_unsafe" for item in blockers)
+
+
+def test_response_execute_blocks_malformed_timestamp_field(tmp_path: Path, monkeypatch) -> None:
+    adapter = _FakeAdapter()
+    monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
+    monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant"})
+
+    rc = run_response(
+        ResponseConfig(
+            tenant_name="contoso",
+            out_dir=tmp_path,
+            tenant_id="tenant",
+            action="user_audit_history",
+            target="user@example.com",
+            since="2026-01-01",
+            until="n0t-a-date",
+            intent="review smoke",
+            auditor_profile="exchange-reader",
+            allow_lab_response=True,
+            run_name="response-unsafe-timestamps-blocked",
+        )
+    )
+
+    assert rc == 1
+    assert adapter.run_calls == []
+    run_dir = tmp_path / "contoso-response-unsafe-timestamps-blocked"
+    blockers = json.loads((run_dir / "blockers" / "blockers.json").read_text(encoding="utf-8"))
+    assert any(item["error_class"] == "response_argument_malformed" for item in blockers)

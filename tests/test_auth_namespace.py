@@ -82,7 +82,7 @@ def _jwt(payload: dict[str, object]) -> str:
         raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
         return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
-    return f"{_encode({'alg': 'none', 'typ': 'JWT'})}.{_encode(payload)}."
+    return f"{_encode({'alg': 'none', 'typ': 'JWT'})}.{_encode(payload)}.sig"
 
 
 def test_auth_import_token_command_persists_context(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -107,7 +107,11 @@ def test_auth_import_token_command_persists_context(monkeypatch, tmp_path: Path,
     assert payload["auth_type"] == "imported_token"
     stored = json.loads(contexts_path.read_text(encoding="utf-8"))
     assert stored["active_context"] == "customer-a"
-    assert stored["contexts"]["customer-a"]["token"] == token
+    stored_context = stored["contexts"]["customer-a"]
+    assert stored_context["token"] != token
+    assert stored_context["token_file"]
+    assert stored_context["token_preview"].startswith(token[:8])
+    assert stored_context["token_preview"].endswith(token[-4:])
 
 
 def test_auth_inspect_token_command_prints_claims(monkeypatch, tmp_path: Path, capsys) -> None:

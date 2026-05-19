@@ -124,3 +124,9 @@ The resulting `outputs/ci-contract/ci-contract/validation.json` must be valid an
 - Keep `.venv/`, `.secrets/`, and tenant outputs local.
 - Keep raw evidence local; AI should read normalized artifacts by default.
 - Use [docs/provenance/provenance.md](docs/provenance/provenance.md) when provenance questions matter.
+
+## Verification notes
+
+- Treat `auditex response run` as lab-only. Execution needs explicit intent, a lab tenant allowlist, and the matching allow flags for write actions and any adapter or command override.
+- Imported token contexts should keep the raw token on disk in the secrets sidecar, not inside the context JSON.
+- When checking exposure, verify the public route, direct-IP / Host-header path, and the blocked path separately. One green check is not enough.

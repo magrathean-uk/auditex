@@ -4,7 +4,19 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from auditex.auth_runtime import AuthRuntimeAdapters, ProductAuthRuntime, ToolchainRuntime, ToolchainRuntimeAdapters
+
+
+def _encode_jwt_payload(payload: dict[str, object]) -> str:
+    import base64
+
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode("utf-8")).decode("ascii").rstrip("=")
+    raw_payload = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"{header}.{raw_payload}.sig"
 
 
 class _FakeAuthAdapters:
@@ -73,6 +85,60 @@ def test_auth_runtime_resolves_active_auth_context_from_fake_store() -> None:
     assert listed["active_context"] == "customer-a"
     assert listed["contexts"][0]["active"] is True
     assert listed["contexts"][0]["tenant_id"] == "tenant-1"
+
+
+def test_import_token_context_uses_token_file_when_available(tmp_path: Path) -> None:
+    store: dict[str, Any] = {"active_context": None, "contexts": {}}
+    saved_token_path: Path | None = None
+
+    def _save_store(payload: dict[str, Any]) -> None:
+        nonlocal store
+        store = payload
+
+    token_path = tmp_path / "tokens"
+    token_path.mkdir(parents=True, exist_ok=True)
+
+    def _resolve_token_path(name: str, token_file: str | None = None) -> Path:
+        assert token_file
+        return token_path / token_file
+
+    runtime = ProductAuthRuntime(
+        AuthRuntimeAdapters(
+            load_auth_context_store=lambda: store,
+            save_auth_context_store=_save_store,
+            resolve_token_path=_resolve_token_path,
+            write_token=lambda path, token: path.write_text(token, encoding="utf-8"),
+            read_token=lambda path: path.read_text(encoding="utf-8"),
+            list_adapter_capabilities=lambda: [],
+        )
+    )
+
+    token = _encode_jwt_payload({"tid": "tenant-1", "aud": "https://graph.microsoft.com", "exp": 1893456000})
+    runtime.import_token_context(name="customer-a", token=token, tenant_id="tenant-1")
+
+    assert store["active_context"] == "customer-a"
+    context = store["contexts"]["customer-a"]
+    assert context["token"] is None
+    assert context["token_file"] == "customer-a.token"
+    assert context["token_preview"] == f"{token[:8]}...{token[-4:]}"
+    assert context["token_preview"] != token
+    assert _resolve_token_path("customer-a", "customer-a.token").exists()
+
+    saved_token_path = _resolve_token_path("customer-a", context["token_file"])
+    assert saved_token_path.read_text(encoding="utf-8").strip() == token
+
+    resolved = runtime.resolve_auth_context()
+    assert resolved["token"] == token
+
+
+def test_import_token_context_rejects_incomplete_token() -> None:
+    runtime = ProductAuthRuntime()
+    with pytest.raises(ValueError, match="token is not a complete JWT"):
+        runtime.import_token_context(
+            name="bad-token",
+            token="header..signature",
+            tenant_id="tenant-1",
+        )
 
 
 class _FakeToolchainAdapters:

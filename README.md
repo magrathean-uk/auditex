@@ -220,7 +220,7 @@ Target repository: `magrathean-uk/auditex`
 
 Copyright © 2026 Magrathean UK Ltd. All rights reserved.
 
-Auditex is proprietary software. See [`LICENSE`](./LICENSE) for the full licence text. Third-party components and their licences are listed in [`LICENSE.md`](./LICENSE.md) and [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) where present. Public availability of this repository does not grant any right to copy, modify, redistribute, or use the software outside the licence terms.
+Auditex is proprietary software. See [`LICENSE`](./LICENSE) for the full licence text. Third-party components and their licences are listed in [`license.md`](./license.md) and [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) where present. Public availability of this repository does not grant any right to copy, modify, redistribute, or use the software outside the licence terms.
 
 ### Lawful use only — tenant audits
 
