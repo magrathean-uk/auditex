@@ -352,6 +352,26 @@ def test_google_doctor_plain_output_mentions_live_readiness(capsys) -> None:
     assert "https://www.googleapis.com/auth/admin.directory.user.readonly" in output
 
 
+def test_google_dependency_status_handles_missing_google_namespace(monkeypatch) -> None:
+    from auditex.google_workspace import auth as google_auth
+
+    def fake_find_spec(module: str) -> object | None:
+        if module == "google.auth":
+            raise ModuleNotFoundError("No module named 'google'")
+        return None
+
+    monkeypatch.setattr(google_auth.importlib.util, "find_spec", fake_find_spec)
+
+    status = google_auth.google_dependency_status()
+
+    assert status["available"] is False
+    assert status["missing"] == [
+        "google-api-python-client",
+        "google-auth",
+        "google-auth-oauthlib",
+    ]
+
+
 def test_google_capability_rows_include_live_readiness() -> None:
     from auditex.google_workspace.run import build_google_capability_rows, build_google_live_readiness
 

@@ -3,6 +3,7 @@ name: compliance
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   taint-scan:

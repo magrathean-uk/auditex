@@ -45,7 +45,7 @@ class GoogleAuthConfig:
 
 
 def google_dependency_status() -> dict[str, Any]:
-    missing = [package for module, package in _DEPENDENCIES.items() if importlib.util.find_spec(module) is None]
+    missing = [package for module, package in _DEPENDENCIES.items() if not _module_available(module)]
     missing = sorted(dict.fromkeys(missing))
     return {
         "available": not missing,
@@ -55,6 +55,13 @@ def google_dependency_status() -> dict[str, Any]:
         if missing
         else "",
     }
+
+
+def _module_available(module: str) -> bool:
+    try:
+        return importlib.util.find_spec(module) is not None
+    except ModuleNotFoundError:
+        return False
 
 
 def ensure_google_dependencies() -> None:
