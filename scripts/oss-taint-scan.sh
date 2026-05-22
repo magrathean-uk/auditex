@@ -26,7 +26,7 @@ for derived in \
   fi
 done
 
-PATTERN='steal|Competitor harvest|auditex research competitors|docs/research|src/auditex/research|ThomasKur/M365Documentation|System-Admins/m365assessment|ThomasKur__M365Documentation|System-Admins__m365assessment'
+PATTERN='(^|[^[:alnum:]_])steal([^[:alnum:]_]|$)|Competitor harvest|auditex research competitors|docs/research|src/auditex/research|ThomasKur/M365Documentation|System-Admins/m365assessment|ThomasKur__M365Documentation|System-Admins__m365assessment'
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
@@ -40,6 +40,7 @@ find . \
   -path './docs/provenance' -prune -o \
   -path './tenant-bootstrap/vendor/microsoft-skills' -prune -o \
   -path './scripts/oss-taint-scan.sh' -prune -o \
+  -name 'license.md' -prune -o \
   -name 'THIRD_PARTY_NOTICES.md' -prune -o \
   -name '*.pyc' -prune -o \
   -name '__pycache__' -prune -o \

@@ -316,6 +316,8 @@ def test_google_probe_writes_summarizable_artifacts(tmp_path: Path, monkeypatch,
 
 
 def test_google_doctor_accepts_run_selection_options(capsys) -> None:
+    from auditex.google_workspace.auth import google_dependency_status
+
     rc = auditex_cli.main(
         [
             "google",
@@ -336,18 +338,25 @@ def test_google_doctor_accepts_run_selection_options(capsys) -> None:
     assert payload["auth"]["scopes_csv"]
     assert "," in payload["auth"]["scopes_csv"]
     assert payload["auth"]["scopes_csv"].split(",") == payload["auth"]["scopes"]
-    assert payload["live_readiness"]["trust_level"] == "setup_only"
-    assert "google_calendar_posture" in payload["live_readiness"]["unverified_collectors"]
+    expected_trust = "setup_only" if google_dependency_status()["available"] else "blocked"
+    assert payload["live_readiness"]["trust_level"] == expected_trust
+    if expected_trust == "setup_only":
+        assert "google_calendar_posture" in payload["live_readiness"]["unverified_collectors"]
+    else:
+        assert "google_calendar_posture" in payload["live_readiness"]["blocked_collectors"]
 
 
 def test_google_doctor_plain_output_mentions_live_readiness(capsys) -> None:
+    from auditex.google_workspace.auth import google_dependency_status
+
     rc = auditex_cli.main(["google", "doctor", "--collector-preset", "identity"])
 
     output = capsys.readouterr().out
 
     assert rc in {0, 2}
     assert "Live readiness:" in output
-    assert "setup_only" in output
+    expected_trust = "setup_only" if google_dependency_status()["available"] else "blocked"
+    assert expected_trust in output
     assert "OAuth scopes:" in output
     assert "https://www.googleapis.com/auth/admin.directory.user.readonly" in output
 
