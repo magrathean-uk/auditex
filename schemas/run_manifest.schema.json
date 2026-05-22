@@ -25,6 +25,15 @@
     "tenant_id": {
       "type": ["string", "null"]
     },
+    "platform": {
+      "type": "string"
+    },
+    "workspace_domain": {
+      "type": ["string", "null"]
+    },
+    "customer_id": {
+      "type": ["string", "null"]
+    },
     "run_id": {
       "type": "string"
     },
@@ -70,7 +79,46 @@
     "validation_path": {
       "type": "string"
     },
+    "live_readiness_path": {
+      "type": "string"
+    },
     "privacy": {
+      "type": "object"
+    },
+    "data_handling_path": {
+      "type": "string"
+    },
+    "audit_plan_path": {
+      "type": "string"
+    },
+    "api_inventory_path": {
+      "type": "string"
+    },
+    "autopilot_quality": {
+      "type": "object"
+    },
+    "data_handling_events": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "assurance": {
+      "type": "object"
+    },
+    "surface_coverage": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "coverage_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "provider_scorecard": {
       "type": "object"
     },
     "time_window": {

@@ -5,7 +5,7 @@ import time
 from typing import Any, Callable, Optional
 
 from ..adapters import get_adapter
-from .base import Collector, CollectorResult
+from .base import Collector, CollectorResult, normalize_collection_limit
 from ..graph import GraphError
 
 
@@ -185,13 +185,16 @@ class ExchangeCollector(Collector):
             return None
 
         try:
+            params: dict[str, str] = {
+                "$select": "id,displayName,userPrincipalName,mail,mailboxSettings",
+                "$filter": "mail ne null",
+            }
+            limit = normalize_collection_limit(top, default=500)
+            if limit is not None:
+                params["$top"] = str(limit)
             users = graph_client.get_all(
                 "/users",
-                params={
-                    "$select": "id,displayName,userPrincipalName,mail,mailboxSettings",
-                    "$filter": "mail ne null",
-                    "$top": str(top),
-                },
+                params=params,
             )
             return {
                 "command": "graph /users?filter=mail ne null",

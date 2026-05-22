@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from azure_tenant_audit.config import CollectorConfig
+from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.secret_hygiene import (
@@ -578,16 +579,18 @@ def collector_capability_matrix(
             status = "partial"
             reason = "global_reader_tenant_level_reports_only"
         rows.append(
-            {
-                "collector": collector_name,
-                "status": status,
-                "reason": reason,
-                "required_permissions": required,
-                "missing_permissions": missing,
-                "observed_permissions": sorted(available),
-                "minimum_role_hints": list(hints.get("minimum_role_hints") or profile.delegated_role_hints),
-                "notes": hints.get("notes") or profile.notes,
-            }
+            enrich_capability_row(
+                {
+                    "collector": collector_name,
+                    "status": status,
+                    "reason": reason,
+                    "required_permissions": required,
+                    "missing_permissions": missing,
+                    "observed_permissions": sorted(available),
+                    "minimum_role_hints": list(hints.get("minimum_role_hints") or profile.delegated_role_hints),
+                    "notes": hints.get("notes") or profile.notes,
+                }
+            )
         )
     return rows
 

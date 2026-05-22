@@ -82,6 +82,24 @@ def test_run_bundle_reader_centralizes_legacy_and_contract_artifacts(tmp_path: P
     assert bundle["auth_context"]["name"] == "saved"
 
 
+def test_run_bundle_metadata_exposes_platform_and_risk(tmp_path: Path) -> None:
+    from auditex.run_bundle import RunBundle
+
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .manifest(tenant_name="acme", run_id="run-1", overall_status="partial", platform="google_workspace")
+        .summary(tenant_name="acme", run_id="run-1", collectors=[], assurance={"score": 90, "grade": "strong"})
+        .report_pack(summary={"overall_status": "partial", "risk": {"score": 40, "grade": "high"}}, findings=[])
+        .build()
+    )
+
+    metadata = RunBundle(run_dir).metadata()
+
+    assert metadata["platform"] == "google_workspace"
+    assert metadata["risk"] == {"score": 40, "grade": "high"}
+    assert metadata["assurance"] == {"score": 90, "grade": "strong"}
+
+
 def test_mcp_command_runner_redacts_sensitive_args() -> None:
     from auditex.command_runner import run_cli_command
 

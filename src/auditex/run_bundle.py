@@ -34,6 +34,21 @@ def _dict_rows(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _coverage_gaps(*values: Any) -> list[dict[str, Any]]:
+    for value in values:
+        gaps = _dict_rows(value)
+        if gaps:
+            return gaps
+    return []
+
+
+def _scorecard(*values: Any) -> dict[str, Any]:
+    for value in values:
+        if isinstance(value, Mapping):
+            return dict(value)
+    return {}
+
+
 def _action_rows(value: Any) -> list[dict[str, Any]]:
     rows = _dict_rows(value)
     if rows:
@@ -102,6 +117,18 @@ class RunBundle:
         path = self.path("toolchain-readiness.json")
         return (path, _read_json(path, {})) if path.exists() else (None, None)
 
+    def live_readiness(self) -> tuple[Path | None, Any]:
+        return self._artifact_json("live_readiness_path", "live-readiness.json", {})
+
+    def audit_plan(self) -> tuple[Path | None, Any]:
+        return self._artifact_json("audit_plan_path", "audit-plan.json", {})
+
+    def api_inventory(self) -> tuple[Path | None, Any]:
+        return self._artifact_json("api_inventory_path", "api-inventory.json", {})
+
+    def data_handling(self) -> tuple[Path | None, Any]:
+        return self._artifact_json("data_handling_path", "data-handling.json", {})
+
     def auth_context(self) -> tuple[Path | None, Any]:
         path = self._candidate_path("auth_context_path", "auth-context.json")
         normalized_path = self.path("normalized/auth_context.json")
@@ -141,7 +168,8 @@ class RunBundle:
     def report_summary(self) -> dict[str, Any]:
         _, report_pack = self.report_pack()
         pack_summary = _mapping(_mapping(report_pack).get("summary"))
-        return pack_summary or self.summary()
+        fallback = self.summary()
+        return {**fallback, **pack_summary} if pack_summary else fallback
 
     def finding_rows(self) -> list[dict[str, Any]]:
         _, report_pack = self.report_pack()
@@ -158,6 +186,17 @@ class RunBundle:
             return rows
         _, payload = self.action_plan()
         return _action_rows(payload)
+
+    def proof_table_rows(self) -> list[dict[str, Any]]:
+        _, report_pack = self.report_pack()
+        rows = _dict_rows(_mapping(report_pack).get("proof_table"))
+        if rows:
+            return rows
+        try:
+            from azure_tenant_audit.autopilot import build_proof_table
+        except ImportError:
+            return []
+        return build_proof_table(self.finding_rows())
 
     def blocker_rows(self) -> list[dict[str, Any]]:
         _, payload = self.blockers()
@@ -176,6 +215,7 @@ class RunBundle:
         return {
             "path": str(self.run_dir),
             "run_id": indexed.get("run_id") or manifest.get("run_id") or summary.get("run_id"),
+            "platform": manifest.get("platform") or report_summary.get("platform") or summary.get("platform") or "m365",
             "tenant_name": indexed.get("tenant_name")
             or manifest.get("tenant_name")
             or report_summary.get("tenant_name")
@@ -191,6 +231,20 @@ class RunBundle:
             or summary.get("auditor_profile"),
             "section_stats": section_stats,
             "item_count": item_count or 0,
+            "risk": report_summary.get("risk") or summary.get("risk") or {},
+            "assurance": manifest.get("assurance") or summary.get("assurance") or {},
+            "live_readiness": _mapping(self.live_readiness()[1]),
+            "autopilot_quality": manifest.get("autopilot_quality") or summary.get("autopilot_quality") or {},
+            "provider_scorecard": _scorecard(
+                report_summary.get("provider_scorecard"),
+                manifest.get("provider_scorecard"),
+                summary.get("provider_scorecard"),
+            ),
+            "coverage_gaps": _coverage_gaps(
+                report_summary.get("coverage_gaps"),
+                manifest.get("coverage_gaps"),
+                summary.get("coverage_gaps"),
+            ),
             "evidence_db_path": str(self.evidence_db_path()) if self.evidence_db_path() is not None else None,
         }
 
@@ -247,6 +301,10 @@ class RunBundle:
         for key, loader in (
             ("capability_matrix", self.capability_matrix),
             ("toolchain_readiness", self.toolchain_readiness),
+            ("live_readiness", self.live_readiness),
+            ("audit_plan", self.audit_plan),
+            ("api_inventory", self.api_inventory),
+            ("data_handling", self.data_handling),
             ("auth_context", self.auth_context),
             ("coverage_ledger", self.coverage_ledger),
             ("ai_context", self.ai_context),
@@ -271,4 +329,19 @@ class RunBundle:
         evidence_db_path = self.evidence_db_path()
         if evidence_db_path is not None:
             result["evidence_db_path"] = _path_text(evidence_db_path)
+        gaps = _coverage_gaps(
+            self.report_summary().get("coverage_gaps"),
+            self.manifest().get("coverage_gaps"),
+            self.summary().get("coverage_gaps"),
+        )
+        if gaps:
+            result["coverage_gaps"] = gaps
+        scorecard = _scorecard(
+            self.report_summary().get("provider_scorecard"),
+            self.manifest().get("provider_scorecard"),
+            self.summary().get("provider_scorecard"),
+        )
+        if scorecard:
+            result["provider_scorecard"] = scorecard
+        result["metadata"] = self.metadata()
         return result

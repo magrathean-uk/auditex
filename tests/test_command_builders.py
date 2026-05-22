@@ -4,9 +4,11 @@ import pytest
 
 from auditex.command_builders import (
     AuditRunCommandSpec,
+    GoogleRunCommandSpec,
     ProbeCommandSpec,
     ResponseCommandSpec,
     build_audit_run_command,
+    build_google_run_command,
     build_probe_command,
     build_response_command,
 )
@@ -116,3 +118,29 @@ def test_response_command_builder_includes_explicit_override_gates() -> None:
     assert "--adapter-override" in command
     assert "--allow-command-override" in command
     assert "--allow-adapter-override" in command
+
+
+def test_google_run_command_builds_domain_delegation_path() -> None:
+    command = build_google_run_command(
+        GoogleRunCommandSpec(
+            tenant_name="bolyki-google",
+            out_dir="outputs/google",
+            auth="domain-delegation",
+            domain="bolyki.eu",
+            customer_id="my_customer",
+            subject="bolyki@bolyki.eu",
+            service_account_key="/creds/key.json",
+            collector_preset="core-security",
+            collectors=["google_directory", "google_reports"],
+            top=500,
+            page_size=100,
+            python_executable="python",
+        )
+    )
+
+    assert command[:4] == ["python", "-m", "auditex", "google"]
+    assert "run" in command
+    assert command[command.index("--auth") + 1] == "domain-delegation"
+    assert command[command.index("--service-account-key") + 1] == "/creds/key.json"
+    assert command[command.index("--collectors") + 1] == "google_directory,google_reports"
+    assert command[command.index("--top") + 1] == "500"

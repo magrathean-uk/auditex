@@ -7,6 +7,7 @@ from typing import Any
 from azure_tenant_audit.config import CollectorConfig
 
 from . import auth as auditex_auth
+from .features import response_disabled_message, response_enabled
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.profiles import PROFILES
 from azure_tenant_audit.adapters import ADAPTERS, list_adapters as _list_adapters
@@ -16,19 +17,43 @@ from .rules import list_rule_inventory
 from .command_runner import run_cli_command
 from .command_builders import (
     AuditRunCommandSpec,
+    GoogleRunCommandSpec,
     ProbeCommandSpec,
     ResponseCommandSpec,
     build_audit_run_command,
+    build_google_run_command,
     build_probe_command as build_probe_tool_command,
     build_response_command as build_response_tool_command,
 )
 from .mcp_registry import iter_tool_specs, register_fastmcp_tools
 from .run_bundle import RunBundle
+from .setup_guide import build_setup_guide
 SUPPORTED_PLANES = ("inventory", "full", "export")
 SUPPORTED_PROBE_MODES = ("delegated", "app", "response")
 
 
-def list_collectors(config_path: str = "configs/collector-definitions.json") -> dict[str, Any]:
+def list_collectors(config_path: str = "configs/collector-definitions.json", provider: str = "m365") -> dict[str, Any]:
+    if provider in {"google", "google_workspace"}:
+        from .google_workspace.collectors import DEFAULT_ORDER, REGISTRY
+
+        collectors = [
+            {
+                "name": name,
+                "description": getattr(collector, "description", ""),
+                "enabled": True,
+                "required_permissions": list(getattr(collector, "required_scopes", ())),
+                "query_plan": [],
+                "command_collectors": [],
+                "position": position,
+            }
+            for position, (name, collector) in enumerate(REGISTRY.items())
+        ]
+        return {
+            "provider": "google",
+            "collectors": collectors,
+            "default_order": list(DEFAULT_ORDER),
+        }
+
     path = Path(config_path)
     if not path.exists():
         return {"error": "collector definitions file not found", "path": str(path)}
@@ -50,6 +75,7 @@ def list_collectors(config_path: str = "configs/collector-definitions.json") -> 
         for position, (name, definition) in enumerate(config.collectors.items())
     ]
     return {
+        "provider": "m365",
         "path": str(path),
         "collectors": collectors,
         "default_order": config.default_order,
@@ -65,8 +91,11 @@ def list_adapters() -> dict[str, Any]:
 
 
 def list_response_actions() -> dict[str, Any]:
+    if not response_enabled():
+        return {"enabled": False, "error": "response_disabled", "message": response_disabled_message(), "actions": [], "count": 0}
     actions = response_actions()
     return {
+        "enabled": True,
         "actions": actions,
         "count": len(actions),
     }
@@ -74,6 +103,47 @@ def list_response_actions() -> dict[str, Any]:
 
 def tool_specs() -> list[dict[str, Any]]:
     return list(iter_tool_specs())
+
+
+def setup_guide(
+    *,
+    provider: str,
+    collector_preset: str = "",
+    collectors: str = "",
+    exclude: str = "",
+    auth: str = "domain-delegation",
+    tenant_name: str = "CLIENT",
+    tenant_id: str = "<tenant-id-or-domain>",
+    domain: str = "example.com",
+    customer_id: str = "my_customer",
+    subject: str = "admin@example.com",
+    service_account_key: str = "/path/to/service-account.json",
+    oauth_client: str = "/path/to/oauth-client.json",
+    token_cache: str = ".secrets/google-token.json",
+    auditor_profile: str = "global-reader",
+    plane: str = "full",
+    mode: str = "delegated",
+    include_exchange: bool = False,
+) -> dict[str, Any]:
+    return build_setup_guide(
+        provider=provider,
+        collector_preset=collector_preset or None,
+        collectors=collectors or None,
+        exclude=exclude or None,
+        auth=auth,
+        tenant_name=tenant_name,
+        tenant_id=tenant_id,
+        domain=domain,
+        customer_id=customer_id,
+        subject=subject,
+        service_account_key=service_account_key,
+        oauth_client=oauth_client,
+        token_cache=token_cache,
+        auditor_profile=auditor_profile,
+        plane=plane,
+        mode=mode,
+        include_exchange=include_exchange,
+    )
 
 
 def build_cli_command(
@@ -111,6 +181,58 @@ def build_cli_command(
             until=until,
             offline=offline,
             sample_path=sample_path,
+            python_executable=sys.executable,
+        )
+    )
+
+
+def build_google_command(
+    *,
+    tenant_name: str = "google-workspace",
+    out_dir: str = "outputs/google",
+    google_command: str = "run",
+    auth: str = "domain-delegation",
+    domain: str = "",
+    customer_id: str = "",
+    subject: str = "",
+    service_account_key: str = "",
+    oauth_client: str = "",
+    token_cache: str = "",
+    collector_preset: str = "core-security",
+    collectors: str | list[str] | None = None,
+    exclude: str | list[str] | None = None,
+    top: int | None = None,
+    page_size: int | None = None,
+    since: str = "",
+    until: str = "",
+    run_name: str = "",
+    offline: bool = False,
+    sample_path: str = "examples/google_workspace_sample.json",
+    json_output: bool = False,
+) -> list[str]:
+    return build_google_run_command(
+        GoogleRunCommandSpec(
+            tenant_name=tenant_name,
+            out_dir=out_dir,
+            google_command=google_command,
+            auth=auth,
+            domain=domain or None,
+            customer_id=customer_id or None,
+            subject=subject or None,
+            service_account_key=service_account_key or None,
+            oauth_client=oauth_client or None,
+            token_cache=token_cache or None,
+            collector_preset=collector_preset or None,
+            collectors=collectors,
+            exclude=exclude,
+            top=top,
+            page_size=page_size,
+            since=since or None,
+            until=until or None,
+            run_name=run_name or None,
+            offline=offline,
+            sample_path=sample_path,
+            json_output=json_output,
             python_executable=sys.executable,
         )
     )
@@ -175,6 +297,8 @@ def build_response_command(
     allow_adapter_override: bool = False,
     allow_command_override: bool = False,
 ) -> list[str]:
+    if not response_enabled():
+        raise ValueError(response_disabled_message())
     return build_response_tool_command(
         ResponseCommandSpec(
             tenant_name=tenant_name,
@@ -242,6 +366,42 @@ def preview_report(
     )
 
 
+def analyze_report(run_dir: str) -> dict[str, Any]:
+    from .reporting import analyze_report as _analyze_report
+
+    return _analyze_report(run_dir)
+
+
+def api_inventory(run_dir: str) -> dict[str, Any]:
+    from .reporting import api_call_inventory as _api_call_inventory
+
+    return _api_call_inventory(run_dir)
+
+
+def permissions_ledger(run_dir: str) -> dict[str, Any]:
+    from .reporting import permissions_ledger as _permissions_ledger
+
+    return _permissions_ledger(run_dir)
+
+
+def proof_table(run_dir: str) -> dict[str, Any]:
+    from .reporting import proof_table as _proof_table
+
+    return _proof_table(run_dir)
+
+
+def enterprise_handoff(run_dir: str) -> dict[str, Any]:
+    from .reporting import enterprise_handoff as _enterprise_handoff
+
+    return _enterprise_handoff(run_dir)
+
+
+def verify_customer_pack(pack_dir: str) -> dict[str, Any]:
+    from .reporting import verify_enterprise_handoff_pack
+
+    return verify_enterprise_handoff_pack(pack_dir)
+
+
 def list_available_exporters() -> dict[str, Any]:
     from .exporters import list_exporters
 
@@ -257,6 +417,7 @@ def preview_notification(run_dir: str, sink: str = "teams") -> dict[str, Any]:
 def rules_inventory(
     tag: str = "",
     path_prefix: str = "",
+    platform: str = "",
     product_family: str = "",
     license_tier: str = "",
     audit_level: str = "",
@@ -264,6 +425,7 @@ def rules_inventory(
     rows = list_rule_inventory(
         tag=tag or None,
         path_prefix=path_prefix or None,
+        platform=platform or None,
         product_family=product_family or None,
         license_tier=license_tier or None,
         audit_level=audit_level or None,
@@ -283,8 +445,8 @@ def main() -> int:
     def auditex_list_profiles() -> dict[str, Any]:
         return {"profiles": [profile.__dict__ for profile in PROFILES.values()]}
 
-    def auditex_list_collectors(config_path: str = "configs/collector-definitions.json") -> dict[str, Any]:
-        return list_collectors(config_path=config_path)
+    def auditex_list_collectors(config_path: str = "configs/collector-definitions.json", provider: str = "m365") -> dict[str, Any]:
+        return list_collectors(config_path=config_path, provider=provider)
 
     def auditex_list_adapters() -> dict[str, Any]:
         return list_adapters()
@@ -313,6 +475,45 @@ def main() -> int:
             name=name or None,
             collectors=selected_collectors,
             auditor_profile=auditor_profile,
+        )
+
+    def auditex_setup_guide(
+        provider: str,
+        collector_preset: str = "",
+        collectors: str = "",
+        exclude: str = "",
+        auth: str = "domain-delegation",
+        tenant_name: str = "CLIENT",
+        tenant_id: str = "<tenant-id-or-domain>",
+        domain: str = "example.com",
+        customer_id: str = "my_customer",
+        subject: str = "admin@example.com",
+        service_account_key: str = "/path/to/service-account.json",
+        oauth_client: str = "/path/to/oauth-client.json",
+        token_cache: str = ".secrets/google-token.json",
+        auditor_profile: str = "global-reader",
+        plane: str = "full",
+        mode: str = "delegated",
+        include_exchange: bool = False,
+    ) -> dict[str, Any]:
+        return setup_guide(
+            provider=provider,
+            collector_preset=collector_preset,
+            collectors=collectors,
+            exclude=exclude,
+            auth=auth,
+            tenant_name=tenant_name,
+            tenant_id=tenant_id,
+            domain=domain,
+            customer_id=customer_id,
+            subject=subject,
+            service_account_key=service_account_key,
+            oauth_client=oauth_client,
+            token_cache=token_cache,
+            auditor_profile=auditor_profile,
+            plane=plane,
+            mode=mode,
+            include_exchange=include_exchange,
         )
 
     def auditex_contract_schema_manifest(schema_dir: str = "schemas") -> dict[str, Any]:
@@ -354,6 +555,104 @@ def main() -> int:
             collectors=collectors or None,
             since=since or None,
             until=until or None,
+        )
+        return run_cli_command(command)
+
+    def auditex_google_doctor(
+        auth: str = "domain-delegation",
+        domain: str = "",
+        customer_id: str = "",
+        subject: str = "",
+        service_account_key: str = "",
+        oauth_client: str = "",
+        token_cache: str = "",
+    ) -> dict[str, Any]:
+        command = build_google_command(
+            google_command="doctor",
+            auth=auth,
+            domain=domain,
+            customer_id=customer_id,
+            subject=subject,
+            service_account_key=service_account_key,
+            oauth_client=oauth_client,
+            token_cache=token_cache,
+            json_output=True,
+        )
+        return run_cli_command(command)
+
+    def auditex_google_probe(
+        tenant_name: str = "google-workspace",
+        out_dir: str = "outputs/google-probes",
+        auth: str = "domain-delegation",
+        domain: str = "",
+        customer_id: str = "",
+        subject: str = "",
+        service_account_key: str = "",
+        oauth_client: str = "",
+        token_cache: str = "",
+        collector_preset: str = "core-security",
+        collectors: str = "",
+        exclude: str = "",
+        top: int = 1,
+        page_size: int = 1,
+    ) -> dict[str, Any]:
+        command = build_google_command(
+            tenant_name=tenant_name,
+            out_dir=out_dir,
+            google_command="probe",
+            auth=auth,
+            domain=domain,
+            customer_id=customer_id,
+            subject=subject,
+            service_account_key=service_account_key,
+            oauth_client=oauth_client,
+            token_cache=token_cache,
+            collector_preset=collector_preset,
+            collectors=collectors or None,
+            exclude=exclude or None,
+            top=top,
+            page_size=page_size,
+        )
+        return run_cli_command(command)
+
+    def auditex_run_google_workspace_audit(
+        tenant_name: str = "google-workspace",
+        out_dir: str = "outputs/google",
+        auth: str = "domain-delegation",
+        domain: str = "",
+        customer_id: str = "",
+        subject: str = "",
+        service_account_key: str = "",
+        oauth_client: str = "",
+        token_cache: str = "",
+        collector_preset: str = "core-security",
+        collectors: str = "",
+        exclude: str = "",
+        top: int = 100,
+        page_size: int = 100,
+        since: str = "",
+        until: str = "",
+        run_name: str = "",
+    ) -> dict[str, Any]:
+        command = build_google_command(
+            tenant_name=tenant_name,
+            out_dir=out_dir,
+            google_command="run",
+            auth=auth,
+            domain=domain,
+            customer_id=customer_id,
+            subject=subject,
+            service_account_key=service_account_key,
+            oauth_client=oauth_client,
+            token_cache=token_cache,
+            collector_preset=collector_preset,
+            collectors=collectors or None,
+            exclude=exclude or None,
+            top=top,
+            page_size=page_size,
+            since=since,
+            until=until,
+            run_name=run_name,
         )
         return run_cli_command(command)
 
@@ -414,6 +713,24 @@ def main() -> int:
             include_sections=include_sections,
             exclude_sections=exclude_sections,
         )
+
+    def auditex_report_analyze(run_dir: str) -> dict[str, Any]:
+        return analyze_report(run_dir)
+
+    def auditex_api_inventory(run_dir: str) -> dict[str, Any]:
+        return api_inventory(run_dir)
+
+    def auditex_permissions_ledger(run_dir: str) -> dict[str, Any]:
+        return permissions_ledger(run_dir)
+
+    def auditex_proof_table(run_dir: str) -> dict[str, Any]:
+        return proof_table(run_dir)
+
+    def auditex_enterprise_handoff(run_dir: str) -> dict[str, Any]:
+        return enterprise_handoff(run_dir)
+
+    def auditex_verify_customer_pack(pack_dir: str) -> dict[str, Any]:
+        return verify_customer_pack(pack_dir)
 
     def auditex_export_list() -> dict[str, Any]:
         return list_available_exporters()

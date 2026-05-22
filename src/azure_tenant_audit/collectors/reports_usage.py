@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from ..graph import GraphClient
-from .base import Collector, CollectorResult, _classify_graph_error
+from .base import Collector, CollectorResult, _classify_graph_error, apply_collection_limit, normalize_collection_limit
 
 
 def _parse_csv_rows(content: str) -> list[dict[str, str]]:
@@ -37,7 +37,10 @@ class ReportsUsageCollector(Collector):
             start = time.perf_counter()
             try:
                 content = client.get_content(endpoint)
-                rows = _parse_csv_rows(content)[: max(int(context.get("top", 100)), 0)]
+                rows = apply_collection_limit(
+                    _parse_csv_rows(content),
+                    normalize_collection_limit(context.get("top"), default=100),
+                )
                 payload[name] = {"value": rows}
                 coverage.append(
                     {

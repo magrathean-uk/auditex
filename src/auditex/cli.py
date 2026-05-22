@@ -7,14 +7,24 @@ from pathlib import Path
 
 from . import auth as auditex_auth
 from .bootstrap import print_doctor_report, run_setup
+from .features import response_disabled_message, response_enabled
 from .guided import build_guided_parser, run_guided
 from .rules import list_rule_inventory
+from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
+from .google_workspace.run import GoogleRunConfig, google_doctor, run_google_live, run_google_offline, run_google_probe
 
 from .mcp_server import list_blockers, summarize_run
+
+REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
+
+
+def _probe_mode_choices() -> tuple[str, ...]:
+    modes = tuple(mode for mode in probe_mode_choices() if mode != "response")
+    return (*modes, "response") if response_enabled() else modes
 
 
 def _build_root_parser() -> argparse.ArgumentParser:
@@ -25,17 +35,20 @@ def _build_root_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("setup", help="Bootstrap local runtime dependencies.")
+    subparsers.add_parser("setup-guide", help="Print provider setup scopes, roles, and verification commands.")
     subparsers.add_parser("doctor", help="Show local runtime and auth readiness.")
     subparsers.add_parser("guided-run", help="Run the guided operator flow.")
     subparsers.add_parser("run", help="Run a raw tenant audit.")
     subparsers.add_parser("probe", help="Run or summarize capability probes.")
-    subparsers.add_parser("response", help="Run guarded response actions.")
+    if response_enabled():
+        subparsers.add_parser("response", help="Run lab-only response actions.")
     subparsers.add_parser("compare", help="Compare completed runs.")
     subparsers.add_parser("report", help="Preview or render reports from a run.")
     subparsers.add_parser("export", help="List and run exporters.")
     subparsers.add_parser("notify", help="Build or send post-run notifications.")
     subparsers.add_parser("rules", help="Inspect built-in rule packs.")
     subparsers.add_parser("auth", help="Inspect and manage local auth state.")
+    subparsers.add_parser("google", help="Run Google Workspace audit flows.")
     subparsers.add_parser("gate", help="Severity-threshold gate for CI integration.")
     subparsers.add_parser("gate-drift", help="Drift gate: fail when new findings appear above a severity threshold.")
     return parser
@@ -64,6 +77,48 @@ def render_report(
         exclude_sections=exclude_sections,
         output_path=output_path,
     )
+
+
+def analyze_report(run_dir: str) -> dict[str, object]:
+    from .reporting import analyze_report as _analyze_report
+
+    return _analyze_report(run_dir)
+
+
+def api_call_inventory(run_dir: str) -> dict[str, object]:
+    from .reporting import api_call_inventory as _api_call_inventory
+
+    return _api_call_inventory(run_dir)
+
+
+def permissions_ledger(run_dir: str) -> dict[str, object]:
+    from .reporting import permissions_ledger as _permissions_ledger
+
+    return _permissions_ledger(run_dir)
+
+
+def proof_table(run_dir: str) -> dict[str, object]:
+    from .reporting import proof_table as _proof_table
+
+    return _proof_table(run_dir)
+
+
+def enterprise_handoff(run_dir: str) -> dict[str, object]:
+    from .reporting import enterprise_handoff as _enterprise_handoff
+
+    return _enterprise_handoff(run_dir)
+
+
+def write_customer_pack(run_dir: str, output_dir: str) -> dict[str, object]:
+    from .reporting import write_enterprise_handoff_pack
+
+    return write_enterprise_handoff_pack(run_dir, output_dir)
+
+
+def verify_customer_pack(pack_dir: str) -> dict[str, object]:
+    from .reporting import verify_enterprise_handoff_pack
+
+    return verify_enterprise_handoff_pack(pack_dir)
 
 
 def list_exporters() -> list[dict[str, object]]:
@@ -105,7 +160,7 @@ def _build_probe_parser() -> argparse.ArgumentParser:
     live.add_argument("--tenant-name", required=True, help="Label for the probe output folder.")
     live.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
     live.add_argument("--auditor-profile", default="global-reader", help="Audit profile for escalation guidance.")
-    live.add_argument("--mode", default="delegated", choices=probe_mode_choices(), help="Probe auth and execution mode.")
+    live.add_argument("--mode", default="delegated", choices=_probe_mode_choices(), help="Probe auth and execution mode.")
     live.add_argument("--surface", default="all", help="Surface family to probe, or comma-separated list.")
     live.add_argument("--out", default="outputs/probes", help="Base output directory.")
     live.add_argument("--run-name", default=None, help="Optional probe run name.")
@@ -173,6 +228,74 @@ def _build_auth_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_google_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--domain", default=None, help="Google Workspace primary domain.")
+    parser.add_argument("--customer-id", default=None, help="Google Workspace customer ID. Defaults to my_customer at runtime.")
+    parser.add_argument("--subject", default=None, help="Admin subject to impersonate for domain-wide delegation.")
+    parser.add_argument("--service-account-key", default=None, help="Service account JSON key for domain-wide delegation.")
+    parser.add_argument("--oauth-client", default=None, help="OAuth desktop client JSON for browser auth.")
+    parser.add_argument("--token-cache", default=None, help="OAuth authorized-user token cache path.")
+
+
+def _add_google_selection_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--auth", choices=("domain-delegation", "oauth"), default="domain-delegation")
+    parser.add_argument("--collector-preset", default="core-security")
+    parser.add_argument("--collectors", default=None)
+    parser.add_argument("--exclude", default=None)
+    parser.add_argument("--top", type=int, default=100)
+    parser.add_argument("--page-size", type=int, default=100)
+    parser.add_argument("--since", default=None)
+    parser.add_argument("--until", default=None)
+
+
+def _add_google_run_args(parser: argparse.ArgumentParser) -> None:
+    _add_google_common_args(parser)
+    _add_google_selection_args(parser)
+    parser.add_argument("--tenant-name", default="google-workspace", help="Label for the output folder.")
+    parser.add_argument("--out", default="outputs/google", help="Base output directory.")
+    parser.add_argument("--run-name", default=None, help="Optional run name.")
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--sample", default="examples/google_workspace_sample.json")
+
+
+def _build_google_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="auditex google", description="Run Google Workspace audit flows.")
+    subparsers = parser.add_subparsers(dest="google_command", required=True)
+    doctor = subparsers.add_parser("doctor", help="Inspect Google Workspace runtime readiness.")
+    _add_google_common_args(doctor)
+    _add_google_selection_args(doctor)
+    doctor.add_argument("--json", action="store_true")
+    probe = subparsers.add_parser("probe", help="Probe Google Workspace auth and dependency readiness.")
+    _add_google_run_args(probe)
+    run = subparsers.add_parser("run", help="Run a Google Workspace audit.")
+    _add_google_run_args(run)
+    return parser
+
+
+def _google_config_from_args(args: argparse.Namespace) -> GoogleRunConfig:
+    return GoogleRunConfig(
+        tenant_name=getattr(args, "tenant_name", "google-workspace"),
+        out=Path(getattr(args, "out", "outputs/google")),
+        domain=args.domain,
+        customer_id=args.customer_id,
+        run_name=getattr(args, "run_name", None),
+        auth=getattr(args, "auth", "domain-delegation"),
+        subject=args.subject,
+        service_account_key=Path(args.service_account_key).expanduser() if args.service_account_key else None,
+        oauth_client=Path(args.oauth_client).expanduser() if args.oauth_client else None,
+        token_cache=Path(args.token_cache).expanduser() if args.token_cache else None,
+        collector_preset=getattr(args, "collector_preset", "core-security"),
+        collectors=getattr(args, "collectors", None),
+        exclude=getattr(args, "exclude", None),
+        top=getattr(args, "top", 100),
+        page_size=getattr(args, "page_size", 100),
+        since=getattr(args, "since", None),
+        until=getattr(args, "until", None),
+        offline=getattr(args, "offline", False),
+        sample=Path(getattr(args, "sample", "examples/google_workspace_sample.json")),
+    )
+
+
 def _build_response_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="auditex response", description="Run guarded response actions.")
     subparsers = parser.add_subparsers(dest="response_command", required=True)
@@ -212,9 +335,49 @@ def _build_rules_parser() -> argparse.ArgumentParser:
     inventory = subparsers.add_parser("inventory", help="List rule inventory rows.")
     inventory.add_argument("--tag", default=None, help="Optional rule tag filter.")
     inventory.add_argument("--path-prefix", default=None, help="Optional path prefix filter.")
+    inventory.add_argument("--platform", default=None, help="Optional platform filter.")
     inventory.add_argument("--product-family", default=None, help="Optional product family filter.")
     inventory.add_argument("--license-tier", default=None, help="Optional license tier filter.")
     inventory.add_argument("--audit-level", default=None, help="Optional audit level filter.")
+    return parser
+
+
+def _build_setup_guide_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="auditex setup-guide",
+        description="Print tenant setup scopes, roles, admin steps, and verification commands.",
+    )
+    subparsers = parser.add_subparsers(dest="provider", required=True)
+
+    google = subparsers.add_parser("google", help="Google Workspace setup guide.")
+    google.add_argument("--auth", choices=("domain-delegation", "oauth"), default="domain-delegation")
+    google.add_argument("--collector-preset", default="core-security")
+    google.add_argument("--collectors", default=None)
+    google.add_argument("--exclude", default=None)
+    google.add_argument("--tenant-name", default="CLIENT-GOOGLE")
+    google.add_argument("--domain", default="example.com")
+    google.add_argument("--customer-id", default="my_customer")
+    google.add_argument("--subject", default="admin@example.com")
+    google.add_argument("--service-account-key", default="/path/to/service-account.json")
+    google.add_argument("--oauth-client", default="/path/to/oauth-client.json")
+    google.add_argument("--token-cache", default=".secrets/google-token.json")
+    google.add_argument("--format", choices=("json", "md"), default="md")
+    google.add_argument("--output", default=None)
+
+    m365 = subparsers.add_parser("m365", help="Microsoft 365 setup guide.")
+    m365.add_argument("--collector-preset", default=None)
+    m365.add_argument("--collectors", default=None)
+    m365.add_argument("--exclude", default=None)
+    m365.add_argument("--tenant-name", default="CLIENT")
+    m365.add_argument("--tenant-id", default="<tenant-id-or-domain>")
+    m365.add_argument("--auditor-profile", default="global-reader")
+    m365.add_argument("--plane", choices=("inventory", "full", "export"), default="full")
+    m365.add_argument("--mode", choices=("delegated", "app"), default="delegated")
+    m365.add_argument("--include-exchange", action="store_true")
+    m365.add_argument("--config", default="configs/collector-definitions.json")
+    m365.add_argument("--permission-hints", default="configs/collector-permissions.json")
+    m365.add_argument("--format", choices=("json", "md"), default="md")
+    m365.add_argument("--output", default=None)
     return parser
 
 
@@ -230,11 +393,52 @@ def _build_report_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="report_command", required=True)
     render = subparsers.add_parser("render", help="Render a report bundle in one format.")
     render.add_argument("run_dir", help="Completed run directory.")
-    render.add_argument("--format", required=True, choices=("json", "md", "csv", "html"))
+    render.add_argument("--format", required=True, choices=REPORT_FORMAT_CHOICES)
     render.add_argument("--include-section", action="append", default=None)
     render.add_argument("--exclude-section", action="append", default=None)
     render.add_argument("--output", default=None)
+    analyze = subparsers.add_parser("analyze", help="Analyze a saved run without tenant access.")
+    analyze.add_argument("run_dir", help="Completed run directory.")
+    api_calls = subparsers.add_parser("api-calls", help="Print the API call ledger for a completed run.")
+    api_calls.add_argument("run_dir", help="Completed run directory.")
+    api_calls.add_argument("--format", choices=("json", "md"), default="json")
+    api_calls.add_argument("--output", default=None, help="Optional output file path.")
+    permissions = subparsers.add_parser("permissions", help="Print required, observed, and missing permissions for a completed run.")
+    permissions.add_argument("run_dir", help="Completed run directory.")
+    permissions.add_argument("--format", choices=("json", "md"), default="json")
+    permissions.add_argument("--output", default=None, help="Optional output file path.")
+    proof = subparsers.add_parser("proof-table", help="Print finding-to-evidence proof rows for a completed run.")
+    proof.add_argument("run_dir", help="Completed run directory.")
+    proof.add_argument("--format", choices=("json", "md"), default="json")
+    proof.add_argument("--output", default=None, help="Optional output file path.")
+    handoff = subparsers.add_parser("handoff", help="Print enterprise customer handoff index for a completed run.")
+    handoff.add_argument("run_dir", help="Completed run directory.")
+    handoff.add_argument("--format", choices=("json", "md"), default="json")
+    handoff.add_argument("--output", default=None, help="Optional output file path.")
+    customer_pack = subparsers.add_parser("customer-pack", help="Write a customer handoff pack for a completed run.")
+    customer_pack.add_argument("run_dir", help="Completed run directory.")
+    customer_pack.add_argument("--output-dir", required=True, help="Directory where customer handoff files will be written.")
+    verify_pack = subparsers.add_parser("verify-pack", help="Verify a customer handoff pack manifest and checksums.")
+    verify_pack.add_argument("pack_dir", help="Customer handoff pack directory.")
     return parser
+
+
+def _emit_report_payload(*, content: str, format_name: str, output_path: str | None) -> None:
+    if not output_path:
+        print(content, end="")
+        return
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    print(json.dumps({"format": format_name, "output_path": str(target)}, indent=2))
+
+
+def _emit_setup_guide(payload: dict[str, object], *, format_name: str, output_path: str | None) -> None:
+    if format_name == "md":
+        content = render_setup_guide_markdown(payload)
+    else:
+        content = json.dumps(payload, indent=2) + "\n"
+    _emit_report_payload(content=content, format_name=format_name, output_path=output_path)
 
 
 def _build_export_parser() -> argparse.ArgumentParser:
@@ -415,6 +619,32 @@ def main(argv: list[str] | None = None) -> int:
         if args.pwsh:
             setup_kwargs["with_pwsh"] = True
         return run_setup(**setup_kwargs)
+    if argv[0] == "setup-guide":
+        parser = _build_setup_guide_parser()
+        args = parser.parse_args(argv[1:])
+        payload = build_setup_guide(
+            provider=args.provider,
+            collector_preset=getattr(args, "collector_preset", None),
+            collectors=getattr(args, "collectors", None),
+            exclude=getattr(args, "exclude", None),
+            auth=getattr(args, "auth", "domain-delegation"),
+            tenant_name=getattr(args, "tenant_name", "CLIENT"),
+            tenant_id=getattr(args, "tenant_id", "<tenant-id-or-domain>"),
+            domain=getattr(args, "domain", "example.com"),
+            customer_id=getattr(args, "customer_id", "my_customer"),
+            subject=getattr(args, "subject", "admin@example.com"),
+            service_account_key=getattr(args, "service_account_key", "/path/to/service-account.json"),
+            oauth_client=getattr(args, "oauth_client", "/path/to/oauth-client.json"),
+            token_cache=getattr(args, "token_cache", ".secrets/google-token.json"),
+            auditor_profile=getattr(args, "auditor_profile", "global-reader"),
+            plane=getattr(args, "plane", "full"),
+            mode=getattr(args, "mode", "delegated"),
+            include_exchange=getattr(args, "include_exchange", False),
+            config_path=getattr(args, "config", "configs/collector-definitions.json"),
+            permission_hints_path=getattr(args, "permission_hints", "configs/collector-permissions.json"),
+        )
+        _emit_setup_guide(payload, format_name=args.format, output_path=args.output)
+        return 0
     if argv[0] == "doctor":
         parser = argparse.ArgumentParser(prog="auditex doctor", description="Inspect local tool and auth readiness.")
         parser.add_argument("--json", action="store_true", help="Print JSON report.")
@@ -433,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
                 filters["tag"] = args.tag
             if args.path_prefix is not None:
                 filters["path_prefix"] = args.path_prefix
+            if args.platform is not None:
+                filters["platform"] = args.platform
             if args.product_family is not None:
                 filters["product_family"] = args.product_family
             if args.license_tier is not None:
@@ -454,6 +686,56 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "report":
         parser = _build_report_parser()
         args = parser.parse_args(argv[1:])
+        if args.report_command == "analyze":
+            print(json.dumps(analyze_report(args.run_dir), indent=2))
+            return 0
+        if args.report_command == "api-calls":
+            inventory = api_call_inventory(args.run_dir)
+            if args.format == "md":
+                from .reporting import render_api_call_inventory_markdown
+
+                content = render_api_call_inventory_markdown(inventory)
+            else:
+                content = json.dumps(inventory, indent=2) + "\n"
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            return 0
+        if args.report_command == "permissions":
+            payload = permissions_ledger(args.run_dir)
+            if args.format == "md":
+                from .reporting import render_permissions_ledger_markdown
+
+                content = render_permissions_ledger_markdown(payload)
+            else:
+                content = json.dumps(payload, indent=2) + "\n"
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            return 0
+        if args.report_command == "proof-table":
+            payload = proof_table(args.run_dir)
+            if args.format == "md":
+                from .reporting import render_proof_table_markdown
+
+                content = render_proof_table_markdown(payload)
+            else:
+                content = json.dumps(payload, indent=2) + "\n"
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            return 0
+        if args.report_command == "handoff":
+            payload = enterprise_handoff(args.run_dir)
+            if args.format == "md":
+                from .reporting import render_enterprise_handoff_markdown
+
+                content = render_enterprise_handoff_markdown(payload)
+            else:
+                content = json.dumps(payload, indent=2) + "\n"
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            return 0
+        if args.report_command == "customer-pack":
+            print(json.dumps(write_customer_pack(args.run_dir, args.output_dir), indent=2))
+            return 0
+        if args.report_command == "verify-pack":
+            result = verify_customer_pack(args.pack_dir)
+            print(json.dumps(result, indent=2))
+            return 0 if result.get("valid") else 1
         if args.report_command != "render":
             return 2
         print(
@@ -576,6 +858,43 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         return 2
+    if argv[0] == "google":
+        parser = _build_google_parser()
+        args = parser.parse_args(argv[1:])
+        cfg = _google_config_from_args(args)
+        if args.google_command == "doctor":
+            payload = google_doctor(cfg)
+            if args.json:
+                print(json.dumps(payload, indent=2))
+            else:
+                deps = payload["dependencies"]
+                auth = payload.get("auth") or {}
+                print(f"Google Workspace dependencies: {'ok' if deps['available'] else 'blocked'}")
+                if auth.get("scopes_csv"):
+                    print(f"OAuth scopes: {auth['scopes_csv']}")
+                if deps.get("install_hint"):
+                    print(deps["install_hint"])
+                readiness = payload.get("live_readiness") or {}
+                if readiness:
+                    print(f"Live readiness: {readiness.get('trust_level', 'unknown')}")
+                    cannot_trust = readiness.get("cannot_trust") or []
+                    if cannot_trust:
+                        print("Cannot trust until probe/run succeeds: " + ", ".join(str(item) for item in cannot_trust))
+            return 0 if payload["dependencies"]["available"] else 2
+        if args.google_command == "probe":
+            return run_google_probe(cfg, command_line=["auditex", *argv])
+        if args.google_command == "run":
+            if cfg.offline:
+                return run_google_offline(
+                    sample_path=cfg.sample or Path("examples/google_workspace_sample.json"),
+                    out=cfg.out,
+                    tenant_name=cfg.tenant_name,
+                    run_name=cfg.run_name,
+                    domain=cfg.domain,
+                    customer_id=cfg.customer_id,
+                )
+            return run_google_live(cfg, command_line=["auditex", *argv])
+        return 2
     if argv[0] == "gate":
         parser = _build_gate_parser()
         args = parser.parse_args(argv[1:])
@@ -644,6 +963,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return run_live_probe(cfg)
     if argv[0] == "response":
+        if not response_enabled():
+            print(response_disabled_message(), file=sys.stderr)
+            return 2
         parser = _build_response_parser()
         args = parser.parse_args(argv[1:])
         if args.response_command == "list-actions":

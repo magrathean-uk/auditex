@@ -50,6 +50,9 @@
     ]
   },
   "collector.issue.collector": {
+    "cis_m365_v3": [
+      "1.1.1"
+    ],
     "nist_800_53": [
       "AU-12",
       "SI-4"
@@ -67,7 +70,60 @@
       "Article 11(1)"
     ]
   },
+  "coverage.gap": {
+    "cis_m365_v3": [
+      "1.1.1"
+    ],
+    "nist_800_53": [
+      "AU-2",
+      "AU-6",
+      "CA-7"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.16"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1078"
+    ]
+  },
   "sharepoint.broad_link": {
+    "cis_m365_v3": [
+      "7.2.5",
+      "7.2.7"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-22"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.3"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1530"
+    ]
+  },
+  "sharepoint.external_principal": {
     "cis_m365_v3": [
       "7.2.5",
       "7.2.7"
@@ -421,6 +477,72 @@
     "mitre_attack": [
       "T1564.008",
       "T1098"
+    ]
+  },
+  "exchange.transport_external_redirect": {
+    "cis_m365_v3": [
+      "6.2.1"
+    ],
+    "nist_800_53": [
+      "AC-4",
+      "AC-20",
+      "AU-12",
+      "IR-4"
+    ],
+    "iso_27001": [
+      "A.5.10",
+      "A.8.16",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC7.2",
+      "CC7.3"
+    ],
+    "nis2": [
+      "Article 21(2)(b)",
+      "Article 21(2)(g)",
+      "Article 23"
+    ],
+    "dora": [
+      "Article 17(1)",
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1114.003",
+      "T1567"
+    ]
+  },
+  "exchange.remote_domain_auto_forward_enabled": {
+    "cis_m365_v3": [
+      "6.2.1"
+    ],
+    "nist_800_53": [
+      "AC-4",
+      "AC-20",
+      "AU-12",
+      "IR-4"
+    ],
+    "iso_27001": [
+      "A.5.10",
+      "A.8.16",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC7.2",
+      "CC7.3"
+    ],
+    "nis2": [
+      "Article 21(2)(b)",
+      "Article 21(2)(g)",
+      "Article 23"
+    ],
+    "dora": [
+      "Article 17(1)",
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1114.003",
+      "T1567"
     ]
   },
   "app_credentials.secret_expired": {
@@ -953,6 +1075,286 @@
     ],
     "mitre_attack": [
       "T1528"
+    ]
+  },
+  "identity.global_admin_singleton": {
+    "cis_m365_v3": [
+      "1.1.2",
+      "1.1.3"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "CP-2",
+      "IA-2"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "identity.global_admin_sprawl": {
+    "cis_m365_v3": [
+      "1.1.2",
+      "1.1.3"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "identity.global_admin_disabled": {
+    "cis_m365_v3": [
+      "1.1.2",
+      "1.1.3"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.16",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "identity.global_admin_stale_password": {
+    "cis_m365_v3": [
+      "1.1.2",
+      "1.1.3"
+    ],
+    "nist_800_53": [
+      "IA-5",
+      "AC-2"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "identity.global_admin_mfa_not_registered": {
+    "cis_m365_v3": [
+      "1.1.2",
+      "1.1.3",
+      "5.2.2"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "identity.user_mfa_not_registered": {
+    "cis_m365_v3": [
+      "1.1.2",
+      "1.1.3"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)"
+    ],
+    "iso_27001": [
+      "A.5.17"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "security.risky_signin": {
+    "cis_m365_v3": [
+      "1.1.2",
+      "1.1.3"
+    ],
+    "nist_800_53": [
+      "AU-6",
+      "IR-4",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.8.15",
+      "A.8.16"
+    ],
+    "soc2": [
+      "CC7.2",
+      "CC7.3"
+    ],
+    "nis2": [
+      "Article 21(2)(b)",
+      "Article 23"
+    ],
+    "dora": [
+      "Article 17(1)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "security.privilege_change_event": {
+    "cis_m365_v3": [
+      "5.1.5",
+      "5.2.2"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "AC-6",
+      "AU-6"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.5.18",
+      "A.8.15"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)",
+      "Article 23"
+    ],
+    "dora": [
+      "Article 9(4)(a)",
+      "Article 17(1)"
+    ],
+    "mitre_attack": [
+      "T1098",
+      "T1078.004"
+    ]
+  },
+  "intune.device_noncompliant": {
+    "cis_m365_v3": [
+      "8.5.1",
+      "8.5.2"
+    ],
+    "nist_800_53": [
+      "CM-8",
+      "SI-7"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.9"
+    ],
+    "soc2": [
+      "CC6.6",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1200"
+    ]
+  },
+  "intune.device_stale_sync": {
+    "cis_m365_v3": [
+      "8.5.1",
+      "8.5.2"
+    ],
+    "nist_800_53": [
+      "CM-8",
+      "SI-4",
+      "SI-7"
+    ],
+    "iso_27001": [
+      "A.5.9",
+      "A.8.1",
+      "A.8.9"
+    ],
+    "soc2": [
+      "CC6.6",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1200"
     ]
   }
 }

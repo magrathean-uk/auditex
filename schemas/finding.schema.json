@@ -123,19 +123,49 @@
     "framework_mappings": {
       "type": "object",
       "properties": {
-        "cis": {
+        "cis_m365_v3": {
           "type": "array",
           "items": {
             "type": "string"
           }
         },
-        "nist": {
+        "google_workspace_baseline": {
           "type": "array",
           "items": {
             "type": "string"
           }
         },
-        "attack": {
+        "nist_800_53": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "iso_27001": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "soc2": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nis2": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dora": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mitre_attack": {
           "type": "array",
           "items": {
             "type": "string"

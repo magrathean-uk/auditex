@@ -118,3 +118,65 @@ def test_findings_skip_disabled_rules() -> None:
     findings = build_findings([], normalized_snapshot=snapshot)
     rule_findings = [f for f in findings if "mailbox_forwarding:u1:rule-1" in f["id"]]
     assert rule_findings == []
+
+
+def test_findings_flag_external_exchange_transport_redirect() -> None:
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="run-1",
+        collector_payloads={
+            "exchange_policy": {
+                "acceptedDomains": {"value": [{"Name": "contoso.com", "DomainName": "contoso.com"}]},
+                "transportRules": {
+                    "value": [
+                        {
+                            "Name": "Redirect invoices",
+                            "State": "Enabled",
+                            "Mode": "Enforce",
+                            "RedirectMessageTo": ["finance@evil.example"],
+                            "BlindCopyTo": ["audit@contoso.com"],
+                        }
+                    ]
+                },
+            }
+        },
+    )
+
+    findings = build_findings([], normalized_snapshot=snapshot)
+    finding = next((f for f in findings if f["rule_id"] == "exchange.transport_external_redirect"), None)
+
+    assert finding is not None
+    assert finding["severity"] == "critical"
+    assert finding["returned_value"] == ["finance@evil.example"]
+
+
+def test_findings_flag_remote_domain_auto_forward_policy() -> None:
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="run-1",
+        collector_payloads={
+            "exchange_policy": {
+                "remoteDomains": {
+                    "value": [
+                        {
+                            "Name": "Default",
+                            "DomainName": "*",
+                            "AutoForwardEnabled": True,
+                        },
+                        {
+                            "Name": "Partner",
+                            "DomainName": "partner.example",
+                            "AutoForwardEnabled": False,
+                        },
+                    ]
+                },
+            }
+        },
+    )
+
+    findings = build_findings([], normalized_snapshot=snapshot)
+    finding = next((f for f in findings if f["rule_id"] == "exchange.remote_domain_auto_forward_enabled"), None)
+
+    assert finding is not None
+    assert finding["severity"] == "high"
+    assert finding["affected_objects"] == ["Default"]

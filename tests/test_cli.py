@@ -258,8 +258,11 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
     auth_context = json.loads((output_dir / "normalized" / "auth_context.json").read_text(encoding="utf-8"))
     capability_matrix = json.loads((output_dir / "normalized" / "capability_matrix.json").read_text(encoding="utf-8"))
     coverage_ledger = json.loads((output_dir / "normalized" / "coverage_ledger.json").read_text(encoding="utf-8"))
+    live_readiness = json.loads((output_dir / "live-readiness.json").read_text(encoding="utf-8"))
+    data_handling = json.loads((output_dir / "data-handling.json").read_text(encoding="utf-8"))
     ai_context = json.loads((output_dir / "ai_context.json").read_text(encoding="utf-8"))
     manifest = json.loads((output_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    report_pack = json.loads((output_dir / "reports" / "report-pack.json").read_text(encoding="utf-8"))
 
     assert auth_context["auth_mode"] == "access_token"
     assert auth_context["token_claims"]["tenant_id"] == "tenant-ctx"
@@ -271,7 +274,17 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
     assert manifest["auth_context_path"] == "normalized/auth_context.json"
     assert manifest["capability_matrix_path"] == "normalized/capability_matrix.json"
     assert manifest["coverage_ledger_path"] == "normalized/coverage_ledger.json"
+    assert manifest["live_readiness_path"] == "live-readiness.json"
+    assert manifest["data_handling_path"] == "data-handling.json"
     assert manifest["ai_context_path"] == "ai_context.json"
+    assert live_readiness["trust_level"] == "live_verified"
+    assert data_handling["read_only"] is True
+    assert data_handling["content_reads"] is False
+    assert data_handling["write_actions"] is False
+    assert data_handling["scope_risk"] == "read_only_scopes"
+    assert data_handling["write_capable_scopes"] == []
+    assert "live-readiness.json" in report_pack["evidence_paths"]
+    assert "data-handling.json" in report_pack["evidence_paths"]
     assert (output_dir / "index" / "evidence.sqlite").exists()
 
 

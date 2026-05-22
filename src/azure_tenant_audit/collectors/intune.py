@@ -23,7 +23,7 @@ class IntuneCollector(Collector):
             "managedDevices": {
                 "endpoint": "/deviceManagement/managedDevices",
                 "params": {
-                    "$select": "id,deviceName,manufacturer,model,osVersion,operatingSystem,complianceState,azureADDeviceId",
+                    "$select": "id,deviceName,manufacturer,model,osVersion,operatingSystem,complianceState,azureADDeviceId,lastSyncDateTime",
                 },
             },
             "deviceCompliancePolicies": {

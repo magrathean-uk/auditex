@@ -14,11 +14,17 @@ classifiers = [
 ]
 dependencies = [
     "requests>=2.31,<3",
-    "msal>=1.28,<2",]
+    "msal>=1.28,<2",
+]
 
 [project.optional-dependencies]
 mcp = [
     "mcp>=1,<2",
+]
+google = [
+    "google-auth>=2,<3",
+    "google-auth-oauthlib>=1,<2",
+    "google-api-python-client>=2,<3",
 ]
 
 [project.scripts]
@@ -36,9 +42,13 @@ where = ["src"]
 "auditex/configs" = ["configs/*.json"]
 "auditex/profiles" = ["profiles/*.md"]
 "auditex/schemas" = ["schemas/*.json"]
+"auditex/docs" = ["docs/*.md"]
+"auditex/docs/improvement" = ["docs/improvement/*.md"]
+"auditex/docs/provenance" = ["docs/provenance/*.md", "docs/provenance/*.csv"]
 "auditex/agent" = ["agent/*.md", "agent/*.json"]
 "auditex/skills/app-readonly-escalation" = ["skills/app-readonly-escalation/SKILL.md"]
 "auditex/skills/auditex-operator" = ["skills/auditex-operator/SKILL.md"]
 "auditex/skills/delegated-auth" = ["skills/delegated-auth/SKILL.md"]
 "auditex/skills/evidence-pack" = ["skills/evidence-pack/SKILL.md"]
 "auditex/examples/sample_audit_bundle" = ["examples/sample_audit_bundle/*.json"]
+"auditex/examples" = ["examples/google_workspace_sample.json"]

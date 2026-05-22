@@ -10,7 +10,7 @@ def test_run_bundle_view_uses_contract_report_pack_then_artifact_fallbacks(tmp_p
     run_dir = (
         RunBundleBuilder(tmp_path)
         .manifest(report_pack_path="custom/report-pack.json")
-        .summary(tenant_name="legacy")
+        .summary(tenant_name="legacy", assurance={"score": 75, "grade": "usable"})
         .report_pack(
             path="custom/report-pack.json",
             summary={"tenant_name": "acme", "overall_status": "partial", "finding_count": 1, "open_count": 1},
@@ -25,6 +25,7 @@ def test_run_bundle_view_uses_contract_report_pack_then_artifact_fallbacks(tmp_p
     bundle = RunBundle(run_dir)
 
     assert bundle.report_summary()["tenant_name"] == "acme"
+    assert bundle.report_summary()["assurance"] == {"score": 75, "grade": "usable"}
     assert bundle.finding_rows() == [{"id": "f1", "status": "open", "title": "Fix"}]
     assert bundle.action_plan_rows() == [{"id": "f1", "title": "Fix"}]
     assert bundle.blocker_rows() == [{"collector": "identity"}]

@@ -1,0 +1,45 @@
+name: Audit setup
+description: Track customer-safe Auditex setup and probe readiness.
+title: "Audit setup: <provider> <tenant label>"
+labels: ["audit-setup"]
+body:
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - Google Workspace
+        - Microsoft 365
+    validations:
+      required: true
+  - type: input
+    id: preset
+    attributes:
+      label: Collector preset
+      placeholder: everything, full, identity-only
+    validations:
+      required: true
+  - type: textarea
+    id: setup_guide
+    attributes:
+      label: Setup guide output
+      description: Paste `auditex setup-guide ... --format md` output. Do not paste auth material or raw tenant evidence.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: probe_result
+    attributes:
+      label: Probe result
+      description: Paste status, blocker classes, and missing permissions only.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checks
+      options:
+        - label: No auth files, local auth material, or raw tenant evidence is included.
+          required: true
+        - label: The setup asks only for permissions listed by setup-guide or proven by probe blockers.
+          required: true

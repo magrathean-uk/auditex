@@ -152,8 +152,22 @@ def _build_payload(run_dir: str | Path) -> dict[str, Any]:
     findings_rows = bundle.finding_rows()
     report_pack_path, _ = bundle.report_pack()
     action_plan_path, _ = bundle.action_plan()
+    _, live_readiness_raw = bundle.live_readiness()
+    live_readiness = dict(live_readiness_raw) if isinstance(live_readiness_raw, dict) else {}
     open_count = sum(1 for item in findings_rows if isinstance(item, dict) and item.get("status") == "open")
     accepted_count = sum(1 for item in findings_rows if isinstance(item, dict) and item.get("status") == "accepted_risk")
+    coverage_gaps = [
+        dict(item)
+        for item in (report_summary.get("coverage_gaps") or manifest.get("coverage_gaps") or [])
+        if isinstance(item, dict)
+    ]
+    provider_scorecard = (
+        dict(report_summary.get("provider_scorecard"))
+        if isinstance(report_summary.get("provider_scorecard"), dict)
+        else dict(manifest.get("provider_scorecard"))
+        if isinstance(manifest.get("provider_scorecard"), dict)
+        else {}
+    )
     return {
         "run_dir": str(run_dir),
         "tenant_name": report_summary.get("tenant_name") or manifest.get("tenant_name"),
@@ -162,6 +176,10 @@ def _build_payload(run_dir: str | Path) -> dict[str, Any]:
         "blocker_count": report_summary.get("blocker_count", manifest.get("blocker_count", 0)),
         "open_count": report_summary.get("open_count", open_count),
         "accepted_count": report_summary.get("accepted_count", accepted_count),
+        "provider_scorecard": provider_scorecard,
+        "live_readiness": live_readiness,
+        "coverage_gap_count": len(coverage_gaps),
+        "coverage_gaps": coverage_gaps,
         "action_plan": action_plan,
         "report_pack_path": str(report_pack_path) if report_pack_path is not None else None,
         "action_plan_path": str(action_plan_path) if action_plan_path is not None else None,
@@ -177,6 +195,21 @@ def _payload_text(payload: dict[str, Any], sink: str) -> str:
         f"Open: {payload.get('open_count', 0)}",
         f"Blockers: {payload.get('blocker_count', 0)}",
     ]
+    provider_scorecard = payload.get("provider_scorecard") if isinstance(payload.get("provider_scorecard"), dict) else {}
+    if provider_scorecard:
+        lines.append(f"Scorecard: {provider_scorecard.get('grade') or 'unknown'} / {provider_scorecard.get('score', 0)}")
+    live_readiness = payload.get("live_readiness") if isinstance(payload.get("live_readiness"), dict) else {}
+    if live_readiness:
+        lines.append(f"Live readiness: {live_readiness.get('trust_level') or 'unknown'}")
+        cannot_trust = live_readiness.get("cannot_trust") or []
+        if cannot_trust:
+            lines.append("Cannot trust: " + ", ".join(str(item) for item in cannot_trust[:5]))
+    coverage_gaps = payload.get("coverage_gaps") or []
+    if coverage_gaps:
+        lines.append(f"Coverage gaps: {payload.get('coverage_gap_count', len(coverage_gaps))}")
+        for gap in coverage_gaps[:3]:
+            if isinstance(gap, dict):
+                lines.append(f"- {gap.get('message') or gap.get('surface') or 'coverage gap'}")
     action_plan = payload.get("action_plan") or []
     if action_plan:
         lines.append(f"Top action: {action_plan[0].get('title') or action_plan[0].get('id')}")

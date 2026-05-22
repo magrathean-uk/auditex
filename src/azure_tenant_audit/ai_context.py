@@ -31,6 +31,8 @@ def _artifact_map(run_dir: Path) -> dict[str, list[str]]:
             continue
         if path.name == ".DS_Store" or "__MACOSX" in path.parts:
             continue
+        if path.name.endswith(("-wal", "-shm")):
+            continue
         relative = path.relative_to(run_dir)
         section = relative.parts[0] if len(relative.parts) > 1 else "root"
         raw.setdefault(section, []).append(str(relative))

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .assurance import build_live_readiness_summary
+from .capability_gate import enrich_capability_row
 from .config import CollectorConfig, RunConfig
 from .ai_context import build_privacy_block
 from .finalize import finalize_bundle_contract
@@ -122,17 +124,19 @@ def build_capability_matrix_rows(
             status = "partial"
             reason = "global_reader_tenant_level_reports_only"
         rows.append(
-            {
-                "collector": collector_name,
-                "status": status,
-                "reason": reason,
-                "required_permissions": required,
-                "missing_permissions": missing,
-                "observed_permissions": sorted(available),
-                "delegated_roles": sorted(delegated_roles),
-                "minimum_role_hints": list(hints.get("minimum_role_hints") or profile.delegated_role_hints),
-                "notes": hints.get("notes") or profile.notes,
-            }
+            enrich_capability_row(
+                {
+                    "collector": collector_name,
+                    "status": status,
+                    "reason": reason,
+                    "required_permissions": required,
+                    "missing_permissions": missing,
+                    "observed_permissions": sorted(available),
+                    "delegated_roles": sorted(delegated_roles),
+                    "minimum_role_hints": list(hints.get("minimum_role_hints") or profile.delegated_role_hints),
+                    "notes": hints.get("notes") or profile.notes,
+                }
+            )
         )
     return rows
 
@@ -161,6 +165,7 @@ def reconcile_capability_matrix_rows(
             item["status"] = "blocked"
         elif actual_status == "skipped":
             item["status"] = "not_applicable"
+        item = enrich_capability_row(item)
         reconciled.append(item)
     return reconciled
 
@@ -397,12 +402,18 @@ def finalize_probe_run(
     for name, payload in normalized_snapshot.items():
         writer.write_normalized(name, payload)
     writer.write_ai_safe("probe_summary", build_probe_ai_safe_summary(normalized_snapshot, findings=findings))
+    live_readiness = build_live_readiness_summary(
+        selected_collectors=requested_surfaces,
+        capability_rows=capability_matrix,
+    )
+    live_readiness_path = writer.write_json_artifact("live-readiness.json", live_readiness)
 
     evidence_paths = [
         "run-manifest.json",
         "summary.json",
         "capability-matrix.json",
         "toolchain-readiness.json",
+        "live-readiness.json",
     ]
     if auth_context_path is not None:
         evidence_paths.append("auth-context.json")
@@ -444,6 +455,7 @@ def finalize_probe_run(
             "probe_surface": cfg.surface,
             "capability_matrix_path": str(capability_path.relative_to(writer.run_dir)),
             "toolchain_readiness_path": str(toolchain_path.relative_to(writer.run_dir)),
+            "live_readiness_path": str(live_readiness_path.relative_to(writer.run_dir)),
             "evidence_index_path": str(evidence_index_path.relative_to(writer.run_dir)),
             "auth_path": auth_path,
             "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path else None,

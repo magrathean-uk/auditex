@@ -2,6 +2,8 @@
 
 Magrathean UK Ltd. takes the security of Auditex seriously. Thank you for helping keep Auditex and its operators safe.
 
+For the product security and privacy model, including read-only guarantees, no-content-read rules, local evidence handling, and customer-pack integrity, see [docs/SECURITY_PRIVACY.md](docs/SECURITY_PRIVACY.md).
+
 ## Reporting a vulnerability
 
 If you discover a security issue in Auditex, please **do not** open a public issue or pull request. Report it privately by email instead:
@@ -50,7 +52,7 @@ We will not pursue civil or criminal action against good-faith security research
 - Do not exploit a vulnerability beyond the minimum necessary to demonstrate the issue.
 - Comply with all applicable law (including the UK Computer Misuse Act 1990 and equivalents).
 
-This safe-harbour statement is offered as a matter of policy and does not waive the rights or remedies of any third party. **It does not authorise testing against any Microsoft 365 tenant that you do not own or do not have explicit owner authorisation to test.**
+This safe-harbour statement is offered as a matter of policy and does not waive the rights or remedies of any third party. **It does not authorise testing against any Microsoft 365 tenant or Google Workspace domain that you do not own or do not have explicit owner authorisation to test.**
 
 ## Contact
 

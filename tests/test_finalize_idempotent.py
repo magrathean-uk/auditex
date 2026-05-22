@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from azure_tenant_audit.ai_context import build_privacy_block
+from azure_tenant_audit.ai_context import build_ai_context
 from azure_tenant_audit.finalize import finalize_bundle_contract
 from azure_tenant_audit.findings import build_findings, build_report_pack
 from azure_tenant_audit.normalize import build_ai_safe_summary, build_normalized_snapshot
@@ -207,6 +208,28 @@ _BYTE_STABLE_ARTIFACTS = (
     "reports/report-pack.json",
     "summary.json",
 )
+
+
+def test_ai_context_ignores_sqlite_sidecar_artifacts(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    index_dir = run_dir / "index"
+    index_dir.mkdir(parents=True)
+    for name in ("evidence.sqlite", "evidence.sqlite-wal", "evidence.sqlite-shm"):
+        (index_dir / name).write_text("", encoding="utf-8")
+
+    context = build_ai_context(
+        run_dir=run_dir,
+        run_metadata={},
+        normalized_snapshot={},
+        capability_rows=[],
+        coverage_ledger=[],
+        blockers=[],
+        findings=[],
+    )
+
+    assert "index/evidence.sqlite" in context["artifacts"]["index"]
+    assert "index/evidence.sqlite-wal" not in context["artifacts"]["index"]
+    assert "index/evidence.sqlite-shm" not in context["artifacts"]["index"]
 
 
 def test_finalize_bundle_contract_is_idempotent_for_byte_stable_artifacts(

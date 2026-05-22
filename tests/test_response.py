@@ -94,10 +94,15 @@ def test_response_execute_runs_when_lab_guard_is_satisfied(tmp_path: Path, monke
     normalized = json.loads((run_dir / "normalized" / "response.json").read_text(encoding="utf-8"))
     ai_context = json.loads((run_dir / "ai_context.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    data_handling = json.loads((run_dir / "data-handling.json").read_text(encoding="utf-8"))
     assert normalized["response"]["ran"] is True
     assert normalized["response"]["adapter"] == "powershell_graph"
     validation = json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))
     assert manifest["plane"] == "response"
+    assert manifest["data_handling_path"] == "data-handling.json"
+    assert data_handling["read_only"] is True
+    assert data_handling["write_actions"] is False
+    assert data_handling["events"][0]["action"] == "message_trace"
     assert manifest["overall_status"] == "ok"
     assert manifest["contract_status"] == "valid"
     assert ai_context["coverage"]["coverage_row_count"] == 1

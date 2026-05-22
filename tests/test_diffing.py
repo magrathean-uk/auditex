@@ -85,3 +85,19 @@ def test_diff_run_directories_treats_matching_tenant_id_as_same_tenant(tmp_path:
     result = diff_run_directories(run_a, run_b)
 
     assert result["compare_context"]["same_tenant"] is True
+
+
+def test_diff_run_directories_blocks_cross_provider_compare(tmp_path: Path) -> None:
+    run_a = tmp_path / "run-a"
+    run_b = tmp_path / "run-b"
+    _write_json(run_a / "run-manifest.json", {"tenant_name": "acme", "platform": "m365", "run_id": "run-1"})
+    _write_json(run_b / "run-manifest.json", {"tenant_name": "acme", "platform": "google_workspace", "run_id": "run-2"})
+    _write_json(run_a / "normalized" / "users.json", {"kind": "users", "records": [{"key": "user:alice"}]})
+    _write_json(run_b / "normalized" / "users.json", {"kind": "users", "records": [{"key": "user:alice"}]})
+
+    result = diff_run_directories(run_a, run_b)
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "same_platform_required"
+    assert result["compare_context"]["same_platform"] is False
+    assert result["summary"] == {"added": 0, "removed": 0, "changed": 0, "object_kinds": 0}

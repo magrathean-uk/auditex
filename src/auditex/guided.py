@@ -15,6 +15,8 @@ from . import auth as auditex_auth
 from .bootstrap import build_doctor_report, run_setup
 from .operator_flow import flow_choices, flow_plan, guided_choice_options, resolve_auto_flow
 
+REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
+
 
 def _default_browser_command() -> str:
     if platform.system() == "Darwin":
@@ -316,7 +318,7 @@ def build_guided_parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-mode", action="store_true")
     parser.add_argument("--skip-login-check", action="store_true")
     parser.add_argument("--skip-tool-check", action="store_true")
-    parser.add_argument("--report-format", choices=("json", "md", "csv", "html"), default=None)
+    parser.add_argument("--report-format", choices=REPORT_FORMAT_CHOICES, default=None)
     parser.add_argument("--probe-first", dest="probe_first", action="store_true", default=True)
     parser.add_argument("--no-probe-first", dest="probe_first", action="store_false")
     return parser

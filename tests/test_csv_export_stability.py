@@ -3,7 +3,7 @@
 The CSV exporter (``auditex.reporting._render_csv``) feeds operators'
 spreadsheets and downstream pipelines. The contract:
 
-1. Stable column order (``id, title, severity, status``).
+1. Stable column order with identifiers, triage fields, and remediation guidance.
 2. Deterministic row order: severity desc → rule_id → record_key → id.
 3. RFC 4180 quoting (Python's ``csv.writer`` default is RFC 4180
    compliant; this test guards against future regressions).
@@ -21,6 +21,10 @@ _FINDINGS_UNSORTED = [
         "severity": "medium",
         "status": "open",
         "rule_id": "rule.medium",
+        "collector": "collector-medium",
+        "impact": "Medium impact",
+        "remediation": "Fix medium.",
+        "expected_value": "Medium expected",
         "evidence_refs": [{"record_key": "section:medium-1"}],
     },
     {
@@ -29,6 +33,10 @@ _FINDINGS_UNSORTED = [
         "severity": "high",
         "status": "open",
         "rule_id": "rule.high",
+        "collector": "collector-high",
+        "impact": "High impact 2",
+        "remediation": "Fix high 2.",
+        "affected_objects": ["obj-2"],
         "evidence_refs": [{"record_key": "section:high-2"}],
     },
     {
@@ -37,6 +45,9 @@ _FINDINGS_UNSORTED = [
         "severity": "critical",
         "status": "open",
         "rule_id": "rule.critical",
+        "collector": "collector-critical",
+        "impact": "Critical impact",
+        "remediation": "Fix critical.",
         "evidence_refs": [{"record_key": "section:crit-1"}],
     },
     {
@@ -45,6 +56,10 @@ _FINDINGS_UNSORTED = [
         "severity": "high",
         "status": "open",
         "rule_id": "rule.high",
+        "collector": "collector-high",
+        "impact": "High impact 1",
+        "remediation": "Fix high 1.",
+        "affected_objects": ["obj-1"],
         "evidence_refs": [{"record_key": "section:high-1"}],
     },
     {
@@ -53,6 +68,9 @@ _FINDINGS_UNSORTED = [
         "severity": "low",
         "status": "open",
         "rule_id": "rule.low",
+        "collector": "collector-low",
+        "impact": "Low impact",
+        "remediation": "Fix low.",
         "evidence_refs": [{"record_key": "section:low-1"}],
     },
 ]
@@ -61,7 +79,17 @@ _FINDINGS_UNSORTED = [
 def test_csv_export_columns_match_canonical_order() -> None:
     csv_output = _render_csv({"findings": _FINDINGS_UNSORTED})
     header = csv_output.splitlines()[0]
-    assert header == "id,title,severity,status"
+    assert header == "id,title,severity,status,rule_id,collector,affected_objects,impact,remediation,expected_value"
+
+
+def test_csv_export_includes_actionable_audit_fields() -> None:
+    csv_output = _render_csv({"findings": _FINDINGS_UNSORTED})
+
+    assert "rule.critical" in csv_output
+    assert "collector-critical" in csv_output
+    assert "Critical impact" in csv_output
+    assert "Fix critical." in csv_output
+    assert '[""obj-1""]' in csv_output
 
 
 def test_csv_export_sorts_rows_severity_desc_then_rule_id_then_record_key() -> None:

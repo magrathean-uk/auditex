@@ -502,13 +502,19 @@ def test_onedrive_posture_collector_distinguishes_personal_and_team_sites() -> N
 
 
 def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> None:
+    transport_command = (
+        "Get-TransportRule | Select-Object "
+        "Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText"
+    )
     adapter = _FakeAdapter(
         {
-            "Get-TransportRule | Select-Object Name,State,Priority,Mode": {"value": [{"Name": "Block Forwarding"}]},
+            transport_command: {"value": [{"Name": "Block Forwarding", "RedirectMessageTo": ["external@example.net"]}]},
             "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Inbound 1"}]},
             "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Outbound 1"}]},
             "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default": {"value": [{"Name": "contoso.com"}]},
-            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled": {"value": [{"Name": "Default"}]},
+            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled": {
+                "value": [{"Name": "Default"}]
+            },
             "Get-EXOMailbox -ResultSize 50 | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward": {"value": [{"DisplayName": "Alice Example"}]},
         }
     )

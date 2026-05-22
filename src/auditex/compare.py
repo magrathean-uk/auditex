@@ -32,13 +32,36 @@ def _run_metadata(run_dir: Path) -> dict[str, Any]:
 
 
 def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    platforms = [run.get("platform") or "m365" for run in runs]
+    same_platform = len(set(platforms)) <= 1
     tenant_ids = [run.get("tenant_id") for run in runs]
     tenant_names = [run.get("tenant_name") for run in runs]
     if all(tenant_ids) and len(set(tenant_ids)) == 1:
-        return {"same_tenant": True, "gate": "same_tenant", "tenant_key": tenant_ids[0]}
+        gate = "same_tenant" if same_platform else "same_platform_required"
+        return {
+            "same_tenant": True,
+            "same_platform": same_platform,
+            "gate": gate,
+            "tenant_key": tenant_ids[0],
+            "platform_key": platforms[0] if same_platform and platforms else None,
+        }
     if all(tenant_names) and len(set(tenant_names)) == 1:
-        return {"same_tenant": True, "gate": "same_tenant", "tenant_key": tenant_names[0]}
-    return {"same_tenant": False, "gate": "same_tenant_required", "tenant_key": None}
+        gate = "same_tenant" if same_platform else "same_platform_required"
+        return {
+            "same_tenant": True,
+            "same_platform": same_platform,
+            "gate": gate,
+            "tenant_key": tenant_names[0],
+            "platform_key": platforms[0] if same_platform and platforms else None,
+        }
+    gate = "same_tenant_required" if same_platform else "same_platform_required"
+    return {
+        "same_tenant": False,
+        "same_platform": same_platform,
+        "gate": gate,
+        "tenant_key": None,
+        "platform_key": platforms[0] if same_platform and platforms else None,
+    }
 
 
 def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -53,12 +76,20 @@ def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _blocked_diff(left_run: dict[str, Any], right_run: dict[str, Any], reason: str) -> dict[str, Any]:
+    same_tenant = (
+        bool(left_run.get("tenant_id"))
+        and left_run.get("tenant_id") == right_run.get("tenant_id")
+    ) or (
+        bool(left_run.get("tenant_name"))
+        and left_run.get("tenant_name") == right_run.get("tenant_name")
+    )
+    same_platform = (left_run.get("platform") or "m365") == (right_run.get("platform") or "m365")
     return {
         "left_run": _public_run(left_run),
         "right_run": _public_run(right_run),
         "status": "blocked",
         "reason": reason,
-        "compare_context": {"same_tenant": False, "gate": reason},
+        "compare_context": {"same_tenant": same_tenant, "same_platform": same_platform, "gate": reason},
         "summary": {"added": 0, "removed": 0, "changed": 0, "object_kinds": 0},
         "changes": {},
         "compared_files": [],
@@ -72,6 +103,8 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compare_pair(left_run: dict[str, Any], right_run: dict[str, Any], same_tenant: bool, *, allow_cross_tenant: bool) -> dict[str, Any]:
+    if (left_run.get("platform") or "m365") != (right_run.get("platform") or "m365"):
+        return _blocked_diff(left_run, right_run, "same_platform_required")
     if not same_tenant and not allow_cross_tenant:
         return _blocked_diff(left_run, right_run, "same_tenant_required")
     diff = diff_run_directories(left_run["path"], right_run["path"])
@@ -81,9 +114,11 @@ def _compare_pair(left_run: dict[str, Any], right_run: dict[str, Any], same_tena
     diff["reason"] = None
     diff["compare_context"] = {
         "same_tenant": same_tenant,
+        "same_platform": True,
         "gate": "same_tenant" if same_tenant else "allow_cross_tenant",
         "tenant_name": left_run.get("tenant_name"),
         "tenant_id": left_run.get("tenant_id"),
+        "platform": left_run.get("platform") or "m365",
     }
     return diff
 

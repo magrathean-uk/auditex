@@ -11,11 +11,17 @@ class ExchangePolicyCollector(Collector):
     description = "Exchange transport, domain, connector, and forwarding policy posture."
     required_permissions: list[str] = []
     command_collectors = [
-        ("transportRules", "Get-TransportRule | Select-Object Name,State,Priority,Mode"),
+        (
+            "transportRules",
+            "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText",
+        ),
         ("inboundConnectors", "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType"),
         ("outboundConnectors", "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType"),
         ("acceptedDomains", "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default"),
-        ("remoteDomains", "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled"),
+        (
+            "remoteDomains",
+            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",
+        ),
         (
             "mailboxForwarding",
             "Get-EXOMailbox -ResultSize 50 | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward",

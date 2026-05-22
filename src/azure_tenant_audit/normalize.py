@@ -778,6 +778,7 @@ def build_normalized_snapshot(
             department=item.get("department"),
             user_type=item.get("userType"),
             enabled=item.get("accountEnabled"),
+            last_password_change_at=item.get("lastPasswordChangeDateTime"),
         )
         for item in _values(collector_payloads.get("identity", {}), "users")
         if item.get("id")
@@ -850,6 +851,7 @@ def build_normalized_snapshot(
             os_version=item.get("osVersion"),
             compliance_state=item.get("complianceState"),
             azure_ad_device_id=item.get("azureADDeviceId"),
+            last_sync_at=item.get("lastSyncDateTime"),
         )
         for item in _values(collector_payloads.get("intune", {}), "managedDevices")
         if item.get("id")
@@ -878,6 +880,40 @@ def build_normalized_snapshot(
             created=item.get("createdDateTime"),
         )
         for item in _values(collector_payloads.get("defender", {}), "secureScores")
+        if item.get("id")
+    ]
+    security_signin_events = [
+        _record(
+            "security_signin_event",
+            "security.signIns",
+            str(item.get("id")),
+            created=item.get("createdDateTime"),
+            user_principal_name=item.get("userPrincipalName"),
+            app_display_name=item.get("appDisplayName"),
+            ip_address=item.get("ipAddress"),
+            risk_level_aggregated=item.get("riskLevelAggregated"),
+            risk_level_during_signin=item.get("riskLevelDuringSignIn"),
+            risk_state=item.get("riskState"),
+            risk_detail=item.get("riskDetail"),
+            conditional_access_status=item.get("conditionalAccessStatus"),
+            status=item.get("status") or {},
+        )
+        for item in _values(collector_payloads.get("security", {}), "signIns")
+        if item.get("id")
+    ]
+    security_directory_audit_events = [
+        _record(
+            "security_directory_audit_event",
+            "security.directoryAudits",
+            str(item.get("id")),
+            activity_time=item.get("activityDateTime"),
+            activity_display_name=item.get("activityDisplayName"),
+            category=item.get("category"),
+            result=item.get("result"),
+            initiated_by=item.get("initiatedBy") or {},
+            target_resources=item.get("targetResources") or [],
+        )
+        for item in _values(collector_payloads.get("security", {}), "directoryAudits")
         if item.get("id")
     ]
     exchange_mailbox_records: list[dict[str, Any]] = []
@@ -937,6 +973,22 @@ def build_normalized_snapshot(
                     state=item.get("state"),
                 )
             )
+    auth_method_registration_records = [
+        _record(
+            "auth_method_registration",
+            "auth_methods.userRegistrationDetails",
+            str(item.get("id") or item.get("userPrincipalName")),
+            user_principal_name=item.get("userPrincipalName"),
+            user_type=item.get("userType"),
+            is_admin=item.get("isAdmin"),
+            is_mfa_registered=item.get("isMfaRegistered"),
+            is_mfa_capable=item.get("isMfaCapable"),
+            is_passwordless_capable=item.get("isPasswordlessCapable"),
+            is_sspr_enabled=item.get("isSsprEnabled"),
+        )
+        for item in _values(collector_payloads.get("auth_methods", {}), "userRegistrationDetails")
+        if item.get("id") or item.get("userPrincipalName")
+    ]
 
     sites = [
         _record(
@@ -1121,11 +1173,20 @@ def build_normalized_snapshot(
                     object_id,
                     source_name=source_name,
                     display_name=item.get("Name") or item.get("Identity") or item.get("DisplayName"),
+                    domain_name=item.get("DomainName"),
+                    trusted_mail_outbound_enabled=item.get("TrustedMailOutboundEnabled"),
+                    auto_reply_enabled=item.get("AutoReplyEnabled"),
+                    auto_forward_enabled=item.get("AutoForwardEnabled"),
                     primary_smtp_address=item.get("PrimarySmtpAddress"),
                     forwarding_smtp_address=item.get("ForwardingSmtpAddress"),
                     deliver_to_mailbox_and_forward=item.get("DeliverToMailboxAndForward"),
+                    redirect_message_to=_to_str_list(item.get("RedirectMessageTo")),
+                    blind_copy_to=_to_str_list(item.get("BlindCopyTo")),
+                    copy_to=_to_str_list(item.get("CopyTo")),
+                    apply_html_disclaimer_text=item.get("ApplyHtmlDisclaimerText"),
                     state=item.get("State"),
                     priority=item.get("Priority"),
+                    mode=item.get("Mode"),
                 )
             )
     governance_objects: list[dict[str, Any]] = []
@@ -1716,8 +1777,11 @@ def build_normalized_snapshot(
         "devices": devices,
         "incidents": incidents,
         "security_scores": security_scores,
+        "security_signin_events": security_signin_events,
+        "security_directory_audit_events": security_directory_audit_events,
         "mailboxes": mailboxes,
         "policies": policies,
+        "auth_method_registration_objects": auth_method_registration_records,
         "sites": sites,
         "sharepoint_site_posture_objects": sharepoint_site_posture_objects,
         "sharepoint_permission_edges": sharepoint_permission_edges,

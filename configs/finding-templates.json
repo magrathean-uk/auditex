@@ -26,6 +26,15 @@
     "control_ids": ["AUDITEX-COLLECTOR-FAILURE"],
     "expected_value": "The collector completes without runtime errors."
   },
+  "coverage.gap": {
+    "risk_rating": "high",
+    "description": "One or more audit surfaces are blocked or partial, limiting assurance for that provider area.",
+    "impact": "Important risks can remain unknown when required collectors cannot read the surface or only return partial evidence.",
+    "remediation": "Resolve the affected collector permissions, scopes, service availability, or configuration, then rerun the audit.",
+    "references": ["Auditex coverage diagnostics", "Auditex collector permission matrix"],
+    "control_ids": ["AUDITEX-COVERAGE-GAP"],
+    "expected_value": "All in-scope audit surfaces complete successfully or have an accepted scope decision."
+  },
   "sharepoint.broad_link": {
     "risk_rating": "high",
     "description": "SharePoint or OneDrive evidence indicates a sharing link with broad audience reach.",
@@ -34,6 +43,15 @@
     "references": ["SharePoint sharing policy review"],
     "control_ids": ["AUDITEX-SPO-BROAD-LINK"],
     "expected_value": "External and organization-wide links are absent or explicitly approved."
+  },
+  "sharepoint.external_principal": {
+    "risk_rating": "high",
+    "description": "SharePoint or OneDrive evidence indicates direct access for a principal outside the tenant domains.",
+    "impact": "Content may be exposed to external users or groups outside the approved collaboration boundary.",
+    "remediation": "Remove unapproved external principals from the item or site permission set and retest affected sites.",
+    "references": ["SharePoint permissions review"],
+    "control_ids": ["AUDITEX-SPO-EXTERNAL-PRINCIPAL"],
+    "expected_value": "Direct SharePoint and OneDrive permissions are limited to approved tenant principals."
   },
   "app_consent.high_privilege": {
     "risk_rating": "high",
@@ -206,6 +224,24 @@
     "control_ids": ["AUDITEX-MBX-HIDE-FROM-USER"],
     "expected_value": "Inbox rules do not silently hide messages from the user."
   },
+  "exchange.transport_external_redirect": {
+    "risk_rating": "critical",
+    "description": "An Exchange transport rule redirects or copies mail to a recipient outside accepted tenant domains.",
+    "impact": "Transport-level forwarding can exfiltrate many users' mail before mailbox rules or user visibility expose it.",
+    "remediation": "Remove the external recipient from the transport rule or disable the rule until the exception is approved.",
+    "references": ["Exchange transport rule review"],
+    "control_ids": ["AUDITEX-EXO-TRANSPORT-EXTERNAL-REDIRECT"],
+    "expected_value": "Transport rules do not redirect or copy mail to external recipients."
+  },
+  "exchange.remote_domain_auto_forward_enabled": {
+    "risk_rating": "high",
+    "description": "An Exchange remote-domain policy permits automatic forwarding outside the tenant.",
+    "impact": "Tenant-level auto-forwarding allows mailbox rules and user settings to exfiltrate mail without a transport exception.",
+    "remediation": "Disable automatic forwarding on the default remote-domain policy and approve only specific business exceptions.",
+    "references": ["Exchange Online remote domain review", "MITRE ATT&CK T1114.003"],
+    "control_ids": ["AUDITEX-EXO-REMOTE-DOMAIN-AUTO-FWD"],
+    "expected_value": "Remote-domain policies do not allow automatic forwarding to external domains by default."
+  },
   "dns_posture.spf_missing": {
     "risk_rating": "high",
     "description": "No SPF (Sender Policy Framework) TXT record was discovered for a verified tenant domain.",
@@ -313,5 +349,95 @@
     "references": ["Microsoft Entra admin consent workflow"],
     "control_ids": ["AUDITEX-CONSENT-WORKFLOW-DISABLED"],
     "expected_value": "Admin consent request workflow enabled with named reviewers."
+  },
+  "identity.global_admin_singleton": {
+    "risk_rating": "high",
+    "description": "Only one Microsoft Entra Global Administrator assignment was observed.",
+    "impact": "Loss or compromise of the single Global Administrator can block recovery or concentrate tenant-wide privilege.",
+    "remediation": "Maintain at least two protected emergency-capable admins and use narrower roles for routine administration.",
+    "references": ["Microsoft Entra emergency access account guidance", "CIS Microsoft 365 administrator role guidance"],
+    "control_ids": ["AUDITEX-ID-GA-SINGLETON"],
+    "expected_value": "Two to five protected Global Administrator principals are present."
+  },
+  "identity.global_admin_sprawl": {
+    "risk_rating": "medium",
+    "description": "More than five Microsoft Entra Global Administrator assignments were observed.",
+    "impact": "A broad Global Administrator set increases tenant-wide blast radius if any privileged principal is compromised.",
+    "remediation": "Reduce Global Administrator assignments and move routine administration to least-privileged roles or eligible activation.",
+    "references": ["Microsoft Entra least-privileged roles", "CIS Microsoft 365 administrator role guidance"],
+    "control_ids": ["AUDITEX-ID-GA-SPRAWL"],
+    "expected_value": "Two to five protected Global Administrator principals are present."
+  },
+  "identity.global_admin_disabled": {
+    "risk_rating": "high",
+    "description": "A disabled Microsoft Entra user still has a Global Administrator assignment.",
+    "impact": "Dormant privileged assignments create confusing recovery paths and can be reactivated with tenant-wide privilege.",
+    "remediation": "Remove Global Administrator from disabled users and keep emergency access accounts explicitly documented.",
+    "references": ["Microsoft Entra administrator role guidance", "CIS Microsoft 365 account governance guidance"],
+    "control_ids": ["AUDITEX-ID-GA-DISABLED"],
+    "expected_value": "Disabled accounts have no Global Administrator assignments."
+  },
+  "identity.global_admin_stale_password": {
+    "risk_rating": "medium",
+    "description": "A Microsoft Entra Global Administrator has not changed password in over 365 days.",
+    "impact": "Long-lived privileged passwords raise credential-theft and recovery risk, especially for accounts without documented emergency controls.",
+    "remediation": "Rotate or validate the privileged credential and move routine administration to phishing-resistant, least-privileged access.",
+    "references": ["Microsoft Entra password protection guidance", "CIS Microsoft 365 administrator role guidance"],
+    "control_ids": ["AUDITEX-ID-GA-STALE-PASSWORD"],
+    "expected_value": "Privileged administrator credentials are rotated or governed through approved emergency-access procedure."
+  },
+  "identity.global_admin_mfa_not_registered": {
+    "risk_rating": "critical",
+    "description": "A Microsoft Entra Global Administrator is not registered for MFA.",
+    "impact": "A tenant-wide privileged account without MFA registration is exposed to password-only compromise.",
+    "remediation": "Require phishing-resistant MFA for every Global Administrator and confirm registration in authentication method reports.",
+    "references": ["Microsoft Entra authentication methods report", "CIS Microsoft 365 MFA guidance"],
+    "control_ids": ["AUDITEX-ID-GA-MFA-MISSING"],
+    "expected_value": "Every Global Administrator is registered for MFA."
+  },
+  "identity.user_mfa_not_registered": {
+    "risk_rating": "medium",
+    "description": "A non-admin member user is not registered for MFA in authentication method reports.",
+    "impact": "Password-only users are easier to compromise and can become a foothold for mail, data, and lateral access abuse.",
+    "remediation": "Require MFA registration for active member users and follow up on users that remain unregistered.",
+    "references": ["Microsoft Entra authentication methods report", "CIS Microsoft 365 MFA guidance"],
+    "control_ids": ["AUDITEX-ID-USER-MFA-MISSING"],
+    "expected_value": "Active member users are registered for MFA."
+  },
+  "security.risky_signin": {
+    "risk_rating": "high",
+    "description": "Microsoft Entra sign-in logs show a risky sign-in event.",
+    "impact": "Risky sign-ins can indicate credential theft, impossible travel, anomalous token use, or other account-compromise signals.",
+    "remediation": "Investigate the sign-in, revoke sessions where needed, reset credentials, and confirm conditional access controls responded.",
+    "references": ["Microsoft Entra risky sign-ins", "Microsoft Graph signIn risk evidence"],
+    "control_ids": ["AUDITEX-SIGNIN-RISKY"],
+    "expected_value": "Observed sign-ins have no active risk state or elevated risk level."
+  },
+  "security.privilege_change_event": {
+    "risk_rating": "high",
+    "description": "Microsoft Entra directory audit logs show an administrative role or privilege change.",
+    "impact": "Unexpected privileged-role changes can indicate persistence setup, emergency access drift, or active tenant compromise.",
+    "remediation": "Review the initiator, target role, approval trail, and recent sign-ins; revoke unauthorized role assignments.",
+    "references": ["Microsoft Entra directory audit logs", "Privileged role assignment review"],
+    "control_ids": ["AUDITEX-PRIVILEGE-CHANGE-EVENT"],
+    "expected_value": "Privileged role changes are approved, expected, and traceable."
+  },
+  "intune.device_noncompliant": {
+    "risk_rating": "medium",
+    "description": "A managed Intune device is marked noncompliant, in conflict, or in error state.",
+    "impact": "Noncompliant managed devices can indicate missing security baseline enforcement or a device that should not be trusted for resource access.",
+    "remediation": "Review the device compliance failure, remediate or retire the device, and confirm conditional access blocks noncompliant devices where required.",
+    "references": ["Microsoft Intune compliance policy guidance", "CIS Microsoft 365 device compliance guidance"],
+    "control_ids": ["AUDITEX-INTUNE-DEVICE-NONCOMPLIANT"],
+    "expected_value": "Managed devices are compliant or explicitly out of scope."
+  },
+  "intune.device_stale_sync": {
+    "risk_rating": "medium",
+    "description": "A managed Intune device has not synced recently.",
+    "impact": "Stale device sync can hide missing security baselines, device loss, deprovisioning gaps, or stale access assumptions.",
+    "remediation": "Investigate stale managed devices, retire devices no longer in use, and confirm conditional access blocks unknown device posture.",
+    "references": ["Microsoft Intune managed device inventory"],
+    "control_ids": ["AUDITEX-INTUNE-DEVICE-STALE-SYNC"],
+    "expected_value": "Managed devices sync within the approved recency window."
   }
 }

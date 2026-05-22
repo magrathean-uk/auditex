@@ -64,18 +64,33 @@ _SENSITIVE_CONTRACT_ARTIFACTS = (
     "reports/report-pack.json",
     "normalized/auth_context.json",
 )
+_OPTIONAL_MANIFEST_ARTIFACT_FIELDS = (
+    "data_handling_path",
+    "live_readiness_path",
+    "audit_plan_path",
+    "api_inventory_path",
+)
 # Canonical framework keys used by exporters / control-mappings. C3 fails the
 # bundle if a finding's framework_mappings drifts from this set, since SARIF/
 # OSCAL exporters depend on knowing the framework taxonomy at bundle-build
 # time.
 _KNOWN_FRAMEWORK_KEYS = frozenset(
-    {"cis_m365_v3", "nist_800_53", "iso_27001", "soc2", "nis2", "dora", "mitre_attack"}
+    {
+        "cis_m365_v3",
+        "google_workspace_baseline",
+        "nist_800_53",
+        "iso_27001",
+        "soc2",
+        "nis2",
+        "dora",
+        "mitre_attack",
+    }
 )
 # Provenance markers that are NOT in the audit collector REGISTRY but are
 # still legitimate ``collector`` values on findings — they identify
 # non-audit planes (response actions, etc.) that produce findings via a
 # different runtime path. Keep this list short and explicit.
-_KNOWN_NON_COLLECTOR_PROVENANCE = frozenset({"response"})
+_KNOWN_NON_COLLECTOR_PROVENANCE = frozenset({"response", "toolchain", "windows365"})
 
 
 def _read_json(path: Path, fallback: Any = None) -> Any:
@@ -210,6 +225,12 @@ def _validate_finding_collectors(
     except Exception:  # noqa: BLE001 — never let import failure crash validation
         return
     known = set(_REGISTRY.keys()) | set(_KNOWN_NON_COLLECTOR_PROVENANCE)
+    try:
+        from auditex.google_workspace.collectors import REGISTRY as _GOOGLE_REGISTRY
+
+        known.update(_GOOGLE_REGISTRY.keys())
+    except Exception:  # noqa: BLE001
+        pass
     for finding in findings:
         collector = finding.get("collector")
         if not isinstance(collector, str) or not collector.strip():
@@ -384,6 +405,197 @@ def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]]) -> None:
         issues.append(_issue("invalid_evidence_sqlite", path="index/evidence.sqlite", details=str(exc)))
 
 
+def _validate_manifest_artifact_paths(run_dir: Path, issues: list[dict[str, Any]]) -> dict[str, Any]:
+    manifest = _read_json(run_dir / "run-manifest.json", fallback={})
+    if not isinstance(manifest, Mapping):
+        return {}
+    for field in _OPTIONAL_MANIFEST_ARTIFACT_FIELDS:
+        value = manifest.get(field)
+        if not value:
+            continue
+        relative = str(value)
+        if not (run_dir / relative).exists():
+            issues.append(_issue("missing_manifest_artifact", path=relative, details=field))
+    return dict(manifest)
+
+
+def _validate_data_handling(run_dir: Path, manifest: Mapping[str, Any], issues: list[dict[str, Any]]) -> None:
+    relative = manifest.get("data_handling_path")
+    if not relative:
+        return
+    path = run_dir / str(relative)
+    payload = _read_json(path, fallback=None)
+    if not isinstance(payload, Mapping):
+        issues.append(_issue("invalid_json_artifact", path=str(relative)))
+        return
+    required = ("schema_version", "platform", "read_only", "content_reads", "write_actions", "provider_assertions")
+    missing = [key for key in required if key not in payload]
+    if missing:
+        issues.append(_issue("missing_json_required_fields", path=str(relative), details=missing))
+        return
+    if payload.get("read_only") is True and payload.get("write_actions") is True:
+        issues.append(_issue("invalid_data_handling_semantics", path=str(relative), details="read_only_with_write_actions"))
+    if payload.get("content_reads") is True:
+        issues.append(_issue("invalid_data_handling_semantics", path=str(relative), details="content_reads_enabled"))
+    assertions = payload.get("provider_assertions")
+    if not isinstance(assertions, Mapping):
+        issues.append(_issue("missing_json_required_fields", path=str(relative), details=["provider_assertions"]))
+        return
+    platform = str(payload.get("platform") or manifest.get("platform") or "m365")
+    if platform == "google_workspace":
+        forbidden = [
+            key
+            for key in ("gmail_body_reads", "drive_file_content_reads", "body_or_file_content_reads")
+            if assertions.get(key) is True
+        ]
+        if forbidden:
+            issues.append(_issue("invalid_data_handling_no_content_assertion", path=str(relative), details=forbidden))
+    elif assertions.get("body_or_file_content_reads") is True:
+        issues.append(
+            _issue("invalid_data_handling_no_content_assertion", path=str(relative), details=["body_or_file_content_reads"])
+        )
+
+
+def _validate_live_readiness(run_dir: Path, manifest: Mapping[str, Any], issues: list[dict[str, Any]]) -> None:
+    relative = manifest.get("live_readiness_path")
+    if not relative:
+        return
+    path = run_dir / str(relative)
+    payload = _read_json(path, fallback=None)
+    if not isinstance(payload, Mapping):
+        issues.append(_issue("invalid_json_artifact", path=str(relative)))
+        return
+    missing = [key for key in ("trust_level", "selected_collectors", "can_trust", "cannot_trust") if key not in payload]
+    if missing:
+        issues.append(_issue("missing_json_required_fields", path=str(relative), details=missing))
+
+
+def _validate_audit_plan(run_dir: Path, manifest: Mapping[str, Any], issues: list[dict[str, Any]]) -> None:
+    relative = manifest.get("audit_plan_path")
+    if not relative:
+        return
+    path = run_dir / str(relative)
+    payload = _read_json(path, fallback=None)
+    if not isinstance(payload, Mapping):
+        issues.append(_issue("invalid_json_artifact", path=str(relative)))
+        return
+    missing = [key for key in ("schema_version", "platform", "evidence_gates", "quality_gate") if key not in payload]
+    if missing:
+        issues.append(_issue("missing_json_required_fields", path=str(relative), details=missing))
+    gate = payload.get("quality_gate")
+    if not isinstance(gate, Mapping) or gate.get("status") not in {"complete", "partial", "unusable"}:
+        issues.append(_issue("invalid_audit_plan_quality_gate", path=str(relative)))
+
+
+def _validate_api_inventory(run_dir: Path, manifest: Mapping[str, Any], issues: list[dict[str, Any]]) -> None:
+    relative = manifest.get("api_inventory_path")
+    if not relative:
+        return
+    path = run_dir / str(relative)
+    payload = _read_json(path, fallback=None)
+    if not isinstance(payload, Mapping):
+        issues.append(_issue("invalid_json_artifact", path=str(relative)))
+        return
+    missing = [key for key in ("schema_version", "platform", "declared_collectors", "observed_calls", "safety") if key not in payload]
+    if missing:
+        issues.append(_issue("missing_json_required_fields", path=str(relative), details=missing))
+        return
+    if not isinstance(payload.get("declared_collectors"), list) or not isinstance(payload.get("observed_calls"), list):
+        issues.append(_issue("invalid_api_inventory_shape", path=str(relative)))
+    safety = payload.get("safety")
+    if not isinstance(safety, Mapping):
+        issues.append(_issue("missing_json_required_fields", path=str(relative), details=["safety"]))
+        return
+    if safety.get("content_reads") is True or safety.get("no_content_reads") is False:
+        issues.append(_issue("invalid_api_inventory_safety", path=str(relative), details="content_reads_enabled"))
+    if str(manifest.get("plane") or "inventory") != "response" and (
+        safety.get("write_actions") is True or safety.get("read_only") is False
+    ):
+        issues.append(_issue("invalid_api_inventory_safety", path=str(relative), details="write_actions_in_audit_plane"))
+    for index, call in enumerate(payload.get("observed_calls") or []):
+        if not isinstance(call, Mapping):
+            issues.append(_issue("invalid_api_inventory_shape", path=str(relative), details={"observed_call_index": index}))
+            continue
+        method = str(call.get("method") or "").upper()
+        if str(manifest.get("plane") or "inventory") != "response" and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            issues.append(
+                _issue(
+                    "invalid_api_inventory_safety",
+                    path=str(relative),
+                    details={"observed_call_index": index, "method": method},
+                )
+            )
+
+
+def _validate_report_pack(run_dir: Path, issues: list[dict[str, Any]]) -> None:
+    relative = "reports/report-pack.json"
+    payload = _read_json(run_dir / relative, fallback=None)
+    if not isinstance(payload, Mapping):
+        return
+    proof_table = payload.get("proof_table")
+    if proof_table is None:
+        return
+    if not isinstance(proof_table, list):
+        issues.append(_issue("invalid_report_proof_table", path=relative, details="proof_table_not_list"))
+        return
+
+    findings = [dict(item) for item in payload.get("findings") or [] if isinstance(item, Mapping)]
+    finding_ids = {str(item.get("id")) for item in findings if item.get("id")}
+    covered_ids: set[str] = set()
+    for index, row in enumerate(proof_table):
+        if not isinstance(row, Mapping):
+            issues.append(_issue("invalid_report_proof_table", path=relative, details={"row_index": index}))
+            continue
+        if "proof_status" not in row and "evidence_count" in row and (row.get("finding_id") or row.get("id")):
+            covered_ids.add(str(row.get("finding_id") or row.get("id")))
+            continue
+        finding_id = str(row.get("finding_id") or row.get("id") or "").strip()
+        proof_status = str(row.get("proof_status") or "").strip()
+        missing = []
+        if not finding_id:
+            missing.append("finding_id")
+        if not proof_status:
+            missing.append("proof_status")
+        if proof_status == "supported":
+            missing.extend(
+                field
+                for field in ("artifact_path", "artifact_kind", "collector", "record_key")
+                if not str(row.get(field) or "").strip()
+            )
+            artifact_path = str(row.get("artifact_path") or "")
+            if artifact_path and not (run_dir / artifact_path).exists():
+                issues.append(
+                    _issue(
+                        "broken_report_proof_table_ref",
+                        path=relative,
+                        details={"row_index": index, "finding_id": finding_id, "artifact_path": artifact_path},
+                    )
+                )
+        elif proof_status not in {"missing_evidence", "unsupported"}:
+            missing.append("proof_status:supported|missing_evidence|unsupported")
+        if missing:
+            issues.append(
+                _issue(
+                    "invalid_report_proof_table",
+                    path=relative,
+                    details={"row_index": index, "finding_id": finding_id, "missing": missing},
+                )
+            )
+        if finding_id:
+            covered_ids.add(finding_id)
+
+    missing_finding_rows = sorted(finding_ids - covered_ids)
+    if missing_finding_rows:
+        issues.append(
+            _issue(
+                "missing_report_proof_table_rows",
+                path=relative,
+                details=missing_finding_rows,
+                severity="warning",
+            )
+        )
+
+
 def build_validation_report(
     *,
     run_dir: str | Path,
@@ -411,6 +623,12 @@ def build_validation_report(
     _validate_ai_safe(run_path, issues)
     _validate_sensitive_contract_artifacts(run_path, issues)
     _validate_evidence_db(run_path, issues)
+    manifest = _validate_manifest_artifact_paths(run_path, issues)
+    _validate_data_handling(run_path, manifest, issues)
+    _validate_live_readiness(run_path, manifest, issues)
+    _validate_audit_plan(run_path, manifest, issues)
+    _validate_api_inventory(run_path, manifest, issues)
+    _validate_report_pack(run_path, issues)
 
     context = ai_context if isinstance(ai_context, Mapping) else _read_json(run_path / "ai_context.json", fallback={})
     if not isinstance(context, Mapping):

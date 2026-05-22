@@ -75,9 +75,68 @@ def test_build_report_pack_includes_findings_and_evidence_paths() -> None:
     assert report["summary"]["open_count"] == 1
     assert report["summary"]["accepted_count"] == 0
     assert report["privacy"] == {}
+    assert report["summary"]["risk"]["score"] == 40
+    assert report["summary"]["risk"]["grade"] == "high"
+    assert report["summary"]["risk"]["open_weight"] == 4
     assert report["findings"][0]["id"] == "security:securityAlerts"
     assert report["evidence_paths"] == ["run-manifest.json", "findings/findings.json"]
     assert report["action_plan"][0]["rule_id"] == "collector.issue.permission"
+
+
+def test_build_report_pack_risk_rollup_ignores_non_open_findings() -> None:
+    report = build_report_pack(
+        tenant_name="acme",
+        overall_status="partial",
+        findings=[
+            {"id": "critical-open", "severity": "critical", "status": "open", "title": "Crit"},
+            {"id": "high-waived", "severity": "high", "status": "waived", "title": "Waived"},
+            {"id": "medium-accepted", "severity": "medium", "status": "accepted_risk", "title": "Accepted"},
+        ],
+        evidence_paths=[],
+    )
+
+    assert report["summary"]["risk"] == {
+        "score": 60,
+        "grade": "critical",
+        "open_weight": 6,
+        "counts_by_open_severity": {"critical": 1},
+        "top_open_findings": [{"id": "critical-open", "severity": "critical", "title": "Crit", "category": None}],
+    }
+
+
+def test_build_report_pack_promotes_coverage_gaps_into_risk_and_action_plan() -> None:
+    report = build_report_pack(
+        tenant_name="acme",
+        overall_status="partial",
+        findings=[
+            {
+                "id": "medium-open",
+                "rule_id": "identity.user_mfa_not_registered",
+                "severity": "medium",
+                "status": "open",
+                "title": "User missing MFA",
+                "category": "identity",
+            }
+        ],
+        coverage_gaps=[
+            {
+                "surface": "mail",
+                "status": "blocked",
+                "severity": "high",
+                "collectors": ["google_gmail_settings"],
+                "error_classes": ["invalid_scope"],
+                "message": "mail coverage is blocked; affected collectors: google_gmail_settings",
+            }
+        ],
+        evidence_paths=[],
+    )
+
+    assert report["summary"]["coverage_gap_count"] == 1
+    assert report["summary"]["risk"]["score"] == 40
+    assert report["summary"]["risk"]["coverage_gap_weight"] == 4
+    assert report["action_plan"][0]["id"] == "coverage_gap:mail"
+    assert report["action_plan"][0]["rule_id"] == "coverage.gap"
+    assert report["action_plan"][0]["error_classes"] == ["invalid_scope"]
 
 
 def test_build_findings_applies_waivers_and_adds_richer_fields(tmp_path: Path) -> None:
@@ -175,6 +234,15 @@ def test_finding_schema_includes_framework_mappings() -> None:
     assert "framework_mappings" in schema["properties"]
 
 
+def test_finding_schema_framework_mappings_match_contract_keys() -> None:
+    from azure_tenant_audit.contracts import _KNOWN_FRAMEWORK_KEYS
+
+    schema = json.loads(Path("schemas/finding.schema.json").read_text(encoding="utf-8"))
+    allowed = set(schema["properties"]["framework_mappings"]["properties"])
+
+    assert _KNOWN_FRAMEWORK_KEYS.issubset(allowed)
+
+
 def test_build_report_pack_excludes_accepted_findings_from_action_plan() -> None:
     findings = [
         {
@@ -238,6 +306,30 @@ def test_build_findings_promotes_normalized_workload_risks() -> None:
                     "anonymous_link_count": 1,
                     "ownership_state": "weak",
                 }
+            ]
+        },
+        "sharepoint_permission_edges": {
+            "records": [
+                {
+                    "id": "site-1:perm-2:external-user",
+                    "site_id": "site-1",
+                    "site_name": "Executive",
+                    "permission_id": "perm-2",
+                    "target_type": "user",
+                    "target_id": "external-user",
+                    "target_name": "consultant@external.test",
+                    "roles": ["write"],
+                },
+                {
+                    "id": "site-1:perm-3:internal-user",
+                    "site_id": "site-1",
+                    "site_name": "Executive",
+                    "permission_id": "perm-3",
+                    "target_type": "user",
+                    "target_id": "internal-user",
+                    "target_name": "alice@contoso.com",
+                    "roles": ["read"],
+                },
             ]
         },
         "application_consents": {
@@ -316,6 +408,15 @@ def test_build_findings_promotes_normalized_workload_risks() -> None:
                 },
             ]
         },
+        "domain_hybrid_objects": {
+            "records": [
+                {
+                    "id": "contoso.com",
+                    "source_name": "domains",
+                    "is_verified": True,
+                }
+            ]
+        },
         "snapshot": {"tenant_name": "acme", "run_id": "run-1", "object_counts": {}},
     }
 
@@ -323,6 +424,7 @@ def test_build_findings_promotes_normalized_workload_risks() -> None:
     ids = {item["id"] for item in findings}
 
     assert "sharepoint:site-1:perm-1:sharing" in ids
+    assert "sharepoint_permission:site-1:perm-2:external-user:external_principal" in ids
     assert "sharepoint_site_posture:site-1:weak_ownership" in ids
     assert "onedrive_posture:od-1:external_sharing_enabled" in ids
     assert "app_consent:grant-1:high_privilege" in ids
@@ -331,6 +433,28 @@ def test_build_findings_promotes_normalized_workload_risks() -> None:
     assert "service_health:issue-1:active_service_issue" in ids
     assert "external_identity:authz-1:broad_guest_invite_policy" in ids
     assert "consent_policy:consent-1:admin_consent_workflow_disabled" in ids
+
+
+def test_build_findings_does_not_guess_external_sharepoint_principal_without_tenant_domain() -> None:
+    normalized = {
+        "sharepoint_permission_edges": {
+            "records": [
+                {
+                    "id": "site-1:perm-2:user",
+                    "site_id": "site-1",
+                    "site_name": "Executive",
+                    "target_type": "user",
+                    "target_name": "consultant@external.test",
+                    "roles": ["write"],
+                }
+            ]
+        },
+        "snapshot": {"tenant_name": "acme", "run_id": "run-1", "object_counts": {}},
+    }
+
+    findings = build_findings([], normalized_snapshot=normalized)
+
+    assert all(finding["rule_id"] != "sharepoint.external_principal" for finding in findings)
 
 
 def test_build_findings_makes_conditional_access_ids_unique() -> None:
@@ -349,3 +473,398 @@ def test_build_findings_makes_conditional_access_ids_unique() -> None:
         "conditional_access:ca_reporting_only:policy-1",
         "conditional_access:ca_reporting_only:policy-2",
     }
+
+
+def test_build_findings_flags_m365_global_admin_resilience() -> None:
+    too_few = {
+        "role_definitions": {
+            "records": [
+                {
+                    "id": "role-global-admin",
+                    "display_name": "Global Administrator",
+                }
+            ]
+        },
+        "role_assignments": {
+            "records": [
+                {
+                    "id": "assignment-1",
+                    "principal_id": "user-1",
+                    "role_definition_id": "role-global-admin",
+                }
+            ]
+        },
+    }
+    sprawl = {
+        "role_definitions": too_few["role_definitions"],
+        "role_assignments": {
+            "records": [
+                {
+                    "id": f"assignment-{index}",
+                    "principal_id": f"user-{index}",
+                    "role_definition_id": "role-global-admin",
+                }
+                for index in range(6)
+            ]
+        },
+    }
+
+    too_few_ids = {item["rule_id"] for item in build_findings([], normalized_snapshot=too_few)}
+    sprawl_ids = {item["rule_id"] for item in build_findings([], normalized_snapshot=sprawl)}
+
+    assert "identity.global_admin_singleton" in too_few_ids
+    assert "identity.global_admin_sprawl" in sprawl_ids
+
+
+def test_build_findings_flags_disabled_global_admin_assignment() -> None:
+    normalized = {
+        "users": {
+            "records": [
+                {
+                    "id": "user-1",
+                    "principal_name": "disabled-admin@example.com",
+                    "enabled": False,
+                }
+            ]
+        },
+        "role_definitions": {
+            "records": [
+                {
+                    "id": "role-global-admin",
+                    "display_name": "Global Administrator",
+                }
+            ]
+        },
+        "role_assignments": {
+            "records": [
+                {
+                    "id": "assignment-1",
+                    "principal_id": "user-1",
+                    "role_definition_id": "role-global-admin",
+                },
+                {
+                    "id": "assignment-2",
+                    "principal_id": "user-2",
+                    "role_definition_id": "role-global-admin",
+                },
+            ]
+        },
+    }
+
+    findings = build_findings([], normalized_snapshot=normalized)
+    disabled = next(item for item in findings if item["rule_id"] == "identity.global_admin_disabled")
+
+    assert disabled["severity"] == "high"
+    assert disabled["affected_objects"] == ["disabled-admin@example.com"]
+
+
+def test_build_findings_flags_global_admin_stale_password() -> None:
+    normalized = {
+        "users": {
+            "records": [
+                {
+                    "id": "user-1",
+                    "principal_name": "stale-admin@example.com",
+                    "enabled": True,
+                    "last_password_change_at": "2020-01-01T00:00:00Z",
+                },
+                {
+                    "id": "user-2",
+                    "principal_name": "fresh-admin@example.com",
+                    "enabled": True,
+                    "last_password_change_at": "2026-01-01T00:00:00Z",
+                },
+            ]
+        },
+        "role_definitions": {
+            "records": [
+                {
+                    "id": "role-global-admin",
+                    "display_name": "Global Administrator",
+                }
+            ]
+        },
+        "role_assignments": {
+            "records": [
+                {
+                    "id": "assignment-1",
+                    "principal_id": "user-1",
+                    "role_definition_id": "role-global-admin",
+                },
+                {
+                    "id": "assignment-2",
+                    "principal_id": "user-2",
+                    "role_definition_id": "role-global-admin",
+                },
+            ]
+        },
+    }
+
+    findings = build_findings([], normalized_snapshot=normalized)
+    stale = next(item for item in findings if item["rule_id"] == "identity.global_admin_stale_password")
+
+    assert stale["severity"] == "medium"
+    assert stale["affected_objects"] == ["stale-admin@example.com"]
+
+
+def test_build_findings_flags_global_admin_without_mfa_registration() -> None:
+    normalized = {
+        "users": {
+            "records": [
+                {
+                    "id": "user-1",
+                    "principal_name": "no-mfa-admin@example.com",
+                    "enabled": True,
+                },
+                {
+                    "id": "user-2",
+                    "principal_name": "mfa-admin@example.com",
+                    "enabled": True,
+                },
+            ]
+        },
+        "role_definitions": {
+            "records": [
+                {
+                    "id": "role-global-admin",
+                    "display_name": "Global Administrator",
+                }
+            ]
+        },
+        "role_assignments": {
+            "records": [
+                {
+                    "id": "assignment-1",
+                    "principal_id": "user-1",
+                    "role_definition_id": "role-global-admin",
+                },
+                {
+                    "id": "assignment-2",
+                    "principal_id": "user-2",
+                    "role_definition_id": "role-global-admin",
+                },
+            ]
+        },
+        "auth_method_registration_objects": {
+            "records": [
+                {
+                    "id": "user-1",
+                    "user_principal_name": "no-mfa-admin@example.com",
+                    "is_mfa_registered": False,
+                },
+                {
+                    "id": "user-2",
+                    "user_principal_name": "mfa-admin@example.com",
+                    "is_mfa_registered": True,
+                },
+            ]
+        },
+    }
+
+    findings = build_findings([], normalized_snapshot=normalized)
+    mfa = next(item for item in findings if item["rule_id"] == "identity.global_admin_mfa_not_registered")
+
+    assert mfa["severity"] == "critical"
+    assert mfa["affected_objects"] == ["no-mfa-admin@example.com"]
+
+
+def test_build_findings_flags_active_user_without_mfa_registration() -> None:
+    normalized = {
+        "users": {
+            "records": [
+                {
+                    "id": "user-1",
+                    "principal_name": "no-mfa@example.com",
+                    "enabled": True,
+                    "user_type": "Member",
+                },
+                {
+                    "id": "user-2",
+                    "principal_name": "disabled@example.com",
+                    "enabled": False,
+                    "user_type": "Member",
+                },
+                {
+                    "id": "user-3",
+                    "principal_name": "admin@example.com",
+                    "enabled": True,
+                    "user_type": "Member",
+                },
+            ]
+        },
+        "role_definitions": {
+            "records": [{"id": "role-global-admin", "display_name": "Global Administrator"}]
+        },
+        "role_assignments": {
+            "records": [{"id": "assignment-1", "principal_id": "user-3", "role_definition_id": "role-global-admin"}]
+        },
+        "auth_method_registration_objects": {
+            "records": [
+                {
+                    "id": "user-1",
+                    "user_principal_name": "no-mfa@example.com",
+                    "is_mfa_registered": False,
+                    "is_admin": False,
+                    "user_type": "Member",
+                },
+                {
+                    "id": "user-2",
+                    "user_principal_name": "disabled@example.com",
+                    "is_mfa_registered": False,
+                    "is_admin": False,
+                    "user_type": "Member",
+                },
+                {
+                    "id": "user-3",
+                    "user_principal_name": "admin@example.com",
+                    "is_mfa_registered": False,
+                    "is_admin": True,
+                    "user_type": "Member",
+                },
+            ]
+        },
+    }
+
+    findings = [
+        item
+        for item in build_findings([], normalized_snapshot=normalized)
+        if item["rule_id"] == "identity.user_mfa_not_registered"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "medium"
+    assert findings[0]["affected_objects"] == ["no-mfa@example.com"]
+
+
+def test_build_findings_flags_risky_m365_signin() -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    normalized = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="run-1",
+        collector_payloads={
+            "security": {
+                "signIns": {
+                    "value": [
+                        {
+                            "id": "signin-1",
+                            "createdDateTime": "2026-05-22T08:00:00Z",
+                            "userPrincipalName": "alice@example.com",
+                            "riskLevelAggregated": "high",
+                            "riskState": "atRisk",
+                            "status": {"errorCode": 0},
+                        },
+                        {
+                            "id": "signin-2",
+                            "createdDateTime": "2026-05-22T09:00:00Z",
+                            "userPrincipalName": "bob@example.com",
+                            "riskLevelAggregated": "none",
+                            "riskState": "none",
+                            "status": {"errorCode": 0},
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [item for item in build_findings([], normalized_snapshot=normalized) if item["rule_id"] == "security.risky_signin"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["affected_objects"] == ["alice@example.com"]
+
+
+def test_build_findings_flags_m365_privilege_change_audit_event() -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    normalized = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="run-1",
+        collector_payloads={
+            "security": {
+                "directoryAudits": {
+                    "value": [
+                        {
+                            "id": "audit-1",
+                            "activityDateTime": "2026-05-22T08:00:00Z",
+                            "category": "RoleManagement",
+                            "activityDisplayName": "Add member to role",
+                            "result": "success",
+                            "initiatedBy": {"user": {"userPrincipalName": "admin@example.com"}},
+                            "targetResources": [{"displayName": "Global Administrator", "type": "Role"}],
+                        },
+                        {
+                            "id": "audit-2",
+                            "activityDateTime": "2026-05-22T09:00:00Z",
+                            "category": "UserManagement",
+                            "activityDisplayName": "Update user",
+                            "result": "success",
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [item for item in build_findings([], normalized_snapshot=normalized) if item["rule_id"] == "security.privilege_change_event"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["affected_objects"] == ["admin@example.com"]
+
+
+def test_build_findings_flags_noncompliant_intune_device() -> None:
+    normalized = {
+        "devices": {
+            "records": [
+                {
+                    "id": "device-1",
+                    "display_name": "Laptop 1",
+                    "platform": "Windows",
+                    "compliance_state": "noncompliant",
+                },
+                {
+                    "id": "device-2",
+                    "display_name": "Laptop 2",
+                    "platform": "Windows",
+                    "compliance_state": "compliant",
+                },
+            ]
+        }
+    }
+
+    findings = build_findings([], normalized_snapshot=normalized)
+    device = next(item for item in findings if item["rule_id"] == "intune.device_noncompliant")
+
+    assert device["severity"] == "medium"
+    assert device["affected_objects"] == ["Laptop 1"]
+
+
+def test_build_findings_flags_stale_intune_device_sync() -> None:
+    normalized = {
+        "devices": {
+            "records": [
+                {
+                    "id": "device-1",
+                    "display_name": "Old Laptop",
+                    "platform": "Windows",
+                    "compliance_state": "compliant",
+                    "last_sync_at": "2020-01-01T00:00:00Z",
+                },
+                {
+                    "id": "device-2",
+                    "display_name": "Fresh Laptop",
+                    "platform": "Windows",
+                    "compliance_state": "compliant",
+                    "last_sync_at": "2026-05-20T00:00:00Z",
+                },
+            ]
+        }
+    }
+
+    findings = [item for item in build_findings([], normalized_snapshot=normalized) if item["rule_id"] == "intune.device_stale_sync"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "medium"
+    assert findings[0]["affected_objects"] == ["Old Laptop"]

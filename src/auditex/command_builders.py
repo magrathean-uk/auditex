@@ -4,8 +4,12 @@ import sys
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+from .features import response_disabled_message, response_enabled
+
 SUPPORTED_PLANES = ("inventory", "full", "export")
 SUPPORTED_PROBE_MODES = ("delegated", "app", "response")
+SUPPORTED_GOOGLE_COMMANDS = ("doctor", "probe", "run")
+SUPPORTED_GOOGLE_AUTH = ("domain-delegation", "oauth")
 
 
 def _python_executable(value: str | None = None) -> str:
@@ -79,6 +83,72 @@ def build_audit_run_command(spec: AuditRunCommandSpec) -> list[str]:
 
 
 @dataclass(frozen=True)
+class GoogleRunCommandSpec:
+    tenant_name: str
+    out_dir: str
+    google_command: str = "run"
+    auth: str = "domain-delegation"
+    domain: str | None = None
+    customer_id: str | None = None
+    subject: str | None = None
+    service_account_key: str | None = None
+    oauth_client: str | None = None
+    token_cache: str | None = None
+    collector_preset: str | None = "core-security"
+    collectors: str | Sequence[str] | None = None
+    exclude: str | Sequence[str] | None = None
+    top: int | None = None
+    page_size: int | None = None
+    since: str | None = None
+    until: str | None = None
+    run_name: str | None = None
+    offline: bool = False
+    sample_path: str = "examples/google_workspace_sample.json"
+    json_output: bool = False
+    python_executable: str | None = None
+
+
+def build_google_run_command(spec: GoogleRunCommandSpec) -> list[str]:
+    if spec.google_command not in SUPPORTED_GOOGLE_COMMANDS:
+        raise ValueError(f"Unsupported Google command '{spec.google_command}'. Supported commands: {', '.join(SUPPORTED_GOOGLE_COMMANDS)}")
+    if spec.auth not in SUPPORTED_GOOGLE_AUTH:
+        raise ValueError(f"Unsupported Google auth '{spec.auth}'. Supported auth modes: {', '.join(SUPPORTED_GOOGLE_AUTH)}")
+    command = [
+        _python_executable(spec.python_executable),
+        "-m",
+        "auditex",
+        "google",
+        spec.google_command,
+        "--auth",
+        spec.auth,
+    ]
+    _add_option(command, "--domain", spec.domain)
+    _add_option(command, "--customer-id", spec.customer_id)
+    _add_option(command, "--subject", spec.subject)
+    _add_option(command, "--service-account-key", spec.service_account_key)
+    _add_option(command, "--oauth-client", spec.oauth_client)
+    _add_option(command, "--token-cache", spec.token_cache)
+    if spec.google_command == "doctor":
+        _add_bool(command, "--json", spec.json_output)
+        return command
+    _add_option(command, "--tenant-name", spec.tenant_name)
+    _add_option(command, "--out", spec.out_dir)
+    _add_option(command, "--run-name", spec.run_name)
+    _add_option(command, "--collector-preset", spec.collector_preset)
+    _add_option(command, "--collectors", _csv(spec.collectors))
+    _add_option(command, "--exclude", _csv(spec.exclude))
+    _add_option(command, "--top", spec.top)
+    _add_option(command, "--page-size", spec.page_size)
+    _add_option(command, "--since", spec.since)
+    _add_option(command, "--until", spec.until)
+    if spec.google_command == "run":
+        _add_bool(command, "--offline", spec.offline)
+        if spec.offline:
+            _add_option(command, "--sample", spec.sample_path)
+    return command
+
+
+@dataclass(frozen=True)
 class ProbeCommandSpec:
     tenant_name: str
     out_dir: str
@@ -100,6 +170,8 @@ class ProbeCommandSpec:
 def build_probe_command(spec: ProbeCommandSpec) -> list[str]:
     if spec.mode not in SUPPORTED_PROBE_MODES:
         raise ValueError(f"Unsupported probe mode '{spec.mode}'. Supported modes: {', '.join(SUPPORTED_PROBE_MODES)}")
+    if spec.mode == "response" and not response_enabled():
+        raise ValueError(response_disabled_message())
     command = [_python_executable(spec.python_executable), "-m", "auditex", "probe", "live", "--tenant-name", spec.tenant_name, "--out", spec.out_dir]
     _add_option(command, "--tenant-id", spec.tenant_id)
     command.extend(["--auditor-profile", spec.auditor_profile, "--mode", spec.mode, "--surface", spec.surface])

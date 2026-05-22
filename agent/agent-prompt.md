@@ -13,11 +13,17 @@ Preferred guided operator flows:
 `auditex guided-run --flow ga-setup-app`
 `auditex guided-run --flow app-audit`
 
+Before asking for tenant access:
+`auditex setup-guide m365 --collector-preset full --format json`
+`auditex setup-guide google --collector-preset everything --format json`
+
 Codex-led flow:
-1. Authenticate the current Azure session.
-2. Capture the signed-in identity and directory roles.
-3. Run live collection.
-4. Return the audit bundle and blocked items.
+1. Generate setup-guide JSON for the provider.
+2. Authenticate the current session.
+3. Run probe.
+4. Capture the signed-in identity and directory roles.
+5. Run live collection only after probe.
+6. Return the audit bundle and blocked items.
 
 Then run live collection with provided credentials:
 `auditex run --tenant-name <tenant-name> --tenant-id <tenant-id> --client-id <app-id> --client-secret <secret> --top 400`.

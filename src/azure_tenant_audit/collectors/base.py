@@ -63,11 +63,27 @@ def _normalize_top(
     return query
 
 
+def normalize_collection_limit(value: Any, *, default: int | None) -> int | None:
+    if value is None:
+        return default
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return default
+    if limit <= 0:
+        return None
+    return limit
+
+
+def apply_collection_limit(rows: list[dict[str, Any]], limit: int | None) -> list[dict[str, Any]]:
+    return list(rows) if limit is None else rows[:limit]
+
+
 def run_graph_endpoints(
     collector: str,
     client: GraphClient,
     endpoint_specs: dict[str, dict[str, Any]],
-    top: int,
+    top: int | None,
     *,
     page_size: int | None = None,
     chunk_writer: Optional[Callable[[str, str, int, list[dict[str, Any]], Optional[dict[str, Any]]], str | None]] = None,
@@ -84,7 +100,8 @@ def run_graph_endpoints(
         endpoint = spec["endpoint"]
         page = spec.get("page", True)
         apply_top = spec.get("apply_top", True)
-        effective_top = page_size if page_size is not None else top
+        collection_limit = normalize_collection_limit(top, default=None)
+        effective_top = page_size if page_size is not None else collection_limit
         if not page or not apply_top:
             # Non-collection calls often do not accept $top.
             effective_top = None
@@ -106,7 +123,7 @@ def run_graph_endpoints(
             if page:
                 if chunk_writer is not None and hasattr(client, "iter_pages"):
                     accumulator = EndpointAccumulator(sample_limit=20)
-                    window = PageWindow.from_limit(top)
+                    window = PageWindow.from_limit(collection_limit)
                     for page_number, page_payload in enumerate(client.iter_pages(endpoint, params=query), start=1):
                         values = page_payload.get("value", [])
                         if not isinstance(values, list):
@@ -131,7 +148,7 @@ def run_graph_endpoints(
                     payload[key] = accumulator.payload()
                 else:
                     if hasattr(client, "iter_items"):
-                        rows = list(client.iter_items(endpoint, params=query, result_limit=top))
+                        rows = list(client.iter_items(endpoint, params=query, result_limit=collection_limit))
                     else:
                         rows = client.get_all(endpoint, params=query)
                     if isinstance(rows, list):

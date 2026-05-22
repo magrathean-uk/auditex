@@ -15,6 +15,52 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_findings(run_dir: Path) -> list[dict[str, Any]]:
+    pack = _load_json(run_dir / "reports" / "report-pack.json")
+    rows = pack.get("findings") if isinstance(pack, dict) else []
+    if not isinstance(rows, list):
+        rows = []
+    return [dict(item) for item in rows if isinstance(item, dict)]
+
+
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _finding_key(finding: dict[str, Any]) -> str:
+    if finding.get("id"):
+        return str(finding["id"])
+    affected = finding.get("affected_objects")
+    affected_key = ",".join(str(item) for item in affected) if isinstance(affected, list) else ""
+    return f"{finding.get('rule_id') or finding.get('title') or 'finding'}:{affected_key}"
+
+
+def _posture_drift_summary(left: Path, right: Path) -> dict[str, Any]:
+    before = {_finding_key(item): item for item in _load_findings(left)}
+    after = {_finding_key(item): item for item in _load_findings(right)}
+    new_keys = sorted(set(after) - set(before))
+    resolved_keys = sorted(set(before) - set(after))
+    worsened: list[str] = []
+    improved: list[str] = []
+    for key in sorted(set(before) & set(after)):
+        before_rank = _SEVERITY_RANK.get(str(before[key].get("severity") or ""), -1)
+        after_rank = _SEVERITY_RANK.get(str(after[key].get("severity") or ""), -1)
+        if after_rank > before_rank:
+            worsened.append(key)
+        elif after_rank < before_rank:
+            improved.append(key)
+    return {
+        "new_findings": new_keys,
+        "resolved_findings": resolved_keys,
+        "worsened_findings": worsened,
+        "improved_findings": improved,
+        "new_count": len(new_keys),
+        "resolved_count": len(resolved_keys),
+        "worsened_count": len(worsened),
+        "improved_count": len(improved),
+        "notification_recommended": bool(new_keys or worsened),
+    }
+
+
 def _load_records(path: Path) -> tuple[str, list[dict[str, Any]]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     kind = str(payload.get("kind") or path.stem)
@@ -48,8 +94,10 @@ def _run_metadata(run_dir: Path) -> dict[str, Any]:
     manifest = _load_json(run_dir / "run-manifest.json")
     snapshot = _load_json(run_dir / "normalized" / "snapshot.json")
     snapshot_meta = snapshot if isinstance(snapshot, dict) else {}
+    platform = manifest.get("platform") or snapshot_meta.get("platform") or "m365"
     return {
         "path": str(run_dir),
+        "platform": platform,
         "tenant_name": manifest.get("tenant_name") or snapshot_meta.get("tenant_name"),
         "tenant_id": manifest.get("tenant_id") or snapshot_meta.get("tenant_id"),
         "run_id": manifest.get("run_id") or snapshot_meta.get("run_id"),
@@ -66,6 +114,35 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path) -> dict[str, Any]
     right_files, right_records = _records_for_run(right)
     left_info = _run_metadata(left)
     right_info = _run_metadata(right)
+    same_tenant = (
+        (
+            bool(left_info.get("tenant_id"))
+            and left_info.get("tenant_id") == right_info.get("tenant_id")
+        )
+        or (
+            bool(left_info.get("tenant_name"))
+            and left_info.get("tenant_name") == right_info.get("tenant_name")
+        )
+    )
+    same_platform = str(left_info.get("platform") or "m365") == str(right_info.get("platform") or "m365")
+
+    if not same_platform:
+        return {
+            "run_a": str(left),
+            "run_b": str(right),
+            "run_a_info": left_info,
+            "run_b_info": right_info,
+            "status": "blocked",
+            "reason": "same_platform_required",
+            "compare_context": {
+                "same_tenant": same_tenant,
+                "same_platform": False,
+                "gate": "same_platform_required",
+            },
+            "compared_files": [],
+            "summary": {"added": 0, "removed": 0, "changed": 0, "object_kinds": 0},
+            "changes": {},
+        }
 
     compared_files = sorted(set(left_files.values()) | set(right_files.values()))
     changes: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -99,14 +176,8 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path) -> dict[str, Any]
         "run_a_info": left_info,
         "run_b_info": right_info,
         "compare_context": {
-            "same_tenant": (
-                bool(left_info.get("tenant_id"))
-                and left_info.get("tenant_id") == right_info.get("tenant_id")
-            )
-            or (
-                bool(left_info.get("tenant_name"))
-                and left_info.get("tenant_name") == right_info.get("tenant_name")
-            ),
+            "same_tenant": same_tenant,
+            "same_platform": same_platform,
         },
         "compared_files": compared_files,
         "summary": {
@@ -115,5 +186,6 @@ def diff_run_directories(run_a: str | Path, run_b: str | Path) -> dict[str, Any]
             "changed": total_changed,
             "object_kinds": len(changes),
         },
+        "drift_summary": _posture_drift_summary(left, right),
         "changes": changes,
     }

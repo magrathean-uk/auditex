@@ -29,6 +29,12 @@ class RunBundleBuilder:
     _session_context: dict[str, Any] | None = None
     _capability_matrix: object | None = None
     _toolchain_readiness: dict[str, Any] | None = None
+    _live_readiness: dict[str, Any] | None = None
+    _live_readiness_path: str = "live-readiness.json"
+    _api_inventory: dict[str, Any] | None = None
+    _api_inventory_path: str = "api-inventory.json"
+    _data_handling: dict[str, Any] | None = None
+    _data_handling_path: str = "data-handling.json"
     _evidence_db_path: str | None = None
 
     @property
@@ -93,6 +99,24 @@ class RunBundleBuilder:
         self._toolchain_readiness = payload
         return self
 
+    def live_readiness(self, payload: dict[str, Any], *, path: str = "live-readiness.json") -> RunBundleBuilder:
+        self._live_readiness_path = path
+        self._live_readiness = payload
+        self._manifest.setdefault("live_readiness_path", path)
+        return self
+
+    def api_inventory(self, payload: dict[str, Any], *, path: str = "api-inventory.json") -> RunBundleBuilder:
+        self._api_inventory_path = path
+        self._api_inventory = payload
+        self._manifest.setdefault("api_inventory_path", path)
+        return self
+
+    def data_handling(self, payload: dict[str, Any], *, path: str = "data-handling.json") -> RunBundleBuilder:
+        self._data_handling_path = path
+        self._data_handling = payload
+        self._manifest.setdefault("data_handling_path", path)
+        return self
+
     def evidence_db(self, *, path: str = "index/evidence.sqlite") -> RunBundleBuilder:
         self._evidence_db_path = path
         self._manifest.setdefault("evidence_db_path", path)
@@ -130,6 +154,12 @@ class RunBundleBuilder:
             write_json(self.run_dir / "capability-matrix.json", self._capability_matrix)
         if self._toolchain_readiness is not None:
             write_json(self.run_dir / "toolchain-readiness.json", self._toolchain_readiness)
+        if self._live_readiness is not None:
+            write_json(self.run_dir / self._live_readiness_path, self._live_readiness)
+        if self._api_inventory is not None:
+            write_json(self.run_dir / self._api_inventory_path, self._api_inventory)
+        if self._data_handling is not None:
+            write_json(self.run_dir / self._data_handling_path, self._data_handling)
         if self._evidence_db_path is not None:
             evidence_path = self.run_dir / self._evidence_db_path
             evidence_path.parent.mkdir(parents=True, exist_ok=True)

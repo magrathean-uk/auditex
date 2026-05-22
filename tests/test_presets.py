@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from azure_tenant_audit import cli
+from auditex.rules import list_rule_inventory
 from auditex import cli as auditex_cli
 
 
@@ -100,3 +101,54 @@ def test_rule_inventory_filters_by_tag(monkeypatch, capsys) -> None:
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["rules"][0]["name"] == "alpha.rule"
+
+
+def test_rule_inventory_lists_generated_m365_and_google_rules() -> None:
+    rows = list_rule_inventory()
+    by_name = {row["name"]: row for row in rows}
+
+    m365 = by_name["identity.global_admin_mfa_not_registered"]
+    google = by_name["google.admin_2sv_not_enforced"]
+
+    assert m365["platform"] == "m365"
+    assert m365["product_family"] == "identity"
+    assert m365["framework_mappings"]["cis_m365_v3"]
+    assert google["platform"] == "google_workspace"
+    assert google["product_family"] == "identity"
+    assert google["framework_mappings"]["google_workspace_baseline"] == ["identity.2sv"]
+
+
+def test_rule_inventory_includes_operator_metadata_for_m365_and_google() -> None:
+    rows = list_rule_inventory()
+    by_name = {row["name"]: row for row in rows}
+
+    m365 = by_name["identity.global_admin_mfa_not_registered"]
+    google = by_name["google.gmail_external_forwarding"]
+
+    assert m365["risk_rating"] == "critical"
+    assert "phishing-resistant MFA" in m365["remediation"]
+    assert m365["expected_value"]
+    assert google["risk_rating"] == "high"
+    assert google["description"] == "A mailbox forwards incoming mail to an external address."
+    assert "Disable unapproved forwarding" in google["remediation"]
+    assert google["expected_value"]
+
+
+def test_google_rule_inventory_has_specific_metadata_for_every_rule() -> None:
+    rows = list_rule_inventory(platform="google_workspace")
+
+    assert rows
+    for row in rows:
+        assert row["description"] != "Google Workspace evidence is outside the approved audit baseline."
+        assert row["risk_rating"] in {"low", "medium", "high", "critical"}
+        assert row["remediation"]
+        assert row["expected_value"]
+
+
+def test_rule_inventory_filters_by_platform_and_product_family() -> None:
+    rows = list_rule_inventory(platform="google_workspace", product_family="gmail")
+
+    assert rows
+    assert {row["platform"] for row in rows} == {"google_workspace"}
+    assert {row["product_family"] for row in rows} == {"gmail"}
+    assert "google.gmail_external_forwarding" in {row["name"] for row in rows}

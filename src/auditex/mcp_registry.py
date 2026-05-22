@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from .features import response_enabled
+
 
 Handler = Callable[..., dict[str, Any]]
 
@@ -28,7 +30,7 @@ class McpToolEntry:
 TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
     McpToolEntry(
         name="auditex_list_collectors",
-        description="List collector IDs, required permissions, and query plans from the active definitions file.",
+        description="List Microsoft 365 or Google Workspace collector IDs, required permissions, and query plans.",
         read_only_hint=True,
     ),
     McpToolEntry(
@@ -77,6 +79,11 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
         read_only_hint=True,
     ),
     McpToolEntry(
+        name="auditex_setup_guide",
+        description="Build provider setup scopes, roles, admin steps, and verification commands before tenant access.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
         name="auditex_contract_schema_manifest",
         description="List versioned output contract schemas shipped with this Auditex build.",
         read_only_hint=True,
@@ -89,6 +96,21 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
     McpToolEntry(
         name="auditex_run_delegated_audit",
         description="Run the Azure CLI token or supplied-token audit path against a tenant and return the run manifest path.",
+        read_only_hint=False,
+    ),
+    McpToolEntry(
+        name="auditex_google_doctor",
+        description="Check Google Workspace audit dependencies and target auth configuration.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
+        name="auditex_google_probe",
+        description="Run a low-volume Google Workspace capability probe and return command output.",
+        read_only_hint=False,
+    ),
+    McpToolEntry(
+        name="auditex_run_google_workspace_audit",
+        description="Run the Google Workspace audit path with domain delegation or OAuth.",
         read_only_hint=False,
     ),
     McpToolEntry(
@@ -127,6 +149,36 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
         read_only_hint=True,
     ),
     McpToolEntry(
+        name="auditex_report_analyze",
+        description="Analyze a completed run into auditor score, attack paths, dry-run control simulator, and QA without tenant access.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
+        name="auditex_api_inventory",
+        description="Read the enterprise API call inventory from a completed run bundle.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
+        name="auditex_permissions_ledger",
+        description="Read required, observed, and missing permissions from a completed run bundle.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
+        name="auditex_proof_table",
+        description="Read finding-to-evidence proof rows from a completed run bundle.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
+        name="auditex_enterprise_handoff",
+        description="Read the enterprise customer handoff index for a completed run bundle.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
+        name="auditex_verify_customer_pack",
+        description="Verify a customer handoff pack manifest, required files, and SHA-256 checksums.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
         name="auditex_export_list",
         description="List available report exporters.",
         read_only_hint=True,
@@ -149,12 +201,20 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
 )
 
 
-def iter_tool_specs() -> tuple[dict[str, Any], ...]:
-    return tuple(entry.spec() for entry in TOOL_REGISTRY)
+def iter_tool_specs(*, include_response: bool | None = None) -> tuple[dict[str, Any], ...]:
+    enabled = response_enabled() if include_response is None else include_response
+    return tuple(
+        entry.spec()
+        for entry in TOOL_REGISTRY
+        if enabled or entry.name not in {"auditex_list_response_actions", "auditex_run_response_action"}
+    )
 
 
 def register_fastmcp_tools(server: Any, handlers: Mapping[str, Handler]) -> None:
+    enabled_names = {item["name"] for item in iter_tool_specs()}
     for entry in TOOL_REGISTRY:
+        if entry.name not in enabled_names:
+            continue
         if entry.name not in handlers:
             continue
         handler = handlers[entry.name]

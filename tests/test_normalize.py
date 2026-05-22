@@ -129,6 +129,35 @@ def test_build_ai_safe_summary_uses_normalized_snapshot_counts() -> None:
     assert ai_safe["translation_catalog_count"] == 1
 
 
+def test_build_normalized_snapshot_extracts_auth_method_registrations() -> None:
+    normalized = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="run-auth",
+        collector_payloads={
+            "auth_methods": {
+                "userRegistrationDetails": {
+                    "value": [
+                        {
+                            "id": "user-1",
+                            "userPrincipalName": "admin@example.com",
+                            "isMfaRegistered": False,
+                            "isMfaCapable": True,
+                            "isPasswordlessCapable": False,
+                            "isSsprEnabled": True,
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    record = normalized["auth_method_registration_objects"]["records"][0]
+
+    assert record["user_principal_name"] == "admin@example.com"
+    assert record["is_mfa_registered"] is False
+    assert record["is_mfa_capable"] is True
+
+
 def test_build_normalized_snapshot_extracts_security_incidents_scores_and_exchange_mailboxes() -> None:
     collector_payloads = {
         "defender": {

@@ -75,15 +75,19 @@ def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, mo
     run_dir = tmp_path / "contoso-probe-live"
     capability_matrix = json.loads((run_dir / "capability-matrix.json").read_text(encoding="utf-8"))
     toolchain = json.loads((run_dir / "toolchain-readiness.json").read_text(encoding="utf-8"))
+    live_readiness = json.loads((run_dir / "live-readiness.json").read_text(encoding="utf-8"))
     manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
 
     assert capability_matrix[0]["surface"] == "identity"
     assert capability_matrix[0]["toolchain"] == "graph"
+    assert live_readiness["trust_level"] == "live_verified"
+    assert live_readiness["trusted_collectors"] == ["identity"]
     assert toolchain["az_cli_graph"]["status"] == "supported"
     assert manifest["probe_mode"] == "delegated"
     assert manifest["probe_surface"] == "identity"
     assert manifest["capability_matrix_path"] == "capability-matrix.json"
     assert manifest["toolchain_readiness_path"] == "toolchain-readiness.json"
+    assert manifest["live_readiness_path"] == "live-readiness.json"
     assert (run_dir / "index" / "evidence.sqlite").exists()
 
 

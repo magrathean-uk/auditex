@@ -67,7 +67,16 @@ def test_auth_use_command_switches_connection(monkeypatch, capsys) -> None:
     assert payload["connectionName"] == "tenant-user"
 
 
-def test_response_list_actions_command_prints_json(capsys) -> None:
+def test_response_list_actions_command_disabled_by_default(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("AUDITEX_ENABLE_RESPONSE", raising=False)
+    rc = auditex_cli.main(["response", "list-actions"])
+
+    assert rc == 2
+    assert "response plane is disabled" in capsys.readouterr().err
+
+
+def test_response_list_actions_command_prints_json_when_enabled(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
     rc = auditex_cli.main(["response", "list-actions"])
 
     assert rc == 0
@@ -195,6 +204,8 @@ def test_auth_capability_command_prints_collector_statuses(monkeypatch, tmp_path
     assert rows["identity"]["status"] == "supported_exact_scope"
     assert rows["security"]["status"] == "supported_exact_scope"
     assert rows["defender"]["status"] == "blocked_by_scope"
+    assert rows["defender"]["blocker_kind"] == "auth_scope"
+    assert rows["defender"]["next_step"]
 
 
 def test_save_local_auth_values_updates_env_file(monkeypatch, tmp_path: Path) -> None:

@@ -46,6 +46,8 @@ def test_rules_inventory_cli_accepts_routing_filters(monkeypatch, capsys) -> Non
         [
             "rules",
             "inventory",
+            "--platform",
+            "google_workspace",
             "--product-family",
             "identity",
             "--license-tier",
@@ -56,6 +58,7 @@ def test_rules_inventory_cli_accepts_routing_filters(monkeypatch, capsys) -> Non
     )
 
     assert rc == 0
+    assert seen["platform"] == "google_workspace"
     assert seen["product_family"] == "identity"
     assert seen["license_tier"] == "p2"
     assert seen["audit_level"] == "deep"
@@ -108,6 +111,20 @@ def test_report_render_cli_dispatches(monkeypatch, capsys) -> None:
     assert payload["include_sections"] == ["summary", "findings"]
 
 
+def test_report_analyze_cli_dispatches(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "auditex.cli.analyze_report",
+        lambda run_dir: {"run_dir": run_dir, "auditor_score": {"grade": "usable"}},
+    )
+
+    rc = auditex_cli.main(["report", "analyze", "run-a"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["run_dir"] == "run-a"
+    assert payload["auditor_score"]["grade"] == "usable"
+
+
 def test_export_list_cli_dispatches(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         "auditex.cli.list_exporters",
@@ -158,14 +175,27 @@ def test_guided_parser_accepts_local_mode_flags() -> None:
             "--skip-login-check",
             "--skip-tool-check",
             "--report-format",
-            "csv",
+            "sarif",
         ]
     )
 
     assert args.local_mode is True
     assert args.skip_login_check is True
     assert args.skip_tool_check is True
-    assert args.report_format == "csv"
+    assert args.report_format == "sarif"
+
+
+def test_report_render_cli_accepts_security_export_formats(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "auditex.cli.render_report",
+        lambda **kwargs: {"format": kwargs["format_name"], "output_path": "rendered"},
+    )
+
+    rc = auditex_cli.main(["report", "render", "run-a", "--format", "oscal"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["format"] == "oscal"
 
 
 def test_guided_parser_accepts_app_mode_flags() -> None:

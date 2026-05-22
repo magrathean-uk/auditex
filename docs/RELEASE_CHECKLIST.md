@@ -27,6 +27,10 @@ python -m pytest
 auditex --help
 auditex doctor --json
 auditex guided-run --help
+auditex setup-guide m365 --collector-preset identity-only --format json
+auditex setup-guide google --collector-preset identity --format json
+auditex google --help
+auditex report --help
 ```
 
 ## Contract smoke
@@ -52,25 +56,55 @@ assert (run / 'ai_context.json').exists()
 PY
 ```
 
-## Probe, response, and MCP smoke
+## Google offline smoke
 
-Use a lab tenant or saved lab auth context only.
+```bash
+auditex google run \
+  --offline \
+  --sample examples/google_workspace_sample.json \
+  --domain example.com \
+  --tenant-name ci-google \
+  --run-name contract \
+  --out outputs/ci-google-contract
+```
+
+## Customer pack smoke
+
+```bash
+auditex report customer-pack outputs/ci-contract/ci-contract --output-dir outputs/ci-contract/customer-pack
+auditex report verify-pack outputs/ci-contract/customer-pack
+```
+
+## Probe and MCP smoke
 
 ```bash
 auditex probe live --tenant-name LAB --tenant-id <tenant-id> --mode delegated --use-azure-cli-token --run-name probe-smoke
 
-auditex response list-actions
-
-auditex response run \
-  --tenant-name LAB \
-  --tenant-id <tenant-id> \
-  --action message_trace \
-  --target user@example.com \
-  --intent "release smoke" \
-  --allow-lab-response \
-  --run-name response-smoke
-
 auditex-mcp --help || true
+```
+
+## Documentation checks
+
+```bash
+python - <<'PY'
+from pathlib import Path
+for path in [
+    Path('docs/README.md'),
+    Path('docs/PRODUCT_MANUAL.md'),
+    Path('docs/SETUP_GUIDE.md'),
+    Path('docs/ADMIN_PERMISSION_GUIDE.md'),
+    Path('docs/AI_OPERATOR_GUIDE.md'),
+    Path('docs/GITHUB_OPERATOR_GUIDE.md'),
+    Path('docs/CUSTOMER_HANDOFF_GUIDE.md'),
+    Path('docs/SECURITY_PRIVACY.md'),
+    Path('docs/TROUBLESHOOTING.md'),
+    Path('docs/SHIP_READINESS.md'),
+]:
+    assert path.exists(), path
+    text = path.read_text(encoding='utf-8')
+    for marker in ['TO' + 'DO', 'TB' + 'D', 'FIX' + 'ME']:
+        assert marker not in text, path
+PY
 ```
 
 ## Release bundle contents
@@ -84,6 +118,8 @@ The shipped bundle must keep these aligned:
 - agent prompts under `agent/`
 - skills under `skills/`
 - sample bundle under `examples/sample_audit_bundle/`
+- Google Workspace sample under `examples/`
+- product docs under `docs/`
 - provenance docs under `docs/provenance/`
 - `THIRD_PARTY_NOTICES.md`
 - this checklist

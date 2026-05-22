@@ -24,6 +24,8 @@ Health check:
 ```bash
 auditex doctor
 auditex doctor --json
+auditex setup-guide m365 --collector-preset full --format md
+auditex setup-guide google --collector-preset everything --format md
 ```
 
 ## Auth and profiles
@@ -31,6 +33,7 @@ auditex doctor --json
 - `make login TENANT=<tenant-id-or-domain>` opens Azure CLI login with `--allow-no-subscriptions`.
 - Exchange-backed collection needs `m365`.
 - Saved app credentials live only in `.secrets/m365-auth.env`.
+- Google Workspace credentials stay local: use a service-account key path for domain-wide delegation or an OAuth client/token cache path for delegated OAuth.
 
 Shipped profile notes:
 
@@ -68,6 +71,7 @@ Offline sample:
 
 ```bash
 auditex run --offline --tenant-name demo --out outputs/offline
+auditex google run --offline --sample examples/google_workspace_sample.json --domain example.com --tenant-name demo --out outputs/google
 ```
 
 Compare, render, export, notify:
@@ -78,6 +82,35 @@ auditex report render <run-dir> --format md
 auditex export list
 auditex export run <exporter-name> <run-dir>
 auditex notify send <run-dir> --sink teams
+```
+
+## Google Workspace
+
+Install optional Google libraries only when needed:
+
+```bash
+python -m pip install -e '.[google]'
+auditex setup-guide google --auth domain-delegation --collector-preset everything --format md
+auditex google doctor --json
+```
+
+Domain-wide delegation is the preferred full-domain path:
+
+```bash
+auditex google run \
+  --auth domain-delegation \
+  --service-account-key /path/to/service-account.json \
+  --subject admin@example.com \
+  --domain example.com \
+  --customer-id C123 \
+  --tenant-name EXAMPLE \
+  --out outputs/google
+```
+
+Run `auditex google probe ...` first after scope changes. It performs tiny endpoint reads and reports the capability matrix before a full collection. Use `--collector-preset everything` when Drive metadata, Google Groups settings, and Calendar sharing posture are in scope; add these extra DWD scopes when enabling that preset:
+
+```text
+https://www.googleapis.com/auth/drive.metadata.readonly,https://www.googleapis.com/auth/apps.groups.settings,https://www.googleapis.com/auth/admin.directory.resource.calendar.readonly,https://www.googleapis.com/auth/calendar.calendarlist.readonly,https://www.googleapis.com/auth/calendar.acls.readonly
 ```
 
 ## Tenant bootstrap
@@ -119,6 +152,24 @@ auditex run --offline --sample examples/sample_audit_bundle/sample_result.json -
 
 The resulting `outputs/ci-contract/ci-contract/validation.json` must be valid and the final manifest must report `contract_status: valid`.
 
+Product docs live under [docs/README.md](docs/README.md). Update the manual, setup guide, admin permission guide, AI operator guide, GitHub operator guide, customer handoff guide, security/privacy model, troubleshooting guide, and ship-readiness guide when commands, scopes, artifacts, or release gates change.
+
+For enterprise evidence review, render the API call ledger:
+
+```bash
+auditex report customer-pack outputs/ci-contract/ci-contract --output-dir outputs/ci-contract/customer-pack
+auditex report verify-pack outputs/ci-contract/customer-pack
+auditex report handoff outputs/ci-contract/ci-contract --format md
+auditex report api-calls outputs/ci-contract/ci-contract --format md
+auditex report permissions outputs/ci-contract/ci-contract --format md
+auditex report proof-table outputs/ci-contract/ci-contract --format md
+```
+
+Use `customer-pack` when handing material to a reviewer. It writes `README.md`, handoff, full Markdown report, API ledger, permission ledger, proof table, JSON copies, selected customer-safe source artifacts under `source-artifacts/`, `checksums.sha256`, and `pack-manifest.json` with hashes. Run `verify-pack` before handoff to catch missing or tampered files. Start with the handoff output, then use the API call ledger, permission ledger, and proof table for detail. Use them beside `data-handling.json`, `audit-plan.json`, `reports/report-pack.json` (`proof_table`), and `validation.json` to show what APIs were attempted, which scopes were needed or missing, which exact evidence rows prove each finding, and whether the run stayed read-only.
+Use `--output reports/<name>.md` or `--output reports/<name>.json` when creating a persisted customer handoff pack.
+
+When a run is partial, start with `live-readiness.json`. Its blocker summary separates missing scopes, admin role limits, unlicensed or absent services, local toolchain gaps, tenant policy blocks, runtime errors, and unverified collectors.
+
 ## Local safety
 
 - Keep `.venv/`, `.secrets/`, and tenant outputs local.
@@ -127,6 +178,6 @@ The resulting `outputs/ci-contract/ci-contract/validation.json` must be valid an
 
 ## Verification notes
 
-- Treat `auditex response run` as lab-only. Execution needs explicit intent, a lab tenant allowlist, and the matching allow flags for write actions and any adapter or command override.
+- Public Auditex is audit-only. Lab response tools are hidden unless `AUDITEX_ENABLE_RESPONSE=1` is set for local development.
 - Imported token contexts should keep the raw token on disk in the secrets sidecar, not inside the context JSON.
 - When checking exposure, verify the public route, direct-IP / Host-header path, and the blocked path separately. One green check is not enough.

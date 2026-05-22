@@ -747,6 +747,7 @@ def run_live_probe(cfg: ProbeConfig) -> int:
     capability_path = writer.write_json_artifact("capability-matrix.json", capability_matrix)
     toolchain_payload = {row["name"]: row for row in toolchain_rows}
     toolchain_path = writer.write_json_artifact("toolchain-readiness.json", toolchain_payload)
+    writer.write_raw("toolchain", toolchain_payload)
     if auth_context_payload is not None:
         auth_context_path = writer.write_json_artifact("auth-context.json", auth_context_payload)
     if blockers:

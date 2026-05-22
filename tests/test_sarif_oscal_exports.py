@@ -64,6 +64,22 @@ def test_sarif_severity_maps_to_levels() -> None:
     assert levels["rule.low"] == "note"
 
 
+def test_sarif_uses_provider_label_from_manifest() -> None:
+    from auditex.reporting import render_sarif
+
+    document = render_sarif(
+        findings=[],
+        summary={"tenant_name": "acme"},
+        manifest={"platform": "google_workspace", "run_id": "run-1"},
+    )
+
+    run = document["runs"][0]
+    description = run["automationDetails"]["description"]["text"]
+    assert "Google Workspace" in description
+    assert "Microsoft 365" not in description
+    assert run["properties"]["auditex.platform"] == "google_workspace"
+
+
 def test_sarif_rule_index_aligns_results_to_rules() -> None:
     from auditex.reporting import render_sarif
 
@@ -203,6 +219,30 @@ def test_sarif_help_fields_populated_for_every_rule_under_diverse_input() -> Non
         assert rule_id in rule["helpUri"], (
             f"rule={rule_id} helpUri does not deep-link to its template entry"
         )
+
+
+def test_sarif_google_rules_link_to_google_rule_catalog() -> None:
+    from auditex.reporting import render_sarif
+
+    document = render_sarif(
+        findings=[
+            {
+                "id": "google.admin_2sv_not_enforced:user-1",
+                "rule_id": "google.admin_2sv_not_enforced",
+                "severity": "high",
+                "title": "Admin account does not enforce 2-step verification",
+                "category": "identity",
+                "framework_mappings": {"google_workspace_baseline": ["identity.2sv"]},
+            }
+        ],
+        summary={},
+        manifest={"platform": "google_workspace", "run_id": "run-1"},
+    )
+
+    rule = document["runs"][0]["tool"]["driver"]["rules"][0]
+    assert "src/auditex/google_workspace/findings.py" in rule["helpUri"]
+    assert "configs/finding-templates.json" not in rule["helpUri"]
+    assert "google.admin_2sv_not_enforced" in rule["helpUri"]
 
 
 def test_sarif_fingerprint_is_stable_across_renders() -> None:
@@ -418,6 +458,42 @@ def test_oscal_assessment_results_passes_structural_validator() -> None:
     )
     errors = _validate_oscal_assessment_results(document)
     assert not errors, f"OSCAL structural validation failed: {errors}"
+
+
+def test_oscal_metadata_uses_provider_label_from_manifest() -> None:
+    from auditex.reporting import render_oscal
+
+    document = render_oscal(
+        findings=[],
+        summary={"tenant_name": "acme"},
+        manifest={"platform": "google_workspace", "run_id": "run-1", "schema_contract_version": "2026-04-21"},
+    )
+
+    metadata = document["assessment-results"]["metadata"]
+    assert "Google Workspace" in metadata["title"]
+    assert metadata["props"] == [{"name": "auditex.platform", "value": "google_workspace"}]
+
+
+def test_oscal_includes_google_workspace_baseline_targets() -> None:
+    from auditex.reporting import render_oscal
+
+    document = render_oscal(
+        findings=[
+            {
+                "id": "google.admin_2sv_not_enforced:user-1",
+                "rule_id": "google.admin_2sv_not_enforced",
+                "severity": "high",
+                "title": "Admin 2SV not enforced",
+                "framework_mappings": {"google_workspace_baseline": ["identity.2sv"]},
+            }
+        ],
+        summary={"tenant_name": "acme"},
+        manifest={"platform": "google_workspace", "run_id": "run-1"},
+    )
+
+    finding = document["assessment-results"]["results"][0]["findings"][0]
+    assert "identity.2sv" in finding["target-ids"]
+    assert "google_workspace_baseline:identity.2sv" in finding["target-ids"]
 
 
 def test_oscal_assessment_results_passes_validator_with_zero_findings() -> None:

@@ -149,6 +149,18 @@ def test_validation_flags_non_list_framework_value(tmp_path: Path) -> None:
     assert "invalid_framework_mapping_value" in _issue_codes(report), report["issues"]
 
 
+def test_validation_accepts_google_workspace_baseline_mapping(tmp_path: Path) -> None:
+    run_dir = _bundle(tmp_path)
+    _ensure_finding(
+        run_dir,
+        lambda f: f.update({"framework_mappings": {"google_workspace_baseline": ["identity.2sv"]}}),
+    )
+
+    report = build_validation_report(run_dir=run_dir)
+
+    assert "unknown_framework_mapping_key" not in _issue_codes(report), report["issues"]
+
+
 def test_validation_clean_bundle_has_no_framework_mapping_issues(tmp_path: Path) -> None:
     run_dir = _bundle(tmp_path)
     report = build_validation_report(run_dir=run_dir)

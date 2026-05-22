@@ -17,6 +17,21 @@ SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
     ShippedContentArea("configs", "configs", "auditex/configs", ("configs/*.json",), "configs under `configs/`"),
     ShippedContentArea("profiles", "profiles", "auditex/profiles", ("profiles/*.md",), "profiles under `profiles/`"),
     ShippedContentArea("schemas", "schemas", "auditex/schemas", ("schemas/*.json",), "schemas under `schemas/`"),
+    ShippedContentArea(
+        "docs_improvement",
+        "docs/improvement",
+        "auditex/docs/improvement",
+        ("docs/improvement/*.md",),
+        "product docs under `docs/`",
+    ),
+    ShippedContentArea(
+        "docs_provenance",
+        "docs/provenance",
+        "auditex/docs/provenance",
+        ("docs/provenance/*.md", "docs/provenance/*.csv"),
+        "provenance docs under `docs/provenance/`",
+    ),
+    ShippedContentArea("docs", "docs", "auditex/docs", ("docs/*.md",), "product docs under `docs/`"),
     ShippedContentArea("agent", "agent", "auditex/agent", ("agent/*.md", "agent/*.json"), "agent prompts under `agent/`"),
     ShippedContentArea(
         "skills_app_readonly_escalation",
@@ -52,6 +67,13 @@ SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
         "auditex/examples/sample_audit_bundle",
         ("examples/sample_audit_bundle/*.json",),
         "sample bundle under `examples/sample_audit_bundle/`",
+    ),
+    ShippedContentArea(
+        "google_workspace_sample",
+        "examples",
+        "auditex/examples",
+        ("examples/google_workspace_sample.json",),
+        "Google Workspace sample under `examples/`",
     ),
 )
 

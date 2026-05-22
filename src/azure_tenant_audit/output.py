@@ -9,6 +9,9 @@ from typing import Any, Optional
 
 import time
 
+from .assurance import build_assurance_summary, build_coverage_gap_summary, build_provider_scorecard, build_surface_coverage_map
+from .findings import apply_coverage_gaps_to_report_pack
+
 LOG = logging.getLogger("azure_tenant_audit.output")
 RUN_MANIFEST_SCHEMA_VERSION = "2026-04-21"
 SUMMARY_SCHEMA_VERSION = "2026-04-21"
@@ -461,6 +464,7 @@ class AuditWriter:
             "probe_mode",
             "probe_surface",
             "capability_matrix_path",
+            "live_readiness_path",
             "coverage_ledger_path",
             "preflight_path",
             "throttle_mode",
@@ -472,13 +476,23 @@ class AuditWriter:
             "auth_path",
             "auth_context_path",
             "data_handling_events",
+            "data_handling_path",
+            "audit_plan_path",
+            "api_inventory_path",
+            "autopilot_quality",
             "lab_guard_state",
+            "platform",
+            "workspace_domain",
+            "customer_id",
             "privacy",
             "ai_context_path",
             "validation_path",
             "contract_status",
             "contract_issue_count",
             "schema_contract_version",
+            "top_limit",
+            "sample_truncated",
+            "truncated_sections",
         ):
             value = metadata.get(key)
             if value is not None:
@@ -505,11 +519,45 @@ class AuditWriter:
             self._record_artifact(coverage_path)
             self._manifest["coverage_count"] = len(self.coverage)
 
+        assurance = build_assurance_summary(
+            collector_rows=[dict(row) for row in self.summary.get("collectors", []) if isinstance(row, dict)],
+            coverage_rows=[dict(row) for row in self.coverage if isinstance(row, dict)],
+            sample_truncated=bool(metadata.get("sample_truncated")),
+        )
+        surface_coverage = build_surface_coverage_map(
+            collector_rows=[dict(row) for row in self.summary.get("collectors", []) if isinstance(row, dict)],
+            platform=str(metadata.get("platform") or self._manifest.get("platform") or "m365"),
+        )
+        coverage_gaps = build_coverage_gap_summary(
+            surface_coverage=surface_coverage,
+            collector_rows=[dict(row) for row in self.summary.get("collectors", []) if isinstance(row, dict)],
+            coverage_rows=[dict(row) for row in self.coverage if isinstance(row, dict)],
+        )
+        provider_scorecard = build_provider_scorecard(
+            platform=str(metadata.get("platform") or self._manifest.get("platform") or "m365"),
+            surface_coverage=surface_coverage,
+            coverage_gaps=coverage_gaps,
+        )
+        self._manifest["assurance"] = assurance
+        self._manifest["surface_coverage"] = surface_coverage
+        self._manifest["coverage_gaps"] = coverage_gaps
+        self._manifest["provider_scorecard"] = provider_scorecard
+        if coverage_gaps:
+            report_pack_path = self.run_dir / str(self._manifest.get("report_pack_path") or "reports/report-pack.json")
+            report_pack = self._safe_load_json(report_pack_path)
+            if isinstance(report_pack, dict):
+                self.write_report_pack(apply_coverage_gaps_to_report_pack(report_pack, coverage_gaps))
         self.summary["schema_version"] = SUMMARY_SCHEMA_VERSION
         self.summary["tenant_name"] = self._manifest["tenant_name"]
         self.summary["run_id"] = self.run_id
         self.summary["overall_status"] = self._manifest.get("overall_status")
         self.summary["duration_seconds"] = self._manifest.get("duration_seconds", 0)
+        self.summary["assurance"] = assurance
+        self.summary["surface_coverage"] = surface_coverage
+        self.summary["coverage_gaps"] = coverage_gaps
+        self.summary["provider_scorecard"] = provider_scorecard
+        if self._manifest.get("autopilot_quality"):
+            self.summary["autopilot_quality"] = self._manifest["autopilot_quality"]
         summary_json_path = self.run_dir / "summary.json"
         summary_md_path = self.run_dir / "summary.md"
         self._write_json_atomic(summary_json_path, self.summary)
@@ -528,6 +576,12 @@ class AuditWriter:
             lines.append(
                 f"| {row.get('name')} | {row.get('status')} | {row.get('item_count', 0)} | {row.get('message', '')} |"
             )
+        if coverage_gaps:
+            lines.extend(["", "## Coverage Gaps", ""])
+            for gap in coverage_gaps:
+                error_classes = ", ".join(gap.get("error_classes") or [])
+                detail = f" ({error_classes})" if error_classes else ""
+                lines.append(f"- {gap.get('severity')}: {gap.get('message')}{detail}")
         self._write_text_atomic(summary_md_path, "\n".join(lines))
         self._record_artifact(summary_md_path)
 
