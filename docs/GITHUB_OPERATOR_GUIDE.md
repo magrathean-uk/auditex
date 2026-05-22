@@ -46,9 +46,9 @@ auditex report verify-pack customer-pack
 
 Only publish customer-safe packs after verification passes.
 
-## Pages
+## Website
 
-GitHub Pages is built by the `pages` workflow from the main branch. It uses the repository docs as source and uploads the generated static site artifact.
+GitHub Pages is built by the `pages` workflow from the main branch. It publishes the product website at `auditex.hu` and keeps the operator docs available as linked pages.
 
 Local preview build:
 
@@ -56,7 +56,7 @@ Local preview build:
 python scripts/build-pages-site.py site
 ```
 
-The repository Pages setting must use workflow builds. If the site is missing, create it through the GitHub Pages API with `build_type=workflow`.
+The repository Pages setting must use workflow builds and the custom domain `auditex.hu`. If the site is missing, create it through the GitHub Pages API with `build_type=workflow`, then set `cname=auditex.hu`.
 
 ## Releases
 

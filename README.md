@@ -103,15 +103,15 @@ auditex setup-guide google --collector-preset everything --format json
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) - third-party notice file.
 - [CHANGELOG.md](CHANGELOG.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md) - v1 release notes.
 
-## GitHub Pages and releases
+## Website and releases
 
-Build the public docs site locally:
+Build the public website locally:
 
 ```bash
 python scripts/build-pages-site.py site
 ```
 
-The `pages` workflow publishes the generated site from `main`. The repository Pages setting should use workflow builds.
+The `pages` workflow publishes the generated site from `main`. The repository Pages setting should use workflow builds and the custom domain `auditex.hu`.
 
 Create the v1 release from a verified checkout:
 
