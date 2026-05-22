@@ -48,9 +48,9 @@ Only publish customer-safe packs after verification passes.
 
 ## Website
 
-GitHub Pages is built by the `pages` workflow from the main branch. It publishes the product website at `auditex.hu` and keeps the operator docs available as linked pages.
+The public website lives at `auditex.hu` outside this repository. GitHub Pages is built by the `pages` workflow only to keep the repository Pages handoff pointed at that domain.
 
-Local preview build:
+Local handoff build:
 
 ```bash
 python scripts/build-pages-site.py site

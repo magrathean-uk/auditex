@@ -105,13 +105,13 @@ auditex setup-guide google --collector-preset everything --format json
 
 ## Website and releases
 
-Build the public website locally:
+Build the GitHub Pages handoff artifact locally:
 
 ```bash
 python scripts/build-pages-site.py site
 ```
 
-The `pages` workflow publishes the generated site from `main`. The repository Pages setting should use workflow builds and the custom domain `auditex.hu`.
+The public website lives at `auditex.hu` outside this repository. The `pages` workflow only keeps GitHub Pages configured to hand traffic to that domain.
 
 Create the v1 release from a verified checkout:
 
