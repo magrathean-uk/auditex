@@ -1,17 +1,15 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditex"
 version = "1.0.0"
-description = "Portable AI-first Microsoft 365 audit toolkit for Codex-operated evidence collection"
+description = "Portable AI-first Microsoft 365 and Google Workspace audit toolkit for evidence collection"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Proprietary"}
-classifiers = [
-    "License :: Other/Proprietary License",
-]
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
 dependencies = [
     "requests>=2.31,<3",
     "msal>=1.28,<2",

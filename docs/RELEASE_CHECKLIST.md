@@ -22,7 +22,7 @@ auditex setup --pwsh
 ## Required checks
 
 ```bash
-python -m compileall -q src tests
+python -m compileall -q src tests scripts
 python -m pytest
 auditex --help
 auditex doctor --json
@@ -86,9 +86,13 @@ auditex-mcp --help || true
 ## Documentation checks
 
 ```bash
+python scripts/build-pages-site.py /tmp/auditex-pages
+
 python - <<'PY'
 from pathlib import Path
 for path in [
+    Path('README.md'),
+    Path('RUNBOOK.md'),
     Path('docs/README.md'),
     Path('docs/PRODUCT_MANUAL.md'),
     Path('docs/SETUP_GUIDE.md'),
@@ -99,12 +103,32 @@ for path in [
     Path('docs/SECURITY_PRIVACY.md'),
     Path('docs/TROUBLESHOOTING.md'),
     Path('docs/SHIP_READINESS.md'),
+    Path('CHANGELOG.md'),
+    Path('RELEASE_NOTES.md'),
 ]:
     assert path.exists(), path
     text = path.read_text(encoding='utf-8')
     for marker in ['TO' + 'DO', 'TB' + 'D', 'FIX' + 'ME']:
         assert marker not in text, path
 PY
+```
+
+## Package build
+
+```bash
+python -m build
+python -m pip install dist/*.whl --force-reinstall
+auditex --help
+auditex setup-guide google --collector-preset identity --format json
+auditex setup-guide m365 --collector-preset identity-only --format json
+```
+
+## GitHub ship checks
+
+```bash
+gh api repos/magrathean-uk/auditex/pages --jq '.build_type'
+gh workflow list
+gh release view v1
 ```
 
 ## Release bundle contents

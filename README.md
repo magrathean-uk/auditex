@@ -98,8 +98,32 @@ auditex setup-guide google --collector-preset everything --format json
 
 - [AGENTS.md](AGENTS.md) - repo rules and edit guardrails.
 - [RUNBOOK.md](RUNBOOK.md) - setup, live audit flows, and tenant bootstrap commands.
+- [docs/README.md](docs/README.md) - full product documentation index.
 - [docs/provenance/provenance.md](docs/provenance/provenance.md) - provenance sheet.
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) - third-party notice file.
+- [CHANGELOG.md](CHANGELOG.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md) - v1 release notes.
+
+## GitHub Pages and releases
+
+Build the public docs site locally:
+
+```bash
+python scripts/build-pages-site.py site
+```
+
+The `pages` workflow publishes the generated site from `main`. The repository Pages setting should use workflow builds.
+
+Create the v1 release from a verified checkout:
+
+```bash
+make test
+make lint
+make contract-smoke
+python -m build
+git tag -a v1 -m "Auditex v1 enterprise release"
+git push origin main v1
+gh release create v1 dist/* --title "Auditex v1 Enterprise Release" --notes-file RELEASE_NOTES.md --verify-tag
+```
 
 ## Data handling
 

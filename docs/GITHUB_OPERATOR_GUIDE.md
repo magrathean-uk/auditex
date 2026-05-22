@@ -32,6 +32,7 @@ Recommended local checks before pushing:
 make test
 make lint
 make contract-smoke
+python scripts/build-pages-site.py /tmp/auditex-pages
 auditex setup-guide google --collector-preset identity --format json
 auditex setup-guide m365 --collector-preset identity-only --format json
 ```
@@ -44,3 +45,27 @@ auditex report verify-pack customer-pack
 ```
 
 Only publish customer-safe packs after verification passes.
+
+## Pages
+
+GitHub Pages is built by the `pages` workflow from the main branch. It uses the repository docs as source and uploads the generated static site artifact.
+
+Local preview build:
+
+```bash
+python scripts/build-pages-site.py site
+```
+
+The repository Pages setting must use workflow builds. If the site is missing, create it through the GitHub Pages API with `build_type=workflow`.
+
+## Releases
+
+Version tags that start with `v` run the release workflow. The workflow runs release checks, builds package artifacts, smoke-tests the installed wheel, then publishes a GitHub release using `RELEASE_NOTES.md`.
+
+For the v1 line:
+
+```bash
+git tag -a v1 -m "Auditex v1 enterprise release"
+git push origin main v1
+gh release create v1 dist/* --title "Auditex v1 Enterprise Release" --notes-file RELEASE_NOTES.md --verify-tag
+```
