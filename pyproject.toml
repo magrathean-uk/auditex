@@ -37,6 +37,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.data-files]
+"auditex/assets" = ["assets/*"]
 "auditex/configs" = ["configs/*.json"]
 "auditex/profiles" = ["profiles/*.md"]
 "auditex/schemas" = ["schemas/*.json"]
