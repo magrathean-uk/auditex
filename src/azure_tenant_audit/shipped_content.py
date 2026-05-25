@@ -15,6 +15,7 @@ class ShippedContentArea:
 
 SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
     ShippedContentArea("configs", "configs", "auditex/configs", ("configs/*.json",), "configs under `configs/`"),
+    ShippedContentArea("assets", "assets", "auditex/assets", ("assets/*",), "product assets under `assets/`"),
     ShippedContentArea("profiles", "profiles", "auditex/profiles", ("profiles/*.md",), "profiles under `profiles/`"),
     ShippedContentArea("schemas", "schemas", "auditex/schemas", ("schemas/*.json",), "schemas under `schemas/`"),
     ShippedContentArea(

@@ -1,11 +1,11 @@
-# License — auditex
+# License - auditex
 
 ## This Project
 
-Auditex is **proprietary software**.
+Auditex is open-source software released under the Apache License, Version 2.0.
 
-> See `LICENSE` for the full proprietary licence text.
-> Copyright © 2026 Magrathean UK Ltd. All rights reserved.
+> See `LICENSE` for the full Apache-2.0 licence text.
+> Copyright 2026 Magrathean UK Ltd.
 
 A machine-readable record of third-party components is maintained in
 `THIRD_PARTY_NOTICES.md`. The summary below is derived from that file and from the
@@ -63,7 +63,7 @@ documentation text was copied. Recorded in `THIRD_PARTY_NOTICES.md` for provenan
 
 | License | Action required |
 |---------|----------------|
-| Proprietary (this project) | No redistribution without written agreement — see `LICENSE` |
+| Apache-2.0 (this project) | Retain licence and notice text when redistributing covered source or binaries; see `LICENSE` |
 | MIT (vendored microsoft-skills) | Licence text retained at `tenant-bootstrap/vendor/microsoft-skills/LICENSE` |
 | MIT (msal, mcp) | Retain copyright notice and licence text when redistributing bundled wheels |
 | Apache-2.0 (requests) | Retain NOTICE file (if any) and licence text when redistributing bundled wheels |

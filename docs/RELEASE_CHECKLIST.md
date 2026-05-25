@@ -137,6 +137,7 @@ The shipped bundle must keep these aligned:
 
 - source under `src/`
 - configs under `configs/`
+- product assets under `assets/`
 - profiles under `profiles/`
 - schemas under `schemas/`
 - agent prompts under `agent/`
