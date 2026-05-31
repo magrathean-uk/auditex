@@ -6,6 +6,7 @@ Auditex is an audit-only evidence collection and reporting toolkit for Microsoft
 
 - Runs Microsoft 365 delegated, app-readonly, and offline sample audits.
 - Runs Google Workspace domain-wide delegation, OAuth, and offline sample audits.
+- Flags Google collaboration posture from metadata-only evidence, including public group visibility, public membership visibility, shared-drive external-member allowance, calendar ACL exposure, and Drive sharing exposure.
 - Produces a local evidence bundle with manifest, summary, raw evidence, normalized records, findings, report pack, API inventory, proof table, evidence index, AI-safe context, and validation.
 - Explains coverage gaps as structured blockers instead of pretending the audit is complete.
 - Produces customer handoff packs with checksums and a verifier command.
@@ -201,7 +202,8 @@ A completed run directory contains the contract artifacts. Start with:
 7. `api-inventory.json`
 8. `reports/report-pack.json`
 
-`validation.json` must be valid for release or customer handoff. Partial audits can still be useful, but the blocker reasons must be explicit.
+`validation.json` must be valid for customer handoff. Partial audits can still be useful, but the blocker reasons must be explicit.
+Accepted-risk findings with expired waiver dates are stale for handoff and should be treated like a review blocker until re-approved.
 
 ## Render Reports
 
@@ -224,6 +226,7 @@ auditex report verify-pack customer-pack
 ```
 
 If `verify-pack` returns `valid: false`, do not send the pack. Recreate it from the run directory or investigate missing or tampered files.
+`stale_accepted_risk` means the bundle still marks a finding as accepted even though its waiver expiry date has passed.
 
 For targeted review, render single artifacts:
 
@@ -278,7 +281,6 @@ Auditex is shippable when:
 - contract smoke passes,
 - full tests pass,
 - customer pack verifies,
-- release checklist passes,
 - no-secret scan is clean,
 - docs match current commands,
 - Google and Microsoft sample runs still validate,

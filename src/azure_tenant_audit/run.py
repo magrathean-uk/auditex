@@ -9,9 +9,9 @@ from .assurance import build_live_readiness_summary
 from .capability_gate import enrich_capability_row
 from .config import CollectorConfig, RunConfig
 from .ai_context import build_privacy_block
-from .finalize import finalize_bundle_contract
-from .findings import build_report_pack
+from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .profiles import AuditProfile, get_profile
+from .scope_catalog import build_m365_scope_catalog
 from .selection import select_collectors
 from .utils import parse_csv_list
 
@@ -103,11 +103,15 @@ def build_capability_matrix_rows(
     delegated_roles = {str(item) for item in auth_context.get("delegated_roles") or [] if item}
     has_global_reader = any(role.lower() == "global reader" for role in delegated_roles)
     profile = get_profile(auditor_profile)
+    catalog = build_m365_scope_catalog(
+        collector_config=collector_config,
+        permission_hints=permission_hints,
+    )
     rows: list[dict[str, Any]] = []
     for collector_name in selected_collectors:
+        entry = catalog.get(collector_name, {})
         definition = collector_config.collectors.get(collector_name)
-        hints = permission_hints.get(collector_name, {})
-        required = list(definition.required_permissions) if definition else list(hints.get("graph_scopes") or [])
+        required = list(entry.get("required_permissions") or [])
         missing = [perm for perm in required if perm not in available]
         status = "supported_exact_scope"
         reason = "required_permissions_present"
@@ -133,8 +137,8 @@ def build_capability_matrix_rows(
                     "missing_permissions": missing,
                     "observed_permissions": sorted(available),
                     "delegated_roles": sorted(delegated_roles),
-                    "minimum_role_hints": list(hints.get("minimum_role_hints") or profile.delegated_role_hints),
-                    "notes": hints.get("notes") or profile.notes,
+                    "minimum_role_hints": list(entry.get("minimum_role_hints") or profile.delegated_role_hints),
+                    "notes": entry.get("notes") or profile.notes,
                 }
             )
         )
@@ -425,60 +429,45 @@ def finalize_probe_run(
     evidence_paths.extend(["ai_context.json", "validation.json"])
     overall_status = "partial" if blockers else "ok"
     privacy = build_privacy_block(safe_for_external_llm=False)
-    writer.write_report_pack(
-        build_report_pack(
-            tenant_name=cfg.tenant_name,
-            overall_status=overall_status,
-            findings=findings,
-            evidence_paths=evidence_paths,
-            blocker_count=len(blockers),
-            privacy=privacy,
-        )
-    )
     evidence_index = {"artifacts": sorted(set(writer.artifact_paths() + ["run-manifest.json", "summary.json", "summary.md"]))}
     evidence_index_path = writer.write_json_artifact("evidence-index.json", evidence_index)
-    finalize_bundle_contract(
+    write_provider_bundle(
         writer=writer,
-        bundle_metadata={
-            "executed_by": "auditex_probe",
-            "collectors": requested_surfaces,
-            "overall_status": overall_status,
-            "duration_seconds": 0,
-            "mode": auth_mode,
-            "auditor_profile": cfg.auditor_profile,
-            "plane": "inventory",
-            "since": cfg.since,
-            "until": cfg.until,
-            "session_context": session_context,
-            "command_line": command_line,
-            "probe_mode": cfg.mode,
-            "probe_surface": cfg.surface,
-            "capability_matrix_path": str(capability_path.relative_to(writer.run_dir)),
-            "toolchain_readiness_path": str(toolchain_path.relative_to(writer.run_dir)),
-            "live_readiness_path": str(live_readiness_path.relative_to(writer.run_dir)),
-            "evidence_index_path": str(evidence_index_path.relative_to(writer.run_dir)),
-            "auth_path": auth_path,
-            "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path else None,
-            "data_handling_events": [],
-            "lab_guard_state": lab_guard_state,
-            "privacy": privacy,
-        },
-        run_metadata={
-            "tenant_name": cfg.tenant_name,
-            "tenant_id": cfg.tenant_id,
-            "run_id": writer.run_id,
-            "overall_status": overall_status,
-            "auditor_profile": cfg.auditor_profile,
-            "mode": auth_mode,
-            "plane": "inventory",
-            "selected_collectors": requested_surfaces,
-            "duration_seconds": 0,
-        },
-        normalized_snapshot=normalized_snapshot,
-        capability_rows=capability_matrix,
-        coverage_ledger=[],
-        blockers=blockers,
-        findings=findings,
+        plan=ProviderFinalizePlan(
+            tenant_name=cfg.tenant_name,
+            tenant_id=cfg.tenant_id,
+            executed_by="auditex_probe",
+            selected_collectors=requested_surfaces,
+            overall_status=overall_status,
+            duration_seconds=0,
+            mode=auth_mode,
+            auditor_profile=cfg.auditor_profile,
+            plane="inventory",
+            findings=findings,
+            blockers=blockers,
+            evidence_paths=evidence_paths,
+            normalized_snapshot=normalized_snapshot,
+            capability_rows=capability_matrix,
+            coverage_ledger=[],
+            privacy=privacy,
+            bundle_metadata={
+                "since": cfg.since,
+                "until": cfg.until,
+                "session_context": session_context,
+                "command_line": command_line,
+                "probe_mode": cfg.mode,
+                "probe_surface": cfg.surface,
+                "capability_matrix_path": str(capability_path.relative_to(writer.run_dir)),
+                "toolchain_readiness_path": str(toolchain_path.relative_to(writer.run_dir)),
+                "live_readiness_path": str(live_readiness_path.relative_to(writer.run_dir)),
+                "evidence_index_path": str(evidence_index_path.relative_to(writer.run_dir)),
+                "auth_path": auth_path,
+                "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path else None,
+                "data_handling_events": [],
+                "lab_guard_state": lab_guard_state,
+                "platform": "m365",
+            },
+        ),
     )
     writer.log_event(
         "probe.completed",

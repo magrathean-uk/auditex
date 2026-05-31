@@ -1,4 +1,11 @@
 {
+  "_fixture_provenance": {
+    "fixture_id": "google-known-bad",
+    "fixture_version": "2026-05-31",
+    "provider": "google_workspace",
+    "seed_kind": "known_bad",
+    "source_path": "examples/google_workspace_sample.json"
+  },
   "google_directory": {
     "users": {
       "value": [
@@ -70,6 +77,15 @@
         }
       ]
     },
+    "aliasesErrors": {
+      "value": [
+        {
+          "userKey": "admin@example.com",
+          "error_class": "insufficient_permissions",
+          "error": "alias scope missing"
+        }
+      ]
+    },
     "oauthGrants": {
       "value": [
         {
@@ -92,8 +108,39 @@
             "enabled": true,
             "emailAddress": "outside@other.test"
           },
-          "filters": [],
-          "forwardingAddresses": [],
+          "filters": [
+            {
+              "id": "filter-external-forward",
+              "criteria": {
+                "from": "finance@example.com"
+              },
+              "action": {
+                "forward": "ops@other.test"
+              }
+            },
+            {
+              "id": "filter-hidden-forward",
+              "criteria": {
+                "from": "ceo@example.com"
+              },
+              "action": {
+                "forward": "stealth@other.test",
+                "removeLabelIds": [
+                  "INBOX"
+                ]
+              }
+            }
+          ],
+          "forwardingAddresses": [
+            {
+              "forwardingEmail": "outside@other.test",
+              "verificationStatus": "accepted"
+            },
+            {
+              "forwardingEmail": "ready@other.test",
+              "verificationStatus": "accepted"
+            }
+          ],
           "sendAs": [
             {
               "sendAsEmail": "billing@other.test",
@@ -106,6 +153,11 @@
           },
           "pop": {
             "accessWindow": "allMail"
+          },
+          "vacation": {
+            "enableAutoReply": true,
+            "restrictToContacts": false,
+            "restrictToDomain": false
           },
           "delegates": [
             {
@@ -175,7 +227,15 @@
       ]
     },
     "chromeosDevices": {
-      "value": []
+      "value": [
+        {
+          "deviceId": "chrome-1",
+          "serialNumber": "CHROME-001",
+          "annotatedUser": "student@example.com",
+          "status": "DEPROVISIONED",
+          "lastSync": "2020-01-01T00:00:00.000Z"
+        }
+      ]
     }
   },
   "google_dns_posture": {
@@ -211,7 +271,8 @@
           "permissions": [
             {
               "type": "anyone",
-              "role": "reader"
+              "role": "reader",
+              "allowFileDiscovery": false
             },
             {
               "id": "p-external",
@@ -220,11 +281,38 @@
               "emailAddress": "consultant@other.test"
             }
           ]
+        },
+        {
+          "id": "file-2",
+          "name": "Public Handbook",
+          "mimeType": "application/vnd.google-apps.document",
+          "shared": true,
+          "permissions": [
+            {
+              "type": "anyone",
+              "role": "reader",
+              "allowFileDiscovery": true
+            },
+            {
+              "id": "p-domain-internal",
+              "type": "domain",
+              "role": "reader",
+              "domain": "example.com"
+            }
+          ]
         }
       ]
     },
     "sharedDrives": {
-      "value": []
+      "value": [
+        {
+          "id": "drive-1",
+          "name": "External Projects",
+          "restrictions": {
+            "domainUsersOnly": false
+          }
+        }
+      ]
     }
   },
   "google_groups_settings": {
@@ -233,7 +321,19 @@
         {
           "email": "all@example.com",
           "allowExternalMembers": "true",
-          "whoCanPostMessage": "ANYONE_CAN_POST"
+          "whoCanJoin": "ANYONE_CAN_JOIN",
+          "whoCanPostMessage": "ANYONE_CAN_POST",
+          "messageModerationLevel": "MODERATE_NONE",
+          "whoCanViewGroup": "ANYONE_CAN_VIEW",
+          "whoCanViewMembership": "ANYONE_CAN_VIEW"
+        },
+        {
+          "email": "staff@example.com",
+          "whoCanJoin": "ALL_IN_DOMAIN_CAN_JOIN",
+          "whoCanPostMessage": "ALL_IN_DOMAIN_CAN_POST",
+          "messageModerationLevel": "MODERATE_NONE",
+          "whoCanViewGroup": "ALL_IN_DOMAIN_CAN_VIEW",
+          "whoCanViewMembership": "ALL_IN_DOMAIN_CAN_VIEW"
         }
       ]
     }
@@ -275,6 +375,15 @@
             "value": "external@other.test"
           },
           "role": "writer"
+        },
+        {
+          "calendarId": "team@example.com",
+          "id": "domain:example.com",
+          "scope": {
+            "type": "domain",
+            "value": "example.com"
+          },
+          "role": "reader"
         }
       ]
     }

@@ -21,25 +21,44 @@ from .collectors import REGISTRY
 from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
 from .config import AuthConfig, CollectorConfig
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
-from .findings import build_findings, build_report_pack
+from .findings import build_findings
 from .graph import GraphClient
 from .normalize import build_ai_safe_summary, build_normalized_snapshot
 from .output import AuditWriter
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
+from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .resources import resolve_resource_path
 from .utils import load_env_file
+from .versioning import package_version_line
 from .ai_context import build_privacy_block
-from .finalize import finalize_bundle_contract
 from . import run as run_core
 
 LOG = logging.getLogger("azure_tenant_audit")
 
 PLANE_CHOICES = ("inventory", "full", "export")
+_OFFLINE_SAMPLE_METADATA_KEYS = frozenset({"_fixture_provenance"})
+
+
+def _merged_fixture_provenance(
+    sample_fixture_provenance: dict[str, Any] | None,
+    fixture_provenance_override: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    merged: dict[str, Any] = {}
+    if isinstance(sample_fixture_provenance, dict):
+        merged.update(sample_fixture_provenance)
+    if isinstance(fixture_provenance_override, dict):
+        for key, value in fixture_provenance_override.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+    return merged or None
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Microsoft tenant audit collection.")
+    parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
     parser.add_argument("--tenant-name", default="tenant", help="Label for the output folder.")
     parser.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
     parser.add_argument("--client-id", default=None, help="App registration ID.")
@@ -124,6 +143,7 @@ def run_offline(
     plane: str = "inventory",
     since: str | None = None,
     until: str | None = None,
+    fixture_provenance_override: dict[str, Any] | None = None,
 ) -> int:
     sample_path = resolve_resource_path(sample_path)
     if not sample_path.exists():
@@ -134,6 +154,10 @@ def run_offline(
     except (ValueError, OSError) as exc:
         LOG.error("Unable to load sample bundle: %s", exc)
         return 2
+    fixture_provenance = _merged_fixture_provenance(
+        sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
+        fixture_provenance_override,
+    )
 
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     writer.log_event(
@@ -157,6 +181,8 @@ def run_offline(
     )
     writer.record_artifact(writer.raw_dir / "sample_input.json")
     for key, value in sample.items():
+        if key in _OFFLINE_SAMPLE_METADATA_KEYS:
+            continue
         if isinstance(value, dict):
             collector_payloads[str(key)] = value
         row: dict[str, Any] = {
@@ -223,48 +249,34 @@ def run_offline(
         evidence_paths.append("findings/findings.json")
     evidence_paths.extend(f"normalized/{name}.json" for name in ["capability_matrix", "coverage_ledger", *normalized_snapshot.keys()])
     privacy = build_privacy_block(safe_for_external_llm=False)
-    writer.write_report_pack(
-        build_report_pack(
-            tenant_name=tenant_name,
-            overall_status="ok",
-            findings=findings,
-            evidence_paths=evidence_paths,
-            blocker_count=0,
-            privacy=privacy,
-        )
-    )
-    finalize_bundle_contract(
+    write_provider_bundle(
         writer=writer,
-        bundle_metadata={
-            "executed_by": "azure_tenant_audit",
-            "collectors": list(sample.keys()),
-            "overall_status": "ok",
-            "duration_seconds": 0,
-            "mode": "offline",
-            "auditor_profile": auditor_profile,
-            "plane": plane,
-            "since": since,
-            "until": until,
-            "command_line": [],
-            "coverage_count": 0,
-            "privacy": privacy,
-        },
-        run_metadata={
-            "tenant_name": tenant_name,
-            "tenant_id": None,
-            "run_id": writer.run_id,
-            "overall_status": "ok",
-            "auditor_profile": auditor_profile,
-            "mode": "offline",
-            "plane": plane,
-            "selected_collectors": list(sample.keys()),
-            "duration_seconds": 0,
-        },
-        normalized_snapshot=normalized_snapshot,
-        capability_rows=capability_rows,
-        coverage_ledger=coverage_ledger,
-        blockers=diagnostics,
-        findings=findings,
+        plan=ProviderFinalizePlan(
+            tenant_name=tenant_name,
+            tenant_id=None,
+            executed_by="azure_tenant_audit",
+            selected_collectors=[row["name"] for row in result_rows],
+            overall_status="ok",
+            duration_seconds=0,
+            mode="offline",
+            auditor_profile=auditor_profile,
+            plane=plane,
+            findings=findings,
+            blockers=diagnostics,
+            evidence_paths=evidence_paths,
+            normalized_snapshot=normalized_snapshot,
+            capability_rows=capability_rows,
+            coverage_ledger=coverage_ledger,
+            privacy=privacy,
+            bundle_metadata={
+                "fixture_provenance": fixture_provenance,
+                "since": since,
+                "until": until,
+                "command_line": [],
+                "coverage_count": 0,
+                "platform": "m365",
+            },
+        ),
     )
     LOG.info("Offline sample written to %s", writer.run_dir)
     return 0
@@ -629,60 +641,46 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     evidence_paths.extend(["ai_context.json", "validation.json"])
     overall_status = "partial" if failures or preflight_skipped else "ok"
     privacy = build_privacy_block(safe_for_external_llm=False)
-    report_pack = build_report_pack(
-        tenant_name=run_cfg.tenant_name,
-        overall_status=overall_status,
-        findings=findings,
-        evidence_paths=evidence_paths,
-        blocker_count=len(diagnostics),
-        privacy=privacy,
-    )
-    writer.write_report_pack(report_pack)
     writer.log_event(
         "run.complete",
         "Live run completed",
         {"failures": failures, "collectors": len(result_rows), "coverage_rows": len(coverage_rows)},
     )
-    finalize_bundle_contract(
+    write_provider_bundle(
         writer=writer,
-        bundle_metadata={
-            "executed_by": "azure_tenant_audit",
-            "collectors": selected,
-            "overall_status": overall_status,
-            "duration_seconds": duration,
-            "mode": auth_mode,
-            "auditor_profile": run_cfg.auditor_profile,
-            "plane": run_cfg.plane,
-            "collector_preset": args.collector_preset,
-            "waiver_path": args.waiver_file,
-            "since": run_cfg.since,
-            "until": run_cfg.until,
-            "session_context": session_context,
-            "auth_context_path": "normalized/auth_context.json",
-            "capability_matrix_path": "normalized/capability_matrix.json",
-            "coverage_ledger_path": "normalized/coverage_ledger.json",
-            "command_line": command_line,
-            "coverage_count": len(coverage_rows),
-            "throttle_mode": args.throttle_mode,
-            "preflight_path": preflight_path,
-            "privacy": privacy,
-        },
-        run_metadata={
-            "tenant_name": run_cfg.tenant_name,
-            "tenant_id": args.tenant_id,
-            "run_id": writer.run_id,
-            "overall_status": overall_status,
-            "auditor_profile": run_cfg.auditor_profile,
-            "mode": auth_mode,
-            "plane": run_cfg.plane,
-            "selected_collectors": selected,
-            "duration_seconds": duration,
-        },
-        normalized_snapshot=normalized_snapshot,
-        capability_rows=capability_rows,
-        coverage_ledger=coverage_ledger,
-        blockers=diagnostics,
-        findings=findings,
+        plan=ProviderFinalizePlan(
+            tenant_name=run_cfg.tenant_name,
+            tenant_id=args.tenant_id,
+            executed_by="azure_tenant_audit",
+            selected_collectors=selected,
+            overall_status=overall_status,
+            duration_seconds=duration,
+            mode=auth_mode,
+            auditor_profile=run_cfg.auditor_profile,
+            plane=run_cfg.plane,
+            findings=findings,
+            blockers=diagnostics,
+            evidence_paths=evidence_paths,
+            normalized_snapshot=normalized_snapshot,
+            capability_rows=capability_rows,
+            coverage_ledger=coverage_ledger,
+            privacy=privacy,
+            bundle_metadata={
+                "collector_preset": args.collector_preset,
+                "waiver_path": args.waiver_file,
+                "since": run_cfg.since,
+                "until": run_cfg.until,
+                "session_context": session_context,
+                "auth_context_path": "normalized/auth_context.json",
+                "capability_matrix_path": "normalized/capability_matrix.json",
+                "coverage_ledger_path": "normalized/coverage_ledger.json",
+                "command_line": command_line,
+                "coverage_count": len(coverage_rows),
+                "throttle_mode": args.throttle_mode,
+                "preflight_path": preflight_path,
+                "platform": "m365",
+            },
+        ),
     )
     LOG.info("Completed in %.2fs. Output in %s", duration, writer.run_dir)
     return 1 if failures or preflight_skipped else 0

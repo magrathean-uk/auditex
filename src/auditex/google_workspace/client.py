@@ -180,20 +180,31 @@ class GoogleWorkspaceClient:
         service = self._service("gmail", "v1")
         settings = service.users().settings()
         payload: dict[str, Any] = {"userEmail": user_email}
-        payload["autoForwarding"] = settings.getAutoForwarding(userId=user_email).execute()
-        payload["filters"] = settings.filters().list(userId=user_email).execute().get("filter", [])
-        payload["forwardingAddresses"] = (
-            settings.forwardingAddresses().list(userId=user_email).execute().get("forwardingAddresses", [])
+
+        def _capture(name: str, getter: Callable[[], Any], *, list_key: str | None = None, default: Any = None) -> None:
+            try:
+                value = getter()
+                if list_key is not None and isinstance(value, dict):
+                    payload[name] = value.get(list_key, default if default is not None else [])
+                else:
+                    payload[name] = value
+            except Exception as exc:  # noqa: BLE001
+                error_class, error = classify_google_error(exc)
+                payload[f"{name}_error"] = {"error_class": error_class, "error": error}
+
+        _capture("autoForwarding", lambda: settings.getAutoForwarding(userId=user_email).execute(), default={})
+        _capture("filters", lambda: settings.filters().list(userId=user_email).execute(), list_key="filter", default=[])
+        _capture(
+            "forwardingAddresses",
+            lambda: settings.forwardingAddresses().list(userId=user_email).execute(),
+            list_key="forwardingAddresses",
+            default=[],
         )
-        payload["sendAs"] = settings.sendAs().list(userId=user_email).execute().get("sendAs", [])
-        payload["imap"] = settings.getImap(userId=user_email).execute()
-        payload["pop"] = settings.getPop(userId=user_email).execute()
-        payload["vacation"] = settings.getVacation(userId=user_email).execute()
-        try:
-            payload["delegates"] = settings.delegates().list(userId=user_email).execute().get("delegates", [])
-        except Exception as exc:  # noqa: BLE001
-            error_class, error = classify_google_error(exc)
-            payload["delegates_error"] = {"error_class": error_class, "error": error}
+        _capture("sendAs", lambda: settings.sendAs().list(userId=user_email).execute(), list_key="sendAs", default=[])
+        _capture("imap", lambda: settings.getImap(userId=user_email).execute(), default={})
+        _capture("pop", lambda: settings.getPop(userId=user_email).execute(), default={})
+        _capture("vacation", lambda: settings.getVacation(userId=user_email).execute(), default={})
+        _capture("delegates", lambda: settings.delegates().list(userId=user_email).execute(), list_key="delegates", default=[])
         return payload
 
     def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:

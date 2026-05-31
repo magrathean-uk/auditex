@@ -16,6 +16,8 @@ The command prints:
 - read-only and no-content-read assertions,
 - primary vendor documentation links.
 
+Auditex builds this output from the shipped scope catalog. The same catalog also feeds capability rows and permission ledgers so access planning stays consistent across setup, run, and review surfaces.
+
 Use JSON for AI/MCP callers:
 
 ```bash

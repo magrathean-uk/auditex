@@ -94,7 +94,7 @@ def test_findings_skip_microsoft_service_provider_partner() -> None:
     snapshot = _snapshot(
         partners=[
             {
-                "tenant_id": "f8cdef31-a31e-4b4a-93e4-5f571e91255a",
+                "tenant_id": "22222222-2222-2222-2222-222222222222",
                 "b2b_direct_connect_inbound_access": "allowed",
                 "b2b_direct_connect_outbound_access": "allowed",
                 "inbound_trust_mfa_accepted": False,

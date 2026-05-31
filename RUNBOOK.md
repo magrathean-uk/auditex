@@ -28,6 +28,45 @@ auditex setup-guide m365 --collector-preset full --format md
 auditex setup-guide google --collector-preset everything --format md
 ```
 
+## Local development checks
+
+Use the Makefile and CI-discovered commands as the local truth:
+
+```bash
+make test
+make lint
+make contract-smoke
+./scripts/oss-taint-scan.sh
+python3 scripts/build-pages-site.py site
+```
+
+What each check covers:
+
+- `make test` runs `python -m pytest`.
+- `make lint` runs `python -m compileall -q src tests`.
+- `make contract-smoke` rebuilds the offline sample bundle in `outputs/ci-contract` and asserts valid contract status plus `index/evidence.sqlite`.
+- `./scripts/oss-taint-scan.sh` checks forbidden research/derived paths and taint markers.
+- `python3 scripts/build-pages-site.py site` builds the GitHub Pages redirect artifact.
+
+Provider run note:
+
+- Microsoft 365 and Google `run` and `probe` now stamp the same shared provider finalization metadata in `run-manifest.json`: `provider_adapter_version` and `api_inventory_recorder_version`. Use those fields when checking whether two bundles came through the same orchestration path.
+
+Command help smoke:
+
+```bash
+auditex --version
+auditex --help
+auditex doctor --json
+auditex guided-run --help
+auditex google --help
+auditex report --help
+auditex-mcp --version
+auditex-mcp --help
+```
+
+No dedicated formatter or static typecheck command is currently defined in the repo. Do not invent one in docs or CI without adding the actual tool config.
+
 ## Auth and profiles
 
 - `make login TENANT=<tenant-id-or-domain>` opens Azure CLI login with `--allow-no-subscriptions`.
@@ -71,18 +110,24 @@ Offline sample:
 
 ```bash
 auditex run --offline --tenant-name demo --out outputs/offline
+auditex run --offline --sample examples/sample_audit_bundle/known_bad_result.json --tenant-name demo --run-name known-bad --out outputs/offline-known-bad
 auditex google run --offline --sample examples/google_workspace_sample.json --domain example.com --tenant-name demo --out outputs/google
+python3 tenant-bootstrap/scripts/replay-known-bad-fixtures.py --out tenant-bootstrap/fixture-output --clean
+python3 tenant-bootstrap/scripts/replay-known-bad-fixtures.py --bootstrap-run-dir tenant-bootstrap/runs/<seed-run> --out tenant-bootstrap/fixture-output --clean
 ```
 
 Compare, render, export, notify:
 
 ```bash
+azure-tenant-audit --version
 auditex compare --run-dir run-a --run-dir run-b
 auditex report render <run-dir> --format md
 auditex export list
 auditex export run <exporter-name> <run-dir>
 auditex notify send <run-dir> --sink teams
 ```
+
+Default compare suppresses volatile churn like raw sync timestamps and usage report refresh dates. Use `auditex compare --classic ...` when raw timestamp-only changes still matter.
 
 ## Google Workspace
 
@@ -140,9 +185,9 @@ cd tenant-bootstrap
 ```
 
 
-## Release and contract smoke
+## Contract smoke
 
-Before shipping a build, run the release checklist in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md). At minimum, every release must pass:
+Before handing off a build, run:
 
 ```bash
 python -m compileall -q src tests
@@ -152,7 +197,12 @@ auditex run --offline --sample examples/sample_audit_bundle/sample_result.json -
 
 The resulting `outputs/ci-contract/ci-contract/validation.json` must be valid and the final manifest must report `contract_status: valid`.
 
-Product docs live under [docs/README.md](docs/README.md). Update the manual, setup guide, admin permission guide, AI operator guide, GitHub operator guide, customer handoff guide, security/privacy model, troubleshooting guide, and ship-readiness guide when commands, scopes, artifacts, or release gates change.
+Release CI also runs `make contract-smoke`, `./scripts/oss-taint-scan.sh`, `python3 scripts/build-pages-site.py /tmp/auditex-pages`, and a built-wheel offline smoke.
+
+For local release packaging proof, build `dist/` and run `bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke`. That smoke path validates base wheel install plus `google` and `mcp` extras in separate virtualenvs.
+Release tags must match the packaged version from `auditex --version`: for example `1.0.0` ships as git tag `v1.0.0`.
+
+Product docs live under [docs/README.md](docs/README.md). Update the manual, setup guide, admin permission guide, customer handoff guide, security/privacy model, and troubleshooting guide when commands, scopes, artifacts, or checks change.
 
 For enterprise evidence review, render the API call ledger:
 
@@ -181,3 +231,11 @@ When a run is partial, start with `live-readiness.json`. Its blocker summary sep
 - Public Auditex is audit-only. Lab response tools are hidden unless `AUDITEX_ENABLE_RESPONSE=1` is set for local development.
 - Imported token contexts should keep the raw token on disk in the secrets sidecar, not inside the context JSON.
 - When checking exposure, verify the public route, direct-IP / Host-header path, and the blocked path separately. One green check is not enough.
+
+## Done criteria for repo changes
+
+- Setup, command, scope, artifact, or handoff changes are reflected in `README.md`, this runbook, or product docs as applicable.
+- Behavior changes have focused pytest coverage.
+- Bundle, report, collector, API inventory, evidence ref, or customer-pack changes pass `make contract-smoke`.
+- Python edits pass `make lint` when practical.
+- Live tenant work records blockers honestly when auth, scopes, licenses, optional tools, network, or customer access prevent verification.

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .capability_gate import capability_blocker_summary, classify_capability_blocker
+from .evidence_gates import build_evidence_gate_summary
 
 
 _GOOGLE_SURFACES = {
@@ -79,22 +80,6 @@ _SURFACE_SCORES = {
     "blocked": 0,
     "unknown": 0,
 }
-
-_TRUSTED_CAPABILITY_STATUSES = {
-    "ok",
-    "supported",
-    "supported_exact_scope",
-    "supported_equivalent_scope",
-    "supported_effective_role",
-    "complete",
-    "complete_exact_scope",
-    "complete_equivalent_scope",
-    "complete_effective_role",
-    "complete_offline_sample",
-}
-
-_PARTIAL_CAPABILITY_STATUSES = {"partial"}
-
 
 def _status_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts = Counter(str(row.get("status") or "unknown") for row in rows if isinstance(row, Mapping))
@@ -194,97 +179,11 @@ def build_live_readiness_summary(
     capability_rows: list[dict[str, Any]],
     dependency_available: bool = True,
 ) -> dict[str, Any]:
-    selected = [str(item) for item in selected_collectors if str(item)]
-    rows_by_collector = {
-        str(row.get("collector")): row
-        for row in capability_rows
-        if isinstance(row, Mapping) and row.get("collector")
-    }
-    trusted: list[str] = []
-    partial: list[str] = []
-    blocked: list[str] = []
-    unverified: list[str] = []
-    missing_permissions: dict[str, list[str]] = {}
-    capability_blockers: list[dict[str, Any]] = []
-
-    if not dependency_available:
-        blocked = selected
-        for collector in selected:
-            capability_blockers.append(
-                {
-                    "collector": collector,
-                    "status": "blocked",
-                    "reason": "dependency_unavailable",
-                    "blocker_kind": "local_tool",
-                    "blocker_reason": "required local dependency is unavailable",
-                    "next_step": "Install the missing dependency, then rerun probe.",
-                    "missing_permissions": [],
-                }
-            )
-    else:
-        for collector in selected:
-            row = rows_by_collector.get(collector)
-            if not row:
-                unverified.append(collector)
-                capability_blockers.append({"collector": collector, **classify_capability_blocker(None), "status": "unverified", "reason": "not_live_verified", "missing_permissions": []})
-                continue
-            status = str(row.get("status") or "")
-            if status in _TRUSTED_CAPABILITY_STATUSES:
-                trusted.append(collector)
-            elif status in _PARTIAL_CAPABILITY_STATUSES:
-                partial.append(collector)
-            elif status.startswith("blocked") or status in {"failed", "unauthenticated"}:
-                blocked.append(collector)
-            else:
-                unverified.append(collector)
-            missing = [str(item) for item in row.get("missing_permissions") or [] if str(item)]
-            if missing:
-                missing_permissions[collector] = missing
-            classification = classify_capability_blocker(row)
-            if classification["blocker_kind"] != "none":
-                capability_blockers.append(
-                    {
-                        "collector": collector,
-                        "status": status,
-                        "reason": str(row.get("reason") or ""),
-                        "missing_permissions": missing,
-                        **classification,
-                    }
-                )
-
-    cannot_trust = [*blocked, *partial, *unverified]
-    if not selected:
-        trust_level = "unknown"
-    elif not dependency_available:
-        trust_level = "blocked"
-    elif not capability_rows and unverified:
-        trust_level = "setup_only"
-    elif trusted and not cannot_trust:
-        trust_level = "live_verified"
-    elif trusted:
-        trust_level = "partial"
-    elif blocked:
-        trust_level = "blocked"
-    else:
-        trust_level = "setup_only"
-
-    return {
-        "trust_level": trust_level,
-        "selected_collectors": selected,
-        "trusted_collectors": trusted,
-        "partial_collectors": partial,
-        "blocked_collectors": blocked,
-        "unverified_collectors": unverified,
-        "can_trust": trusted,
-        "cannot_trust": cannot_trust,
-        "missing_permissions": missing_permissions,
-        "blocker_summary": capability_blocker_summary(capability_blockers),
-        "statement": (
-            "Live evidence is verified for all selected collectors."
-            if trust_level == "live_verified"
-            else "Some selected audit data is blocked, partial, or not live-verified."
-        ),
-    }
+    return build_evidence_gate_summary(
+        selected_collectors=selected_collectors,
+        capability_rows=capability_rows,
+        dependency_available=dependency_available,
+    )
 
 
 def build_surface_coverage_map(

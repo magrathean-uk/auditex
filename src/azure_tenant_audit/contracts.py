@@ -54,7 +54,10 @@ _AI_SAFE_KEY_ALLOWLIST = re.compile(
     r"^(authorization|credential)_"
     r"(?:policy|policies|context|contexts|method|methods|metric|metrics|"
     r"setting|settings|level|type|kind|state|status|class|admin|grant|grants|"
-    r"provider|providers|flow|flows)$",
+    r"provider|providers|flow|flows)$"
+    r"|^(?:password|key|application|service_principal)_credentials$"
+    r"|^app_credentials$"
+    r"|^(?:application|service_principal)_credential_objects$",
     re.IGNORECASE,
 )
 _AI_SAFE_SENSITIVE_VALUES = re.compile(r"(Bearer\s+[A-Za-z0-9._-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.)")

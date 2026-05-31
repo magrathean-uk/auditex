@@ -195,6 +195,69 @@ def test_compare_runs_result_is_json_serializable(tmp_path: Path) -> None:
     json.dumps(payload)
 
 
+def test_compare_runs_can_use_classic_mode_for_raw_timestamp_churn(tmp_path: Path) -> None:
+    run_a = _write_run(
+        tmp_path,
+        tenant_name="acme",
+        run_id="run-a",
+        created_utc="2026-04-01T00:00:00Z",
+        status="ok",
+        collector_name="devices",
+        normalized_name="devices",
+        records=[{"key": "device:1", "platform": "Windows", "last_sync": "2026-05-01T00:00:00Z"}],
+    )
+    run_b = _write_run(
+        tmp_path,
+        tenant_name="acme",
+        run_id="run-b",
+        created_utc="2026-04-02T00:00:00Z",
+        status="ok",
+        collector_name="devices",
+        normalized_name="devices",
+        records=[{"key": "device:1", "platform": "Windows", "last_sync": "2026-05-02T00:00:00Z"}],
+    )
+
+    suppressed = compare_runs([str(run_a), str(run_b)])
+    classic = compare_runs([str(run_a), str(run_b)], classic=True)
+
+    assert suppressed["classic"] is False
+    assert suppressed["baseline_diff"]["summary"]["changed"] == 0
+    assert suppressed["baseline_diff"]["noise_suppression"]["suppressed_changed"] == 1
+    assert suppressed["baseline_diff"]["noise_suppression"]["suppressed_path_counts"] == {"last_sync": 1}
+    assert classic["classic"] is True
+    assert classic["baseline_diff"]["summary"]["changed"] == 1
+    assert classic["baseline_diff"]["noise_suppression"]["enabled"] is False
+
+
+def test_compare_runs_exposes_usage_refresh_noise_summary(tmp_path: Path) -> None:
+    run_a = _write_run(
+        tmp_path,
+        tenant_name="acme",
+        run_id="run-a",
+        created_utc="2026-04-01T00:00:00Z",
+        status="ok",
+        collector_name="usage_report_objects",
+        normalized_name="usage_report_objects",
+        records=[{"key": "usage:users", "source_name": "office365ActiveUserCounts", "report_refresh_date": "2026-05-01"}],
+    )
+    run_b = _write_run(
+        tmp_path,
+        tenant_name="acme",
+        run_id="run-b",
+        created_utc="2026-04-02T00:00:00Z",
+        status="ok",
+        collector_name="usage_report_objects",
+        normalized_name="usage_report_objects",
+        records=[{"key": "usage:users", "source_name": "office365ActiveUserCounts", "report_refresh_date": "2026-05-02"}],
+    )
+
+    result = compare_runs([str(run_a), str(run_b)])
+
+    assert result["baseline_diff"]["summary"]["changed"] == 0
+    assert result["baseline_diff"]["noise_suppression"]["suppressed_changed"] == 1
+    assert result["baseline_diff"]["noise_suppression"]["suppressed_path_counts"] == {"report_refresh_date": 1}
+
+
 def test_compare_run_directories_falls_back_to_manifest_when_index_metadata_is_sparse(tmp_path: Path) -> None:
     run_a = _write_run(
         tmp_path,

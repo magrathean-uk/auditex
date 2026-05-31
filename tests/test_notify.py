@@ -77,6 +77,10 @@ def test_send_notification_builds_dry_run_payload(tmp_path: Path) -> None:
     assert result["payload"]["coverage_gap_count"] == 1
     assert result["payload"]["coverage_gaps"][0]["error_classes"] == ["invalid_scope"]
     assert result["payload"]["action_plan"][0]["id"] == "finding-1"
+    assert "run-manifest.json" in [row["artifact_path"] for row in result["citations"]]
+    assert "reports/report-pack.json" in [row["artifact_path"] for row in result["citations"]]
+    assert "live-readiness.json" in [row["artifact_path"] for row in result["citations"]]
+    assert result["evidence_missing"] == []
 
 
 def test_send_notification_posts_to_webhook_when_execute_enabled(tmp_path: Path, monkeypatch) -> None:
@@ -140,3 +144,5 @@ def test_send_notification_falls_back_to_manifest_and_findings(tmp_path: Path) -
     assert result["payload"]["open_count"] == 1
     assert result["payload"]["accepted_count"] == 1
     assert result["payload"]["report_pack_path"] is None
+    assert "reports/report-pack.json" in result["evidence_missing"]
+    assert "live-readiness.json" in result["evidence_missing"]

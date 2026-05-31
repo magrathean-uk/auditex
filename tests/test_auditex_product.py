@@ -16,15 +16,22 @@ from auditex.mcp_server import (
     build_probe_command,
     compare_many_runs,
     list_adapters,
+    list_blockers,
     list_collectors,
     list_available_exporters,
+    list_profiles,
     preview_notification,
     preview_report,
     rules_inventory,
     list_response_actions,
     main as mcp_main,
     analyze_report,
+    auth_capability,
+    auth_inspect_token,
+    auth_list,
+    auth_status,
     api_inventory,
+    contract_schema_inventory,
     enterprise_handoff,
     permissions_ledger,
     proof_table,
@@ -201,15 +208,25 @@ def test_mcp_main_uses_current_fastmcp_tool_decorator(monkeypatch: pytest.Monkey
     fake_module.FastMCP = _FakeFastMCP
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fake_module)
 
+    monkeypatch.setattr(sys, "argv", ["auditex-mcp"])
     assert mcp_main() == 0
     expected = [(item["name"], item["readOnlyHint"]) for item in tool_specs()]
     assert registered == expected
+
+
+def test_mcp_main_prints_version_without_mcp_extra(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr("auditex.mcp_server.package_version_line", lambda name="auditex": f"{name} 9.9.9")
+
+    assert mcp_main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == "auditex-mcp 9.9.9"
 
 
 def test_list_collectors_tool_shape_matches_definitions() -> None:
     result = list_collectors()
     assert result["path"].endswith("configs/collector-definitions.json")
     assert isinstance(result["collectors"], list)
+    assert "configs/collector-definitions.json" in [row["artifact_path"] for row in result["citations"]]
+    assert result["evidence_missing"] == []
     collector_names = {item["name"] for item in result["collectors"]}
     assert {
         "identity",
@@ -230,6 +247,8 @@ def test_list_collectors_tool_shape_matches_definitions() -> None:
         "teams_policy",
         "exchange_policy",
     }.issubset(collector_names)
+    identity = next(item for item in result["collectors"] if item["name"] == "identity")
+    assert "Security Reader" in identity["minimum_role_hints"]
 
 
 def test_list_collectors_can_show_google_registry() -> None:
@@ -237,6 +256,7 @@ def test_list_collectors_can_show_google_registry() -> None:
 
     collector_names = {item["name"] for item in result["collectors"]}
     assert result["provider"] == "google"
+    assert "src/auditex/google_workspace/collectors.py" in [row["artifact_path"] for row in result["citations"]]
     assert "google_directory" in collector_names
     assert "google_drive_posture" in collector_names
     assert "google_calendar_posture" in collector_names
@@ -246,10 +266,141 @@ def test_list_collectors_can_show_google_registry() -> None:
     assert "https://www.googleapis.com/auth/calendar.acls.readonly" in calendar["required_permissions"]
 
 
+def test_list_profiles_helper_returns_citations() -> None:
+    result = list_profiles()
+
+    assert any(row["artifact_path"] == "src/azure_tenant_audit/profiles.py" for row in result["citations"])
+    assert result["citation_summary"]["artifact_count"] == 1
+    assert result["evidence_missing"] == []
+    assert any(profile["name"] == "global-reader" for profile in result["profiles"])
+
+
+def test_contract_schema_inventory_returns_citations() -> None:
+    result = contract_schema_inventory("schemas")
+
+    assert result["contract_version"] == "2026-04-21"
+    assert any(row["artifact_path"] == "src/azure_tenant_audit/contracts.py" for row in result["citations"])
+    assert any(row["artifact_path"] == "schemas" for row in result["citations"])
+    assert result["evidence_missing"] == []
+
+
+def test_auth_capability_helper_returns_citations(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    auth_contexts_path = tmp_path / "auth-contexts.json"
+    auth_contexts_path.write_text(
+        json.dumps(
+            {
+                "active_context": "demo",
+                "contexts": {
+                    "demo": {
+                        "name": "demo",
+                        "tenant_id": "tenant-1",
+                        "auth_type": "delegated",
+                        "token_claims": {
+                            "tenant_id": "tenant-1",
+                            "audience": "https://graph.microsoft.com",
+                            "delegated_scopes": ["Directory.Read.All", "Policy.Read.All"],
+                            "app_roles": [],
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AUDITEX_AUTH_CONTEXTS_PATH", str(auth_contexts_path))
+
+    result = auth_capability(name="demo", collectors="identity", auditor_profile="global-reader")
+
+    artifact_paths = [row["artifact_path"] for row in result["citations"]]
+    assert "src/auditex/auth.py" in artifact_paths
+    assert "src/auditex/auth_runtime.py" in artifact_paths
+    assert "configs/collector-definitions.json" in artifact_paths
+    assert "configs/collector-permissions.json" in artifact_paths
+    assert "src/azure_tenant_audit/scope_catalog.py" in artifact_paths
+    assert str(auth_contexts_path) in artifact_paths
+    assert result["citation_summary"]["artifact_count"] == 6
+    assert result["evidence_missing"] == []
+    assert result["auth_context"]["name"] == "demo"
+
+
+def test_auth_status_helper_returns_citations(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    env_path = tmp_path / "m365-auth.env"
+    env_path.write_text("AUDITEX_TENANT_ID=tenant-1\n", encoding="utf-8")
+    contexts_path = tmp_path / "contexts.json"
+    contexts_path.write_text(json.dumps({"active_context": None, "contexts": {}}), encoding="utf-8")
+    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(env_path))
+    monkeypatch.setenv("AUDITEX_AUTH_CONTEXTS_PATH", str(contexts_path))
+    monkeypatch.setattr(
+        "auditex.auth.get_auth_status",
+        lambda: {
+            "local_auth": {"path": str(env_path), "present": True},
+            "azure_cli": {"status": "supported"},
+            "m365": {"status": "supported", "authenticated": True},
+            "exchange": {"status": "supported"},
+            "auth_contexts": {"active_context": None, "contexts": []},
+            "adapter_capabilities": [],
+        },
+    )
+
+    result = auth_status()
+
+    artifact_paths = {row["artifact_path"] for row in result["citations"]}
+    assert str(env_path) in artifact_paths
+    assert str(contexts_path) in artifact_paths
+    assert "command:az account show --output json" in artifact_paths
+    assert "command:m365 status --output json" in artifact_paths
+    assert "command:m365 connection list --output json" in artifact_paths
+    assert "command:pwsh exchange-module-check" in artifact_paths
+    assert result["citation_summary"]["artifact_count"] == 9
+    assert result["evidence_missing"] == []
+
+
+def test_auth_list_helper_returns_citations(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    env_path = tmp_path / "m365-auth.env"
+    env_path.write_text("M365_CLI_APP_ID=app-1\n", encoding="utf-8")
+    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(env_path))
+    monkeypatch.setattr(
+        "auditex.auth.list_connections",
+        lambda: {
+            "connections": [
+                {"name": "tenant-app", "active": False},
+                {"name": "tenant-user", "active": True},
+            ]
+        },
+    )
+
+    result = auth_list()
+
+    artifact_paths = {row["artifact_path"] for row in result["citations"]}
+    assert str(env_path) in artifact_paths
+    assert "command:m365 connection list --output json" in artifact_paths
+    assert result["citation_summary"]["artifact_count"] == 4
+    assert result["evidence_missing"] == []
+    assert result["connections"][1]["name"] == "tenant-user"
+
+
+def test_auth_inspect_token_helper_returns_citations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "auditex.auth.inspect_token_claims",
+        lambda token: {"tenant_id": "tenant-1", "audience": "https://graph.microsoft.com", "token_preview": token[:4]},
+    )
+
+    result = auth_inspect_token("eyJ.example")
+
+    artifact_paths = {row["artifact_path"] for row in result["citations"]}
+    assert "src/auditex/auth.py" in artifact_paths
+    assert "src/auditex/auth_runtime.py" in artifact_paths
+    assert "token_input" in artifact_paths
+    assert result["citation_summary"]["artifact_count"] == 3
+    assert result["evidence_missing"] == []
+    assert result["tenant_id"] == "tenant-1"
+
+
 def test_list_adapters_tool_shape() -> None:
     result = list_adapters()
     assert result["count"] >= 1
     assert isinstance(result["adapters"], list)
+    assert "src/azure_tenant_audit/adapters/__init__.py" in [row["artifact_path"] for row in result["citations"]]
     adapter_names = {item["name"] for item in result["adapters"]}
     assert {"m365_cli", "m365dsc", "powershell_graph"}.issubset(adapter_names)
 
@@ -335,11 +486,11 @@ def test_build_probe_command_includes_app_credentials() -> None:
 
 def test_build_google_command_uses_workspace_path() -> None:
     command = build_google_command(
-        tenant_name="bolyki-google",
+        tenant_name="example-google",
         out_dir="outputs/google",
-        domain="bolyki.eu",
+        domain="example.com",
         customer_id="my_customer",
-        subject="bolyki@bolyki.eu",
+        subject="auditor@example.com",
         service_account_key="/creds/key.json",
         collectors="google_directory,google_reports",
         top=500,
@@ -347,7 +498,7 @@ def test_build_google_command_uses_workspace_path() -> None:
 
     assert command[:4] == [command[0], "-m", "auditex", "google"]
     assert "run" in command
-    assert command[command.index("--domain") + 1] == "bolyki.eu"
+    assert command[command.index("--domain") + 1] == "example.com"
     assert command[command.index("--service-account-key") + 1] == "/creds/key.json"
 
 
@@ -401,6 +552,10 @@ def test_list_response_actions_disabled_by_default(monkeypatch: pytest.MonkeyPat
     assert result["enabled"] is False
     assert result["count"] == 0
     assert result["actions"] == []
+    assert "src/auditex/features.py" in [row["artifact_path"] for row in result["citations"]]
+    assert "src/azure_tenant_audit/response.py" in [row["artifact_path"] for row in result["citations"]]
+    assert result["citation_summary"]["artifact_count"] == 2
+    assert result["evidence_missing"] == []
 
 
 def test_list_response_actions_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -409,6 +564,10 @@ def test_list_response_actions_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["enabled"] is True
     assert result["count"] >= 1
     assert "message_trace" in result["actions"]
+    assert "src/auditex/features.py" in [row["artifact_path"] for row in result["citations"]]
+    assert "src/azure_tenant_audit/response.py" in [row["artifact_path"] for row in result["citations"]]
+    assert result["citation_summary"]["artifact_count"] == 2
+    assert result["evidence_missing"] == []
 
 
 def test_build_response_command_uses_guarded_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -471,9 +630,15 @@ def test_summarize_run_reads_manifest(tmp_path: Path) -> None:
     run_dir = RunBundleBuilder(tmp_path).summary_md("# Audit Summary").build()
 
     summary = summarize_run(str(run_dir))
+    artifact_paths = {row["artifact_path"] for row in summary["citations"]}
     assert summary["manifest"]["tenant_name"] == "acme"
     assert summary["summary_md_path"].endswith("summary.md")
     assert summary["summary_md"] == "# Audit Summary"
+    assert "run-manifest.json" in artifact_paths
+    assert "summary.json" in artifact_paths
+    assert "summary.md" in artifact_paths
+    assert summary["citation_summary"]["artifact_count"] >= 3
+    assert summary["evidence_missing"] == []
 
 
 def test_summarize_run_reads_probe_artifacts(tmp_path: Path) -> None:
@@ -491,6 +656,10 @@ def test_summarize_run_reads_probe_artifacts(tmp_path: Path) -> None:
     assert summary["live_readiness"]["trust_level"] == "partial"
     assert summary["live_readiness_path"].endswith("live-readiness.json")
     assert summary["metadata"]["live_readiness"]["cannot_trust"] == ["mail"]
+    artifact_paths = {row["artifact_path"] for row in summary["citations"]}
+    assert "capability-matrix.json" in artifact_paths
+    assert "toolchain-readiness.json" in artifact_paths
+    assert "live-readiness.json" in artifact_paths
 
 
 def test_summarize_run_reads_probe_auth_context_artifact(tmp_path: Path) -> None:
@@ -498,6 +667,7 @@ def test_summarize_run_reads_probe_auth_context_artifact(tmp_path: Path) -> None
 
     summary = summarize_run(str(run_dir))
     assert summary["auth_context"]["name"] == "customer-token"
+    assert "auth-context.json" in [row["artifact_path"] for row in summary["citations"]]
 
 
 def test_api_inventory_tool_reads_customer_call_ledger(tmp_path: Path) -> None:
@@ -520,6 +690,8 @@ def test_api_inventory_tool_reads_customer_call_ledger(tmp_path: Path) -> None:
 
     assert result["present"] is True
     assert result["observed_calls"][0]["endpoint"] == "/users"
+    assert "api-inventory.json" in [row["artifact_path"] for row in result["citations"]]
+    assert result["evidence_missing"] is False
 
 
 def test_permissions_ledger_reads_scope_requirements(tmp_path: Path) -> None:
@@ -537,6 +709,7 @@ def test_permissions_ledger_reads_scope_requirements(tmp_path: Path) -> None:
                         "observed_permissions": [],
                         "missing_permissions": ["admin.reports.audit.readonly"],
                         "observed_call_count": 0,
+                        "minimum_role_hints": ["Google Workspace super admin or delegated admin"],
                     }
                 ],
                 "observed_calls": [],
@@ -571,7 +744,9 @@ def test_permissions_ledger_reads_scope_requirements(tmp_path: Path) -> None:
     assert result["counts"]["missing_permissions"] == 1
     assert result["missing_permissions"] == ["admin.reports.audit.readonly"]
     assert result["collectors"][0]["collector"] == "google_reports"
+    assert result["collectors"][0]["minimum_role_hints"] == ["Google Workspace super admin or delegated admin"]
     assert result["collectors"][0]["next_step"] == "Grant the missing readonly Reports scope."
+    assert "audit-plan.json" in [row["artifact_path"] for row in result["citations"]]
 
 
 def test_proof_table_tool_reads_customer_evidence_rows(tmp_path: Path) -> None:
@@ -609,6 +784,10 @@ def test_proof_table_tool_reads_customer_evidence_rows(tmp_path: Path) -> None:
     assert result["counts"]["supported"] == 1
     assert result["proof_table"][0]["collector"] == "google_gmail_settings"
     assert result["proof_table"][0]["record_key"] == "user:alice"
+    assert "reports/report-pack.json" in [row["artifact_path"] for row in result["citations"]]
+    assert "summary.json" in [row["artifact_path"] for row in result["citations"]]
+    assert result["citation_summary"]["artifact_count"] == 2
+    assert result["evidence_missing"] is False
 
 
 def test_enterprise_handoff_indexes_customer_review_artifacts(tmp_path: Path) -> None:
@@ -683,16 +862,135 @@ def test_enterprise_handoff_indexes_customer_review_artifacts(tmp_path: Path) ->
 
     result = enterprise_handoff(str(run_dir))
 
-    assert result["handoff_status"] == "ready"
+    assert result["handoff_status"] == "ready_with_limitations"
     assert result["safety"]["read_only"] is True
     assert result["safety"]["no_content_reads"] is True
+    assert result["safety"]["scope_risk"] == "read_only_scopes"
     assert result["counts"]["api_calls"] == 1
     assert result["counts"]["proof_rows"] == 1
     assert result["review_commands"]["api_calls"].startswith("auditex report api-calls")
+    assert any(item["surface"] == "scope_risk" for item in result["limitations"])
     artifacts = {row["path"]: row for row in result["artifacts"]}
     assert artifacts["api-inventory.json"]["present"] is True
     assert artifacts["api-inventory.json"]["sha256"]
     assert artifacts["reports/report-pack.json"]["present"] is True
+    assert "reports/report-pack.json" in [row["artifact_path"] for row in result["citations"]]
+    assert "validation.json" in [row["artifact_path"] for row in result["citations"]]
+    assert result["citation_summary"]["artifact_count"] == 4
+
+
+def test_api_inventory_tool_says_evidence_missing_when_artifact_absent(tmp_path: Path) -> None:
+    run_dir = RunBundleBuilder(tmp_path).build()
+
+    result = api_inventory(str(run_dir))
+
+    assert result["present"] is False
+    assert result["evidence_missing"] is True
+    assert result["citations"] == []
+
+
+def test_report_handoff_marks_collector_issue_findings_as_limitations(tmp_path: Path) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .manifest(platform="google_workspace")
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "google_workspace",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {"gmail_body_reads": False, "drive_file_content_reads": False},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "google_workspace",
+                "declared_collectors": [],
+                "observed_calls": [],
+                "counts": {"observed_calls": 0},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "partial"},
+            findings=[
+                {
+                    "id": "google.collector_issue:mailbox:alice@example.com",
+                    "rule_id": "google.collector_issue",
+                    "title": "Google Workspace collector issue",
+                    "severity": "high",
+                    "status": "open",
+                    "collector": "google_gmail_settings",
+                    "description": "Google Workspace evidence is incomplete for this Gmail delegates surface.",
+                    "returned_value": {
+                        "surface": "delegates",
+                        "error_class": "insufficient_permissions",
+                        "error": "delegates scope missing",
+                    },
+                    "evidence_refs": [
+                        {
+                            "artifact_path": "normalized/google_mailbox_settings.json",
+                            "artifact_kind": "normalized_json",
+                            "collector": "google_gmail_settings",
+                            "record_key": "google_mailbox_setting:alice@example.com",
+                        }
+                    ],
+                }
+            ],
+            evidence_paths=["normalized/google_mailbox_settings.json"],
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+
+    result = enterprise_handoff(str(run_dir))
+
+    assert result["handoff_status"] == "ready_with_limitations"
+    assert any(
+        item["surface"] == "collector_issue"
+        and item["collector"] == "google_gmail_settings"
+        and item["subsurface"] == "delegates"
+        and item["error_class"] == "insufficient_permissions"
+        for item in result["limitations"]
+    )
+
+
+def test_list_blockers_tool_exposes_citations(tmp_path: Path) -> None:
+    run_dir = RunBundleBuilder(tmp_path).blockers([{"collector": "identity", "message": "Missing Graph scope."}]).build()
+
+    result = list_blockers(str(run_dir))
+
+    assert result["evidence_missing"] is False
+    assert result["blockers"][0]["collector"] == "identity"
+    assert result["citations"] == [
+        {
+            "artifact_path": "blockers/blockers.json",
+            "reason": "Recorded collector and runtime blockers for this run.",
+        }
+    ]
+    assert result["citation_summary"]["artifact_count"] == 1
+
+
+def test_list_blockers_tool_says_evidence_missing_when_artifact_absent(tmp_path: Path) -> None:
+    run_dir = RunBundleBuilder(tmp_path).build()
+
+    result = list_blockers(str(run_dir))
+
+    assert result["evidence_missing"] is True
+    assert "blockers" not in result
+    assert result["citations"] == []
 
 
 def test_report_api_calls_command_prints_markdown(tmp_path: Path, capsys) -> None:
@@ -814,6 +1112,88 @@ def test_report_handoff_command_prints_markdown(tmp_path: Path, capsys) -> None:
     assert "auditex report proof-table" in output
 
 
+def test_report_handoff_marks_missing_permissions_and_blocked_collectors_as_limitations(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .manifest(platform="google_workspace")
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "google_workspace",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {"gmail_body_reads": False, "drive_file_content_reads": False},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "google_workspace",
+                "declared_collectors": [
+                    {
+                        "collector": "google_reports",
+                        "required_permissions": ["admin.reports.audit.readonly"],
+                        "missing_permissions": ["admin.reports.audit.readonly"],
+                    }
+                ],
+                "observed_calls": [],
+                "counts": {"observed_calls": 0},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .blockers(
+            [
+                {
+                    "collector": "google_reports",
+                    "message": "Missing readonly Reports scope.",
+                    "blocker_kind": "auth_scope",
+                }
+            ]
+        )
+        .report_pack(summary={"tenant_name": "acme", "overall_status": "partial"}, findings=[], evidence_paths=[])
+        .build()
+    )
+    write_json(
+        run_dir / "audit-plan.json",
+        {
+            "platform": "google_workspace",
+            "quality_gate": {"status": "partial"},
+            "evidence_gates": [
+                {
+                    "collector": "google_reports",
+                    "status": "blocked_by_scope",
+                    "blocker_kind": "auth_scope",
+                    "blocker_reason": "Missing readonly Reports scope.",
+                    "missing_permissions": ["admin.reports.audit.readonly"],
+                    "required_permissions": ["admin.reports.audit.readonly"],
+                    "next_step": "Grant the missing readonly Reports scope.",
+                }
+            ],
+        },
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+
+    rc = auditex_cli.main(["report", "handoff", str(run_dir), "--format", "md"])
+    output = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Status: ready_with_limitations" in output
+    assert "## Limitations" in output
+    assert "Missing permissions affect google_reports: admin.reports.audit.readonly." in output
+    assert "Blocked collectors require reviewer attention: google_reports." in output
+
+
 def test_report_customer_docs_can_write_output_files(tmp_path: Path, capsys) -> None:
     run_dir = (
         RunBundleBuilder(tmp_path)
@@ -892,7 +1272,20 @@ def _build_customer_pack_run(tmp_path: Path) -> Path:
                 "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
             }
         )
-        .report_pack(summary={"tenant_name": "acme", "overall_status": "ok"}, findings=[], evidence_paths=[])
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[],
+            evidence_paths=[],
+            citations=[{"artifact_path": "summary.json", "reason": "Synthetic summary artifact for pack verification."}],
+            citation_summary={
+                "citation_count": 1,
+                "artifact_count": 1,
+                "artifacts": ["summary.json"],
+                "record_key_count": 0,
+                "json_pointer_count": 0,
+                "evidence_missing": False,
+            },
+        )
         .build()
     )
     write_json(
@@ -942,13 +1335,19 @@ def test_report_customer_pack_writes_complete_handoff_folder(tmp_path: Path, cap
     assert copied["api-inventory.json"]["present"] is True
     assert copied["api-inventory.json"]["sha256"]
     assert copied["live-readiness.json"]["present"] is False
-    assert (output_dir / "README.md").read_text(encoding="utf-8").startswith("# Auditex Customer Pack")
+    readme_text = (output_dir / "README.md").read_text(encoding="utf-8")
+    assert readme_text.startswith("# Auditex Customer Pack")
+    assert "- Validation: pass" in readme_text
+    assert "reviewer index" in readme_text
     checksums = (output_dir / "checksums.sha256").read_text(encoding="utf-8")
     assert "api-calls.md" in checksums
     assert "permissions.md" in checksums
     assert "source-artifacts/api-inventory.json" in checksums
     assert (output_dir / "handoff.md").read_text(encoding="utf-8").startswith("# Auditex Enterprise Handoff")
-    assert json.loads((output_dir / "pack-manifest.json").read_text(encoding="utf-8"))["kind"] == "auditex_enterprise_handoff_pack"
+    manifest = json.loads((output_dir / "pack-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["kind"] == "auditex_enterprise_handoff_pack"
+    assert manifest["source"]["validation_summary"]["status"] == "pass"
+    assert manifest["source"]["reviewer_summary"]["counts"]["start_here"] >= 1
 
     assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 0
     verification = json.loads(capsys.readouterr().out)
@@ -993,6 +1392,666 @@ def test_report_verify_pack_detects_tampered_file(tmp_path: Path, capsys) -> Non
     assert any(issue["code"] == "checksum_mismatch" for issue in verification["issues"])
 
 
+def test_report_verify_pack_fails_for_missing_manifest_validation_summary(tmp_path: Path, capsys) -> None:
+    run_dir = _build_customer_pack_run(tmp_path)
+    output_dir = tmp_path / "customer-pack"
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    manifest_path = output_dir / "pack-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source"].pop("validation_summary", None)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_manifest_validation_summary" for issue in verification["issues"])
+
+
+def test_enterprise_handoff_flags_stale_accepted_risk(tmp_path: Path) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[
+                {
+                    "id": "f1",
+                    "rule_id": "identity.admin_mfa_missing",
+                    "title": "Accepted but expired",
+                    "severity": "high",
+                    "status": "accepted_risk",
+                    "waiver": {"expires_on": "2020-01-01", "comment": "Old exception"},
+                    "evidence_refs": [
+                        {
+                            "artifact_path": "summary.json",
+                            "artifact_kind": "summary",
+                            "collector": "identity",
+                            "record_key": "admin",
+                        }
+                    ],
+                }
+            ],
+            evidence_paths=["summary.json"],
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+
+    result = enterprise_handoff(str(run_dir))
+
+    assert result["handoff_status"] == "ready_with_limitations"
+    assert result["accepted_risks"]["count"] == 1
+    assert result["accepted_risks"]["stale_count"] == 1
+    assert result["quality"]["stale_accepted_risk_count"] == 1
+
+
+def test_enterprise_handoff_exposes_reviewer_and_validation_summaries(tmp_path: Path) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "google_workspace",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "google_workspace",
+                "declared_collectors": [{"collector": "google_gmail_settings"}],
+                "observed_calls": [{"collector": "google_gmail_settings", "endpoint": "gmail.users.settings", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "partial"},
+            findings=[],
+            evidence_paths=[],
+            reviewer_index={
+                "start_here": [{"section": "executive_summary", "artifact_path": "reports/report-pack.json", "reason": "Start here."}],
+                "prove_this": [{"finding_id": "f1", "proof_status": "supported", "artifact_path": "summary.json", "record_key": "admin"}],
+                "known_limits": [{"surface": "mail", "status": "partial", "message": "mail gap"}],
+            },
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+
+    result = enterprise_handoff(str(run_dir))
+
+    assert result["validation_summary"]["status"] == "pass"
+    assert result["validation_summary"]["issue_count"] == 0
+    assert result["reviewer_summary"]["start_here"][0]["section"] == "executive_summary"
+    assert result["reviewer_summary"]["prove_this"][0]["finding_id"] == "f1"
+    assert result["reviewer_summary"]["known_limits"][0]["surface"] == "mail"
+
+
+def test_report_verify_pack_fails_for_stale_accepted_risk(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[
+                {
+                    "id": "f1",
+                    "rule_id": "identity.admin_mfa_missing",
+                    "title": "Accepted but expired",
+                    "severity": "high",
+                    "status": "accepted_risk",
+                    "waiver": {"expires_on": "2020-01-01", "comment": "Old exception"},
+                    "evidence_refs": [
+                        {
+                            "artifact_path": "summary.json",
+                            "artifact_kind": "summary",
+                            "collector": "identity",
+                            "record_key": "admin",
+                        }
+                    ],
+                }
+            ],
+            evidence_paths=["summary.json"],
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "stale_accepted_risk" for issue in verification["issues"])
+
+
+def test_report_verify_pack_fails_for_missing_report_pack_citations(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[],
+            evidence_paths=["summary.json"],
+            citations=[],
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_report_pack_citations" for issue in verification["issues"])
+
+
+def test_report_verify_pack_fails_for_missing_report_pack_citation_summary(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[],
+            proof_table=[],
+            evidence_paths=["summary.json"],
+            citations=[{"artifact_path": "summary.json", "reason": "Proof source."}],
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_report_pack_citation_summary" for issue in verification["issues"])
+
+
+def test_report_verify_pack_fails_for_missing_generated_helper_citation_summary(tmp_path: Path, capsys) -> None:
+    run_dir = _build_customer_pack_run(tmp_path)
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    helper_path = output_dir / "api-calls.json"
+    helper_payload = json.loads(helper_path.read_text(encoding="utf-8"))
+    helper_payload.pop("citation_summary", None)
+    helper_path.write_text(json.dumps(helper_payload), encoding="utf-8")
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_generated_helper_citation_summary" for issue in verification["issues"])
+
+
+def test_report_verify_pack_fails_when_generated_helper_proof_record_key_missing_from_citations(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[],
+            proof_table=[
+                {
+                    "finding_id": "finding-1",
+                    "rule_id": "identity.admin_mfa_missing",
+                    "proof_status": "supported",
+                    "collector": "identity",
+                    "artifact_path": "summary.json",
+                    "artifact_kind": "summary",
+                    "record_key": "admin",
+                }
+            ],
+            evidence_paths=["summary.json"],
+            citations=[
+                {"artifact_path": "summary.json", "reason": "Proof source.", "record_key": "admin"},
+            ],
+            citation_summary={
+                "citation_count": 1,
+                "artifact_count": 1,
+                "artifacts": ["summary.json"],
+                "record_key_count": 1,
+                "json_pointer_count": 0,
+                "evidence_missing": False,
+            },
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    helper_path = output_dir / "proof-table.json"
+    helper_payload = json.loads(helper_path.read_text(encoding="utf-8"))
+    helper_payload["citations"] = [
+        (
+            {"artifact_path": row.get("artifact_path"), "reason": row.get("reason")}
+            if row.get("artifact_path") == "summary.json" and row.get("record_key") == "admin"
+            else row
+        )
+        for row in helper_payload.get("citations", [])
+    ]
+    helper_payload["citation_summary"] = {
+        "citation_count": len(helper_payload["citations"]),
+        "artifact_count": len({row["artifact_path"] for row in helper_payload["citations"] if row.get("artifact_path")}),
+        "artifacts": sorted({row["artifact_path"] for row in helper_payload["citations"] if row.get("artifact_path")}),
+        "record_key_count": len({row["record_key"] for row in helper_payload["citations"] if row.get("record_key")}),
+        "json_pointer_count": sum(1 for row in helper_payload["citations"] if row.get("json_pointer")),
+        "evidence_missing": not helper_payload["citations"],
+    }
+    helper_path.write_text(json.dumps(helper_payload), encoding="utf-8")
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_generated_helper_proof_record_key_citation" for issue in verification["issues"])
+
+
+def test_report_verify_pack_fails_when_proof_artifact_missing_from_citations(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[],
+            proof_table=[
+                {
+                    "finding_id": "finding-1",
+                    "rule_id": "identity.admin_mfa_missing",
+                    "proof_status": "supported",
+                    "collector": "identity",
+                    "artifact_path": "normalized/users.json",
+                    "artifact_kind": "normalized_json",
+                    "record_key": "user:1",
+                }
+            ],
+            evidence_paths=["normalized/users.json"],
+            citations=[{"artifact_path": "summary.json", "reason": "Wrong source."}],
+            citation_summary={
+                "citation_count": 1,
+                "artifact_count": 1,
+                "artifacts": ["summary.json"],
+                "record_key_count": 0,
+                "json_pointer_count": 0,
+                "evidence_missing": False,
+            },
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_report_pack_proof_citation" for issue in verification["issues"])
+
+
+def test_report_verify_pack_fails_when_proof_record_key_missing_from_citations(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[],
+            proof_table=[
+                {
+                    "finding_id": "finding-1",
+                    "rule_id": "identity.admin_mfa_missing",
+                    "proof_status": "supported",
+                    "collector": "identity",
+                    "artifact_path": "normalized/users.json",
+                    "artifact_kind": "normalized_json",
+                    "record_key": "user:1",
+                }
+            ],
+            evidence_paths=["normalized/users.json"],
+            citations=[{"artifact_path": "normalized/users.json", "reason": "Artifact only."}],
+            citation_summary={
+                "citation_count": 1,
+                "artifact_count": 1,
+                "artifacts": ["normalized/users.json"],
+                "record_key_count": 0,
+                "json_pointer_count": 0,
+                "evidence_missing": False,
+            },
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_report_pack_proof_record_key_citation" for issue in verification["issues"])
+
+
+def test_report_verify_pack_fails_when_proof_json_pointer_missing_from_citations(tmp_path: Path, capsys) -> None:
+    run_dir = (
+        RunBundleBuilder(tmp_path)
+        .data_handling(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "read_only": True,
+                "content_reads": False,
+                "write_actions": False,
+                "provider_assertions": {},
+            }
+        )
+        .api_inventory(
+            {
+                "schema_version": "2026-04-21",
+                "platform": "m365",
+                "declared_collectors": [{"collector": "identity"}],
+                "observed_calls": [{"collector": "identity", "endpoint": "/users", "method": "GET"}],
+                "counts": {"observed_calls": 1},
+                "safety": {"read_only": True, "no_content_reads": True, "write_actions": False},
+            }
+        )
+        .report_pack(
+            summary={"tenant_name": "acme", "overall_status": "ok"},
+            findings=[],
+            proof_table=[
+                {
+                    "finding_id": "finding-1",
+                    "rule_id": "identity.admin_mfa_missing",
+                    "proof_status": "supported",
+                    "collector": "identity",
+                    "artifact_path": "normalized/users.json",
+                    "artifact_kind": "normalized_json",
+                    "record_key": "user:1",
+                    "json_pointer": "/records/0",
+                }
+            ],
+            evidence_paths=["normalized/users.json"],
+            citations=[
+                {
+                    "artifact_path": "normalized/users.json",
+                    "record_key": "user:1",
+                    "reason": "Artifact and record only.",
+                }
+            ],
+            citation_summary={
+                "citation_count": 1,
+                "artifact_count": 1,
+                "artifacts": ["normalized/users.json"],
+                "record_key_count": 1,
+                "json_pointer_count": 0,
+                "evidence_missing": False,
+            },
+        )
+        .build()
+    )
+    write_json(
+        run_dir / "validation.json",
+        {
+            "schema_version": "2026-04-21",
+            "contract_version": "2026-04-21",
+            "valid": True,
+            "issue_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+        },
+    )
+    output_dir = tmp_path / "customer-pack"
+
+    assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 1
+    verification = json.loads(capsys.readouterr().out)
+
+    assert verification["valid"] is False
+    assert any(issue["code"] == "missing_report_pack_proof_json_pointer_citation" for issue in verification["issues"])
+
+
 def test_summarize_run_reads_response_auth_context_artifact(tmp_path: Path) -> None:
     run_dir = (
         RunBundleBuilder(tmp_path)
@@ -1028,6 +2087,9 @@ def test_summarize_run_reads_report_pack_and_action_plan_artifacts(tmp_path: Pat
     assert summary["report_pack"]["summary"]["overall_status"] == "partial"
     assert summary["action_plan_path"].endswith("reports/action-plan.json")
     assert summary["action_plan"]["blocked"] == []
+    artifact_paths = {row["artifact_path"] for row in summary["citations"]}
+    assert "reports/report-pack.json" in artifact_paths
+    assert "reports/action-plan.json" in artifact_paths
 
 
 def test_analyze_report_exposes_basic_license_intelligence_for_mcp(tmp_path: Path) -> None:
@@ -1065,6 +2127,9 @@ def test_analyze_report_exposes_basic_license_intelligence_for_mcp(tmp_path: Pat
     assert result["license_profile"]["requires_premium_license"] is False
     assert result["replay_context"]["requires_live_tenant"] is False
     assert result["auditor_score"]["score"] > 0
+    assert "reports/report-pack.json" in [row["artifact_path"] for row in result["citations"]]
+    assert result["citation_summary"]["artifact_count"] == 1
+    assert result["evidence_missing"] == []
 
 
 def test_summarize_run_exposes_coverage_gaps_for_mcp_clients(tmp_path: Path) -> None:
@@ -1112,6 +2177,17 @@ def test_summarize_run_exposes_provider_scorecard_for_mcp_clients(tmp_path: Path
     assert summary["provider_scorecard"] == scorecard
 
 
+def test_summarize_run_reports_missing_core_evidence(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run-missing"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run-manifest.json").write_text(json.dumps({"tenant_name": "acme", "run_id": "run-1"}), encoding="utf-8")
+
+    summary = summarize_run(str(run_dir))
+
+    assert "run-manifest.json" in [row["artifact_path"] for row in summary["citations"]]
+    assert summary["evidence_missing"] == ["summary.json"]
+
+
 def test_compare_many_runs_uses_same_tenant_gate(tmp_path: Path) -> None:
     run_a = (
         RunBundleBuilder(tmp_path, name="run-a")
@@ -1128,6 +2204,8 @@ def test_compare_many_runs_uses_same_tenant_gate(tmp_path: Path) -> None:
 
     assert result["compare_context"]["same_tenant"] is True
     assert len(result["runs"]) == 2
+    assert "run-manifest.json" in [row["artifact_path"] for row in result["citations"]]
+    assert "normalized/*.json" in result["evidence_missing"]
 
 
 def test_compare_many_runs_blocks_cross_provider_runs(tmp_path: Path) -> None:
@@ -1149,6 +2227,7 @@ def test_compare_many_runs_blocks_cross_provider_runs(tmp_path: Path) -> None:
     assert result["baseline_diff"]["reason"] == "same_platform_required"
     assert result["baseline_diff"]["compare_context"]["same_tenant"] is True
     assert result["baseline_diff"]["compare_context"]["same_platform"] is False
+    assert result["baseline_diff"]["citation_summary"]["artifact_count"] == 1
 
 
 def test_preview_report_and_notification_are_read_only_helpers(tmp_path: Path) -> None:
@@ -1170,6 +2249,10 @@ def test_preview_report_and_notification_are_read_only_helpers(tmp_path: Path) -
 
     assert report["format"] == "json"
     assert "\"tenant_name\": \"acme\"" in report["content"]
+    assert "summary.json" in [row["artifact_path"] for row in report["citations"]]
+    assert "reports/report-pack.json" in [row["artifact_path"] for row in report["citations"]]
+    assert "api-inventory.json" in report["evidence_missing"]
+    assert "normalized/*.json" in report["evidence_missing"]
     assert notification["dry_run"] is True
     assert notification["payload"]["tenant_name"] == "acme"
 
@@ -1181,8 +2264,10 @@ def test_export_list_and_rules_inventory_helpers_return_rows() -> None:
 
     assert "exporters" in exporters
     assert exporters["exporters"]
+    assert "src/auditex/exporters.py" in [row["artifact_path"] for row in exporters["citations"]]
     assert rules["count"] >= 1
     assert google_rules["count"] >= 1
+    assert "configs/rule-packs.json" in [row["artifact_path"] for row in rules["citations"]]
     assert {row["platform"] for row in google_rules["rules"]} == {"google_workspace"}
 
 

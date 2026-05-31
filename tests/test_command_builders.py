@@ -123,12 +123,12 @@ def test_response_command_builder_includes_explicit_override_gates() -> None:
 def test_google_run_command_builds_domain_delegation_path() -> None:
     command = build_google_run_command(
         GoogleRunCommandSpec(
-            tenant_name="bolyki-google",
+            tenant_name="example-google",
             out_dir="outputs/google",
             auth="domain-delegation",
-            domain="bolyki.eu",
+            domain="example.com",
             customer_id="my_customer",
-            subject="bolyki@bolyki.eu",
+            subject="auditor@example.com",
             service_account_key="/creds/key.json",
             collector_preset="core-security",
             collectors=["google_directory", "google_reports"],

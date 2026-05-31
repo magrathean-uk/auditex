@@ -88,6 +88,8 @@ def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, mo
     assert manifest["capability_matrix_path"] == "capability-matrix.json"
     assert manifest["toolchain_readiness_path"] == "toolchain-readiness.json"
     assert manifest["live_readiness_path"] == "live-readiness.json"
+    assert manifest["provider_adapter_version"] == "2026-05-31"
+    assert manifest["api_inventory_recorder_version"] == "2026-05-31"
     assert (run_dir / "index" / "evidence.sqlite").exists()
 
 

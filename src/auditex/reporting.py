@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.autopilot import build_basic_license_intelligence
+from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.resources import resolve_resource_path
+from azure_tenant_audit.waivers import accepted_risk_summary
 
 from .run_bundle import RunBundle
 
@@ -40,6 +42,8 @@ _SECTION_ORDER = (
     "summary",
     "executive_summary",
     "technical_appendix",
+    "reviewer_index",
+    "citation_summary",
     "limitations",
     "next_actions",
     "license_profile",
@@ -118,6 +122,112 @@ def _provider_label(platform: str) -> str:
     return labels.get(platform, platform.replace("_", " ").title())
 
 
+def _scope_risk_limitation(
+    *,
+    platform: str,
+    scope_risk: str | None,
+    write_capable_scopes: list[str],
+) -> dict[str, Any] | None:
+    if not scope_risk:
+        return None
+    provider = _provider_label(platform)
+    if scope_risk == "write_capable_scope_present":
+        message = (
+            f"{provider} auth included write-capable scopes. Auditex still stayed read-only, "
+            "but reviewers should treat the scope set as a higher-trust limitation."
+        )
+    else:
+        message = (
+            f"{provider} read settings can require broad scopes. Auditex still stayed read-only, "
+            "but reviewers should confirm the scope set matches the intended audit surface."
+        )
+    limitation = {
+        "surface": "scope_risk",
+        "status": scope_risk,
+        "message": message,
+    }
+    if write_capable_scopes:
+        limitation["write_capable_scopes"] = write_capable_scopes
+    return limitation
+
+
+def _permission_limitation(permissions_payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    missing_permissions = [str(item) for item in permissions_payload.get("missing_permissions") or [] if str(item)]
+    if not missing_permissions:
+        return None
+    affected_collectors = [
+        str(row.get("collector"))
+        for row in _dict_rows(permissions_payload.get("collectors"))
+        if row.get("collector") and [str(item) for item in row.get("missing_permissions") or [] if str(item)]
+    ]
+    collector_text = ", ".join(sorted(set(affected_collectors))) or "unknown collectors"
+    permission_text = ", ".join(missing_permissions)
+    return {
+        "surface": "permissions",
+        "status": "missing_permissions",
+        "message": f"Missing permissions affect {collector_text}: {permission_text}.",
+        "collectors": sorted(set(affected_collectors)),
+        "missing_permissions": missing_permissions,
+    }
+
+
+def _blocked_collectors_limitation(blockers: list[dict[str, Any]]) -> dict[str, Any] | None:
+    blocked_collectors = [str(row.get("collector") or row.get("id")) for row in blockers if str(row.get("collector") or row.get("id"))]
+    if not blocked_collectors:
+        return None
+    return {
+        "surface": "blocked_collectors",
+        "status": "blocked",
+        "message": f"Blocked collectors require reviewer attention: {', '.join(sorted(set(blocked_collectors)))}.",
+        "collectors": sorted(set(blocked_collectors)),
+    }
+
+
+def _collector_issue_limitations(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    limitations: list[dict[str, Any]] = []
+    for finding in findings:
+        rule_id = str(finding.get("rule_id") or "")
+        if not rule_id.endswith("collector_issue"):
+            continue
+        collector = str(finding.get("collector") or "unknown")
+        finding_id = str(finding.get("id") or "")
+        returned_value = finding.get("returned_value")
+        message = str(finding.get("description") or "Collector evidence is incomplete for this surface.")
+        limitation = {
+            "surface": "collector_issue",
+            "status": "evidence_incomplete",
+            "collector": collector,
+            "finding_id": finding_id,
+            "message": message,
+        }
+        if isinstance(returned_value, Mapping):
+            if returned_value.get("surface"):
+                limitation["subsurface"] = returned_value.get("surface")
+            if returned_value.get("error_class"):
+                limitation["error_class"] = returned_value.get("error_class")
+        limitations.append(limitation)
+    return limitations
+
+
+def _citation(
+    artifact_path: str,
+    *,
+    reason: str,
+    record_key: str | None = None,
+    json_pointer: str | None = None,
+) -> dict[str, Any]:
+    payload = {"artifact_path": artifact_path, "reason": reason}
+    if record_key:
+        payload["record_key"] = record_key
+    if json_pointer:
+        payload["json_pointer"] = json_pointer
+    return payload
+
+
+def _dedupe_citations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return dedupe_citations(rows)
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, default=str)
 
@@ -167,6 +277,93 @@ def _load_normalized_sections(run_path: Path) -> dict[str, Any]:
     return sections
 
 
+def _preview_section_citations(
+    *,
+    run_path: Path,
+    bundle: RunBundle,
+    selected_sections: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    citations: list[dict[str, Any]] = []
+    missing: list[str] = []
+
+    manifest_path = bundle.path("run-manifest.json")
+    if "manifest" in selected_sections:
+        if manifest_path.exists():
+            citations.append(_citation("run-manifest.json", reason="Run identity and artifact pointers for this preview."))
+        else:
+            missing.append("run-manifest.json")
+
+    summary_path = bundle._artifact_path("summary_path", "summary.json")
+    if "summary" in selected_sections:
+        if summary_path.exists():
+            citations.append(_citation(_relative_source(summary_path, run_path), reason="Top-level run summary for this preview."))
+        else:
+            missing.append("summary.json")
+
+    report_pack_path, report_pack_payload = bundle.report_pack()
+    report_pack = _mapping(report_pack_payload)
+    report_pack_sections = {
+        "executive_summary",
+        "technical_appendix",
+        "reviewer_index",
+        "citation_summary",
+        "limitations",
+        "next_actions",
+        "license_profile",
+        "auditor_score",
+        "attack_paths",
+        "control_simulator",
+        "report_qa",
+        "replay_context",
+    }
+    if report_pack_sections.intersection(selected_sections) or "proof_table" in selected_sections:
+        if report_pack_path is not None:
+            citations.append(_citation(_relative_source(report_pack_path, run_path), reason="Report pack sections used in this preview."))
+        else:
+            missing.append("reports/report-pack.json")
+
+    findings_path, _ = bundle.findings()
+    if "findings" in selected_sections:
+        if findings_path is not None:
+            citations.append(_citation(_relative_source(findings_path, run_path), reason="Finding register used in this preview."))
+        elif report_pack_path is None:
+            missing.append("findings/findings.json")
+
+    action_plan_path, _ = bundle.action_plan()
+    if "action_plan" in selected_sections:
+        if action_plan_path is not None:
+            citations.append(_citation(_relative_source(action_plan_path, run_path), reason="Action-plan rows used in this preview."))
+        elif report_pack_path is None:
+            missing.append("reports/action-plan.json")
+
+    api_inventory_path, _ = bundle.api_inventory()
+    if "api_inventory" in selected_sections:
+        if api_inventory_path is not None:
+            citations.append(_citation(_relative_source(api_inventory_path, run_path), reason="API inventory used in this preview."))
+        else:
+            missing.append("api-inventory.json")
+
+    blockers_path, _ = bundle.blockers()
+    if "blockers" in selected_sections:
+        if blockers_path is not None:
+            citations.append(_citation(_relative_source(blockers_path, run_path), reason="Blocker rows used in this preview."))
+        else:
+            missing.append("blockers/blockers.json")
+
+    if "normalized" in selected_sections:
+        normalized_dir = run_path / "normalized"
+        normalized_paths = sorted(normalized_dir.glob("*.json"), key=lambda item: item.name) if normalized_dir.is_dir() else []
+        if normalized_paths:
+            citations.extend(
+                _citation(_relative_source(path, run_path), reason="Normalized evidence section used in this preview.")
+                for path in normalized_paths
+            )
+        else:
+            missing.append("normalized/*.json")
+
+    return _dedupe_citations(citations), sorted(set(missing))
+
+
 def load_report_bundle(run_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     bundle = RunBundle(run_path)
@@ -192,6 +389,8 @@ def load_report_bundle(run_dir: str | Path) -> dict[str, Any]:
     for key in (
         "executive_summary",
         "technical_appendix",
+        "reviewer_index",
+        "citation_summary",
         "limitations",
         "next_actions",
         "license_profile",
@@ -211,8 +410,9 @@ def analyze_report(run_dir: str | Path) -> dict[str, Any]:
     bundle = RunBundle(run_path)
     manifest = bundle.manifest()
     report_summary = bundle.report_summary()
-    _, report_pack_payload = bundle.report_pack()
+    report_pack_path, report_pack_payload = bundle.report_pack()
     report_pack = _mapping(report_pack_payload)
+    findings_path, _ = bundle.findings()
     findings = bundle.finding_rows()
     evidence_paths = report_pack.get("evidence_paths")
     if not isinstance(evidence_paths, list):
@@ -226,8 +426,28 @@ def analyze_report(run_dir: str | Path) -> dict[str, Any]:
         evidence_paths=[str(item) for item in evidence_paths],
         coverage_gaps=[dict(item) for item in coverage_gaps if isinstance(item, Mapping)] if isinstance(coverage_gaps, list) else [],
     )
+    citations = _dedupe_citations(
+        (
+            [_citation(_relative_source(report_pack_path, run_path), reason="Report-pack summary and evidence paths analyzed for this run.")]
+            if report_pack_path is not None
+            else []
+        )
+        + (
+            [_citation(_relative_source(findings_path, run_path), reason="Finding register analyzed for this run.")]
+            if findings_path is not None and report_pack_path is None
+            else []
+        )
+    )
+    evidence_missing: list[str] = []
+    if report_pack_path is None:
+        evidence_missing.append("reports/report-pack.json")
+    if not findings and findings_path is None and report_pack_path is None:
+        evidence_missing.append("findings/findings.json")
     return {
         "run_dir": str(run_path),
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
+        "evidence_missing": sorted(set(evidence_missing)),
         **intelligence,
     }
 
@@ -237,10 +457,18 @@ def api_call_inventory(run_dir: str | Path) -> dict[str, Any]:
     bundle = RunBundle(run_path)
     path, payload = bundle.api_inventory()
     inventory = _mapping(payload)
+    citations = (
+        [_citation(_relative_source(path, run_path), reason="API call ledger for this completed run.")]
+        if path is not None
+        else []
+    )
     return {
         "run_dir": str(run_path),
         "api_inventory_path": str(path) if path is not None else str(bundle.path("api-inventory.json")),
         "present": path is not None,
+        "evidence_missing": path is None,
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
         **inventory,
     }
 
@@ -282,17 +510,34 @@ def permissions_ledger(run_dir: str | Path) -> dict[str, Any]:
                 "required_permissions": required,
                 "observed_permissions": observed,
                 "missing_permissions": missing,
+                "minimum_role_hints": [str(item) for item in declaration.get("minimum_role_hints") or [] if str(item)],
+                "tool_requirements": [str(item) for item in declaration.get("tool_requirements") or [] if str(item)],
                 "observed_call_count": declaration.get("observed_call_count", 0),
                 "blocker_kind": gate.get("blocker_kind"),
                 "blocker_reason": gate.get("blocker_reason"),
                 "next_step": gate.get("next_step"),
             }
         )
+    citations = _dedupe_citations(
+        (
+            [_citation(_relative_source(Path(api["api_inventory_path"]), run_path), reason="Declared collector permissions for this run.")]
+            if api.get("present")
+            else []
+        )
+        + (
+            [_citation(_relative_source(bundle.audit_plan()[0], run_path), reason="Evidence gate and missing-permission plan.")]
+            if bundle.audit_plan()[0] is not None
+            else []
+        )
+    )
     return {
         "run_dir": str(run_path),
         "platform": api.get("platform") or audit_plan.get("platform") or bundle.metadata().get("platform"),
         "api_inventory_path": api.get("api_inventory_path"),
         "audit_plan_path": str(bundle.audit_plan()[0]) if bundle.audit_plan()[0] is not None else str(bundle.path("audit-plan.json")),
+        "evidence_missing": not api.get("present") or bundle.audit_plan()[0] is None,
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
         "counts": {
             "collectors": len(rows),
             "required_permissions": len(required_permissions),
@@ -327,14 +572,35 @@ def proof_table(run_dir: str | Path) -> dict[str, Any]:
         finding_id = _text(row.get("finding_id") or row.get("id"))
         if status != "supported" and finding_id:
             unsupported_claims.append(finding_id)
+    citations = (
+        [_citation(_relative_source(path, run_path), reason="Proof table source for finding-to-evidence mapping.")]
+        if path is not None
+        else []
+    )
+    for row in rows:
+        artifact_path = _text(row.get("artifact_path")).strip()
+        if not artifact_path:
+            continue
+        citations.append(
+            _citation(
+                artifact_path,
+                reason="Artifact referenced by proof row.",
+                record_key=_text(row.get("record_key")).strip() or None,
+                json_pointer=_text(row.get("json_pointer")).strip() or None,
+            )
+        )
+    citations = _dedupe_citations(citations)
     return {
         "run_dir": str(run_path),
         "report_pack_path": str(path) if path is not None else str(bundle.path("reports/report-pack.json")),
         "present": path is not None,
+        "evidence_missing": path is None or not rows,
         "summary": bundle.report_summary(),
         "counts": counts,
         "unsupported_claims": sorted(set(unsupported_claims)),
         "evidence_paths": [str(item) for item in report_pack.get("evidence_paths") or [] if str(item)],
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
         "proof_table": rows,
     }
 
@@ -361,6 +627,129 @@ def _artifact_row(run_path: Path, relative: str, purpose: str, *, customer_safe:
     }
 
 
+def _validation_summary(validation: Mapping[str, Any], *, path: str) -> dict[str, Any]:
+    valid = validation.get("valid") if isinstance(validation, Mapping) else None
+    issue_count = int(validation.get("issue_count") or 0) if isinstance(validation, Mapping) else 0
+    error_count = int(validation.get("error_count") or 0) if isinstance(validation, Mapping) else 0
+    warning_count = int(validation.get("warning_count") or 0) if isinstance(validation, Mapping) else 0
+    status = "pass"
+    if valid is False or error_count:
+        status = "fail"
+    elif warning_count or issue_count:
+        status = "warn"
+    return {
+        "status": status,
+        "valid": valid,
+        "issue_count": issue_count,
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "path": path,
+    }
+
+
+def _reviewer_summary(
+    *,
+    report_pack: Mapping[str, Any],
+    proof_rows: list[dict[str, Any]],
+    limitations: list[dict[str, Any]],
+    blockers: list[dict[str, Any]],
+    unsupported_claims: list[str],
+    stale_accepted: list[dict[str, Any]],
+) -> dict[str, Any]:
+    reviewer_index = _mapping(report_pack.get("reviewer_index"))
+    start_here = _dict_rows(reviewer_index.get("start_here"))
+    if not start_here:
+        start_here = [
+            {
+                "section": "handoff",
+                "artifact_path": "handoff.json",
+                "reason": "Start with overall handoff status, safety, contract, and review commands.",
+            },
+            {
+                "section": "executive_summary",
+                "artifact_path": "reports/report-pack.json",
+                "reason": "Review top findings and overall posture before drilling into proof.",
+            },
+            {
+                "section": "proof_table",
+                "artifact_path": "reports/report-pack.json",
+                "reason": "Verify important claims against exact artifacts and record keys.",
+            },
+            {
+                "section": "validation",
+                "artifact_path": "validation.json",
+                "reason": "Confirm contract validation result before customer handoff.",
+            },
+        ]
+    prove_this = _dict_rows(reviewer_index.get("prove_this"))
+    if not prove_this:
+        seen: set[str] = set()
+        prove_this = []
+        for row in proof_rows:
+            finding_id = str(row.get("finding_id") or row.get("id") or "").strip()
+            if not finding_id or finding_id in seen:
+                continue
+            seen.add(finding_id)
+            prove_this.append(
+                {
+                    "finding_id": finding_id,
+                    "severity": row.get("severity"),
+                    "proof_status": row.get("proof_status"),
+                    "artifact_path": row.get("artifact_path"),
+                    "record_key": row.get("record_key"),
+                    "json_pointer": row.get("json_pointer"),
+                }
+            )
+            if len(prove_this) >= 5:
+                break
+    known_limits = _dict_rows(reviewer_index.get("known_limits"))
+    if not known_limits:
+        known_limits = [
+            {
+                "surface": row.get("surface"),
+                "status": row.get("status"),
+                "message": row.get("message"),
+            }
+            for row in limitations
+        ]
+    if blockers:
+        known_limits.append(
+            {
+                "surface": "collection",
+                "status": "blocked",
+                "message": f"{len(blockers)} collector blocker(s) need reviewer attention.",
+            }
+        )
+    if unsupported_claims:
+        known_limits.append(
+            {
+                "surface": "proof",
+                "status": "unsupported_claim",
+                "message": "Some findings are not fully supported by proof rows yet.",
+                "finding_ids": unsupported_claims,
+            }
+        )
+    if stale_accepted:
+        known_limits.append(
+            {
+                "surface": "accepted_risk",
+                "status": "stale",
+                "message": "One or more accepted risks have expired and need renewed review.",
+                "finding_ids": [row.get("id") for row in stale_accepted if row.get("id")],
+            }
+        )
+    return {
+        "counts": {
+            "start_here": len(start_here),
+            "prove_this": len(prove_this),
+            "known_limits": len(known_limits),
+        },
+        "start_here": start_here,
+        "prove_this": prove_this,
+        "known_limits": known_limits,
+    }
+
+
 def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     bundle = RunBundle(run_path)
@@ -377,11 +766,35 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
     live_readiness = _mapping(live_readiness_payload)
     audit_plan_path, audit_plan_payload = bundle.audit_plan()
     audit_plan = _mapping(audit_plan_payload)
-    report_pack_path, _ = bundle.report_pack()
+    permissions = permissions_ledger(run_path)
+    report_pack_path, report_pack_payload = bundle.report_pack()
+    report_pack = _mapping(report_pack_payload)
     blockers = bundle.blocker_rows()
+    accepted_risks = accepted_risk_summary(bundle.finding_rows())
     coverage_gaps = _dict_rows(summary.get("coverage_gaps")) or _dict_rows(metadata.get("coverage_gaps"))
     api_safety = _mapping(api.get("safety"))
     proof_counts = _mapping(proof.get("counts"))
+    scope_risk = str(data_handling.get("scope_risk") or api_safety.get("scope_risk") or "").strip() or None
+    write_capable_scopes = [
+        str(item)
+        for item in (data_handling.get("write_capable_scopes") or api_safety.get("write_capable_scopes") or [])
+        if str(item)
+    ]
+    limitations = [dict(item) for item in coverage_gaps if isinstance(item, dict)]
+    scope_risk_limitation = _scope_risk_limitation(
+        platform=_provider_platform(summary, manifest),
+        scope_risk=scope_risk,
+        write_capable_scopes=write_capable_scopes,
+    )
+    if scope_risk_limitation:
+        limitations.append(scope_risk_limitation)
+    permission_limitation = _permission_limitation(permissions)
+    if permission_limitation:
+        limitations.append(permission_limitation)
+    blocked_collectors_limitation = _blocked_collectors_limitation(blockers)
+    if blocked_collectors_limitation:
+        limitations.append(blocked_collectors_limitation)
+    limitations.extend(_collector_issue_limitations(bundle.finding_rows()))
 
     validation_valid = validation.get("valid") if validation else None
     read_only = data_handling.get("read_only") is not False and api_safety.get("read_only") is not False
@@ -393,7 +806,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
         status = "unusable"
     elif validation_valid is None or not api.get("present") or not proof.get("present"):
         status = "incomplete"
-    elif coverage_gaps or blockers or unsupported_claims:
+    elif limitations or blockers or unsupported_claims or int(accepted_risks.get("stale_count") or 0) > 0:
         status = "ready_with_limitations"
     else:
         status = "ready"
@@ -404,6 +817,18 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
     live_readiness_relative = str(manifest.get("live_readiness_path") or "live-readiness.json")
     report_pack_relative = str(manifest.get("report_pack_path") or "reports/report-pack.json")
     validation_relative = str(manifest.get("validation_path") or "validation.json")
+    validation_summary = _validation_summary(
+        validation,
+        path=str(validation_path) if validation_path is not None else str(run_path / validation_relative),
+    )
+    reviewer_summary = _reviewer_summary(
+        report_pack=report_pack,
+        proof_rows=_dict_rows(proof.get("proof_table")),
+        limitations=limitations,
+        blockers=blockers,
+        unsupported_claims=unsupported_claims,
+        stale_accepted=_dict_rows(accepted_risks.get("stale")),
+    )
     artifacts = [
         _artifact_row(run_path, "run-manifest.json", "Run identity, selected collectors, contract status, and artifact paths."),
         _artifact_row(run_path, "summary.json", "Top-level run summary and collector status."),
@@ -417,10 +842,30 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
         _artifact_row(run_path, "index/evidence.sqlite", "Indexed normalized evidence for replay and lookup."),
         _artifact_row(run_path, validation_relative, "Bundle contract validation result."),
     ]
+    citations = _dedupe_citations(
+        [_citation(data_handling_relative, reason="Read-only and no-content-read declaration.")]
+        + (
+            [_citation(api_relative, reason="API call ledger reviewed for handoff.")]
+            if api.get("present")
+            else []
+        )
+        + (
+            [_citation(report_pack_relative, reason="Report pack reviewed for findings and proof.")]
+            if report_pack_path is not None
+            else []
+        )
+        + (
+            [_citation(validation_relative, reason="Bundle contract validation result.")]
+            if validation_path is not None
+            else []
+        )
+    )
 
     return {
         "run_dir": str(run_path),
         "handoff_status": status,
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
         "tenant": {
             "name": summary.get("tenant_name") or manifest.get("tenant_name"),
             "id": manifest.get("tenant_id"),
@@ -435,19 +880,23 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "warning_count": validation.get("warning_count"),
             "path": str(validation_path) if validation_path is not None else str(run_path / validation_relative),
         },
+        "validation_summary": validation_summary,
         "safety": {
             "read_only": read_only,
             "no_content_reads": no_content_reads,
             "write_actions": write_actions,
-            "scope_risk": data_handling.get("scope_risk") or api_safety.get("scope_risk"),
-            "write_capable_scopes": data_handling.get("write_capable_scopes") or api_safety.get("write_capable_scopes") or [],
+            "scope_risk": scope_risk,
+            "write_capable_scopes": write_capable_scopes,
         },
         "quality": {
             "audit_plan_status": _mapping(audit_plan.get("quality_gate")).get("status"),
             "live_readiness": live_readiness.get("trust_level"),
-            "coverage_gap_count": len(coverage_gaps),
+            "coverage_gap_count": len(limitations),
             "blocker_count": len(blockers),
             "unsupported_claim_count": len(unsupported_claims),
+            "accepted_risk_count": int(accepted_risks.get("count") or 0),
+            "stale_accepted_risk_count": int(accepted_risks.get("stale_count") or 0),
+            "expiring_accepted_risk_count": int(accepted_risks.get("expiring_soon_count") or 0),
         },
         "counts": {
             "findings": int(proof_counts.get("findings") or len(bundle.finding_rows())),
@@ -455,6 +904,8 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "supported_proof_rows": int(proof_counts.get("supported") or 0),
             "api_calls": int(_mapping(api.get("counts")).get("observed_calls") or len(_dict_rows(api.get("observed_calls")))),
         },
+        "reviewer_summary": reviewer_summary,
+        "accepted_risks": accepted_risks,
         "artifacts": artifacts,
         "review_commands": {
             "render_report": f"auditex report render {run_path} --format md",
@@ -462,7 +913,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "proof_table": f"auditex report proof-table {run_path} --format md",
             "handoff": f"auditex report handoff {run_path} --format md",
         },
-        "limitations": coverage_gaps,
+        "limitations": limitations,
         "blockers": blockers,
         "unsupported_claims": unsupported_claims,
     }
@@ -545,9 +996,12 @@ def render_permissions_ledger_markdown(payload: Mapping[str, Any]) -> str:
 def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
     tenant = _mapping(payload.get("tenant"))
     contract = _mapping(payload.get("contract"))
+    validation_summary = _mapping(payload.get("validation_summary"))
     safety = _mapping(payload.get("safety"))
     quality = _mapping(payload.get("quality"))
     counts = _mapping(payload.get("counts"))
+    reviewer_summary = _mapping(payload.get("reviewer_summary"))
+    accepted_risks = _mapping(payload.get("accepted_risks"))
     commands = _mapping(payload.get("review_commands"))
     artifacts = _dict_rows(payload.get("artifacts"))
     lines = [
@@ -558,6 +1012,7 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
         f"- Tenant: {_markdown_cell(tenant.get('name'))}",
         f"- Platform: {_markdown_cell(tenant.get('platform'))}",
         f"- Contract valid: {_markdown_cell(contract.get('valid'))}",
+        f"- Validation: {_markdown_cell(validation_summary.get('status'))} / {_markdown_cell(validation_summary.get('issue_count'))} issues",
         f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
         f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
@@ -565,6 +1020,8 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
         f"- Findings: {_markdown_cell(counts.get('findings'))}",
         f"- Proof rows: {_markdown_cell(counts.get('proof_rows'))}",
         f"- API calls: {_markdown_cell(counts.get('api_calls'))}",
+        f"- Accepted risks: {_markdown_cell(accepted_risks.get('count'))}",
+        f"- Stale accepted risks: {_markdown_cell(accepted_risks.get('stale_count'))}",
         "",
         "## Review Commands",
         "",
@@ -572,6 +1029,28 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
     for key in ("render_report", "api_calls", "proof_table", "handoff"):
         if commands.get(key):
             lines.append(f"- `{_markdown_cell(commands.get(key))}`")
+    start_here = _dict_rows(reviewer_summary.get("start_here"))
+    if start_here:
+        lines.extend(["", "## Start Here", ""])
+        for row in start_here:
+            lines.append(f"- `{_markdown_cell(row.get('section'))}`: {_markdown_cell(row.get('reason'))}")
+    prove_this = _dict_rows(reviewer_summary.get("prove_this"))
+    if prove_this:
+        lines.extend(["", "## Prove This", "", "| Finding | Severity | Proof | Artifact | Record |", "| --- | --- | --- | --- | --- |"])
+        for row in prove_this:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _markdown_cell(row.get("finding_id")),
+                        _markdown_cell(row.get("severity")),
+                        _markdown_cell(row.get("proof_status")),
+                        _markdown_cell(row.get("artifact_path")),
+                        _markdown_cell(row.get("record_key")),
+                    ]
+                )
+                + " |"
+            )
     lines.extend(
         [
             "",
@@ -604,6 +1083,18 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
         lines.extend(["", "## Blockers", ""])
         for item in blockers:
             lines.append(f"- {_markdown_cell(item.get('collector') or item.get('id') or 'blocker')}: {_markdown_cell(item.get('message') or item.get('error') or item.get('reason'))}")
+    stale_accepted = _dict_rows(accepted_risks.get("stale"))
+    expiring_accepted = _dict_rows(accepted_risks.get("expiring_soon"))
+    if stale_accepted or expiring_accepted:
+        lines.extend(["", "## Accepted Risk Review", ""])
+        for item in stale_accepted:
+            lines.append(
+                f"- Stale: {_markdown_cell(item.get('id'))} expires {_markdown_cell(item.get('expires_on'))}"
+            )
+        for item in expiring_accepted:
+            lines.append(
+                f"- Expiring soon: {_markdown_cell(item.get('id'))} expires {_markdown_cell(item.get('expires_on'))}"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -718,9 +1209,11 @@ def _pack_file_path(pack_dir: Path, manifest_output_dir: Path, value: Any) -> Pa
 def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
     source = _mapping(manifest.get("source"))
     tenant = _mapping(source.get("tenant"))
+    validation_summary = _mapping(source.get("validation_summary"))
     safety = _mapping(source.get("safety"))
     quality = _mapping(source.get("quality"))
     counts = _mapping(source.get("counts"))
+    reviewer_summary = _mapping(source.get("reviewer_summary"))
     generated = _dict_rows(manifest.get("generated_files"))
     sources = _dict_rows(manifest.get("source_artifacts"))
     lines = [
@@ -729,20 +1222,23 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         f"- Status: {_markdown_cell(manifest.get('handoff_status'))}",
         f"- Tenant: {_markdown_cell(tenant.get('name'))}",
         f"- Platform: {_markdown_cell(tenant.get('platform'))}",
+        f"- Validation: {_markdown_cell(validation_summary.get('status'))}",
         f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
         f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
         f"- Findings: {_markdown_cell(counts.get('findings'))}",
         f"- API calls: {_markdown_cell(counts.get('api_calls'))}",
+        f"- Reviewer prove-this rows: {_markdown_cell(_mapping(reviewer_summary.get('counts')).get('prove_this'))}",
         "",
         "## Start Here",
         "",
         "1. Read `handoff.md`.",
-        "2. Review `report.md` for the client-ready report.",
-        "3. Review `api-calls.md` for every observed API call.",
-        "4. Review `permissions.md` for required and missing scopes.",
-        "5. Review `proof-table.md` for finding-to-evidence rows.",
-        "6. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity.",
+        "2. Check `validation.json` and the validation summary before trusting the pack.",
+        "3. Review `report.md` for the client-ready report and reviewer index.",
+        "4. Review `api-calls.md` for every observed API call.",
+        "5. Review `permissions.md` for required and missing scopes.",
+        "6. Review `proof-table.md` for finding-to-evidence rows.",
+        "7. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity.",
         "",
         "## Generated Files",
         "",
@@ -817,14 +1313,17 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         "source": {
             "tenant": handoff_payload.get("tenant"),
             "contract": handoff_payload.get("contract"),
+            "validation_summary": handoff_payload.get("validation_summary"),
             "safety": handoff_payload.get("safety"),
             "quality": handoff_payload.get("quality"),
-                "counts": handoff_payload.get("counts"),
-                "permissions": {
-                    "counts": permissions_payload.get("counts"),
-                    "missing_permissions": permissions_payload.get("missing_permissions"),
-                },
+            "counts": handoff_payload.get("counts"),
+            "reviewer_summary": handoff_payload.get("reviewer_summary"),
+            "accepted_risks": handoff_payload.get("accepted_risks"),
+            "permissions": {
+                "counts": permissions_payload.get("counts"),
+                "missing_permissions": permissions_payload.get("missing_permissions"),
             },
+        },
         "generated_files": generated,
         "source_artifacts": source_artifacts,
     }
@@ -890,6 +1389,18 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
     manifest_output_dir = Path(str(manifest.get("output_dir") or pack_path))
     generated = _dict_rows(manifest.get("generated_files"))
     sources = _dict_rows(manifest.get("source_artifacts"))
+    source_payload = _mapping(manifest.get("source"))
+    manifest_validation_summary = _mapping(source_payload.get("validation_summary"))
+    manifest_reviewer_summary = _mapping(source_payload.get("reviewer_summary"))
+    accepted_risks = _mapping(source_payload.get("accepted_risks"))
+
+    if int(accepted_risks.get("stale_count") or 0) > 0:
+        add_issue(
+            "stale_accepted_risk",
+            "Customer pack includes accepted risks whose expiry date has passed.",
+            stale_count=int(accepted_risks.get("stale_count") or 0),
+            findings=[row.get("id") for row in _dict_rows(accepted_risks.get("stale")) if row.get("id")],
+        )
 
     for row in generated:
         check_file(
@@ -906,6 +1417,248 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
             _text(row.get("sha256")) or None,
             source=f"manifest.source:{row.get('source_path') or row.get('path')}",
         )
+
+    generated_by_name = {
+        str(row.get("name") or Path(str(row.get("path") or "")).name): row
+        for row in generated
+        if row.get("name") or row.get("path")
+    }
+    handoff_row = generated_by_name.get("handoff.json")
+    handoff_payload = _mapping(
+        _read_json(
+            _pack_file_path(pack_path, manifest_output_dir, handoff_row.get("path")) if handoff_row else Path("missing"),
+            {},
+        )
+    )
+    if not manifest_validation_summary:
+        add_issue(
+            "missing_manifest_validation_summary",
+            "pack-manifest.json source is missing validation_summary.",
+            path=str(manifest_path),
+        )
+    elif manifest_validation_summary != _mapping(handoff_payload.get("validation_summary")):
+        add_issue(
+            "invalid_manifest_validation_summary",
+            "pack-manifest.json validation_summary does not match handoff.json.",
+            path=str(manifest_path),
+        )
+    if not manifest_reviewer_summary:
+        add_issue(
+            "missing_manifest_reviewer_summary",
+            "pack-manifest.json source is missing reviewer_summary.",
+            path=str(manifest_path),
+        )
+    elif manifest_reviewer_summary != _mapping(handoff_payload.get("reviewer_summary")):
+        add_issue(
+            "invalid_manifest_reviewer_summary",
+            "pack-manifest.json reviewer_summary does not match handoff.json.",
+            path=str(manifest_path),
+        )
+
+    def verify_generated_helper_citations(helper_name: str) -> None:
+        row = generated_by_name.get(helper_name)
+        if not row:
+            return
+        helper_file = _pack_file_path(pack_path, manifest_output_dir, row.get("path"))
+        helper_payload = _mapping(_read_json(helper_file, {}))
+        if "citations" not in helper_payload:
+            add_issue(
+                "missing_generated_helper_citations",
+                f"Generated helper {helper_name} is missing citations.",
+                path=str(helper_file) if helper_file is not None else None,
+                helper=helper_name,
+            )
+            return
+        citations = _dict_rows(helper_payload.get("citations"))
+        citation_summary = _mapping(helper_payload.get("citation_summary"))
+        if not citation_summary:
+            add_issue(
+                "missing_generated_helper_citation_summary",
+                f"Generated helper {helper_name} is missing citation_summary.",
+                path=str(helper_file) if helper_file is not None else None,
+                helper=helper_name,
+            )
+            return
+        expected_summary = build_citation_summary(citations)
+        for key in ("citation_count", "artifact_count", "record_key_count", "json_pointer_count", "evidence_missing"):
+            if citation_summary.get(key) != expected_summary.get(key):
+                add_issue(
+                    "invalid_generated_helper_citation_summary",
+                    f"Generated helper {helper_name} has a citation_summary that does not match citations.",
+                    path=str(helper_file) if helper_file is not None else None,
+                    helper=helper_name,
+                    field=key,
+                    expected=expected_summary.get(key),
+                    actual=citation_summary.get(key),
+                )
+                return
+        if [str(item) for item in citation_summary.get("artifacts") or []] != [str(item) for item in expected_summary.get("artifacts") or []]:
+            add_issue(
+                "invalid_generated_helper_citation_summary",
+                f"Generated helper {helper_name} has citation_summary artifacts that do not match citations.",
+                path=str(helper_file) if helper_file is not None else None,
+                helper=helper_name,
+            )
+            return
+        if helper_name != "proof-table.json":
+            return
+        cited_artifacts = {str(citation.get("artifact_path") or "").strip() for citation in citations if str(citation.get("artifact_path") or "").strip()}
+        cited_artifact_keys = {
+            (
+                str(citation.get("artifact_path") or "").strip(),
+                str(citation.get("record_key") or "").strip(),
+            )
+            for citation in citations
+            if str(citation.get("artifact_path") or "").strip()
+        }
+        cited_artifact_json_pointers = {
+            (
+                str(citation.get("artifact_path") or "").strip(),
+                str(citation.get("json_pointer") or "").strip(),
+            )
+            for citation in citations
+            if str(citation.get("artifact_path") or "").strip()
+        }
+        for proof_row in _dict_rows(helper_payload.get("proof_table")):
+            artifact_path = str(proof_row.get("artifact_path") or "").strip()
+            if not artifact_path:
+                continue
+            if artifact_path not in cited_artifacts:
+                add_issue(
+                    "missing_generated_helper_proof_citation",
+                    "Generated helper proof-table.json references an artifact not covered by citations.",
+                    path=str(helper_file) if helper_file is not None else None,
+                    helper=helper_name,
+                    artifact_path=artifact_path,
+                    finding_id=proof_row.get("finding_id") or proof_row.get("id"),
+                )
+                return
+            record_key = str(proof_row.get("record_key") or "").strip()
+            if record_key and (artifact_path, record_key) not in cited_artifact_keys:
+                add_issue(
+                    "missing_generated_helper_proof_record_key_citation",
+                    "Generated helper proof-table.json record_key is not covered by citations.",
+                    path=str(helper_file) if helper_file is not None else None,
+                    helper=helper_name,
+                    artifact_path=artifact_path,
+                    record_key=record_key,
+                    finding_id=proof_row.get("finding_id") or proof_row.get("id"),
+                )
+                return
+            json_pointer = str(proof_row.get("json_pointer") or "").strip()
+            if json_pointer and (artifact_path, json_pointer) not in cited_artifact_json_pointers:
+                add_issue(
+                    "missing_generated_helper_proof_json_pointer_citation",
+                    "Generated helper proof-table.json json_pointer is not covered by citations.",
+                    path=str(helper_file) if helper_file is not None else None,
+                    helper=helper_name,
+                    artifact_path=artifact_path,
+                    json_pointer=json_pointer,
+                    finding_id=proof_row.get("finding_id") or proof_row.get("id"),
+                )
+                return
+
+    for helper_name in ("handoff.json", "api-calls.json", "permissions.json", "proof-table.json"):
+        verify_generated_helper_citations(helper_name)
+
+    report_pack_source = next(
+        (
+            row
+            for row in sources
+            if str(row.get("source_path") or row.get("path") or "").endswith("reports/report-pack.json")
+        ),
+        None,
+    )
+    if report_pack_source and report_pack_source.get("present") is not False:
+        report_pack_file = _pack_file_path(pack_path, manifest_output_dir, report_pack_source.get("path"))
+        report_pack_payload = _mapping(_read_json(report_pack_file, {}))
+        citations = _dict_rows(report_pack_payload.get("citations"))
+        if not citations:
+            add_issue(
+                "missing_report_pack_citations",
+                "Customer pack source report-pack.json is missing citations.",
+                path=str(report_pack_file) if report_pack_file is not None else None,
+            )
+        citation_summary = _mapping(report_pack_payload.get("citation_summary"))
+        if not citation_summary:
+            add_issue(
+                "missing_report_pack_citation_summary",
+                "Customer pack source report-pack.json is missing citation_summary.",
+                path=str(report_pack_file) if report_pack_file is not None else None,
+            )
+        else:
+            expected_summary = build_citation_summary(citations)
+            for key in ("citation_count", "artifact_count", "record_key_count", "json_pointer_count", "evidence_missing"):
+                if citation_summary.get(key) != expected_summary.get(key):
+                    add_issue(
+                        "invalid_report_pack_citation_summary",
+                        "Customer pack source report-pack.json has a citation_summary that does not match citations.",
+                        path=str(report_pack_file) if report_pack_file is not None else None,
+                        field=key,
+                        expected=expected_summary.get(key),
+                        actual=citation_summary.get(key),
+                    )
+                    break
+            else:
+                if [str(item) for item in citation_summary.get("artifacts") or []] != [str(item) for item in expected_summary.get("artifacts") or []]:
+                    add_issue(
+                        "invalid_report_pack_citation_summary",
+                        "Customer pack source report-pack.json has citation_summary artifacts that do not match citations.",
+                        path=str(report_pack_file) if report_pack_file is not None else None,
+                    )
+
+        cited_artifacts = {str(row.get("artifact_path") or "").strip() for row in citations if str(row.get("artifact_path") or "").strip()}
+        cited_artifact_keys = {
+            (
+                str(row.get("artifact_path") or "").strip(),
+                str(row.get("record_key") or "").strip(),
+            )
+            for row in citations
+            if str(row.get("artifact_path") or "").strip()
+        }
+        cited_artifact_json_pointers = {
+            (
+                str(row.get("artifact_path") or "").strip(),
+                str(row.get("json_pointer") or "").strip(),
+            )
+            for row in citations
+            if str(row.get("artifact_path") or "").strip()
+        }
+        for proof_row in _dict_rows(report_pack_payload.get("proof_table")):
+            artifact_path = str(proof_row.get("artifact_path") or "").strip()
+            if not artifact_path:
+                continue
+            if artifact_path not in cited_artifacts:
+                add_issue(
+                    "missing_report_pack_proof_citation",
+                    "Customer pack source report-pack.json proof_table references an artifact not covered by citations.",
+                    path=str(report_pack_file) if report_pack_file is not None else None,
+                    artifact_path=artifact_path,
+                    finding_id=proof_row.get("finding_id") or proof_row.get("id"),
+                )
+                break
+            record_key = str(proof_row.get("record_key") or "").strip()
+            if record_key and (artifact_path, record_key) not in cited_artifact_keys:
+                add_issue(
+                    "missing_report_pack_proof_record_key_citation",
+                    "Customer pack source report-pack.json proof_table record_key is not covered by citations.",
+                    path=str(report_pack_file) if report_pack_file is not None else None,
+                    artifact_path=artifact_path,
+                    record_key=record_key,
+                    finding_id=proof_row.get("finding_id") or proof_row.get("id"),
+                )
+                break
+            json_pointer = str(proof_row.get("json_pointer") or "").strip()
+            if json_pointer and (artifact_path, json_pointer) not in cited_artifact_json_pointers:
+                add_issue(
+                    "missing_report_pack_proof_json_pointer_citation",
+                    "Customer pack source report-pack.json proof_table json_pointer is not covered by citations.",
+                    path=str(report_pack_file) if report_pack_file is not None else None,
+                    artifact_path=artifact_path,
+                    json_pointer=json_pointer,
+                    finding_id=proof_row.get("finding_id") or proof_row.get("id"),
+                )
+                break
 
     checksum_path = pack_path / "checksums.sha256"
     checksum_line_count = 0
@@ -1029,6 +1782,50 @@ def _append_rows_markdown(
         lines.append("| " + " | ".join(_markdown_value(row.get(field)) for _, field in columns) + " |")
 
 
+def _append_reviewer_index_markdown(lines: list[str], payload: Mapping[str, Any]) -> None:
+    reviewer_index = dict(payload) if isinstance(payload, Mapping) else {}
+    if not reviewer_index:
+        return
+    lines.extend(["", "## Reviewer Index", ""])
+    start_here = _dict_rows(reviewer_index.get("start_here"))
+    if start_here:
+        lines.append("### Start Here")
+        lines.append("")
+        for row in start_here:
+            lines.append(
+                f"- `{_markdown_cell(row.get('section'))}`: {_markdown_cell(row.get('reason'))}"
+            )
+        lines.append("")
+    prove_this = _dict_rows(reviewer_index.get("prove_this"))
+    if prove_this:
+        lines.append("### Prove This")
+        lines.append("")
+        lines.append("| Finding | Severity | Proof | Artifact | Record |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for row in prove_this:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _markdown_value(row.get("finding_id")),
+                        _markdown_value(row.get("severity")),
+                        _markdown_value(row.get("proof_status")),
+                        _markdown_value(row.get("artifact_path")),
+                        _markdown_value(row.get("record_key")),
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
+    known_limits = _dict_rows(reviewer_index.get("known_limits"))
+    if known_limits:
+        lines.append("### Known Limits")
+        lines.append("")
+        for row in known_limits:
+            lines.append(f"- {_markdown_cell(row.get('status'))}: {_markdown_cell(row.get('message'))}")
+        lines.append("")
+
+
 def _render_markdown(selected_sections: dict[str, Any]) -> str:
     summary = _mapping(selected_sections.get("summary"))
     findings = _dict_rows(selected_sections.get("findings"))
@@ -1064,6 +1861,8 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
         lines.append("")
     _append_mapping_markdown(lines, "Executive Summary", _mapping(selected_sections.get("executive_summary")))
     _append_mapping_markdown(lines, "Technical Appendix", _mapping(selected_sections.get("technical_appendix")))
+    _append_reviewer_index_markdown(lines, _mapping(selected_sections.get("reviewer_index")))
+    _append_mapping_markdown(lines, "Citation Summary", _mapping(selected_sections.get("citation_summary")))
     if "limitations" in selected_sections:
         _append_rows_markdown(
             lines,
@@ -1321,6 +2120,7 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
     for key, title in (
         ("executive_summary", "Executive Summary"),
         ("technical_appendix", "Technical Appendix"),
+        ("citation_summary", "Citation Summary"),
         ("license_profile", "License Profile"),
         ("auditor_score", "Auditor Score"),
         ("control_simulator", "Control Simulator"),
@@ -1328,6 +2128,8 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
     ):
         if key in selected_sections:
             sections.append(_render_key_values(title, _mapping(selected_sections.get(key))))
+    if "reviewer_index" in selected_sections:
+        sections.append(_render_json_section("Reviewer Index", selected_sections.get("reviewer_index")))
     if "limitations" in selected_sections:
         sections.append(_render_json_section("Limitations", selected_sections.get("limitations")))
     if "next_actions" in selected_sections:
@@ -1699,6 +2501,12 @@ def preview_report(
 
     bundle = load_report_bundle(run_dir)
     selected = _select_sections(bundle, include_sections=include_sections, exclude_sections=exclude_sections)
+    run_path = Path(run_dir)
+    citations, evidence_missing = _preview_section_citations(
+        run_path=run_path,
+        bundle=RunBundle(run_path),
+        selected_sections=selected,
+    )
     renderers = {
         "json": _render_json,
         "md": _render_markdown,
@@ -1707,7 +2515,14 @@ def preview_report(
         "sarif": _render_sarif,
         "oscal": _render_oscal,
     }
-    return {"format": format_name, "content": renderers[format_name](selected), "sections": list(selected.keys())}
+    return {
+        "format": format_name,
+        "content": renderers[format_name](selected),
+        "sections": list(selected.keys()),
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
+        "evidence_missing": evidence_missing,
+    }
 
 
 def render_report(

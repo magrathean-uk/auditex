@@ -30,20 +30,24 @@ The pack includes:
 
 - `README.md` - reviewer start point.
 - `handoff.md` and `handoff.json` - audit status, contract status, safety, quality gate, blockers, and review commands.
+- Accepted-risk review is part of handoff. Expired accepted risks are treated as stale and should block sharing until re-approved or removed.
 - `report.md` - client-ready report.
+- `reports/report-pack.json` inside `source-artifacts/` now carries both raw `citations` and typed `citation_summary`. Pack verify checks that those stay aligned with proof rows.
+- `reports/report-pack.json` also carries `reviewer_index` with `start_here`, `prove_this`, and `known_limits` so customer reviewers can jump from posture to proof fast.
+- Generated helper JSON files like `handoff.json`, `api-calls.json`, `permissions.json`, and `proof-table.json` also keep `citations` and `citation_summary`. Pack verify checks those too.
 - `api-calls.md` and `api-calls.json` - API call ledger.
 - `permissions.md` and `permissions.json` - required, observed, and missing permission ledger.
 - `proof-table.md` and `proof-table.json` - finding-to-evidence proof rows.
 - `source-artifacts/` - selected customer-safe source artifacts copied from the run.
 - `checksums.sha256` - file integrity hash list.
-- `pack-manifest.json` - pack manifest with generated and source artifact hashes.
+- `pack-manifest.json` - pack manifest with generated and source artifact hashes, plus `validation_summary` and `reviewer_summary` copied from handoff truth.
 
 ## Reviewer Order
 
 1. Read `handoff.md`.
 2. Check `validation.json` and contract status.
 3. Read `data-handling.json` to confirm read-only and no-content-read assertions.
-4. Read `report.md` for executive and technical findings.
+4. Read `report.md`, especially the reviewer index and executive summary.
 5. Read `proof-table.md` for evidence behind each finding.
 6. Read `api-calls.md` to see exactly which APIs were attempted.
 7. Read `permissions.md` to see missing scopes, roles, or licenses.
@@ -110,9 +114,11 @@ Yes. Keep the run directory and pack together. Use `auditex report render`, `aud
 
 ## Handoff Checklist
 
-- Run contract validation or `make contract-smoke` for release samples.
+- Run contract validation or `make contract-smoke` for customer samples.
 - Generate the customer pack.
-- Run `auditex report verify-pack`.
+- Run `auditex report verify-pack`. This now also checks that the copied `report-pack.json` still carries citation rows.
+- Confirm `pack-manifest.json` and `handoff.json` agree on validation summary and reviewer summary.
+- If pack verify reports `stale_accepted_risk`, stop handoff and refresh the acceptance decision before sharing.
 - Confirm `data-handling.json` says read-only and no content reads.
 - Confirm `validation.json` is valid or limitations are explained.
 - Confirm no local auth files are inside the pack.

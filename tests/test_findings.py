@@ -139,6 +139,53 @@ def test_build_report_pack_promotes_coverage_gaps_into_risk_and_action_plan() ->
     assert report["action_plan"][0]["error_classes"] == ["invalid_scope"]
 
 
+def test_build_report_pack_adds_reviewer_index() -> None:
+    report = build_report_pack(
+        tenant_name="acme",
+        overall_status="partial",
+        findings=[
+            {
+                "id": "mail:fwd",
+                "rule_id": "google.gmail_external_forwarding",
+                "severity": "high",
+                "status": "open",
+                "title": "External forwarding",
+                "category": "mail",
+                "collector": "google_gmail_settings",
+                "remediation": "Disable forwarding.",
+                "evidence_refs": [
+                    {
+                        "artifact_path": "normalized/google_mailbox_settings.json",
+                        "artifact_kind": "normalized",
+                        "collector": "google_gmail_settings",
+                        "record_key": "google_mailbox_setting:admin@example.com",
+                        "json_pointer": "/records/0",
+                    }
+                ],
+            }
+        ],
+        coverage_gaps=[
+            {
+                "surface": "mail",
+                "status": "blocked",
+                "severity": "high",
+                "message": "mail coverage is blocked",
+                "collectors": ["google_gmail_settings"],
+            }
+        ],
+        evidence_paths=["normalized/google_mailbox_settings.json"],
+        blocker_count=1,
+    )
+
+    reviewer_index = report["reviewer_index"]
+    assert reviewer_index["start_here"][0]["section"] == "executive_summary"
+    assert reviewer_index["start_here"][0]["artifact_path"] == "reports/report-pack.json"
+    assert reviewer_index["prove_this"][0]["finding_id"] == "mail:fwd"
+    assert reviewer_index["prove_this"][0]["artifact_path"] == "normalized/google_mailbox_settings.json"
+    known_limit_statuses = {row["status"] for row in reviewer_index["known_limits"]}
+    assert "blocked" in known_limit_statuses
+
+
 def test_build_findings_applies_waivers_and_adds_richer_fields(tmp_path: Path) -> None:
     waiver_path = tmp_path / "waivers.json"
     waiver_path.write_text(

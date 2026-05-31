@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from azure_tenant_audit.api_inventory import build_api_call_inventory
+from azure_tenant_audit.api_inventory import ApiInventoryRecorder, build_api_call_inventory
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.finalize import finalize_bundle_contract
 from test_finalize_idempotent import _prepare_bundle_for_finalize
@@ -41,13 +41,21 @@ def test_api_inventory_maps_observed_calls_to_read_only_customer_ledger() -> Non
             "scope_risk": "read_only_scopes",
             "write_capable_scopes": [],
         },
-        collector_descriptions={"identity": "Directory posture"},
+        collector_catalog={
+            "identity": {
+                "description": "Directory posture",
+                "minimum_role_hints": ["Global Reader", "Security Reader"],
+                "tool_requirements": [],
+            }
+        },
     )
 
     assert inventory["safety"]["read_only"] is True
     assert inventory["safety"]["no_content_reads"] is True
     assert inventory["counts"]["observed_calls"] == 1
     assert inventory["declared_collectors"][0]["description"] == "Directory posture"
+    assert inventory["declared_collectors"][0]["minimum_role_hints"] == ["Global Reader", "Security Reader"]
+    assert inventory["declared_collectors"][0]["tool_requirements"] == []
     call = inventory["observed_calls"][0]
     assert call["method"] == "GET"
     assert call["access_mode"] == "read"
@@ -111,3 +119,82 @@ def test_contract_rejects_audit_plane_mutating_api_inventory(tmp_path: Path) -> 
 
     assert report["valid"] is False
     assert "invalid_api_inventory_safety" in {item["code"] for item in report["issues"]}
+
+
+def test_api_inventory_recorder_maps_graph_call_permissions() -> None:
+    recorder = ApiInventoryRecorder(
+        platform="m365",
+        capability_rows=[
+            {
+                "collector": "identity",
+                "required_permissions": ["Directory.Read.All"],
+                "missing_permissions": [],
+            }
+        ],
+    )
+
+    recorder.record(
+        {
+            "collector": "identity",
+            "name": "users",
+            "endpoint": "/users",
+            "method": "GET",
+            "status": "ok",
+            "item_count": 2,
+        }
+    )
+
+    call = recorder.observed_calls()[0]
+    assert call["id"] == "identity:users:1"
+    assert call["access_mode"] == "read"
+    assert call["required_permissions"] == ["Directory.Read.All"]
+    assert recorder.observed_counts()["identity"] == 1
+
+
+def test_api_inventory_recorder_maps_command_calls_to_read_command() -> None:
+    recorder = ApiInventoryRecorder(platform="m365", capability_rows=[])
+
+    recorder.record(
+        {
+            "collector": "exchange_policy",
+            "type": "command",
+            "name": "remoteDomains",
+            "endpoint": "Get-RemoteDomain",
+            "status": "ok",
+        }
+    )
+
+    call = recorder.observed_calls()[0]
+    assert call["method"] == "COMMAND"
+    assert call["access_mode"] == "read_command"
+    assert call["data_class"] == "mail_metadata_and_settings"
+
+
+def test_api_inventory_recorder_maps_google_device_rows() -> None:
+    recorder = ApiInventoryRecorder(
+        platform="google_workspace",
+        capability_rows=[
+            {
+                "collector": "google_devices",
+                "required_permissions": ["https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly"],
+                "missing_permissions": [],
+            }
+        ],
+    )
+
+    recorder.record(
+        {
+            "collector": "google_devices",
+            "name": "chromeosDevices",
+            "endpoint": "chromeosDevices",
+            "status": "ok",
+            "item_count": 3,
+        }
+    )
+
+    call = recorder.observed_calls()[0]
+    assert call["platform"] == "google_workspace"
+    assert call["data_class"] == "device_inventory_and_policy"
+    assert call["required_permissions"] == [
+        "https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly"
+    ]

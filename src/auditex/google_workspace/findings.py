@@ -18,16 +18,29 @@ _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.gmail_hidden_forwarding_filter": {"nist_800_53": ["SI-4"], "mitre_attack": ["T1114"], "soc2": ["CC7.2"]},
     "google.gmail_imap_enabled": {"nist_800_53": ["AC-17"], "iso_27001": ["A.8.20"], "soc2": ["CC6.6"]},
     "google.gmail_pop_enabled": {"nist_800_53": ["AC-17"], "iso_27001": ["A.8.20"], "soc2": ["CC6.6"]},
+    "google.gmail_vacation_external_reply": {"nist_800_53": ["SC-7"], "iso_27001": ["A.8.12"], "soc2": ["CC6.7"]},
     "google.gmail_external_send_as": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.gmail_external_delegate": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.drive_anyone_with_link": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.drive_public_discoverable": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.drive_domain_permission": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.drive_external_permission": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.shared_drive_external_members_allowed": {"nist_800_53": ["AC-2", "AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.calendar_public_acl": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.calendar_external_acl": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.calendar_domain_acl": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.group_anyone_can_join": {"nist_800_53": ["AC-2", "AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_domain_can_join": {"nist_800_53": ["AC-2", "AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.group_external_members_allowed": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
     "google.group_external_member": {"nist_800_53": ["AC-2", "AC-3"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
     "google.group_anyone_can_post": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_anyone_can_post_unmoderated": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_domain_can_post": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_domain_can_post_unmoderated": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_public_view": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_public_membership": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_domain_view": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_domain_membership": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.alert_active": {"nist_800_53": ["IR-5"], "iso_27001": ["A.5.25"], "soc2": ["CC7.3"]},
     "google.super_admin_singleton": {"nist_800_53": ["CP-2", "AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
     "google.super_admin_sprawl": {"nist_800_53": ["AC-2", "AC-6"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
@@ -35,6 +48,8 @@ _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.admin_stale_login": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
     "google.mobile_device_compromised": {"nist_800_53": ["SI-4"], "iso_27001": ["A.8.16"], "soc2": ["CC7.2"]},
     "google.mobile_device_stale_sync": {"nist_800_53": ["CM-8", "SI-4"], "iso_27001": ["A.5.9", "A.8.1"], "soc2": ["CC7.1"]},
+    "google.chromeos_device_stale_sync": {"nist_800_53": ["CM-8", "SI-4"], "iso_27001": ["A.5.9", "A.8.1"], "soc2": ["CC7.1"]},
+    "google.chromeos_device_inactive_assignment": {"nist_800_53": ["CM-8"], "iso_27001": ["A.5.9"], "soc2": ["CC7.1"]},
     "google.dns_spf_missing": {"nist_800_53": ["SC-7", "SC-8"], "iso_27001": ["A.5.14", "A.8.20"], "soc2": ["CC6.6"], "mitre_attack": ["T1566"]},
     "google.dns_dmarc_monitor_only": {"nist_800_53": ["SC-7", "SC-8"], "iso_27001": ["A.5.14", "A.8.20"], "soc2": ["CC6.6"], "mitre_attack": ["T1566"]},
     "google.dns_dkim_missing": {"nist_800_53": ["SC-7", "SC-8"], "iso_27001": ["A.5.14", "A.8.20"], "soc2": ["CC6.6"], "mitre_attack": ["T1566"]},
@@ -55,21 +70,36 @@ _GOOGLE_BASELINE_CONTROLS: dict[str, str] = {
     "google.gmail_hidden_forwarding_filter": "gmail.forwarding",
     "google.gmail_imap_enabled": "gmail.protocols",
     "google.gmail_pop_enabled": "gmail.protocols",
+    "google.gmail_vacation_external_reply": "gmail.auto_reply",
     "google.gmail_external_send_as": "gmail.delegation",
     "google.gmail_external_delegate": "gmail.delegation",
     "google.drive_anyone_with_link": "drive.sharing",
+    "google.drive_public_discoverable": "drive.sharing",
+    "google.drive_domain_permission": "drive.sharing",
     "google.drive_external_permission": "drive.sharing",
+    "google.shared_drive_external_members_allowed": "drive.sharing",
     "google.calendar_public_acl": "calendar.sharing",
     "google.calendar_external_acl": "calendar.sharing",
+    "google.calendar_domain_acl": "calendar.sharing",
     "google.group_anyone_can_join": "groups.exposure",
+    "google.group_domain_can_join": "groups.exposure",
     "google.group_external_members_allowed": "groups.exposure",
     "google.group_external_member": "groups.exposure",
     "google.group_anyone_can_post": "groups.posting",
+    "google.group_anyone_can_post_unmoderated": "groups.posting",
+    "google.group_domain_can_post": "groups.posting",
+    "google.group_domain_can_post_unmoderated": "groups.posting",
+    "google.group_public_view": "groups.exposure",
+    "google.group_public_membership": "groups.exposure",
+    "google.group_domain_view": "groups.exposure",
+    "google.group_domain_membership": "groups.exposure",
     "google.alert_active": "security.alerts",
     "google.login_suspicious_event": "security.audit_events",
     "google.admin_privilege_event": "security.audit_events",
     "google.mobile_device_compromised": "devices.mobile",
     "google.mobile_device_stale_sync": "devices.mobile",
+    "google.chromeos_device_stale_sync": "devices.chromeos",
+    "google.chromeos_device_inactive_assignment": "devices.chromeos",
     "google.dns_spf_missing": "domains.email_auth",
     "google.dns_dmarc_monitor_only": "domains.email_auth",
     "google.dns_dkim_missing": "domains.email_auth",
@@ -153,6 +183,14 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "remediation": "Restrict group joining to owners, managers, or invited users.",
         "expected_value": "Group joining is restricted to approved users.",
     },
+    "google.group_domain_can_join": {
+        "title": "Group allows domain-wide joining",
+        "risk_rating": "medium",
+        "description": "A Google group allows any Workspace domain user to join.",
+        "impact": "Domain-wide group joining can expose mail, Drive sharing, calendars, or app permissions broadly across the tenant beyond least-privilege need.",
+        "remediation": "Restrict group joining to invited users, owners, managers, or approved request workflows unless domain-wide joining is explicitly required.",
+        "expected_value": "Group joining is restricted to approved users unless there is a documented domain-wide need.",
+    },
     "google.group_external_member": {
         "title": "Google group has external member",
         "risk_rating": "medium",
@@ -184,6 +222,14 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "impact": "POP access can copy mail out of Google Workspace and reduce investigation visibility.",
         "remediation": "Disable POP unless there is an approved client requirement.",
         "expected_value": "POP is disabled unless explicitly approved.",
+    },
+    "google.gmail_vacation_external_reply": {
+        "title": "Gmail vacation responder can reply outside the domain",
+        "risk_rating": "medium",
+        "description": "A mailbox vacation responder is enabled without restricting replies to the Workspace domain.",
+        "impact": "Automatic vacation replies can leak mailbox presence and business context to external senders outside the approved boundary.",
+        "remediation": "Restrict vacation replies to the Workspace domain or disable the responder unless there is an approved business need.",
+        "expected_value": "Vacation responders are disabled or restricted to approved internal recipients.",
     },
     "google.gmail_external_forwarding": {
         "title": "Gmail auto-forwarding sends mail outside the domain",
@@ -241,6 +287,22 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "remediation": "Remove public link permissions or document a time-bound exception.",
         "expected_value": "Drive items are not available to anyone with the link unless approved.",
     },
+    "google.drive_public_discoverable": {
+        "title": "Drive file is publicly discoverable",
+        "risk_rating": "high",
+        "description": "A Google Drive item is exposed to anyone and can be discovered without a pre-shared link.",
+        "impact": "Publicly discoverable Drive content can leak outside the Workspace boundary with broader internet exposure than link-only sharing.",
+        "remediation": "Disable public discoverability and restrict access to approved users or groups.",
+        "expected_value": "Drive items are not publicly discoverable unless explicitly approved.",
+    },
+    "google.drive_domain_permission": {
+        "title": "Drive item grants domain-wide access",
+        "risk_rating": "medium",
+        "description": "A Google Drive item grants access to the entire Workspace domain.",
+        "impact": "Domain-wide Drive sharing can expose files broadly across the tenant beyond least-privilege need.",
+        "remediation": "Restrict Drive sharing to approved users or groups unless domain-wide access is explicitly required.",
+        "expected_value": "Drive permissions are scoped to approved users or groups unless there is a documented domain-wide need.",
+    },
     "google.drive_external_permission": {
         "title": "Drive item grants access to an external principal",
         "risk_rating": "high",
@@ -248,6 +310,14 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "impact": "Direct external Drive permissions can expose files outside the Workspace trust boundary.",
         "remediation": "Remove unapproved external Drive permissions or document a time-bound exception.",
         "expected_value": "Drive permissions are internal or explicitly approved.",
+    },
+    "google.shared_drive_external_members_allowed": {
+        "title": "Shared drive allows external members",
+        "risk_rating": "medium",
+        "description": "A Google shared drive is configured so members do not have to belong to the Workspace domain.",
+        "impact": "Shared drives that permit external members can expose broad folders and inherited collaboration access outside the managed boundary.",
+        "remediation": "Restrict shared drives to domain users unless the drive is an approved external collaboration boundary.",
+        "expected_value": "Shared drives are limited to domain users unless explicitly approved.",
     },
     "google.calendar_public_acl": {
         "title": "Calendar ACL grants public access",
@@ -265,6 +335,14 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "remediation": "Remove unapproved external calendar sharing or document a time-bound exception.",
         "expected_value": "Calendar ACLs are internal or explicitly approved.",
     },
+    "google.calendar_domain_acl": {
+        "title": "Calendar ACL grants domain-wide access",
+        "risk_rating": "medium",
+        "description": "A Google Calendar access rule grants access to the entire Workspace domain.",
+        "impact": "Domain-wide calendar sharing can expose meeting metadata broadly across the tenant beyond least-privilege need.",
+        "remediation": "Restrict calendar sharing to approved groups or individuals unless domain-wide access is explicitly required.",
+        "expected_value": "Calendar ACLs are scoped to approved users or groups unless there is a documented domain-wide need.",
+    },
     "google.group_external_members_allowed": {
         "title": "Google group allows external members",
         "risk_rating": "medium",
@@ -281,6 +359,62 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "remediation": "Restrict posting to members, managers, or owners.",
         "expected_value": "Group posting is restricted to approved senders.",
     },
+    "google.group_anyone_can_post_unmoderated": {
+        "title": "Google group allows public posting without moderation",
+        "risk_rating": "medium",
+        "description": "A Google group permits public posting and does not moderate posts from non-members.",
+        "impact": "Unmoderated public posting increases spam, abuse, and impersonation risk for the group.",
+        "remediation": "Set message moderation to at least non-member moderation or disable public posting.",
+        "expected_value": "Public-post groups moderate non-member or all messages.",
+    },
+    "google.group_domain_can_post": {
+        "title": "Google group allows domain-wide posting",
+        "risk_rating": "medium",
+        "description": "A Google group permits all Workspace domain users to post.",
+        "impact": "Domain-wide posting can expose collaborative inboxes or group archives to broad internal spoofing, spam, and misdelivery paths.",
+        "remediation": "Restrict posting to members, managers, owners, or approved senders unless domain-wide posting is explicitly required.",
+        "expected_value": "Group posting is limited to approved senders unless there is a documented domain-wide need.",
+    },
+    "google.group_domain_can_post_unmoderated": {
+        "title": "Google group allows unmoderated domain-wide posting",
+        "risk_rating": "medium",
+        "description": "A Google group permits all Workspace domain users to post and does not moderate those posts.",
+        "impact": "Unmoderated domain-wide posting broadens spoofing, spam, and internal misuse risk across the tenant.",
+        "remediation": "Enable moderation for domain-wide posting or restrict posting to a narrower approved sender set.",
+        "expected_value": "Domain-wide posting is disabled or moderated unless explicitly approved.",
+    },
+    "google.group_public_view": {
+        "title": "Google group is publicly viewable",
+        "risk_rating": "medium",
+        "description": "A Google group allows anyone on the internet to view group metadata or content.",
+        "impact": "Publicly viewable groups can disclose membership purpose, routing, and discussion structure outside the Workspace boundary.",
+        "remediation": "Restrict group visibility to domain users, members, managers, or owners.",
+        "expected_value": "Group visibility is limited to approved internal viewers.",
+    },
+    "google.group_public_membership": {
+        "title": "Google group membership is publicly viewable",
+        "risk_rating": "medium",
+        "description": "A Google group allows anyone on the internet to view group membership.",
+        "impact": "Public membership visibility can expose internal people, aliases, and organizational structure to outsiders.",
+        "remediation": "Restrict membership visibility to approved internal viewers.",
+        "expected_value": "Group membership visibility is limited to approved internal viewers.",
+    },
+    "google.group_domain_view": {
+        "title": "Google group is visible across the Workspace domain",
+        "risk_rating": "medium",
+        "description": "A Google group allows all domain users to view group metadata or content.",
+        "impact": "Domain-wide group visibility can expose collaboration structure and content broadly across the tenant beyond least-privilege need.",
+        "remediation": "Restrict group visibility to members, managers, owners, or approved internal groups unless domain-wide visibility is explicitly required.",
+        "expected_value": "Group visibility is limited to approved internal viewers unless there is a documented domain-wide need.",
+    },
+    "google.group_domain_membership": {
+        "title": "Google group membership is visible across the Workspace domain",
+        "risk_rating": "medium",
+        "description": "A Google group allows all domain users to view group membership.",
+        "impact": "Domain-wide group membership visibility can expose internal people, aliases, and organizational structure broadly across the tenant.",
+        "remediation": "Restrict membership visibility to approved internal viewers unless domain-wide visibility is explicitly required.",
+        "expected_value": "Group membership visibility is limited to approved internal viewers unless there is a documented domain-wide need.",
+    },
     "google.mobile_device_compromised": {
         "title": "Mobile device is marked compromised",
         "risk_rating": "high",
@@ -296,6 +430,22 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "impact": "Stale devices can retain access posture assumptions after they are lost, retired, or unmanaged.",
         "remediation": "Investigate stale mobile devices, block or remove devices no longer in use, and require re-enrollment before restoring access.",
         "expected_value": "Managed mobile devices sync recently or are removed from inventory.",
+    },
+    "google.chromeos_device_stale_sync": {
+        "title": "ChromeOS device has stale sync",
+        "risk_rating": "medium",
+        "description": "Google Workspace reports a managed ChromeOS device that has not synced recently.",
+        "impact": "Stale ChromeOS inventory can leave old device trust assumptions in place after devices are retired, lost, or no longer managed.",
+        "remediation": "Investigate stale ChromeOS devices, remove inactive inventory, and re-enroll devices before restoring managed access.",
+        "expected_value": "Managed ChromeOS devices sync recently or are removed from inventory.",
+    },
+    "google.chromeos_device_inactive_assignment": {
+        "title": "Inactive ChromeOS device still has assigned user",
+        "risk_rating": "medium",
+        "description": "Google Workspace reports a disabled or deprovisioned ChromeOS device that still has an annotated user assignment.",
+        "impact": "Inactive assigned devices can confuse asset ownership, weaken inventory trust, and hide stale access assumptions.",
+        "remediation": "Review inactive ChromeOS inventory, clear stale user assignments, and confirm the device lifecycle state is accurate.",
+        "expected_value": "Inactive ChromeOS devices do not retain stale user assignments.",
     },
     "google.alert_active": {
         "title": "Google Workspace Alert Center alert is active",
@@ -463,9 +613,51 @@ def _mailbox_forwarding_address_record(mailbox: dict[str, Any], forwarding_addre
     return {**mailbox, "id": f"{mailbox.get('id') or mailbox.get('key')}:{address_id}"}
 
 
+def _mailbox_auto_forwarding_record(mailbox: dict[str, Any], auto_forwarding: dict[str, Any]) -> dict[str, Any]:
+    address_id = str(auto_forwarding.get("emailAddress") or auto_forwarding.get("forwardTo") or "auto_forwarding")
+    return {**mailbox, "id": f"{mailbox.get('id') or mailbox.get('key')}:{address_id}"}
+
+
 def _mailbox_send_as_record(mailbox: dict[str, Any], send_as: dict[str, Any]) -> dict[str, Any]:
     send_as_id = str(send_as.get("sendAsEmail") or send_as.get("email") or "send_as")
     return {**mailbox, "id": f"{mailbox.get('id') or mailbox.get('key')}:{send_as_id}"}
+
+
+def _mailbox_filter_record(mailbox: dict[str, Any], gmail_filter: dict[str, Any]) -> dict[str, Any]:
+    filter_id = str(gmail_filter.get("id") or gmail_filter.get("forward") or "filter")
+    return {**mailbox, "id": f"{mailbox.get('id') or mailbox.get('key')}:{filter_id}"}
+
+
+def _mailbox_vacation_returned_value(vacation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enableAutoReply": vacation.get("enableAutoReply"),
+        "restrictToContacts": vacation.get("restrictToContacts"),
+        "restrictToDomain": vacation.get("restrictToDomain"),
+    }
+
+
+def _mailbox_surface_error(
+    mailbox: dict[str, Any],
+    *,
+    surface: str,
+    error_key: str,
+) -> dict[str, Any] | None:
+    payload = mailbox.get(error_key)
+    if not isinstance(payload, dict) or not payload:
+        return None
+    error_class = str(payload.get("error_class") or "client_error")
+    return _finding(
+        rule_id="google.collector_issue",
+        title="Google Workspace collector issue",
+        severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
+        category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
+        collector="google_gmail_settings",
+        section="google_mailbox_settings",
+        record=mailbox,
+        description=f"Google Workspace evidence is incomplete for this Gmail {surface} surface.",
+        remediation=f"Fix the Gmail {surface}-read permission or service availability, then rerun the collector.",
+        returned_value={"surface": surface, **payload},
+    )
 
 
 def _truthy_google_setting(value: Any) -> bool:
@@ -630,7 +822,47 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             )
         )
 
+    open_join_groups: set[str] = set()
+
+    for group_setting in _records(normalized_snapshot, "google_group_settings"):
+        if str(group_setting.get("who_can_join") or "").upper() == "ANYONE_CAN_JOIN":
+            group_email = str(group_setting.get("email") or "").strip().lower()
+            if group_email:
+                open_join_groups.add(group_email)
+            findings.append(
+                _finding(
+                    rule_id="google.group_anyone_can_join",
+                    title="Group allows anyone to join",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_groups_settings",
+                    section="google_group_settings",
+                    record=group_setting,
+                    description="A Google group permits open joining.",
+                    remediation="Restrict group joining to owners, managers, or invited users.",
+                    returned_value=group_setting.get("email"),
+                )
+            )
+        if str(group_setting.get("who_can_join") or "").upper() == "ALL_IN_DOMAIN_CAN_JOIN":
+            findings.append(
+                _finding(
+                    rule_id="google.group_domain_can_join",
+                    title="Group allows domain-wide joining",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_groups_settings",
+                    section="google_group_settings",
+                    record=group_setting,
+                    description="A Google group allows any Workspace domain user to join.",
+                    remediation="Restrict group joining to invited users, owners, managers, or approved request workflows unless domain-wide joining is explicitly required.",
+                    returned_value=group_setting.get("email"),
+                )
+            )
+
     for group in _records(normalized_snapshot, "google_groups"):
+        group_email = str(group.get("email") or "").strip().lower()
+        if group_email and group_email in open_join_groups:
+            continue
         if str(group.get("who_can_join") or "").upper() == "ANYONE_CAN_JOIN":
             findings.append(
                 _finding(
@@ -664,6 +896,50 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                 )
             )
 
+    for member_error in _records(normalized_snapshot, "google_group_member_errors"):
+        error_class = str(member_error.get("error_class") or "client_error")
+        findings.append(
+            _finding(
+                rule_id="google.collector_issue",
+                title="Google Workspace collector issue",
+                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
+                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
+                collector="google_directory",
+                section="google_group_member_errors",
+                record=member_error,
+                description="Google Workspace evidence is incomplete for this group membership surface.",
+                remediation="Fix the Google group member-read permission or service availability, then rerun the collector.",
+                returned_value={
+                    "surface": "group-members",
+                    "group": member_error.get("group_email"),
+                    "error_class": member_error.get("error_class"),
+                    "error": member_error.get("error"),
+                },
+            )
+        )
+
+    for alias_error in _records(normalized_snapshot, "google_alias_errors"):
+        error_class = str(alias_error.get("error_class") or "client_error")
+        findings.append(
+            _finding(
+                rule_id="google.collector_issue",
+                title="Google Workspace collector issue",
+                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
+                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
+                collector="google_directory",
+                section="google_alias_errors",
+                record=alias_error,
+                description="Google Workspace evidence is incomplete for this user alias surface.",
+                remediation="Fix the Google user alias-read permission or service availability, then rerun the collector.",
+                returned_value={
+                    "surface": "aliases",
+                    "user_email": alias_error.get("user_email"),
+                    "error_class": alias_error.get("error_class"),
+                    "error": alias_error.get("error"),
+                },
+            )
+        )
+
     high_risk_scope_terms = ("gmail.modify", "gmail.settings.sharing", "/auth/drive", "admin.directory", "cloud-platform")
     for grant in _records(normalized_snapshot, "google_oauth_grants"):
         scopes = [str(item) for item in grant.get("scopes") or []]
@@ -683,10 +959,46 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                 )
             )
 
+    for grant_error in _records(normalized_snapshot, "google_oauth_grant_errors"):
+        error_class = str(grant_error.get("error_class") or "client_error")
+        findings.append(
+            _finding(
+                rule_id="google.collector_issue",
+                title="Google Workspace collector issue",
+                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
+                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
+                collector="google_directory",
+                section="google_oauth_grant_errors",
+                record=grant_error,
+                description="Google Workspace evidence is incomplete for this OAuth grant surface.",
+                remediation="Fix the Google token-read permission or service availability, then rerun the collector.",
+                returned_value={
+                    "surface": "oauth-grants",
+                    "user_email": grant_error.get("user_email"),
+                    "error_class": grant_error.get("error_class"),
+                    "error": grant_error.get("error"),
+                },
+            )
+        )
+
     for mailbox in _records(normalized_snapshot, "google_mailbox_settings"):
+        for surface, error_key in (
+            ("auto-forwarding", "auto_forwarding_error"),
+            ("filters", "filters_error"),
+            ("forwarding-addresses", "forwarding_addresses_error"),
+            ("send-as", "send_as_error"),
+            ("delegates", "delegates_error"),
+            ("imap", "imap_error"),
+            ("pop", "pop_error"),
+            ("vacation", "vacation_error"),
+        ):
+            issue = _mailbox_surface_error(mailbox, surface=surface, error_key=error_key)
+            if issue is not None:
+                findings.append(issue)
         auto_forwarding = mailbox.get("auto_forwarding") if isinstance(mailbox.get("auto_forwarding"), dict) else {}
         imap = mailbox.get("imap") if isinstance(mailbox.get("imap"), dict) else {}
         pop = mailbox.get("pop") if isinstance(mailbox.get("pop"), dict) else {}
+        vacation = mailbox.get("vacation") if isinstance(mailbox.get("vacation"), dict) else {}
         if imap.get("enabled") is True:
             findings.append(
                 _finding(
@@ -717,6 +1029,21 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=pop,
                 )
             )
+        if vacation.get("enableAutoReply") is True and vacation.get("restrictToDomain") is not True:
+            findings.append(
+                _finding(
+                    rule_id="google.gmail_vacation_external_reply",
+                    title="Gmail vacation responder can reply outside the domain",
+                    severity="medium",
+                    category="mail",
+                    collector="google_gmail_settings",
+                    section="google_mailbox_settings",
+                    record=mailbox,
+                    description="A mailbox vacation responder is enabled without restricting replies to the Workspace domain.",
+                    remediation="Restrict vacation replies to the Workspace domain or disable the responder unless there is an approved business need.",
+                    returned_value=_mailbox_vacation_returned_value(vacation),
+                )
+            )
         if auto_forwarding.get("enabled") and _external_email(auto_forwarding.get("emailAddress"), workspace_domain):
             findings.append(
                 _finding(
@@ -726,7 +1053,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     category="mail",
                     collector="google_gmail_settings",
                     section="google_mailbox_settings",
-                    record=mailbox,
+                    record=_mailbox_auto_forwarding_record(mailbox, auto_forwarding),
                     description="A mailbox forwards incoming mail to an external address.",
                     remediation="Disable unapproved forwarding or document the business exception.",
                     returned_value=auto_forwarding.get("emailAddress"),
@@ -762,19 +1089,22 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             action = gmail_filter.get("action") if isinstance(gmail_filter, dict) else {}
             forward_to = action.get("forward") if isinstance(action, dict) else None
             remove_labels = action.get("removeLabelIds") if isinstance(action, dict) else []
+            if not isinstance(remove_labels, list):
+                remove_labels = []
             if _external_email(forward_to, workspace_domain):
                 rule_id = "google.gmail_hidden_forwarding_filter" if "INBOX" in remove_labels else "google.gmail_filter_external_forwarding"
+                rule_metadata = google_rule_metadata().get(rule_id, {})
                 findings.append(
                     _finding(
                         rule_id=rule_id,
-                        title="Gmail filter forwards mail outside the domain",
+                        title=str(rule_metadata.get("title") or rule_id),
                         severity="high",
                         category="mail",
                         collector="google_gmail_settings",
                         section="google_mailbox_settings",
-                        record=mailbox,
-                        description="A Gmail filter forwards matching mail to an external address.",
-                        remediation="Remove unapproved forwarding filters and review mailbox compromise indicators.",
+                        record=_mailbox_filter_record(mailbox, gmail_filter),
+                        description=str(rule_metadata.get("description") or "A Gmail filter forwards matching mail to an external address."),
+                        remediation=str(rule_metadata.get("remediation") or "Remove unapproved forwarding filters and review mailbox compromise indicators."),
                         returned_value=forward_to,
                     )
                 )
@@ -817,7 +1147,6 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                         returned_value=delegate_email,
                     )
                 )
-
     for drive_file in _records(normalized_snapshot, "google_drive_files"):
         for permission in drive_file.get("permissions") or []:
             if not isinstance(permission, dict):
@@ -826,17 +1155,26 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             role = str(permission.get("role") or "").lower()
             write_like = role in {"writer", "fileorganizer", "organizer", "owner"}
             if permission_type == "anyone" and role in {"reader", "commenter", "writer", "fileorganizer", "organizer"}:
+                allow_file_discovery = permission.get("allowFileDiscovery") is True
                 findings.append(
                     _finding(
-                        rule_id="google.drive_anyone_with_link",
-                        title="Drive file is available to anyone with the link",
+                        rule_id="google.drive_public_discoverable" if allow_file_discovery else "google.drive_anyone_with_link",
+                        title="Drive file is publicly discoverable" if allow_file_discovery else "Drive file is available to anyone with the link",
                         severity="high" if write_like else "medium",
                         category="collaboration",
                         collector="google_drive_posture",
                         section="google_drive_files",
                         record=drive_file,
-                        description="A Google Drive item grants access to anyone with the link.",
-                        remediation="Remove public link permissions or document a time-bound exception.",
+                        description=(
+                            "A Google Drive item is exposed to anyone and can be discovered without a pre-shared link."
+                            if allow_file_discovery
+                            else "A Google Drive item grants access to anyone with the link."
+                        ),
+                        remediation=(
+                            "Disable public discoverability and restrict access to approved users or groups."
+                            if allow_file_discovery
+                            else "Remove public link permissions or document a time-bound exception."
+                        ),
                         returned_value={"name": drive_file.get("name"), "permission": permission},
                     )
                 )
@@ -870,6 +1208,39 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                         returned_value={"name": drive_file.get("name"), "permission": permission},
                     )
                 )
+            elif permission_type == "domain" and workspace_domain and str(permission.get("domain") or "").lower() == str(workspace_domain).lower():
+                findings.append(
+                    _finding(
+                        rule_id="google.drive_domain_permission",
+                        title="Drive item grants domain-wide access",
+                        severity="high" if write_like else "medium",
+                        category="collaboration",
+                        collector="google_drive_posture",
+                        section="google_drive_files",
+                        record=_drive_permission_record(drive_file, permission),
+                        description="A Google Drive item grants access to the entire Workspace domain.",
+                        remediation="Restrict Drive sharing to approved users or groups unless domain-wide access is explicitly required.",
+                        returned_value={"name": drive_file.get("name"), "permission": permission},
+                    )
+                )
+
+    for shared_drive in _records(normalized_snapshot, "google_shared_drives"):
+        restrictions = shared_drive.get("restrictions") if isinstance(shared_drive.get("restrictions"), dict) else {}
+        if restrictions.get("domainUsersOnly") is False:
+            findings.append(
+                _finding(
+                    rule_id="google.shared_drive_external_members_allowed",
+                    title="Shared drive allows external members",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_drive_posture",
+                    section="google_shared_drives",
+                    record=shared_drive,
+                    description="A Google shared drive is configured so members do not have to belong to the Workspace domain.",
+                    remediation="Restrict shared drives to domain users unless the drive is an approved external collaboration boundary.",
+                    returned_value={"name": shared_drive.get("name"), "restrictions": restrictions},
+                )
+            )
 
     for calendar_acl in _records(normalized_snapshot, "google_calendar_acls"):
         scope = calendar_acl.get("scope") if isinstance(calendar_acl.get("scope"), dict) else {}
@@ -923,6 +1294,43 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value={"calendar": calendar_acl.get("calendar_id"), "role": role, "scope": scope},
                 )
             )
+        elif scope_type == "domain" and workspace_domain and str(scope_value or "").lower() == str(workspace_domain).lower():
+            findings.append(
+                _finding(
+                    rule_id="google.calendar_domain_acl",
+                    title="Calendar ACL grants domain-wide access",
+                    severity="medium",
+                    category="calendar",
+                    collector="google_calendar_posture",
+                    section="google_calendar_acls",
+                    record=calendar_acl,
+                    description="A Google Calendar access rule grants access to the entire Workspace domain.",
+                    remediation="Restrict domain-wide calendar sharing to approved calendars or document the business exception.",
+                    returned_value={"calendar": calendar_acl.get("calendar_id"), "role": role, "scope": scope},
+                )
+            )
+
+    for calendar_acl_error in _records(normalized_snapshot, "google_calendar_acl_errors"):
+        error_class = str(calendar_acl_error.get("error_class") or "client_error")
+        findings.append(
+            _finding(
+                rule_id="google.collector_issue",
+                title="Google Workspace collector issue",
+                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
+                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
+                collector="google_calendar_posture",
+                section="google_calendar_acl_errors",
+                record=calendar_acl_error,
+                description="Google Workspace evidence is incomplete for this calendar ACL surface.",
+                remediation="Fix the Google Calendar ACL-read permission or service availability, then rerun the collector.",
+                returned_value={
+                    "surface": "calendar-acls",
+                    "calendar": calendar_acl_error.get("calendar_id"),
+                    "error_class": calendar_acl_error.get("error_class"),
+                    "error": calendar_acl_error.get("error"),
+                },
+            )
+        )
 
     for group_setting in _records(normalized_snapshot, "google_group_settings"):
         if _truthy_google_setting(group_setting.get("allow_external_members")):
@@ -937,6 +1345,66 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     record=group_setting,
                     description="A Google group permits external members.",
                     remediation="Disable external members unless the group has an approved business exception.",
+                    returned_value=group_setting.get("email"),
+                )
+            )
+        if str(group_setting.get("who_can_view_group") or "").upper() == "ANYONE_CAN_VIEW":
+            findings.append(
+                _finding(
+                    rule_id="google.group_public_view",
+                    title="Google group is publicly viewable",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_groups_settings",
+                    section="google_group_settings",
+                    record=group_setting,
+                    description="A Google group allows anyone on the internet to view group metadata or content.",
+                    remediation="Restrict group visibility to domain users, members, managers, or owners.",
+                    returned_value=group_setting.get("email"),
+                )
+            )
+        if str(group_setting.get("who_can_view_group") or "").upper() == "ALL_IN_DOMAIN_CAN_VIEW":
+            findings.append(
+                _finding(
+                    rule_id="google.group_domain_view",
+                    title="Google group is visible across the Workspace domain",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_groups_settings",
+                    section="google_group_settings",
+                    record=group_setting,
+                    description="A Google group allows all domain users to view group metadata or content.",
+                    remediation="Restrict group visibility to members, managers, owners, or approved internal groups unless domain-wide visibility is explicitly required.",
+                    returned_value=group_setting.get("email"),
+                )
+            )
+        if str(group_setting.get("who_can_view_membership") or "").upper() == "ANYONE_CAN_VIEW":
+            findings.append(
+                _finding(
+                    rule_id="google.group_public_membership",
+                    title="Google group membership is publicly viewable",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_groups_settings",
+                    section="google_group_settings",
+                    record=group_setting,
+                    description="A Google group allows anyone on the internet to view group membership.",
+                    remediation="Restrict membership visibility to approved internal viewers.",
+                    returned_value=group_setting.get("email"),
+                )
+            )
+        if str(group_setting.get("who_can_view_membership") or "").upper() == "ALL_IN_DOMAIN_CAN_VIEW":
+            findings.append(
+                _finding(
+                    rule_id="google.group_domain_membership",
+                    title="Google group membership is visible across the Workspace domain",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_groups_settings",
+                    section="google_group_settings",
+                    record=group_setting,
+                    description="A Google group allows all domain users to view group membership.",
+                    remediation="Restrict membership visibility to approved internal viewers unless domain-wide visibility is explicitly required.",
                     returned_value=group_setting.get("email"),
                 )
             )
@@ -955,6 +1423,83 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=group_setting.get("email"),
                 )
             )
+            moderation = str(group_setting.get("message_moderation_level") or "").upper()
+            if moderation not in {"MODERATE_NON_MEMBERS", "MODERATE_ALL_MESSAGES"}:
+                findings.append(
+                    _finding(
+                        rule_id="google.group_anyone_can_post_unmoderated",
+                        title="Google group allows public posting without moderation",
+                        severity="medium",
+                        category="collaboration",
+                        collector="google_groups_settings",
+                        section="google_group_settings",
+                        record=group_setting,
+                        description="A Google group permits public posting and does not moderate posts from non-members.",
+                        remediation="Set message moderation to at least non-member moderation or disable public posting.",
+                        returned_value={
+                            "email": group_setting.get("email"),
+                            "whoCanPostMessage": group_setting.get("who_can_post_message"),
+                            "messageModerationLevel": group_setting.get("message_moderation_level"),
+                        },
+                    )
+                )
+        if str(group_setting.get("who_can_post_message") or "").upper() == "ALL_IN_DOMAIN_CAN_POST":
+            findings.append(
+                _finding(
+                    rule_id="google.group_domain_can_post",
+                    title="Google group allows domain-wide posting",
+                    severity="medium",
+                    category="collaboration",
+                    collector="google_groups_settings",
+                    section="google_group_settings",
+                    record=group_setting,
+                    description="A Google group permits all Workspace domain users to post.",
+                    remediation="Restrict posting to members, managers, owners, or approved senders unless domain-wide posting is explicitly required.",
+                    returned_value=group_setting.get("email"),
+                )
+            )
+            moderation = str(group_setting.get("message_moderation_level") or "").upper()
+            if moderation not in {"MODERATE_NON_MEMBERS", "MODERATE_ALL_MESSAGES"}:
+                findings.append(
+                    _finding(
+                        rule_id="google.group_domain_can_post_unmoderated",
+                        title="Google group allows unmoderated domain-wide posting",
+                        severity="medium",
+                        category="collaboration",
+                        collector="google_groups_settings",
+                        section="google_group_settings",
+                        record=group_setting,
+                        description="A Google group permits all Workspace domain users to post and does not moderate those posts.",
+                        remediation="Enable moderation for domain-wide posting or restrict posting to a narrower approved sender set.",
+                        returned_value={
+                            "email": group_setting.get("email"),
+                            "whoCanPostMessage": group_setting.get("who_can_post_message"),
+                            "messageModerationLevel": group_setting.get("message_moderation_level"),
+                        },
+                    )
+                )
+
+    for group_setting_error in _records(normalized_snapshot, "google_group_setting_errors"):
+        error_class = str(group_setting_error.get("error_class") or "client_error")
+        findings.append(
+            _finding(
+                rule_id="google.collector_issue",
+                title="Google Workspace collector issue",
+                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
+                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
+                collector="google_groups_settings",
+                section="google_group_setting_errors",
+                record=group_setting_error,
+                description="Google Workspace evidence is incomplete for this group settings surface.",
+                remediation="Fix the Google Groups settings-read permission or service availability, then rerun the collector.",
+                returned_value={
+                    "surface": "group-settings",
+                    "email": group_setting_error.get("email"),
+                    "error_class": group_setting_error.get("error_class"),
+                    "error": group_setting_error.get("error"),
+                },
+            )
+        )
 
     for mobile_device in _records(normalized_snapshot, "google_mobile_devices"):
         if str(mobile_device.get("compromised_status") or "").strip().lower() in {"compromised", "compromised_status_compromised"}:
@@ -985,6 +1530,38 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     description="Google Workspace reports a managed mobile device that has not synced recently.",
                     remediation="Investigate stale mobile devices, block or remove devices no longer in use, and require re-enrollment before restoring access.",
                     returned_value=mobile_device.get("last_sync"),
+                )
+            )
+
+    for chrome_device in _records(normalized_snapshot, "google_chromeos_devices"):
+        if _stale_google_timestamp(chrome_device.get("last_sync")):
+            findings.append(
+                _finding(
+                    rule_id="google.chromeos_device_stale_sync",
+                    title="ChromeOS device has stale sync",
+                    severity="medium",
+                    category="device",
+                    collector="google_devices",
+                    section="google_chromeos_devices",
+                    record=chrome_device,
+                    description="Google Workspace reports a managed ChromeOS device that has not synced recently.",
+                    remediation="Investigate stale ChromeOS devices, remove inactive inventory, and re-enroll devices before restoring managed access.",
+                    returned_value=chrome_device.get("last_sync"),
+                )
+            )
+        if str(chrome_device.get("status") or "").strip().lower() in {"deprovisioned", "disabled", "inactive"} and str(chrome_device.get("annotated_user") or "").strip():
+            findings.append(
+                _finding(
+                    rule_id="google.chromeos_device_inactive_assignment",
+                    title="Inactive ChromeOS device still has assigned user",
+                    severity="medium",
+                    category="device",
+                    collector="google_devices",
+                    section="google_chromeos_devices",
+                    record=chrome_device,
+                    description="Google Workspace reports a disabled or deprovisioned ChromeOS device that still has an annotated user assignment.",
+                    remediation="Review inactive ChromeOS inventory, clear stale user assignments, and confirm the device lifecycle state is accurate.",
+                    returned_value={"status": chrome_device.get("status"), "annotated_user": chrome_device.get("annotated_user")},
                 )
             )
 

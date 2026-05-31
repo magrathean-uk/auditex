@@ -11,6 +11,8 @@ Auditex writes `api-inventory.json` into every finalized bundle. This artifact i
 - `counts`: declared collector count, observed call count, mutating call count, and content-read call count.
 - `safety`: read-only status, no-content-read status, write-capable scopes, and any mutating/content-read exceptions.
 
+Declared collector access metadata comes from the same shipped scope catalog used by `auditex setup-guide`, so reviewer-facing permission rows and operator-facing setup rows stay aligned.
+
 The bundle validator fails audit-plane bundles when this artifact reports tenant writes or body/file content reads.
 
 ## Read-Only Rules

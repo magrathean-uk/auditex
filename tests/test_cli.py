@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sys
 
+import pytest
+
 from azure_tenant_audit import cli
 from azure_tenant_audit.collectors.base import CollectorResult
 
@@ -76,6 +78,15 @@ def test_main_offline_preserves_plane_and_time_window(tmp_path: Path) -> None:
     assert manifest["plane"] == "full"
     assert manifest["time_window"]["since"] == "2026-04-01T00:00:00Z"
     assert manifest["time_window"]["until"] == "2026-04-02T00:00:00Z"
+
+
+def test_parser_supports_version_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("azure_tenant_audit.cli.package_version_line", lambda name="auditex": f"{name} 9.9.9")
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.build_parser().parse_args(["--version"])
+
+    assert excinfo.value.code == 0
 
 
 def test_parser_accepts_waiver_file() -> None:
@@ -277,6 +288,8 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
     assert manifest["live_readiness_path"] == "live-readiness.json"
     assert manifest["data_handling_path"] == "data-handling.json"
     assert manifest["ai_context_path"] == "ai_context.json"
+    assert manifest["provider_adapter_version"] == "2026-05-31"
+    assert manifest["api_inventory_recorder_version"] == "2026-05-31"
     assert live_readiness["trust_level"] == "live_verified"
     assert data_handling["read_only"] is True
     assert data_handling["content_reads"] is False

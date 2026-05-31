@@ -12,6 +12,7 @@ import requests
 from requests.exceptions import RequestException
 
 from .config import AuthConfig
+from .versioning import package_user_agent
 
 
 LOG = logging.getLogger(__name__)
@@ -278,7 +279,7 @@ class GraphClient:
             {
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
-                "User-Agent": "auditex/1.0.0",
+                "User-Agent": package_user_agent(),
             }
         )
         attempt = 0

@@ -162,3 +162,6 @@ def test_live_readiness_summary_distinguishes_trusted_blocked_and_unverified() -
     blockers = {row["collector"]: row for row in summary["blocker_summary"]["blockers"]}
     assert blockers["google_reports"]["blocker_kind"] == "auth_scope"
     assert blockers["google_reports"]["next_step"]
+    gates = {row["collector"]: row for row in summary["evidence_gates"]}
+    assert gates["google_reports"]["blocker_kind"] == "auth_scope"
+    assert gates["google_gmail_settings"]["status"] == "unverified"

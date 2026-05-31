@@ -86,3 +86,28 @@ def test_credential_provider_key_is_allowlisted(tmp_path: Path) -> None:
     report = build_validation_report(run_dir=run_dir)
     codes = [issue["code"] for issue in report["issues"]]
     assert "unsafe_ai_safe_artifact" not in codes
+
+
+def test_password_credentials_key_is_allowlisted(tmp_path: Path) -> None:
+    """Credential inventory metadata can use ``*_credentials`` keys without
+    carrying any secret values."""
+    run_dir = _bundle(tmp_path)
+    _write_ai_safe_with_field(
+        run_dir,
+        "password_credentials",
+        [{"key_id": "k1", "end_date_time": "2099-01-01T00:00:00Z"}],
+    )
+
+    report = build_validation_report(run_dir=run_dir)
+    codes = [issue["code"] for issue in report["issues"]]
+    assert "unsafe_ai_safe_artifact" not in codes, report["issues"]
+
+
+def test_application_credential_objects_key_is_allowlisted(tmp_path: Path) -> None:
+    """Normalized section names for app inventory are metadata, not secrets."""
+    run_dir = _bundle(tmp_path)
+    _write_ai_safe_with_field(run_dir, "application_credential_objects", 1)
+
+    report = build_validation_report(run_dir=run_dir)
+    codes = [issue["code"] for issue in report["issues"]]
+    assert "unsafe_ai_safe_artifact" not in codes, report["issues"]

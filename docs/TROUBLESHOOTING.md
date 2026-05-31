@@ -167,11 +167,19 @@ Run the offline sample manually and inspect `validation.json`.
 
 ```bash
 auditex run --offline --sample examples/sample_audit_bundle/sample_result.json --tenant-name ci --run-name contract --out outputs/ci-contract
+auditex run --offline --sample examples/sample_audit_bundle/known_bad_result.json --tenant-name ci --run-name known-bad --out outputs/ci-known-bad
 ```
 
 ### Auth-material scan finds a match
 
 Do not ship. Remove the material from source or generated fixtures, rotate if exposed, and rerun the scan.
+
+### Customer pack fails with `stale_accepted_risk`
+
+The bundle includes an accepted-risk finding whose waiver expiry date has already passed.
+
+- Refresh the waiver decision and rerun the audit, or
+- remove the stale waiver so the finding is open again and review it normally.
 
 ### Docs mention a command that no longer exists
 

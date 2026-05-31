@@ -18,6 +18,15 @@ def test_root_help_lists_operator_commands(capsys) -> None:
     assert "run" in output
 
 
+def test_root_version_prints_shared_package_version(monkeypatch, capsys) -> None:
+    monkeypatch.setattr("auditex.cli.package_version_line", lambda name="auditex": f"{name} 9.9.9")
+
+    rc = auditex_cli.main(["--version"])
+
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "auditex 9.9.9"
+
+
 def test_setup_cli_accepts_optional_runtime_packs(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
@@ -69,9 +78,10 @@ def test_rules_inventory_cli_accepts_routing_filters(monkeypatch, capsys) -> Non
 def test_compare_cli_dispatches(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         "auditex.cli.compare_runs",
-        lambda run_dirs, allow_cross_tenant=False: {
+        lambda run_dirs, allow_cross_tenant=False, classic=False: {
             "runs": [{"path": path} for path in run_dirs],
             "same_tenant": not allow_cross_tenant,
+            "classic": classic,
         },
     )
 
@@ -80,6 +90,25 @@ def test_compare_cli_dispatches(monkeypatch, capsys) -> None:
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert [row["path"] for row in payload["runs"]] == ["run-a", "run-b"]
+
+
+def test_compare_cli_dispatches_classic_flag(monkeypatch, capsys) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_compare(run_dirs, allow_cross_tenant=False, classic=False):  # noqa: ANN001
+        seen["run_dirs"] = run_dirs
+        seen["allow_cross_tenant"] = allow_cross_tenant
+        seen["classic"] = classic
+        return {"runs": [{"path": path} for path in run_dirs], "classic": classic}
+
+    monkeypatch.setattr("auditex.cli.compare_runs", _fake_compare)
+
+    rc = auditex_cli.main(["compare", "--run-dir", "run-a", "--run-dir", "run-b", "--classic"])
+
+    assert rc == 0
+    assert seen["classic"] is True
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["classic"] is True
 
 
 def test_report_render_cli_dispatches(monkeypatch, capsys) -> None:

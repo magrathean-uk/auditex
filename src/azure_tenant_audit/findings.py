@@ -2222,6 +2222,7 @@ def build_report_pack(
         "evidence_paths": list(dict.fromkeys(evidence_paths)),
         "executive_summary": board_sections["executive_summary"],
         "technical_appendix": board_sections["technical_appendix"],
+        "reviewer_index": board_sections["reviewer_index"],
         "limitations": board_sections["limitations"],
         "proof_table": board_sections["proof_table"],
         "next_actions": board_sections["next_actions"],

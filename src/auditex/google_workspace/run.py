@@ -12,9 +12,8 @@ from azure_tenant_audit.assurance import build_live_readiness_summary
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
-from azure_tenant_audit.finalize import finalize_bundle_contract
-from azure_tenant_audit.findings import build_report_pack
 from azure_tenant_audit.output import AuditWriter
+from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.run import build_coverage_ledger
 from azure_tenant_audit.utils import parse_csv_list
@@ -28,6 +27,23 @@ from .normalize import build_google_normalized_snapshot
 
 
 LOG = logging.getLogger("auditex.google_workspace")
+_OFFLINE_SAMPLE_METADATA_KEYS = frozenset({"_fixture_provenance"})
+
+
+def _merged_fixture_provenance(
+    sample_fixture_provenance: dict[str, Any] | None,
+    fixture_provenance_override: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    merged: dict[str, Any] = {}
+    if isinstance(sample_fixture_provenance, dict):
+        merged.update(sample_fixture_provenance)
+    if isinstance(fixture_provenance_override, dict):
+        for key, value in fixture_provenance_override.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+    return merged or None
 _SENSITIVE_COMMAND_FLAGS = {"--service-account-key", "--oauth-client", "--token-cache"}
 
 
@@ -52,6 +68,7 @@ class GoogleRunConfig:
     until: str | None = None
     offline: bool = False
     sample: Path | None = None
+    fixture_provenance: dict[str, Any] | None = None
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
@@ -343,55 +360,40 @@ def _write_google_bundle(
     evidence_paths.extend(f"normalized/{name}.json" for name in ["capability_matrix", "coverage_ledger", *normalized_snapshot.keys()])
     overall_status = "partial" if diagnostics or any(str(row.get("status")) not in {"ok", "skipped"} for row in result_rows) else "ok"
     privacy = build_privacy_block(safe_for_external_llm=False)
-    writer.write_report_pack(
-        build_report_pack(
-            tenant_name=config.tenant_name,
-            overall_status=overall_status,
-            findings=findings,
-            evidence_paths=evidence_paths,
-            blocker_count=len(diagnostics),
-            privacy=privacy,
-        )
-    )
-    finalize_bundle_contract(
+    write_provider_bundle(
         writer=writer,
-        bundle_metadata={
-            "executed_by": "auditex_google_workspace",
-            "collectors": [row["name"] for row in result_rows],
-            "overall_status": overall_status,
-            "duration_seconds": duration,
-            "mode": mode,
-            "auditor_profile": "google-workspace",
-            "plane": "inventory",
-            "since": config.since,
-            "until": config.until,
-            "platform": "google_workspace",
-            "workspace_domain": config.domain,
-            "customer_id": config.customer_id,
-            "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path is not None else None,
-            "command_line": scrub_google_command_line(command_line or []),
-            "coverage_count": len(coverage_rows),
-            "top_limit": config.top,
-            "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
-            "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
-            "privacy": privacy,
-        },
-        run_metadata={
-            "tenant_name": config.tenant_name,
-            "tenant_id": config.customer_id,
-            "run_id": writer.run_id,
-            "overall_status": overall_status,
-            "auditor_profile": "google-workspace",
-            "mode": mode,
-            "plane": "inventory",
-            "selected_collectors": [row["name"] for row in result_rows],
-            "duration_seconds": duration,
-        },
-        normalized_snapshot=normalized_snapshot,
-        capability_rows=capability_rows,
-        coverage_ledger=coverage_ledger,
-        blockers=diagnostics,
-        findings=findings,
+        plan=ProviderFinalizePlan(
+            tenant_name=config.tenant_name,
+            tenant_id=config.customer_id,
+            executed_by="auditex_google_workspace",
+            selected_collectors=[row["name"] for row in result_rows],
+            overall_status=overall_status,
+            duration_seconds=duration,
+            mode=mode,
+            auditor_profile="google-workspace",
+            plane="inventory",
+            findings=findings,
+            blockers=diagnostics,
+            evidence_paths=evidence_paths,
+            normalized_snapshot=normalized_snapshot,
+            capability_rows=capability_rows,
+            coverage_ledger=coverage_ledger,
+            privacy=privacy,
+            bundle_metadata={
+                "fixture_provenance": config.fixture_provenance,
+                "since": config.since,
+                "until": config.until,
+                "platform": "google_workspace",
+                "workspace_domain": config.domain,
+                "customer_id": config.customer_id,
+                "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path is not None else None,
+                "command_line": scrub_google_command_line(command_line or []),
+                "coverage_count": len(coverage_rows),
+                "top_limit": config.top,
+                "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
+                "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
+            },
+        ),
     )
     return 1 if overall_status == "partial" else 0
 
@@ -404,6 +406,7 @@ def run_google_offline(
     run_name: str | None,
     domain: str | None,
     customer_id: str | None,
+    fixture_provenance_override: dict[str, Any] | None = None,
 ) -> int:
     target = resolve_resource_path(sample_path)
     try:
@@ -414,6 +417,10 @@ def run_google_offline(
     if not isinstance(sample, dict):
         LOG.error("Google sample bundle must be a JSON object.")
         return 2
+    fixture_provenance = _merged_fixture_provenance(
+        sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
+        fixture_provenance_override,
+    )
     config = GoogleRunConfig(
         tenant_name=tenant_name,
         out=out,
@@ -422,10 +429,15 @@ def run_google_offline(
         run_name=run_name,
         offline=True,
         sample=sample_path,
+        fixture_provenance=fixture_provenance,
     )
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     writer.log_event("run.started", "Google Workspace offline run started", {"platform": "google_workspace", "sample": str(target)})
-    collector_payloads = {str(key): value for key, value in sample.items() if isinstance(value, dict)}
+    collector_payloads = {
+        str(key): value
+        for key, value in sample.items()
+        if key not in _OFFLINE_SAMPLE_METADATA_KEYS and isinstance(value, dict)
+    }
     result_rows: list[dict[str, Any]] = []
     for name, payload in collector_payloads.items():
         item_count = 0
@@ -677,71 +689,55 @@ def _write_google_probe_bundle(
     ]
     if blockers:
         evidence_paths.append("blockers/blockers.json")
-    writer.write_report_pack(
-        build_report_pack(
-            tenant_name=config.tenant_name,
-            overall_status=overall_status,
-            findings=[],
-            evidence_paths=evidence_paths,
-            blocker_count=len(blockers),
-            privacy=privacy,
-        )
-    )
     evidence_index = {"artifacts": sorted(set(writer.artifact_paths() + ["run-manifest.json", "summary.json", "summary.md"]))}
     evidence_index_path = writer.write_json_artifact("evidence-index.json", evidence_index)
-    finalize_bundle_contract(
+    write_provider_bundle(
         writer=writer,
-        bundle_metadata={
-            "executed_by": "auditex_google_probe",
-            "collectors": selected,
-            "overall_status": overall_status,
-            "duration_seconds": 0,
-            "mode": config.auth,
-            "auditor_profile": "google-workspace",
-            "plane": "inventory",
-            "since": config.since,
-            "until": config.until,
-            "command_line": scrub_google_command_line(command_line or []),
-            "probe_mode": config.auth,
-            "probe_surface": config.collectors or config.collector_preset or "",
-            "capability_matrix_path": str(capability_path.relative_to(writer.run_dir)),
-            "toolchain_readiness_path": str(toolchain_path.relative_to(writer.run_dir)),
-            "live_readiness_path": str(live_readiness_path.relative_to(writer.run_dir)),
-            "preflight_path": str(preflight_path.relative_to(writer.run_dir)),
-            "evidence_index_path": str(evidence_index_path.relative_to(writer.run_dir)),
-            "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)),
-            "platform": "google_workspace",
-            "workspace_domain": config.domain,
-            "customer_id": config.customer_id,
-            "collector_preset": config.collector_preset,
-            "top_limit": config.top,
-            "privacy": privacy,
-        },
-        run_metadata={
-            "tenant_name": config.tenant_name,
-            "tenant_id": config.customer_id,
-            "run_id": writer.run_id,
-            "overall_status": overall_status,
-            "auditor_profile": "google-workspace",
-            "mode": config.auth,
-            "plane": "inventory",
-            "selected_collectors": selected,
-            "duration_seconds": 0,
-        },
-        normalized_snapshot={
-            "snapshot": {
-                "normalized_counts": {"preflight_rows": len(preflight_rows), "collectors": len(selected)},
-                "collector_count": len(selected),
-                "coverage_row_count": len(preflight_rows),
-                "blocker_count": len(blockers),
-                "sample_truncated": False,
-                "truncated_sections": [],
-            }
-        },
-        capability_rows=capability_rows,
-        coverage_ledger=coverage_ledger,
-        blockers=blockers,
-        findings=[],
+        plan=ProviderFinalizePlan(
+            tenant_name=config.tenant_name,
+            tenant_id=config.customer_id,
+            executed_by="auditex_google_probe",
+            selected_collectors=selected,
+            overall_status=overall_status,
+            duration_seconds=0,
+            mode=config.auth,
+            auditor_profile="google-workspace",
+            plane="inventory",
+            findings=[],
+            blockers=blockers,
+            evidence_paths=evidence_paths,
+            normalized_snapshot={
+                "snapshot": {
+                    "normalized_counts": {"preflight_rows": len(preflight_rows), "collectors": len(selected)},
+                    "collector_count": len(selected),
+                    "coverage_row_count": len(preflight_rows),
+                    "blocker_count": len(blockers),
+                    "sample_truncated": False,
+                    "truncated_sections": [],
+                }
+            },
+            capability_rows=capability_rows,
+            coverage_ledger=coverage_ledger,
+            privacy=privacy,
+            bundle_metadata={
+                "since": config.since,
+                "until": config.until,
+                "command_line": scrub_google_command_line(command_line or []),
+                "probe_mode": config.auth,
+                "probe_surface": config.collectors or config.collector_preset or "",
+                "capability_matrix_path": str(capability_path.relative_to(writer.run_dir)),
+                "toolchain_readiness_path": str(toolchain_path.relative_to(writer.run_dir)),
+                "live_readiness_path": str(live_readiness_path.relative_to(writer.run_dir)),
+                "preflight_path": str(preflight_path.relative_to(writer.run_dir)),
+                "evidence_index_path": str(evidence_index_path.relative_to(writer.run_dir)),
+                "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)),
+                "platform": "google_workspace",
+                "workspace_domain": config.domain,
+                "customer_id": config.customer_id,
+                "collector_preset": config.collector_preset,
+                "top_limit": config.top,
+            },
+        ),
     )
     writer.log_event(
         "probe.completed",

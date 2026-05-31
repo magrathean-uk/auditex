@@ -1,0 +1,164 @@
+{
+  "_fixture_provenance": {
+    "fixture_id": "m365-known-bad",
+    "fixture_version": "2026-05-31",
+    "provider": "m365",
+    "seed_kind": "known_bad",
+    "source_path": "examples/sample_audit_bundle/known_bad_result.json"
+  },
+  "mailbox_forwarding": {
+    "messageRules": {
+      "value": [
+        {
+          "rule_id": "rule-1",
+          "user_id": "u1",
+          "user_principal_name": "alice@contoso.com",
+          "display_name": "Forward to external",
+          "is_enabled": true,
+          "forwards_externally": true,
+          "forwards_internally": false,
+          "external_recipients": [
+            "attacker@evil.example"
+          ],
+          "internal_recipients": [],
+          "hide_from_user": false,
+          "delete_action": false
+        }
+      ]
+    },
+    "mailboxSettings": {
+      "value": []
+    }
+  },
+  "exchange_policy": {
+    "acceptedDomains": {
+      "value": [
+        {
+          "Name": "contoso.com",
+          "DomainName": "contoso.com"
+        }
+      ]
+    },
+    "transportRules": {
+      "value": [
+        {
+          "Name": "Redirect invoices",
+          "State": "Enabled",
+          "Mode": "Enforce",
+          "RedirectMessageTo": [
+            "finance@evil.example"
+          ],
+          "BlindCopyTo": [
+            "audit@contoso.com"
+          ]
+        }
+      ]
+    },
+    "remoteDomains": {
+      "value": [
+        {
+          "Name": "Default",
+          "DomainName": "*",
+          "AutoForwardEnabled": true
+        }
+      ]
+    }
+  },
+  "dns_posture": {
+    "domains": {
+      "value": []
+    },
+    "domainPosture": {
+      "value": [
+        {
+          "domain": "contoso.com",
+          "managed_by_microsoft": false,
+          "spf": {
+            "present": false
+          },
+          "dmarc": {
+            "present": true,
+            "policy": "none"
+          },
+          "dkim": {
+            "selectors_present": [],
+            "selectors_missing": [
+              "selector1",
+              "selector2"
+            ]
+          },
+          "mta_sts": {
+            "dns_present": true
+          },
+          "bimi": {
+            "present": false
+          }
+        }
+      ]
+    }
+  },
+  "app_credentials": {
+    "applicationCredentials": {
+      "value": [
+        {
+          "id": "app-1",
+          "display_name": "Wide Build Bot",
+          "app_id": "1",
+          "sign_in_audience": "AzureADMultipleOrgs",
+          "password_credentials": [
+            {
+              "key_id": "k1",
+              "end_date_time": "2020-01-01T00:00:00Z"
+            }
+          ],
+          "key_credentials": [],
+          "redirect_uris": [
+            {
+              "uri": "http://example.com/callback",
+              "scheme": "http"
+            }
+          ],
+          "owner_count": 0,
+          "federated_credentials": []
+        }
+      ]
+    },
+    "servicePrincipalCredentials": {
+      "value": []
+    }
+  },
+  "cross_tenant_access": {
+    "crossTenantAccessPolicy": {
+      "value": [
+        {
+          "displayName": "Cross-tenant access policy"
+        }
+      ]
+    },
+    "defaultPolicy": {
+      "value": [
+        {
+          "is_service_default": false,
+          "b2b_collaboration_outbound_access": "blocked",
+          "b2b_collaboration_inbound_access": "blocked",
+          "b2b_direct_connect_outbound_access": "blocked",
+          "b2b_direct_connect_inbound_access": "allowed",
+          "inbound_trust_mfa_accepted": false,
+          "automatic_user_consent_inbound_allowed": true,
+          "automatic_user_consent_outbound_allowed": false
+        }
+      ]
+    },
+    "partnerConfigurations": {
+      "value": [
+        {
+          "tenant_id": "11111111-1111-1111-1111-111111111111",
+          "b2b_direct_connect_inbound_access": "allowed",
+          "b2b_direct_connect_outbound_access": "blocked",
+          "inbound_trust_mfa_accepted": false,
+          "is_service_provider": false
+        }
+      ]
+    }
+  }
+}

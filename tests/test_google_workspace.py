@@ -136,6 +136,7 @@ def test_google_offline_run_writes_valid_contract_and_findings(tmp_path: Path) -
         {
             "google.admin_2sv_not_enforced",
             "google.gmail_external_forwarding",
+            "google.gmail_hidden_forwarding_filter",
             "google.oauth_high_risk_scope",
             "google.alert_active",
             "google.dns_dmarc_monitor_only",
@@ -303,6 +304,8 @@ def test_google_probe_writes_summarizable_artifacts(tmp_path: Path, monkeypatch,
     assert manifest["toolchain_readiness_path"] == "toolchain-readiness.json"
     assert manifest["live_readiness_path"] == "live-readiness.json"
     assert manifest["auth_context_path"] == "auth-context.json"
+    assert manifest["provider_adapter_version"] == "2026-05-31"
+    assert manifest["api_inventory_recorder_version"] == "2026-05-31"
     assert auth_context["scopes"] == ["scope://directory.readonly"]
     assert "service-account.json" not in json.dumps(auth_context)
     assert capability_matrix[0]["collector"] == "google_directory"
@@ -505,6 +508,83 @@ def test_google_collector_handles_paginated_fake_client() -> None:
     assert result.payload["oauthGrants"]["value"][0]["userKey"] == "user@example.com"
 
 
+def test_google_directory_collector_keeps_group_member_errors() -> None:
+    from auditex.google_workspace.collectors import GoogleDirectoryCollector
+
+    class _FakeClient:
+        def list_directory(self, resource: str, **_kwargs):
+            if resource == "users":
+                return []
+            if resource == "groups":
+                return [{"id": "g-1", "email": "all@example.com"}]
+            return []
+
+        def list_group_members(self, group_email: str, **_kwargs):
+            raise RuntimeError(f"403 members denied for {group_email}")
+
+    result = GoogleDirectoryCollector().run({"client": _FakeClient(), "top": 10, "domain": "example.com"})
+
+    assert result.status == "partial"
+    assert result.payload["groupMembers"]["value"] == []
+    assert result.payload["groupMembersErrors"]["value"] == [
+        {
+            "groupEmail": "all@example.com",
+            "error_class": "client_error",
+            "error": "403 members denied for all@example.com",
+        }
+    ]
+
+
+def test_google_directory_collector_keeps_alias_errors() -> None:
+    from auditex.google_workspace.collectors import GoogleDirectoryCollector
+
+    class _FakeClient:
+        def list_directory(self, resource: str, **_kwargs):
+            if resource == "users":
+                return [{"id": "u-1", "primaryEmail": "user@example.com"}]
+            return []
+
+        def list_user_aliases(self, user_key: str, **_kwargs):
+            raise RuntimeError(f"403 alias denied for {user_key}")
+
+    result = GoogleDirectoryCollector().run({"client": _FakeClient(), "top": 10, "domain": "example.com"})
+
+    assert result.status == "partial"
+    assert result.payload["aliases"]["value"] == []
+    assert result.payload["aliasesErrors"]["value"] == [
+        {
+            "userKey": "user@example.com",
+            "error_class": "client_error",
+            "error": "403 alias denied for user@example.com",
+        }
+    ]
+
+
+def test_google_directory_collector_keeps_oauth_grant_errors() -> None:
+    from auditex.google_workspace.collectors import GoogleDirectoryCollector
+
+    class _FakeClient:
+        def list_directory(self, resource: str, **_kwargs):
+            if resource == "users":
+                return [{"id": "u-1", "primaryEmail": "user@example.com"}]
+            return []
+
+        def list_user_tokens(self, user_key: str, **_kwargs):
+            raise RuntimeError(f"403 token denied for {user_key}")
+
+    result = GoogleDirectoryCollector().run({"client": _FakeClient(), "top": 10, "domain": "example.com"})
+
+    assert result.status == "partial"
+    assert result.payload["oauthGrants"]["value"] == []
+    assert result.payload["oauthGrantsErrors"]["value"] == [
+        {
+            "userKey": "user@example.com",
+            "error_class": "client_error",
+            "error": "403 token denied for user@example.com",
+        }
+    ]
+
+
 def test_google_collector_top_zero_means_unbounded_collection() -> None:
     from auditex.google_workspace.collectors import GoogleDirectoryCollector
 
@@ -659,7 +739,13 @@ def test_google_drive_and_group_settings_findings_from_sample() -> None:
                             "id": "file-1",
                             "name": "Payroll",
                             "mimeType": "application/vnd.google-apps.spreadsheet",
-                            "permissions": [{"type": "anyone", "role": "reader"}],
+                            "permissions": [{"type": "anyone", "role": "reader", "allowFileDiscovery": False}],
+                        },
+                        {
+                            "id": "file-2",
+                            "name": "Public Handbook",
+                            "mimeType": "application/vnd.google-apps.document",
+                            "permissions": [{"type": "anyone", "role": "reader", "allowFileDiscovery": True}],
                         }
                     ]
                 },
@@ -672,6 +758,7 @@ def test_google_drive_and_group_settings_findings_from_sample() -> None:
                             "email": "all@example.com",
                             "allowExternalMembers": "true",
                             "whoCanPostMessage": "ANYONE_CAN_POST",
+                            "messageModerationLevel": "MODERATE_NONE",
                         }
                     ]
                 }
@@ -682,8 +769,91 @@ def test_google_drive_and_group_settings_findings_from_sample() -> None:
     rule_ids = {finding["rule_id"] for finding in build_google_findings(normalized)}
 
     assert "google.drive_anyone_with_link" in rule_ids
+    assert "google.drive_public_discoverable" in rule_ids
     assert "google.group_external_members_allowed" in rule_ids
     assert "google.group_anyone_can_post" in rule_ids
+    assert "google.group_anyone_can_post_unmoderated" in rule_ids
+
+
+def test_google_group_public_posting_moderation_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_groups_settings": {
+                "groupSettings": {
+                    "value": [
+                        {
+                            "email": "all@example.com",
+                            "whoCanPostMessage": "ANYONE_CAN_POST",
+                            "messageModerationLevel": "MODERATE_NONE",
+                        },
+                        {
+                            "email": "reviewed@example.com",
+                            "whoCanPostMessage": "ANYONE_CAN_POST",
+                            "messageModerationLevel": "MODERATE_NON_MEMBERS",
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [item for item in build_google_findings(normalized) if item["rule_id"] == "google.group_anyone_can_post_unmoderated"]
+
+    assert len(findings) == 1
+    assert findings[0]["returned_value"] == {
+        "email": "all@example.com",
+        "whoCanPostMessage": "ANYONE_CAN_POST",
+        "messageModerationLevel": "MODERATE_NONE",
+    }
+
+
+def test_google_group_domain_posting_findings() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_groups_settings": {
+                "groupSettings": {
+                    "value": [
+                        {
+                            "email": "staff@example.com",
+                            "whoCanPostMessage": "ALL_IN_DOMAIN_CAN_POST",
+                            "messageModerationLevel": "MODERATE_NONE",
+                        },
+                        {
+                            "email": "reviewed@example.com",
+                            "whoCanPostMessage": "ALL_IN_DOMAIN_CAN_POST",
+                            "messageModerationLevel": "MODERATE_NON_MEMBERS",
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = build_google_findings(normalized)
+    rule_ids = {item["rule_id"] for item in findings}
+    unmoderated = [item for item in findings if item["rule_id"] == "google.group_domain_can_post_unmoderated"]
+
+    assert "google.group_domain_can_post" in rule_ids
+    assert len(unmoderated) == 1
+    assert unmoderated[0]["returned_value"] == {
+        "email": "staff@example.com",
+        "whoCanPostMessage": "ALL_IN_DOMAIN_CAN_POST",
+        "messageModerationLevel": "MODERATE_NONE",
+    }
 
 
 def test_google_drive_external_permission_finding() -> None:
@@ -721,6 +891,171 @@ def test_google_drive_external_permission_finding() -> None:
     assert all("other.test" in str(finding["returned_value"]) for finding in findings)
 
 
+def test_google_drive_domain_permission_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_drive_posture": {
+                "driveFiles": {
+                    "value": [
+                        {
+                            "id": "file-1",
+                            "name": "Domain Shared Playbook",
+                            "permissions": [
+                                {"id": "p-domain", "type": "domain", "role": "reader", "domain": "example.com"},
+                            ],
+                        }
+                    ]
+                },
+            }
+        },
+    )
+
+    finding = next(item for item in build_google_findings(normalized) if item["rule_id"] == "google.drive_domain_permission")
+
+    assert finding["severity"] == "medium"
+    assert finding["returned_value"]["permission"]["domain"] == "example.com"
+
+
+def test_google_group_anyone_can_join_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_directory": {
+                "groups": {
+                    "value": [
+                        {
+                            "id": "g-all",
+                            "email": "all@example.com",
+                            "name": "All Staff",
+                            "whoCanJoin": "ANYONE_CAN_JOIN",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    finding = next(item for item in build_google_findings(normalized) if item["rule_id"] == "google.group_anyone_can_join")
+
+    assert finding["severity"] == "medium"
+    assert finding["returned_value"] == "all@example.com"
+
+
+def test_google_group_anyone_can_join_from_group_settings_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_groups_settings": {
+                "groupSettings": {
+                    "value": [
+                        {
+                            "email": "all@example.com",
+                            "whoCanJoin": "ANYONE_CAN_JOIN",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    finding = next(item for item in build_google_findings(normalized) if item["rule_id"] == "google.group_anyone_can_join")
+
+    assert finding["severity"] == "medium"
+    assert finding["collector"] == "google_groups_settings"
+    assert finding["returned_value"] == "all@example.com"
+    assert finding["evidence_refs"][0]["artifact_path"] == "normalized/google_group_settings.json"
+
+
+def test_google_group_domain_can_join_from_group_settings_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_groups_settings": {
+                "groupSettings": {
+                    "value": [
+                        {
+                            "email": "staff@example.com",
+                            "whoCanJoin": "ALL_IN_DOMAIN_CAN_JOIN",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    finding = next(item for item in build_google_findings(normalized) if item["rule_id"] == "google.group_domain_can_join")
+
+    assert finding["severity"] == "medium"
+    assert finding["collector"] == "google_groups_settings"
+    assert finding["returned_value"] == "staff@example.com"
+    assert finding["evidence_refs"][0]["artifact_path"] == "normalized/google_group_settings.json"
+
+
+def test_google_shared_drive_external_members_allowed_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_drive_posture": {
+                "sharedDrives": {
+                    "value": [
+                        {
+                            "id": "drive-1",
+                            "name": "External Projects",
+                            "restrictions": {"domainUsersOnly": False},
+                        },
+                        {
+                            "id": "drive-2",
+                            "name": "Internal Only",
+                            "restrictions": {"domainUsersOnly": True},
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        finding
+        for finding in build_google_findings(normalized)
+        if finding["rule_id"] == "google.shared_drive_external_members_allowed"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "medium"
+    assert findings[0]["affected_objects"] == ["drive-1"]
+
+
 def test_google_external_group_member_finding() -> None:
     from auditex.google_workspace.findings import build_google_findings
     from auditex.google_workspace.normalize import build_google_normalized_snapshot
@@ -751,6 +1086,155 @@ def test_google_external_group_member_finding() -> None:
 
     assert finding["severity"] == "medium"
     assert finding["affected_objects"] == ["external@other.test"]
+
+
+def test_google_group_member_visibility_gap_emits_collector_issue() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_directory": {
+                "groupMembersErrors": {
+                    "value": [
+                        {
+                            "groupEmail": "all@example.com",
+                            "error_class": "insufficient_permissions",
+                            "error": "member scope missing",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        item
+        for item in build_google_findings(normalized)
+        if item["rule_id"] == "google.collector_issue" and item["collector"] == "google_directory"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["returned_value"] == {
+        "surface": "group-members",
+        "group": "all@example.com",
+        "error_class": "insufficient_permissions",
+        "error": "member scope missing",
+    }
+    assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_group_member_errors.json"
+
+
+def test_google_group_public_visibility_findings() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_groups_settings": {
+                "groupSettings": {
+                    "value": [
+                        {
+                            "email": "all@example.com",
+                            "whoCanViewGroup": "ANYONE_CAN_VIEW",
+                            "whoCanViewMembership": "ANYONE_CAN_VIEW",
+                        },
+                        {
+                            "email": "staff@example.com",
+                            "whoCanViewGroup": "ALL_MANAGERS_CAN_VIEW",
+                            "whoCanViewMembership": "ALL_MEMBERS_CAN_VIEW",
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = build_google_findings(normalized)
+    rule_ids = {finding["rule_id"] for finding in findings}
+
+    assert "google.group_public_view" in rule_ids
+    assert "google.group_public_membership" in rule_ids
+
+
+def test_google_group_domain_visibility_findings() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_groups_settings": {
+                "groupSettings": {
+                    "value": [
+                        {
+                            "email": "staff@example.com",
+                            "whoCanViewGroup": "ALL_IN_DOMAIN_CAN_VIEW",
+                            "whoCanViewMembership": "ALL_IN_DOMAIN_CAN_VIEW",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = build_google_findings(normalized)
+    rule_ids = {finding["rule_id"] for finding in findings}
+
+    assert "google.group_domain_view" in rule_ids
+    assert "google.group_domain_membership" in rule_ids
+
+
+def test_google_group_settings_visibility_gap_emits_collector_issue() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_groups_settings": {
+                "groupSettingsErrors": {
+                    "value": [
+                        {
+                            "email": "staff@example.com",
+                            "error_class": "insufficient_permissions",
+                            "error": "group settings scope missing",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        item
+        for item in build_google_findings(normalized)
+        if item["rule_id"] == "google.collector_issue" and item["collector"] == "google_groups_settings"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["returned_value"] == {
+        "surface": "group-settings",
+        "email": "staff@example.com",
+        "error_class": "insufficient_permissions",
+        "error": "group settings scope missing",
+    }
+    assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_group_setting_errors.json"
 
 
 def test_google_gmail_protocol_and_external_send_as_findings() -> None:
@@ -800,6 +1284,88 @@ def test_google_gmail_protocol_and_external_send_as_findings() -> None:
     assert len(set(send_as_ids)) == 2
 
 
+def test_google_oauth_grant_visibility_gap_emits_collector_issue() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_directory": {
+                "oauthGrantsErrors": {
+                    "value": [
+                        {
+                            "userKey": "admin@example.com",
+                            "error_class": "insufficient_permissions",
+                            "error": "token scope missing",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        item
+        for item in build_google_findings(normalized)
+        if item["rule_id"] == "google.collector_issue" and item["collector"] == "google_directory"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["returned_value"] == {
+        "surface": "oauth-grants",
+        "user_email": "admin@example.com",
+        "error_class": "insufficient_permissions",
+        "error": "token scope missing",
+    }
+    assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_oauth_grant_errors.json"
+
+
+def test_google_alias_visibility_gap_emits_collector_issue() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_directory": {
+                "aliasesErrors": {
+                    "value": [
+                        {
+                            "userKey": "admin@example.com",
+                            "error_class": "insufficient_permissions",
+                            "error": "alias scope missing",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        item
+        for item in build_google_findings(normalized)
+        if item["rule_id"] == "google.collector_issue" and item["collector"] == "google_directory"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["returned_value"] == {
+        "surface": "aliases",
+        "user_email": "admin@example.com",
+        "error_class": "insufficient_permissions",
+        "error": "alias scope missing",
+    }
+    assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_alias_errors.json"
+
+
 def test_google_gmail_external_forwarding_address_ready_finding() -> None:
     from auditex.google_workspace.findings import build_google_findings
     from auditex.google_workspace.normalize import build_google_normalized_snapshot
@@ -835,6 +1401,7 @@ def test_google_gmail_external_forwarding_address_ready_finding() -> None:
     assert len(findings) == 1
     assert findings[0]["severity"] == "medium"
     assert findings[0]["returned_value"] == "ready@other.test"
+    assert findings[0]["id"].endswith(":ready@other.test")
 
 
 def test_google_gmail_external_delegate_finding() -> None:
@@ -870,6 +1437,213 @@ def test_google_gmail_external_delegate_finding() -> None:
     assert findings[0]["returned_value"] == "assistant@other.test"
 
 
+def test_google_gmail_delegate_visibility_gap_emits_collector_issue() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_gmail_settings": {
+                "mailboxSettings": {
+                    "value": [
+                        {
+                            "userEmail": "alice@example.com",
+                            "delegates_error": {
+                                "error_class": "insufficient_permissions",
+                                "error": "delegates scope missing",
+                            },
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        item
+        for item in build_google_findings(normalized)
+        if item["rule_id"] == "google.collector_issue" and item["collector"] == "google_gmail_settings"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["returned_value"] == {
+        "surface": "delegates",
+        "error_class": "insufficient_permissions",
+        "error": "delegates scope missing",
+    }
+    assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_mailbox_settings.json"
+
+
+def test_google_gmail_send_as_visibility_gap_emits_collector_issue() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_gmail_settings": {
+                "mailboxSettings": {
+                    "value": [
+                        {
+                            "userEmail": "alice@example.com",
+                            "sendAs_error": {
+                                "error_class": "insufficient_permissions",
+                                "error": "sendAs scope missing",
+                            },
+                            "imap": {"enabled": True},
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        item
+        for item in build_google_findings(normalized)
+        if item["rule_id"] == "google.collector_issue" and item["collector"] == "google_gmail_settings"
+    ]
+    imap = next(item for item in build_google_findings(normalized) if item["rule_id"] == "google.gmail_imap_enabled")
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["returned_value"] == {
+        "surface": "send-as",
+        "error_class": "insufficient_permissions",
+        "error": "sendAs scope missing",
+    }
+    assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_mailbox_settings.json"
+    assert imap["returned_value"] == {"enabled": True}
+
+
+def test_google_gmail_filter_external_forwarding_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings, google_rule_metadata
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_gmail_settings": {
+                "mailboxSettings": {
+                    "value": [
+                        {
+                            "userEmail": "alice@example.com",
+                            "filters": [
+                                {
+                                    "id": "filter-plain",
+                                    "criteria": {"from": "finance@example.com"},
+                                    "action": {"forward": "outside@other.test"},
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [item for item in build_google_findings(normalized) if item["rule_id"] == "google.gmail_filter_external_forwarding"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["title"] == google_rule_metadata()["google.gmail_filter_external_forwarding"]["title"]
+    assert findings[0]["description"] == google_rule_metadata()["google.gmail_filter_external_forwarding"]["description"]
+    assert findings[0]["returned_value"] == "outside@other.test"
+    assert findings[0]["affected_objects"] == ["alice@example.com"]
+    assert findings[0]["id"].endswith(":filter-plain")
+
+
+def test_google_gmail_hidden_forwarding_filter_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings, google_rule_metadata
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_gmail_settings": {
+                "mailboxSettings": {
+                    "value": [
+                        {
+                            "userEmail": "alice@example.com",
+                            "filters": [
+                                {
+                                    "id": "filter-hidden",
+                                    "criteria": {"from": "finance@example.com"},
+                                    "action": {"forward": "stealth@other.test", "removeLabelIds": ["INBOX"]},
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [item for item in build_google_findings(normalized) if item["rule_id"] == "google.gmail_hidden_forwarding_filter"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["title"] == google_rule_metadata()["google.gmail_hidden_forwarding_filter"]["title"]
+    assert findings[0]["description"] == google_rule_metadata()["google.gmail_hidden_forwarding_filter"]["description"]
+    assert findings[0]["returned_value"] == "stealth@other.test"
+    assert findings[0]["affected_objects"] == ["alice@example.com"]
+    assert findings[0]["id"].endswith(":filter-hidden")
+
+
+def test_google_gmail_vacation_external_reply_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_gmail_settings": {
+                "mailboxSettings": {
+                    "value": [
+                        {
+                            "userEmail": "alice@example.com",
+                            "vacation": {
+                                "enableAutoReply": True,
+                                "restrictToContacts": False,
+                                "restrictToDomain": False,
+                                "responseSubject": "OOO",
+                                "responseBodyPlainText": "Away",
+                            },
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [finding for finding in build_google_findings(normalized) if finding["rule_id"] == "google.gmail_vacation_external_reply"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "medium"
+    assert findings[0]["returned_value"] == {
+        "enableAutoReply": True,
+        "restrictToContacts": False,
+        "restrictToDomain": False,
+    }
+
+
 def test_google_findings_use_rule_catalog_metadata() -> None:
     from auditex.google_workspace.findings import build_google_findings, google_rule_metadata
 
@@ -898,6 +1672,7 @@ def test_google_findings_use_rule_catalog_metadata() -> None:
     assert finding["expected_value"] == metadata["expected_value"]
     assert finding["references"] == metadata["references"]
     assert finding["control_ids"] == metadata["control_ids"]
+    assert finding["id"].endswith(":outside@other.test")
 
 
 def test_google_calendar_posture_collector_uses_fake_client() -> None:
@@ -939,6 +1714,32 @@ def test_google_calendar_posture_collector_uses_fake_client() -> None:
     assert client.acl_calls == ["team@example.com", "room-1@example.com"]
 
 
+def test_google_calendar_posture_collector_keeps_acl_errors() -> None:
+    from auditex.google_workspace.collectors import GoogleCalendarPostureCollector
+
+    class _FakeClient:
+        def list_calendar_resources(self, **_kwargs):
+            return []
+
+        def list_calendar_list(self, **_kwargs):
+            return [{"id": "team@example.com", "summary": "Team Calendar", "accessRole": "owner"}]
+
+        def list_calendar_acl(self, calendar_id: str, **_kwargs):
+            raise RuntimeError(f"403 acl denied for {calendar_id}")
+
+    result = GoogleCalendarPostureCollector().run({"client": _FakeClient(), "top": 10})
+
+    assert result.status == "partial"
+    assert result.payload["calendarAcls"]["value"] == []
+    assert result.payload["calendarAclsErrors"]["value"] == [
+        {
+            "calendarId": "team@example.com",
+            "error_class": "client_error",
+            "error": "403 acl denied for team@example.com",
+        }
+    ]
+
+
 def test_google_calendar_findings_from_sample() -> None:
     from auditex.google_workspace.findings import build_google_findings
     from auditex.google_workspace.normalize import build_google_normalized_snapshot
@@ -976,6 +1777,12 @@ def test_google_calendar_findings_from_sample() -> None:
                             "scope": {"type": "user", "value": "external@other.test"},
                             "role": "writer",
                         },
+                        {
+                            "calendarId": "team@example.com",
+                            "id": "domain:example.com",
+                            "scope": {"type": "domain", "value": "example.com"},
+                            "role": "reader",
+                        },
                     ]
                 },
             }
@@ -986,6 +1793,48 @@ def test_google_calendar_findings_from_sample() -> None:
 
     assert "google.calendar_public_acl" in rule_ids
     assert "google.calendar_external_acl" in rule_ids
+    assert "google.calendar_domain_acl" in rule_ids
+
+
+def test_google_calendar_acl_visibility_gap_emits_collector_issue() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_calendar_posture": {
+                "calendarAclsErrors": {
+                    "value": [
+                        {
+                            "calendarId": "team@example.com",
+                            "error_class": "insufficient_permissions",
+                            "error": "calendar acl scope missing",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [
+        item
+        for item in build_google_findings(normalized)
+        if item["rule_id"] == "google.collector_issue" and item["collector"] == "google_calendar_posture"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["returned_value"] == {
+        "surface": "calendar-acls",
+        "calendar": "team@example.com",
+        "error_class": "insufficient_permissions",
+        "error": "calendar acl scope missing",
+    }
+    assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_calendar_acl_errors.json"
 
 
 def test_google_admin_resilience_findings() -> None:
@@ -1305,6 +2154,84 @@ def test_google_stale_mobile_device_sync_finding() -> None:
     assert len(findings) == 1
     assert findings[0]["severity"] == "medium"
     assert findings[0]["affected_objects"] == ["mobile-1"]
+
+
+def test_google_stale_chromeos_device_sync_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_devices": {
+                "chromeosDevices": {
+                    "value": [
+                        {
+                            "deviceId": "chrome-1",
+                            "serialNumber": "SER-1",
+                            "annotatedUser": "student@example.com",
+                            "status": "ACTIVE",
+                            "lastSync": "2020-01-01T00:00:00.000Z",
+                        },
+                        {
+                            "deviceId": "chrome-2",
+                            "serialNumber": "SER-2",
+                            "annotatedUser": "fresh@example.com",
+                            "status": "ACTIVE",
+                            "lastSync": "2026-05-20T00:00:00.000Z",
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [item for item in build_google_findings(normalized) if item["rule_id"] == "google.chromeos_device_stale_sync"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "medium"
+    assert findings[0]["affected_objects"] == ["chrome-1"]
+
+
+def test_google_disabled_chromeos_device_assignment_finding() -> None:
+    from auditex.google_workspace.findings import build_google_findings
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    normalized = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        domain="example.com",
+        customer_id="C123",
+        collector_payloads={
+            "google_devices": {
+                "chromeosDevices": {
+                    "value": [
+                        {
+                            "deviceId": "chrome-1",
+                            "serialNumber": "SER-1",
+                            "annotatedUser": "student@example.com",
+                            "status": "DEPROVISIONED",
+                        },
+                        {
+                            "deviceId": "chrome-2",
+                            "serialNumber": "SER-2",
+                            "annotatedUser": "",
+                            "status": "DEPROVISIONED",
+                        },
+                    ]
+                }
+            }
+        },
+    )
+
+    findings = [item for item in build_google_findings(normalized) if item["rule_id"] == "google.chromeos_device_inactive_assignment"]
+
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "medium"
+    assert findings[0]["affected_objects"] == ["chrome-1"]
 
 
 def test_google_preflight_checks_calendar_posture() -> None:

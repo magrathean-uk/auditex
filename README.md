@@ -41,6 +41,7 @@ auditex setup --pwsh
 Fast checks:
 
 ```bash
+auditex --version
 make test
 make lint
 auditex doctor
@@ -62,7 +63,9 @@ auditex guided-run --flow app-audit
 Direct CLI surface:
 
 ```bash
+azure-tenant-audit --version
 auditex run --offline --tenant-name demo --out outputs/offline
+auditex run --offline --sample examples/sample_audit_bundle/known_bad_result.json --tenant-name demo --run-name known-bad --out outputs/offline-known-bad
 auditex google run --offline --sample examples/google_workspace_sample.json --domain example.com --tenant-name demo --out outputs/google
 auditex compare --run-dir run-a --run-dir run-b
 auditex report render <run-dir> --format md
@@ -101,29 +104,16 @@ auditex setup-guide google --collector-preset everything --format json
 - [docs/README.md](docs/README.md) - full product documentation index.
 - [docs/provenance/provenance.md](docs/provenance/provenance.md) - provenance sheet.
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) - third-party notice file.
-- [CHANGELOG.md](CHANGELOG.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md) - v1 release notes.
 
-## Website and releases
+## Website
 
 Build the GitHub Pages handoff artifact locally:
 
 ```bash
-python scripts/build-pages-site.py site
+python3 scripts/build-pages-site.py site
 ```
 
 The public website lives at `auditex.hu` outside this repository. The `pages` workflow only keeps GitHub Pages configured to hand traffic to that domain.
-
-Create the v1 release from a verified checkout:
-
-```bash
-make test
-make lint
-make contract-smoke
-python -m build
-git tag -a v1 -m "Auditex v1 enterprise release"
-git push origin main v1
-gh release create v1 dist/* --title "Auditex v1 Enterprise Release" --notes-file RELEASE_NOTES.md --verify-tag
-```
 
 ## Data handling
 
@@ -221,7 +211,7 @@ The manifest records `schema_contract_version`, `contract_status`, and `contract
 
 Additional run artifacts include `summary.md`, `data-handling.json`, `audit-plan.json`, `api-inventory.json`, `audit-log.jsonl`, `audit-debug.log`, `raw/`, `index/coverage.jsonl`, `blockers/`, `diagnostics.json`, `normalized/`, `ai_safe/`, `findings/`, `reports/`, `chunks/`, and `checkpoints/checkpoint-state.json`.
 
-Schemas live in `schemas/`; contract notes live in [docs/OUTPUT_CONTRACT.md](docs/OUTPUT_CONTRACT.md). The product documentation index lives in [docs/README.md](docs/README.md), with the operator manual, setup guide, admin permission guide, customer handoff guide, AI operator guide, GitHub operator guide, security/privacy model, troubleshooting guide, and ship-readiness guide. The 1.0 audit-only release plan lives in [docs/improvement/auditex-1.0-ultimate-plan.md](docs/improvement/auditex-1.0-ultimate-plan.md).
+Schemas live in `schemas/`; contract notes live in [docs/OUTPUT_CONTRACT.md](docs/OUTPUT_CONTRACT.md). The product documentation index lives in [docs/README.md](docs/README.md), with the operator manual, setup guide, admin permission guide, customer handoff guide, security/privacy model, and troubleshooting guide.
 
 For customer call review:
 

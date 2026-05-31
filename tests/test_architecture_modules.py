@@ -28,14 +28,13 @@ def test_runtime_resources_resolve_from_non_repo_cwd(tmp_path: Path, monkeypatch
 def test_shipped_content_truth_matches_packaging_manifest() -> None:
     import tomllib
 
-    from azure_tenant_audit.shipped_content import data_file_manifest, release_content_labels
+    from azure_tenant_audit.shipped_content import data_file_manifest, shipped_directories
 
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    checklist = Path("docs/RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
 
     assert pyproject["tool"]["setuptools"]["data-files"] == data_file_manifest()
-    for label in release_content_labels():
-        assert f"- {label}" in checklist
+    for directory in shipped_directories():
+        assert Path(directory).exists()
 
 
 def test_catalog_validates_registry_config_profiles() -> None:
@@ -58,6 +57,39 @@ def test_probe_uses_runtime_modules_instead_of_cli_private_helpers() -> None:
     source = Path("src/azure_tenant_audit/probe.py").read_text(encoding="utf-8")
 
     assert "from .cli import" not in source
+
+
+def test_release_workflow_restores_ship_checks() -> None:
+    source = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "make lint" in source
+    assert "make test" in source
+    assert "make contract-smoke" in source
+    assert "./scripts/oss-taint-scan.sh" in source
+    assert "python3 scripts/build-pages-site.py /tmp/auditex-pages" in source
+    assert "python -m build" in source
+    assert ".[google,mcp]" in source
+    assert "bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke" in source
+    assert "gh release create" in source
+    assert "from azure_tenant_audit.versioning import package_version" in source
+    assert 'if [ "$TAG" != "v$PACKAGE_VERSION" ]; then' in source
+
+
+def test_release_smoke_script_covers_base_google_and_mcp_matrix() -> None:
+    source = Path("scripts/release-smoke.sh").read_text(encoding="utf-8")
+
+    assert "auditex run --offline" in source
+    assert "\"${WHEEL_PATH}[google]\"" in source
+    assert "\"auditex\", \"google\", \"doctor\", \"--json\"" in source
+    assert "\"${WHEEL_PATH}[mcp]\"" in source
+    assert "from mcp.server.fastmcp import FastMCP" in source
+
+
+def test_graph_user_agent_does_not_hardcode_package_version() -> None:
+    source = Path("src/azure_tenant_audit/graph.py").read_text(encoding="utf-8")
+
+    assert "auditex/1.0.0" not in source
+    assert "package_user_agent()" in source
 
 
 def test_run_bundle_reader_centralizes_legacy_and_contract_artifacts(tmp_path: Path) -> None:

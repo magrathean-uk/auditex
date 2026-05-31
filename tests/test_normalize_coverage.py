@@ -17,8 +17,8 @@ _NORMALIZE_PATH = (
 )
 
 
-# Collectors that intentionally bypass normalize. Documented in
-# docs/improvement/normalize-coverage-2026-05-09.md.
+# Collectors that intentionally bypass normalize. Keep rationales beside the
+# exceptions so they stay with the test that enforces the coverage rule.
 _INTENTIONAL_EXCEPTIONS = {
     "security",  # sign-ins / directory-audits — too noisy to flatten
     "teams",     # overlaps with groups (M365 groups + Team flag)
@@ -42,7 +42,7 @@ def test_every_collector_is_consumed_by_normalize() -> None:
         f"Collectors not consumed by normalize.py and not on the exceptions "
         f"list: {sorted(missing)}. Either add a section in normalize.py or "
         f"add the collector name to the exceptions set with a documented "
-        f"rationale in docs/improvement/normalize-coverage-2026-05-09.md."
+        f"rationale."
     )
 
 

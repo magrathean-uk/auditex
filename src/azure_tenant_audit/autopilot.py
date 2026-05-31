@@ -3,25 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .capability_gate import classify_capability_blocker
+from .evidence_gates import build_evidence_gate_summary
 
 
 SCHEMA_VERSION = "2026-04-21"
-
-_TRUSTED_STATUSES = {
-    "ok",
-    "supported",
-    "supported_exact_scope",
-    "supported_equivalent_scope",
-    "supported_effective_role",
-    "complete",
-    "complete_exact_scope",
-    "complete_equivalent_scope",
-    "complete_effective_role",
-    "complete_offline_sample",
-    "offline_sample",
-}
-_PARTIAL_STATUSES = {"partial", "setup_only", "unknown"}
 
 _EXPECTED_COLLECTORS = {
     "m365": (
@@ -82,19 +67,6 @@ def _strings(value: Any) -> list[str]:
     return [str(item) for item in value if str(item)]
 
 
-def _capability_status(row: Mapping[str, Any] | None) -> str:
-    if row is None:
-        return "unverified"
-    raw_status = str(row.get("status") or "unknown")
-    if raw_status in _TRUSTED_STATUSES:
-        return "complete"
-    if raw_status in _PARTIAL_STATUSES:
-        return "partial"
-    if raw_status.startswith("blocked") or raw_status in {"failed", "unauthenticated", "unsupported"}:
-        return "blocked"
-    return "unverified"
-
-
 def _gate_reason(collector: str, status: str, missing: list[str], reason: str) -> str:
     if missing:
         return f"{collector}: missing {', '.join(missing)}"
@@ -114,42 +86,33 @@ def build_audit_autopilot_plan(
 ) -> dict[str, Any]:
     platform_key = platform or "m365"
     selected = [str(item) for item in selected_collectors if str(item)]
-    capabilities = {
-        str(row.get("collector") or row.get("name") or ""): row
-        for row in _rows(capability_rows)
-        if row.get("collector") or row.get("name")
-    }
+    gate_summary = build_evidence_gate_summary(
+        selected_collectors=selected_collectors,
+        capability_rows=capability_rows,
+    )
+    evidence_gates = [dict(row) for row in _rows(gate_summary.get("evidence_gates"))]
     required_scopes = sorted(
         {
             scope
-            for row in capabilities.values()
+            for row in evidence_gates
             for scope in _strings(row.get("required_permissions"))
         }
     )
-    evidence_gates: list[dict[str, Any]] = []
     reasons: list[str] = []
-    for collector in selected:
-        row = capabilities.get(collector)
-        status = _capability_status(row)
-        missing = _strings(row.get("missing_permissions")) if row else []
-        raw_reason = str(row.get("reason") or "") if row else "not live-verified"
-        blocker = classify_capability_blocker(row)
-        gate = {
-            "collector": collector,
-            "status": status,
-            "required_permissions": _strings(row.get("required_permissions")) if row else [],
-            "missing_permissions": missing,
-            "reason": raw_reason,
-            "blocker_kind": blocker["blocker_kind"],
-            "blocker_reason": blocker["blocker_reason"],
-            "next_step": blocker["next_step"],
-        }
-        evidence_gates.append(gate)
+    for gate in evidence_gates:
+        status = str(gate.get("status") or "unverified")
         if status != "complete":
-            reasons.append(_gate_reason(collector, status, missing, raw_reason))
+            reasons.append(
+                _gate_reason(
+                    str(gate.get("collector") or "unknown"),
+                    status,
+                    _strings(gate.get("missing_permissions")),
+                    str(gate.get("reason") or ""),
+                )
+            )
 
-    trusted_count = sum(1 for gate in evidence_gates if gate["status"] == "complete")
-    blocked_count = sum(1 for gate in evidence_gates if gate["status"] == "blocked")
+    trusted_count = len(_strings(gate_summary.get("trusted_collectors")))
+    blocked_count = len(_strings(gate_summary.get("blocked_collectors")))
     expected = list(_EXPECTED_COLLECTORS.get(platform_key, _EXPECTED_COLLECTORS["m365"]))
     missing_expected = [item for item in expected if item not in selected]
     gap_rows = _rows(coverage_gaps)
@@ -459,6 +422,104 @@ def build_proof_table(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def _build_reviewer_index(
+    *,
+    top_findings: list[dict[str, Any]],
+    proof_table: list[dict[str, Any]],
+    limitations: list[dict[str, Any]],
+    report_qa: dict[str, Any],
+    blocker_count: int,
+) -> dict[str, Any]:
+    proof_by_finding: dict[str, dict[str, Any]] = {}
+    for row in proof_table:
+        finding_id = str(row.get("finding_id") or row.get("id") or "").strip()
+        if not finding_id or finding_id in proof_by_finding:
+            continue
+        proof_by_finding[finding_id] = row
+
+    prove_this = []
+    for finding in top_findings:
+        finding_id = str(finding.get("id") or "").strip()
+        if not finding_id:
+            continue
+        proof = proof_by_finding.get(finding_id, {})
+        prove_this.append(
+            {
+                "finding_id": finding_id,
+                "title": finding.get("title"),
+                "severity": finding.get("severity"),
+                "collector": proof.get("collector") or finding.get("collector"),
+                "proof_status": proof.get("proof_status") or "missing_evidence",
+                "artifact_path": proof.get("artifact_path"),
+                "record_key": proof.get("record_key"),
+                "json_pointer": proof.get("json_pointer"),
+            }
+        )
+
+    known_limits = [dict(item) for item in limitations if isinstance(item, Mapping)]
+    unsupported_claims = _strings(report_qa.get("unsupported_claims"))
+    if unsupported_claims:
+        known_limits.append(
+            {
+                "surface": "proof",
+                "status": "unsupported_claim",
+                "message": "Some findings do not yet have supporting evidence refs.",
+                "finding_ids": unsupported_claims,
+            }
+        )
+    low_confidence = _strings(report_qa.get("low_confidence_findings"))
+    if low_confidence:
+        known_limits.append(
+            {
+                "surface": "confidence",
+                "status": "low_confidence",
+                "message": "Some findings are below high confidence and need extra reviewer care.",
+                "finding_ids": low_confidence,
+            }
+        )
+    if blocker_count:
+        known_limits.append(
+            {
+                "surface": "collection",
+                "status": "blocked",
+                "message": "One or more selected collectors were blocked during collection.",
+                "blocker_count": blocker_count,
+            }
+        )
+
+    return {
+        "start_here": [
+            {
+                "section": "executive_summary",
+                "artifact_path": "reports/report-pack.json",
+                "reason": "Start with posture, risk, and top open findings.",
+            },
+            {
+                "section": "reviewer_index",
+                "artifact_path": "reports/report-pack.json",
+                "reason": "Use this index to jump from claims to proof and known limits.",
+            },
+            {
+                "section": "report_qa",
+                "artifact_path": "reports/report-pack.json",
+                "reason": "Check unsupported claims, confidence, and declared gaps before trusting conclusions.",
+            },
+            {
+                "section": "proof_table",
+                "artifact_path": "reports/report-pack.json",
+                "reason": "Verify each important claim against exact artifacts and record keys.",
+            },
+            {
+                "section": "limitations",
+                "artifact_path": "reports/report-pack.json",
+                "reason": "Review blocked or partial surfaces before treating the audit as complete coverage.",
+            },
+        ],
+        "prove_this": prove_this,
+        "known_limits": known_limits,
+    }
+
+
 def build_basic_license_intelligence(
     *,
     tenant_name: str,
@@ -545,6 +606,13 @@ def build_board_report_sections(
         evidence_paths=evidence_paths,
         coverage_gaps=gaps,
     )
+    reviewer_index = _build_reviewer_index(
+        top_findings=top_findings,
+        proof_table=proof_table,
+        limitations=limitations,
+        report_qa=dict(intelligence.get("report_qa") or {}),
+        blocker_count=blocker_count,
+    )
     return {
         "findings": rows,
         "executive_summary": {
@@ -572,6 +640,7 @@ def build_board_report_sections(
             "proof_table_count": len(proof_table),
             "data_handling": "read_only_audit_default",
         },
+        "reviewer_index": reviewer_index,
         "limitations": limitations,
         "proof_table": proof_table,
         "next_actions": next_actions,

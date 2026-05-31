@@ -21,7 +21,7 @@ def _snapshot(rows_by_source: dict[str, list[dict]]) -> dict:
         }
     }
     return build_normalized_snapshot(
-        tenant_name="bolyki",
+        tenant_name="example",
         run_id="run-test",
         collector_payloads=payloads,
     )

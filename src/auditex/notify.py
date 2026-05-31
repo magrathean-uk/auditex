@@ -12,6 +12,8 @@ from typing import Any
 
 import requests
 
+from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
+
 from .run_bundle import RunBundle
 
 
@@ -144,6 +146,13 @@ WEBHOOK_ENV = {
 }
 
 
+def _relative_source(path: Path, run_path: Path) -> str:
+    try:
+        return str(path.relative_to(run_path))
+    except ValueError:
+        return str(path)
+
+
 def _build_payload(run_dir: str | Path) -> dict[str, Any]:
     bundle = RunBundle(run_dir)
     report_summary = bundle.report_summary()
@@ -184,6 +193,53 @@ def _build_payload(run_dir: str | Path) -> dict[str, Any]:
         "report_pack_path": str(report_pack_path) if report_pack_path is not None else None,
         "action_plan_path": str(action_plan_path) if action_plan_path is not None else None,
     }
+
+
+def _notification_proof(run_dir: str | Path, payload: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    run_path = Path(run_dir)
+    bundle = RunBundle(run_path)
+    citations: list[dict[str, Any]] = []
+    missing: list[str] = []
+
+    manifest_path = run_path / "run-manifest.json"
+    if manifest_path.exists():
+        citations.append({"artifact_path": "run-manifest.json", "reason": "Run identity and notification context."})
+    else:
+        missing.append("run-manifest.json")
+
+    summary_path = bundle._artifact_path("summary_path", "summary.json")
+    if summary_path.exists():
+        citations.append({"artifact_path": _relative_source(summary_path, run_path), "reason": "Run summary used in notification payload."})
+    else:
+        missing.append("summary.json")
+
+    report_pack_path = payload.get("report_pack_path")
+    if report_pack_path:
+        path = Path(report_pack_path)
+        if path.exists():
+            citations.append({"artifact_path": _relative_source(path, run_path), "reason": "Report-pack summary and action plan used in notification payload."})
+        else:
+            missing.append("reports/report-pack.json")
+    else:
+        missing.append("reports/report-pack.json")
+
+    live_readiness_path, _ = bundle.live_readiness()
+    if live_readiness_path is not None:
+        citations.append({"artifact_path": _relative_source(live_readiness_path, run_path), "reason": "Live-readiness trust signals used in notification payload."})
+    else:
+        missing.append("live-readiness.json")
+
+    action_plan_path = payload.get("action_plan_path")
+    if action_plan_path:
+        path = Path(action_plan_path)
+        if path.exists():
+            citations.append({"artifact_path": _relative_source(path, run_path), "reason": "Action-plan rows used in notification payload."})
+        else:
+            missing.append("reports/action-plan.json")
+    elif payload.get("action_plan") and not report_pack_path:
+        missing.append("reports/action-plan.json")
+
+    return dedupe_citations(citations), sorted(set(missing))
 
 
 def _payload_text(payload: dict[str, Any], sink: str) -> str:
@@ -572,22 +628,26 @@ def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
 
 def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[str, Any]:
     payload = _build_payload(run_dir)
+    citations, evidence_missing = _notification_proof(run_dir, payload)
+    base = {
+        "sink": sink,
+        "payload": payload,
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
+        "evidence_missing": evidence_missing,
+    }
     if dry_run:
-        return {"status": "planned", "sink": sink, "dry_run": True, "payload": payload}
+        return {"status": "planned", "dry_run": True, **base}
     if sink in WEBHOOK_ENV:
         result = _send_webhook(sink, payload)
-        result["dry_run"] = False
-        return result
+        return {**result, **base, "dry_run": False}
     if sink == "smtp":
         result = _send_smtp(payload)
-        result["dry_run"] = False
-        return result
+        return {**result, **base, "dry_run": False}
     if sink == "jira":
         result = _send_jira(payload)
-        result["dry_run"] = False
-        return result
+        return {**result, **base, "dry_run": False}
     if sink == "github":
         result = _send_github(payload)
-        result["dry_run"] = False
-        return result
-    return {"status": "blocked", "sink": sink, "dry_run": False, "reason": "unsupported sink", "payload": payload}
+        return {**result, **base, "dry_run": False}
+    return {"status": "blocked", "dry_run": False, "reason": "unsupported sink", **base}

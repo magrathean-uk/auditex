@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
 
 from .run_bundle import RunBundle
@@ -93,6 +94,13 @@ def _blocked_diff(left_run: dict[str, Any], right_run: dict[str, Any], reason: s
         "summary": {"added": 0, "removed": 0, "changed": 0, "object_kinds": 0},
         "changes": {},
         "compared_files": [],
+        "citations": [
+            {"artifact_path": "run-manifest.json", "reason": "Run identity and compare gate for blocked comparison."}
+        ],
+        "citation_summary": build_citation_summary(
+            [{"artifact_path": "run-manifest.json", "reason": "Run identity and compare gate for blocked comparison."}]
+        ),
+        "evidence_missing": [],
     }
 
 
@@ -102,12 +110,19 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _compare_pair(left_run: dict[str, Any], right_run: dict[str, Any], same_tenant: bool, *, allow_cross_tenant: bool) -> dict[str, Any]:
+def _compare_pair(
+    left_run: dict[str, Any],
+    right_run: dict[str, Any],
+    same_tenant: bool,
+    *,
+    allow_cross_tenant: bool,
+    classic: bool,
+) -> dict[str, Any]:
     if (left_run.get("platform") or "m365") != (right_run.get("platform") or "m365"):
         return _blocked_diff(left_run, right_run, "same_platform_required")
     if not same_tenant and not allow_cross_tenant:
         return _blocked_diff(left_run, right_run, "same_tenant_required")
-    diff = diff_run_directories(left_run["path"], right_run["path"])
+    diff = diff_run_directories(left_run["path"], right_run["path"], classic=classic)
     diff["left_run"] = _public_run(left_run)
     diff["right_run"] = _public_run(right_run)
     diff["status"] = "ok"
@@ -123,7 +138,7 @@ def _compare_pair(left_run: dict[str, Any], right_run: dict[str, Any], same_tena
     return diff
 
 
-def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenant: bool = False) -> dict[str, Any]:
+def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
     runs = [_run_metadata(Path(run_dir)) for run_dir in run_dirs]
     ordered_runs = _sort_runs(runs)
     compare_context = _tenant_gate(ordered_runs)
@@ -141,7 +156,7 @@ def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenan
     adjacent_diffs: list[dict[str, Any]] = []
     for left_run, right_run in zip(ordered_runs, ordered_runs[1:]):
         adjacent_diffs.append(
-            _compare_pair(left_run, right_run, compare_context["same_tenant"], allow_cross_tenant=allow_cross_tenant)
+            _compare_pair(left_run, right_run, compare_context["same_tenant"], allow_cross_tenant=allow_cross_tenant, classic=classic)
         )
 
     if len(ordered_runs) >= 2:
@@ -150,6 +165,7 @@ def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenan
             ordered_runs[-1],
             compare_context["same_tenant"],
             allow_cross_tenant=allow_cross_tenant,
+            classic=classic,
         )
     else:
         baseline_diff = _blocked_diff(
@@ -158,14 +174,36 @@ def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenan
             "needs_at_least_two_runs",
         )
 
+    citations = dedupe_citations(
+        [{"artifact_path": "run-manifest.json", "reason": "Run identity and ordering for compared runs."}]
+        + [
+            dict(row)
+            for diff in [*adjacent_diffs, baseline_diff]
+            for row in diff.get("citations") or []
+            if isinstance(row, dict)
+        ]
+    )
+    evidence_missing = sorted(
+        {
+            str(item)
+            for diff in [*adjacent_diffs, baseline_diff]
+            for item in diff.get("evidence_missing") or []
+            if str(item)
+        }
+    )
+
     return {
         "runs": ordered_runs_public,
         "timeline": timeline,
         "adjacent_diffs": adjacent_diffs,
         "baseline_diff": baseline_diff,
         "compare_context": compare_context,
+        "classic": classic,
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
+        "evidence_missing": evidence_missing,
     }
 
 
-def compare_runs(run_dirs: Iterable[str | Path], *, allow_cross_tenant: bool = False) -> dict[str, Any]:
-    return compare_run_directories(run_dirs, allow_cross_tenant=allow_cross_tenant)
+def compare_runs(run_dirs: Iterable[str | Path], *, allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
+    return compare_run_directories(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)

@@ -66,6 +66,38 @@ def test_autopilot_plan_marks_partial_with_exact_scope_blockers() -> None:
     assert "google_reports: missing admin.reports.audit.readonly" in plan["quality_gate"]["reasons"]
 
 
+def test_autopilot_and_live_readiness_share_evidence_gate_rows() -> None:
+    from azure_tenant_audit.assurance import build_live_readiness_summary
+    from azure_tenant_audit.autopilot import build_audit_autopilot_plan
+
+    capability_rows = [
+        {"collector": "google_directory", "status": "supported_exact_scope"},
+        {
+            "collector": "google_reports",
+            "status": "blocked_by_scope",
+            "reason": "runtime_permission_block",
+            "missing_permissions": ["admin.reports.audit.readonly"],
+        },
+        {"collector": "google_gmail_settings", "status": "partial", "reason": "runtime_endpoint_block"},
+    ]
+    selected = ["google_directory", "google_reports", "google_gmail_settings"]
+
+    readiness = build_live_readiness_summary(
+        selected_collectors=selected,
+        capability_rows=capability_rows,
+    )
+    plan = build_audit_autopilot_plan(
+        platform="google_workspace",
+        selected_collectors=selected,
+        capability_rows=capability_rows,
+        coverage_gaps=[],
+        blockers=[],
+        findings=[],
+    )
+
+    assert readiness["evidence_gates"] == plan["evidence_gates"]
+
+
 def test_autopilot_plan_marks_unusable_when_no_trusted_critical_evidence() -> None:
     from azure_tenant_audit.autopilot import build_audit_autopilot_plan
 

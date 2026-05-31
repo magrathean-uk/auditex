@@ -15,6 +15,7 @@ from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
+from azure_tenant_audit.versioning import package_version_line
 from .google_workspace.run import GoogleRunConfig, google_doctor, run_google_live, run_google_offline, run_google_probe
 
 from .mcp_server import list_blockers, summarize_run
@@ -33,6 +34,7 @@ def _build_root_parser() -> argparse.ArgumentParser:
         description="Auditex operator CLI.",
         epilog="Use `auditex run ...` for explicit raw audit runs. Legacy raw flags like `auditex --tenant-name ...` still work.",
     )
+    parser.add_argument("--version", action="version", version=package_version_line())
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("setup", help="Bootstrap local runtime dependencies.")
     subparsers.add_parser("setup-guide", help="Print provider setup scopes, roles, and verification commands.")
@@ -54,10 +56,10 @@ def _build_root_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def compare_runs(run_dirs: list[str], *, allow_cross_tenant: bool = False) -> dict[str, object]:
+def compare_runs(run_dirs: list[str], *, allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, object]:
     from .compare import compare_runs as _compare_runs
 
-    return _compare_runs(run_dirs, allow_cross_tenant=allow_cross_tenant)
+    return _compare_runs(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)
 
 
 def render_report(
@@ -385,6 +387,7 @@ def _build_compare_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="auditex compare", description="Compare multiple completed run directories.")
     parser.add_argument("--run-dir", action="append", required=True, dest="run_dirs", help="Run directory to compare.")
     parser.add_argument("--allow-cross-tenant", action="store_true", help="Allow comparing runs from different tenants.")
+    parser.add_argument("--classic", action="store_true", help="Use classic raw compare without noise suppression.")
     return parser
 
 
@@ -518,6 +521,7 @@ def gate_drift(*, baseline_run_dir: str, current_run_dir: str, fail_on: str) -> 
         raise ValueError(f"unsupported --fail-on severity: {fail_on}")
 
     from .run_bundle import RunBundle
+    from azure_tenant_audit.waivers import accepted_risk_summary, is_accepted_status
 
     baseline_rows = RunBundle(baseline_run_dir).finding_rows()
     current_rows = RunBundle(current_run_dir).finding_rows()
@@ -541,6 +545,8 @@ def gate_drift(*, baseline_run_dir: str, current_run_dir: str, fail_on: str) -> 
 
     threshold_rank = _SEVERITY_RANKS[threshold]
     new_above_threshold: list[dict[str, object]] = []
+    reactivated_above_threshold: list[dict[str, object]] = []
+    state_transitions: list[dict[str, object]] = []
     for key in new_keys:
         row = current_index[key]
         severity = str(row.get("severity") or "medium").lower()
@@ -555,19 +561,76 @@ def gate_drift(*, baseline_run_dir: str, current_run_dir: str, fail_on: str) -> 
                 }
             )
 
+    for key in persisting_keys:
+        baseline_row = baseline_index[key]
+        current_row = current_index[key]
+        from_status = str(baseline_row.get("status") or "open").lower()
+        to_status = str(current_row.get("status") or "open").lower()
+        if from_status != to_status:
+            state_transitions.append(
+                {
+                    "id": current_row.get("id") or baseline_row.get("id") or key,
+                    "rule_id": current_row.get("rule_id") or baseline_row.get("rule_id"),
+                    "severity": str(current_row.get("severity") or baseline_row.get("severity") or "medium").lower(),
+                    "title": current_row.get("title") or baseline_row.get("title"),
+                    "collector": current_row.get("collector") or baseline_row.get("collector"),
+                    "from_status": from_status,
+                    "to_status": to_status,
+                }
+            )
+        if is_accepted_status(from_status) and not is_accepted_status(to_status):
+            severity = str(current_row.get("severity") or "medium").lower()
+            if _SEVERITY_RANKS.get(severity, 0) >= threshold_rank:
+                reactivated_above_threshold.append(
+                    {
+                        "id": current_row.get("id") or key,
+                        "rule_id": current_row.get("rule_id"),
+                        "severity": severity,
+                        "title": current_row.get("title"),
+                        "collector": current_row.get("collector"),
+                        "from_status": from_status,
+                        "to_status": to_status,
+                    }
+                )
+
+    accepted_summary = accepted_risk_summary(current_rows)
+    stale_accepted_above_threshold: list[dict[str, object]] = []
+    for row in accepted_summary.get("stale") or []:
+        severity = str(row.get("severity") or "medium").lower()
+        if _SEVERITY_RANKS.get(severity, 0) >= threshold_rank:
+            stale_accepted_above_threshold.append(
+                {
+                    "id": row.get("id"),
+                    "rule_id": row.get("rule_id"),
+                    "severity": severity,
+                    "title": row.get("title"),
+                    "collector": row.get("collector"),
+                    "expires_on": row.get("expires_on"),
+                    "days_until_expiry": row.get("days_until_expiry"),
+                }
+            )
+
     return {
-        "pass": len(new_above_threshold) == 0,
+        "pass": len(new_above_threshold) == 0
+        and len(reactivated_above_threshold) == 0
+        and len(stale_accepted_above_threshold) == 0,
         "fail_on": threshold,
         "baseline_run_dir": str(baseline_run_dir),
         "current_run_dir": str(current_run_dir),
         "new": [{"id": key, **{k: v for k, v in current_index[key].items() if k in {"severity", "title", "rule_id", "collector"}}} for key in new_keys],
         "resolved": [{"id": key, **{k: v for k, v in baseline_index[key].items() if k in {"severity", "title", "rule_id", "collector"}}} for key in resolved_keys],
         "persisting": [{"id": key} for key in persisting_keys],
+        "state_transitions": state_transitions,
+        "accepted_risk_summary": accepted_summary,
         "new_count": len(new_keys),
         "resolved_count": len(resolved_keys),
         "persisting_count": len(persisting_keys),
         "new_count_at_or_above_threshold": len(new_above_threshold),
         "new_at_or_above_threshold": new_above_threshold,
+        "reactivated_count_at_or_above_threshold": len(reactivated_above_threshold),
+        "reactivated_at_or_above_threshold": reactivated_above_threshold,
+        "stale_accepted_risk_count_at_or_above_threshold": len(stale_accepted_above_threshold),
+        "stale_accepted_risks_at_or_above_threshold": stale_accepted_above_threshold,
     }
 
 
@@ -604,6 +667,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] in {"-h", "--help", "help"}:
         _build_root_parser().print_help()
+        return 0
+    if argv[0] == "--version":
+        print(package_version_line())
         return 0
     if argv[0].startswith("-"):
         return tenant_audit_main(argv)
@@ -681,7 +747,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "compare":
         parser = _build_compare_parser()
         args = parser.parse_args(argv[1:])
-        print(json.dumps(compare_runs(args.run_dirs, allow_cross_tenant=args.allow_cross_tenant), indent=2))
+        print(json.dumps(compare_runs(args.run_dirs, allow_cross_tenant=args.allow_cross_tenant, classic=args.classic), indent=2))
         return 0
     if argv[0] == "report":
         parser = _build_report_parser()

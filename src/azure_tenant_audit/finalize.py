@@ -7,10 +7,12 @@ from .ai_context import build_ai_context, build_privacy_block, build_validation_
 from .api_inventory import build_api_call_inventory
 from .assurance import build_coverage_gap_summary, build_live_readiness_summary, build_surface_coverage_map
 from .autopilot import build_audit_autopilot_plan
+from .citations import build_citation_summary, dedupe_citations
 from .contracts import CONTRACT_VERSION
 from .data_handling import build_data_handling_summary
 from .evidence_db import build_run_evidence_index
 from .output import AuditWriter
+from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
 
 
 def _append_report_evidence_path(writer: AuditWriter, relative_path: str) -> None:
@@ -42,25 +44,16 @@ def _auth_scopes_from_capabilities(capability_rows: list[dict[str, Any]]) -> lis
     return sorted(scopes)
 
 
-def _collector_descriptions(platform: str) -> dict[str, str]:
+def _collector_scope_catalog(platform: str) -> dict[str, dict[str, Any]]:
     if platform == "google_workspace":
         try:
-            from auditex.google_workspace.collectors import REGISTRY as google_registry
+            return build_google_scope_catalog()
         except Exception:  # noqa: BLE001
             return {}
-        return {
-            str(name): str(getattr(collector, "description", ""))
-            for name, collector in google_registry.items()
-        }
     try:
-        from .config import CollectorConfig
+        return load_m365_scope_catalog()
     except Exception:  # noqa: BLE001
         return {}
-    try:
-        config = CollectorConfig.from_path("configs/collector-definitions.json")
-    except Exception:  # noqa: BLE001
-        return {}
-    return {name: definition.description for name, definition in config.collectors.items()}
 
 
 def _apply_audit_plan_to_report_pack(writer: AuditWriter, audit_plan: dict[str, Any]) -> None:
@@ -78,6 +71,53 @@ def _apply_audit_plan_to_report_pack(writer: AuditWriter, audit_plan: dict[str, 
     summary["autopilot_quality"] = quality_gate
     report_pack["summary"] = summary
     report_pack["audit_plan"] = audit_plan
+    writer.write_report_pack(report_pack)
+
+
+def _apply_report_pack_citations(writer: AuditWriter, metadata: dict[str, Any]) -> None:
+    report_path = writer.run_dir / "reports" / "report-pack.json"
+    try:
+        report_pack = writer._safe_load_json(report_path)
+    except AttributeError:
+        return
+    if not isinstance(report_pack, dict):
+        return
+
+    rows: list[dict[str, str]] = []
+    for artifact_path in report_pack.get("evidence_paths") or []:
+        text = str(artifact_path or "").strip()
+        if text:
+            rows.append({"artifact_path": text, "reason": "Evidence artifact referenced by this report pack."})
+    for proof_row in report_pack.get("proof_table") or []:
+        if not isinstance(proof_row, dict):
+            continue
+        artifact_path = str(proof_row.get("artifact_path") or "").strip()
+        if not artifact_path:
+            continue
+        row: dict[str, str] = {
+            "artifact_path": artifact_path,
+            "reason": "Artifact referenced by proof row.",
+        }
+        record_key = str(proof_row.get("record_key") or "").strip()
+        json_pointer = str(proof_row.get("json_pointer") or "").strip()
+        if record_key:
+            row["record_key"] = record_key
+        if json_pointer:
+            row["json_pointer"] = json_pointer
+        rows.append(row)
+    for key, reason in (
+        ("data_handling_path", "Read-only and no-content-read declaration for this run."),
+        ("api_inventory_path", "Observed API call ledger for this run."),
+        ("audit_plan_path", "Evidence gates and blockers for this run."),
+        ("validation_path", "Bundle contract validation result."),
+    ):
+        text = str(metadata.get(key) or "").strip()
+        if text:
+            rows.append({"artifact_path": text, "reason": reason})
+
+    deduped = dedupe_citations(rows)
+    report_pack["citations"] = deduped
+    report_pack["citation_summary"] = build_citation_summary(deduped)
     writer.write_report_pack(report_pack)
 
 
@@ -161,7 +201,7 @@ def finalize_bundle_contract(
                 capability_rows=capability_rows,
                 coverage_rows=[dict(row) for row in writer.coverage if isinstance(row, dict)] or coverage_ledger,
                 data_handling=data_handling_payload,
-                collector_descriptions=_collector_descriptions(platform),
+                collector_catalog=_collector_scope_catalog(platform),
             ),
         )
         metadata["api_inventory_path"] = str(api_inventory_path.relative_to(writer.run_dir))
@@ -175,7 +215,6 @@ def finalize_bundle_contract(
             "schema_contract_version": CONTRACT_VERSION,
         }
     )
-
     # Pre-register the artifacts finalize is about to create so the suppressed
     # manifest write (and the evidence DB rebuild that reads it) sees the same
     # artifacts list on the first finalize call as it does on a re-finalize of
@@ -216,6 +255,7 @@ def finalize_bundle_contract(
     final_metadata["contract_issue_count"] = validation.get("issue_count", 0)
     writer.write_bundle(final_metadata)
     _apply_audit_plan_to_report_pack(writer, audit_plan)
+    _apply_report_pack_citations(writer, metadata)
 
     # Rebuild the evidence DB once the final manifest (with contract_status /
     # contract_issue_count) is on disk so run_meta carries the final values.

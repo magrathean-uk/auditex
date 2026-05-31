@@ -60,3 +60,6 @@ def test_setup_guide_mcp_tool_is_registered_and_callable() -> None:
     payload = mcp_setup_guide(provider="m365", collector_preset="identity-only")
     assert payload["provider"] == "m365"
     assert "Application.Read.All" in payload["graph_permissions"]
+    artifact_paths = {row["artifact_path"] for row in payload["citations"]}
+    assert "src/auditex/setup_guide.py" in artifact_paths
+    assert "configs/collector-definitions.json" in artifact_paths

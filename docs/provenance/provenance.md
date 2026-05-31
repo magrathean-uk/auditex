@@ -34,7 +34,5 @@ High-risk rewrite targets completed:
 
 Remaining non-code work:
 
-- historical git records still exist
 - no external legal review yet
 - no external similarity audit yet
-- use a sanitized repository root for commercial release if old git history must be excluded

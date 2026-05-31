@@ -111,3 +111,77 @@ def test_gate_drift_classifies_resolved_findings(baseline_and_current: tuple[Pat
     assert payload["persisting_count"] == 1
     assert payload["resolved"][0]["id"] == "f1"
     assert rc == 0  # only low-sev new finding, threshold is high
+
+
+def test_gate_drift_fails_when_accepted_risk_reopens_above_threshold(
+    baseline_and_current: tuple[Path, Path],
+) -> None:
+    baseline, current = baseline_and_current
+    _write_findings(
+        baseline,
+        [
+            {
+                "id": "f1",
+                "rule_id": "x",
+                "severity": "high",
+                "title": "Known issue",
+                "status": "accepted_risk",
+                "waiver": {"expires_on": "2099-01-01", "comment": "Temporary exception"},
+            }
+        ],
+    )
+    _write_findings(
+        current,
+        [
+            {
+                "id": "f1",
+                "rule_id": "x",
+                "severity": "high",
+                "title": "Known issue",
+                "status": "open",
+            }
+        ],
+    )
+
+    rc, output = _gate(
+        ["gate-drift", "--baseline", str(baseline), "--current", str(current), "--fail-on", "high"]
+    )
+    payload = json.loads(output)
+
+    assert rc == 2
+    assert payload["pass"] is False
+    assert payload["reactivated_count_at_or_above_threshold"] == 1
+    assert payload["reactivated_at_or_above_threshold"][0]["id"] == "f1"
+    assert payload["state_transitions"][0]["from_status"] == "accepted_risk"
+    assert payload["state_transitions"][0]["to_status"] == "open"
+
+
+def test_gate_drift_fails_when_current_accepted_risk_is_stale(
+    baseline_and_current: tuple[Path, Path],
+) -> None:
+    baseline, current = baseline_and_current
+    _write_findings(baseline, [])
+    _write_findings(
+        current,
+        [
+            {
+                "id": "f1",
+                "rule_id": "x",
+                "severity": "critical",
+                "title": "Accepted but expired",
+                "status": "accepted_risk",
+                "waiver": {"expires_on": "2020-01-01", "comment": "Old exception"},
+            }
+        ],
+    )
+
+    rc, output = _gate(
+        ["gate-drift", "--baseline", str(baseline), "--current", str(current), "--fail-on", "high"]
+    )
+    payload = json.loads(output)
+
+    assert rc == 2
+    assert payload["pass"] is False
+    assert payload["stale_accepted_risk_count_at_or_above_threshold"] == 1
+    assert payload["stale_accepted_risks_at_or_above_threshold"][0]["id"] == "f1"
+    assert payload["accepted_risk_summary"]["stale_count"] == 1

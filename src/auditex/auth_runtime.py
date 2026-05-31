@@ -14,6 +14,7 @@ from typing import Any, Callable
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.profiles import get_profile
+from azure_tenant_audit.scope_catalog import build_m365_scope_catalog
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.secret_hygiene import (
     sanitize_token_claims,
@@ -558,14 +559,17 @@ def collector_capability_matrix(
     config = CollectorConfig.from_path(Path(config_path))
     permission_hints = load_permission_hints(Path(permission_hints_path))
     profile = get_profile(auditor_profile)
+    catalog = build_m365_scope_catalog(
+        collector_config=config,
+        permission_hints=permission_hints,
+    )
     token_claims = auth_context.get("token_claims") or {}
     available = available_permissions(token_claims)
     has_global_reader = has_global_reader_like_role(auth_context)
     rows: list[dict[str, Any]] = []
     for collector_name in collectors:
-        definition = config.collectors.get(collector_name)
-        hints = permission_hints.get(collector_name, {})
-        required = list(definition.required_permissions) if definition else list(hints.get("graph_scopes") or [])
+        entry = catalog.get(collector_name, {})
+        required = list(entry.get("required_permissions") or [])
         missing = [item for item in required if item not in available]
         status = "supported_exact_scope"
         reason = "required_permissions_present"
@@ -587,8 +591,8 @@ def collector_capability_matrix(
                     "required_permissions": required,
                     "missing_permissions": missing,
                     "observed_permissions": sorted(available),
-                    "minimum_role_hints": list(hints.get("minimum_role_hints") or profile.delegated_role_hints),
-                    "notes": hints.get("notes") or profile.notes,
+                    "minimum_role_hints": list(entry.get("minimum_role_hints") or profile.delegated_role_hints),
+                    "notes": entry.get("notes") or profile.notes,
                 }
             )
         )

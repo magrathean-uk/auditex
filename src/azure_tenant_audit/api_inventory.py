@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -67,28 +68,113 @@ def _capability_index(capability_rows: list[dict[str, Any]]) -> dict[str, dict[s
     return indexed
 
 
+def _observed_call(
+    *,
+    platform: str,
+    capabilities: Mapping[str, dict[str, Any]],
+    row: Mapping[str, Any],
+    index: int,
+) -> tuple[str, dict[str, Any]]:
+    collector = _text(row.get("collector"), "unknown")
+    name = _text(row.get("name") or row.get("operation"), f"call-{index}")
+    endpoint = _text(row.get("endpoint") or row.get("path") or name, name)
+    method = _method(row)
+    access_mode = _access_mode(method)
+    content_reads = bool(row.get("content_reads") or row.get("body_reads") or row.get("file_content_reads"))
+    write_actions = bool(row.get("write_actions") or access_mode == "write")
+    capability = capabilities.get(collector, {})
+    return collector, {
+        "id": f"{collector}:{name}:{index}",
+        "source": "observed",
+        "platform": platform,
+        "collector": collector,
+        "name": name,
+        "endpoint": endpoint,
+        "method": method,
+        "access_mode": access_mode,
+        "status": row.get("status"),
+        "item_count": int(row.get("item_count") or 0),
+        "duration_ms": row.get("duration_ms"),
+        "data_class": _data_class(platform=platform, collector=collector, endpoint=endpoint, name=name),
+        "content_reads": content_reads,
+        "write_actions": write_actions,
+        "required_permissions": list(capability.get("required_permissions") or []),
+        "missing_permissions": list(capability.get("missing_permissions") or []),
+        "error_class": row.get("error_class"),
+    }
+
+
+@dataclass
+class ApiInventoryRecorder:
+    platform: str
+    capability_rows: list[dict[str, Any]]
+    _observed_calls: list[dict[str, Any]] = field(default_factory=list)
+    _observed_counts: Counter[str] = field(default_factory=Counter)
+    _mutating_calls: list[dict[str, Any]] = field(default_factory=list)
+    _content_calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.platform = self.platform or "m365"
+        self._capabilities = _capability_index(self.capability_rows)
+
+    def record(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        collector, call = _observed_call(
+            platform=self.platform,
+            capabilities=self._capabilities,
+            row=row,
+            index=len(self._observed_calls) + 1,
+        )
+        self._observed_calls.append(call)
+        self._observed_counts[collector] += 1
+        if call["write_actions"]:
+            self._mutating_calls.append({"id": call["id"], "method": call["method"], "endpoint": call["endpoint"]})
+        if call["content_reads"]:
+            self._content_calls.append({"id": call["id"], "endpoint": call["endpoint"]})
+        return call
+
+    def record_many(self, rows: list[dict[str, Any]]) -> None:
+        for row in _rows(rows):
+            self.record(row)
+
+    def observed_calls(self) -> list[dict[str, Any]]:
+        return list(self._observed_calls)
+
+    def observed_counts(self) -> Counter[str]:
+        return Counter(self._observed_counts)
+
+    def mutating_calls(self) -> list[dict[str, Any]]:
+        return list(self._mutating_calls)
+
+    def content_calls(self) -> list[dict[str, Any]]:
+        return list(self._content_calls)
+
+
 def _collector_plan(
     *,
     selected_collectors: list[str],
     capability_rows: list[dict[str, Any]],
-    collector_descriptions: Mapping[str, str] | None,
+    collector_catalog: Mapping[str, Mapping[str, Any]] | None,
     observed_counts: Counter[str],
 ) -> list[dict[str, Any]]:
     capabilities = _capability_index(capability_rows)
-    descriptions = dict(collector_descriptions or {})
+    catalog = dict(collector_catalog or {})
     rows: list[dict[str, Any]] = []
     for collector in selected_collectors:
         capability = capabilities.get(collector, {})
+        metadata = dict(catalog.get(collector) or {})
         rows.append(
             {
                 "collector": collector,
-                "description": descriptions.get(collector, ""),
+                "description": metadata.get("description", ""),
                 "status": capability.get("status"),
                 "reason": capability.get("reason"),
                 "required_permissions": list(capability.get("required_permissions") or []),
                 "observed_permissions": list(capability.get("observed_permissions") or []),
                 "missing_permissions": list(capability.get("missing_permissions") or []),
                 "observed_call_count": observed_counts.get(collector, 0),
+                "minimum_role_hints": list(metadata.get("minimum_role_hints") or []),
+                "tool_requirements": list(metadata.get("tool_requirements") or []),
+                "optional_commands": list(metadata.get("optional_commands") or []),
             }
         )
     return rows
@@ -101,50 +187,16 @@ def build_api_call_inventory(
     capability_rows: list[dict[str, Any]],
     coverage_rows: list[dict[str, Any]],
     data_handling: Mapping[str, Any] | None,
-    collector_descriptions: Mapping[str, str] | None = None,
+    collector_catalog: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     provider = platform or "m365"
     data_handling_payload = dict(data_handling or {})
-    capabilities = _capability_index(capability_rows)
-    observed_calls: list[dict[str, Any]] = []
-    observed_counts: Counter[str] = Counter()
-    mutating_calls: list[dict[str, Any]] = []
-    content_calls: list[dict[str, Any]] = []
-
-    for index, row in enumerate(_rows(coverage_rows), start=1):
-        collector = _text(row.get("collector"), "unknown")
-        name = _text(row.get("name") or row.get("operation"), f"call-{index}")
-        endpoint = _text(row.get("endpoint") or row.get("path") or name, name)
-        method = _method(row)
-        access_mode = _access_mode(method)
-        content_reads = bool(row.get("content_reads") or row.get("body_reads") or row.get("file_content_reads"))
-        write_actions = bool(row.get("write_actions") or access_mode == "write")
-        capability = capabilities.get(collector, {})
-        call = {
-            "id": f"{collector}:{name}:{index}",
-            "source": "observed",
-            "platform": provider,
-            "collector": collector,
-            "name": name,
-            "endpoint": endpoint,
-            "method": method,
-            "access_mode": access_mode,
-            "status": row.get("status"),
-            "item_count": int(row.get("item_count") or 0),
-            "duration_ms": row.get("duration_ms"),
-            "data_class": _data_class(platform=provider, collector=collector, endpoint=endpoint, name=name),
-            "content_reads": content_reads,
-            "write_actions": write_actions,
-            "required_permissions": list(capability.get("required_permissions") or []),
-            "missing_permissions": list(capability.get("missing_permissions") or []),
-            "error_class": row.get("error_class"),
-        }
-        observed_calls.append(call)
-        observed_counts[collector] += 1
-        if write_actions:
-            mutating_calls.append({"id": call["id"], "method": method, "endpoint": endpoint})
-        if content_reads:
-            content_calls.append({"id": call["id"], "endpoint": endpoint})
+    recorder = ApiInventoryRecorder(platform=provider, capability_rows=capability_rows)
+    recorder.record_many(coverage_rows)
+    observed_calls = recorder.observed_calls()
+    observed_counts = recorder.observed_counts()
+    mutating_calls = recorder.mutating_calls()
+    content_calls = recorder.content_calls()
 
     data_content = bool(data_handling_payload.get("content_reads"))
     data_write = bool(data_handling_payload.get("write_actions"))
@@ -157,7 +209,7 @@ def build_api_call_inventory(
         "declared_collectors": _collector_plan(
             selected_collectors=selected_collectors,
             capability_rows=capability_rows,
-            collector_descriptions=collector_descriptions,
+            collector_catalog=collector_catalog,
             observed_counts=observed_counts,
         ),
         "observed_calls": observed_calls,

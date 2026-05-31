@@ -7,50 +7,16 @@ from typing import Any, Mapping
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.presets import load_collector_presets
 from azure_tenant_audit.profiles import get_profile
+from azure_tenant_audit.scope_catalog import (
+    aggregate_catalog_rows,
+    build_google_scope_catalog,
+    build_m365_scope_catalog,
+)
 from azure_tenant_audit.selection import select_collectors
 
 
 GOOGLE_PROVIDER_ALIASES = {"google", "google_workspace", "workspace"}
 M365_PROVIDER_ALIASES = {"m365", "entra", "microsoft365", "microsoft_365"}
-
-GOOGLE_SCOPE_NOTES: dict[str, dict[str, str]] = {
-    "https://www.googleapis.com/auth/admin.directory.user.security": {
-        "risk": "write_capable",
-        "note": "Google exposes user security state through a non-readonly scope; Auditex only reads posture fields.",
-    },
-    "https://www.googleapis.com/auth/apps.alerts": {
-        "risk": "write_capable",
-        "note": "Alert Center exposes one read/write scope; Auditex only lists alerts.",
-    },
-    "https://www.googleapis.com/auth/gmail.settings.basic": {
-        "risk": "write_capable",
-        "note": "Gmail settings scopes can change settings; Auditex only lists filters, forwarding, send-as, and delegates.",
-    },
-    "https://www.googleapis.com/auth/gmail.settings.sharing": {
-        "risk": "write_capable",
-        "note": "Required for sensitive Gmail settings such as forwarding and delegates; Auditex only reads settings.",
-    },
-    "https://www.googleapis.com/auth/apps.groups.settings": {
-        "risk": "write_capable",
-        "note": "Groups Settings uses a read/write scope for settings; Auditex only reads group settings.",
-    },
-    "https://www.googleapis.com/auth/drive.readonly": {
-        "risk": "content_capable",
-        "note": "Drive readonly can read file content; Auditex only uses metadata/list endpoints and records no content reads.",
-    },
-}
-
-GOOGLE_API_ENABLEMENT = {
-    "google_directory": ["Admin SDK API"],
-    "google_reports": ["Admin SDK API"],
-    "google_alert_center": ["Alert Center API"],
-    "google_gmail_settings": ["Gmail API", "Admin SDK API"],
-    "google_devices": ["Admin SDK API"],
-    "google_dns_posture": ["Admin SDK API"],
-    "google_drive_posture": ["Google Drive API"],
-    "google_groups_settings": ["Groups Settings API", "Admin SDK API"],
-    "google_calendar_posture": ["Google Calendar API", "Admin SDK API"],
-}
 
 GOOGLE_SOURCE_REFERENCES = [
     {
@@ -186,17 +152,11 @@ def build_google_setup_guide(
         collectors=collectors,
         exclude=exclude,
     )
-    required_scopes = _dedupe(
-        scope
-        for name in selected
-        for scope in getattr(REGISTRY[name], "required_scopes", ())
-    )
-    scope_warnings = [
-        {"scope": scope, **GOOGLE_SCOPE_NOTES[scope]}
-        for scope in required_scopes
-        if scope in GOOGLE_SCOPE_NOTES
-    ]
-    api_enablement = _dedupe(api for name in selected for api in GOOGLE_API_ENABLEMENT.get(name, []))
+    catalog = build_google_scope_catalog(registry=REGISTRY)
+    aggregate = aggregate_catalog_rows(catalog, selected)
+    required_scopes = aggregate["required_permissions"]
+    scope_warnings = aggregate["scope_warnings"]
+    api_enablement = aggregate["api_enablement"]
     scopes_csv = ",".join(required_scopes)
     provider_assertions = {
         "read_only_audit": True,
@@ -317,37 +277,30 @@ def build_m365_setup_guide(
         include_exchange=include_exchange,
     )
     hints = _load_permission_hints(permission_hints_path)
+    catalog = build_m365_scope_catalog(
+        collector_config=config,
+        permission_hints=hints,
+    )
+    aggregate = aggregate_catalog_rows(catalog, selected)
 
     collector_rows: list[dict[str, Any]] = []
-    graph_permissions: list[str] = []
-    role_hints: list[str] = list(profile.delegated_role_hints)
-    tool_requirements: list[str] = list(profile.adapter_requirements)
-    optional_commands: list[str] = []
+    graph_permissions: list[str] = list(aggregate["required_permissions"])
+    role_hints: list[str] = _dedupe([*profile.delegated_role_hints, *aggregate["minimum_role_hints"]])
+    tool_requirements: list[str] = _dedupe([*profile.adapter_requirements, *aggregate["tool_requirements"]])
+    optional_commands: list[str] = list(aggregate["optional_commands"])
     for name in selected:
-        definition = config.collectors.get(name)
-        hint = _mapping(hints.get(name))
-        definition_permissions = list(definition.required_permissions if definition else [])
-        hint_permissions = [str(item) for item in hint.get("graph_scopes") or []]
-        required = _dedupe([*definition_permissions, *hint_permissions])
-        graph_permissions.extend(required)
-        role_hints.extend(str(item) for item in hint.get("minimum_role_hints") or [])
-        tool_requirements.extend(str(item) for item in hint.get("command_tools") or [])
-        optional_commands.extend(str(item) for item in hint.get("optional_commands") or [])
+        row = _mapping(catalog.get(name))
         collector_rows.append(
             {
                 "collector": name,
-                "description": definition.description if definition else "",
-                "required_permissions": required,
-                "minimum_role_hints": [str(item) for item in hint.get("minimum_role_hints") or []],
-                "tool_requirements": [str(item) for item in hint.get("command_tools") or []],
-                "notes": str(hint.get("notes") or ""),
+                "description": row.get("description", ""),
+                "required_permissions": list(row.get("required_permissions") or []),
+                "minimum_role_hints": list(row.get("minimum_role_hints") or []),
+                "tool_requirements": list(row.get("tool_requirements") or []),
+                "notes": str(row.get("notes") or ""),
             }
         )
 
-    graph_permissions = _dedupe(graph_permissions)
-    role_hints = _dedupe(role_hints)
-    tool_requirements = _dedupe(tool_requirements)
-    optional_commands = _dedupe(optional_commands)
     broad_permissions = [
         {
             "permission": permission,

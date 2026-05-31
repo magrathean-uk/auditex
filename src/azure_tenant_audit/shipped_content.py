@@ -19,13 +19,6 @@ SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
     ShippedContentArea("profiles", "profiles", "auditex/profiles", ("profiles/*.md",), "profiles under `profiles/`"),
     ShippedContentArea("schemas", "schemas", "auditex/schemas", ("schemas/*.json",), "schemas under `schemas/`"),
     ShippedContentArea(
-        "docs_improvement",
-        "docs/improvement",
-        "auditex/docs/improvement",
-        ("docs/improvement/*.md",),
-        "product docs under `docs/`",
-    ),
-    ShippedContentArea(
         "docs_provenance",
         "docs/provenance",
         "auditex/docs/provenance",

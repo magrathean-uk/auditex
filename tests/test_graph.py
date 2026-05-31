@@ -122,6 +122,23 @@ def test_graph_client_stops_after_repeated_permission_failures(monkeypatch) -> N
     assert calls["count"] == 2
 
 
+def test_graph_client_uses_shared_package_user_agent(monkeypatch) -> None:
+    client = fake_graph_client()
+    captured: dict[str, object] = {}
+
+    def _request(method, url, headers=None, timeout=None, **kwargs):  # noqa: ANN001, ARG001
+        captured["headers"] = headers
+        return graph_response(200, {"value": [{"id": "1"}]})
+
+    monkeypatch.setattr("azure_tenant_audit.graph.package_user_agent", lambda: "auditex/9.9.9")
+    monkeypatch.setattr(client.session, "request", _request)
+
+    payload = client.get_json("/users")
+
+    assert payload["value"][0]["id"] == "1"
+    assert captured["headers"]["User-Agent"] == "auditex/9.9.9"
+
+
 def test_graph_client_batches_get_requests_in_chunks_of_20_and_preserves_order(monkeypatch) -> None:
     client = fake_graph_client(throttle_mode="fast")
     calls: list[dict[str, object]] = []

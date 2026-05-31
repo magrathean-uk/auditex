@@ -50,6 +50,31 @@ def _write_run(run_dir: Path) -> None:
                     "proof_table_count": 1,
                     "data_handling": "read_only_audit_default",
                 },
+                "reviewer_index": {
+                    "start_here": [
+                        {
+                            "section": "executive_summary",
+                            "artifact_path": "reports/report-pack.json",
+                            "reason": "Start with posture and top findings.",
+                        }
+                    ],
+                    "prove_this": [
+                        {
+                            "finding_id": "finding-1",
+                            "severity": "high",
+                            "proof_status": "supported",
+                            "artifact_path": "normalized/users.json",
+                            "record_key": "user:alice",
+                        }
+                    ],
+                    "known_limits": [
+                        {
+                            "surface": "mail",
+                            "status": "partial",
+                            "message": "mail coverage is partial",
+                        }
+                    ],
+                },
                 "limitations": [
                     {
                         "surface": "mail",
@@ -198,6 +223,7 @@ def test_load_section_registry_includes_core_sections() -> None:
     assert {
         "summary",
         "executive_summary",
+        "reviewer_index",
         "findings",
         "proof_table",
         "action_plan",
@@ -239,6 +265,10 @@ def test_render_report_supports_md_csv_and_html(tmp_path: Path) -> None:
     assert "Live readiness: partial" in md_content
     assert "Cannot trust: google_gmail_settings" in md_content
     assert "## Executive Summary" in md_content
+    assert "## Reviewer Index" in md_content
+    assert "### Start Here" in md_content
+    assert "### Prove This" in md_content
+    assert "### Known Limits" in md_content
     assert "read_only_audit_default" in md_content
     assert "## Next Actions" in md_content
     assert "## Auditor Score" in md_content
@@ -269,6 +299,7 @@ def test_render_report_supports_md_csv_and_html(tmp_path: Path) -> None:
     assert "Proof Table" in html_content
     assert "user:alice" in html_content
     assert "Executive Summary" in html_content
+    assert "Reviewer Index" in html_content
     assert "Report QA" in html_content
     assert "admin.directory.users.list" in html_content
 
@@ -282,6 +313,14 @@ def test_preview_report_returns_content_without_writing(tmp_path: Path) -> None:
     payload = json.loads(result["content"])
     assert result["format"] == "json"
     assert result["sections"] == ["summary"]
+    assert result["citations"] == [
+        {
+            "artifact_path": "summary.json",
+            "reason": "Top-level run summary for this preview.",
+        }
+    ]
+    assert result["citation_summary"]["artifact_count"] == 1
+    assert result["evidence_missing"] == []
     assert payload["sections"]["summary"]["tenant_name"] == "acme"
     assert payload["sections"]["summary"]["live_readiness"]["trust_level"] == "partial"
 

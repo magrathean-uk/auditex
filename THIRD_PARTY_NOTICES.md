@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This file records third-party components that remain in or are declared by this repository after the clean-room and history-remediation pass dated 2026-04-18.
+This file records third-party components that remain in or are declared by this repository.
 
 ## Vendored component
 

@@ -16,6 +16,11 @@
       "description": "Evidence paths, proof counts, and data-handling context."
     },
     {
+      "id": "reviewer_index",
+      "title": "Reviewer Index",
+      "description": "Start-here pointers, prove-this rows, and known limits for customer review."
+    },
+    {
       "id": "limitations",
       "title": "Limitations",
       "description": "Declared coverage gaps and assurance limits."

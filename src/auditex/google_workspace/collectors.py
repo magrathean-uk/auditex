@@ -164,6 +164,7 @@ class GoogleDirectoryCollector:
         )
 
         group_members: list[dict[str, Any]] = []
+        group_member_errors: list[dict[str, Any]] = []
         for group in groups[:top]:
             group_email = str(group.get("email") or group.get("id") or "")
             if not group_email:
@@ -176,46 +177,80 @@ class GoogleDirectoryCollector:
                 endpoint="admin.directory.members.list",
                 func=lambda group_email=group_email: client.list_group_members(group_email, top=top),
             )
+            coverage_row = next((row for row in reversed(coverage) if row.get("name") == f"groupMembers:{group_email}"), None)
+            if isinstance(coverage_row, dict) and coverage_row.get("status") != "ok":
+                group_member_errors.append(
+                    {
+                        "groupEmail": group_email,
+                        "error_class": coverage_row.get("error_class"),
+                        "error": coverage_row.get("error"),
+                    }
+                )
             for member in members:
                 group_members.append({"groupEmail": group_email, **member})
 
         aliases: list[dict[str, Any]] = []
+        alias_errors: list[dict[str, Any]] = []
         oauth_grants: list[dict[str, Any]] = []
+        oauth_grant_errors: list[dict[str, Any]] = []
         for user in users[:top]:
             user_key = str(user.get("primaryEmail") or user.get("email") or user.get("id") or "")
             if not user_key:
                 continue
             if hasattr(client, "list_user_aliases"):
-                for alias in _call(
+                user_aliases = _call(
                     collector=self.name,
                     name=f"aliases:{user_key}",
                     coverage=coverage,
                     log_event=log_event,
                     endpoint="admin.directory.users.aliases.list",
                     func=lambda user_key=user_key: client.list_user_aliases(user_key, top=top),
-                ):
+                )
+                coverage_row = next((row for row in reversed(coverage) if row.get("name") == f"aliases:{user_key}"), None)
+                if isinstance(coverage_row, dict) and coverage_row.get("status") != "ok":
+                    alias_errors.append(
+                        {
+                            "userKey": user_key,
+                            "error_class": coverage_row.get("error_class"),
+                            "error": coverage_row.get("error"),
+                        }
+                    )
+                for alias in user_aliases:
                     aliases.append({"userKey": user_key, **alias})
             if hasattr(client, "list_user_tokens"):
-                for token in _call(
+                tokens = _call(
                     collector=self.name,
                     name=f"oauthGrants:{user_key}",
                     coverage=coverage,
                     log_event=log_event,
                     endpoint="admin.directory.tokens.list",
                     func=lambda user_key=user_key: client.list_user_tokens(user_key, top=top),
-                ):
+                )
+                coverage_row = next((row for row in reversed(coverage) if row.get("name") == f"oauthGrants:{user_key}"), None)
+                if isinstance(coverage_row, dict) and coverage_row.get("status") != "ok":
+                    oauth_grant_errors.append(
+                        {
+                            "userKey": user_key,
+                            "error_class": coverage_row.get("error_class"),
+                            "error": coverage_row.get("error"),
+                        }
+                    )
+                for token in tokens:
                     oauth_grants.append({"userKey": user_key, **token})
 
         payload = {
             "users": {"value": users},
             "aliases": {"value": aliases},
+            "aliasesErrors": {"value": alias_errors},
             "groups": {"value": groups},
             "groupMembers": {"value": group_members},
+            "groupMembersErrors": {"value": group_member_errors},
             "orgUnits": {"value": org_units},
             "domains": {"value": domains},
             "roles": {"value": roles},
             "roleAssignments": {"value": role_assignments},
             "oauthGrants": {"value": oauth_grants},
+            "oauthGrantsErrors": {"value": oauth_grant_errors},
         }
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(
@@ -540,6 +575,7 @@ class GoogleGroupsSettingsCollector:
                 func=lambda: client.list_directory("groups", top=top, domain=domain),
             )
         settings_rows: list[dict[str, Any]] = []
+        settings_errors: list[dict[str, Any]] = []
         for group in groups[:top]:
             group_email = str(group.get("email") or group.get("id") or "")
             if not group_email:
@@ -552,14 +588,23 @@ class GoogleGroupsSettingsCollector:
                 endpoint="groupssettings.groups.get",
                 func=lambda group_email=group_email: [client.get_group_settings(group_email)],
             )
+            coverage_row = next((row for row in reversed(coverage) if row.get("name") == f"groupSettings:{group_email}"), None)
+            if isinstance(coverage_row, dict) and coverage_row.get("status") != "ok":
+                settings_errors.append(
+                    {
+                        "email": group_email,
+                        "error_class": coverage_row.get("error_class"),
+                        "error": coverage_row.get("error"),
+                    }
+                )
             for row in settings:
                 settings_rows.append({"email": group_email, **row})
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(
             self.name,
             "partial" if partial else "ok",
-            {"groupSettings": {"value": settings_rows}},
-            len(settings_rows),
+            {"groupSettings": {"value": settings_rows}, "groupSettingsErrors": {"value": settings_errors}},
+            len(settings_rows) + len(settings_errors),
             coverage=coverage,
         )
 
@@ -609,6 +654,7 @@ class GoogleCalendarPostureCollector:
                 calendar_ids.append(calendar_id)
 
         acl_rows: list[dict[str, Any]] = []
+        acl_errors: list[dict[str, Any]] = []
         for calendar_id in calendar_ids[:top]:
             acls = _call(
                 collector=self.name,
@@ -618,6 +664,15 @@ class GoogleCalendarPostureCollector:
                 endpoint="calendar.acl.list",
                 func=lambda calendar_id=calendar_id: client.list_calendar_acl(calendar_id, top=top),
             )
+            coverage_row = next((row for row in reversed(coverage) if row.get("name") == f"calendarAcls:{calendar_id}"), None)
+            if isinstance(coverage_row, dict) and coverage_row.get("status") != "ok":
+                acl_errors.append(
+                    {
+                        "calendarId": calendar_id,
+                        "error_class": coverage_row.get("error_class"),
+                        "error": coverage_row.get("error"),
+                    }
+                )
             for acl in acls:
                 acl_rows.append({"calendarId": calendar_id, **acl})
 
@@ -629,8 +684,9 @@ class GoogleCalendarPostureCollector:
                 "calendarResources": {"value": resources},
                 "calendars": {"value": calendars},
                 "calendarAcls": {"value": acl_rows},
+                "calendarAclsErrors": {"value": acl_errors},
             },
-            len(resources) + len(calendars) + len(acl_rows),
+            len(resources) + len(calendars) + len(acl_rows) + len(acl_errors),
             coverage=coverage,
         )
 

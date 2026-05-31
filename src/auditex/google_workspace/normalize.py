@@ -93,6 +93,30 @@ def build_google_normalized_snapshot(
         for item in _values(collector_payloads.get("google_directory", {}), "groupMembers")
         if item.get("groupEmail") and (item.get("id") or item.get("email"))
     ]
+    group_member_errors = [
+        _record(
+            "google_group_member_error",
+            "google_directory.groupMembersErrors",
+            str(item.get("groupEmail")),
+            group_email=item.get("groupEmail"),
+            error_class=item.get("error_class"),
+            error=item.get("error"),
+        )
+        for item in _values(collector_payloads.get("google_directory", {}), "groupMembersErrors")
+        if item.get("groupEmail")
+    ]
+    alias_errors = [
+        _record(
+            "google_alias_error",
+            "google_directory.aliasesErrors",
+            str(item.get("userKey")),
+            user_email=item.get("userKey"),
+            error_class=item.get("error_class"),
+            error=item.get("error"),
+        )
+        for item in _values(collector_payloads.get("google_directory", {}), "aliasesErrors")
+        if item.get("userKey")
+    ]
     roles = {
         str(item.get("roleId")): item
         for item in _values(collector_payloads.get("google_directory", {}), "roles")
@@ -125,6 +149,18 @@ def build_google_normalized_snapshot(
         for item in _values(collector_payloads.get("google_directory", {}), "oauthGrants")
         if item.get("clientId") or item.get("client_id")
     ]
+    oauth_grant_errors = [
+        _record(
+            "google_oauth_grant_error",
+            "google_directory.oauthGrantsErrors",
+            str(item.get("userKey")),
+            user_email=item.get("userKey"),
+            error_class=item.get("error_class"),
+            error=item.get("error"),
+        )
+        for item in _values(collector_payloads.get("google_directory", {}), "oauthGrantsErrors")
+        if item.get("userKey")
+    ]
     mailbox_settings = [
         _record(
             "google_mailbox_setting",
@@ -132,13 +168,21 @@ def build_google_normalized_snapshot(
             str(item.get("userEmail")),
             user_email=item.get("userEmail"),
             auto_forwarding=item.get("autoForwarding"),
+            auto_forwarding_error=item.get("autoForwarding_error") or {},
             filters=item.get("filters") or [],
+            filters_error=item.get("filters_error") or {},
             forwarding_addresses=item.get("forwardingAddresses") or [],
+            forwarding_addresses_error=item.get("forwardingAddresses_error") or {},
             send_as=item.get("sendAs") or [],
+            send_as_error=item.get("sendAs_error") or {},
             delegates=item.get("delegates") or [],
+            delegates_error=item.get("delegates_error") or {},
             imap=item.get("imap") or {},
+            imap_error=item.get("imap_error") or {},
             pop=item.get("pop") or {},
+            pop_error=item.get("pop_error") or {},
             vacation=item.get("vacation") or {},
+            vacation_error=item.get("vacation_error") or {},
         )
         for item in _values(collector_payloads.get("google_gmail_settings", {}), "mailboxSettings")
         if item.get("userEmail")
@@ -194,6 +238,7 @@ def build_google_normalized_snapshot(
             annotated_user=item.get("annotatedUser"),
             status=item.get("status"),
             os_version=item.get("osVersion"),
+            last_sync=item.get("lastSync"),
         )
         for item in _values(collector_payloads.get("google_devices", {}), "chromeosDevices")
         if item.get("deviceId") or item.get("serialNumber")
@@ -236,10 +281,23 @@ def build_google_normalized_snapshot(
             allow_external_members=item.get("allowExternalMembers"),
             who_can_join=item.get("whoCanJoin"),
             who_can_post_message=item.get("whoCanPostMessage"),
+            message_moderation_level=item.get("messageModerationLevel"),
             who_can_view_membership=item.get("whoCanViewMembership"),
             who_can_view_group=item.get("whoCanViewGroup"),
         )
         for item in _values(collector_payloads.get("google_groups_settings", {}), "groupSettings")
+        if item.get("email")
+    ]
+    group_setting_errors = [
+        _record(
+            "google_group_setting_error",
+            "google_groups_settings.groupSettingsErrors",
+            str(item.get("email")),
+            email=item.get("email"),
+            error_class=item.get("error_class"),
+            error=item.get("error"),
+        )
+        for item in _values(collector_payloads.get("google_groups_settings", {}), "groupSettingsErrors")
         if item.get("email")
     ]
     calendar_resources = [
@@ -286,6 +344,18 @@ def build_google_normalized_snapshot(
         for item in _values(collector_payloads.get("google_calendar_posture", {}), "calendarAcls")
         if item.get("calendarId") and (item.get("id") or item.get("scope"))
     ]
+    calendar_acl_errors = [
+        _record(
+            "google_calendar_acl_error",
+            "google_calendar_posture.calendarAclsErrors",
+            str(item.get("calendarId")),
+            calendar_id=item.get("calendarId"),
+            error_class=item.get("error_class"),
+            error=item.get("error"),
+        )
+        for item in _values(collector_payloads.get("google_calendar_posture", {}), "calendarAclsErrors")
+        if item.get("calendarId")
+    ]
     activity_records: list[dict[str, Any]] = []
     for source, payload in collector_payloads.get("google_reports", {}).items():
         for item in _values({"items": payload}, "items"):
@@ -309,8 +379,11 @@ def build_google_normalized_snapshot(
         "google_users": users,
         "google_groups": groups,
         "google_group_members": group_members,
+        "google_group_member_errors": group_member_errors,
+        "google_alias_errors": alias_errors,
         "google_role_assignments": role_assignments,
         "google_oauth_grants": oauth_grants,
+        "google_oauth_grant_errors": oauth_grant_errors,
         "google_mailbox_settings": mailbox_settings,
         "google_alerts": alerts,
         "google_dns_posture": dns_posture,
@@ -319,9 +392,11 @@ def build_google_normalized_snapshot(
         "google_drive_files": drive_files,
         "google_shared_drives": shared_drives,
         "google_group_settings": group_settings,
+        "google_group_setting_errors": group_setting_errors,
         "google_calendar_resources": calendar_resources,
         "google_calendars": calendars,
         "google_calendar_acls": calendar_acls,
+        "google_calendar_acl_errors": calendar_acl_errors,
         "google_activity_events": activity_records,
     }
     object_counts = {name: len(records) for name, records in sections.items()}
