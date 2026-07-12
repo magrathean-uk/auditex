@@ -22,9 +22,8 @@ Start here when operating or reviewing Auditex.
 - [Output Contract](OUTPUT_CONTRACT.md) - stable bundle contract and evidence rules.
 - [API Call Catalog](API_CALL_CATALOG.md) - API inventory, permission ledger, and customer API review process.
 
-## Planning and Provenance
+## Provenance
 
-- [Next 5 Release Roadmap](AUDITEX_NEXT_5_RELEASE_ROADMAP.md) - planning context and backlog; not live operator truth.
 - [Provenance Notes](provenance/provenance.md) - shipped third-party and provenance context.
 
 Auditex 1.0 is audit-only. Audit, probe, report, export, MCP audit tools, and customer-pack verification must not write to a production tenant or read mail/file body content.
