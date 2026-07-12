@@ -58,7 +58,8 @@ jobs:
             --tenant-name "${{ github.event.inputs.tenant_name || 'scheduled' }}" \
             --run-name audit \
             --out outputs/audit
-          echo "RUN_DIR=outputs/audit/$(ls outputs/audit | head -n 1)" >> "$GITHUB_ENV"
+          run_dir="$(find outputs/audit -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          echo "RUN_DIR=$run_dir" >> "$GITHUB_ENV"
 
       - name: Render SARIF
         run: |
@@ -93,4 +94,4 @@ jobs:
           auditex gate "$RUN_DIR" --fail-on "${{ github.event.inputs.fail_on || 'high' }}" | tee gate.json
           status=${PIPESTATUS[0]}
           echo "AUDITEX_GATE_STATUS=$status" >> "$GITHUB_ENV"
-          exit $status
+          exit "$status"

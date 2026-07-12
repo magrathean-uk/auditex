@@ -58,10 +58,10 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
           fi
           PACKAGE_VERSION="$(python - <<'PY'
-from azure_tenant_audit.versioning import package_version
-print(package_version())
-PY
-)"
+          from azure_tenant_audit.versioning import package_version
+          print(package_version())
+          PY
+          )"
           if [ "$TAG" != "v$PACKAGE_VERSION" ]; then
             echo "release tag $TAG does not match package version v$PACKAGE_VERSION" >&2
             exit 1
