@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
@@ -7,6 +8,10 @@ import pytest
 
 import azure_tenant_audit.findings as findings_module
 from azure_tenant_audit.findings import build_findings, build_report_pack
+
+
+def _utc_days_ago(days: int) -> str:
+    return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def test_build_findings_classifies_permission_and_partial_failures() -> None:
@@ -889,6 +894,8 @@ def test_build_findings_flags_noncompliant_intune_device() -> None:
 
 
 def test_build_findings_flags_stale_intune_device_sync() -> None:
+    stale_sync = _utc_days_ago(365)
+    fresh_sync = _utc_days_ago(1)
     normalized = {
         "devices": {
             "records": [
@@ -897,14 +904,14 @@ def test_build_findings_flags_stale_intune_device_sync() -> None:
                     "display_name": "Old Laptop",
                     "platform": "Windows",
                     "compliance_state": "compliant",
-                    "last_sync_at": "2020-01-01T00:00:00Z",
+                    "last_sync_at": stale_sync,
                 },
                 {
                     "id": "device-2",
                     "display_name": "Fresh Laptop",
                     "platform": "Windows",
                     "compliance_state": "compliant",
-                    "last_sync_at": "2026-05-20T00:00:00Z",
+                    "last_sync_at": fresh_sync,
                 },
             ]
         }
