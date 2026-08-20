@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
 
 from auditex import cli as auditex_cli
+
+
+def _utc_days_ago(days: int) -> str:
+    return (datetime.now(tz=timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sample_payload() -> dict[str, object]:
@@ -2120,6 +2125,8 @@ def test_google_stale_mobile_device_sync_finding() -> None:
     from auditex.google_workspace.findings import build_google_findings
     from auditex.google_workspace.normalize import build_google_normalized_snapshot
 
+    stale_sync = _utc_days_ago(365)
+    fresh_sync = _utc_days_ago(1)
     normalized = build_google_normalized_snapshot(
         tenant_name="Example",
         run_id="run1",
@@ -2134,14 +2141,14 @@ def test_google_stale_mobile_device_sync_finding() -> None:
                             "email": ["user@example.com"],
                             "model": "Android",
                             "status": "APPROVED",
-                            "lastSync": "2020-01-01T00:00:00.000Z",
+                            "lastSync": stale_sync,
                         },
                         {
                             "resourceId": "mobile-2",
                             "email": ["fresh@example.com"],
                             "model": "Android",
                             "status": "APPROVED",
-                            "lastSync": "2026-05-20T00:00:00.000Z",
+                            "lastSync": fresh_sync,
                         },
                     ]
                 }
@@ -2160,6 +2167,8 @@ def test_google_stale_chromeos_device_sync_finding() -> None:
     from auditex.google_workspace.findings import build_google_findings
     from auditex.google_workspace.normalize import build_google_normalized_snapshot
 
+    stale_sync = _utc_days_ago(365)
+    fresh_sync = _utc_days_ago(1)
     normalized = build_google_normalized_snapshot(
         tenant_name="Example",
         run_id="run1",
@@ -2174,14 +2183,14 @@ def test_google_stale_chromeos_device_sync_finding() -> None:
                             "serialNumber": "SER-1",
                             "annotatedUser": "student@example.com",
                             "status": "ACTIVE",
-                            "lastSync": "2020-01-01T00:00:00.000Z",
+                            "lastSync": stale_sync,
                         },
                         {
                             "deviceId": "chrome-2",
                             "serialNumber": "SER-2",
                             "annotatedUser": "fresh@example.com",
                             "status": "ACTIVE",
-                            "lastSync": "2026-05-20T00:00:00.000Z",
+                            "lastSync": fresh_sync,
                         },
                     ]
                 }
