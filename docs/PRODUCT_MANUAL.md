@@ -1,6 +1,6 @@
 # Auditex Product Manual
 
-Auditex is an audit-only evidence collection and reporting toolkit for Microsoft 365 and Google Workspace. It gathers read-only posture evidence, records exactly what was attempted, normalizes the evidence into a stable bundle, and produces a customer-review pack with proof for every claim.
+Auditex is an audit-only evidence collection and reporting toolkit for Microsoft 365 and Google Workspace. It gathers read-only posture evidence, records exactly what was attempted, normalizes the evidence into a stable bundle, and produces a customer review pack with finding-to-evidence references and recorded coverage gaps.
 
 ## What Auditex Does
 
@@ -91,7 +91,7 @@ auditex run \
   --out outputs/live
 ```
 
-For app-readonly tenants, use the app profile and locally supplied app credentials.
+For app-readonly tenants, use the app profile and an ignored local auth file containing `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET`. Keep the file local; do not put secret values in shell commands or reports.
 
 ```bash
 auditex run \
@@ -99,8 +99,7 @@ auditex run \
   --tenant-id <tenant-id> \
   --auditor-profile app-readonly-full \
   --plane full \
-  --client-id <app-id> \
-  --client-secret <app-secret> \
+  --env .secrets/m365-auth.env \
   --out outputs/live
 ```
 
@@ -218,7 +217,7 @@ auditex report render <run-dir> --format oscal --output reports/oscal.json
 
 ## Customer Pack
 
-Create and verify the handoff pack before sharing.
+Create the pack in a fresh directory, verify its integrity, and review its content before sharing. Generated packs may contain tenant identifiers and other sensitive metadata; verification is not a disclosure approval.
 
 ```bash
 auditex report customer-pack <run-dir> --output-dir customer-pack
@@ -228,13 +227,13 @@ auditex report verify-pack customer-pack
 If `verify-pack` returns `valid: false`, do not send the pack. Recreate it from the run directory or investigate missing or tampered files.
 `stale_accepted_risk` means the bundle still marks a finding as accepted even though its waiver expiry date has passed.
 
-For targeted review, render single artifacts:
+For targeted review, render single artifacts outside the verified pack. Changing pack files invalidates its recorded hashes:
 
 ```bash
-auditex report handoff <run-dir> --format md --output customer-pack/handoff.md
-auditex report api-calls <run-dir> --format md --output customer-pack/api-calls.md
-auditex report permissions <run-dir> --format md --output customer-pack/permissions.md
-auditex report proof-table <run-dir> --format md --output customer-pack/proof-table.md
+auditex report handoff <run-dir> --format md --output review-notes/handoff.md
+auditex report api-calls <run-dir> --format md --output review-notes/api-calls.md
+auditex report permissions <run-dir> --format md --output review-notes/permissions.md
+auditex report proof-table <run-dir> --format md --output review-notes/proof-table.md
 ```
 
 ## Compare And Drift
@@ -249,7 +248,7 @@ Use drift gates in CI or scheduled checks:
 
 ```bash
 auditex gate <run-dir> --fail-on high
-auditex gate-drift --baseline-run-dir <old-run> --current-run-dir <new-run> --fail-on medium
+auditex gate-drift --baseline <old-run> --current <new-run> --fail-on medium
 ```
 
 ## MCP
@@ -274,9 +273,9 @@ Use MCP tools for bundle-backed answers only. Every answer should cite bundle ev
 - `auditex_compare_runs`
 - `auditex_rules_inventory`
 
-## Ship Criteria
+## Validation before release
 
-Auditex is shippable when:
+Review the checks in [the runbook](../RUNBOOK.md#development-and-release-checks). Offline validation and local tests do not establish live provider acceptance. At minimum:
 
 - contract smoke passes,
 - full tests pass,

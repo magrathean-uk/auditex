@@ -29,7 +29,7 @@ Some providers expose settings through broad scopes. When that happens, `data-ha
 
 ## Customer Use
 
-For enterprise review, provide the full bundle directory. Review these artifacts first:
+For enterprise review, create and verify a customer pack, inspect it for confidential data, and use the approved evidence channel. Keep raw evidence local unless separately authorized for disclosure. Review these artifacts first:
 
 1. `run-manifest.json`
 2. `data-handling.json`
@@ -52,6 +52,6 @@ auditex report permissions <run-dir> --format md
 auditex report proof-table <run-dir> --format md
 ```
 
-Add `--output <path>` to persist any of these review files in the customer handoff pack.
+Add `--output <path>` to persist individual review files outside the verified pack. Regenerate and reverify the pack when its contents need to change.
 
 The permission ledger joins `api-inventory.json` and `audit-plan.json` so reviewers can see required, observed, and missing scopes per collector. The `customer-pack` command also copies selected customer-safe source artifacts, including `data-handling.json`, `api-inventory.json`, `audit-plan.json`, `reports/report-pack.json`, `validation.json`, and `ai_context.json`, under `source-artifacts/` with hashes in `pack-manifest.json` and `checksums.sha256`. Run `verify-pack` before handoff.

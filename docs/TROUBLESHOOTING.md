@@ -56,7 +56,7 @@ Add the smallest read permission or role needed, then rerun probe.
 
 ### Empty Defender, Intune, or risk data
 
-This often means the tenant lacks the product, license, or data retention window. Treat it as a documented limitation unless the customer confirms the service exists and should have data.
+Check collector status, permissions, service availability, and the data retention window. Empty results alone do not prove the service is absent or the tenant has no findings. Record the supported blocker reason and confirm expected coverage with the customer.
 
 ### Exchange coverage missing
 
@@ -189,5 +189,5 @@ Update the docs and run command help checks:
 auditex --help
 auditex google --help
 auditex report --help
-auditex-mcp --help || true
+auditex-mcp --help
 ```

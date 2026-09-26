@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible Auditex problem using synthetic data.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check SUPPORT.md first. Follow SECURITY.md for vulnerabilities.
+        Do not post credentials, tenant evidence, or customer reports.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Auditex version, Python version, operating system, and provider.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal steps with synthetic data and sanitized command options.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before posting
+      options:
+        - label: I removed credentials, tenant identifiers, local paths, and private evidence.
+          required: true

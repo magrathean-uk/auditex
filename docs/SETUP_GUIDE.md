@@ -90,7 +90,7 @@ auditex report permissions <run-dir> --format md
 
 - Run `auditex setup-guide ... --format json` before asking for admin action.
 - Never request permissions not shown in the plan unless a probe proves a missing surface.
-- Paste setup-guide Markdown into GitHub issues.
+- Share only a sanitized setup summary in GitHub issues. Remove tenant identities, domains, local paths, and credentials from generated output first.
 - Do not paste auth files or raw tenant evidence into GitHub.
 - After live collection, answer from bundle artifacts.
 

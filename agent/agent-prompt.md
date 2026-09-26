@@ -1,61 +1,40 @@
-# Codex / AI Caller Prompt Pack
+# Auditex Operator Prompt
 
-Use this as a starting prompt when handing over a tenant for audit:
+Use the Auditex product surface in this folder for an authorized tenant audit.
+Keep the public audit plane read-only. Do not use tenant-bootstrap actions that
+create or change tenant objects as part of an Auditex audit.
 
-```
-Use the Auditex product surface in this folder.
-First run offline validation:
-`auditex run --offline --tenant-name <label> --sample examples/sample_audit_bundle/sample_result.json`.
+Start with an offline validation run:
 
-Preferred guided operator flows:
-`auditex guided-run`
-`auditex guided-run --flow gr-audit --include-exchange`
-`auditex guided-run --flow ga-setup-app`
-`auditex guided-run --flow app-audit`
-
-Before asking for tenant access:
-`auditex setup-guide m365 --collector-preset full --format json`
-`auditex setup-guide google --collector-preset everything --format json`
-
-Codex-led flow:
-1. Generate setup-guide JSON for the provider.
-2. Authenticate the current session.
-3. Run probe.
-4. Capture the signed-in identity and directory roles.
-5. Run live collection only after probe.
-6. Return the audit bundle and blocked items.
-
-Then run live collection with provided credentials:
-`auditex run --tenant-name <tenant-name> --tenant-id <tenant-id> --client-id <app-id> --client-secret <secret> --top 400`.
-
-If you prefer browser login with Global Reader/Admin:
-`auditex run --tenant-name <tenant-name> --interactive --client-id <app-id> --browser-command firefox`.
-
-If no app is available, use the Azure CLI flow:
-`az login --tenant <tenant-id>` then
-`auditex run --tenant-name <label> --tenant-id <tenant> --use-azure-cli-token --auditor-profile global-reader`.
-
-Collectors to run by default: identity, security, intune, teams, exchange.
-After run, open `<output>/<tenant-name>-<run-id>/summary.md` then inspect any raw/<collector>.json files with anomalies.
-
-Bootstrap workflow (no app required, Azure CLI token mode):
-`cd tenant-bootstrap && ./run-bootstrap-azurecli.sh --tenant-name <tenant-name> --dry-run`.
-
-For a live build:
-`cd tenant-bootstrap && ./run-bootstrap-azurecli.sh --tenant-name <tenant-name>`.
-
-If you want end-to-end bootstrap + collection in one step:
-`cd tenant-bootstrap && ./run-enterprise-audit.sh --tenant-name <tenant-name> --inspect`.
-
-Also hand over logs on request:
-- `audit-log.jsonl` for all command and Graph events
-- `run-manifest.json` for an evidence summary and artifact map
-- `bootstrap-shell.log` and `bootstrap-debug.log` for wrapper command-level logs (Azure CLI flow)
-- `identity-seed-az-log.jsonl` and `workload-seed-az-log.jsonl` for seed command streams
+```sh
+auditex run --offline \
+  --sample examples/sample_audit_bundle/sample_result.json \
+  --tenant-name <label> \
+  --out outputs/offline
 ```
 
-Preferred output handling:
+Before requesting tenant access, generate the provider setup guidance:
 
-- Do not print secrets.
-- Summarize any blocked collectors (`status=partial`/`failed`) and the exact error.
-- Keep evidence paths in responses.
+```sh
+auditex setup-guide m365 --collector-preset full --format json
+auditex setup-guide google --collector-preset everything --format json
+```
+
+For an authorized live engagement:
+
+1. Use a local, Git-excluded authentication method. Do not place secrets or
+   access tokens in prompts, command lines, logs, or handoff text.
+2. Run a probe before full collection.
+3. Record the signed-in identity and visible directory roles in the run
+   evidence.
+4. Run collection only after the probe and report blocked collectors as
+   coverage gaps.
+5. Review `summary.json`, `run-manifest.json`, `data-handling.json`,
+   `api-inventory.json`, and `diagnostics.json` when present.
+6. Verify any customer pack before handoff with
+   `auditex report verify-pack <customer-pack-dir>`.
+
+Do not read Gmail or Exchange message bodies, or Drive, SharePoint, or OneDrive
+file content. Do not make production-tenant changes. Preserve evidence paths in
+the summary, label partial or failed collection plainly, and never print raw
+credentials or tenant evidence.

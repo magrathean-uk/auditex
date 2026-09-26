@@ -1,27 +1,28 @@
 ---
 name: delegated-auth
-description: Use when starting a customer Microsoft 365 audit without an app registration and you need the delegated-first Global Reader workflow.
+description: Use when starting an authorized Microsoft 365 audit without an app registration and assessing delegated coverage before an app-consent escalation.
 ---
 
-# Delegated Auth
+# Delegated Authentication
 
-## Default rule
-
-Start with delegated `Global Reader` or equivalent before asking for app consent.
+Start with delegated `Global Reader` or an equivalent authorized role before
+asking for app consent. If delegated visibility provides the required coverage,
+do not request broader access.
 
 ## Preferred path
 
-```bash
+```sh
 az login --tenant <tenant>
 auditex guided-run --flow gr-audit --include-exchange
 auditex run --tenant-name <label> --tenant-id <tenant> --use-azure-cli-token --auditor-profile global-reader --out outputs/live
 ```
 
-## What to record
+## Record
 
-- who signed in
-- what role context was visible
-- what collectors were blocked
-- what additional delegated role would help
+- signed-in identity;
+- visible role context;
+- blocked collectors and their evidence;
+- any additional delegated role or permission that would add coverage.
 
-If delegated visibility is enough, do not escalate.
+Do not disclose tokens or raw evidence. Keep the audit operation read-only and
+run a probe before full collection when the workflow does not do so itself.

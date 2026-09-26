@@ -1,241 +1,99 @@
-# Auditex Runbook
+# Auditex runbook
 
-This is the live operator and local-dev path for Auditex.
+Use this runbook for local setup, authorized audits, and development checks. For access planning, start with the [setup guide](docs/SETUP_GUIDE.md). For the full workflow, use the [product manual](docs/PRODUCT_MANUAL.md).
 
-## Setup
+## Install and inspect
+
+Use Python 3.11 or newer from the repository root:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
-auditex setup
-```
-
-Optional adapters:
-
-```bash
-auditex setup --mcp
-auditex setup --exchange
-auditex setup --pwsh
-```
-
-Health check:
-
-```bash
-auditex doctor
+python -m pip install -e .
 auditex doctor --json
-auditex setup-guide m365 --collector-preset full --format md
+auditex --help
+```
+
+Google Workspace needs `python -m pip install -e '.[google]'`; MCP needs `python -m pip install -e '.[mcp]'`. `auditex setup` installs local tools. Its `--mcp`, `--exchange`, and `--pwsh` options install optional tooling, so use them only for the intended scope.
+
+## Plan access and probe
+
+```bash
+auditex setup-guide m365 --auditor-profile global-reader --collector-preset full --format md
 auditex setup-guide google --collector-preset everything --format md
 ```
 
-## Local development checks
+Review the generated plan with the tenant administrator. Scope names may carry broader rights than the read calls Auditex makes; check scope risk before granting access. Keep app credentials, service-account files, and token caches in an ignored local location such as `.secrets/`.
 
-Use the Makefile and CI-discovered commands as the local truth:
+For delegated Microsoft 365 access:
 
 ```bash
-make test
-make lint
-make contract-smoke
-./scripts/oss-taint-scan.sh
-python3 scripts/build-pages-site.py site
+az login --allow-no-subscriptions --tenant contoso.onmicrosoft.com
+auditex probe live --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --mode delegated --use-azure-cli-token
 ```
 
-What each check covers:
+`make login TENANT=contoso.onmicrosoft.com` is an alternative Azure CLI login helper that selects Firefox. Review the probe's `live-readiness.json` and `audit-plan.json` before collection. Missing scopes, roles, licenses, services, local tools, tenant policy, runtime errors, and unverified surfaces are separate blockers.
 
-- `make test` runs `python -m pytest`.
-- `make lint` runs `python -m compileall -q src tests`.
-- `make contract-smoke` rebuilds the offline sample bundle in `outputs/ci-contract` and asserts valid contract status plus `index/evidence.sqlite`.
-- `./scripts/oss-taint-scan.sh` checks forbidden research/derived paths and taint markers.
-- `python3 scripts/build-pages-site.py site` builds the GitHub Pages redirect artifact.
-
-Provider run note:
-
-- Microsoft 365 and Google `run` and `probe` now stamp the same shared provider finalization metadata in `run-manifest.json`: `provider_adapter_version` and `api_inventory_recorder_version`. Use those fields when checking whether two bundles came through the same orchestration path.
-
-Command help smoke:
+## Run an audit
 
 ```bash
-auditex --version
-auditex --help
-auditex doctor --json
-auditex guided-run --help
-auditex google --help
-auditex report --help
-auditex-mcp --version
-auditex-mcp --help
+auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --auditor-profile global-reader --plane full --use-azure-cli-token --out outputs/live
 ```
 
-No dedicated formatter or static typecheck command is currently defined in the repo. Do not invent one in docs or CI without adding the actual tool config.
+`auditex guided-run` provides the interactive route. `--flow gr-audit` uses delegated access and `--flow app-audit` uses saved app credentials. `--flow ga-setup-app` performs app setup and requires explicit authority to create or change the customer-local registration; it is not an audit-only step.
 
-## Auth and profiles
+Google Workspace commands and credential choices are in the [product manual](docs/PRODUCT_MANUAL.md#google-workspace-audit-flow). Rerun a probe after changing roles or scopes.
 
-- `make login TENANT=<tenant-id-or-domain>` opens Azure CLI login with `--allow-no-subscriptions`.
-- Exchange-backed collection needs `m365`.
-- Saved app credentials live only in `.secrets/m365-auth.env`.
-- Google Workspace credentials stay local: use a service-account key path for domain-wide delegation or an OAuth client/token cache path for delegated OAuth.
-
-Shipped profile notes:
-
-- [profiles/global-reader.md](profiles/global-reader.md)
-- [profiles/security-reader.md](profiles/security-reader.md)
-- [profiles/app-readonly-full.md](profiles/app-readonly-full.md)
-- [profiles/exchange-reader.md](profiles/exchange-reader.md)
-- [profiles/intune-reader.md](profiles/intune-reader.md)
-
-## Guided audit flows
-
-Default operator path:
+## Offline fixtures
 
 ```bash
-auditex guided-run
-```
-
-Common flows:
-
-```bash
-auditex guided-run --flow gr-audit --include-exchange
-auditex guided-run --flow ga-setup-app
-auditex guided-run --flow app-audit
-```
-
-Repo-local wrapper:
-
-```bash
-./scripts/tenant-audit-flow --flow gr-audit --include-exchange
-```
-
-## Direct CLI flows
-
-Offline sample:
-
-```bash
-auditex run --offline --tenant-name demo --out outputs/offline
+auditex run --offline --sample examples/sample_audit_bundle/sample_result.json --tenant-name demo --run-name sample --out outputs/offline
 auditex run --offline --sample examples/sample_audit_bundle/known_bad_result.json --tenant-name demo --run-name known-bad --out outputs/offline-known-bad
 auditex google run --offline --sample examples/google_workspace_sample.json --domain example.com --tenant-name demo --out outputs/google
-python3 tenant-bootstrap/scripts/replay-known-bad-fixtures.py --out tenant-bootstrap/fixture-output --clean
-python3 tenant-bootstrap/scripts/replay-known-bad-fixtures.py --bootstrap-run-dir tenant-bootstrap/runs/<seed-run> --out tenant-bootstrap/fixture-output --clean
 ```
 
-Compare, render, export, notify:
+These exercise sample processing and do not demonstrate live tenant access or completeness.
+
+## Review and hand off
 
 ```bash
-azure-tenant-audit --version
+auditex report handoff <run-dir> --format md
+auditex report api-calls <run-dir> --format md
+auditex report permissions <run-dir> --format md
+auditex report proof-table <run-dir> --format md
+auditex report customer-pack <run-dir> --output-dir customer-pack
+auditex report verify-pack customer-pack
+```
+
+Use a fresh pack directory and review it for confidential information before sharing through the customer's approved channel. Integrity verification does not establish audit completeness or permission to disclose. Follow the [customer handoff guide](docs/CUSTOMER_HANDOFF_GUIDE.md), including expired accepted-risk checks.
+
+```bash
 auditex compare --run-dir run-a --run-dir run-b
-auditex report render <run-dir> --format md
+auditex gate-drift --baseline run-a --current run-b --fail-on high
 auditex export list
-auditex export run <exporter-name> <run-dir>
 auditex notify send <run-dir> --sink teams
 ```
 
-Default compare suppresses volatile churn like raw sync timestamps and usage report refresh dates. Use `auditex compare --classic ...` when raw timestamp-only changes still matter.
+Comparison suppresses selected volatile timestamp changes by default; `--classic` retains them. Notifications are previews unless `--execute` is supplied. Sending is an external action that needs an authorized destination and reviewed content.
 
-## Google Workspace
+## Development and release checks
 
-Install optional Google libraries only when needed:
+Install pytest for development: `python -m pip install -e . pytest`.
 
-```bash
-python -m pip install -e '.[google]'
-auditex setup-guide google --auth domain-delegation --collector-preset everything --format md
-auditex google doctor --json
-```
+| Check | What it exercises |
+| --- | --- |
+| `make lint` | Compiles Python under `src` and `tests`; it does not check style or types. |
+| `make test` | Runs pytest with the interpreter selected by `scripts/select-python.sh`. |
+| `make contract-smoke` | Deletes and recreates `outputs/ci-contract`, validates an offline bundle and its evidence index. |
+| `./scripts/oss-taint-scan.sh` | Checks forbidden research/derived paths and taint markers. |
+| `python3 scripts/build-pages-site.py /tmp/auditex-pages` | Recreates the destination as a redirect artifact to the configured site. It deletes an existing destination. |
 
-Domain-wide delegation is the preferred full-domain path:
+The existing `.pre-commit-config.yaml` also declares checks including a manual Ruff hook. This runbook does not change or install hooks. Use focused tests for changed behavior. Contract changes need contract smoke. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution scope and check reporting.
 
-```bash
-auditex google run \
-  --auth domain-delegation \
-  --service-account-key /path/to/service-account.json \
-  --subject admin@example.com \
-  --domain example.com \
-  --customer-id C123 \
-  --tenant-name EXAMPLE \
-  --out outputs/google
-```
+The existing release workflow installs Google and MCP extras, runs the checks above, builds the wheel and source distribution, and invokes `bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke`. That script creates isolated environments for base, Google, and MCP package checks. The release tag must be `v` followed by the packaged version. These are workflow definitions, not a statement that a particular release has passed.
 
-Run `auditex google probe ...` first after scope changes. It performs tiny endpoint reads and reports the capability matrix before a full collection. Use `--collector-preset everything` when Drive metadata, Google Groups settings, and Calendar sharing posture are in scope; add these extra DWD scopes when enabling that preset:
+## Lab tools
 
-```text
-https://www.googleapis.com/auth/drive.metadata.readonly,https://www.googleapis.com/auth/apps.groups.settings,https://www.googleapis.com/auth/admin.directory.resource.calendar.readonly,https://www.googleapis.com/auth/calendar.calendarlist.readonly,https://www.googleapis.com/auth/calendar.acls.readonly
-```
+`tenant-bootstrap/` seeds lab tenant data and contains writable operations. `run-enterprise-audit.sh` runs bootstrap before audit by default; it is not a production audit shortcut. Inspect its `--help` and the selected configuration before any separately authorized lab work. Keep lab credentials and outputs separate from customer audits.
 
-## Tenant bootstrap
-
-The bootstrap kit stays in `tenant-bootstrap/` and shares the root runtime when the full repo is present.
-
-Install bootstrap-only requirements:
-
-```bash
-python3 -m pip install -r tenant-bootstrap/requirements.txt
-```
-
-Recommended full chain:
-
-```bash
-cd tenant-bootstrap
-./run-enterprise-audit.sh --tenant-name "Example Tenant" --inspect
-```
-
-Other common entrypoints:
-
-```bash
-cd tenant-bootstrap
-./run-bootstrap-azurecli.sh --tenant-name "EXAMPLE-LAB"
-./run-enterprise-lab-max.sh --run-name enterprise-lab-max-dryrun --days 1
-./run-enterprise-lab-max.sh --live --run-name enterprise-lab-max-live --days 30
-```
-
-
-## Contract smoke
-
-Before handing off a build, run:
-
-```bash
-python -m compileall -q src tests
-python -m pytest
-auditex run --offline --sample examples/sample_audit_bundle/sample_result.json --tenant-name ci --run-name contract --out outputs/ci-contract
-```
-
-The resulting `outputs/ci-contract/ci-contract/validation.json` must be valid and the final manifest must report `contract_status: valid`.
-
-Release CI also runs `make contract-smoke`, `./scripts/oss-taint-scan.sh`, `python3 scripts/build-pages-site.py /tmp/auditex-pages`, and a built-wheel offline smoke.
-
-For local release packaging proof, build `dist/` and run `bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke`. That smoke path validates base wheel install plus `google` and `mcp` extras in separate virtualenvs.
-Release tags must match the packaged version from `auditex --version`: for example `1.0.0` ships as git tag `v1.0.0`.
-
-Product docs live under [docs/README.md](docs/README.md). Update the manual, setup guide, admin permission guide, customer handoff guide, security/privacy model, and troubleshooting guide when commands, scopes, artifacts, or checks change.
-
-For enterprise evidence review, render the API call ledger:
-
-```bash
-auditex report customer-pack outputs/ci-contract/ci-contract --output-dir outputs/ci-contract/customer-pack
-auditex report verify-pack outputs/ci-contract/customer-pack
-auditex report handoff outputs/ci-contract/ci-contract --format md
-auditex report api-calls outputs/ci-contract/ci-contract --format md
-auditex report permissions outputs/ci-contract/ci-contract --format md
-auditex report proof-table outputs/ci-contract/ci-contract --format md
-```
-
-Use `customer-pack` when handing material to a reviewer. It writes `README.md`, handoff, full Markdown report, API ledger, permission ledger, proof table, JSON copies, selected customer-safe source artifacts under `source-artifacts/`, `checksums.sha256`, and `pack-manifest.json` with hashes. Run `verify-pack` before handoff to catch missing or tampered files. Start with the handoff output, then use the API call ledger, permission ledger, and proof table for detail. Use them beside `data-handling.json`, `audit-plan.json`, `reports/report-pack.json` (`proof_table`), and `validation.json` to show what APIs were attempted, which scopes were needed or missing, which exact evidence rows prove each finding, and whether the run stayed read-only.
-Use `--output reports/<name>.md` or `--output reports/<name>.json` when creating a persisted customer handoff pack.
-
-When a run is partial, start with `live-readiness.json`. Its blocker summary separates missing scopes, admin role limits, unlicensed or absent services, local toolchain gaps, tenant policy blocks, runtime errors, and unverified collectors.
-
-## Local safety
-
-- Keep `.venv/`, `.secrets/`, and tenant outputs local.
-- Keep raw evidence local; AI should read normalized artifacts by default.
-- Use [docs/provenance/provenance.md](docs/provenance/provenance.md) when provenance questions matter.
-
-## Verification notes
-
-- Public Auditex is audit-only. Lab response tools are hidden unless `AUDITEX_ENABLE_RESPONSE=1` is set for local development.
-- Imported token contexts should keep the raw token on disk in the secrets sidecar, not inside the context JSON.
-- When checking exposure, verify the public route, direct-IP / Host-header path, and the blocked path separately. One green check is not enough.
-
-## Done criteria for repo changes
-
-- Setup, command, scope, artifact, or handoff changes are reflected in `README.md`, this runbook, or product docs as applicable.
-- Behavior changes have focused pytest coverage.
-- Bundle, report, collector, API inventory, evidence ref, or customer-pack changes pass `make contract-smoke`.
-- Python edits pass `make lint` when practical.
-- Live tenant work records blockers honestly when auth, scopes, licenses, optional tools, network, or customer access prevent verification.
+The response plane is hidden by default and guarded separately. Do not enable it for an ordinary audit. Agent command templates under `agent/` include lab tools as well as audit commands; inspect the selected tool before execution.

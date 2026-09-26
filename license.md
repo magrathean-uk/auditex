@@ -1,69 +1,41 @@
-# License - auditex
+# Licensing
 
-## This Project
+Auditex is distributed under the Apache License, Version 2.0. The complete,
+controlling licence text is in [LICENSE](LICENSE). The package metadata in
+`pyproject.toml` also declares `Apache-2.0` and includes that file in package
+licence files.
 
-Auditex is open-source software released under the Apache License, Version 2.0.
+Copyright 2026 Magrathean UK Ltd.
 
-> See `LICENSE` for the full Apache-2.0 licence text.
-> Copyright 2026 Magrathean UK Ltd.
+This page explains the repository layout. It does not alter the licence or add
+terms.
 
-A machine-readable record of third-party components is maintained in
-`THIRD_PARTY_NOTICES.md`. The summary below is derived from that file and from the
-project's declared dependencies.
+## Third-party material
 
----
+The repository retains a curated vendored subset of Microsoft Skills under
+`tenant-bootstrap/vendor/microsoft-skills/`. Its MIT licence is kept with that
+material. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) identifies it and
+the declared Python dependencies, and records provenance-only references that
+are not retained as code or text.
 
-## Third-Party Dependencies
+The optional `google` dependency group in `pyproject.toml` also declares
+`google-auth`, `google-auth-oauthlib`, and `google-api-python-client`.
+They are not currently listed in `THIRD_PARTY_NOTICES.md`. This refresh does
+not infer their licence terms or add a notice without a dependency-specific
+review.
 
-### Vendored component
+Retain the notices and licences that apply to any redistributed components or
+bundled dependencies. The root `LICENSE` is the only root licence text in the
+reviewed tree; this document is not a replacement for it.
 
-| Component | License | Location |
-|-----------|---------|----------|
-| `microsoft/skills` (curated subset of SKILL.md files) | **MIT** | `tenant-bootstrap/vendor/microsoft-skills/` — licence at `tenant-bootstrap/vendor/microsoft-skills/LICENSE` |
+## Trademarks
 
-### Python runtime — `pyproject.toml` / `requirements.txt`
+[TRADEMARKS.md](TRADEMARKS.md) identifies the project and third-party marks
+used in the repository and states the product's independence from Microsoft
+and Google.
 
-| Package | License | Declared in |
-|---------|---------|-------------|
-| `requests` | Apache-2.0 | `pyproject.toml`, `requirements.txt` |
-| `msal` | MIT | `pyproject.toml`, `requirements.txt` |
-| `mcp` *(optional)* | MIT | `pyproject.toml` |
+## Provenance
 
-### Python build tooling — `pyproject.toml`
-
-| Package | License | Declared in |
-|---------|---------|-------------|
-| `setuptools` | MIT | `pyproject.toml` |
-
-### Tenant-bootstrap tooling — `tenant-bootstrap/requirements.txt`
-
-| Package | License | Declared in |
-|---------|---------|-------------|
-| `requests` | Apache-2.0 | `tenant-bootstrap/requirements.txt` |
-| `msal` | MIT | `tenant-bootstrap/requirements.txt` |
-
-### Research references (no code retained)
-
-The following upstream projects were studied for ideas. No source code, templates, or
-documentation text was copied. Recorded in `THIRD_PARTY_NOTICES.md` for provenance.
-
-| Project | License | Status |
-|---------|---------|--------|
-| `ThomasKur/M365Documentation` | GPLv3+ | Rewritten; no code retained |
-| `System-Admins/m365assessment` | No visible licence | Rewritten; no code retained |
-| `cisagov/ScubaGear` | CC0-1.0 | Idea-level only |
-| `maester365/maester` | MIT | Idea-level only |
-| `microsoft/EntraExporter` | MIT | Idea-level only |
-| `dirkjanm/ROADtools` | MIT | Idea-level only |
-| `CompliantSec/M365SAT` | MIT | Idea-level only |
-
----
-
-## License Obligations Summary
-
-| License | Action required |
-|---------|----------------|
-| Apache-2.0 (this project) | Retain licence and notice text when redistributing covered source or binaries; see `LICENSE` |
-| MIT (vendored microsoft-skills) | Licence text retained at `tenant-bootstrap/vendor/microsoft-skills/LICENSE` |
-| MIT (msal, mcp) | Retain copyright notice and licence text when redistributing bundled wheels |
-| Apache-2.0 (requests) | Retain NOTICE file (if any) and licence text when redistributing bundled wheels |
+[docs/provenance/provenance.md](docs/provenance/provenance.md) and its CSV
+companion record the project’s stated source-provenance review. They do not
+replace a licence review for a new contribution or distribution.

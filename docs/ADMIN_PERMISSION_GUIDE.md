@@ -64,7 +64,7 @@ Typical Microsoft Graph application permissions depend on selected collectors, b
 - `SecurityEvents.Read.All` or related security permissions where Defender/Security APIs are in scope.
 - `DeviceManagementManagedDevices.Read.All` and related Intune read scopes where Intune is in scope.
 
-Use `auditex probe live --mode app` before full collection. Do not grant write permissions for the audit path.
+Use `auditex probe live --mode app` before full collection. Do not grant broad permissions automatically. Some shipped profile hints include `AppRoleAssignment.ReadWrite.All` and `Exchange.ManageAsApp`; those names do not establish least privilege. Review the generated plan and the blocked surface with the administrator before approving any broader grant. The audit commands themselves must remain read-only.
 
 ### Exchange-Assisted Coverage
 
@@ -87,7 +87,7 @@ In Google Admin Console:
 1. Open Security > Access and data control > API controls > Domain-wide delegation.
 2. Add the service account client ID.
 3. Paste the comma-separated scopes for the collector preset you intend to run.
-4. Save, then wait a few minutes before probing.
+4. Save, then probe and record any propagation or authorization failure.
 
 Core scopes:
 

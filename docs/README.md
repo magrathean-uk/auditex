@@ -1,29 +1,29 @@
-# Auditex Documentation
+# Auditex documentation
 
-Start here when operating or reviewing Auditex.
+This index separates operator guidance, product assurance, and provenance material. Start with the [repository README](../README.md) for a short overview and the [runbook](../RUNBOOK.md) for commands and local checks.
 
-## Repository Agent Starting Points
+For repository changes, see [CONTRIBUTING.md](../CONTRIBUTING.md). For product questions and issue reports, see [SUPPORT.md](../SUPPORT.md).
 
-- [Agent Notes](../AGENTS.md) - repo map, command matrix, edit guardrails, generated-file rules, and done criteria for future Codex sessions.
-- [Runbook](../RUNBOOK.md) - local setup, live operator flows, tenant bootstrap, and verification commands.
-- [Repository Overview](../README.md) - public overview, quickstart, CLI examples, and output contract summary.
+## Operator docs
 
-## Operator Docs
+- [Product Manual](PRODUCT_MANUAL.md): install, audit, probe, report, export, compare, customer packs, and MCP.
+- [Setup Guide](SETUP_GUIDE.md): provider scopes, roles, admin steps, and generated setup plans.
+- [Administrator Permission Guide](ADMIN_PERMISSION_GUIDE.md): Microsoft 365 and Google Workspace access models.
+- [Customer Handoff Guide](CUSTOMER_HANDOFF_GUIDE.md): pack contents, integrity checks, evidence review, and partial runs.
+- [Troubleshooting Guide](TROUBLESHOOTING.md): local runtime, authentication, provider scope, report, and pack failures.
 
-- [Product Manual](PRODUCT_MANUAL.md) - install, run, verify, report, export, and MCP workflows.
-- [Setup Guide](SETUP_GUIDE.md) - pre-audit scopes, roles, admin steps, and setup-guide CLI usage.
-- [Administrator Permission Guide](ADMIN_PERMISSION_GUIDE.md) - Microsoft 365 and Google Workspace access setup.
-- [Customer Handoff Guide](CUSTOMER_HANDOFF_GUIDE.md) - evidence pack contents, integrity checks, and reviewer flow.
-- [Troubleshooting Guide](TROUBLESHOOTING.md) - common auth, scope, license, report, and pack failures.
+## Assurance and contracts
 
-## Product Assurance
-
-- [Security and Privacy Model](SECURITY_PRIVACY.md) - read-only guarantees, no-content-read policy, local evidence handling, and secret rules.
-- [Output Contract](OUTPUT_CONTRACT.md) - stable bundle contract and evidence rules.
-- [API Call Catalog](API_CALL_CATALOG.md) - API inventory, permission ledger, and customer API review process.
+- [Security and Privacy Model](SECURITY_PRIVACY.md): authorization boundary, read-only rules, no-content-read policy, local evidence, auth material, and telemetry.
+- [Output Contract](OUTPUT_CONTRACT.md): finalized bundle artifacts, validation, evidence references, and MCP contract surfaces.
+- [API Call Catalog](API_CALL_CATALOG.md): the API inventory and permission ledger used for customer review.
 
 ## Provenance
 
-- [Provenance Notes](provenance/provenance.md) - shipped third-party and provenance context.
+- [Provenance Notes](provenance/provenance.md): retained third-party and research provenance.
+- [Third-Party Notices](../THIRD_PARTY_NOTICES.md): dependency and vendored-component notices.
+- [License](../LICENSE): Apache License 2.0 text.
 
-Auditex 1.0 is audit-only. Audit, probe, report, export, MCP audit tools, and customer-pack verification must not write to a production tenant or read mail/file body content.
+## Product boundary
+
+Auditex's public audit, probe, report, export, MCP audit, and customer-pack verification surfaces are read-only with respect to production tenants and do not read mail or file body content. The `tenant-bootstrap/` directory is a separate lab helper for seeding and rehearsing test environments; follow its own scripts and keep its credentials and generated runs local.

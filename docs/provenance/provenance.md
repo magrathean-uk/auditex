@@ -1,38 +1,34 @@
-# Source Provenance Sheet
+# Source Provenance
 
-This is the human-readable companion to `docs/provenance/provenance.csv`.
+This page is the human-readable companion to
+`docs/provenance/provenance.csv`.
 
-Clean-room rule applied on 2026-04-18: GPL and no-license sources are not used as product source. High-risk surfaces were rewritten from the product requirements and current Auditex tests, not from upstream source text. Permissive projects remain at most idea-level influences unless explicitly listed as vendored or declared dependencies in `THIRD_PARTY_NOTICES.md`.
+The source tree records a clean-room rule applied on 2026-04-18: GPL and
+no-license sources are not used as product source. It says high-risk surfaces
+were rewritten from product requirements and current Auditex tests rather than
+upstream source text. Permissively licensed projects remain idea-level
+influences unless they are listed as vendored or declared dependencies in
+`THIRD_PARTY_NOTICES.md`.
 
-The CSV columns are:
-
-- `file/module`
-- `source repo`
-- `license`
-- `copied vs inspired`
-- `action`
-
-Current action summary:
+The CSV records the file or module, source repository, licence, whether the
+relationship is copied or inspired, and the action taken.
 
 | Action | Meaning |
 | --- | --- |
-| `rewrite` | Replaced implementation or text with Auditex-owned implementation/text. |
-| `remove` | Removed competitor harvesting, direct-port records, or research pack material from the distributable product tree. |
-| `keep` | Retained because it is own code, idea-level only, a declared dependency, or permissively licensed vendored material with notices. |
+| `rewrite` | Auditex replaced implementation or text. |
+| `remove` | The distributable tree no longer includes the recorded material. |
+| `keep` | The record identifies own code, idea-level influence, a declared dependency, or permissively licensed vendored material with notices. |
 
-High-risk rewrite targets completed:
+The current source record identifies rewritten reporting, report-section,
+friendly-name, finding-template, and fallback-template surfaces; it also says
+the legacy source-review module and distributable research material were
+removed. See the CSV for the file-level record.
 
-| Surface | Status |
-| --- | --- |
-| `src/auditex/reporting.py` | Rewritten. |
-| `configs/report-sections.json` | Rewritten. |
-| `src/azure_tenant_audit/friendly_names.py` | Rewritten. |
-| `configs/finding-templates.json` | Rewritten. |
-| `src/azure_tenant_audit/findings.py` fallback template text | Rewritten. |
-| legacy source-review module | Removed from the product tree. |
-| `docs/research/*` | Removed from distributable tree. |
+## Limits
 
-Remaining non-code work:
-
-- no external legal review yet
-- no external similarity audit yet
+The source record also states that no external legal review or external
+similarity audit has been completed. It is an engineering provenance record,
+not a legal opinion or proof of rights for a new contribution. Review new
+third-party material before adding it, retain applicable notices, and update
+the CSV and [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) when a
+material relationship changes.

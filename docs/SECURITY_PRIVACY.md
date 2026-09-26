@@ -1,118 +1,74 @@
 # Auditex Security and Privacy Model
 
-Auditex is designed for authorized tenant auditing. The default public product surface is audit-only.
+Auditex is for authorized tenant auditing. The public product surface is
+audit-only.
 
-## Authorization Boundary
+## Authorization and audit boundaries
 
-Use Auditex only against tenants you own or where the tenant owner has given explicit written authorization. The operator is responsible for Microsoft, Google, legal, regulatory, and data-protection obligations.
+Use Auditex only against tenants you own or for which the tenant owner has
+given explicit written authorization. The operator remains responsible for the
+applicable Microsoft, Google, legal, regulatory, and data-protection
+requirements.
 
-## Read-Only Policy
+The audit plane must not write to production tenants. This covers Microsoft
+365 and Google Workspace audit runs, probes, reports, exports, MCP audit tools,
+customer-pack creation, and customer-pack verification. Lab-only response
+features require `AUDITEX_ENABLE_RESPONSE` to have a truthy value (`1`,
+`true`, `yes`, or `on`) and are outside the public audit flow.
 
-The audit plane must not write to production tenants. This applies to:
+## Data collected
 
-- Microsoft 365 audit runs,
-- Google Workspace audit runs,
-- probes,
-- report rendering,
-- exports,
-- MCP audit tools,
-- customer-pack creation,
-- customer-pack verification.
+Audit collectors must not read Gmail or Exchange message bodies, or Drive,
+SharePoint, or OneDrive file content. Metadata and settings can still contain
+personal data, including user names, email addresses, group membership, device
+metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
+Treat every bundle as confidential.
 
-Any response or remediation experiment must stay outside the public 1.0 audit flow and behind explicit local development gating.
+`data-handling.json` describes a run's declared plane, scope risk, read-only
+status, content-read status, and write actions. `api-inventory.json` records
+declared collectors, observed calls, permissions, call classification, and
+safety counts. Final audit-plane validation rejects bundles that report tenant
+writes or body or file content reads. These artifacts support review of a run;
+they do not authorize access or replace an operator's obligations.
 
-## No-Content-Read Policy
+## Evidence and customer packs
 
-Auditex audit collectors must not read:
+Evidence is written locally under the selected output directory. Auditex does
+not send raw evidence to an external service. Customer handoff packs copy
+selected artifacts and include checksums. Selected artifacts can still contain
+customer-sensitive metadata. Create each pack in a fresh review directory,
+inspect its contents and intended recipients before transfer, then store it
+under the customer's retention rules and delete stale bundles when that period
+ends.
 
-- Gmail message bodies,
-- Google Drive file content,
-- Exchange mailbox body content,
-- SharePoint file content,
-- OneDrive file content.
+Before handoff, verify the pack:
 
-Metadata and settings may still contain personal data, such as user names, email addresses, group membership, device metadata, OAuth grant metadata, sharing metadata, and audit event metadata. Treat every bundle as confidential.
-
-## Local Evidence Handling
-
-Evidence is written locally under the selected output directory. Raw evidence is not sent to an external service by Auditex. Customer handoff packs copy selected customer-safe artifacts and include checksums.
-
-Store output folders according to customer retention rules. Delete stale bundles when retention expires.
-
-## Auth Material Handling
-
-Auditex must not commit or ship:
-
-- Azure app auth values,
-- Google service-account files,
-- OAuth client files,
-- OAuth cache files,
-- bearer material,
-- refresh material,
-- raw credential dumps,
-- customer signing keys.
-
-Use local paths such as `.secrets/` or a dedicated auth folder excluded from git. Do not put auth paths into repo defaults.
-
-## API Inventory And Auditability
-
-Every finalized audit bundle should include `api-inventory.json`. This records:
-
-- declared collectors,
-- observed calls,
-- required permissions,
-- observed and missing permissions,
-- read/write classification,
-- content-read classification,
-- mutating and content-read counts,
-- scope risk.
-
-Validation fails audit-plane bundles that report tenant writes or body/file content reads.
-
-## Customer Pack Integrity
-
-Customer packs include:
-
-- `pack-manifest.json`,
-- `checksums.sha256`,
-- generated-file hashes,
-- source-artifact hashes.
-
-Verify before handoff:
-
-```bash
-auditex report verify-pack customer-pack
+```sh
+auditex report verify-pack <customer-pack-dir>
 ```
 
-If verification fails, regenerate from the original run directory.
+If verification fails, regenerate the pack from the original run directory.
 
-## AI And MCP Use
+Notification preview is local by default. `auditex notify send --execute`
+sends the chosen notification to an external sink. Review the recipient and
+payload separately from pack verification before using `--execute`.
 
-Use AI and MCP only against bundle artifacts intended for reasoning:
+## Credentials and local files
 
-- `summary.json`,
-- `summary.md`,
-- `data-handling.json`,
-- `audit-plan.json`,
-- `api-inventory.json`,
-- `reports/report-pack.json`,
-- `proof-table` rows,
-- `ai_context.json`,
-- `validation.json`.
+Never commit or ship Azure app authentication values, Google service-account
+files, OAuth client files, OAuth caches, bearer or refresh material, raw
+credential dumps, or customer signing keys. Keep them in `.secrets/` or another
+local Git-excluded path. Do not place those paths in repository defaults.
 
-Do not ask MCP clients to infer facts without evidence. If evidence is missing, the answer should say so.
+Use AI and MCP only with bundle artifacts intended for reasoning, such as
+`summary.json`, `summary.md`, `data-handling.json`, `audit-plan.json`,
+`api-inventory.json`, report-pack data, proof-table rows, `ai_context.json`,
+and `validation.json`. If evidence is missing, say so rather than inferring a
+fact. Do not add external crash telemetry or analytics.
 
-## No Telemetry Rule
+## Suspected exposure
 
-Do not add external crash telemetry or analytics. Diagnostics stay local unless a customer-approved runbook says otherwise.
-
-## Incident Handling
-
-If sensitive auth material is found in a bundle or pack:
-
-1. Stop handoff.
-2. Remove the pack from the transfer channel.
-3. Rotate the exposed auth material.
-4. Regenerate the run or pack after fixing the source.
-5. Run pack verification again.
-6. Record the incident according to the customer's process.
+If sensitive auth material is found in a bundle or pack, stop handoff, remove
+the pack from its transfer channel, rotate the exposed material, regenerate the
+run or pack after correcting the source, verify the pack again, and record the
+incident through the customer's process.

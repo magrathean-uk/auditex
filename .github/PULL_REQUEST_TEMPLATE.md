@@ -1,15 +1,16 @@
-## Summary
+## Change
 
-- 
+Describe the operator problem and the resulting behavior.
 
-## Test Plan
+## Validation
 
-- [ ] `make test`
-- [ ] `make lint`
-- [ ] `make contract-smoke`
+List the checks run, their results, and any skipped check with a reason.
+For bundle, collector, report, schema, evidence-reference, or customer-pack changes, include `make contract-smoke`.
 
-## Audit Safety
+## Review
 
-- [ ] Audit mode stays read-only.
-- [ ] No Gmail, Drive, SharePoint, OneDrive, or mailbox body-content reads were added.
-- [ ] Docs were updated for any CLI, scope, artifact, or operator-flow change.
+- [ ] Audit and probe operations keep the production tenant read-only boundary.
+- [ ] No mail body or file content collection was added to audit mode.
+- [ ] No credentials, local auth files, or tenant evidence are included.
+- [ ] Related command, permission, artifact, and operator documentation is current.
+- [ ] Third-party code and data retain their license and attribution.

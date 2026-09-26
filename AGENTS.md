@@ -1,49 +1,53 @@
 # Auditex Agent Guide
 
-Read `README.md`, `RUNBOOK.md`, `docs/README.md`,
-`docs/OUTPUT_CONTRACT.md`, and `docs/SECURITY_PRIVACY.md` before changing the
-related surface. `SECURITY.md`, `THIRD_PARTY_NOTICES.md`, and
-`docs/provenance/provenance.md` hold security, legal, and provenance context.
+## Start here
 
-## Repo map
+Use `README.md` and `RUNBOOK.md` for setup and commands. Read the
+documentation for the surface you will change: `docs/OUTPUT_CONTRACT.md` before changing
+bundle artifacts, `docs/SECURITY_PRIVACY.md` before changing data handling,
+and `docs/provenance/provenance.md` before reusing third-party material.
 
-- `src/azure_tenant_audit/`: Microsoft 365 audit engine, collectors,
-  normalization, findings, bundle finalization, and core CLI.
-- `src/auditex/`: product CLI, guided flows, Google Workspace path, reports,
-  exports, notifications, MCP server, and auth/setup helpers.
-- `configs/`, `profiles/`, and `schemas/`: shipped collection and contract data.
-- `agent/` and `skills/`: shipped operator/runtime content.
-- `tests/`: core, product, Google, contract, report, export, and safety tests.
-- `tenant-bootstrap/`: portable lab helper kit; keep it aligned with root
-  behavior.
-- `scripts/`: setup, login, audit, taint-scan, Python selection, release smoke,
-  and Pages build helpers.
+Check `git status --short` before editing. Preserve unrelated work.
 
-## Rules
+## Repository map
 
-- Inspect `git status --short` first and preserve unrelated work.
-- Use Python 3.11 or newer and match nearby style.
-- Public Auditex is audit-only. Audit, probe, report, export, MCP audit tools,
-  and customer-pack verification must not write to production tenants.
-- Do not read Gmail or Exchange bodies, or Drive, SharePoint, or OneDrive file
-  content in audit mode.
-- Keep Google Workspace as a separate read-only provider path.
-- Keep collector definitions, permission maps, setup-guide output, permission
-  ledgers, and API inventories aligned when scope truth changes.
-- Update schemas, docs, tests, and contract expectations together when public
-  commands or bundle artifacts change.
-- Never commit tenant evidence, tokens, OAuth caches, service-account keys,
-  secrets, or bearer material. Do not add external telemetry.
-- Treat `.venv/`, `.secrets/`, `.pytest_cache/`, `outputs/`, `audit-output/`,
-  `src/auditex.egg-info/`, `site/`, and tenant-bootstrap run/secret folders as
-  generated or local.
+- `src/azure_tenant_audit/`: Microsoft 365 collection, normalization,
+  findings, bundle finalization, and the core CLI.
+- `src/auditex/`: product CLI, guided flows, Google Workspace collection,
+  reports, exports, notifications, MCP server, and auth helpers.
+- `configs/`, `profiles/`, and `schemas/`: shipped collection and contract
+  data.
+- `agent/` and `skills/`: shipped operator and runtime content.
+- `tests/`: unit, contract, report, export, provider, and safety coverage.
+- `tenant-bootstrap/`: a separate lab helper surface. Its runtime templates
+  include bootstrap actions that can write tenant objects. Do not present it as
+  part of the public audit-only flow.
 
-## Setup and verification
+## Safety boundaries
+
+Public Auditex audit, probe, report, export, MCP audit tools, customer-pack
+creation, and customer-pack verification must not write to production tenants.
+Audit collectors must not read Gmail or Exchange message bodies, or Drive,
+SharePoint, or OneDrive file content. Google Workspace remains a separate
+read-only provider path.
+
+Treat tenant evidence and credentials as confidential. Never commit tokens,
+OAuth caches, service-account keys, secrets, bearer material, or tenant
+evidence. Do not add external telemetry. Keep `.venv/`, `.secrets/`,
+`.pytest_cache/`, `outputs/`, `audit-output/`, `src/auditex.egg-info/`,
+`site/`, and tenant-bootstrap run or secret folders local.
+
+When collector scope changes, keep collector definitions, permission maps,
+setup-guide output, permission ledgers, API inventory, schemas, documentation,
+tests, and contract expectations aligned. A scope that is write-capable does
+not authorize a mutating operation. Record its blast radius and verify the API
+inventory for the actual run.
+
+## Commands
+
+Use Python 3.11 or newer. The repository defines these checks:
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
 make lint
 make test
 make contract-smoke
@@ -55,23 +59,31 @@ auditex guided-run --help
 auditex-mcp --help
 ```
 
-`make test` uses `scripts/select-python.sh`; `make lint` compiles `src` and
-`tests`; `make contract-smoke` recreates `outputs/ci-contract` and validates an
-offline bundle. No dedicated formatter or static typecheck command is
-configured.
+`make lint` compiles `src` and `tests`. `make test` uses
+`scripts/select-python.sh`. `make contract-smoke` recreates
+`outputs/ci-contract` and validates an offline bundle. Run the contract smoke
+when changing collectors, reports, schemas, evidence references, API inventory,
+or customer-pack behaviour. State any skipped check and its blocker.
 
-Run `make contract-smoke` when collectors, reports, schemas, evidence refs, API
-inventory, or customer-pack behavior changes. Report any skipped check and its
-blocker.
+## Working rules
 
-## Working guidance — GPT-6 Astra
+Complete authorized work through its relevant checks. Make routine local
+choices without repeated permission, preserve explicit owner restrictions, and
+use bounded delegation for independent work when useful. Keep changes small
+and follow nearby conventions. Use the stable `auditex`
+product surface for normal audit work. Start an authorized tenant engagement
+with setup guidance and a probe, then report blocked collectors as structured
+coverage gaps. Do not expose secrets in commands, prompts, logs, or generated
+documentation.
 
-Based on [OpenAI's Astra prompting guidance](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices), reviewed 2026-09-19. These are working instructions, not a change to model or API settings.
+Use local auth files excluded from Git where app credentials are necessary.
+Do not copy direct-secret runtime templates into operator guidance. Response
+features are disabled unless `AUDITEX_ENABLE_RESPONSE` has a truthy value for
+lab-only development; they are outside the public audit flow. Treat
+`auditex notify send --execute` as an external send, separate from local audit
+or pack verification.
 
-- Complete the authorized task through implementation and relevant verification. Make routine choices yourself; ask only when a missing decision materially changes the result or requires new authority. Prepare reviewable work before requesting any necessary final approval.
-- Current user instructions take precedence over repository and skill guidance within system and tool constraints. Preserve explicit exclusions and owner holds. Historical plans and session notes do not grant current authorization. If a file or skill blocks progress, identify its exact path and rule.
-- Keep changes small and practical. Inspect current source and Git status, preserve unrelated work, and use existing conventions. Do not add speculative abstractions, dependencies, or unrelated cleanup. Commit, push, deploy, install, and live-service changes require authorization for that action.
-- Use the reasoning effort the task needs. Follow explicit project delegation rules; otherwise use subagents only when requested, with bounded independent tasks and distinct file ownership. Batch independent reads; serialize dependent operations and conflicting edits.
-- Run meaningful checks for the changed behavior and required project gates. Avoid tests that merely repeat low-impact edits. Broaden or repeat verification only after changes, failures, or unresolved concerns. Distinguish local checks from device, browser, and live-service evidence.
-- Write concise, plain, outcome-first updates. State what changed, why, verification, and material gaps. Avoid filler and unnecessary formatting.
-- Keep durable instructions in AGENTS.md and maintained product documentation. Do not create duplicate assistant instruction files or disposable plans, transcripts, status reports, and screenshots in source directories unless requested. Preserve source, tests, fixtures, assets, licences, and operational evidence regardless of who created them.
+Update product documentation when commands, scopes, artifacts, or operator
+flows change. Keep durable repository guidance here and in maintained product
+documentation rather than creating session notes or duplicate instruction
+files.

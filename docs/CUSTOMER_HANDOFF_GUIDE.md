@@ -4,7 +4,7 @@ Use this guide when preparing audit evidence for an enterprise customer, legal r
 
 ## Handoff Rule
 
-Send the verified customer pack through the customer's approved evidence channel. Do not send local auth material or unredacted credential material.
+Create each pack in a fresh directory. Review its contents and send it through the customer's approved evidence channel only after integrity verification. The verifier does not prove that every file is safe to disclose or that the audit is complete. Do not send local auth material or unredacted credential material.
 
 ## Create The Pack
 
@@ -31,7 +31,7 @@ The pack includes:
 - `README.md` - reviewer start point.
 - `handoff.md` and `handoff.json` - audit status, contract status, safety, quality gate, blockers, and review commands.
 - Accepted-risk review is part of handoff. Expired accepted risks are treated as stale and should block sharing until re-approved or removed.
-- `report.md` - client-ready report.
+- `report.md` - report for customer review.
 - `reports/report-pack.json` inside `source-artifacts/` now carries both raw `citations` and typed `citation_summary`. Pack verify checks that those stay aligned with proof rows.
 - `reports/report-pack.json` also carries `reviewer_index` with `start_here`, `prove_this`, and `known_limits` so customer reviewers can jump from posture to proof fast.
 - Generated helper JSON files like `handoff.json`, `api-calls.json`, `permissions.json`, and `proof-table.json` also keep `citations` and `citation_summary`. Pack verify checks those too.
@@ -45,8 +45,8 @@ The pack includes:
 ## Reviewer Order
 
 1. Read `handoff.md`.
-2. Check `validation.json` and contract status.
-3. Read `data-handling.json` to confirm read-only and no-content-read assertions.
+2. Check `source-artifacts/validation.json` and contract status.
+3. Read `source-artifacts/data-handling.json` to confirm read-only and no-content-read assertions.
 4. Read `report.md`, especially the reviewer index and executive summary.
 5. Read `proof-table.md` for evidence behind each finding.
 6. Read `api-calls.md` to see exactly which APIs were attempted.
@@ -114,13 +114,13 @@ Yes. Keep the run directory and pack together. Use `auditex report render`, `aud
 
 ## Handoff Checklist
 
-- Run contract validation or `make contract-smoke` for customer samples.
+- Inspect the actual run's `validation.json` and contract status. An unrelated offline contract smoke does not validate this customer run.
 - Generate the customer pack.
 - Run `auditex report verify-pack`. This now also checks that the copied `report-pack.json` still carries citation rows.
 - Confirm `pack-manifest.json` and `handoff.json` agree on validation summary and reviewer summary.
 - If pack verify reports `stale_accepted_risk`, stop handoff and refresh the acceptance decision before sharing.
 - Confirm `data-handling.json` says read-only and no content reads.
-- Confirm `validation.json` is valid or limitations are explained.
+- Confirm the actual run's `validation.json` is valid and coverage limitations are explained.
 - Confirm no local auth files are inside the pack.
 - Confirm customer-safe source artifacts are present.
 - Confirm every high or critical finding has proof-table evidence.

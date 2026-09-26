@@ -1,45 +1,52 @@
 name: Audit setup
-description: Track customer-safe Auditex setup and probe readiness.
-title: "Audit setup: <provider> <tenant label>"
-labels: ["audit-setup"]
+description: Describe a sanitized setup or probe problem.
+title: "Audit setup: "
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic labels. Remove tenant identities, local paths, credentials, and raw evidence.
+        Report suspected vulnerabilities using SECURITY.md, not this public form.
   - type: dropdown
     id: provider
     attributes:
       label: Provider
       options:
-        - Google Workspace
         - Microsoft 365
+        - Google Workspace
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Auditex version and operating system
     validations:
       required: true
   - type: input
     id: preset
     attributes:
-      label: Collector preset
-      placeholder: everything, full, identity-only
+      label: Collector preset or selection
+      placeholder: full, everything, or selected collector IDs
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Expected behavior and observed problem
+      description: Include sanitized command options and blocker classes. Do not attach bundles or auth files.
     validations:
       required: true
   - type: textarea
     id: setup_guide
     attributes:
-      label: Setup guide output
-      description: Paste `auditex setup-guide ... --format md` output. Do not paste auth material or raw tenant evidence.
-      render: markdown
-    validations:
-      required: true
-  - type: textarea
-    id: probe_result
-    attributes:
-      label: Probe result
-      description: Paste status, blocker classes, and missing permissions only.
+      label: Access plan and probe summary
+      description: Summarize required and missing permissions after reviewing setup-guide output locally.
     validations:
       required: true
   - type: checkboxes
     id: safety
     attributes:
-      label: Safety checks
+      label: Before posting
       options:
-        - label: No auth files, local auth material, or raw tenant evidence is included.
-          required: true
-        - label: The setup asks only for permissions listed by setup-guide or proven by probe blockers.
+        - label: I removed credentials, auth files, tenant identifiers, local paths, and raw tenant evidence.
           required: true
