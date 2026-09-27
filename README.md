@@ -1,4 +1,18 @@
-# Auditex
+<p align="center">
+  <img src="https://raw.githubusercontent.com/magrathean-uk/magrathean-uk/main/assets/icons/auditex.png" width="96" height="96" alt="">
+</p>
+
+<h1 align="center">Auditex</h1>
+
+<p align="center">A read-only Microsoft 365 and Google Workspace tenant-audit toolkit, for auditors and admins.</p>
+
+<p align="center">
+  <a href="https://auditex.hu">Website</a> ·
+  <a href="docs/index.md">Documentation</a> ·
+  <a href="https://auditex.hu/privacy/">Privacy</a>
+</p>
+
+## Overview
 
 Auditex is a Python CLI and MCP toolkit for read-only Microsoft 365 and Google Workspace tenant audits. It collects local evidence, normalizes results, and produces report, export, comparison, and customer handoff artifacts.
 
@@ -40,7 +54,7 @@ make contract-smoke
 ./scripts/oss-taint-scan.sh
 ```
 
-`make contract-smoke` runs an offline sample and checks the finalized bundle contract. See [RUNBOOK.md](RUNBOOK.md) for the complete local and release check matrix.
+`make contract-smoke` runs an offline sample and checks the finalized bundle contract. See [the runbook](docs/development/runbook.md) for the complete local and release check matrix.
 
 ## Main commands
 
@@ -94,7 +108,7 @@ auditex google probe --auth domain-delegation --domain example.com \
 
 ## Read a run and prepare a handoff
 
-Each finalized run contains a manifest, summary, report pack, evidence index, AI context, and validation result. The current contract version is recorded in `run-manifest.json`; required files and evidence rules are documented in [docs/OUTPUT_CONTRACT.md](docs/OUTPUT_CONTRACT.md).
+Each finalized run contains a manifest, summary, report pack, evidence index, AI context, and validation result. The current contract version is recorded in `run-manifest.json`; required files and evidence rules are documented in [the output contract](docs/reference/output-contract.md).
 
 ```bash
 auditex report render <run-dir> --format md
@@ -121,20 +135,27 @@ The MCP registry exposes inventory and contract inspection, offline validation, 
 
 ## Documentation
 
-Use [docs/README.md](docs/README.md) as the documentation index.
+Use [docs/index.md](docs/index.md) as the documentation index.
 
-- [RUNBOOK.md](RUNBOOK.md) covers setup, operator flows, local checks, and the separate lab bootstrap kit.
-- [docs/PRODUCT_MANUAL.md](docs/PRODUCT_MANUAL.md) explains the product workflows.
-- [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) and [docs/ADMIN_PERMISSION_GUIDE.md](docs/ADMIN_PERMISSION_GUIDE.md) cover access planning.
-- [docs/SECURITY_PRIVACY.md](docs/SECURITY_PRIVACY.md) describes data handling and audit boundaries.
-- [docs/CUSTOMER_HANDOFF_GUIDE.md](docs/CUSTOMER_HANDOFF_GUIDE.md) covers review packs.
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) covers common failures.
+- [The runbook](docs/development/runbook.md) covers setup, operator flows, local checks, and the separate lab bootstrap kit.
+- [The product manual](docs/guides/product-manual.md) explains the product workflows.
+- [The setup guide](docs/guides/setup-guide.md) and [the administrator permission guide](docs/guides/admin-permission-guide.md) cover access planning.
+- [The security and privacy model](docs/reference/security-privacy.md) describes data handling and audit boundaries.
+- [The customer handoff guide](docs/guides/customer-handoff-guide.md) covers review packs.
+- [The troubleshooting guide](docs/guides/troubleshooting.md) covers common failures.
 - [AGENTS.md](AGENTS.md) contains repository-specific development rules.
-- [CONTRIBUTING.md](CONTRIBUTING.md) covers development setup and review expectations.
-- [SUPPORT.md](SUPPORT.md) explains how to request help and report product issues.
+- [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) covers development setup and review expectations.
+- [.github/SUPPORT.md](.github/SUPPORT.md) explains how to request help and report product issues.
 
 Keep `.venv/`, `.secrets/`, tenant evidence, and generated output directories local. Never commit tokens, OAuth caches, service-account keys, or tenant evidence. Do not add external telemetry.
 
-## License and reporting
+## Licence
 
-Auditex is distributed under the Apache License 2.0. See [LICENSE](LICENSE), [license.md](license.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for legal and attribution information. Security reporting instructions are in [SECURITY.md](SECURITY.md). Trademark information is in [TRADEMARKS.md](TRADEMARKS.md).
+Auditex is open source under the Apache License 2.0. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE); the fuller dependency inventory is in
+[third-party notices](docs/legal/third-party-notices.md). Security reporting instructions
+are in [.github/SECURITY.md](.github/SECURITY.md). Trademark information is in
+[docs/legal/trademarks.md](docs/legal/trademarks.md). Contributions: see
+[CONTRIBUTING](.github/CONTRIBUTING.md).
+
+<sub>© 2026 MAGRATHEAN UK LTD · [Legal](https://github.com/magrathean-uk/.github/blob/main/LEGAL.md)</sub>

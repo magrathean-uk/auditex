@@ -8,7 +8,7 @@ no-license sources are not used as product source. It says high-risk surfaces
 were rewritten from product requirements and current Auditex tests rather than
 upstream source text. Permissively licensed projects remain idea-level
 influences unless they are listed as vendored or declared dependencies in
-`THIRD_PARTY_NOTICES.md`.
+`docs/legal/third-party-notices.md`.
 
 The CSV records the file or module, source repository, licence, whether the
 relationship is copied or inspired, and the action taken.
@@ -30,5 +30,5 @@ The source record also states that no external legal review or external
 similarity audit has been completed. It is an engineering provenance record,
 not a legal opinion or proof of rights for a new contribution. Review new
 third-party material before adding it, retain applicable notices, and update
-the CSV and [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) when a
+the CSV and [third-party notices](../legal/third-party-notices.md) when a
 material relationship changes.

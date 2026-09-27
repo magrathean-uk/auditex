@@ -1,0 +1,14 @@
+Auditex
+Copyright © 2026 MAGRATHEAN UK LTD
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+This product includes third-party material:
+tenant-bootstrap/vendor/microsoft-skills/ — MIT — Microsoft Corporation, from
+microsoft/skills. The upstream licence text is copied at
+tenant-bootstrap/vendor/microsoft-skills/LICENSE.
+
+See docs/legal/third-party-notices.md for the declared Python dependency inventory.
+
+Auditex is independent. It is not affiliated with, endorsed by or supported by Microsoft
+Corporation or Google LLC.

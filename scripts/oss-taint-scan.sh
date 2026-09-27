@@ -40,8 +40,7 @@ find . \
   -path './docs/provenance' -prune -o \
   -path './tenant-bootstrap/vendor/microsoft-skills' -prune -o \
   -path './scripts/oss-taint-scan.sh' -prune -o \
-  -name 'license.md' -prune -o \
-  -name 'THIRD_PARTY_NOTICES.md' -prune -o \
+  -name 'third-party-notices.md' -prune -o \
   -name '*.pyc' -prune -o \
   -name '__pycache__' -prune -o \
   -type f -print0 \

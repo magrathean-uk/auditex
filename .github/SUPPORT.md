@@ -1,6 +1,6 @@
 # Getting help
 
-Start with the [setup guide](docs/SETUP_GUIDE.md), [troubleshooting guide](docs/TROUBLESHOOTING.md), and [runbook](RUNBOOK.md). Use `auditex doctor --json` for local readiness and the provider's probe command for live capability blockers.
+Start with the [setup guide](../docs/guides/setup-guide.md), [troubleshooting guide](../docs/guides/troubleshooting.md), and [runbook](../docs/development/runbook.md). Use `auditex doctor --json` for local readiness and the provider's probe command for live capability blockers.
 
 For a reproducible product bug or setup question, use the repository's [issue tracker](https://github.com/magrathean-uk/auditex/issues). Include:
 

@@ -1,6 +1,6 @@
 # Auditex runbook
 
-Use this runbook for local setup, authorized audits, and development checks. For access planning, start with the [setup guide](docs/SETUP_GUIDE.md). For the full workflow, use the [product manual](docs/PRODUCT_MANUAL.md).
+Use this runbook for local setup, authorized audits, and development checks. For access planning, start with the [setup guide](../guides/setup-guide.md). For the full workflow, use the [product manual](../guides/product-manual.md).
 
 ## Install and inspect
 
@@ -42,7 +42,7 @@ auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --auditor-
 
 `auditex guided-run` provides the interactive route. `--flow gr-audit` uses delegated access and `--flow app-audit` uses saved app credentials. `--flow ga-setup-app` performs app setup and requires explicit authority to create or change the customer-local registration; it is not an audit-only step.
 
-Google Workspace commands and credential choices are in the [product manual](docs/PRODUCT_MANUAL.md#google-workspace-audit-flow). Rerun a probe after changing roles or scopes.
+Google Workspace commands and credential choices are in the [product manual](../guides/product-manual.md#google-workspace-audit-flow). Rerun a probe after changing roles or scopes.
 
 ## Offline fixtures
 
@@ -65,7 +65,7 @@ auditex report customer-pack <run-dir> --output-dir customer-pack
 auditex report verify-pack customer-pack
 ```
 
-Use a fresh pack directory and review it for confidential information before sharing through the customer's approved channel. Integrity verification does not establish audit completeness or permission to disclose. Follow the [customer handoff guide](docs/CUSTOMER_HANDOFF_GUIDE.md), including expired accepted-risk checks.
+Use a fresh pack directory and review it for confidential information before sharing through the customer's approved channel. Integrity verification does not establish audit completeness or permission to disclose. Follow the [customer handoff guide](../guides/customer-handoff-guide.md), including expired accepted-risk checks.
 
 ```bash
 auditex compare --run-dir run-a --run-dir run-b
@@ -88,7 +88,7 @@ Install pytest for development: `python -m pip install -e . pytest`.
 | `./scripts/oss-taint-scan.sh` | Checks forbidden research/derived paths and taint markers. |
 | `python3 scripts/build-pages-site.py /tmp/auditex-pages` | Recreates the destination as a redirect artifact to the configured site. It deletes an existing destination. |
 
-The existing `.pre-commit-config.yaml` also declares checks including a manual Ruff hook. This runbook does not change or install hooks. Use focused tests for changed behavior. Contract changes need contract smoke. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution scope and check reporting.
+The existing `.pre-commit-config.yaml` also declares checks including a manual Ruff hook. This runbook does not change or install hooks. Use focused tests for changed behavior. Contract changes need contract smoke. See [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) for contribution scope and check reporting.
 
 The existing release workflow installs Google and MCP extras, runs the checks above, builds the wheel and source distribution, and invokes `bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke`. That script creates isolated environments for base, Google, and MCP package checks. The release tag must be `v` followed by the packaged version. These are workflow definitions, not a statement that a particular release has passed.
 

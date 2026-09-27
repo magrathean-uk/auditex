@@ -2,10 +2,10 @@
 
 ## Start here
 
-Use `README.md` and `RUNBOOK.md` for setup and commands. Read the
-documentation for the surface you will change: `docs/OUTPUT_CONTRACT.md` before changing
-bundle artifacts, `docs/SECURITY_PRIVACY.md` before changing data handling,
-and `docs/provenance/provenance.md` before reusing third-party material.
+Use `README.md` and `docs/development/runbook.md` for setup and commands. Read the
+documentation for the surface you will change: `docs/reference/output-contract.md` before
+changing bundle artifacts, `docs/reference/security-privacy.md` before changing data
+handling, and `docs/provenance/provenance.md` before reusing third-party material.
 
 Check `git status --short` before editing. Preserve unrelated work.
 
@@ -87,3 +87,9 @@ Update product documentation when commands, scopes, artifacts, or operator
 flows change. Keep durable repository guidance here and in maintained product
 documentation rather than creating session notes or duplicate instruction
 files.
+
+## Legal
+
+Legal files (`LICENSE`, `NOTICE`, `docs/legal/`, contributor terms, copyright and
+attribution strings) are owner-controlled: change them only on the owner's explicit
+instruction.

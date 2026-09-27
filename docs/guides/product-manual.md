@@ -275,7 +275,7 @@ Use MCP tools for bundle-backed answers only. Every answer should cite bundle ev
 
 ## Validation before release
 
-Review the checks in [the runbook](../RUNBOOK.md#development-and-release-checks). Offline validation and local tests do not establish live provider acceptance. At minimum:
+Review the checks in [the runbook](../development/runbook.md#development-and-release-checks). Offline validation and local tests do not establish live provider acceptance. At minimum:
 
 - contract smoke passes,
 - full tests pass,
