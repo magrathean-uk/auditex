@@ -6,7 +6,9 @@ Licensed under the Apache License, Version 2.0. See LICENSE.
 This product includes third-party material:
 tenant-bootstrap/vendor/microsoft-skills/ — MIT — Microsoft Corporation, from
 microsoft/skills. The upstream licence text is copied at
-tenant-bootstrap/vendor/microsoft-skills/LICENSE.
+tenant-bootstrap/vendor/microsoft-skills/LICENSE. Magrathean modified
+skills/mcp-builder/scripts/requirements.txt in that subset to raise its declared
+dependency versions.
 
 See docs/legal/third-party-notices.md for the declared Python dependency inventory.
 

@@ -1,2 +1,3 @@
+# Modified by MAGRATHEAN UK LTD: raised the declared minimum versions from upstream microsoft/skills.
 anthropic>=1.8.0,<2
 mcp>=1.30.0,<2

@@ -44,7 +44,13 @@ Azure operations selected skills:
 
 ## Notice handling
 
-The retained Microsoft material is MIT-licensed. The license text is copied in this directory and the component is listed in the repository-level `THIRD_PARTY_NOTICES.md`.
+The retained Microsoft material is MIT-licensed. The license text is copied in this directory and the component is listed in `NOTICE` and `docs/legal/third-party-notices.md`.
+
+## Local modifications
+
+- `skills/mcp-builder/scripts/requirements.txt`: MAGRATHEAN UK LTD raised the declared versions to `anthropic>=1.8.0,<2` and `mcp>=1.30.0,<2` (upstream: `anthropic>=0.39.0`, `mcp>=1.1.0`), and added a comment line marking the change.
+
+Reapply or drop these changes after a refresh, and keep this list current.
 
 ## Refresh command
 
@@ -61,4 +67,4 @@ After refresh:
 1. Copy only selected `SKILL.md` files and required reference files.
 2. Keep `LICENSE` beside the vendored subset.
 3. Regenerate `ALL-SKILLS-CATALOG.md` from retained files only.
-4. Update this manifest and `THIRD_PARTY_NOTICES.md` if the source commit or retained set changes.
+4. Update this manifest, `NOTICE` and `docs/legal/third-party-notices.md` if the source commit, retained set or local modifications change.
