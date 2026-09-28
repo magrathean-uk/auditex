@@ -69,8 +69,8 @@ ensure_python() {
 
   case "${PACKAGE_MANAGER}" in
     brew)
-      echo "Plan: brew install python@3.13"
-      brew install python@3.13
+      echo "Plan: brew install python@3.14"
+      brew install python@3.14
       ;;
     apt)
       echo "Plan: sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip"
@@ -134,10 +134,17 @@ ensure_exchange_pack() {
         sudo dnf install -y nodejs npm
         ;;
       manual)
-        echo "Node.js 18+ and npm missing. Install them, then rerun."
+        echo "Node.js 20+ and npm missing. Install them, then rerun."
         exit 1
         ;;
     esac
+  fi
+
+  local node_major
+  node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
+  if [[ ! "${node_major}" =~ ^[0-9]+$ ]] || (( node_major < 20 )); then
+    echo "Node.js 20+ is required by the current CLI for Microsoft 365 release. Upgrade Node.js, then rerun." >&2
+    return 1
   fi
 
   if ! command -v m365 >/dev/null 2>&1; then

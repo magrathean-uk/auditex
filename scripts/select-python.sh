@@ -37,7 +37,7 @@ if [[ -x "${repo_venv_python}" ]] && is_supported "${repo_venv_python}"; then
   exit 0
 fi
 
-for candidate in python3.13 python3.12 python3.11 python3; do
+for candidate in python3.14 python3.13 python3.12 python3.11 python3; do
   if command -v "${candidate}" >/dev/null 2>&1 && is_supported "${candidate}"; then
     command -v "${candidate}"
     exit 0
