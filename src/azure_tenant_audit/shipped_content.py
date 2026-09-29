@@ -25,6 +25,27 @@ SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
         ("docs/provenance/*.md", "docs/provenance/*.csv"),
         "provenance docs under `docs/provenance/`",
     ),
+    ShippedContentArea(
+        "docs_guides",
+        "docs/guides",
+        "auditex/docs/guides",
+        ("docs/guides/*.md",),
+        "guides under `docs/guides/`",
+    ),
+    ShippedContentArea(
+        "docs_reference",
+        "docs/reference",
+        "auditex/docs/reference",
+        ("docs/reference/*.md",),
+        "reference docs under `docs/reference/`",
+    ),
+    ShippedContentArea(
+        "docs_legal",
+        "docs/legal",
+        "auditex/docs/legal",
+        ("docs/legal/*.md",),
+        "legal notices under `docs/legal/`",
+    ),
     ShippedContentArea("docs", "docs", "auditex/docs", ("docs/*.md",), "product docs under `docs/`"),
     ShippedContentArea("agent", "agent", "auditex/agent", ("agent/*.md", "agent/*.json"), "agent prompts under `agent/`"),
     ShippedContentArea(
