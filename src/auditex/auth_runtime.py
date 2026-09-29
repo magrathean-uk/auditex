@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from azure_tenant_audit.config import CollectorConfig
+from azure_tenant_audit.m365_home import m365_subprocess_kwargs
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import build_m365_scope_catalog
@@ -42,7 +43,7 @@ def _default_json_command(command: list[str]) -> dict[str, Any]:
             "error": f"{command[0]} not installed",
             "command": command,
         }
-    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    completed = subprocess.run(command, text=True, capture_output=True, check=False, **m365_subprocess_kwargs(command))
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
     payload: Any = None
@@ -68,6 +69,7 @@ def _default_run_json_command(command: list[str]) -> dict[str, Any]:
             text=True,
             capture_output=True,
             check=False,
+            **m365_subprocess_kwargs(command),
         )
     except FileNotFoundError:
         return {
@@ -140,7 +142,7 @@ def _default_list_adapter_capabilities() -> list[dict[str, Any]]:
 
 
 def _default_run_returncode(command: list[str]) -> int:
-    return subprocess.run(command, check=False).returncode
+    return subprocess.run(command, check=False, **m365_subprocess_kwargs(command)).returncode
 
 
 def _load_json(path: Path, *, default: Any) -> Any:

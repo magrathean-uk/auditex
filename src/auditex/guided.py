@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from azure_tenant_audit import cli as tenant_cli
+from azure_tenant_audit.m365_home import m365_environment, m365_subprocess_kwargs
 from azure_tenant_audit.profiles import profile_choices
 
 from . import auth as auditex_auth
@@ -125,7 +126,7 @@ def _offer_m365_setup(tenant_id: str) -> int:
     print("Exchange needs m365 app setup")
     if not _confirm("Run one-time m365 setup now?", default=False):
         return 0
-    setup_rc = subprocess.run(["m365", "setup"], check=False).returncode
+    setup_rc = _run_m365_setup()
     if setup_rc != 0:
         return setup_rc
     app_id = _prompt("m365 app id", default=os.environ.get("M365_CLI_APP_ID") or "")
@@ -193,7 +194,8 @@ def _persist_local_defaults(
 
 
 def _run_m365_setup() -> int:
-    return subprocess.run(["m365", "setup"], check=False).returncode
+    command = ["m365", "setup"]
+    return subprocess.run(command, check=False, **m365_subprocess_kwargs(command)).returncode
 
 
 def _current_m365_state() -> dict[str, Any]:
@@ -279,7 +281,7 @@ def _ensure_m365_login(
     ]
     if app_id:
         command.extend(["--appId", app_id])
-    env = os.environ.copy()
+    env = m365_environment(command) or os.environ.copy()
     env["BROWSER"] = browser_command
     rc = subprocess.run(command, env=env, check=False).returncode
     if rc != 0:

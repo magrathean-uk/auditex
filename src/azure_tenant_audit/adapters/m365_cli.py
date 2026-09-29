@@ -7,6 +7,7 @@ import subprocess
 import time
 from typing import Any, Callable, Optional
 
+from ..m365_home import m365_subprocess_kwargs
 from ..secret_hygiene import collect_sensitive_argv_values, redact_command_string, redact_text
 from .base import Adapter, AdapterMetadata
 
@@ -89,6 +90,7 @@ class M365CLIAdapter(Adapter):
                 capture_output=True,
                 shell=False,
                 timeout=120,
+                **m365_subprocess_kwargs(cmd_parts),
             )
             duration_ms = round((time.time() - start) * 1000, 2)
             stdout = result.stdout or ""

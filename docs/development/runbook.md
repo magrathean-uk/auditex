@@ -14,7 +14,7 @@ auditex doctor --json
 auditex --help
 ```
 
-Google Workspace needs `python -m pip install -e '.[google]'`; MCP needs `python -m pip install -e '.[mcp]'`. `auditex setup` installs local tools. Its `--mcp`, `--exchange`, and `--pwsh` options install optional tooling, so use them only for the intended scope.
+`make install` does the same in `.venv` (or the folder named by `VENV=`), creating it when missing, and never installs into a system Python. Google Workspace needs `python -m pip install -e '.[google]'`; MCP needs `python -m pip install -e '.[mcp]'`. `auditex setup` installs local tools. Its `--mcp`, `--exchange`, and `--pwsh` options install optional tooling, so use them only for the intended scope.
 
 ## Plan access and probe
 
@@ -32,7 +32,7 @@ az login --allow-no-subscriptions --tenant contoso.onmicrosoft.com
 auditex probe live --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --mode delegated --use-azure-cli-token
 ```
 
-`make login TENANT=contoso.onmicrosoft.com` is an alternative Azure CLI login helper that selects Firefox. Review the probe's `live-readiness.json` and `audit-plan.json` before collection. Missing scopes, roles, licenses, services, local tools, tenant policy, runtime errors, and unverified surfaces are separate blockers.
+`make login TENANT=contoso.onmicrosoft.com` is an alternative Azure CLI login helper that selects Firefox. Azure CLI keeps its sign-in state in `AZURE_CONFIG_DIR` (default `~/.azure`), which the scripts leave untouched; set it in your shell to keep that state elsewhere. The Microsoft 365 CLI (`m365`) has no such setting, so Auditex runs it, in the shell scripts and in the Python commands alike, with `HOME` pointing at a private folder: `AUDITEX_M365_HOME` when set (an empty value keeps the `m365` default), otherwise `$XDG_DATA_HOME/auditex/m365` when `XDG_DATA_HOME` is set, otherwise no change. Run `m365` by hand with the same `HOME` to see that sign-in. Review the probe's `live-readiness.json` and `audit-plan.json` before collection. Missing scopes, roles, licenses, services, local tools, tenant policy, runtime errors, and unverified surfaces are separate blockers.
 
 ## Run an audit
 

@@ -3,6 +3,7 @@ set -euo pipefail
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${CURRENT_DIR}/load-local-auth.sh"
+source "${CURRENT_DIR}/m365-home.sh"
 
 usage() {
   cat <<'USAGE'
@@ -79,7 +80,6 @@ FORCE_REAUTH="${FORCE_REAUTH:-0}"
 if ! command -v az >/dev/null 2>&1; then
   echo "Azure CLI is not installed. Install it first:"
   echo "  brew install azure-cli"
-  echo "  (Linux) curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
   exit 2
 fi
 
@@ -109,7 +109,7 @@ if [[ "${M365_LOGIN}" -eq 1 ]]; then
   fi
 
   m365_login_cmd=(
-    m365
+    run_m365
     login
     --authType
     browser
@@ -130,7 +130,7 @@ if [[ "${M365_LOGIN}" -eq 1 ]]; then
     exit 4
   fi
 
-  m365_status_json="$(m365 status --output json 2>/dev/null || true)"
+  m365_status_json="$(run_m365 status --output json 2>/dev/null || true)"
   if [[ -z "${m365_status_json}" ]] || ! grep -q "\"connectionName\"" <<<"${m365_status_json}"; then
     echo "Microsoft 365 CLI login did not leave an active connection."
     exit 6

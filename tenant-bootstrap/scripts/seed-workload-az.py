@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import importlib.util
 import json
 import os
 import subprocess
@@ -25,6 +26,21 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 import windows365_workload as windows365_workload
+
+
+def _m365_subprocess_kwargs(command: list[str]) -> dict:
+    """Run m365 with the private HOME that scripts/tenant-audit-login signs it in under.
+
+    The rule lives in src/azure_tenant_audit/m365_home.py. It is loaded by path because importing the
+    azure_tenant_audit package would pull in the whole audit runtime. Without that file, m365 runs unchanged.
+    """
+    helper = Path(__file__).resolve().parents[2] / "src" / "azure_tenant_audit" / "m365_home.py"
+    if not helper.is_file():
+        return {}
+    spec = importlib.util.spec_from_file_location("auditex_m365_home", helper)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.m365_subprocess_kwargs(command)
 
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
@@ -291,6 +307,7 @@ def _run_command_capture(
             timeout=timeout,
             check=False,
             cwd=str(cwd) if cwd else None,
+            **_m365_subprocess_kwargs(command),
         )
     except FileNotFoundError as exc:
         logger.event("command.failed", "warn", name=name, step=step, command=command_repr, reason=str(exc))

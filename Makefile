@@ -1,4 +1,5 @@
 PYTHON := $(shell ./scripts/select-python.sh)
+VENV ?= .venv
 TENANT ?= organizations
 
 .PHONY: test
@@ -28,7 +29,8 @@ audit-full:
 
 .PHONY: install
 install:
-	$(PYTHON) -m pip install -e .
+	@test -x "$(VENV)/bin/python" || $(PYTHON) -m venv "$(VENV)"
+	"$(VENV)/bin/python" -m pip install -e .
 
 .PHONY: bootstrap
 bootstrap:

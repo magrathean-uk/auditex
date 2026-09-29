@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.m365_home import m365_subprocess_kwargs
 from azure_tenant_audit.secret_hygiene import secure_write_json, secure_write_text
 from azure_tenant_audit.utils import load_env_file
 
@@ -142,7 +143,7 @@ def _json_command(command: list[str]) -> dict[str, Any]:
             "error": f"{command[0]} not installed",
             "command": command,
         }
-    completed = subprocess.run(command, text=True, capture_output=True, check=False)
+    completed = subprocess.run(command, text=True, capture_output=True, check=False, **m365_subprocess_kwargs(command))
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
     payload: Any = None
@@ -263,7 +264,7 @@ def _product_auth_runtime() -> auth_runtime.ProductAuthRuntime:
             write_token=lambda path, token: secure_write_text(path, f"{token}\n", mode=0o600),
             read_token=lambda path: Path(path).read_text(encoding="utf-8").strip(),
             environ_get=os.environ.get,
-            run_returncode=lambda command: subprocess.run(command, check=False).returncode,
+            run_returncode=lambda command: subprocess.run(command, check=False, **m365_subprocess_kwargs(command)).returncode,
         )
     )
 

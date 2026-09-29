@@ -2,6 +2,7 @@
 set -euo pipefail
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${CURRENT_DIR}/load-local-auth.sh"
+source "${CURRENT_DIR}/m365-home.sh"
 ROOT="$(cd "${CURRENT_DIR}/.." && pwd)"
 
 usage() {
@@ -45,7 +46,7 @@ ensure_m365_cli_login() {
   fi
 
   local status
-  status="$(m365 status 2>&1 || true)"
+  status="$(run_m365 status 2>&1 || true)"
   if [[ "${FORCE_LOGIN}" -eq 1 ]] || echo "${status}" | grep -qi "logged out"; then
     if [[ -n "${BROWSER_COMMAND}" ]]; then
       export BROWSER="${BROWSER_COMMAND}"
@@ -55,7 +56,7 @@ ensure_m365_cli_login() {
       export M365_CLI_APP_ID="${M365_APP_ID}"
     fi
     m365_login_cmd=(
-      m365
+      run_m365
       login
       --authType
       browser
