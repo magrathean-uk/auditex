@@ -14,7 +14,7 @@ python -m pip install -e . pytest
 
 Install `.[google]` or `.[mcp]` only when working on those integrations. The CI test job uses Python 3.13. Local tooling and optional adapters are described in [the runbook](../docs/development/runbook.md).
 
-For managing development caches across projects, consider [Clean Development](https://github.com/magrathean-uk/clean-development). It is optional; Auditex does not require its configuration or command routing.
+Auditex development follows [Clean Development](https://github.com/magrathean-uk/clean-development). Run builds, tests, and installs through `clean-development run --session session-only -- <command>`, and keep tool homes and caches out of `~`. The mandatory rules are in [AGENTS.md](../AGENTS.md).
 
 ## Make and verify the change
 
