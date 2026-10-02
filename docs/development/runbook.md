@@ -66,9 +66,10 @@ auditex report proof-table <run-dir> --format md
 auditex report customer-pack <run-dir> --output-dir customer-pack
 auditex report verify-pack customer-pack
 auditex report explorer <run-dir>
+auditex report explorer <run-dir> --compare <previous-run-dir> --output explorer.html
 ```
 
-`report explorer` writes one self-contained HTML page (default `<run-dir>/reports/explorer.html`) with the findings, embedded evidence records, attack paths, and data-handling assertions. It makes no network requests, but it contains tenant evidence: share it only like the run itself.
+`report explorer` writes one self-contained HTML page (default `<run-dir>/reports/explorer.html`) with seven views: Overview (risk grade, verdict, coverage, fix-first list), Findings (search, filters, paging, the evidence record behind each finding), Attack paths (hops, ATT&CK techniques, the break-it change), Detection, Baselines (framework controls and the Secure Score reconciliation), Access & data handling (data-handling assertions and every collector's status, reason and read permissions), and Before / after. Collectors that did not run or were blocked show as Not verified, never as pass or fail. `--compare` (repeatable) embeds earlier runs of the same tenant: the header switches between runs and Before / after compares the oldest with the newest. Runs of different tenants or platforms are refused. The page makes no network requests, carries a Content-Security-Policy that pins its one inline script by hash, and is byte-identical for the same input runs, so it can be checksummed. It contains tenant evidence: share it only like the run itself. `auditex demo` writes the explorer with both the original and the after-fixes run.
 
 Use a fresh pack directory and review it for confidential information before sharing through the customer's approved channel. Integrity verification does not establish audit completeness or permission to disclose. Follow the [customer handoff guide](../guides/customer-handoff-guide.md), including expired accepted-risk checks.
 

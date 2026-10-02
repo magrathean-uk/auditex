@@ -432,8 +432,18 @@ def _build_report_parser() -> argparse.ArgumentParser:
     customer_pack.add_argument("--output-dir", required=True, help="Directory where customer handoff files will be written.")
     verify_pack = subparsers.add_parser("verify-pack", help="Verify a customer handoff pack manifest and checksums.")
     verify_pack.add_argument("pack_dir", help="Customer handoff pack directory.")
-    explorer = subparsers.add_parser("explorer", help="Write a self-contained interactive HTML explorer for a completed run.")
-    explorer.add_argument("run_dir", help="Completed run directory.")
+    explorer = subparsers.add_parser(
+        "explorer",
+        help="Write a self-contained interactive HTML explorer for a completed run, optionally with earlier runs for before/after.",
+    )
+    explorer.add_argument("run_dir", help="Completed run directory (shown when the page opens).")
+    explorer.add_argument(
+        "--compare",
+        action="append",
+        default=[],
+        metavar="PREVIOUS_RUN_DIR",
+        help="Earlier run of the same tenant to embed for Before / after (repeatable; oldest is compared with newest).",
+    )
     explorer.add_argument("--output", default=None, help="HTML file to write (default: <run-dir>/reports/explorer.html).")
     return parser
 
@@ -825,10 +835,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(write_customer_pack(args.run_dir, args.output_dir), indent=2))
             return 0
         if args.report_command == "explorer":
-            from .explorer import write_explorer
+            from .explorer import ExplorerCompareError, write_explorer
 
             output = Path(args.output) if args.output else Path(args.run_dir) / "reports" / "explorer.html"
-            print(write_explorer(args.run_dir, output))
+            try:
+                print(write_explorer([args.run_dir, *args.compare], output))
+            except ExplorerCompareError as exc:
+                print(f"auditex report explorer: {exc}", file=sys.stderr)
+                return 2
             return 0
         if args.report_command == "verify-pack":
             result = verify_customer_pack(args.pack_dir)

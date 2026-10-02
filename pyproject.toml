@@ -39,6 +39,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+auditex = ["explorer_assets/*.css", "explorer_assets/*.html", "explorer_assets/*.js"]
+
 [tool.setuptools.data-files]
 "auditex/assets" = ["assets/*"]
 "auditex/configs" = ["configs/*.json"]

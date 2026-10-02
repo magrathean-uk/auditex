@@ -130,6 +130,7 @@ auditex report proof-table <run-dir> --format md
 auditex report customer-pack <run-dir> --output-dir customer-pack
 auditex report verify-pack customer-pack
 auditex report explorer <run-dir>
+auditex report explorer <run-dir> --compare <previous-run-dir>
 auditex compare --run-dir run-a --run-dir run-b
 auditex export list
 ```

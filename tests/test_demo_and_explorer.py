@@ -59,7 +59,7 @@ def test_explorer_is_self_contained_and_embeds_evidence(tmp_path: Path) -> None:
     assert not re.search(r"""(src|href)=["']https?://""", page), "the explorer must not load remote resources"
     assert "fetch(" not in page and "XMLHttpRequest" not in page
     embedded = page.split('<script id="data" type="application/json">', 1)[1].split("</script>", 1)[0]
-    assert json.loads(embedded)["tenant"] == "demo"
+    assert json.loads(embedded)["runs"][0]["tenant"] == "demo"
 
 
 def test_explorer_escapes_script_breakouts(tmp_path: Path) -> None:
@@ -165,4 +165,4 @@ def test_demo_shows_detection_baselines_and_graph_attack_path(tmp_path: Path) ->
     assert "CIS M365 v7" in output and "fail" in output
     assert "Break it: remove tom.fielding@halcyonfreight.example as owner of Payroll Export" in output
     page = (tmp_path / "demo" / "explorer.html").read_text(encoding="utf-8")
-    assert 'data-tab="detection"' in page and 'data-tab="baselines"' in page
+    assert 'data-view="detection"' in page and 'data-view="baselines"' in page

@@ -371,9 +371,13 @@ def _step_explorer(console: _Console, run_dir: Path, out_dir: Path) -> None:
     from .explorer import write_explorer
 
     console.heading("Explore the run in a browser")
-    path = write_explorer(run_dir, out_dir / "explorer.html")
+    after_dir = out_dir / "runs" / f"{DEMO_TENANT_NAME}-after-fixes"
+    runs = [run_dir, after_dir] if (after_dir / "run-manifest.json").is_file() else [run_dir]
+    path = write_explorer(runs, out_dir / "explorer.html")
     console.line(f"  Open: {path.resolve().as_uri()}")
     console.line(console.style("  One self-contained HTML file: findings, evidence, attack paths, permissions. No network calls.", "2"))
+    if len(runs) > 1:
+        console.line(console.style("  Both runs are embedded: switch runs in the header, or open Before / after.", "2"))
 
 
 def run_demo(options: DemoOptions) -> int:

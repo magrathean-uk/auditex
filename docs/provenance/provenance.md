@@ -34,6 +34,15 @@ identifiers and short paraphrased titles only; no benchmark text is copied. The
 sources used to verify each identifier are listed in the catalog and in
 [Framework Mappings](../reference/framework-mappings.md).
 
+## Run explorer icons
+
+The run explorer (`src/auditex/explorer_assets/`) inlines SVG path data for
+23 icons from Lucide (`lucide-icons/lucide`, ISC licence, Copyright (c) Lucide
+Contributors), some simplified. The script carries an attribution comment, and
+the explorer page loads no icon font or remote asset. The explorer's
+stylesheet recreates the Industry design-system tokens from the Auditex design
+handoff with system font stacks; no Barlow font files are shipped.
+
 ## Limits
 
 The source record also states that no external legal review or external

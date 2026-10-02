@@ -247,6 +247,25 @@ auditex report render <run-dir> --format sarif --output reports/findings.sarif.j
 auditex report render <run-dir> --format oscal --output reports/oscal.json
 ```
 
+## Run Explorer
+
+```bash
+auditex report explorer <run-dir>
+auditex report explorer <run-dir> --compare <previous-run-dir> --output explorer.html
+```
+
+The explorer is one self-contained HTML file (default `<run-dir>/reports/explorer.html`) for auditors, administrators and customer stakeholders. It has seven views:
+
+- **Overview**: risk grade on the engine's grade scale, a one-line verdict, open findings by severity, findings with proof, collector coverage, bundle contract status, the five findings to fix first, findings by area, and run metadata.
+- **Findings**: search by title, object, rule or control id; filter by area, framework, status and severity; findings page in groups of 20. Each finding shows what was found, why it matters, how to fix it, affected objects, framework mapping, and the evidence record (source file and record key) that proves it, with a copy button.
+- **Attack paths**: each route from a foothold to tier-0 control, every hop with its relationship, ATT&CK technique and evidence record, and the single change that breaks the route.
+- **Detection**: the detection signals with their status. Not verified signals are never counted as off; the score is withheld when most signals are not verified.
+- **Baselines**: per-framework control status (fail, accepted risk, pass, not assessed) with links to the findings, and the Microsoft Secure Score reconciliation.
+- **Access & data handling**: the assertions recorded in `data-handling.json`, and every collector with its status (verified, not verified with the reason, or not selected) and read permissions.
+- **Before / after**: with `--compare`, the oldest run against the newest: grade change, resolved, new and changed findings, attack paths and detection score. Runs from different tenants or platforms are refused.
+
+The header switches between embedded runs, toggles light and dark themes, and prints a customer handoff PDF (all views in one flow, critical and high findings expanded). The file makes no network requests and uses no web fonts; a Content-Security-Policy pins its one inline script by hash, and the same runs always produce the same bytes. It contains tenant evidence: share it the way you would share the run folder.
+
 ## Customer Pack
 
 Create the pack in a fresh directory, verify its integrity, and review its content before sharing. Generated packs may contain tenant identifiers and other sensitive metadata; verification is not a disclosure approval.
