@@ -5,8 +5,11 @@ Every ``rule_id`` emitted by ``src/azure_tenant_audit/findings.py`` must have:
 1. A template entry in ``configs/finding-templates.json`` (description, impact,
    remediation, control_ids).
 2. A control-mapping entry in ``configs/control-mappings.json`` that meets the
-   coverage floor: ``cis_m365_v3`` PLUS at least one of ``nist_800_53`` or
-   ``iso_27001``.
+   coverage floor: at least one of ``nist_800_53`` or ``iso_27001``.
+   Benchmark keys (``cis_m365_v7``, ``cisa_scuba``, ``ms_secure_score``,
+   ``ms_zero_trust``, ``mcsb``) are only added where a verified control exists;
+   tests/test_framework_baselines.py checks those against
+   configs/framework-catalog.json.
 
 These tests fail loudly the moment a new rule_id is added to findings.py
 without the corresponding catalog entries — preventing the silent drift that
@@ -60,22 +63,23 @@ def test_emitted_rule_id_has_control_mapping(rule_id: str) -> None:
     mapping = _MAPPINGS.get(rule_id)
     assert mapping is not None, (
         f"rule_id={rule_id} is emitted by findings.py but has no entry in "
-        f"configs/control-mappings.json. Add cis_m365_v3 + at least one of "
-        f"nist_800_53 / iso_27001."
+        f"configs/control-mappings.json. Add at least one of nist_800_53 / "
+        f"iso_27001, plus verified benchmark keys where they exist."
     )
 
 
 @pytest.mark.parametrize("rule_id", _EMITTED_RULE_IDS)
 def test_emitted_rule_id_meets_framework_floor(rule_id: str) -> None:
-    """Floor: every rule must map to CIS M365 v3 plus at least one of
-    NIST 800-53 or ISO 27001 (the two most-widely-cited international
-    frameworks). Optional frameworks (soc2/nis2/dora/mitre) are not enforced
-    here; B5 tracks NIS2/DORA completeness separately."""
+    """Floor: every rule must map to at least one of NIST 800-53 or ISO 27001
+    (the two most-widely-cited international frameworks). Benchmark keys are
+    optional and verified separately; the deprecated ``cis_m365_v3`` key must
+    not be emitted by shipped mappings."""
     mapping = _MAPPINGS.get(rule_id) or {}
-    cis = mapping.get("cis_m365_v3") or []
     nist = mapping.get("nist_800_53") or []
     iso = mapping.get("iso_27001") or []
-    assert cis, f"{rule_id}: cis_m365_v3 mapping is missing or empty"
+    assert "cis_m365_v3" not in mapping, (
+        f"{rule_id}: cis_m365_v3 is deprecated; map verified CIS v7 ids under cis_m365_v7"
+    )
     assert nist or iso, (
         f"{rule_id}: must map to nist_800_53 OR iso_27001 (got neither)"
     )

@@ -50,6 +50,7 @@ _SECTION_ORDER = (
     "auditor_score",
     "attack_paths",
     "control_simulator",
+    "baseline_alignment",
     "report_qa",
     "findings",
     "proof_table",
@@ -58,6 +59,8 @@ _SECTION_ORDER = (
     "normalized",
     "blockers",
     "replay_context",
+    "detection_coverage",
+    "public_footprint",
     "manifest",
 )
 _CSV_COLUMNS = (
@@ -71,6 +74,7 @@ _CSV_COLUMNS = (
     "impact",
     "remediation",
     "expected_value",
+    "framework_mappings",
 )
 # Severity ordering used for deterministic CSV row sort (highest first).
 # Anything outside this set sorts after ``info`` to keep the order stable.
@@ -313,8 +317,11 @@ def _preview_section_citations(
         "auditor_score",
         "attack_paths",
         "control_simulator",
+        "baseline_alignment",
         "report_qa",
         "replay_context",
+        "detection_coverage",
+        "public_footprint",
     }
     if report_pack_sections.intersection(selected_sections) or "proof_table" in selected_sections:
         if report_pack_path is not None:
@@ -397,8 +404,11 @@ def load_report_bundle(run_dir: str | Path) -> dict[str, Any]:
         "auditor_score",
         "attack_paths",
         "control_simulator",
+        "baseline_alignment",
         "report_qa",
         "replay_context",
+        "detection_coverage",
+        "public_footprint",
     ):
         if key in report_pack:
             sections[key] = report_pack[key]
@@ -890,7 +900,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
         },
         "quality": {
             "audit_plan_status": _mapping(audit_plan.get("quality_gate")).get("status"),
-            "live_readiness": live_readiness.get("trust_level"),
+            "live_readiness": live_readiness.get("trust_level") or _offline_live_readiness(manifest, summary, metadata),
             "coverage_gap_count": len(limitations),
             "blocker_count": len(blockers),
             "unsupported_claim_count": len(unsupported_claims),
@@ -929,6 +939,7 @@ def render_api_call_inventory_markdown(inventory: Mapping[str, Any]) -> str:
         f"- Run: {_markdown_cell(inventory.get('run_dir'))}",
         f"- Platform: {_markdown_cell(inventory.get('platform'))}",
         f"- Observed calls: {_markdown_cell(counts.get('observed_calls', len(calls)))}",
+        f"- Beta Graph calls: {_markdown_cell(counts.get('beta_calls', sum(1 for call in calls if call.get('api_version') == 'beta')))}",
         f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
         f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
         "",
@@ -1016,7 +1027,7 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
         f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
         f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
-        f"- Live readiness: {_markdown_cell(quality.get('live_readiness'))}",
+        f"- Live readiness: {_markdown_cell(quality.get('live_readiness')) or 'not recorded'}",
         f"- Findings: {_markdown_cell(counts.get('findings'))}",
         f"- Proof rows: {_markdown_cell(counts.get('proof_rows'))}",
         f"- API calls: {_markdown_cell(counts.get('api_calls'))}",
@@ -1338,6 +1349,28 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     manifest["pack_manifest_path"] = str(manifest_path)
     manifest_path.write_text(_json(manifest) + "\n", encoding="utf-8")
     return manifest
+
+
+def _merge_pack_issues(issues: list[dict[str, Any]], pack_path: Path) -> list[dict[str, Any]]:
+    """Report each problem once, with pack-relative paths, listing every check that caught it."""
+    pack_root = pack_path.resolve()
+    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for issue in issues:
+        path = issue.get("path")
+        if isinstance(path, str) and path:
+            try:
+                issue = {**issue, "path": Path(path).resolve().relative_to(pack_root).as_posix()}
+            except ValueError:
+                pass
+        key = (issue.get("code"), issue.get("path"), issue.get("expected"), issue.get("actual"))
+        if issue.get("path") is None or key not in merged:
+            merged[key if issue.get("path") is not None else (len(merged), id(issue))] = issue
+            continue
+        existing = merged[key]
+        sources = existing.setdefault("sources", [existing["source"]] if existing.get("source") else [])
+        if issue.get("source") and issue["source"] not in sources:
+            sources.append(issue["source"])
+    return list(merged.values())
 
 
 def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
@@ -1702,6 +1735,7 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
                 continue
             check_file(candidate, expected, source=f"checksums.sha256:{line_number}")
 
+    issues = _merge_pack_issues(issues, pack_path)
     return {
         "pack_dir": str(pack_path),
         "pack_manifest_path": str(manifest_path),
@@ -1747,6 +1781,14 @@ def _render_json(selected_sections: dict[str, Any]) -> str:
     return _json({"sections": selected_sections}) + "\n"
 
 
+def _offline_live_readiness(*sources: Mapping[str, Any]) -> str | None:
+    """Offline bundles never write live-readiness.json; say so instead of leaving the field blank."""
+    for source in sources:
+        if str(_mapping(source).get("mode") or "").strip().lower() == "offline":
+            return "n/a (offline)"
+    return None
+
+
 def _markdown_cell(value: Any) -> str:
     return _text(value, "").replace("|", "\\|").replace("\n", " ").strip()
 
@@ -1763,6 +1805,54 @@ def _append_mapping_markdown(lines: list[str], title: str, payload: Mapping[str,
     lines.extend(["", f"## {title}", "", "| Field | Value |", "| --- | --- |"])
     for key in sorted(payload):
         lines.append(f"| {_markdown_cell(key)} | {_markdown_value(payload[key])} |")
+
+
+def _append_baseline_alignment_markdown(lines: list[str], payload: Mapping[str, Any]) -> None:
+    if not payload:
+        return
+    frameworks = _mapping(payload.get("frameworks"))
+    framework_rows = []
+    for key in sorted(frameworks):
+        entry = _mapping(frameworks.get(key))
+        counts = _mapping(entry.get("status_counts"))
+        framework_rows.append(
+            {
+                "framework": key,
+                "version": entry.get("version"),
+                "fail": counts.get("fail", 0),
+                "accepted_risk": counts.get("accepted_risk", 0),
+                "pass": counts.get("pass", 0),
+                "not_assessed": counts.get("not_assessed", 0),
+            }
+        )
+    _append_rows_markdown(
+        lines,
+        "Baseline Alignment",
+        framework_rows,
+        (
+            ("Framework", "framework"),
+            ("Version", "version"),
+            ("Fail", "fail"),
+            ("Accepted risk", "accepted_risk"),
+            ("Pass", "pass"),
+            ("Not assessed", "not_assessed"),
+        ),
+    )
+    secure_score = _mapping(payload.get("secure_score"))
+    if secure_score:
+        _append_rows_markdown(
+            lines,
+            "Secure Score Reconciliation",
+            _dict_rows(secure_score.get("controls")),
+            (
+                ("Control profile", "control_profile_id"),
+                ("Microsoft score", "microsoft_score"),
+                ("Max", "microsoft_max_score"),
+                ("Microsoft state", "microsoft_state"),
+                ("Auditex", "auditex_state"),
+                ("Agreement", "agreement"),
+            ),
+        )
 
 
 def _append_rows_markdown(
@@ -1887,7 +1977,25 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
             (("ID", "id"), ("Severity", "severity"), ("Summary", "summary"), ("Stages", "stage_count")),
         )
     _append_mapping_markdown(lines, "Control Simulator", _mapping(selected_sections.get("control_simulator")))
+    if "baseline_alignment" in selected_sections:
+        _append_baseline_alignment_markdown(lines, _mapping(selected_sections.get("baseline_alignment")))
     _append_mapping_markdown(lines, "Report QA", _mapping(selected_sections.get("report_qa")))
+    if "detection_coverage" in selected_sections:
+        detection = _mapping(selected_sections.get("detection_coverage"))
+        _append_rows_markdown(
+            lines,
+            f"Detection Coverage (score {_text(detection.get('score'), 'n/a')})",
+            _dict_rows(detection.get("signals")),
+            (("Signal", "title"), ("Status", "status"), ("Reason", "reason"), ("Why it matters", "why_it_matters")),
+        )
+    if "public_footprint" in selected_sections:
+        footprint = _mapping(selected_sections.get("public_footprint"))
+        _append_rows_markdown(
+            lines,
+            "Public Footprint (informational)",
+            _dict_rows(footprint.get("domains")),
+            (("Domain", "domain"), ("Authentication", "authentication_type"), ("Discovery", "discovery_status")),
+        )
     if coverage_gaps:
         lines.extend(["## Coverage Gaps", ""])
         for gap in coverage_gaps:
@@ -2130,6 +2238,8 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
             sections.append(_render_key_values(title, _mapping(selected_sections.get(key))))
     if "reviewer_index" in selected_sections:
         sections.append(_render_json_section("Reviewer Index", selected_sections.get("reviewer_index")))
+    if "baseline_alignment" in selected_sections:
+        sections.append(_render_json_section("Baseline Alignment", selected_sections.get("baseline_alignment")))
     if "limitations" in selected_sections:
         sections.append(_render_json_section("Limitations", selected_sections.get("limitations")))
     if "next_actions" in selected_sections:
@@ -2144,6 +2254,10 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
         sections.append(_render_findings_table("Action Plan", _dict_rows(selected_sections.get("action_plan"))))
     if "blockers" in selected_sections:
         sections.append(_render_json_section("Blockers", selected_sections.get("blockers")))
+    if "detection_coverage" in selected_sections:
+        sections.append(_render_json_section("Detection Coverage", selected_sections.get("detection_coverage")))
+    if "public_footprint" in selected_sections:
+        sections.append(_render_json_section("Public Footprint", selected_sections.get("public_footprint")))
     if "api_inventory" in selected_sections:
         sections.append(_render_json_section("API Calls", selected_sections.get("api_inventory")))
     if "normalized" in selected_sections:

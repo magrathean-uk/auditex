@@ -28,6 +28,7 @@ _M365_SURFACES = {
     "defender": ("security",),
     "defender_cloud_apps": ("security",),
     "sentinel_xdr": ("security",),
+    "identity_protection": ("identity", "security"),
     "reports_usage": ("audit_logs",),
     "service_health": ("operations",),
     "domains_hybrid": ("dns", "identity"),

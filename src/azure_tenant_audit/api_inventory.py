@@ -59,6 +59,19 @@ def _data_class(*, platform: str, collector: str, endpoint: str, name: str) -> s
     return "tenant_metadata"
 
 
+def _api_version(row: Mapping[str, Any], endpoint: str) -> str | None:
+    explicit = _text(row.get("api_version"))
+    if explicit:
+        return explicit
+    if endpoint.startswith("https://graph.microsoft.com/beta"):
+        return "beta"
+    if endpoint.startswith("https://graph.microsoft.com/v1.0"):
+        return "v1.0"
+    if _text(row.get("type")).lower() == "graph" and endpoint.startswith("/"):
+        return "v1.0"
+    return None
+
+
 def _capability_index(capability_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     indexed: dict[str, dict[str, Any]] = {}
     for row in capability_rows:
@@ -91,6 +104,7 @@ def _observed_call(
         "name": name,
         "endpoint": endpoint,
         "method": method,
+        "api_version": _api_version(row, endpoint),
         "access_mode": access_mode,
         "status": row.get("status"),
         "item_count": int(row.get("item_count") or 0),
@@ -218,6 +232,7 @@ def build_api_call_inventory(
             "observed_calls": len(observed_calls),
             "mutating_calls": len(mutating_calls),
             "content_read_calls": len(content_calls),
+            "beta_calls": sum(1 for call in observed_calls if call.get("api_version") == "beta"),
         },
         "safety": {
             "read_only": read_only,

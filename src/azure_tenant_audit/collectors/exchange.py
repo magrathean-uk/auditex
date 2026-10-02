@@ -5,7 +5,7 @@ import time
 from typing import Any, Callable, Optional
 
 from ..adapters import get_adapter
-from .base import Collector, CollectorResult, normalize_collection_limit
+from .base import Collector, CollectorResult, _classify_graph_error, normalize_collection_limit
 from ..graph import GraphError
 
 
@@ -184,30 +184,27 @@ class ExchangeCollector(Collector):
         if graph_client is None or not hasattr(graph_client, "get_all"):
             return None
 
+        # Graph rejects "mail ne null" without advanced query headers, so filter mail-enabled users locally.
+        command = "graph /users?$select=mail (mail-enabled users)"
         try:
-            params: dict[str, str] = {
-                "$select": "id,displayName,userPrincipalName,mail,mailboxSettings",
-                "$filter": "mail ne null",
-            }
+            params: dict[str, str] = {"$select": "id,displayName,userPrincipalName,mail"}
             limit = normalize_collection_limit(top, default=500)
             if limit is not None:
                 params["$top"] = str(limit)
-            users = graph_client.get_all(
-                "/users",
-                params=params,
-            )
+            users = graph_client.get_all("/users", params=params)
             return {
-                "command": "graph /users?filter=mail ne null",
-                "value": users,
+                "command": command,
+                "value": [user for user in users if isinstance(user, dict) and user.get("mail")],
                 "source": "graph",
                 "error_class": None,
             }
         except GraphError as exc:
+            error_class, error = _classify_graph_error(exc)
             return {
-                "command": "graph /users?filter=mail ne null",
-                "error": str(exc),
+                "command": command,
+                "error": error,
                 "source": "graph",
-                "error_class": "insufficient_permissions",
+                "error_class": error_class,
             }
 
     def _run_tenant_info_graph_fallback(self, graph_client: Any) -> dict[str, Any] | None:

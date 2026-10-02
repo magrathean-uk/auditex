@@ -1,7 +1,7 @@
 """DNS-over-HTTPS lookups and email-auth record parsers.
 
-Used by the dns_posture collector to evaluate SPF, DKIM, DMARC, MTA-STS, and BIMI
-records for verified tenant domains without depending on system DNS resolvers.
+Used by the dns_posture collector to evaluate SPF, DKIM, DMARC, MTA-STS, TLS-RPT
+(RFC 8460, https://datatracker.ietf.org/doc/html/rfc8460), and BIMI records for verified tenant domains without depending on system DNS resolvers.
 """
 from __future__ import annotations
 
@@ -130,6 +130,19 @@ def parse_mta_sts(record: str) -> dict[str, Any] | None:
     }
 
 
+def parse_tls_rpt(record: str) -> dict[str, Any] | None:
+    """Parse an SMTP TLS Reporting record (RFC 8460 section 3) published at ``_smtp._tls.<domain>``."""
+    text = record.strip()
+    if not text.lower().startswith("v=tlsrptv1"):
+        return None
+    tags = _split_semicolon_tags(text)
+    return {
+        "version": "TLSRPTv1",
+        "rua": _split_csv(tags.get("rua")),
+        "raw": record,
+    }
+
+
 def parse_bimi(record: str) -> dict[str, Any] | None:
     text = record.strip()
     if "v=bimi1" not in text.lower():
@@ -217,6 +230,7 @@ def collect_domain_posture(
         spf_records = resolver.query(domain, "TXT")
         dmarc_records = resolver.query(f"_dmarc.{domain}", "TXT")
         mta_sts_records = resolver.query(f"_mta-sts.{domain}", "TXT")
+        tls_rpt_records = resolver.query(f"_smtp._tls.{domain}", "TXT")
         bimi_records = resolver.query(f"default._bimi.{domain}", "TXT")
         dkim_results: dict[str, dict[str, Any] | None] = {}
         for selector in primary:
@@ -234,6 +248,7 @@ def collect_domain_posture(
         posture["dmarc"] = _absent("dmarc")
         posture["dkim"] = {"selectors_present": [], "selectors_missing": list(all_probed)}
         posture["mta_sts"] = {"dns_present": False}
+        posture["tls_rpt"] = _absent("tls_rpt")
         posture["bimi"] = _absent("bimi")
         return posture
 
@@ -241,6 +256,7 @@ def collect_domain_posture(
     posture["dmarc"] = _summarize_dmarc(dmarc_records)
     posture["dkim"] = _summarize_dkim_collection(dkim_results)
     posture["mta_sts"] = _summarize_mta_sts(mta_sts_records)
+    posture["tls_rpt"] = _summarize_tls_rpt(tls_rpt_records)
     posture["bimi"] = _summarize_bimi(bimi_records)
     return posture
 
@@ -288,6 +304,13 @@ def _summarize_mta_sts(records: list[str]) -> dict[str, Any]:
         "id": parsed.get("id") if parsed else None,
         "raw": parsed.get("raw") if parsed else None,
     }
+
+
+def _summarize_tls_rpt(records: list[str]) -> dict[str, Any]:
+    parsed = next((parse_tls_rpt(rec) for rec in records if parse_tls_rpt(rec)), None)
+    if parsed is None:
+        return _absent("tls_rpt")
+    return {"present": True, "rua": parsed.get("rua") or [], "raw": parsed.get("raw")}
 
 
 def _summarize_bimi(records: list[str]) -> dict[str, Any]:

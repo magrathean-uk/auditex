@@ -6,8 +6,20 @@ from pathlib import Path
 import re
 from typing import Any
 
+from .detection_coverage import build_detection_signals
 from .friendly_names import build_friendly_name_catalog
 
+
+# Detection coverage is assessed for Microsoft 365 runs that collected any of these surfaces.
+_DETECTION_SOURCE_COLLECTORS = (
+    "identity",
+    "security",
+    "conditional_access",
+    "defender",
+    "sentinel_xdr",
+    "identity_protection",
+    "exchange_policy",
+)
 
 _BREAK_GLASS_ROLE_KEYWORDS = (
     "global administrator",
@@ -26,6 +38,30 @@ def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     if isinstance(values, list):
         return [item for item in values if isinstance(item, dict)]
     return []
+
+
+def _secure_score_control_scores(value: Any) -> list[dict[str, Any]]:
+    """Keep only the per-control numbers needed for Secure Score reconciliation."""
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or not item.get("controlName"):
+            continue
+        rows.append(
+            {
+                key: field
+                for key, field in {
+                    "control_name": str(item.get("controlName")),
+                    "control_category": item.get("controlCategory"),
+                    "score": item.get("score"),
+                    "score_in_percentage": item.get("scoreInPercentage"),
+                    "implementation_status": item.get("implementationStatus"),
+                }.items()
+                if field not in (None, "")
+            }
+        )
+    return sorted(rows, key=lambda row: row["control_name"])
 
 
 def _compact(record: dict[str, Any]) -> dict[str, Any]:
@@ -421,6 +457,31 @@ def _extract_conditional_access_reference(
     }
 
 
+def _disambiguate_keys(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Policies of different types can share an Identity (e.g. "Global"); qualify only the colliding keys."""
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[str(record.get("key"))] = counts.get(str(record.get("key")), 0) + 1
+    result = []
+    for record in records:
+        if counts[str(record.get("key"))] > 1 and record.get("source_name"):
+            object_id = f"{record['source_name']}:{record.get('id')}"
+            record = {**record, "id": object_id, "key": f"{record.get('kind')}:{object_id}"}
+        result.append(record)
+    return result
+
+
+def _keyed_relationship(record: dict[str, Any]) -> dict[str, Any]:
+    """Give a Conditional Access relationship a stable id/key so evidence refs can cite it."""
+    if record.get("key"):
+        return record
+    relationship_id = ":".join(
+        str(record.get(field) or "")
+        for field in ("source_id", "direction", "target_type", "target_id", "relationship_type")
+    )
+    return {**record, "id": relationship_id, "key": f"conditional_access_relationship:{relationship_id}"}
+
+
 def _build_conditional_access_graph(
     policies: list[dict[str, Any]],
     identity_payload: dict[str, Any],
@@ -472,7 +533,10 @@ def _build_conditional_access_graph(
         excluded_apps = _ensure_placeholder_skipped(_to_str_list((conditions.get("applications") or {}).get("excludeApplications") if isinstance(conditions.get("applications"), dict) else []))
         include_locations = _ensure_placeholder_skipped(_to_str_list((conditions.get("locations") or {}).get("includeLocations") if isinstance(conditions.get("locations"), dict) else []))
         exclude_locations = _ensure_placeholder_skipped(_to_str_list((conditions.get("locations") or {}).get("excludeLocations") if isinstance(conditions.get("locations"), dict) else []))
-        include_auth_strengths = _ensure_placeholder_skipped(_to_str_list((conditions.get("authenticationStrength") or {}).get("includePolicies") if isinstance(conditions.get("authenticationStrength"), dict) else []))
+        grant_strength = grant.get("authenticationStrength") if isinstance(grant, dict) else None
+        include_auth_strengths = _ensure_placeholder_skipped(
+            [str(grant_strength["id"])] if isinstance(grant_strength, dict) and grant_strength.get("id") else []
+        )
 
         built_in_controls = _to_str_list(grant.get("builtInControls") if isinstance(grant, dict) else grant.get("builtInControls"))
         built_in_controls = [str(item).lower() for item in built_in_controls]
@@ -737,7 +801,7 @@ def _build_conditional_access_graph(
                 )
             )
 
-    relationship_records = [item for item in relationship_records if item]
+    relationship_records = [_keyed_relationship(item) for item in relationship_records if item]
     unique_relationship_records = list({tuple(sorted(item.items())): item for item in relationship_records}.values())
 
     summary = {
@@ -751,6 +815,122 @@ def _build_conditional_access_graph(
         "dangling_references": sum(1 for rel in unique_relationship_records if rel.get("resolution") == "unresolved"),
     }
     return graph_records, unique_relationship_records, summary, policy_findings
+
+
+def _owner_type(owner: dict[str, Any]) -> str:
+    odata_type = str(owner.get("@odata.type") or owner.get("type") or "").lower()
+    if "serviceprincipal" in odata_type:
+        return "service_principal"
+    if "group" in odata_type:
+        return "group"
+    return "user"
+
+
+def _build_group_membership_edges(identity_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Membership and ownership of role-assignable groups (identity fan-out).
+
+    Only role-assignable groups (and groups that hold directory roles) are
+    expanded by the collector, so these edges describe who can inherit or
+    manage a privileged group, not the whole directory membership graph.
+    """
+    records: list[dict[str, Any]] = []
+    for source_name, relationship, list_key in (
+        ("roleAssignableGroupMembers", "member", "members"),
+        ("roleAssignableGroupOwners", "owner", "owners"),
+    ):
+        for item in _values(identity_payload, source_name):
+            group_id = str(item.get("groupId") or "")
+            rows = item.get(list_key)
+            if not group_id or not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict) or not row.get("id"):
+                    continue
+                member_id = str(row.get("id"))
+                records.append(
+                    _record(
+                        "group_membership_edge",
+                        f"identity.{source_name}",
+                        f"{relationship}:{group_id}:{member_id}",
+                        source_name=source_name,
+                        relationship=relationship,
+                        group_id=group_id,
+                        group_display_name=item.get("displayName"),
+                        member_id=member_id,
+                        member_type=_owner_type(row),
+                        member_display_name=row.get("displayName"),
+                        member_principal_name=row.get("userPrincipalName"),
+                    )
+                )
+    return list({record["key"]: record for record in records}.values())
+
+
+def _build_app_owner_edges(
+    app_consent_payload: dict[str, Any],
+    app_credentials_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Owners of service principals and application objects.
+
+    An owner can add credentials to the object it owns, so ownership is a
+    privilege-escalation edge in the attack graph.
+    """
+    records: list[dict[str, Any]] = []
+    for item in _values(app_consent_payload, "servicePrincipalOwners"):
+        sp_id = str(item.get("servicePrincipalId") or "")
+        owners = item.get("owners")
+        if not sp_id or not isinstance(owners, list):
+            continue
+        for owner in owners:
+            if not isinstance(owner, dict) or not owner.get("id"):
+                continue
+            owner_id = str(owner.get("id"))
+            records.append(
+                _record(
+                    "app_owner_edge",
+                    "app_consent.servicePrincipalOwners",
+                    f"service_principal:{sp_id}:{owner_id}",
+                    source_name="servicePrincipalOwners",
+                    collector="app_consent",
+                    target_type="service_principal",
+                    target_id=sp_id,
+                    target_display_name=item.get("displayName"),
+                    owner_id=owner_id,
+                    owner_type=_owner_type(owner),
+                    owner_display_name=owner.get("displayName"),
+                    owner_principal_name=owner.get("userPrincipalName"),
+                )
+            )
+    for source_name, target_type in (
+        ("applicationCredentials", "application"),
+        ("servicePrincipalCredentials", "service_principal"),
+    ):
+        for item in _values(app_credentials_payload, source_name):
+            object_id = str(item.get("id") or "")
+            owners = item.get("owners")
+            if not object_id or not isinstance(owners, list):
+                continue
+            for owner in owners:
+                if not isinstance(owner, dict) or not owner.get("id"):
+                    continue
+                owner_id = str(owner.get("id"))
+                records.append(
+                    _record(
+                        "app_owner_edge",
+                        f"app_credentials.{source_name}",
+                        f"{target_type}:{object_id}:{owner_id}",
+                        source_name=source_name,
+                        collector="app_credentials",
+                        target_type=target_type,
+                        target_id=object_id,
+                        target_display_name=item.get("display_name"),
+                        app_id=item.get("app_id"),
+                        owner_id=owner_id,
+                        owner_type=_owner_type(owner),
+                        owner_display_name=owner.get("displayName") or owner.get("display_name"),
+                        owner_principal_name=owner.get("userPrincipalName") or owner.get("user_principal_name"),
+                    )
+                )
+    return list({record["key"]: record for record in records}.values())
 
 
 def build_normalized_snapshot(
@@ -767,6 +947,17 @@ def build_normalized_snapshot(
     result_rows = result_rows or []
     coverage_rows = coverage_rows or []
 
+    identity_payload = collector_payloads.get("identity", {})
+    signin_section = identity_payload.get("userSignInActivity") if isinstance(identity_payload, dict) else None
+    # signin_data_available is only True when the separate signInActivity query
+    # succeeded; otherwise stale-account rules stay inert rather than guessing.
+    user_signin_available = isinstance(signin_section, dict) and "error" not in signin_section and "value" in signin_section
+    signin_by_user: dict[str, dict[str, Any]] = {}
+    if user_signin_available:
+        for item in _values(identity_payload, "userSignInActivity"):
+            activity = item.get("signInActivity")
+            if item.get("id"):
+                signin_by_user[str(item.get("id"))] = activity if isinstance(activity, dict) else {}
     users = [
         _record(
             "user",
@@ -778,9 +969,13 @@ def build_normalized_snapshot(
             department=item.get("department"),
             user_type=item.get("userType"),
             enabled=item.get("accountEnabled"),
+            created_at=item.get("createdDateTime"),
             last_password_change_at=item.get("lastPasswordChangeDateTime"),
+            last_successful_signin_at=(signin_by_user.get(str(item.get("id"))) or {}).get("lastSuccessfulSignInDateTime"),
+            last_signin_at=(signin_by_user.get(str(item.get("id"))) or {}).get("lastSignInDateTime"),
+            signin_data_available=(str(item.get("id")) in signin_by_user) if user_signin_available else None,
         )
-        for item in _values(collector_payloads.get("identity", {}), "users")
+        for item in _values(identity_payload, "users")
         if item.get("id")
     ]
     groups = [
@@ -791,6 +986,7 @@ def build_normalized_snapshot(
             display_name=item.get("displayName"),
             mail=item.get("mail"),
             group_types=item.get("groupTypes"),
+            is_assignable_to_role=item.get("isAssignableToRole"),
         )
         for item in _values(collector_payloads.get("identity", {}), "groups")
         if item.get("id")
@@ -878,8 +1074,23 @@ def build_normalized_snapshot(
             current_score=item.get("currentScore"),
             max_score=item.get("maxScore"),
             created=item.get("createdDateTime"),
+            control_scores=_secure_score_control_scores(item.get("controlScores")),
         )
         for item in _values(collector_payloads.get("defender", {}), "secureScores")
+        if item.get("id")
+    ]
+    security_score_control_profiles = [
+        _record(
+            "security_score_control_profile",
+            "defender.secureScoreControlProfiles",
+            str(item.get("id")),
+            title=item.get("title"),
+            max_score=item.get("maxScore"),
+            service=item.get("service"),
+            control_category=item.get("controlCategory"),
+            deprecated=item.get("deprecated"),
+        )
+        for item in _values(collector_payloads.get("defender", {}), "secureScoreControlProfiles")
         if item.get("id")
     ]
     security_signin_events = [
@@ -1137,9 +1348,16 @@ def build_normalized_snapshot(
                     service_principal_name=(app_service_principal_by_id.get(service_principal_id) or {}).get("displayName"),
                     principal_display_name=assignment.get("principalDisplayName"),
                     principal_type=assignment.get("principalType"),
+                    principal_id=assignment.get("principalId"),
+                    resource_id=assignment.get("resourceId") or service_principal_id,
+                    resource_display_name=assignment.get("resourceDisplayName"),
+                    app_role_id=assignment.get("appRoleId"),
+                    app_role_value=assignment.get("appRoleValue"),
                     source_name="servicePrincipalAppRoleAssignments",
                 )
             )
+    group_membership_edges = _build_group_membership_edges(collector_payloads.get("identity", {}))
+    app_owner_edges = _build_app_owner_edges(app_consent_payload, collector_payloads.get("app_credentials", {}))
     license_inventory = [
         _record(
             "license_sku",
@@ -1163,6 +1381,10 @@ def build_normalized_snapshot(
         "acceptedDomains",
         "remoteDomains",
         "mailboxForwarding",
+        "adminAuditLogConfig",
+        "organizationAuditConfig",
+        "mailboxAuditBypass",
+        "protectionAlerts",
     ):
         for item in _values(collector_payloads.get("exchange_policy", {}), source_name):
             object_id = str(item.get("Identity") or item.get("Name") or item.get("PrimarySmtpAddress") or source_name)
@@ -1187,6 +1409,13 @@ def build_normalized_snapshot(
                     state=item.get("State"),
                     priority=item.get("Priority"),
                     mode=item.get("Mode"),
+                    unified_audit_log_ingestion_enabled=item.get("UnifiedAuditLogIngestionEnabled"),
+                    audit_disabled=item.get("AuditDisabled"),
+                    audit_bypass_count=item.get("Count") if source_name == "mailboxAuditBypass" else None,
+                    disabled=item.get("Disabled"),
+                    severity=item.get("Severity"),
+                    category=item.get("Category"),
+                    is_system_rule=item.get("IsSystemRule"),
                 )
             )
     governance_objects: list[dict[str, Any]] = []
@@ -1208,6 +1437,11 @@ def build_normalized_snapshot(
                     display_name=item.get("displayName"),
                     description=item.get("description"),
                     status=item.get("status"),
+                    principal_id=item.get("principalId"),
+                    role_definition_id=item.get("roleDefinitionId"),
+                    directory_scope_id=item.get("directoryScopeId"),
+                    member_type=item.get("memberType"),
+                    assignment_type=item.get("assignmentType"),
                 )
             )
     intune_assignment_objects: list[dict[str, Any]] = []
@@ -1312,6 +1546,15 @@ def build_normalized_snapshot(
                     report_refresh_date=item.get("Report Refresh Date"),
                 )
             )
+    usage_report_setting_objects = [
+        _record(
+            "usage_report_settings",
+            "reports_usage.reportSettings",
+            "reportSettings",
+            concealed_names=item.get("displayConcealedNames"),
+        )
+        for item in _values(collector_payloads.get("reports_usage", {}), "reportSettings")
+    ]
     external_identity_objects: list[dict[str, Any]] = []
     for source_name in ("crossTenantAccessPolicy", "authorizationPolicy", "authenticationFlowsPolicy"):
         section = collector_payloads.get("external_identity", {})
@@ -1538,9 +1781,10 @@ def build_normalized_snapshot(
             owner_count=item.get("owner_count"),
             federated_credentials=item.get("federated_credentials") or [],
             required_resource_access=item.get("required_resource_access") or [],
-            # signInActivity is a beta Graph endpoint requiring AuditLog.Read.All; the
-            # collector populates these when available, otherwise the dormant-credential
-            # finding stays inert (signin_data_available=False).
+            # Populated from the beta /reports/servicePrincipalSignInActivities report
+            # (AuditLog.Read.All). When that report is unavailable the collector sets
+            # signin_data_available=False and the dormant-credential finding stays inert.
+            # (User signInActivity, by contrast, is v1.0 and handled in identity.)
             last_signin_at=item.get("last_signin_at"),
             signin_data_available=bool(item.get("signin_data_available")),
         )
@@ -1593,12 +1837,60 @@ def build_normalized_snapshot(
             dkim_selectors_missing=(item.get("dkim") or {}).get("selectors_missing") or [],
             mta_sts_dns_present=bool((item.get("mta_sts") or {}).get("dns_present")),
             mta_sts_id=(item.get("mta_sts") or {}).get("id"),
+            mta_sts_policy_fetch_status=((item.get("mta_sts") or {}).get("policy") or {}).get("fetch_status"),
+            mta_sts_policy_mode=((item.get("mta_sts") or {}).get("policy") or {}).get("mode"),
+            mta_sts_policy_http_status=((item.get("mta_sts") or {}).get("policy") or {}).get("http_status"),
+            # None when the bundle predates TLS-RPT collection, so absence is never inferred.
+            tls_rpt_present=(
+                bool((item.get("tls_rpt") or {}).get("present")) if isinstance(item.get("tls_rpt"), dict) else None
+            ),
+            tls_rpt_rua=(item.get("tls_rpt") or {}).get("rua") if isinstance(item.get("tls_rpt"), dict) else None,
             bimi_present=bool((item.get("bimi") or {}).get("present")),
             bimi_logo_https=(item.get("bimi") or {}).get("logo_url_is_https"),
         )
         for item in _values(collector_payloads.get("dns_posture", {}), "domainPosture")
         if item.get("domain")
     ]
+    public_footprint_objects = [
+        _record(
+            "public_footprint",
+            "dns_posture.publicFootprint",
+            str(item.get("domain")),
+            domain=item.get("domain"),
+            authentication_type=item.get("authentication_type"),
+            is_default=item.get("is_default"),
+            discovery_status=item.get("discovery_status"),
+            tenant_id=item.get("tenant_id"),
+            tenant_region_scope=item.get("tenant_region_scope"),
+            tenant_region_sub_scope=item.get("tenant_region_sub_scope"),
+            cloud_instance_name=item.get("cloud_instance_name"),
+            issuer_host=item.get("issuer_host"),
+        )
+        for item in _values(collector_payloads.get("dns_posture", {}), "publicFootprint")
+        if item.get("domain")
+    ]
+    identity_protection_objects = [
+        _record(
+            "identity_protection_summary",
+            "identity_protection.riskyUserSummary",
+            str(item.get("id") or "summary"),
+            available=item.get("available"),
+            sampled_count=item.get("sampled_count"),
+            sample_limit=item.get("sample_limit"),
+            at_risk_count=item.get("at_risk_count"),
+            risk_state_counts=item.get("risk_state_counts"),
+            risk_level_counts=item.get("risk_level_counts"),
+        )
+        for item in _values(collector_payloads.get("identity_protection", {}), "riskyUserSummary")
+    ]
+    detection_signal_objects = (
+        [
+            _record("detection_signal", "detection_coverage", str(row["name"]), **row)
+            for row in build_detection_signals(collector_payloads, diagnostics)
+        ]
+        if any(collector_payloads.get(name) for name in _DETECTION_SOURCE_COLLECTORS)
+        else []
+    )
     ediscovery_cases = [
         _record(
             "ediscovery_case",
@@ -1720,18 +2012,6 @@ def build_normalized_snapshot(
         if item.get("id")
     ]
 
-    defender_cloud_apps_profile_records = [
-        _record(
-            "defender_cloud_apps_profile",
-            "defender_cloud_apps.cloudAppSecurityProfiles",
-            str(item.get("id") or ""),
-            display_name=item.get("displayName"),
-            risk_score=item.get("riskScore"),
-            category=item.get("category"),
-        )
-        for item in _values(collector_payloads.get("defender_cloud_apps", {}), "cloudAppSecurityProfiles")
-        if item.get("id")
-    ]
     defender_cloud_apps_consent_records = [
         _record(
             "defender_cloud_apps_consent_request",
@@ -1774,9 +2054,12 @@ def build_normalized_snapshot(
         "service_principals": service_principals,
         "role_definitions": role_definitions,
         "role_assignments": role_assignments,
+        "group_membership_edges": group_membership_edges,
+        "app_owner_edges": app_owner_edges,
         "devices": devices,
         "incidents": incidents,
         "security_scores": security_scores,
+        "security_score_control_profiles": security_score_control_profiles,
         "security_signin_events": security_signin_events,
         "security_directory_audit_events": security_directory_audit_events,
         "mailboxes": mailboxes,
@@ -1788,12 +2071,13 @@ def build_normalized_snapshot(
         "sharepoint_sharing_findings": sharepoint_sharing_findings,
         "application_consents": application_consents,
         "license_inventory": license_inventory,
-        "exchange_policy_objects": exchange_policy_objects,
+        "exchange_policy_objects": _disambiguate_keys(exchange_policy_objects),
         "governance_objects": governance_objects,
         "intune_assignment_objects": intune_assignment_objects,
-        "teams_policy_objects": teams_policy_objects,
+        "teams_policy_objects": _disambiguate_keys(teams_policy_objects),
         "service_health_objects": service_health_objects,
         "usage_report_objects": usage_report_objects,
+        "usage_report_setting_objects": usage_report_setting_objects,
         "external_identity_objects": external_identity_objects,
         "consent_policy_objects": consent_policy_objects,
         "domain_hybrid_objects": domain_hybrid_objects,
@@ -1810,6 +2094,9 @@ def build_normalized_snapshot(
         "cross_tenant_default_objects": cross_tenant_default_objects,
         "cross_tenant_partner_objects": cross_tenant_partner_objects,
         "dns_posture_objects": dns_posture_objects,
+        "public_footprint_objects": public_footprint_objects,
+        "identity_protection_objects": identity_protection_objects,
+        "detection_signal_objects": detection_signal_objects,
         "ediscovery_cases": ediscovery_cases,
         "ediscovery_searches": ediscovery_searches,
         "ediscovery_export_jobs": ediscovery_export_jobs,
@@ -1821,7 +2108,6 @@ def build_normalized_snapshot(
         "power_platform_tenant_setting_objects": power_platform_tenant_setting_records,
         "sentinel_xdr_incident_objects": sentinel_xdr_incident_records,
         "sentinel_xdr_alert_objects": sentinel_xdr_alert_records,
-        "defender_cloud_apps_profile_objects": defender_cloud_apps_profile_records,
         "defender_cloud_apps_consent_objects": defender_cloud_apps_consent_records,
         "copilot_admin_setting_objects": copilot_admin_setting_records,
         "copilot_usage_objects": copilot_usage_records,

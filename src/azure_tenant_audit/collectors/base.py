@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from ..perf_runtime import EndpointAccumulator, PageWindow
-from ..graph import GraphClient, GraphError
+from ..graph import GraphClient, GraphError, graph_url
 
 if TYPE_CHECKING:
     from ..collector_runner import CollectorRunContext
@@ -17,14 +17,33 @@ def _classify_graph_error(exc: Exception) -> tuple[str, str]:
         if exc.error_code == "PermissionStop":
             return "permission_stop", message
         status = exc.status
+        lower = message.lower()
+        if status in {400, 401, 403} and any(
+            phrase in lower
+            for phrase in (
+                "premium license",
+                "spo license",
+                "not licensed",
+                "does not have a license",
+                "license is required",
+                "needs to have microsoft entra id p2",
+                "governance license",
+            )
+        ):
+            return "license_required", message
+        if status in {401, 403} and "account is not provisioned" in lower:
+            # Defender XDR answers this way when the tenant has no Defender workload provisioned.
+            return "service_not_available", message
         if status == 401:
+            # Intune answers 401 with ErrorCode "Forbidden" when the token lacks DeviceManagement scopes.
+            if '"errorcode":"forbidden"' in lower.replace(" ", ""):
+                return "insufficient_permissions", message
             return "unauthenticated", message
         if status == 403:
             return "insufficient_permissions", message
         if status == 404:
             return "resource_not_found", message
         if status == 400:
-            lower = message.lower()
             if "no reply address is registered" in lower:
                 return "app_missing_reply_url", message
             if "minimum page size" in lower:
@@ -97,7 +116,12 @@ def run_graph_endpoints(
     coverage: list[dict[str, Any]] = []
 
     for key, spec in endpoint_specs.items():
+        api_version = str(spec.get("api_version") or "v1.0")
         endpoint = spec["endpoint"]
+        if api_version != "v1.0":
+            # Beta (or other non-default) endpoints are called by full URL so the
+            # client does not prefix them with the v1.0 root.
+            endpoint = graph_url(endpoint, api_version)
         page = spec.get("page", True)
         apply_top = spec.get("apply_top", True)
         collection_limit = normalize_collection_limit(top, default=None)
@@ -105,6 +129,9 @@ def run_graph_endpoints(
         if not page or not apply_top:
             # Non-collection calls often do not accept $top.
             effective_top = None
+        max_top = spec.get("max_top")
+        if effective_top is not None and isinstance(max_top, int) and effective_top > max_top:
+            effective_top = max_top
         query = _normalize_top(spec.get("params"), effective_top, min_top=spec.get("min_top"))
         if log_event:
             log_event(
@@ -160,7 +187,11 @@ def run_graph_endpoints(
                     else:
                         payload[key] = {"value": rows}
             else:
-                page_result = client.get_json(endpoint, params=query)
+                page_result = (
+                    client.get_json(endpoint, params=query, full_url=True)
+                    if endpoint.startswith("http")
+                    else client.get_json(endpoint, params=query)
+                )
                 values = page_result.get("value") if isinstance(page_result, dict) else page_result
                 payload[key] = page_result if isinstance(page_result, dict) else {"value": page_result}
                 if isinstance(values, list):
@@ -192,6 +223,7 @@ def run_graph_endpoints(
                 "type": "graph",
                 "name": key,
                 "endpoint": endpoint,
+                "api_version": api_version,
                 "status": status,
                 "top": query.get("$top"),
                 "result_limit": top if page else None,

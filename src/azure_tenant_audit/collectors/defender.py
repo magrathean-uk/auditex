@@ -10,9 +10,9 @@ class DefenderCollector(Collector):
     name = "defender"
     description = "Defender alerts, incidents, and security score posture from Microsoft Graph."
     required_permissions = [
+        "SecurityAlert.Read.All",
         "SecurityEvents.Read.All",
         "SecurityIncident.Read.All",
-        "SecurityActions.Read.All",
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
@@ -31,7 +31,7 @@ class DefenderCollector(Collector):
 
         queries = {
             "securityAlerts": {
-                "endpoint": "/security/alerts",
+                "endpoint": "/security/alerts_v2",
                 "params": query_params,
                 "min_top": 1,
             },

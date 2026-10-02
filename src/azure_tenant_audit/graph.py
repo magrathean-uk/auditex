@@ -17,6 +17,28 @@ from .versioning import package_user_agent
 
 LOG = logging.getLogger(__name__)
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
+# Beta is opt-in per endpoint: only surfaces without a v1.0 equivalent use it, and
+# every beta call is recorded with api_version="beta" in coverage and the API ledger.
+GRAPH_BETA_ROOT = "https://graph.microsoft.com/beta"
+GRAPH_API_ROOTS = {"v1.0": GRAPH_ROOT, "beta": GRAPH_BETA_ROOT}
+
+
+def graph_url(path: str, api_version: str = "v1.0") -> str:
+    """Return the full Graph URL for ``path`` under the requested API version."""
+    if path.startswith("http"):
+        return path
+    try:
+        root = GRAPH_API_ROOTS[api_version]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported Graph api_version: {api_version!r}") from exc
+    return f"{root}{path}"
+
+
+def graph_api_version(url: str) -> str:
+    """Infer the Graph API version from a path or full URL (relative paths are v1.0)."""
+    if url.startswith(GRAPH_BETA_ROOT):
+        return "beta"
+    return "v1.0"
 GRAPH_BATCH_CHUNK_SIZE = 20
 TOKEN_URL_TEMPLATE = "{authority}{tenant_id}/oauth2/v2.0/token"
 
@@ -119,7 +141,9 @@ class GraphClient:
         parts = [item for item in path.split("/") if item]
         if parts and parts[0] in {"v1.0", "beta"}:
             parts = parts[1:]
-        return parts[0] if parts else "root"
+        # Two segments: /security/alerts_v2 and /security/secureScores need different permissions,
+        # so a 403 on one must not stop the other.
+        return "/".join(part.split("(", 1)[0] for part in parts[:2]) if parts else "root"
 
     def _apply_pacing(self, *, method: str, url: str, attempt: int) -> None:
         policy = self._throttle_policy()
@@ -172,6 +196,35 @@ class GraphClient:
         if self.auth.auth_mode == "interactive":
             return self._interactive_token()
         return self._app_token()
+
+    def app_token_for(self, scope: str) -> str | None:
+        """Client-credentials token for another resource (e.g. Exchange Online), or None outside app mode."""
+        if self.auth.access_token or self.auth.auth_mode == "interactive" or not self.auth.client_secret or not self.auth.client_id:
+            return None
+        cache = self.__dict__.setdefault("_resource_tokens", {})
+        if scope in cache:
+            return cache[scope]
+        try:
+            response = self.session.post(
+                self._token_url(),
+                data={
+                    "client_id": self.auth.client_id,
+                    "client_secret": self.auth.client_secret,
+                    "scope": scope,
+                    "grant_type": "client_credentials",
+                },
+                timeout=self.auth.timeout_seconds,
+            )
+        except RequestException as exc:  # noqa: BLE001
+            self._emit("graph.token.failed", "Resource token request raised transport exception", {"scope": scope, "error": str(exc)})
+            return None
+        if response.status_code >= 400:
+            self._emit("graph.token.failed", "Resource token request returned an error response", {"scope": scope, "status": response.status_code})
+            return None
+        token = response.json().get("access_token")
+        cache[scope] = token
+        self._emit("graph.token.succeeded", "Resource token acquired", {"scope": scope, "status": response.status_code})
+        return token
 
     def _app_token(self) -> str:
         if not self.auth.client_secret:

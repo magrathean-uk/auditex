@@ -279,6 +279,9 @@ def build_auditor_score(
 
 
 def _classify_attack_stage(finding: Mapping[str, Any]) -> str | None:
+    if str(finding.get("rule_id") or "").startswith("attack_path."):
+        # Graph-derived paths are reported on their own, not as keyword stages.
+        return None
     text = " ".join(
         str(finding.get(key) or "")
         for key in ("rule_id", "category", "title", "description")
@@ -307,12 +310,17 @@ def build_attack_paths(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     chain = [stage for stage in stage_order if by_stage[stage]]
     if len(chain) < 2:
         return []
+    # Represent each stage by its most severe finding (stable for ties).
+    lead = {
+        stage: max(by_stage[stage], key=lambda item: _SEVERITY_RANK.get(str(item.get("severity") or ""), 0))
+        for stage in chain
+    }
     stage_findings = [
         {
             "stage": stage,
-            "finding_id": by_stage[stage][0].get("id"),
-            "title": by_stage[stage][0].get("title"),
-            "severity": by_stage[stage][0].get("severity"),
+            "finding_id": lead[stage].get("id"),
+            "title": lead[stage].get("title"),
+            "severity": lead[stage].get("severity"),
         }
         for stage in chain
     ]

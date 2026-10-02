@@ -46,6 +46,8 @@ Google Workspace commands and credential choices are in the [product manual](../
 
 ## Offline fixtures
 
+`auditex demo` is the guided walkthrough for demonstrations and recordings. It replays the synthetic demo tenant into `outputs/demo` (recreated on each run), pauses between steps unless `--no-pause` is given, and writes `outputs/demo/explorer.html`. `--sample` replays another offline fixture instead.
+
 ```bash
 auditex run --offline --sample examples/sample_audit_bundle/sample_result.json --tenant-name demo --run-name sample --out outputs/offline
 auditex run --offline --sample examples/sample_audit_bundle/known_bad_result.json --tenant-name demo --run-name known-bad --out outputs/offline-known-bad
@@ -63,7 +65,10 @@ auditex report permissions <run-dir> --format md
 auditex report proof-table <run-dir> --format md
 auditex report customer-pack <run-dir> --output-dir customer-pack
 auditex report verify-pack customer-pack
+auditex report explorer <run-dir>
 ```
+
+`report explorer` writes one self-contained HTML page (default `<run-dir>/reports/explorer.html`) with the findings, embedded evidence records, attack paths, and data-handling assertions. It makes no network requests, but it contains tenant evidence: share it only like the run itself.
 
 Use a fresh pack directory and review it for confidential information before sharing through the customer's approved channel. Integrity verification does not establish audit completeness or permission to disclose. Follow the [customer handoff guide](../guides/customer-handoff-guide.md), including expired accepted-risk checks.
 

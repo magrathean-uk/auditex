@@ -3,8 +3,8 @@
 Targets the #1 BEC indicator: rules that forward to external recipients or
 hide messages from the user (move to RSS Feeds, Junk, or Deleted Items with a
 broad subject filter). Reads via Microsoft Graph so a Global Reader / Global
-Admin with `MailboxSettings.Read.All` and `Mail.Read.All` can audit a tenant
-without Exchange Online PowerShell.
+Admin with `MailboxSettings.Read` can audit a tenant without Exchange Online
+PowerShell. Message content is never read, so `Mail.Read` is not requested.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class MailboxForwardingCollector(Collector):
     description = "Mailbox forwarding settings and inbox rules per licensed user."
     required_permissions = [
         "User.Read.All",
-        "MailboxSettings.Read.All",
+        "MailboxSettings.Read",
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:

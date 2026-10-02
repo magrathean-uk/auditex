@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -9,6 +11,9 @@ from typing import Any, Callable, Optional
 
 from ..secret_hygiene import redact_command_string, redact_text
 from .base import Adapter, AdapterMetadata
+
+
+_ORGANIZATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.onmicrosoft\.(?:com|us|de|cn)")
 
 
 class PowerShellGraphAdapter(Adapter):
@@ -38,6 +43,7 @@ class PowerShellGraphAdapter(Adapter):
             or "access denied" in lowered
             or ("sign in" in lowered and "denied" in lowered)
             or "connect-exchangeonline" in lowered
+            or "unauthorized" in lowered
         )
 
     @staticmethod
@@ -52,10 +58,27 @@ class PowerShellGraphAdapter(Adapter):
             return {}
         return {"value": [parsed]}
 
+    @staticmethod
+    def _session_prelude(session: Optional[dict[str, Any]], env: dict[str, str]) -> str:
+        """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line."""
+        if not session or session.get("kind") != "exchange_online":
+            return ""
+        token = session.get("access_token")
+        organization = str(session.get("organization") or "")
+        if not token or not _ORGANIZATION_PATTERN.fullmatch(organization):
+            return ""
+        env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)
+        return (
+            "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
+            f"Connect-ExchangeOnline -AccessToken $env:AUDITEX_EXO_ACCESS_TOKEN -Organization '{organization}' "
+            "-ShowBanner:$false -SkipLoadingFormatData -ErrorAction Stop | Out-Null; "
+        )
+
     def run(
         self,
         command: str,
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
+        session: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         safe_command = redact_command_string(command)
         exe = shutil.which("pwsh")
@@ -72,7 +95,9 @@ class PowerShellGraphAdapter(Adapter):
         if not script:
             return {"error": "command_empty", "error_class": "command_parse_error", "command": safe_command}
 
-        prepared = f"{script} | ConvertTo-Json -Depth 20 -Compress"
+        env = dict(os.environ)
+        prelude = self._session_prelude(session, env)
+        prepared = f"{prelude}{script} | ConvertTo-Json -Depth 20 -Compress"
         try:
             if log_event:
                 log_event("command.started", "PowerShell command started", {"command": safe_command, "executable": exe})
@@ -82,7 +107,8 @@ class PowerShellGraphAdapter(Adapter):
                 [exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prepared],
                 text=True,
                 capture_output=True,
-                timeout=120,
+                timeout=180 if prelude else 120,
+                env=env,
             )
             duration_ms = round((time.time() - start) * 1000, 2)
             stdout = result.stdout or ""
@@ -104,7 +130,10 @@ class PowerShellGraphAdapter(Adapter):
                 )
 
             if result.returncode != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
-                if self._looks_like_not_found(combined):
+                if self._looks_like_not_found(combined) and session is not None and not prelude:
+                    # Exchange/Teams cmdlets only exist inside a connected session.
+                    error_class = "session_not_connected"
+                elif self._looks_like_not_found(combined):
                     error_class = "command_not_found"
                 elif self._looks_like_auth_required(combined):
                     error_class = "command_not_authenticated"

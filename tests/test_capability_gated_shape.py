@@ -31,6 +31,7 @@ _GATED_COLLECTORS = (
     "sentinel_xdr",
     "defender_cloud_apps",
     "copilot_governance",
+    "identity_protection",
 )
 
 _VALID_GATED_ERROR_CLASSES = {"service_not_available", "insufficient_permissions"}

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .assurance import build_live_readiness_summary
-from .capability_gate import enrich_capability_row
+from .capability_gate import INTUNE_COLLECTORS, enrich_capability_row, intune_license_state
 from .config import CollectorConfig, RunConfig
 from .ai_context import build_privacy_block
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
@@ -148,12 +148,35 @@ def build_capability_matrix_rows(
 def reconcile_capability_matrix_rows(
     capability_rows: list[dict[str, Any]],
     result_rows: list[dict[str, Any]],
+    *,
+    coverage_rows: list[dict[str, Any]] | None = None,
+    collector_payloads: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     results_by_collector = {str(row.get("name")): row for row in result_rows if isinstance(row, dict)}
+    failed_endpoints: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for coverage in coverage_rows or []:
+        if not isinstance(coverage, dict) or coverage.get("status") == "ok":
+            continue
+        collector_name = str(coverage.get("collector") or "")
+        failed_endpoints[collector_name].append(
+            {
+                "name": coverage.get("name"),
+                "status": coverage.get("status"),
+                "error_class": coverage.get("error_class"),
+            }
+        )
+    license_state = intune_license_state(collector_payloads) if collector_payloads is not None else "unknown"
     reconciled: list[dict[str, Any]] = []
     for row in capability_rows:
         item = dict(row)
         collector = str(item.get("collector") or "")
+        if failed_endpoints.get(collector):
+            # Carry endpoint error classes so the blocker classifier sees licence and
+            # service gaps instead of a generic runtime failure.
+            item["endpoint_statuses"] = failed_endpoints[collector]
+            if collector in INTUNE_COLLECTORS:
+                # Intune Forbidden is ambiguous (scope vs licence); add the licensing signal.
+                item["license_state"] = license_state
         result = results_by_collector.get(collector, {})
         actual_status = str(result.get("status") or "")
         missing_permissions = list(item.get("missing_permissions") or [])

@@ -123,7 +123,38 @@
     "framework_mappings": {
       "type": "object",
       "properties": {
+        "cis_m365_v7": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "cis_m365_v3": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "deprecated": true
+        },
+        "cisa_scuba": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ms_secure_score": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ms_zero_trust": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcsb": {
           "type": "array",
           "items": {
             "type": "string"

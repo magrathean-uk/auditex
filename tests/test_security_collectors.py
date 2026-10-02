@@ -20,11 +20,11 @@ class _SecurityClient:
             return [{"id": "ca-1"}]
         if path == "/identity/conditionalAccess/namedLocations":
             return [{"id": "nl-1"}]
-        if path == "/identity/conditionalAccess/authenticationStrengthPolicies":
+        if path == "/policies/authenticationStrengthPolicies":
             return [{"id": "as-1"}]
         if path == "/identity/conditionalAccess/authenticationContextClassReferences":
             return [{"id": "ac-1"}]
-        if path == "/security/alerts":
+        if path == "/security/alerts_v2":
             return [{"id": "alert-1"}]
         if path == "/security/incidents":
             return [{"id": "incident-1"}]

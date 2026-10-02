@@ -486,9 +486,12 @@ def test_conditional_access_graph_scales_with_large_identity_and_multiple_polici
                             "includeLocations": [f"loc-{idx % location_count}"],
                             "excludeLocations": [f"loc-{(idx + 1) % location_count}"],
                         },
-                        "authenticationStrength": {"includePolicies": [f"as-{idx % auth_strength_count}"]},
                     },
-                    "grantControls": {"builtInControls": ["mfa"], "operator": "AND"},
+                    "grantControls": {
+                        "builtInControls": ["mfa"],
+                        "operator": "AND",
+                        "authenticationStrength": {"id": f"as-{idx % auth_strength_count}"},
+                    },
                 }
                 for idx in range(policy_count)
             ]

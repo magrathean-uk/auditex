@@ -1,0 +1,955 @@
+{
+  "_fixture_provenance": {
+    "fixture_id": "m365-demo-tenant",
+    "fixture_version": "2026-10-02",
+    "provider": "m365",
+    "seed_kind": "demo",
+    "synthetic": true,
+    "source_path": "examples/demo_tenant/demo_tenant.json",
+    "description": "Synthetic demo tenant for Halcyon Freight Ltd, a fictional 40-person UK logistics company. Every person, company, domain, identifier, and event is fictional; domains use the reserved .example TLD."
+  },
+  "identity": {
+    "organization": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-00000000d3e0", "displayName": "Halcyon Freight Ltd", "countryLetterCode": "GB", "city": "Felixstowe", "state": "Suffolk", "preferredLanguage": "en-GB", "createdDateTime": "2021-04-12T09:30:00Z", "tenantType": "AAD", "technicalNotificationMails": ["it@halcyonfreight.example"], "verifiedDomains": [{"name": "halcyonfreight.example", "isDefault": true, "isInitial": false, "type": "Managed", "capabilities": "Email, OfficeCommunicationsOnline"}, {"name": "halcyonfreight.onmicrosoft.example", "isDefault": false, "isInitial": true, "type": "Managed", "capabilities": "Email, OfficeCommunicationsOnline"}]}
+      ]
+    },
+    "domains": {
+      "value": [
+        {"id": "halcyonfreight.example", "authenticationType": "Managed", "isDefault": true, "isInitial": false, "isVerified": true, "supportedServices": ["Email", "OfficeCommunicationsOnline", "Intune"]},
+        {"id": "halcyonfreight.onmicrosoft.example", "authenticationType": "Managed", "isDefault": false, "isInitial": true, "isVerified": true, "supportedServices": ["Email", "OfficeCommunicationsOnline"]}
+      ]
+    },
+    "users": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000100000001", "displayName": "Oliver Hartley", "userPrincipalName": "oliver.hartley@halcyonfreight.example", "mail": "oliver.hartley@halcyonfreight.example", "jobTitle": "Managing Director", "department": "Executive", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000002", "displayName": "Priya Nair", "userPrincipalName": "priya.nair@halcyonfreight.example", "mail": "priya.nair@halcyonfreight.example", "jobTitle": "IT & Systems Manager", "department": "IT", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000003", "displayName": "Gareth Pryce", "userPrincipalName": "gareth.pryce@halcyonfreight.example", "mail": "gareth.pryce@halcyonfreight.example", "jobTitle": "Finance Director", "department": "Finance", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000004", "displayName": "Malcolm Reed", "userPrincipalName": "malcolm.reed@halcyonfreight.example", "mail": "malcolm.reed@halcyonfreight.example", "jobTitle": "Operations Director", "department": "Operations", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2023-08-14T07:41:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000005", "displayName": "Dan Whitlock", "userPrincipalName": "dan.whitlock@halcyonfreight.example", "mail": "dan.whitlock@halcyonfreight.example", "jobTitle": "IT Contractor (ended)", "department": "IT", "usageLocation": "GB", "userType": "Member", "accountEnabled": false, "lastPasswordChangeDateTime": "2024-02-02T16:20:00Z", "assignedLicenses": [], "signInActivity": {"lastSignInDateTime": "2025-11-28T17:02:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000006", "displayName": "Lucy Barker", "userPrincipalName": "lucy.barker@halcyonfreight.example", "mail": "lucy.barker@halcyonfreight.example", "jobTitle": "IT Support Analyst", "department": "IT", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000007", "displayName": "Tom Fielding", "userPrincipalName": "tom.fielding@halcyonfreight.example", "mail": "tom.fielding@halcyonfreight.example", "jobTitle": "Payroll Officer", "department": "Finance", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000008", "displayName": "Hannah Bell", "userPrincipalName": "hannah.bell@halcyonfreight.example", "mail": "hannah.bell@halcyonfreight.example", "jobTitle": "Accounts Payable Clerk", "department": "Finance", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000009", "displayName": "Kieran Walsh", "userPrincipalName": "kieran.walsh@halcyonfreight.example", "mail": "kieran.walsh@halcyonfreight.example", "jobTitle": "Warehouse Supervisor", "department": "Warehouse", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000a", "displayName": "Shauna Doyle", "userPrincipalName": "shauna.doyle@halcyonfreight.example", "mail": "shauna.doyle@halcyonfreight.example", "jobTitle": "Goods-In Operative", "department": "Warehouse", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000b", "displayName": "Rhys Morgan", "userPrincipalName": "rhys.morgan@halcyonfreight.example", "mail": "rhys.morgan@halcyonfreight.example", "jobTitle": "Transport Planner", "department": "Transport Planning", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000c", "displayName": "Amira Haddad", "userPrincipalName": "amira.haddad@halcyonfreight.example", "mail": "amira.haddad@halcyonfreight.example", "jobTitle": "Customer Service Advisor", "department": "Customer Service", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000d", "displayName": "Connor McBride", "userPrincipalName": "connor.mcbride@halcyonfreight.example", "mail": "connor.mcbride@halcyonfreight.example", "jobTitle": "HGV Driver", "department": "Transport", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2025-11-03T06:30:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000e", "displayName": "Eleanor Shaw", "userPrincipalName": "eleanor.shaw@halcyonfreight.example", "mail": "eleanor.shaw@halcyonfreight.example", "jobTitle": "HR Manager", "department": "HR", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000f", "displayName": "James Okoro", "userPrincipalName": "james.okoro@halcyonfreight.example", "mail": "james.okoro@halcyonfreight.example", "jobTitle": "Sales Manager", "department": "Sales", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000010", "displayName": "Fiona Campbell", "userPrincipalName": "fiona.campbell@halcyonfreight.example", "mail": "fiona.campbell@halcyonfreight.example", "jobTitle": "Account Manager", "department": "Sales", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000011", "displayName": "William Price", "userPrincipalName": "william.price@halcyonfreight.example", "mail": "william.price@halcyonfreight.example", "jobTitle": "Operations Manager", "department": "Operations", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000012", "displayName": "Sophie Turner", "userPrincipalName": "sophie.turner@halcyonfreight.example", "mail": "sophie.turner@halcyonfreight.example", "jobTitle": "Customer Service Lead", "department": "Customer Service", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000013", "displayName": "Ravi Patel", "userPrincipalName": "ravi.patel@halcyonfreight.example", "mail": "ravi.patel@halcyonfreight.example", "jobTitle": "Senior Transport Planner", "department": "Transport Planning", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000014", "displayName": "Megan Lloyd", "userPrincipalName": "megan.lloyd@halcyonfreight.example", "mail": "megan.lloyd@halcyonfreight.example", "jobTitle": "Credit Controller", "department": "Finance", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000015", "displayName": "Callum Fraser", "userPrincipalName": "callum.fraser@halcyonfreight.example", "mail": "callum.fraser@halcyonfreight.example", "jobTitle": "Forklift Operative", "department": "Warehouse", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000016", "displayName": "Bethan Hughes", "userPrincipalName": "bethan.hughes@halcyonfreight.example", "mail": "bethan.hughes@halcyonfreight.example", "jobTitle": "Stock Controller", "department": "Warehouse", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000017", "displayName": "Adam Clarke", "userPrincipalName": "adam.clarke@halcyonfreight.example", "mail": "adam.clarke@halcyonfreight.example", "jobTitle": "HGV Driver", "department": "Transport", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2025-11-03T06:30:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000018", "displayName": "Niamh Gallagher", "userPrincipalName": "niamh.gallagher@halcyonfreight.example", "mail": "niamh.gallagher@halcyonfreight.example", "jobTitle": "Customer Service Advisor", "department": "Customer Service", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000019", "displayName": "Liam Foster", "userPrincipalName": "liam.foster@halcyonfreight.example", "mail": "liam.foster@halcyonfreight.example", "jobTitle": "Van Driver", "department": "Transport", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2025-11-03T06:30:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001a", "displayName": "Chloe Bennett", "userPrincipalName": "chloe.bennett@halcyonfreight.example", "mail": "chloe.bennett@halcyonfreight.example", "jobTitle": "Business Development Executive", "department": "Sales", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001b", "displayName": "Harry Wood", "userPrincipalName": "harry.wood@halcyonfreight.example", "mail": "harry.wood@halcyonfreight.example", "jobTitle": "Shift Manager", "department": "Operations", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001c", "displayName": "Zara Ahmed", "userPrincipalName": "zara.ahmed@halcyonfreight.example", "mail": "zara.ahmed@halcyonfreight.example", "jobTitle": "HR Assistant", "department": "HR", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001d", "displayName": "Owen Jenkins", "userPrincipalName": "owen.jenkins@halcyonfreight.example", "mail": "owen.jenkins@halcyonfreight.example", "jobTitle": "Picker Packer", "department": "Warehouse", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001e", "displayName": "Grace Mitchell", "userPrincipalName": "grace.mitchell@halcyonfreight.example", "mail": "grace.mitchell@halcyonfreight.example", "jobTitle": "Management Accountant", "department": "Finance", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001f", "displayName": "Ethan Ward", "userPrincipalName": "ethan.ward@halcyonfreight.example", "mail": "ethan.ward@halcyonfreight.example", "jobTitle": "Fleet Coordinator", "department": "Transport", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000020", "displayName": "Isla Robertson", "userPrincipalName": "isla.robertson@halcyonfreight.example", "mail": "isla.robertson@halcyonfreight.example", "jobTitle": "Customs Documentation Clerk", "department": "Customer Service", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000021", "displayName": "Ben Cooper", "userPrincipalName": "ben.cooper@halcyonfreight.example", "mail": "ben.cooper@halcyonfreight.example", "jobTitle": "Health & Safety Officer", "department": "Operations", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000022", "displayName": "Emergency Access 01", "userPrincipalName": "breakglass01@halcyonfreight.onmicrosoft.example", "mail": "", "jobTitle": "Emergency access account", "department": "IT", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-03-02T11:00:00Z", "assignedLicenses": [], "signInActivity": {"lastSignInDateTime": "2026-03-02T11:04:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000023", "displayName": "Scan to Email", "userPrincipalName": "svc-scanner@halcyonfreight.example", "mail": "svc-scanner@halcyonfreight.example", "jobTitle": "Service account - office MFD scan-to-email", "department": "IT", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2022-05-19T12:00:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-10-01T15:44:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000024", "displayName": "Accounts Mailbox", "userPrincipalName": "accounts@halcyonfreight.example", "mail": "accounts@halcyonfreight.example", "jobTitle": "Shared mailbox", "department": "Finance", "usageLocation": "GB", "userType": "Member", "accountEnabled": false, "lastPasswordChangeDateTime": "2021-04-12T10:00:00Z", "assignedLicenses": []},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000025", "displayName": "Dispatch Desk", "userPrincipalName": "dispatch@halcyonfreight.example", "mail": "dispatch@halcyonfreight.example", "jobTitle": "Shared mailbox", "department": "Operations", "usageLocation": "GB", "userType": "Member", "accountEnabled": false, "lastPasswordChangeDateTime": "2021-04-12T10:00:00Z", "assignedLicenses": []},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000026", "displayName": "Sam Okafor", "userPrincipalName": "sam.okafor_parcel-partners.example#EXT#@halcyonfreight.onmicrosoft.example", "mail": "sam.okafor@parcel-partners.example", "jobTitle": "Partner account manager", "department": "Parcel Partners", "usageLocation": "GB", "userType": "Guest", "accountEnabled": true, "assignedLicenses": [], "signInActivity": {"lastSignInDateTime": "2026-09-22T13:10:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000027", "displayName": "Jo Lindqvist", "userPrincipalName": "jo.lindqvist_ledgerline-audit.example#EXT#@halcyonfreight.onmicrosoft.example", "mail": "jo.lindqvist@ledgerline-audit.example", "jobTitle": "External auditor", "department": "Ledgerline Audit", "usageLocation": "GB", "userType": "Guest", "accountEnabled": true, "assignedLicenses": [], "signInActivity": {"lastSignInDateTime": "2026-02-11T10:00:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000028", "displayName": "Ruth Gibson", "userPrincipalName": "ruth.gibson@halcyonfreight.example", "mail": "ruth.gibson@halcyonfreight.example", "jobTitle": "Customer Service Advisor", "department": "Customer Service", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000029", "displayName": "Mark Ellis", "userPrincipalName": "mark.ellis@halcyonfreight.example", "mail": "mark.ellis@halcyonfreight.example", "jobTitle": "HGV Driver", "department": "Transport", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002a", "displayName": "Kerry Dawson", "userPrincipalName": "kerry.dawson@halcyonfreight.example", "mail": "kerry.dawson@halcyonfreight.example", "jobTitle": "Goods-Out Operative", "department": "Warehouse", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002b", "displayName": "Aled Rees", "userPrincipalName": "aled.rees@halcyonfreight.example", "mail": "aled.rees@halcyonfreight.example", "jobTitle": "HGV Driver", "department": "Transport", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002c", "displayName": "Joanna Marsh", "userPrincipalName": "joanna.marsh@halcyonfreight.example", "mail": "joanna.marsh@halcyonfreight.example", "jobTitle": "Sales Coordinator", "department": "Sales", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002d", "displayName": "Stuart Kerr", "userPrincipalName": "stuart.kerr@halcyonfreight.example", "mail": "stuart.kerr@halcyonfreight.example", "jobTitle": "Yard Marshal", "department": "Warehouse", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002e", "displayName": "Pippa Holt", "userPrincipalName": "pippa.holt@halcyonfreight.example", "mail": "pippa.holt@halcyonfreight.example", "jobTitle": "Executive Assistant", "department": "Executive", "usageLocation": "GB", "userType": "Member", "accountEnabled": true, "lastPasswordChangeDateTime": "2026-06-15T09:12:00Z", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}], "signInActivity": {"lastSignInDateTime": "2026-09-30T08:05:00Z"}}
+      ]
+    },
+    "groups": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000200000001", "displayName": "Break Glass Accounts", "description": "Emergency access accounts excluded from Conditional Access", "groupTypes": [], "mailEnabled": false, "securityEnabled": true, "createdDateTime": "2021-04-20T09:00:00Z"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000002", "displayName": "All Staff", "description": "Dynamic group of all member users", "groupTypes": ["DynamicMembership"], "mailEnabled": false, "securityEnabled": true, "createdDateTime": "2021-04-20T09:00:00Z", "membershipRule": "(user.userType -eq \"Member\")"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000003", "displayName": "Finance", "description": "Finance department", "groupTypes": ["Unified"], "mailEnabled": true, "securityEnabled": false, "createdDateTime": "2021-04-20T09:00:00Z", "mail": "finance@halcyonfreight.example"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000004", "displayName": "Operations", "description": "Operations and warehouse team", "groupTypes": ["Unified"], "mailEnabled": true, "securityEnabled": false, "createdDateTime": "2021-04-20T09:00:00Z", "mail": "operations@halcyonfreight.example"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000005", "displayName": "Transport Planning", "description": "Transport planning team", "groupTypes": ["Unified"], "mailEnabled": true, "securityEnabled": false, "createdDateTime": "2021-04-20T09:00:00Z", "mail": "planning@halcyonfreight.example"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000006", "displayName": "Halcyon Freight", "description": "Company-wide Microsoft 365 group", "groupTypes": ["Unified"], "mailEnabled": true, "securityEnabled": false, "createdDateTime": "2021-04-20T09:00:00Z", "mail": "halcyon@halcyonfreight.example"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000007", "displayName": "Drivers", "description": "HGV and van drivers", "groupTypes": [], "mailEnabled": false, "securityEnabled": true, "createdDateTime": "2021-04-20T09:00:00Z"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000008", "displayName": "IT Admins", "description": "IT administration staff", "groupTypes": [], "mailEnabled": false, "securityEnabled": true, "createdDateTime": "2021-04-20T09:00:00Z"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000009", "displayName": "Intune - Corporate Laptops", "description": "Corporate Windows laptops", "groupTypes": [], "mailEnabled": false, "securityEnabled": true, "createdDateTime": "2021-04-20T09:00:00Z"}
+      ]
+    },
+    "applications": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000300000001", "appId": "0d3e1a7f-0000-4000-8000-003a00000001", "displayName": "ShipTrack Sync", "createdDateTime": "2023-01-17T14:22:00Z", "signInAudience": "AzureADMultipleOrgs", "publisherDomain": "halcyonfreight.example", "notes": "Shipment-tracking connector registered for the ShipTrack vendor integration."},
+        {"id": "0d3e1a7f-0000-4000-8000-000300000002", "appId": "0d3e1a7f-0000-4000-8000-003a00000002", "displayName": "Payroll Export", "createdDateTime": "2025-02-03T10:05:00Z", "signInAudience": "AzureADMyOrg", "publisherDomain": "halcyonfreight.example", "notes": "Nightly payroll export to the bureau. Built in-house by the payroll officer."},
+        {"id": "0d3e1a7f-0000-4000-8000-000300000003", "appId": "0d3e1a7f-0000-4000-8000-003a00000003", "displayName": "Halcyon Intranet", "createdDateTime": "2022-06-01T09:00:00Z", "signInAudience": "AzureADMyOrg", "publisherDomain": "halcyonfreight.example"},
+        {"id": "0d3e1a7f-0000-4000-8000-000300000004", "appId": "0d3e1a7f-0000-4000-8000-003a00000004", "displayName": "Legacy EDI Bridge", "createdDateTime": "2021-09-08T12:00:00Z", "signInAudience": "AzureADMyOrg", "publisherDomain": "halcyonfreight.example"}
+      ]
+    },
+    "servicePrincipals": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000400000001", "appId": "0d3e1a7f-0000-4000-8000-003a00000001", "displayName": "ShipTrack Sync", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0", "accountEnabled": true, "signInAudience": "AzureADMultipleOrgs", "publisherName": "Halcyon Freight Ltd", "replyUrls": ["http://shiptrack-sync.example/oauth/callback", "https://shiptrack-sync.example/oauth/callback"], "tags": ["WindowsAzureActiveDirectoryIntegratedApp"]},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000002", "appId": "0d3e1a7f-0000-4000-8000-003a00000002", "displayName": "Payroll Export", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0", "accountEnabled": true, "signInAudience": "AzureADMyOrg", "publisherName": "Halcyon Freight Ltd", "tags": ["WindowsAzureActiveDirectoryIntegratedApp"]},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000003", "appId": "0d3e1a7f-0000-4000-8000-003a00000003", "displayName": "Halcyon Intranet", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0", "accountEnabled": true, "signInAudience": "AzureADMyOrg", "publisherName": "Halcyon Freight Ltd"},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000004", "appId": "0d3e1a7f-0000-4000-8000-003a00000004", "displayName": "Legacy EDI Bridge", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0", "accountEnabled": true, "signInAudience": "AzureADMyOrg", "publisherName": "Halcyon Freight Ltd"},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000005", "appId": "0d3e1a7f-0000-4000-8000-003a00000005", "displayName": "Route Planner Pro", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000a002", "accountEnabled": true, "signInAudience": "AzureADMultipleOrgs", "publisherName": "Route Planner Pro Ltd", "verifiedPublisher": {}},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000099", "appId": "00000003-0000-0000-c000-000000000000", "displayName": "Microsoft Graph", "servicePrincipalType": "Application", "accountEnabled": true, "signInAudience": "AzureADMultipleOrgs"}
+      ]
+    },
+    "roleDefinitions": {
+      "value": [
+        {"id": "62e90394-69f5-4237-9190-012177145e10", "templateId": "62e90394-69f5-4237-9190-012177145e10", "displayName": "Global Administrator", "isBuiltIn": true, "description": "Can manage all aspects of Microsoft Entra ID and Microsoft services that use Microsoft Entra identities."},
+        {"id": "29232cdf-9323-42fd-ade2-1d097af3e4de", "templateId": "29232cdf-9323-42fd-ade2-1d097af3e4de", "displayName": "Exchange Administrator", "isBuiltIn": true, "description": "Can manage all aspects of the Exchange product."},
+        {"id": "729827e3-9c14-49f7-bb1b-9608f156bbb8", "templateId": "729827e3-9c14-49f7-bb1b-9608f156bbb8", "displayName": "Helpdesk Administrator", "isBuiltIn": true, "description": "Can reset passwords for non-administrators and Helpdesk Administrators."},
+        {"id": "e8611ab8-c189-46e8-94e1-60213ab1f814", "templateId": "e8611ab8-c189-46e8-94e1-60213ab1f814", "displayName": "Privileged Role Administrator", "isBuiltIn": true, "description": "Can manage role assignments in Microsoft Entra ID, and all aspects of Privileged Identity Management."},
+        {"id": "5d6b6bb7-de71-4623-b4af-96380a352509", "templateId": "5d6b6bb7-de71-4623-b4af-96380a352509", "displayName": "Security Reader", "isBuiltIn": true, "description": "Can read security information and reports in Microsoft Entra ID and Office 365."}
+      ]
+    },
+    "roleAssignments": {
+      "value": [
+        {"id": "ra-001", "principalId": "0d3e1a7f-0000-4000-8000-000100000001", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/"},
+        {"id": "ra-002", "principalId": "0d3e1a7f-0000-4000-8000-000100000002", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/"},
+        {"id": "ra-003", "principalId": "0d3e1a7f-0000-4000-8000-000100000003", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/"},
+        {"id": "ra-004", "principalId": "0d3e1a7f-0000-4000-8000-000100000004", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/"},
+        {"id": "ra-005", "principalId": "0d3e1a7f-0000-4000-8000-000100000005", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/"},
+        {"id": "ra-006", "principalId": "0d3e1a7f-0000-4000-8000-000100000022", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/"},
+        {"id": "ra-007", "principalId": "0d3e1a7f-0000-4000-8000-000100000006", "roleDefinitionId": "29232cdf-9323-42fd-ade2-1d097af3e4de", "directoryScopeId": "/"},
+        {"id": "ra-008", "principalId": "0d3e1a7f-0000-4000-8000-000100000006", "roleDefinitionId": "729827e3-9c14-49f7-bb1b-9608f156bbb8", "directoryScopeId": "/"},
+        {"id": "ra-009", "principalId": "0d3e1a7f-0000-4000-8000-000100000002", "roleDefinitionId": "e8611ab8-c189-46e8-94e1-60213ab1f814", "directoryScopeId": "/"},
+        {"id": "ra-010", "principalId": "0d3e1a7f-0000-4000-8000-00010000000e", "roleDefinitionId": "5d6b6bb7-de71-4623-b4af-96380a352509", "directoryScopeId": "/"}
+      ]
+    }
+  },
+  "domains_hybrid": {
+    "organization": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-00000000d3e0", "displayName": "Halcyon Freight Ltd"}
+      ]
+    },
+    "domains": {
+      "value": [
+        {"id": "halcyonfreight.example", "authenticationType": "Managed", "isDefault": true, "isVerified": true},
+        {"id": "halcyonfreight.onmicrosoft.example", "authenticationType": "Managed", "isDefault": false, "isVerified": true}
+      ]
+    },
+    "syncSampleUsers": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000100000001", "userPrincipalName": "oliver.hartley@halcyonfreight.example"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000008", "userPrincipalName": "hannah.bell@halcyonfreight.example"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000009", "userPrincipalName": "kieran.walsh@halcyonfreight.example"}
+      ]
+    }
+  },
+  "conditional_access": {
+    "conditionalAccessPolicies": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000500000001", "displayName": "CA001 - Require MFA for administrators", "state": "enabled", "createdDateTime": "2023-03-01T10:00:00Z", "conditions": {"users": {"includeRoles": ["62e90394-69f5-4237-9190-012177145e10", "29232cdf-9323-42fd-ade2-1d097af3e4de", "729827e3-9c14-49f7-bb1b-9608f156bbb8", "e8611ab8-c189-46e8-94e1-60213ab1f814"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": ["mfa"]}},
+        {"id": "0d3e1a7f-0000-4000-8000-000500000002", "displayName": "CA002 - Require MFA for all users", "state": "enabledForReportingButNotEnforced", "createdDateTime": "2024-05-14T10:00:00Z", "conditions": {"users": {"includeUsers": ["All"]}, "applications": {"includeApplications": ["All"]}, "locations": {"includeLocations": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": ["mfa"]}},
+        {"id": "0d3e1a7f-0000-4000-8000-000500000003", "displayName": "CA003 - Block high-risk sign-ins", "state": "enabled", "createdDateTime": "2025-01-09T10:00:00Z", "conditions": {"users": {"includeUsers": ["All"]}, "applications": {"includeApplications": ["All"]}, "signInRiskLevels": ["high"], "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": ["block"]}},
+        {"id": "0d3e1a7f-0000-4000-8000-000500000004", "displayName": "CA004 - Block legacy authentication", "state": "disabled", "createdDateTime": "2023-03-01T10:05:00Z", "conditions": {"users": {"includeUsers": ["All"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["exchangeActiveSync", "other"]}, "grantControls": {"operator": "OR", "builtInControls": ["block"]}},
+        {"id": "0d3e1a7f-0000-4000-8000-000500000005", "displayName": "CA005 - Phishing-resistant MFA for Global Administrators", "state": "enabledForReportingButNotEnforced", "createdDateTime": "2026-08-20T10:00:00Z", "conditions": {"users": {"includeRoles": ["62e90394-69f5-4237-9190-012177145e10"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": [], "authenticationStrength": {"id": "00000000-0000-0000-0000-000000000004", "displayName": "Phishing-resistant MFA"}}}
+      ]
+    },
+    "namedLocations": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000600000001", "displayName": "Felixstowe HQ and Ipswich Depot", "@odata.type": "#microsoft.graph.ipNamedLocation", "isTrusted": true, "ipRanges": [{"cidrAddress": "198.51.100.0/27"}, {"cidrAddress": "198.51.100.64/28"}]},
+        {"id": "0d3e1a7f-0000-4000-8000-000600000002", "displayName": "United Kingdom", "@odata.type": "#microsoft.graph.countryNamedLocation", "countriesAndRegions": ["GB"], "includeUnknownCountriesAndRegions": false}
+      ]
+    },
+    "authenticationStrengthPolicies": {
+      "value": [
+        {"id": "00000000-0000-0000-0000-000000000004", "displayName": "Phishing-resistant MFA", "policyType": "builtIn", "allowedCombinations": ["windowsHelloForBusiness", "fido2", "x509CertificateMultiFactor"]}
+      ]
+    },
+    "authenticationContextClassReferences": {"value": []}
+  },
+  "auth_methods": {
+    "authenticationMethodsPolicy": {
+      "value": [
+        {"id": "authenticationMethodsPolicy", "displayName": "Authentication Methods Policy", "policyMigrationState": "migrationInProgress", "registrationEnforcement": {"authenticationMethodsRegistrationCampaign": {"state": "disabled", "snoozeDurationInDays": 14}}}
+      ]
+    },
+    "authenticationMethodConfigurations": {
+      "value": [
+        {"id": "Fido2", "state": "enabled"},
+        {"id": "MicrosoftAuthenticator", "state": "enabled"},
+        {"id": "Sms", "state": "enabled"},
+        {"id": "Voice", "state": "enabled"},
+        {"id": "Email", "state": "disabled"},
+        {"id": "TemporaryAccessPass", "state": "disabled"}
+      ]
+    },
+    "userRegistrationDetails": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000100000001", "userPrincipalName": "oliver.hartley@halcyonfreight.example", "userType": "member", "isAdmin": true, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000002", "userPrincipalName": "priya.nair@halcyonfreight.example", "userType": "member", "isAdmin": true, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["fido2", "microsoftAuthenticatorPush", "windowsHelloForBusiness"], "defaultMfaMethod": "fido2"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000003", "userPrincipalName": "gareth.pryce@halcyonfreight.example", "userType": "member", "isAdmin": true, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000004", "userPrincipalName": "malcolm.reed@halcyonfreight.example", "userType": "member", "isAdmin": true, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["mobilePhone"], "defaultMfaMethod": "mobilePhone"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000005", "userPrincipalName": "dan.whitlock@halcyonfreight.example", "userType": "member", "isAdmin": true, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000006", "userPrincipalName": "lucy.barker@halcyonfreight.example", "userType": "member", "isAdmin": true, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000007", "userPrincipalName": "tom.fielding@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000008", "userPrincipalName": "hannah.bell@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000009", "userPrincipalName": "kieran.walsh@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000a", "userPrincipalName": "shauna.doyle@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000b", "userPrincipalName": "rhys.morgan@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000c", "userPrincipalName": "amira.haddad@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000d", "userPrincipalName": "connor.mcbride@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000e", "userPrincipalName": "eleanor.shaw@halcyonfreight.example", "userType": "member", "isAdmin": true, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000000f", "userPrincipalName": "james.okoro@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000010", "userPrincipalName": "fiona.campbell@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000011", "userPrincipalName": "william.price@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000012", "userPrincipalName": "sophie.turner@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000013", "userPrincipalName": "ravi.patel@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000014", "userPrincipalName": "megan.lloyd@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000015", "userPrincipalName": "callum.fraser@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000016", "userPrincipalName": "bethan.hughes@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000017", "userPrincipalName": "adam.clarke@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000018", "userPrincipalName": "niamh.gallagher@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000019", "userPrincipalName": "liam.foster@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001a", "userPrincipalName": "chloe.bennett@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001b", "userPrincipalName": "harry.wood@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001c", "userPrincipalName": "zara.ahmed@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001d", "userPrincipalName": "owen.jenkins@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001e", "userPrincipalName": "grace.mitchell@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000001f", "userPrincipalName": "ethan.ward@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000020", "userPrincipalName": "isla.robertson@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000021", "userPrincipalName": "ben.cooper@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000022", "userPrincipalName": "breakglass01@halcyonfreight.onmicrosoft.example", "userType": "member", "isAdmin": true, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["fido2"], "defaultMfaMethod": "fido2"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000023", "userPrincipalName": "svc-scanner@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": ["email"], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000026", "userPrincipalName": "sam.okafor_parcel-partners.example#EXT#@halcyonfreight.onmicrosoft.example", "userType": "guest", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": [], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000027", "userPrincipalName": "jo.lindqvist_ledgerline-audit.example#EXT#@halcyonfreight.onmicrosoft.example", "userType": "guest", "isAdmin": false, "isMfaRegistered": false, "isMfaCapable": false, "isSsprRegistered": false, "methodsRegistered": [], "defaultMfaMethod": "none"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000028", "userPrincipalName": "ruth.gibson@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000029", "userPrincipalName": "mark.ellis@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002a", "userPrincipalName": "kerry.dawson@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002b", "userPrincipalName": "aled.rees@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002c", "userPrincipalName": "joanna.marsh@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002d", "userPrincipalName": "stuart.kerr@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"},
+        {"id": "0d3e1a7f-0000-4000-8000-00010000002e", "userPrincipalName": "pippa.holt@halcyonfreight.example", "userType": "member", "isAdmin": false, "isMfaRegistered": true, "isMfaCapable": true, "isSsprRegistered": true, "methodsRegistered": ["microsoftAuthenticatorPush", "mobilePhone"], "defaultMfaMethod": "microsoftAuthenticatorPush"}
+      ]
+    }
+  },
+  "security": {
+    "signIns": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000700000001", "createdDateTime": "2026-10-01T08:02:11Z", "userPrincipalName": "oliver.hartley@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000001", "appDisplayName": "Office 365 Exchange Online", "clientAppUsed": "Browser", "ipAddress": "198.51.100.10", "location": {"city": "Felixstowe", "countryOrRegion": "GB"}, "riskLevelAggregated": "none", "riskLevelDuringSignIn": "none", "riskState": "none", "riskDetail": "none", "conditionalAccessStatus": "success", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000002", "createdDateTime": "2026-10-01T07:45:40Z", "userPrincipalName": "priya.nair@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000002", "appDisplayName": "Azure Portal", "clientAppUsed": "Browser", "ipAddress": "198.51.100.12", "location": {"city": "Felixstowe", "countryOrRegion": "GB"}, "riskLevelAggregated": "none", "riskLevelDuringSignIn": "none", "riskState": "none", "riskDetail": "none", "conditionalAccessStatus": "success", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000003", "createdDateTime": "2026-09-27T02:13:55Z", "userPrincipalName": "hannah.bell@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000008", "appDisplayName": "Office 365 Exchange Online", "clientAppUsed": "Browser", "ipAddress": "203.0.113.77", "location": {"city": "Lagos", "countryOrRegion": "NG"}, "riskLevelAggregated": "high", "riskLevelDuringSignIn": "high", "riskState": "atRisk", "riskDetail": "unfamiliarFeatures", "conditionalAccessStatus": "notApplied", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000004", "createdDateTime": "2026-09-27T02:15:20Z", "userPrincipalName": "hannah.bell@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000008", "appDisplayName": "OfficeHome", "clientAppUsed": "Browser", "ipAddress": "203.0.113.77", "location": {"city": "Lagos", "countryOrRegion": "NG"}, "riskLevelAggregated": "high", "riskLevelDuringSignIn": "high", "riskState": "atRisk", "riskDetail": "anonymizedIPAddress", "conditionalAccessStatus": "notApplied", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000005", "createdDateTime": "2026-09-29T21:40:03Z", "userPrincipalName": "gareth.pryce@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000003", "appDisplayName": "Office 365 Exchange Online", "clientAppUsed": "Browser", "ipAddress": "192.0.2.144", "location": {"city": "Amsterdam", "countryOrRegion": "NL"}, "riskLevelAggregated": "medium", "riskLevelDuringSignIn": "medium", "riskState": "atRisk", "riskDetail": "unlikelyTravel", "conditionalAccessStatus": "notApplied", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000006", "createdDateTime": "2026-10-01T15:44:00Z", "userPrincipalName": "svc-scanner@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000023", "appDisplayName": "Office 365 Exchange Online", "clientAppUsed": "Authenticated SMTP", "ipAddress": "198.51.100.20", "location": {"city": "Felixstowe", "countryOrRegion": "GB"}, "riskLevelAggregated": "none", "riskLevelDuringSignIn": "none", "riskState": "none", "riskDetail": "none", "conditionalAccessStatus": "notApplied", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000007", "createdDateTime": "2026-09-30T06:58:12Z", "userPrincipalName": "malcolm.reed@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000004", "appDisplayName": "Microsoft Teams", "clientAppUsed": "Browser", "ipAddress": "198.51.100.71", "location": {"city": "Ipswich", "countryOrRegion": "GB"}, "riskLevelAggregated": "none", "riskLevelDuringSignIn": "none", "riskState": "none", "riskDetail": "none", "conditionalAccessStatus": "success", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000008", "createdDateTime": "2026-09-30T05:31:00Z", "userPrincipalName": "kieran.walsh@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000009", "appDisplayName": "Microsoft Teams", "clientAppUsed": "Browser", "ipAddress": "198.51.100.70", "location": {"city": "Ipswich", "countryOrRegion": "GB"}, "riskLevelAggregated": "none", "riskLevelDuringSignIn": "none", "riskState": "none", "riskDetail": "none", "conditionalAccessStatus": "notApplied", "status": {"errorCode": 0, "failureReason": "Other."}},
+        {"id": "0d3e1a7f-0000-4000-8000-000700000009", "createdDateTime": "2026-09-29T21:38:51Z", "userPrincipalName": "gareth.pryce@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000003", "appDisplayName": "Office 365 Exchange Online", "clientAppUsed": "Browser", "ipAddress": "192.0.2.144", "location": {"city": "Amsterdam", "countryOrRegion": "NL"}, "riskLevelAggregated": "none", "riskLevelDuringSignIn": "none", "riskState": "none", "riskDetail": "none", "conditionalAccessStatus": "notApplied", "status": {"errorCode": 50126, "failureReason": "Invalid username or password."}},
+        {"id": "0d3e1a7f-0000-4000-8000-00070000000a", "createdDateTime": "2026-09-30T09:12:30Z", "userPrincipalName": "tom.fielding@halcyonfreight.example", "userId": "0d3e1a7f-0000-4000-8000-000100000007", "appDisplayName": "Azure Portal", "clientAppUsed": "Browser", "ipAddress": "198.51.100.11", "location": {"city": "Felixstowe", "countryOrRegion": "GB"}, "riskLevelAggregated": "none", "riskLevelDuringSignIn": "none", "riskState": "none", "riskDetail": "none", "conditionalAccessStatus": "success", "status": {"errorCode": 0, "failureReason": "Other."}}
+      ]
+    },
+    "directoryAudits": {
+      "value": [
+        {"id": "Directory_0d3e1a7f-0000-4000-8000-000800000001", "activityDateTime": "2026-09-18T15:02:44Z", "activityDisplayName": "Add member to role", "category": "RoleManagement", "result": "success", "loggedByService": "Core Directory", "initiatedBy": {"user": {"id": "0d3e1a7f-0000-4000-8000-000100000002", "userPrincipalName": "priya.nair@halcyonfreight.example", "displayName": "Priya Nair"}}, "targetResources": [{"id": "0d3e1a7f-0000-4000-8000-000100000003", "type": "User", "userPrincipalName": "gareth.pryce@halcyonfreight.example", "displayName": "Gareth Pryce", "modifiedProperties": [{"displayName": "Role.DisplayName", "newValue": "\"Global Administrator\""}]}]},
+        {"id": "Directory_0d3e1a7f-0000-4000-8000-000800000002", "activityDateTime": "2026-09-24T11:20:09Z", "activityDisplayName": "Add app role assignment to service principal", "category": "ApplicationManagement", "result": "success", "loggedByService": "Core Directory", "initiatedBy": {"user": {"id": "0d3e1a7f-0000-4000-8000-000100000007", "userPrincipalName": "tom.fielding@halcyonfreight.example", "displayName": "Tom Fielding"}}, "targetResources": [{"id": "0d3e1a7f-0000-4000-8000-000400000002", "type": "ServicePrincipal", "displayName": "Payroll Export", "modifiedProperties": [{"displayName": "AppRole.Value", "newValue": "\"RoleManagement.ReadWrite.Directory\""}]}, {"id": "0d3e1a7f-0000-4000-8000-000400000099", "type": "ServicePrincipal", "displayName": "Microsoft Graph"}]},
+        {"id": "Directory_0d3e1a7f-0000-4000-8000-000800000003", "activityDateTime": "2026-09-27T02:21:37Z", "activityDisplayName": "Update user", "category": "UserManagement", "result": "success", "loggedByService": "Core Directory", "initiatedBy": {"user": {"id": "0d3e1a7f-0000-4000-8000-000100000008", "userPrincipalName": "hannah.bell@halcyonfreight.example", "displayName": "Hannah Bell"}}, "targetResources": [{"id": "0d3e1a7f-0000-4000-8000-000100000008", "type": "User", "userPrincipalName": "hannah.bell@halcyonfreight.example", "displayName": "Hannah Bell"}]},
+        {"id": "Directory_0d3e1a7f-0000-4000-8000-000800000004", "activityDateTime": "2026-09-30T08:44:10Z", "activityDisplayName": "Reset user password", "category": "UserManagement", "result": "success", "loggedByService": "Core Directory", "initiatedBy": {"user": {"id": "0d3e1a7f-0000-4000-8000-000100000006", "userPrincipalName": "lucy.barker@halcyonfreight.example", "displayName": "Lucy Barker"}}, "targetResources": [{"id": "0d3e1a7f-0000-4000-8000-00010000000a", "type": "User", "userPrincipalName": "shauna.doyle@halcyonfreight.example", "displayName": "Shauna Doyle"}]},
+        {"id": "Directory_0d3e1a7f-0000-4000-8000-000800000005", "activityDateTime": "2026-09-21T10:03:00Z", "activityDisplayName": "Consent to application", "category": "ApplicationManagement", "result": "success", "loggedByService": "Core Directory", "initiatedBy": {"user": {"id": "0d3e1a7f-0000-4000-8000-000100000004", "userPrincipalName": "malcolm.reed@halcyonfreight.example", "displayName": "Malcolm Reed"}}, "targetResources": [{"id": "0d3e1a7f-0000-4000-8000-000400000005", "type": "ServicePrincipal", "displayName": "Route Planner Pro"}]}
+      ]
+    }
+  },
+  "app_consent": {
+    "servicePrincipals": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000400000001", "displayName": "ShipTrack Sync", "appId": "0d3e1a7f-0000-4000-8000-003a00000001", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0"},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000002", "displayName": "Payroll Export", "appId": "0d3e1a7f-0000-4000-8000-003a00000002", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0"},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000003", "displayName": "Halcyon Intranet", "appId": "0d3e1a7f-0000-4000-8000-003a00000003", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0"},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000004", "displayName": "Legacy EDI Bridge", "appId": "0d3e1a7f-0000-4000-8000-003a00000004", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000d3e0"},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000005", "displayName": "Route Planner Pro", "appId": "0d3e1a7f-0000-4000-8000-003a00000005", "servicePrincipalType": "Application", "appOwnerOrganizationId": "0d3e1a7f-0000-4000-8000-00000000a002", "verifiedPublisher": {}},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000099", "displayName": "Microsoft Graph", "appId": "00000003-0000-0000-c000-000000000000", "servicePrincipalType": "Application"}
+      ]
+    },
+    "oauth2PermissionGrants": {
+      "value": [
+        {"id": "shiptrack-graph-allprincipals", "clientId": "0d3e1a7f-0000-4000-8000-000400000001", "resourceId": "0d3e1a7f-0000-4000-8000-000400000099", "consentType": "AllPrincipals", "scope": "openid profile offline_access User.Read Mail.Read Mail.ReadWrite Directory.Read.All Directory.ReadWrite.All"},
+        {"id": "route-planner-graph-allprincipals", "clientId": "0d3e1a7f-0000-4000-8000-000400000005", "resourceId": "0d3e1a7f-0000-4000-8000-000400000099", "consentType": "AllPrincipals", "scope": "openid profile offline_access User.Read Calendars.ReadWrite"},
+        {"id": "intranet-graph-allprincipals", "clientId": "0d3e1a7f-0000-4000-8000-000400000003", "resourceId": "0d3e1a7f-0000-4000-8000-000400000099", "consentType": "AllPrincipals", "scope": "openid profile User.Read"}
+      ]
+    },
+    "servicePrincipalOwners": {
+      "value": [
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000001", "displayName": "ShipTrack Sync", "owners": []},
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000002", "displayName": "Payroll Export", "owners": [{"@odata.type": "#microsoft.graph.user", "id": "0d3e1a7f-0000-4000-8000-000100000007", "displayName": "Tom Fielding", "userPrincipalName": "tom.fielding@halcyonfreight.example"}]},
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000003", "displayName": "Halcyon Intranet", "owners": [{"@odata.type": "#microsoft.graph.user", "id": "0d3e1a7f-0000-4000-8000-000100000002", "displayName": "Priya Nair", "userPrincipalName": "priya.nair@halcyonfreight.example"}]},
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000004", "displayName": "Legacy EDI Bridge", "owners": [{"@odata.type": "#microsoft.graph.user", "id": "0d3e1a7f-0000-4000-8000-000100000005", "displayName": "Dan Whitlock", "userPrincipalName": "dan.whitlock@halcyonfreight.example"}]},
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000005", "displayName": "Route Planner Pro", "owners": []}
+      ]
+    },
+    "servicePrincipalAppRoleAssignments": {
+      "value": [
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000099", "displayName": "Microsoft Graph", "assignments": [{"id": "payroll-export-rolemanagement-readwrite-directory", "appRoleId": "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8", "appRoleValue": "RoleManagement.ReadWrite.Directory", "principalId": "0d3e1a7f-0000-4000-8000-000400000002", "principalDisplayName": "Payroll Export", "principalType": "ServicePrincipal", "resourceId": "0d3e1a7f-0000-4000-8000-000400000099", "resourceDisplayName": "Microsoft Graph", "createdDateTime": "2026-09-24T11:20:09Z"}, {"id": "payroll-export-user-read-all", "appRoleId": "df021288-bdef-4463-88db-98f22de89214", "appRoleValue": "User.Read.All", "principalId": "0d3e1a7f-0000-4000-8000-000400000002", "principalDisplayName": "Payroll Export", "principalType": "ServicePrincipal", "resourceId": "0d3e1a7f-0000-4000-8000-000400000099", "resourceDisplayName": "Microsoft Graph", "createdDateTime": "2025-02-03T10:20:00Z"}]},
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000002", "displayName": "Payroll Export", "assignments": []},
+        {"servicePrincipalId": "0d3e1a7f-0000-4000-8000-000400000001", "displayName": "ShipTrack Sync", "assignments": []}
+      ]
+    }
+  },
+  "app_credentials": {
+    "applicationCredentials": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000300000001", "display_name": "ShipTrack Sync", "app_id": "0d3e1a7f-0000-4000-8000-003a00000001", "created_date_time": "2023-01-17T14:22:00Z", "sign_in_audience": "AzureADMultipleOrgs", "publisher_domain": "halcyonfreight.example", "password_credentials": [{"key_id": "0d3e1a7f-0000-4000-8000-000900000001", "display_name": "shiptrack-prod-2024", "start_date_time": "2024-01-10T09:00:00Z", "end_date_time": "2025-01-10T09:00:00Z", "type": "Password"}, {"key_id": "0d3e1a7f-0000-4000-8000-000900000002", "display_name": "shiptrack-prod-2025", "start_date_time": "2025-03-01T09:00:00Z", "end_date_time": "2027-03-15T09:00:00Z", "type": "Password"}], "key_credentials": [], "redirect_uris": [{"uri": "http://shiptrack-sync.example/oauth/callback", "scheme": "http", "host": "shiptrack-sync.example", "is_localhost": false, "is_wildcard": false}, {"uri": "https://shiptrack-sync.example/oauth/callback", "scheme": "https", "host": "shiptrack-sync.example", "is_localhost": false, "is_wildcard": false}], "required_resource_access": [{"resourceAppId": "00000003-0000-0000-c000-000000000000", "resourceAccess": [{"id": "e383f46e-2787-4529-855e-0e479a3ffac0", "type": "Scope"}, {"id": "024d486e-b451-40bb-833d-3e66d98c5c73", "type": "Scope"}, {"id": "c5366453-9fb0-48a5-a156-24f0c49a4b84", "type": "Scope"}]}], "owner_count": 0, "signin_data_available": true, "last_signin_at": "2026-10-01T23:00:00Z"},
+        {"id": "0d3e1a7f-0000-4000-8000-000300000002", "display_name": "Payroll Export", "app_id": "0d3e1a7f-0000-4000-8000-003a00000002", "created_date_time": "2025-02-03T10:05:00Z", "sign_in_audience": "AzureADMyOrg", "publisher_domain": "halcyonfreight.example", "password_credentials": [{"key_id": "0d3e1a7f-0000-4000-8000-000900000003", "display_name": "payroll-nightly", "start_date_time": "2026-06-01T09:00:00Z", "end_date_time": "2027-06-01T09:00:00Z", "type": "Password"}], "key_credentials": [], "redirect_uris": [], "required_resource_access": [{"resourceAppId": "00000003-0000-0000-c000-000000000000", "resourceAccess": [{"id": "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8", "type": "Role"}, {"id": "df021288-bdef-4463-88db-98f22de89214", "type": "Role"}]}], "owner_count": 1, "signin_data_available": true, "last_signin_at": "2026-10-02T01:00:00Z"},
+        {"id": "0d3e1a7f-0000-4000-8000-000300000003", "display_name": "Halcyon Intranet", "app_id": "0d3e1a7f-0000-4000-8000-003a00000003", "created_date_time": "2022-06-01T09:00:00Z", "sign_in_audience": "AzureADMyOrg", "publisher_domain": "halcyonfreight.example", "password_credentials": [], "key_credentials": [{"key_id": "0d3e1a7f-0000-4000-8000-000900000004", "display_name": "CN=intranet.halcyonfreight.example", "start_date_time": "2026-01-05T00:00:00Z", "end_date_time": "2028-01-05T00:00:00Z", "type": "AsymmetricX509Cert"}], "redirect_uris": [{"uri": "https://intranet.halcyonfreight.example/signin-oidc", "scheme": "https", "host": "intranet.halcyonfreight.example", "is_localhost": false, "is_wildcard": false}, {"uri": "http://localhost:5000/signin-oidc", "scheme": "http", "host": "localhost", "is_localhost": true, "is_wildcard": false}], "owner_count": 1, "signin_data_available": true, "last_signin_at": "2026-10-01T16:30:00Z"},
+        {"id": "0d3e1a7f-0000-4000-8000-000300000004", "display_name": "Legacy EDI Bridge", "app_id": "0d3e1a7f-0000-4000-8000-003a00000004", "created_date_time": "2021-09-08T12:00:00Z", "sign_in_audience": "AzureADMyOrg", "publisher_domain": "halcyonfreight.example", "password_credentials": [], "key_credentials": [{"key_id": "0d3e1a7f-0000-4000-8000-000900000005", "display_name": "CN=edi-bridge", "start_date_time": "2023-09-01T00:00:00Z", "end_date_time": "2025-09-01T00:00:00Z", "type": "AsymmetricX509Cert"}], "redirect_uris": [], "owner_count": 1, "signin_data_available": true, "last_signin_at": "2024-06-30T22:00:00Z"}
+      ]
+    },
+    "servicePrincipalCredentials": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000400000001", "display_name": "ShipTrack Sync", "app_id": "0d3e1a7f-0000-4000-8000-003a00000001", "service_principal_type": "Application", "publisher_name": "Halcyon Freight Ltd", "sign_in_audience": "AzureADMultipleOrgs", "account_enabled": true, "app_owner_organization_id": "0d3e1a7f-0000-4000-8000-00000000d3e0", "tags": ["WindowsAzureActiveDirectoryIntegratedApp"], "reply_urls": ["http://shiptrack-sync.example/oauth/callback", "https://shiptrack-sync.example/oauth/callback"], "owner_count": 0},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000002", "display_name": "Payroll Export", "app_id": "0d3e1a7f-0000-4000-8000-003a00000002", "service_principal_type": "Application", "publisher_name": "Halcyon Freight Ltd", "sign_in_audience": "AzureADMyOrg", "account_enabled": true, "app_owner_organization_id": "0d3e1a7f-0000-4000-8000-00000000d3e0", "owner_count": 1},
+        {"id": "0d3e1a7f-0000-4000-8000-000400000005", "display_name": "Route Planner Pro", "app_id": "0d3e1a7f-0000-4000-8000-003a00000005", "service_principal_type": "Application", "publisher_name": "Route Planner Pro Ltd", "sign_in_audience": "AzureADMultipleOrgs", "account_enabled": true, "app_owner_organization_id": "0d3e1a7f-0000-4000-8000-00000000a002", "reply_urls": ["https://app.routeplanner-pro.example/auth"], "owner_count": 0}
+      ]
+    }
+  },
+  "consent_policy": {
+    "adminConsentRequestPolicy": {
+      "value": [
+        {"id": "adminConsentRequestPolicy", "isEnabled": false, "notifyReviewers": false, "remindersEnabled": false, "requestDurationInDays": 0, "reviewers": [], "version": 0}
+      ]
+    },
+    "permissionGrantPolicies": {
+      "value": [
+        {"id": "microsoft-user-default-legacy", "displayName": "Default user consent (legacy)", "description": "Users can consent to apps from any publisher for any delegated permission not requiring admin consent."},
+        {"id": "microsoft-user-default-low", "displayName": "Default user consent (low risk)", "description": "Users can consent to low-risk permissions for verified publishers."}
+      ]
+    },
+    "authorizationPolicy": {
+      "value": [
+        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-legacy"]}}
+      ]
+    }
+  },
+  "external_identity": {
+    "crossTenantAccessPolicy": {
+      "value": [
+        {"id": "crossTenantAccessPolicy", "displayName": "CrossTenantAccessPolicy", "allowedCloudEndpoints": []}
+      ]
+    },
+    "authorizationPolicy": {
+      "value": [
+        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-legacy"]}}
+      ]
+    },
+    "authenticationFlowsPolicy": {
+      "value": [
+        {"id": "authenticationFlowsPolicy", "displayName": "Authentication flows policy", "selfServiceSignUp": {"isEnabled": true}}
+      ]
+    }
+  },
+  "cross_tenant_access": {
+    "crossTenantAccessPolicy": {
+      "value": [
+        {"id": "crossTenantAccessPolicy", "displayName": "CrossTenantAccessPolicy"}
+      ]
+    },
+    "defaultPolicy": {
+      "value": [
+        {"id": "default", "is_service_default": true, "b2b_collaboration_outbound_access": "allowed", "b2b_collaboration_inbound_access": "allowed", "b2b_direct_connect_outbound_access": "blocked", "b2b_direct_connect_inbound_access": "blocked", "inbound_trust_mfa_accepted": false, "inbound_trust_compliant_device_accepted": false, "inbound_trust_hybrid_aad_joined_accepted": false, "automatic_user_consent_inbound_allowed": false, "automatic_user_consent_outbound_allowed": false}
+      ]
+    },
+    "partnerConfigurations": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-00000000a001", "tenant_id": "0d3e1a7f-0000-4000-8000-00000000a001", "display_name": "Parcel Partners (parcel-partners.example)", "is_service_provider": false, "b2b_collaboration_outbound_access": "allowed", "b2b_collaboration_inbound_access": "allowed", "b2b_direct_connect_outbound_access": "allowed", "b2b_direct_connect_inbound_access": "allowed", "inbound_trust_mfa_accepted": false, "inbound_trust_compliant_device_accepted": false, "inbound_trust_hybrid_aad_joined_accepted": false}
+      ]
+    }
+  },
+  "identity_governance": {
+    "accessReviews": {"value": []},
+    "entitlementCatalogs": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000a00000001", "displayName": "General", "description": "Built-in catalog.", "catalogType": "userManaged", "state": "published"}
+      ]
+    },
+    "accessPackages": {"value": []},
+    "roleAssignmentSchedules": {
+      "value": [
+        {"id": "ras-001", "principalId": "0d3e1a7f-0000-4000-8000-000100000001", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-002", "principalId": "0d3e1a7f-0000-4000-8000-000100000002", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-003", "principalId": "0d3e1a7f-0000-4000-8000-000100000003", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-004", "principalId": "0d3e1a7f-0000-4000-8000-000100000004", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-005", "principalId": "0d3e1a7f-0000-4000-8000-000100000005", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-006", "principalId": "0d3e1a7f-0000-4000-8000-000100000022", "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-007", "principalId": "0d3e1a7f-0000-4000-8000-000100000006", "roleDefinitionId": "29232cdf-9323-42fd-ade2-1d097af3e4de", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-008", "principalId": "0d3e1a7f-0000-4000-8000-000100000006", "roleDefinitionId": "729827e3-9c14-49f7-bb1b-9608f156bbb8", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-009", "principalId": "0d3e1a7f-0000-4000-8000-000100000002", "roleDefinitionId": "e8611ab8-c189-46e8-94e1-60213ab1f814", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}},
+        {"id": "ras-010", "principalId": "0d3e1a7f-0000-4000-8000-00010000000e", "roleDefinitionId": "5d6b6bb7-de71-4623-b4af-96380a352509", "directoryScopeId": "/", "assignmentType": "Assigned", "memberType": "Direct", "status": "Provisioned", "scheduleInfo": {"expiration": {"type": "noExpiration"}}}
+      ]
+    },
+    "roleEligibilitySchedules": {"value": []},
+    "administrativeUnits": {"value": []}
+  },
+  "mailbox_forwarding": {
+    "messageRules": {
+      "value": [
+        {"rule_id": "AQAAAHB-rule-01", "user_id": "0d3e1a7f-0000-4000-8000-000100000008", "user_principal_name": "hannah.bell@halcyonfreight.example", "user_mail": "hannah.bell@halcyonfreight.example", "display_name": ".", "is_enabled": true, "sequence": 1, "actions": {"forwardTo": [{"emailAddress": {"name": "hb.invoices@freemail.example", "address": "hb.invoices@freemail.example"}}], "stopProcessingRules": false}, "conditions": {}, "forwards_to": ["hb.invoices@freemail.example"], "forwards_externally": true, "forwards_internally": false, "external_recipients": ["hb.invoices@freemail.example"], "internal_recipients": [], "delete_action": false, "hide_from_user": false},
+        {"rule_id": "AQAAAHB-rule-02", "user_id": "0d3e1a7f-0000-4000-8000-000100000008", "user_principal_name": "hannah.bell@halcyonfreight.example", "user_mail": "hannah.bell@halcyonfreight.example", "display_name": "..", "is_enabled": true, "sequence": 2, "actions": {"moveToFolder": "RSS Subscriptions", "markAsRead": true, "stopProcessingRules": true}, "conditions": {"subjectContains": ["invoice", "payment", "remittance", "bank details"]}, "forwards_to": [], "forwards_externally": false, "forwards_internally": false, "external_recipients": [], "internal_recipients": [], "move_to_folder": "RSS Subscriptions", "delete_action": false, "hide_from_user": true},
+        {"rule_id": "AQAAAOH-rule-01", "user_id": "0d3e1a7f-0000-4000-8000-000100000001", "user_principal_name": "oliver.hartley@halcyonfreight.example", "user_mail": "oliver.hartley@halcyonfreight.example", "display_name": "Board papers to Eleanor", "is_enabled": true, "sequence": 1, "actions": {"forwardTo": [{"emailAddress": {"name": "Eleanor Shaw", "address": "eleanor.shaw@halcyonfreight.example"}}]}, "conditions": {"subjectContains": ["Board pack"]}, "forwards_to": ["eleanor.shaw@halcyonfreight.example"], "forwards_externally": false, "forwards_internally": true, "external_recipients": [], "internal_recipients": ["eleanor.shaw@halcyonfreight.example"], "delete_action": false, "hide_from_user": false},
+        {"rule_id": "AQAAAKW-rule-01", "user_id": "0d3e1a7f-0000-4000-8000-000100000009", "user_principal_name": "kieran.walsh@halcyonfreight.example", "user_mail": "kieran.walsh@halcyonfreight.example", "display_name": "Old forward to personal (disabled)", "is_enabled": false, "sequence": 1, "actions": {"forwardTo": [{"emailAddress": {"name": "kieran.walsh@freemail.example", "address": "kieran.walsh@freemail.example"}}]}, "conditions": {}, "forwards_to": ["kieran.walsh@freemail.example"], "forwards_externally": true, "forwards_internally": false, "external_recipients": ["kieran.walsh@freemail.example"], "internal_recipients": [], "delete_action": false, "hide_from_user": false}
+      ]
+    },
+    "mailboxSettings": {
+      "value": [
+        {"user_id": "0d3e1a7f-0000-4000-8000-000100000001", "user_principal_name": "oliver.hartley@halcyonfreight.example", "settings": {"timeZone": "GMT Standard Time", "language": {"locale": "en-GB", "displayName": "English (United Kingdom)"}, "automaticRepliesSetting": {"status": "disabled", "externalAudience": "none"}, "delegateMeetingMessageDeliveryOptions": "sendToDelegateAndInformationToPrincipal"}},
+        {"user_id": "0d3e1a7f-0000-4000-8000-000100000003", "user_principal_name": "gareth.pryce@halcyonfreight.example", "settings": {"timeZone": "GMT Standard Time", "language": {"locale": "en-GB", "displayName": "English (United Kingdom)"}, "automaticRepliesSetting": {"status": "disabled", "externalAudience": "none"}, "delegateMeetingMessageDeliveryOptions": "sendToDelegateAndInformationToPrincipal"}},
+        {"user_id": "0d3e1a7f-0000-4000-8000-000100000008", "user_principal_name": "hannah.bell@halcyonfreight.example", "settings": {"timeZone": "GMT Standard Time", "language": {"locale": "en-GB", "displayName": "English (United Kingdom)"}, "automaticRepliesSetting": {"status": "disabled", "externalAudience": "none"}, "delegateMeetingMessageDeliveryOptions": "sendToDelegateAndInformationToPrincipal"}},
+        {"user_id": "0d3e1a7f-0000-4000-8000-000100000009", "user_principal_name": "kieran.walsh@halcyonfreight.example", "settings": {"timeZone": "GMT Standard Time", "language": {"locale": "en-GB", "displayName": "English (United Kingdom)"}, "automaticRepliesSetting": {"status": "disabled", "externalAudience": "none"}, "delegateMeetingMessageDeliveryOptions": "sendToDelegateAndInformationToPrincipal"}},
+        {"user_id": "0d3e1a7f-0000-4000-8000-000100000007", "user_principal_name": "tom.fielding@halcyonfreight.example", "settings": {"timeZone": "GMT Standard Time", "language": {"locale": "en-GB", "displayName": "English (United Kingdom)"}, "automaticRepliesSetting": {"status": "disabled", "externalAudience": "none"}, "delegateMeetingMessageDeliveryOptions": "sendToDelegateAndInformationToPrincipal"}}
+      ]
+    }
+  },
+  "exchange_policy": {
+    "acceptedDomains": {
+      "value": [
+        {"Identity": "halcyonfreight.example", "Name": "halcyonfreight.example", "DomainName": "halcyonfreight.example", "DomainType": "Authoritative", "Default": true},
+        {"Identity": "halcyonfreight.onmicrosoft.example", "Name": "halcyonfreight.onmicrosoft.example", "DomainName": "halcyonfreight.onmicrosoft.example", "DomainType": "Authoritative", "Default": false}
+      ]
+    },
+    "remoteDomains": {
+      "value": [
+        {"Identity": "Default", "Name": "Default", "DomainName": "*", "AutoForwardEnabled": true, "AutoReplyEnabled": true, "TrustedMailOutboundEnabled": false},
+        {"Identity": "Parcel Partners", "Name": "Parcel Partners", "DomainName": "parcel-partners.example", "AutoForwardEnabled": false, "AutoReplyEnabled": true, "TrustedMailOutboundEnabled": true}
+      ]
+    },
+    "transportRules": {
+      "value": [
+        {"Identity": "Redirect invoices", "Name": "Redirect invoices", "State": "Enabled", "Mode": "Enforce", "Priority": 0, "SubjectContainsWords": ["invoice", "remittance"], "SentToScope": "InOrganization", "RedirectMessageTo": ["ap-processing@halcyon-freight-billing.example"], "BlindCopyTo": [], "CopyTo": []},
+        {"Identity": "External sender disclaimer", "Name": "External sender disclaimer", "State": "Enabled", "Mode": "Enforce", "Priority": 1, "FromScope": "NotInOrganization", "ApplyHtmlDisclaimerText": "<p>CAUTION: This email originated outside Halcyon Freight.</p>"},
+        {"Identity": "Copy customs paperwork to broker (test)", "Name": "Copy customs paperwork to broker (test)", "State": "Disabled", "Mode": "Audit", "Priority": 2, "CopyTo": ["entries@customs-broker.example"]}
+      ]
+    },
+    "inboundConnectors": {
+      "value": [
+        {"Identity": "From Parcel Partners", "Name": "From Parcel Partners", "Enabled": true, "ConnectorType": "Partner", "SenderDomains": ["parcel-partners.example"], "RequireTls": true}
+      ]
+    },
+    "outboundConnectors": {
+      "value": [
+        {"Identity": "To Parcel Partners", "Name": "To Parcel Partners", "Enabled": true, "ConnectorType": "Partner", "RecipientDomains": ["parcel-partners.example"], "TlsSettings": "DomainValidation", "TlsDomain": "mail.parcel-partners.example"}
+      ]
+    },
+    "mailboxForwarding": {
+      "value": [
+        {"Identity": "Dispatch Desk", "Name": "Dispatch Desk", "DisplayName": "Dispatch Desk", "PrimarySmtpAddress": "dispatch@halcyonfreight.example", "ForwardingSmtpAddress": "smtp:dispatch.backup@freemail.example", "DeliverToMailboxAndForward": true}
+      ]
+    },
+    "adminAuditLogConfig": {
+      "value": [
+        {"UnifiedAuditLogIngestionEnabled": true}
+      ]
+    },
+    "organizationAuditConfig": {
+      "value": [
+        {"AuditDisabled": false}
+      ]
+    },
+    "mailboxAuditBypass": {
+      "value": [
+        {"Count": 1}
+      ]
+    },
+    "protectionAlerts": {
+      "value": [
+        {"Name": "Creation of forwarding/redirect rule", "Disabled": true, "Severity": "Informational", "Category": "ThreatManagement", "IsSystemRule": true},
+        {"Name": "Elevation of Exchange admin privilege", "Disabled": false, "Severity": "Low", "Category": "PermissionsManagement", "IsSystemRule": true},
+        {"Name": "Suspicious email sending patterns detected", "Disabled": false, "Severity": "Medium", "Category": "ThreatManagement", "IsSystemRule": true},
+        {"Name": "Unusual external user file activity", "Disabled": false, "Severity": "Medium", "Category": "DataGovernance", "IsSystemRule": true}
+      ]
+    }
+  },
+  "exchange": {
+    "mailboxInventory": {
+      "value": [
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000001", "DisplayName": "Oliver Hartley", "PrimarySmtpAddress": "oliver.hartley@halcyonfreight.example", "RecipientTypeDetails": "UserMailbox"},
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000003", "DisplayName": "Gareth Pryce", "PrimarySmtpAddress": "gareth.pryce@halcyonfreight.example", "RecipientTypeDetails": "UserMailbox"},
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000007", "DisplayName": "Tom Fielding", "PrimarySmtpAddress": "tom.fielding@halcyonfreight.example", "RecipientTypeDetails": "UserMailbox"},
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000008", "DisplayName": "Hannah Bell", "PrimarySmtpAddress": "hannah.bell@halcyonfreight.example", "RecipientTypeDetails": "UserMailbox"},
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000009", "DisplayName": "Kieran Walsh", "PrimarySmtpAddress": "kieran.walsh@halcyonfreight.example", "RecipientTypeDetails": "UserMailbox"},
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000023", "DisplayName": "Scan to Email", "PrimarySmtpAddress": "svc-scanner@halcyonfreight.example", "RecipientTypeDetails": "UserMailbox"},
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000024", "DisplayName": "Accounts Mailbox", "PrimarySmtpAddress": "accounts@halcyonfreight.example", "RecipientTypeDetails": "SharedMailbox"},
+        {"ExternalDirectoryObjectId": "0d3e1a7f-0000-4000-8000-000100000025", "DisplayName": "Dispatch Desk", "PrimarySmtpAddress": "dispatch@halcyonfreight.example", "RecipientTypeDetails": "SharedMailbox"}
+      ]
+    }
+  },
+  "dns_posture": {
+    "domains": {
+      "value": [
+        {"id": "halcyonfreight.example", "isVerified": true, "isDefault": true, "authenticationType": "Managed"},
+        {"id": "halcyonfreight.onmicrosoft.example", "isVerified": true, "isDefault": false, "authenticationType": "Managed"}
+      ]
+    },
+    "domainPosture": {
+      "value": [
+        {"domain": "halcyonfreight.example", "managed_by_microsoft": false, "authentication_type": "Managed", "isDefault": true, "spf": {"present": true, "record": "v=spf1 include:spf.protection.outlook.example include:mailer.shiptrack-sync.example ~all", "all_qualifier": "~", "mechanisms": ["include:spf.protection.outlook.example", "include:mailer.shiptrack-sync.example", "~all"], "multiple_records": false}, "dmarc": {"present": true, "record": "v=DMARC1; p=none; rua=mailto:dmarc@halcyonfreight.example", "policy": "none", "pct": 100, "pct_partial": false, "aggregate_addresses": ["dmarc@halcyonfreight.example"], "aggregate_addresses_invalid": []}, "dkim": {"selectors_present": [], "selectors_missing": ["selector1", "selector2"]}, "mta_sts": {"dns_present": false}, "bimi": {"present": false}},
+        {"domain": "halcyonfreight.onmicrosoft.example", "managed_by_microsoft": true, "authentication_type": "Managed", "isDefault": false, "spf": {"present": true, "all_qualifier": "-", "mechanisms": ["include:spf.protection.outlook.example", "-all"]}, "dmarc": {"present": false}, "dkim": {"selectors_present": ["selector1", "selector2"], "selectors_missing": []}, "mta_sts": {"dns_present": false}, "bimi": {"present": false}}
+      ]
+    }
+  },
+  "sharepoint": {
+    "sharePointSettings": {
+      "sharingCapability": "externalUserAndGuestSharing",
+      "sharingDomainRestrictionMode": "none",
+      "isResharingByExternalUsersEnabled": true,
+      "defaultSharingLinkType": "anonymous",
+      "defaultLinkPermission": "edit",
+      "oneDriveSharingCapability": "externalUserAndGuestSharing",
+      "isUnmanagedSyncAppForTenantRestricted": false
+    },
+    "sites": {
+      "value": [
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000001,0d3e1a7f-0000-4000-8000-000c00000001",
+          "name": "Finance",
+          "displayName": "Finance",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Finance",
+          "createdDateTime": "2021-05-03T09:00:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000002,0d3e1a7f-0000-4000-8000-000c00000002",
+          "name": "Operations",
+          "displayName": "Operations",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Operations",
+          "createdDateTime": "2021-05-03T09:10:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000003,0d3e1a7f-0000-4000-8000-000c00000003",
+          "name": "Halcyon Hub",
+          "displayName": "Halcyon Hub",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/HalcyonHub",
+          "createdDateTime": "2021-04-20T09:00:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000004,0d3e1a7f-0000-4000-8000-000c00000004",
+          "name": "Tender Archive 2022",
+          "displayName": "Tender Archive 2022",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/TenderArchive2022",
+          "createdDateTime": "2022-02-14T09:00:00Z"
+        }
+      ]
+    }
+  },
+  "sharepoint_access": {
+    "sharePointSettings": {
+      "sharingCapability": "externalUserAndGuestSharing",
+      "sharingDomainRestrictionMode": "none",
+      "isResharingByExternalUsersEnabled": true,
+      "defaultSharingLinkType": "anonymous",
+      "defaultLinkPermission": "edit",
+      "oneDriveSharingCapability": "externalUserAndGuestSharing",
+      "isUnmanagedSyncAppForTenantRestricted": false
+    },
+    "sites": {
+      "value": [
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000001,0d3e1a7f-0000-4000-8000-000c00000001",
+          "name": "Finance",
+          "displayName": "Finance",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Finance",
+          "createdDateTime": "2021-05-03T09:00:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000002,0d3e1a7f-0000-4000-8000-000c00000002",
+          "name": "Operations",
+          "displayName": "Operations",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Operations",
+          "createdDateTime": "2021-05-03T09:10:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000003,0d3e1a7f-0000-4000-8000-000c00000003",
+          "name": "Halcyon Hub",
+          "displayName": "Halcyon Hub",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/HalcyonHub",
+          "createdDateTime": "2021-04-20T09:00:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000004,0d3e1a7f-0000-4000-8000-000c00000004",
+          "name": "Tender Archive 2022",
+          "displayName": "Tender Archive 2022",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/TenderArchive2022",
+          "createdDateTime": "2022-02-14T09:00:00Z"
+        }
+      ]
+    },
+    "sitePermissionsBySite": {
+      "value": [
+        {
+          "siteId": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000001,0d3e1a7f-0000-4000-8000-000c00000001",
+          "siteName": "Finance",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Finance",
+          "siteKind": "team",
+          "sharingCapability": "externalUserAndGuestSharing",
+          "ownershipState": "sampled",
+          "permissions": [
+            {
+              "id": "fin-p1",
+              "roles": [
+                "owner"
+              ],
+              "grantedToV2": {
+                "group": {
+                  "id": "0d3e1a7f-0000-4000-8000-000200000003",
+                  "displayName": "Finance Owners"
+                }
+              }
+            },
+            {
+              "id": "fin-p2",
+              "roles": [
+                "write"
+              ],
+              "grantedToV2": {
+                "user": {
+                  "id": "0d3e1a7f-0000-4000-8000-000100000003",
+                  "displayName": "Gareth Pryce",
+                  "userPrincipalName": "gareth.pryce@halcyonfreight.example"
+                }
+              }
+            },
+            {
+              "id": "fin-p3",
+              "roles": [
+                "write"
+              ],
+              "grantedToV2": {
+                "user": {
+                  "displayName": "Sam Okafor",
+                  "userPrincipalName": "sam.okafor@parcel-partners.example"
+                }
+              }
+            },
+            {
+              "id": "fin-p4",
+              "roles": [
+                "read"
+              ],
+              "link": {
+                "scope": "anonymous",
+                "type": "view",
+                "webUrl": "https://halcyonfreight.sharepoint.example/:f:/s/Finance/supplier-bank-details"
+              },
+              "grantedToIdentitiesV2": []
+            }
+          ]
+        },
+        {
+          "siteId": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000002,0d3e1a7f-0000-4000-8000-000c00000002",
+          "siteName": "Operations",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Operations",
+          "siteKind": "team",
+          "sharingCapability": "externalUserAndGuestSharing",
+          "ownershipState": "sampled",
+          "permissions": [
+            {
+              "id": "ops-p1",
+              "roles": [
+                "owner"
+              ],
+              "grantedToV2": {
+                "group": {
+                  "id": "0d3e1a7f-0000-4000-8000-000200000004",
+                  "displayName": "Operations Owners"
+                }
+              }
+            },
+            {
+              "id": "ops-p2",
+              "roles": [
+                "write"
+              ],
+              "link": {
+                "scope": "organization",
+                "type": "edit",
+                "webUrl": "https://halcyonfreight.sharepoint.example/:x:/s/Operations/driver-rota"
+              },
+              "grantedToIdentitiesV2": []
+            },
+            {
+              "id": "ops-p3",
+              "roles": [
+                "write"
+              ],
+              "grantedToV2": {
+                "user": {
+                  "id": "0d3e1a7f-0000-4000-8000-000100000011",
+                  "displayName": "William Price",
+                  "userPrincipalName": "william.price@halcyonfreight.example"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "siteId": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000004,0d3e1a7f-0000-4000-8000-000c00000004",
+          "siteName": "Tender Archive 2022",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/TenderArchive2022",
+          "siteKind": "team",
+          "sharingCapability": "externalUserAndGuestSharing",
+          "ownershipState": "orphaned",
+          "principalCount": 0,
+          "permissions": [
+            {
+              "id": "tender-p1",
+              "roles": [
+                "read"
+              ],
+              "link": {
+                "scope": "users",
+                "type": "view"
+              },
+              "grantedToIdentitiesV2": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "onedrive_posture": {
+    "sharePointSettings": {
+      "sharingCapability": "externalUserAndGuestSharing",
+      "sharingDomainRestrictionMode": "none",
+      "isResharingByExternalUsersEnabled": true,
+      "defaultSharingLinkType": "anonymous",
+      "defaultLinkPermission": "edit",
+      "oneDriveSharingCapability": "externalUserAndGuestSharing",
+      "isUnmanagedSyncAppForTenantRestricted": false
+    },
+    "sites": {
+      "value": [
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000001,0d3e1a7f-0000-4000-8000-000c00000001",
+          "name": "Finance",
+          "displayName": "Finance",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Finance",
+          "createdDateTime": "2021-05-03T09:00:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000002,0d3e1a7f-0000-4000-8000-000c00000002",
+          "name": "Operations",
+          "displayName": "Operations",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/Operations",
+          "createdDateTime": "2021-05-03T09:10:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000003,0d3e1a7f-0000-4000-8000-000c00000003",
+          "name": "Halcyon Hub",
+          "displayName": "Halcyon Hub",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/HalcyonHub",
+          "createdDateTime": "2021-04-20T09:00:00Z"
+        },
+        {
+          "id": "halcyonfreight.sharepoint.example,0d3e1a7f-0000-4000-8000-000b00000004,0d3e1a7f-0000-4000-8000-000c00000004",
+          "name": "Tender Archive 2022",
+          "displayName": "Tender Archive 2022",
+          "webUrl": "https://halcyonfreight.sharepoint.example/sites/TenderArchive2022",
+          "createdDateTime": "2022-02-14T09:00:00Z"
+        }
+      ]
+    },
+    "oneDriveSites": {
+      "value": [
+        {
+          "id": "halcyonfreight-my.sharepoint.example,0d3e1a7f-0000-4000-8000-000d00000001,0d3e1a7f-0000-4000-8000-000e00000001",
+          "displayName": "OneDrive - Gareth Pryce",
+          "name": "Gareth Pryce",
+          "webUrl": "https://halcyonfreight-my.sharepoint.example/personal/gareth_pryce_halcyonfreight_example",
+          "siteKind": "personal",
+          "sharingCapability": "externalUserAndGuestSharing"
+        },
+        {
+          "id": "halcyonfreight-my.sharepoint.example,0d3e1a7f-0000-4000-8000-000d00000002,0d3e1a7f-0000-4000-8000-000e00000002",
+          "displayName": "OneDrive - Hannah Bell",
+          "name": "Hannah Bell",
+          "webUrl": "https://halcyonfreight-my.sharepoint.example/personal/hannah_bell_halcyonfreight_example",
+          "siteKind": "personal",
+          "sharingCapability": "externalUserAndGuestSharing"
+        }
+      ]
+    }
+  },
+  "teams": {
+    "teamGroups": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000200000003", "displayName": "Finance", "resourceProvisioningOptions": ["Team"], "visibility": "Private"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000004", "displayName": "Operations", "resourceProvisioningOptions": ["Team"], "visibility": "Private"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000005", "displayName": "Transport Planning", "resourceProvisioningOptions": ["Team"], "visibility": "Private"},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000006", "displayName": "Halcyon Freight", "resourceProvisioningOptions": ["Team"], "visibility": "Private"}
+      ]
+    },
+    "teamChannels": {
+      "value": [
+        {"teamId": "0d3e1a7f-0000-4000-8000-000200000003", "id": "19:0d3e1a7f-0000-4000-8000-000f00000001@thread.tacv2", "displayName": "General", "membershipType": "standard"},
+        {"teamId": "0d3e1a7f-0000-4000-8000-000200000004", "id": "19:0d3e1a7f-0000-4000-8000-000f00000002@thread.tacv2", "displayName": "General", "membershipType": "standard"},
+        {"teamId": "0d3e1a7f-0000-4000-8000-000200000005", "id": "19:0d3e1a7f-0000-4000-8000-000f00000003@thread.tacv2", "displayName": "General", "membershipType": "standard"},
+        {"teamId": "0d3e1a7f-0000-4000-8000-000200000006", "id": "19:0d3e1a7f-0000-4000-8000-000f00000004@thread.tacv2", "displayName": "General", "membershipType": "standard"},
+        {"teamId": "0d3e1a7f-0000-4000-8000-000200000003", "id": "19:0d3e1a7f-0000-4000-8000-000f00000063@thread.tacv2", "displayName": "Supplier Payments", "membershipType": "shared"}
+      ]
+    },
+    "teamsByTeam": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000200000003", "displayName": "Finance", "isArchived": false, "guestSettings": {"allowCreateUpdateChannels": false, "allowDeleteChannels": false}, "memberSettings": {"allowCreateUpdateChannels": true, "allowAddRemoveApps": true}},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000004", "displayName": "Operations", "isArchived": false, "guestSettings": {"allowCreateUpdateChannels": false, "allowDeleteChannels": false}, "memberSettings": {"allowCreateUpdateChannels": true, "allowAddRemoveApps": true}},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000005", "displayName": "Transport Planning", "isArchived": false, "guestSettings": {"allowCreateUpdateChannels": false, "allowDeleteChannels": false}, "memberSettings": {"allowCreateUpdateChannels": true, "allowAddRemoveApps": true}},
+        {"id": "0d3e1a7f-0000-4000-8000-000200000006", "displayName": "Halcyon Freight", "isArchived": false, "guestSettings": {"allowCreateUpdateChannels": false, "allowDeleteChannels": false}, "memberSettings": {"allowCreateUpdateChannels": true, "allowAddRemoveApps": true}}
+      ]
+    }
+  },
+  "teams_policy": {
+    "tenantFederationConfiguration": {
+      "value": [
+        {"Identity": "Global", "AllowFederatedUsers": true, "AllowPublicUsers": true, "AllowTeamsConsumer": true, "AllowTeamsConsumerInbound": true, "AllowedDomains": "AllowAllKnownDomains", "BlockedDomains": []}
+      ]
+    },
+    "messagingPolicies": {
+      "value": [
+        {"Identity": "Tag:HFL-Messaging-Standard", "AllowUserDeleteMessage": true, "AllowGiphy": true}
+      ]
+    },
+    "meetingPolicies": {
+      "value": [
+        {"Identity": "Tag:HFL-Meetings-Standard", "AllowCloudRecording": true, "AllowAnonymousUsersToJoinMeeting": true, "AutoAdmittedUsers": "Everyone"}
+      ]
+    },
+    "appPermissionPolicies": {
+      "value": [
+        {"Identity": "Tag:HFL-Apps", "GlobalCatalogAppsType": "AllowedAppList"}
+      ]
+    },
+    "appSetupPolicies": {
+      "value": [
+        {"Identity": "Tag:HFL-AppSetup", "AllowUserPinning": true}
+      ]
+    }
+  },
+  "intune": {
+    "managedDevices": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-001000000001", "deviceName": "HFL-LT-001", "userPrincipalName": "oliver.hartley@halcyonfreight.example", "userDisplayName": "Oliver Hartley", "operatingSystem": "Windows", "osVersion": "10.0.26100.6584", "complianceState": "compliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000001", "lastSyncDateTime": "2026-10-01T18:20:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad T14", "manufacturer": "Lenovo", "isEncrypted": true, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000002", "deviceName": "HFL-LT-002", "userPrincipalName": "priya.nair@halcyonfreight.example", "userDisplayName": "Priya Nair", "operatingSystem": "Windows", "osVersion": "10.0.26100.6584", "complianceState": "compliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000002", "lastSyncDateTime": "2026-10-02T07:01:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad X1", "manufacturer": "Lenovo", "isEncrypted": true, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000003", "deviceName": "HFL-LT-007", "userPrincipalName": "gareth.pryce@halcyonfreight.example", "userDisplayName": "Gareth Pryce", "operatingSystem": "Windows", "osVersion": "10.0.19045.4529", "complianceState": "noncompliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000003", "lastSyncDateTime": "2026-09-29T20:10:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad T14", "manufacturer": "Lenovo", "isEncrypted": false, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000004", "deviceName": "HFL-LT-011", "userPrincipalName": "hannah.bell@halcyonfreight.example", "userDisplayName": "Hannah Bell", "operatingSystem": "Windows", "osVersion": "10.0.22631.4317", "complianceState": "noncompliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000004", "lastSyncDateTime": "2026-09-27T01:55:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad E14", "manufacturer": "Lenovo", "isEncrypted": false, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000005", "deviceName": "HFL-LT-014", "userPrincipalName": "malcolm.reed@halcyonfreight.example", "userDisplayName": "Malcolm Reed", "operatingSystem": "Windows", "osVersion": "10.0.26100.6584", "complianceState": "compliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000005", "lastSyncDateTime": "2026-09-30T17:45:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad T14", "manufacturer": "Lenovo", "isEncrypted": true, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000006", "deviceName": "HFL-LT-019", "userPrincipalName": "dan.whitlock@halcyonfreight.example", "userDisplayName": "Dan Whitlock", "operatingSystem": "Windows", "osVersion": "10.0.22631.3880", "complianceState": "compliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000006", "lastSyncDateTime": "2026-04-18T16:40:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad X1", "manufacturer": "Lenovo", "isEncrypted": true, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000007", "deviceName": "HFL-IPH-021", "userPrincipalName": "kieran.walsh@halcyonfreight.example", "userDisplayName": "Kieran Walsh", "operatingSystem": "iOS", "osVersion": "18.6.2", "complianceState": "compliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000007", "lastSyncDateTime": "2026-10-01T05:20:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "iPhone 15", "manufacturer": "Apple", "isEncrypted": true, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000008", "deviceName": "HFL-IPH-022", "userPrincipalName": "connor.mcbride@halcyonfreight.example", "userDisplayName": "Connor McBride", "operatingSystem": "iOS", "osVersion": "17.5.1", "complianceState": "noncompliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000008", "lastSyncDateTime": "2026-09-30T04:50:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "iPhone 12", "manufacturer": "Apple", "isEncrypted": false, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-001000000009", "deviceName": "HFL-LT-023", "userPrincipalName": "tom.fielding@halcyonfreight.example", "userDisplayName": "Tom Fielding", "operatingSystem": "Windows", "osVersion": "10.0.26100.6584", "complianceState": "compliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-001100000009", "lastSyncDateTime": "2026-10-01T17:30:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad E14", "manufacturer": "Lenovo", "isEncrypted": true, "jailBroken": "False", "ownerType": "company"},
+        {"id": "0d3e1a7f-0000-4000-8000-00100000000a", "deviceName": "HFL-LT-024", "userPrincipalName": "william.price@halcyonfreight.example", "userDisplayName": "William Price", "operatingSystem": "Windows", "osVersion": "10.0.26100.6584", "complianceState": "compliant", "managementAgent": "mdm", "azureADDeviceId": "0d3e1a7f-0000-4000-8000-00110000000a", "lastSyncDateTime": "2026-10-01T16:00:00Z", "enrolledDateTime": "2024-03-01T09:00:00Z", "model": "ThinkPad T14", "manufacturer": "Lenovo", "isEncrypted": true, "jailBroken": "False", "ownerType": "company"}
+      ]
+    },
+    "deviceCompliancePolicies": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-001200000001", "displayName": "Windows 11 - Baseline compliance", "@odata.type": "#microsoft.graph.windows10CompliancePolicy", "createdDateTime": "2024-02-01T09:00:00Z", "bitLockerEnabled": true, "secureBootEnabled": true, "osMinimumVersion": "10.0.22631"},
+        {"id": "0d3e1a7f-0000-4000-8000-001200000002", "displayName": "iOS - Minimum OS 18", "@odata.type": "#microsoft.graph.iosCompliancePolicy", "createdDateTime": "2024-02-01T09:05:00Z", "osMinimumVersion": "18.0", "passcodeRequired": true}
+      ]
+    },
+    "deviceConfigurationProfiles": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-001300000001", "displayName": "Windows - Defender Antivirus baseline", "@odata.type": "#microsoft.graph.windows10EndpointProtectionConfiguration", "createdDateTime": "2024-02-02T09:00:00Z"},
+        {"id": "0d3e1a7f-0000-4000-8000-001300000002", "displayName": "Windows - BitLocker silent enable", "@odata.type": "#microsoft.graph.windows10EndpointProtectionConfiguration", "createdDateTime": "2024-02-02T09:10:00Z"}
+      ]
+    }
+  },
+  "intune_depth": {
+    "deviceConfigurations": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-001300000001", "displayName": "Windows - Defender Antivirus baseline"},
+        {"id": "0d3e1a7f-0000-4000-8000-001300000002", "displayName": "Windows - BitLocker silent enable"}
+      ]
+    },
+    "groupPolicyConfigurations": {"value": []},
+    "deviceManagementScripts": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-001400000001", "displayName": "Map depot printers", "runAsAccount": "user", "fileName": "map-printers.ps1"}
+      ]
+    },
+    "androidManagedAppProtections": {"value": []},
+    "iosManagedAppProtections": {"value": []},
+    "deviceConfigurationAssignments": {
+      "value": [
+        {"policyId": "0d3e1a7f-0000-4000-8000-001300000001", "displayName": "Windows - Defender Antivirus baseline", "assignments": []},
+        {"policyId": "0d3e1a7f-0000-4000-8000-001300000002", "displayName": "Windows - BitLocker silent enable", "assignments": []}
+      ]
+    }
+  },
+  "defender": {
+    "securityAlerts": {
+      "value": [
+        {"id": "da0d3e1a7f0000400080000015000000", "providerAlertId": "0d3e1a7f-0000-4000-8000-001500000001", "incidentId": "41", "status": "new", "severity": "high", "serviceSource": "microsoftDefenderForOffice365", "detectionSource": "microsoftDefenderForOffice365", "productName": "Microsoft Defender for Office 365", "title": "Suspicious inbox forwarding rule", "category": "Exfiltration", "description": "A user created an inbox rule that forwards mail to an external address shortly after a risky sign-in.", "createdDateTime": "2026-09-27T02:24:00Z", "lastUpdateDateTime": "2026-09-27T02:30:00Z", "firstActivityDateTime": "2026-09-27T02:21:37Z", "lastActivityDateTime": "2026-09-27T02:21:37Z", "mitreTechniques": ["T1114.003", "T1564.008"], "evidence": [{"@odata.type": "#microsoft.graph.security.userEvidence", "roles": ["compromised"], "userAccount": {"accountName": "hannah.bell", "domainName": "halcyonfreight.example", "userPrincipalName": "hannah.bell@halcyonfreight.example"}}, {"@odata.type": "#microsoft.graph.security.mailboxEvidence", "primaryAddress": "hannah.bell@halcyonfreight.example"}]},
+        {"id": "da0d3e1a7f0000400080000015000000", "providerAlertId": "0d3e1a7f-0000-4000-8000-001500000002", "incidentId": "41", "status": "inProgress", "severity": "medium", "serviceSource": "azureAdIdentityProtection", "detectionSource": "azureAdIdentityProtection", "productName": "Microsoft Entra ID Protection", "title": "Unfamiliar sign-in properties", "category": "InitialAccess", "description": "Sign-in with properties not seen recently for the user.", "createdDateTime": "2026-09-27T02:16:00Z", "lastUpdateDateTime": "2026-09-28T09:00:00Z", "firstActivityDateTime": "2026-09-27T02:13:55Z", "lastActivityDateTime": "2026-09-27T02:15:20Z", "mitreTechniques": ["T1078.004"], "evidence": [{"@odata.type": "#microsoft.graph.security.ipEvidence", "ipAddress": "203.0.113.77", "countryLetterCode": "NG"}]},
+        {"id": "da0d3e1a7f0000400080000015000000", "providerAlertId": "0d3e1a7f-0000-4000-8000-001500000003", "incidentId": "38", "status": "resolved", "severity": "low", "classification": "truePositive", "determination": "malware", "serviceSource": "microsoftDefenderForEndpoint", "detectionSource": "antivirus", "productName": "Microsoft Defender for Endpoint", "title": "Potentially unwanted application detected", "category": "Execution", "createdDateTime": "2026-09-10T13:00:00Z", "lastUpdateDateTime": "2026-09-10T15:00:00Z", "mitreTechniques": [], "evidence": [{"@odata.type": "#microsoft.graph.security.deviceEvidence", "deviceDnsName": "hfl-lt-023"}]}
+      ]
+    },
+    "defenderIncidents": {
+      "value": [
+        {"id": "41", "displayName": "Multi-stage incident involving Initial access & Exfiltration on one user", "severity": "high", "status": "active", "classification": "unknown", "determination": "unknown", "createdDateTime": "2026-09-27T02:24:30Z", "lastUpdateDateTime": "2026-09-28T09:00:00Z", "tags": []},
+        {"id": "38", "displayName": "Potentially unwanted application on one endpoint", "severity": "low", "status": "resolved", "classification": "truePositive", "determination": "malware", "createdDateTime": "2026-09-10T13:00:30Z", "lastUpdateDateTime": "2026-09-10T15:00:00Z", "assignedTo": "priya.nair@halcyonfreight.example"}
+      ]
+    },
+    "secureScores": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-00000000d3e0_2026-10-01", "azureTenantId": "0d3e1a7f-0000-4000-8000-00000000d3e0", "createdDateTime": "2026-10-01T00:00:00Z", "currentScore": 41.2, "maxScore": 100.0, "licensedUserCount": 34, "activeUserCount": 31, "enabledServices": ["HasExchange", "HasSharePoint", "HasOD4B", "HasIntune"], "averageComparativeScores": [{"basis": "AllTenants", "averageScore": 52.4}, {"basis": "TotalSeats", "averageScore": 47.9}], "controlScores": [{"controlName": "AdminMFAV2", "controlCategory": "Identity", "score": 6.0}, {"controlName": "MFARegistrationV2", "controlCategory": "Identity", "score": 4.5}, {"controlName": "BlockLegacyAuthentication", "controlCategory": "Identity", "score": 0.0}, {"controlName": "SelfServicePasswordReset", "controlCategory": "Identity", "score": 1.0}, {"controlName": "mdo_autoforwardingmode", "controlCategory": "Data", "score": 0.0}, {"controlName": "IntegratedApps", "controlCategory": "Apps", "score": 0.0}, {"controlName": "mip_search_auditlog", "controlCategory": "Data", "score": 3.0}, {"controlName": "meeting_restrictanonymousjoin_v1", "controlCategory": "Apps", "score": 0.0}]},
+        {"id": "0d3e1a7f-0000-4000-8000-00000000d3e0_2026-09-01", "azureTenantId": "0d3e1a7f-0000-4000-8000-00000000d3e0", "createdDateTime": "2026-09-01T00:00:00Z", "currentScore": 39.8, "maxScore": 100.0, "licensedUserCount": 34, "activeUserCount": 30}
+      ]
+    },
+    "secureScoreControlProfiles": {
+      "value": [
+        {"id": "AdminMFAV2", "title": "Ensure multifactor authentication is enabled for all users in administrative roles", "controlCategory": "Identity", "maxScore": 10, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "AzureAD", "deprecated": false, "threats": ["accountBreach"]},
+        {"id": "MFARegistrationV2", "title": "Ensure all users can complete multifactor authentication", "controlCategory": "Identity", "maxScore": 9, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "AzureAD", "deprecated": false, "threats": ["accountBreach"]},
+        {"id": "BlockLegacyAuthentication", "title": "Enable policy to block legacy authentication", "controlCategory": "Identity", "maxScore": 8, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "AzureAD", "deprecated": false, "threats": ["accountBreach"]},
+        {"id": "SelfServicePasswordReset", "title": "Enable self-service password reset", "controlCategory": "Identity", "maxScore": 1, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "AzureAD", "deprecated": false, "threats": ["accountBreach"]},
+        {"id": "mdo_autoforwardingmode", "title": "Ensure all forms of mail forwarding are blocked and/or disabled", "controlCategory": "Data", "maxScore": 8, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "EXO", "deprecated": false, "threats": ["dataExfiltration"]},
+        {"id": "IntegratedApps", "title": "Do not allow users to grant consent to unmanaged applications", "controlCategory": "Apps", "maxScore": 4, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "MCAS", "deprecated": false, "threats": ["dataExfiltration"]},
+        {"id": "mip_search_auditlog", "title": "Ensure audit data recording is enabled", "controlCategory": "Data", "maxScore": 3, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "EXO", "deprecated": false, "threats": ["dataExfiltration"]},
+        {"id": "meeting_restrictanonymousjoin_v1", "title": "Restrict anonymous users from joining meetings", "controlCategory": "Apps", "maxScore": 2, "implementationCost": "Low", "userImpact": "Moderate", "tier": "Core", "actionType": "Config", "service": "MCAS", "deprecated": false, "threats": ["dataExfiltration"]}
+      ]
+    }
+  },
+  "licensing": {
+    "subscribedSkus": {
+      "value": [
+        {"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "id": "0d3e1a7f-0000-4000-8000-00000000d3e0_0d3e1a7f-0000-4000-8000-005c00000001", "skuPartNumber": "SPB", "capabilityStatus": "Enabled", "appliesTo": "User", "consumedUnits": 40, "prepaidUnits": {"enabled": 38, "suspended": 0, "warning": 0}, "servicePlans": [{"servicePlanName": "EXCHANGE_S_STANDARD", "provisioningStatus": "Success", "appliesTo": "User"}, {"servicePlanName": "SHAREPOINTSTANDARD", "provisioningStatus": "Success", "appliesTo": "User"}, {"servicePlanName": "TEAMS1", "provisioningStatus": "Success", "appliesTo": "User"}, {"servicePlanName": "INTUNE_A", "provisioningStatus": "Success", "appliesTo": "User"}, {"servicePlanName": "AAD_PREMIUM", "provisioningStatus": "Success", "appliesTo": "User"}, {"servicePlanName": "MDE_SMB", "provisioningStatus": "Success", "appliesTo": "User"}, {"servicePlanName": "ATP_ENTERPRISE", "provisioningStatus": "Success", "appliesTo": "User"}]},
+        {"skuId": "0d3e1a7f-0000-4000-8000-005c00000002", "id": "0d3e1a7f-0000-4000-8000-00000000d3e0_0d3e1a7f-0000-4000-8000-005c00000002", "skuPartNumber": "EXCHANGESTANDARD", "capabilityStatus": "Enabled", "appliesTo": "User", "consumedUnits": 0, "prepaidUnits": {"enabled": 5, "suspended": 0, "warning": 0}, "servicePlans": [{"servicePlanName": "EXCHANGE_S_STANDARD", "provisioningStatus": "Success", "appliesTo": "User"}]},
+        {"skuId": "0d3e1a7f-0000-4000-8000-005c00000003", "id": "0d3e1a7f-0000-4000-8000-00000000d3e0_0d3e1a7f-0000-4000-8000-005c00000003", "skuPartNumber": "FLOW_FREE", "capabilityStatus": "Enabled", "appliesTo": "User", "consumedUnits": 3, "prepaidUnits": {"enabled": 10000, "suspended": 0, "warning": 0}, "servicePlans": [{"servicePlanName": "FLOW_P2_VIRAL", "provisioningStatus": "Success", "appliesTo": "User"}]}
+      ]
+    },
+    "licensedUsers": {
+      "value": [
+        {"id": "0d3e1a7f-0000-4000-8000-000100000001", "userPrincipalName": "oliver.hartley@halcyonfreight.example", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}]},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000002", "userPrincipalName": "priya.nair@halcyonfreight.example", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}]},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000003", "userPrincipalName": "gareth.pryce@halcyonfreight.example", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}]},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000004", "userPrincipalName": "malcolm.reed@halcyonfreight.example", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}]},
+        {"id": "0d3e1a7f-0000-4000-8000-000100000006", "userPrincipalName": "lucy.barker@halcyonfreight.example", "assignedLicenses": [{"skuId": "0d3e1a7f-0000-4000-8000-005c00000001", "disabledPlans": []}]}
+      ]
+    },
+    "licensedGroups": {"value": []}
+  },
+  "service_health": {
+    "healthOverviews": {
+      "value": [
+        {"id": "Exchange", "service": "Exchange Online", "status": "serviceDegradation"},
+        {"id": "SharePoint", "service": "SharePoint Online", "status": "serviceOperational"},
+        {"id": "microsoftteams", "service": "Microsoft Teams", "status": "serviceOperational"},
+        {"id": "Intune", "service": "Microsoft Intune", "status": "serviceOperational"}
+      ]
+    },
+    "serviceIssues": {
+      "value": [
+        {"id": "EX918274", "service": "Exchange Online", "title": "Delays sending mail to some external recipients", "status": "serviceDegradation", "classification": "advisory", "feature": "Mail flow", "isResolved": false, "startDateTime": "2026-10-01T13:05:00Z", "lastModifiedDateTime": "2026-10-02T06:30:00Z", "impactDescription": "Some users may see delayed outbound mail."},
+        {"id": "TM917002", "service": "Microsoft Teams", "title": "Meeting recordings not appearing in chat", "status": "serviceRestored", "classification": "advisory", "feature": "Meetings", "isResolved": true, "startDateTime": "2026-09-22T09:00:00Z", "endDateTime": "2026-09-22T15:40:00Z", "lastModifiedDateTime": "2026-09-22T16:00:00Z"}
+      ]
+    },
+    "messages": {
+      "value": [
+        {"id": "MC1150311", "title": "Retirement of legacy MFA and SSPR policy settings", "category": "planForChange", "severity": "high", "services": ["Microsoft Entra"], "startDateTime": "2026-09-15T00:00:00Z", "actionRequiredByDateTime": "2026-12-31T00:00:00Z"},
+        {"id": "MC1149870", "title": "Teams external access default changes", "category": "stayInformed", "severity": "normal", "services": ["Microsoft Teams"], "startDateTime": "2026-09-08T00:00:00Z"}
+      ]
+    }
+  }
+}

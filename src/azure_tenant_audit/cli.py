@@ -32,6 +32,7 @@ from .resources import resolve_resource_path
 from .utils import load_env_file
 from .versioning import package_version_line
 from .ai_context import build_privacy_block
+from .capability_gate import relabel_intune_license_blockers
 from . import run as run_core
 
 LOG = logging.getLogger("azure_tenant_audit")
@@ -54,6 +55,19 @@ def _merged_fixture_provenance(
             else:
                 merged[key] = value
     return merged or None
+
+
+def _offline_item_count(payload: Any) -> int:
+    """Count records in a flat ``{"value": [...]}`` or nested ``{section: {"value": [...]}}`` sample payload."""
+    if not isinstance(payload, dict):
+        return 0
+    if isinstance(payload.get("value"), list):
+        return len(payload["value"])
+    return sum(
+        len(section["value"])
+        for section in payload.values()
+        if isinstance(section, dict) and isinstance(section.get("value"), list)
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -188,7 +202,7 @@ def run_offline(
         row: dict[str, Any] = {
             "name": str(key),
             "status": "ok",
-            "item_count": len(value.get("value", [])) if isinstance(value, dict) else 0,
+            "item_count": _offline_item_count(value),
             "message": "offline simulation",
             "coverage_rows": 0,
         }
@@ -588,6 +602,8 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     duration = round(time.time() - start, 2)
     for row in summary_rows:
         writer.write_summary(row)
+    # Intune Forbidden means "missing scope" or "no licence"; use subscribedSkus to tell them apart.
+    coverage_rows = relabel_intune_license_blockers(coverage_rows, collector_payloads)
     diagnostics = _build_diagnostics(
         result_rows=result_rows,
         coverage_rows=coverage_rows,
@@ -607,7 +623,12 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         result_rows=result_rows,
         diagnostics=diagnostics,
     )
-    capability_rows = run_core.reconcile_capability_matrix_rows(capability_rows, result_rows)
+    capability_rows = run_core.reconcile_capability_matrix_rows(
+        capability_rows,
+        result_rows,
+        coverage_rows=coverage_rows,
+        collector_payloads=collector_payloads,
+    )
     normalized_snapshot = build_normalized_snapshot(
         tenant_name=run_cfg.tenant_name,
         run_id=writer.run_id,

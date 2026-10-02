@@ -149,7 +149,7 @@ def test_exchange_collector_uses_fallbacks_and_marks_partial_for_failed_posture_
     assert result.payload["exchangeConnectivityCheck"]["command"] == "m365 status --output json"
     assert result.payload["exchangeTenantInfo"]["command"] == "graph /organization"
     assert result.payload["exchangeTenantInfo"]["source"] == "graph"
-    assert result.payload["mailboxCount"]["command"] == "graph /users?filter=mail ne null"
+    assert result.payload["mailboxCount"]["command"] == "graph /users?$select=mail (mail-enabled users)"
     assert result.payload["mailboxCount"]["source"] == "graph"
     assert result.payload["roomLists"]["error_class"] == "command_not_found"
 

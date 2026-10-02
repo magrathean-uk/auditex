@@ -25,6 +25,7 @@ _M365_PRODUCT_FAMILIES = {
     "identity": "identity",
     "intune": "endpoint",
     "mailbox_forwarding": "exchange",
+    "secure_score": "security",
     "security": "security",
     "service_health": "service_health",
     "sharepoint": "sharepoint",
@@ -53,6 +54,18 @@ def _read_rules(path: Path) -> list[Mapping[str, Any]]:
         return []
     rows = payload.get("rules") if isinstance(payload, Mapping) else []
     return [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
+
+
+def _read_packs(path: Path) -> list[dict[str, Any]]:
+    path = resolve_resource_path(path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
+        return []
+    rows = payload.get("packs") if isinstance(payload, Mapping) else []
+    if not isinstance(rows, list):
+        return []
+    return [dict(row) for row in rows if isinstance(row, Mapping) and row.get("name")]
 
 
 def _read_registry(path: Path) -> dict[str, Mapping[str, Any]]:
@@ -225,6 +238,52 @@ def _merge_rows(existing: Mapping[str, Any], incoming: Mapping[str, Any]) -> dic
     return merged
 
 
+def build_rule_packs() -> list[dict[str, Any]]:
+    """Generate rule packs from the shipped templates and control mappings.
+
+    Two pack kinds exist: ``area`` packs group rules by platform and product
+    family, and ``framework`` packs group rules by every framework key they
+    map to. ``configs/rule-packs.json`` stores the generated output; run
+    ``python3 scripts/generate-rule-packs.py`` after adding or remapping a
+    rule (tests fail on drift).
+    """
+    generated = [*_generated_m365_rows(), *_generated_google_rows()]
+    area: dict[tuple[str, str], set[str]] = {}
+    framework: dict[str, set[str]] = {}
+    for row in generated:
+        platform = str(row.get("platform") or "m365")
+        family = str(row.get("product_family") or "core")
+        area.setdefault((platform, family), set()).add(row["name"])
+        for key in row.get("framework_mappings") or {}:
+            framework.setdefault(str(key), set()).add(row["name"])
+    packs: list[dict[str, Any]] = []
+    for (platform, family), names in sorted(area.items()):
+        packs.append(
+            {
+                "name": f"{platform}.{family}",
+                "kind": "area",
+                "platform": platform,
+                "title": f"{'Microsoft 365' if platform == 'm365' else 'Google Workspace'} {family.replace('_', ' ')} rules",
+                "rules": sorted(names),
+            }
+        )
+    for key, names in sorted(framework.items()):
+        packs.append(
+            {
+                "name": f"framework.{key}",
+                "kind": "framework",
+                "framework": key,
+                "title": f"Rules mapped to {key}",
+                "rules": sorted(names),
+            }
+        )
+    return packs
+
+
+def list_rule_packs(path: Path | None = None) -> list[dict[str, Any]]:
+    return sorted(_read_packs(path or DEFAULT_RULE_PACKS_PATH), key=lambda row: str(row.get("name")))
+
+
 def _all_rule_rows(path: Path | None = None) -> list[dict[str, Any]]:
     by_name: dict[str, dict[str, Any]] = {}
     rows = [_rule_row(item) for item in _read_rules(path or DEFAULT_RULE_PACKS_PATH)]
@@ -237,6 +296,12 @@ def _all_rule_rows(path: Path | None = None) -> list[dict[str, Any]]:
         name = row["name"]
         existing = by_name.get(name)
         by_name[name] = _merge_rows(existing, row) if existing else dict(row)
+    membership: dict[str, list[str]] = {}
+    for pack in _read_packs(path or DEFAULT_RULE_PACKS_PATH):
+        for rule_name in pack.get("rules") or []:
+            membership.setdefault(str(rule_name), []).append(str(pack["name"]))
+    for name, row in by_name.items():
+        row["packs"] = sorted(membership.get(name, []))
     return list(by_name.values())
 
 

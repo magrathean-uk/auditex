@@ -40,7 +40,8 @@ Expected blockers on basic tenants:
 
 - premium Entra risk APIs may be unavailable,
 - Defender or Secure Score may be empty or blocked by license,
-- Intune may be absent,
+- Intune may be absent; Intune answers `Forbidden` both for missing scopes and for an unlicensed tenant, so Auditex reports a licence blocker when `subscribedSkus` (licensing collector) shows no Intune-capable SKU and a scope blocker otherwise,
+- user sign-in activity needs `AuditLog.Read.All` and Entra ID P1/P2; without them identity still runs and records a coverage gap instead of stale-account findings,
 - audit/sign-in log history may be limited,
 - some SharePoint or Exchange depth may need extra role or app-only coverage.
 
@@ -57,18 +58,23 @@ Typical Microsoft Graph application permissions depend on selected collectors, b
 - `Group.Read.All`
 - `RoleManagement.Read.Directory`
 - `Policy.Read.All`
-- `AuditLog.Read.All`
+- `AuditLog.Read.All` (also enables user `signInActivity` for stale-account findings, which needs Microsoft Entra ID P1 or P2, and the Graph beta `servicePrincipalSignInActivities` report for dormant-application findings)
 - `Reports.Read.All`
+- `ReportSettings.Read.All` (reads whether usage reports conceal user, group, and site names)
 - `Application.Read.All`
 - `DelegatedPermissionGrant.Read.All`
-- `SecurityEvents.Read.All` or related security permissions where Defender/Security APIs are in scope.
+- `SecurityAlert.Read.All` (alerts v2), `SecurityIncident.Read.All`, and `SecurityEvents.Read.All` (Secure Score) where Defender/Security APIs are in scope.
 - `DeviceManagementManagedDevices.Read.All` and related Intune read scopes where Intune is in scope.
+- `IdentityRiskyUser.Read.All` only when the opt-in `identity_protection` collector is selected (Entra ID P2; stores aggregate counts only).
+- `ConsentRequest.Read.All` only when the opt-in `defender_cloud_apps` collector (app consent requests) is in scope. Defender for Cloud Apps app risk profiles have no Microsoft Graph REST endpoint; review them in the Defender portal.
 
-Use `auditex probe live --mode app` before full collection. Do not grant broad permissions automatically. Some shipped profile hints include `AppRoleAssignment.ReadWrite.All` and `Exchange.ManageAsApp`; those names do not establish least privilege. Review the generated plan and the blocked surface with the administrator before approving any broader grant. The audit commands themselves must remain read-only.
+Use `auditex probe live --mode app` before full collection. Do not grant broad permissions automatically. Auditex never requests `AppRoleAssignment.ReadWrite.All` (an app holding it can grant itself any permission) or `Mail.Read` (message content); app role assignments are read with `Application.Read.All` and inbox rules with `MailboxSettings.Read`. Some shipped profile hints include `Exchange.ManageAsApp`, which needs an Exchange role assignment and does not by itself establish least privilege. Review the generated plan and the blocked surface with the administrator before approving any broader grant. The audit commands themselves must remain read-only.
 
 ### Exchange-Assisted Coverage
 
 Exchange posture can use Microsoft 365 CLI and PowerShell adapters where Graph has poor coverage. Auditex still records the command surface and keeps audit output read-only. Do not use production write commands.
+
+Detection coverage reads `Get-AdminAuditLogConfig`, `Get-OrganizationConfig`, and `Get-MailboxAuditBypassAssociation` in Exchange Online PowerShell, and `Get-ProtectionAlert` in Security & Compliance PowerShell (`Connect-IPPSSession`). These are read-only `Get-*` cmdlets; View-Only Organization Management or Global Reader is sufficient. Without the session the signal is reported as `unknown`, not `off`.
 
 ## Google Workspace Access Models
 
@@ -153,3 +159,7 @@ If a run is partial, do not add broad permissions blindly. Add the smallest need
 ## Read-Only Rule
 
 If a permission name includes write capability but is required by a provider to read settings, Auditex may record it as scope risk. The audit path must still use only read methods and must not mutate the tenant.
+
+### Exchange Online in app-only runs
+
+Exchange policy, audit, and forwarding checks run read-only `Get-*` cmdlets. In app mode Auditex requests an Exchange Online token for the audit app (`https://outlook.office365.com/.default`) and connects with `Connect-ExchangeOnline -AccessToken` against the tenant's initial `.onmicrosoft.com` domain; the token is passed to PowerShell through an environment variable, never on the command line. This needs the `Exchange.ManageAsApp` application permission on Office 365 Exchange Online plus a read role for the service principal, such as Global Reader ([Microsoft guidance](https://learn.microsoft.com/powershell/exchange/app-only-auth-powershell-v2)). Without them the checks are reported as `session_not_connected` or `command_not_authenticated` coverage gaps. `Get-ProtectionAlert` needs a Security & Compliance PowerShell session, which Auditex does not open, so alert policies stay a coverage gap in app mode.

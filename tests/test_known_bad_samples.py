@@ -42,6 +42,8 @@ def test_m365_known_bad_sample_emits_high_signal_findings(tmp_path: Path) -> Non
     assert report_pack["citation_summary"]["artifact_count"] >= 4
     assert report_pack["citation_summary"]["record_key_count"] >= 1
     assert report_pack["fixture_provenance"]["fixture_id"] == "m365-known-bad"
+    checkpoint_state = json.loads((run_dir / "checkpoints" / "checkpoint-state.json").read_text(encoding="utf-8"))
+    assert checkpoint_state["collectors"]["exchange_policy"]["item_count"] == 3
 
     finding_ids = {item["id"] for item in findings}
     assert {

@@ -15,7 +15,7 @@ class SentinelXdrCollector(Collector):
     )
     required_permissions = [
         "SecurityIncident.Read.All",
-        "SecurityEvents.Read.All",
+        "SecurityAlert.Read.All",
     ]
 
     def run(self, context: dict[str, Any]) -> Any:

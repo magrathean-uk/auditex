@@ -43,7 +43,7 @@ class TeamsPolicyCollector(Collector):
         total = 0
 
         for name, command in self.command_collectors:
-            response = adapter.run(command, log_event=log_event)
+            response = adapter.run(command, log_event=log_event, session={"kind": "microsoft_teams"})
             response.setdefault("command", command)
             payload[name] = response
             values = response.get("value")

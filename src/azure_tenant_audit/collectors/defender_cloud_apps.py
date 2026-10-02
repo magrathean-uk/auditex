@@ -1,4 +1,11 @@
-"""Capability-gated collector for Microsoft Defender for Cloud Apps (CASB)."""
+"""Capability-gated collector for Microsoft Defender for Cloud Apps (CASB) adjacent posture.
+
+Microsoft Graph has no documented REST endpoint for Defender for Cloud Apps app
+risk profiles (the former ``/security/cloudAppSecurityProfiles`` call returned
+nothing usable and is not in the Graph reference), so this collector only reads
+documented Graph surfaces: pending end-user app consent requests. CASB app risk
+scores remain a portal-only review item.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -10,14 +17,12 @@ from .base import Collector
 class DefenderCloudAppsCollector(Collector):
     name = "defender_cloud_apps"
     description = (
-        "Microsoft Defender for Cloud Apps (CASB) posture via Graph: app security profiles "
-        "and OAuth/connected app inventory. Capability-gated; requires Defender for Cloud Apps "
-        "(E5/Defender plan) plus tenant onboarding."
+        "OAuth app consent request inventory via documented Graph endpoints. Defender for Cloud Apps "
+        "app risk profiles have no Graph REST endpoint and are not collected; review them in the "
+        "Defender portal. Capability-gated."
     )
     required_permissions = [
-        "CloudApp-Discovery.Read.All",
-        "Application.Read.All",
-        "SecurityEvents.Read.All",
+        "ConsentRequest.Read.All",
     ]
 
     def run(self, context: dict[str, Any]) -> Any:
@@ -25,11 +30,10 @@ class DefenderCloudAppsCollector(Collector):
             self.name,
             context.get("client"),
             [
-                ("cloudAppSecurityProfiles", "/security/cloudAppSecurityProfiles"),
                 ("appConsentRequests", "/identityGovernance/appConsent/appConsentRequests"),
             ],
             log_event=context.get("audit_logger"),
-            skip_reason="no Graph client; Defender for Cloud Apps likely unlicensed",
+            skip_reason="no Graph client; app consent request inventory unavailable",
         )
         return build_collector_result(
             self,

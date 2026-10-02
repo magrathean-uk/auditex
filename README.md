@@ -25,6 +25,10 @@ The public audit surface does not write to production tenants. It also does not 
 - Guided setup and audit flows, capability probes, local auth-context management, and diagnostics.
 - Offline fixtures for contract checks and demonstrations.
 - Report rendering, CSV/JSON and other exporters, comparison and drift gates, customer handoff packs, and a local MCP server.
+- Read-only privilege-escalation graph: attack paths from ordinary users, guests, users without MFA, and third-party apps to tier-0 control, with an ATT&CK technique and evidence record per hop and the single change that breaks each path.
+- Detection coverage ("could this tenant see an attack?") and the tenant's public footprint, including MTA-STS and TLS-RPT.
+- Baseline alignment with CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, and the Microsoft cloud security benchmark. See [framework mappings](docs/reference/framework-mappings.md).
+- `auditex demo`, a guided walkthrough on a fictional company, and `auditex report explorer`, a self-contained interactive HTML view of any run.
 
 The package is Python 3.11 or newer. Its required runtime dependencies are `requests` and `msal`. Google Workspace and MCP support are optional extras.
 
@@ -57,6 +61,14 @@ make contract-smoke
 `make contract-smoke` runs an offline sample and checks the finalized bundle contract. See [the runbook](docs/development/runbook.md) for the complete local and release check matrix.
 
 ## Main commands
+
+Try the whole flow on a fictional company without touching any tenant:
+
+```bash
+auditex demo
+```
+
+`auditex demo` replays a synthetic tenant offline, then walks through access planning, findings, evidence, attack paths, and a tamper-evident customer pack, and writes an interactive HTML explorer. Use `--no-pause` for an unattended run.
 
 Generate a provider-specific permission and scope plan before requesting access:
 
@@ -117,6 +129,7 @@ auditex report permissions <run-dir> --format md
 auditex report proof-table <run-dir> --format md
 auditex report customer-pack <run-dir> --output-dir customer-pack
 auditex report verify-pack customer-pack
+auditex report explorer <run-dir>
 auditex compare --run-dir run-a --run-dir run-b
 auditex export list
 ```

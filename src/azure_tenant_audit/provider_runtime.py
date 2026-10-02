@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .attack_graph import analyze_attack_graph
+from .detection_coverage import SECTION as DETECTION_SECTION, summarize_detection_coverage
+from .exposure_lookup import summarize_public_footprint
 from .finalize import finalize_bundle_contract
 from .findings import build_report_pack
 
@@ -14,6 +17,20 @@ API_INVENTORY_RECORDER_VERSION = "2026-05-31"
 def _optional_fixture_provenance(bundle_metadata: dict[str, Any]) -> dict[str, Any] | None:
     fixture_provenance = bundle_metadata.get("fixture_provenance")
     return dict(fixture_provenance) if isinstance(fixture_provenance, dict) else None
+
+
+def _attack_graph_for(normalized_snapshot: dict[str, dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Privilege-escalation graph analysis, or None when the run has no directory data."""
+    analysis = analyze_attack_graph(normalized_snapshot or {})
+    if not analysis["summary"].get("node_count"):
+        return None
+    return analysis
+
+
+def _section_records(snapshot: dict[str, Any], section: str) -> list[dict[str, Any]]:
+    payload = snapshot.get(section) if isinstance(snapshot, dict) else None
+    records = payload.get("records") if isinstance(payload, dict) else None
+    return [dict(item) for item in records if isinstance(item, dict)] if isinstance(records, list) else []
 
 
 @dataclass(frozen=True)
@@ -46,7 +63,16 @@ def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
         evidence_paths=plan.evidence_paths,
         blocker_count=len(plan.blockers),
         privacy=plan.privacy,
+        attack_graph=_attack_graph_for(plan.normalized_snapshot),
+        normalized_snapshot=plan.normalized_snapshot,
+        coverage_ledger=plan.coverage_ledger,
     )
+    detection_records = _section_records(plan.normalized_snapshot, DETECTION_SECTION)
+    if detection_records:
+        report_pack["detection_coverage"] = summarize_detection_coverage(detection_records)
+    footprint_records = _section_records(plan.normalized_snapshot, "public_footprint_objects")
+    if footprint_records:
+        report_pack["public_footprint"] = summarize_public_footprint(footprint_records)
     fixture_provenance = _optional_fixture_provenance(plan.bundle_metadata)
     if fixture_provenance:
         report_pack["fixture_provenance"] = fixture_provenance

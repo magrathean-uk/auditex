@@ -9,7 +9,7 @@ from . import auth as auditex_auth
 from .bootstrap import print_doctor_report, run_setup
 from .features import response_disabled_message, response_enabled
 from .guided import build_guided_parser, run_guided
-from .rules import list_rule_inventory
+from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
@@ -40,6 +40,7 @@ def _build_root_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("setup-guide", help="Print provider setup scopes, roles, and verification commands.")
     subparsers.add_parser("doctor", help="Show local runtime and auth readiness.")
     subparsers.add_parser("guided-run", help="Run the guided operator flow.")
+    subparsers.add_parser("demo", help="Walk through Auditex on a fictional, synthetic tenant (offline).")
     subparsers.add_parser("run", help="Run a raw tenant audit.")
     subparsers.add_parser("probe", help="Run or summarize capability probes.")
     if response_enabled():
@@ -341,6 +342,8 @@ def _build_rules_parser() -> argparse.ArgumentParser:
     inventory.add_argument("--product-family", default=None, help="Optional product family filter.")
     inventory.add_argument("--license-tier", default=None, help="Optional license tier filter.")
     inventory.add_argument("--audit-level", default=None, help="Optional audit level filter.")
+    packs = subparsers.add_parser("packs", help="List rule packs by product area and framework.")
+    packs.add_argument("--kind", choices=("area", "framework"), default=None, help="Optional pack kind filter.")
     return parser
 
 
@@ -388,6 +391,12 @@ def _build_compare_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-dir", action="append", required=True, dest="run_dirs", help="Run directory to compare.")
     parser.add_argument("--allow-cross-tenant", action="store_true", help="Allow comparing runs from different tenants.")
     parser.add_argument("--classic", action="store_true", help="Use classic raw compare without noise suppression.")
+    parser.add_argument(
+        "--format",
+        choices=("json", "md"),
+        default="json",
+        help="Output format: json (default) or md for a readable before/after summary.",
+    )
     return parser
 
 
@@ -423,6 +432,9 @@ def _build_report_parser() -> argparse.ArgumentParser:
     customer_pack.add_argument("--output-dir", required=True, help="Directory where customer handoff files will be written.")
     verify_pack = subparsers.add_parser("verify-pack", help="Verify a customer handoff pack manifest and checksums.")
     verify_pack.add_argument("pack_dir", help="Customer handoff pack directory.")
+    explorer = subparsers.add_parser("explorer", help="Write a self-contained interactive HTML explorer for a completed run.")
+    explorer.add_argument("run_dir", help="Completed run directory.")
+    explorer.add_argument("--output", default=None, help="HTML file to write (default: <run-dir>/reports/explorer.html).")
     return parser
 
 
@@ -716,6 +728,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--json", action="store_true", help="Print JSON report.")
         args = parser.parse_args(argv[1:])
         return print_doctor_report(json_output=args.json)
+    if argv[0] == "demo":
+        from .demo import main as demo_main
+
+        return demo_main(argv[1:])
     if argv[0] == "guided-run":
         parser = build_guided_parser()
         args = parser.parse_args(argv[1:])
@@ -743,11 +759,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps({"count": len(rows), "rules": rows}, indent=2))
             return 0
+        if args.rules_command == "packs":
+            pack_rows = [row for row in list_rule_packs() if args.kind is None or row.get("kind") == args.kind]
+            print(json.dumps({"count": len(pack_rows), "packs": pack_rows}, indent=2))
+            return 0
         return 2
     if argv[0] == "compare":
         parser = _build_compare_parser()
         args = parser.parse_args(argv[1:])
-        print(json.dumps(compare_runs(args.run_dirs, allow_cross_tenant=args.allow_cross_tenant, classic=args.classic), indent=2))
+        result = compare_runs(args.run_dirs, allow_cross_tenant=args.allow_cross_tenant, classic=args.classic)
+        if args.format == "md":
+            from .compare import render_compare_markdown
+
+            print(render_compare_markdown(result))
+        else:
+            print(json.dumps(result, indent=2))
         return 0
     if argv[0] == "report":
         parser = _build_report_parser()
@@ -797,6 +823,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.report_command == "customer-pack":
             print(json.dumps(write_customer_pack(args.run_dir, args.output_dir), indent=2))
+            return 0
+        if args.report_command == "explorer":
+            from .explorer import write_explorer
+
+            output = Path(args.output) if args.output else Path(args.run_dir) / "reports" / "explorer.html"
+            print(write_explorer(args.run_dir, output))
             return 0
         if args.report_command == "verify-pack":
             result = verify_customer_pack(args.pack_dir)
@@ -1005,6 +1037,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.probe_command != "live":
             return 2
+        if args.mode == "app":
+            # Same fallback as `auditex run`: read saved app credentials instead of requiring the secret on the command line.
+            import os
+
+            args.tenant_id = args.tenant_id or os.environ.get("AZURE_TENANT_ID")
+            args.client_id = args.client_id or os.environ.get("AZURE_CLIENT_ID")
+            args.client_secret = args.client_secret or os.environ.get("AZURE_CLIENT_SECRET")
         cfg = ProbeConfig(
             tenant_name=args.tenant_name,
             output_dir=Path(args.out),

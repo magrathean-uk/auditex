@@ -79,7 +79,7 @@ _FINDINGS_UNSORTED = [
 def test_csv_export_columns_match_canonical_order() -> None:
     csv_output = _render_csv({"findings": _FINDINGS_UNSORTED})
     header = csv_output.splitlines()[0]
-    assert header == "id,title,severity,status,rule_id,collector,affected_objects,impact,remediation,expected_value"
+    assert header == "id,title,severity,status,rule_id,collector,affected_objects,impact,remediation,expected_value,framework_mappings"
 
 
 def test_csv_export_includes_actionable_audit_fields() -> None:

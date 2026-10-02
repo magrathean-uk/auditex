@@ -97,27 +97,20 @@ def test_sentinel_xdr_incidents_flatten_to_section() -> None:
     assert section["records"][0]["severity"] == "high"
 
 
-def test_defender_cloud_apps_profiles_flatten_to_section() -> None:
+def test_defender_cloud_apps_consent_requests_flatten_to_section() -> None:
     snapshot = _snapshot(
         {
             "defender_cloud_apps": {
-                "cloudAppSecurityProfiles": {
-                    "value": [
-                        {
-                            "id": "casa-1",
-                            "displayName": "Slack",
-                            "riskScore": 8,
-                            "category": "collaboration",
-                        }
-                    ]
+                "appConsentRequests": {
+                    "value": [{"id": "req-1", "appId": "app-1", "createdDateTime": "2026-09-01T00:00:00Z"}]
                 },
-                "appConsentRequests": {"value": []},
             }
         }
     )
-    section = snapshot.get("defender_cloud_apps_profile_objects")
+    section = snapshot.get("defender_cloud_apps_consent_objects")
     assert section is not None
-    assert section["records"][0]["risk_score"] == 8
+    assert section["records"][0]["app_id"] == "app-1"
+    assert snapshot.get("defender_cloud_apps_profile_objects") is None
 
 
 def test_copilot_admin_settings_flatten_to_section() -> None:
@@ -154,7 +147,6 @@ def test_gated_sections_absent_when_collector_payload_empty() -> None:
             },
             "sentinel_xdr": {"xdrIncidents": {"value": []}, "xdrAlerts": {"value": []}},
             "defender_cloud_apps": {
-                "cloudAppSecurityProfiles": {"value": []},
                 "appConsentRequests": {"value": []},
             },
             "copilot_governance": {
@@ -165,5 +157,5 @@ def test_gated_sections_absent_when_collector_payload_empty() -> None:
     )
     assert snapshot.get("power_platform_environment_objects") is None
     assert snapshot.get("sentinel_xdr_incident_objects") is None
-    assert snapshot.get("defender_cloud_apps_profile_objects") is None
+    assert snapshot.get("defender_cloud_apps_consent_objects") is None
     assert snapshot.get("copilot_admin_setting_objects") is None

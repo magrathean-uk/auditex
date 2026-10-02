@@ -4,8 +4,13 @@
     "description": "Auditex could not read the requested Microsoft 365 surface with the supplied identity.",
     "impact": "The report has a confirmed evidence gap for this area, so the related control cannot be asserted from this run.",
     "remediation": "Rerun with the minimum read permission required for the blocked surface, or exclude that surface from the agreed scope.",
-    "references": ["Microsoft Graph permission review", "Auditex collector permission matrix"],
-    "control_ids": ["AUDITEX-COLLECTOR-PERMISSION"],
+    "references": [
+      "Microsoft Graph permission review",
+      "Auditex collector permission matrix"
+    ],
+    "control_ids": [
+      "AUDITEX-COLLECTOR-PERMISSION"
+    ],
     "expected_value": "The collector can read the requested surface."
   },
   "collector.issue.service": {
@@ -13,8 +18,13 @@
     "description": "The collector reached a tenant surface that is absent, disabled, not provisioned, or temporarily unavailable.",
     "impact": "Evidence for the affected service remains partial until the tenant state or service availability changes.",
     "remediation": "Confirm licensing and service availability, then rerun only the affected collector where appropriate.",
-    "references": ["Microsoft service health", "Auditex collector diagnostics"],
-    "control_ids": ["AUDITEX-COLLECTOR-SERVICE"],
+    "references": [
+      "Microsoft service health",
+      "Auditex collector diagnostics"
+    ],
+    "control_ids": [
+      "AUDITEX-COLLECTOR-SERVICE"
+    ],
     "expected_value": "The target service surface responds successfully."
   },
   "collector.issue.collector": {
@@ -22,8 +32,12 @@
     "description": "A collector finished with an operational error unrelated to normal permission or service-state handling.",
     "impact": "The affected evidence set may be missing, incomplete, or unsuitable for comparison.",
     "remediation": "Inspect the collector diagnostic row, fix the runtime or input condition, and rerun the collector.",
-    "references": ["Auditex collector diagnostics"],
-    "control_ids": ["AUDITEX-COLLECTOR-FAILURE"],
+    "references": [
+      "Auditex collector diagnostics"
+    ],
+    "control_ids": [
+      "AUDITEX-COLLECTOR-FAILURE"
+    ],
     "expected_value": "The collector completes without runtime errors."
   },
   "coverage.gap": {
@@ -31,17 +45,40 @@
     "description": "One or more audit surfaces are blocked or partial, limiting assurance for that provider area.",
     "impact": "Important risks can remain unknown when required collectors cannot read the surface or only return partial evidence.",
     "remediation": "Resolve the affected collector permissions, scopes, service availability, or configuration, then rerun the audit.",
-    "references": ["Auditex coverage diagnostics", "Auditex collector permission matrix"],
-    "control_ids": ["AUDITEX-COVERAGE-GAP"],
+    "references": [
+      "Auditex coverage diagnostics",
+      "Auditex collector permission matrix"
+    ],
+    "control_ids": [
+      "AUDITEX-COVERAGE-GAP"
+    ],
     "expected_value": "All in-scope audit surfaces complete successfully or have an accepted scope decision."
+  },
+  "reports_usage.concealed_names": {
+    "risk_rating": "low",
+    "description": "The tenant report setting displayConcealedNames is enabled, so Microsoft 365 usage reports show hashed user, group, and site names.",
+    "impact": "Per-user usage evidence in this run cannot be tied to named identities; usage-based conclusions are limited to aggregate counts.",
+    "remediation": "No security change is required; concealed names protect privacy. If named per-user evidence is in scope, a report administrator can temporarily disable concealed names in the Microsoft 365 admin center (Settings > Org settings > Reports) under an approved change, then re-enable it.",
+    "references": [
+      "Microsoft Graph adminReportSettings",
+      "Microsoft 365 admin center report privacy settings"
+    ],
+    "control_ids": [
+      "AUDITEX-REPORTS-CONCEALED-NAMES"
+    ],
+    "expected_value": "Report privacy setting is known and accounted for in the audit scope."
   },
   "sharepoint.broad_link": {
     "risk_rating": "high",
     "description": "SharePoint or OneDrive evidence indicates a sharing link with broad audience reach.",
     "impact": "Content may be reachable by users outside the intended collaboration boundary.",
     "remediation": "Reduce the sharing scope, remove stale broad links, and retest affected sites.",
-    "references": ["SharePoint sharing policy review"],
-    "control_ids": ["AUDITEX-SPO-BROAD-LINK"],
+    "references": [
+      "SharePoint sharing policy review"
+    ],
+    "control_ids": [
+      "AUDITEX-SPO-BROAD-LINK"
+    ],
     "expected_value": "External and organization-wide links are absent or explicitly approved."
   },
   "sharepoint.external_principal": {
@@ -49,17 +86,67 @@
     "description": "SharePoint or OneDrive evidence indicates direct access for a principal outside the tenant domains.",
     "impact": "Content may be exposed to external users or groups outside the approved collaboration boundary.",
     "remediation": "Remove unapproved external principals from the item or site permission set and retest affected sites.",
-    "references": ["SharePoint permissions review"],
-    "control_ids": ["AUDITEX-SPO-EXTERNAL-PRINCIPAL"],
+    "references": [
+      "SharePoint permissions review"
+    ],
+    "control_ids": [
+      "AUDITEX-SPO-EXTERNAL-PRINCIPAL"
+    ],
     "expected_value": "Direct SharePoint and OneDrive permissions are limited to approved tenant principals."
+  },
+  "attack_path.app_owner_to_tier0": {
+    "risk_rating": "critical",
+    "description": "A principal that is not a tier-0 administrator owns an application or service principal that holds tier-0 rights, so it can add a credential and act with those rights.",
+    "impact": "Compromising the owner gives an attacker a route to directory-wide control without ever being assigned an administrator role, and the route is not visible in role reviews.",
+    "remediation": "Remove the ownership or move it to a tier-0 administrator, reduce the application's Graph permissions to what it needs, and alert on new credentials added to privileged applications.",
+    "references": [
+      "Microsoft Entra application ownership",
+      "Auditex attack path analysis"
+    ],
+    "control_ids": [
+      "AUDITEX-ATTACK-PATH-APP-OWNER"
+    ],
+    "expected_value": "Only tier-0 administrators own applications that hold tier-0 rights."
+  },
+  "attack_path.no_mfa_to_tier0": {
+    "risk_rating": "critical",
+    "description": "A user without registered MFA can reach a tier-0 role or permission through group membership, eligibility, or delegated control.",
+    "impact": "A single phished or sprayed password can be chained into directory-wide control.",
+    "remediation": "Require MFA registration for the user, remove the privileged route, and protect privileged groups and roles with phishing-resistant MFA.",
+    "references": [
+      "Microsoft Entra authentication methods report",
+      "Auditex attack path analysis"
+    ],
+    "control_ids": [
+      "AUDITEX-ATTACK-PATH-NO-MFA"
+    ],
+    "expected_value": "No password-only user has a route to tier-0 control."
+  },
+  "attack_path.privilege_escalation": {
+    "risk_rating": "high",
+    "description": "A foothold principal (ordinary user, guest, external app, or app with a weak credential) can reach a tier-0 role or permission through a chain of memberships, role assignments, grants, or reset rights.",
+    "impact": "An attacker who compromises the foothold can escalate to tier-0 control by following the chain, often without triggering a direct role assignment.",
+    "remediation": "Break the chain at one of the listed breakpoint edges, prefer removing standing access, and review every remaining route to tier-0 roles.",
+    "references": [
+      "Microsoft Entra privileged roles",
+      "Auditex attack path analysis"
+    ],
+    "control_ids": [
+      "AUDITEX-ATTACK-PATH-PRIVESC"
+    ],
+    "expected_value": "No foothold principal has a route to tier-0 control."
   },
   "app_consent.high_privilege": {
     "risk_rating": "high",
     "description": "Application consent evidence shows sensitive scopes or weak ownership governance.",
     "impact": "Over-privileged or unowned application consent can become a durable path to tenant data exposure.",
     "remediation": "Review the consent grant, remove unused scopes, and assign accountable owners before accepting the application.",
-    "references": ["Application consent governance review"],
-    "control_ids": ["AUDITEX-APP-CONSENT-HIGH-PRIVILEGE"],
+    "references": [
+      "Application consent governance review"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-CONSENT-HIGH-PRIVILEGE"
+    ],
     "expected_value": "Sensitive app grants are approved, current, and owned."
   },
   "app_credentials.secret_expired": {
@@ -67,8 +154,12 @@
     "description": "An application credential (secret or certificate) has already expired.",
     "impact": "An expired credential indicates either an unmaintained app or a credential that should be rotated and removed; leaving expired material attached invites stale state and reuse risk.",
     "remediation": "Remove the expired credential, rotate to a fresh secret or certificate, and confirm the application is still required.",
-    "references": ["Microsoft Entra application credential rotation guidance"],
-    "control_ids": ["AUDITEX-APP-CRED-EXPIRED"],
+    "references": [
+      "Microsoft Entra application credential rotation guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-CRED-EXPIRED"
+    ],
     "expected_value": "All attached credentials are within their validity window."
   },
   "app_credentials.secret_expiring": {
@@ -76,8 +167,12 @@
     "description": "An application credential will expire within 30 days.",
     "impact": "Imminent credential expiry can break automation if not rotated proactively.",
     "remediation": "Rotate the secret or certificate, deploy the new value, and remove the soon-to-expire credential.",
-    "references": ["Microsoft Entra application credential rotation guidance"],
-    "control_ids": ["AUDITEX-APP-CRED-EXPIRING"],
+    "references": [
+      "Microsoft Entra application credential rotation guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-CRED-EXPIRING"
+    ],
     "expected_value": "Credentials are rotated before they expire."
   },
   "app_credentials.redirect_insecure": {
@@ -85,8 +180,13 @@
     "description": "Application has an HTTP redirect URI pointing at a non-localhost host.",
     "impact": "HTTP redirect URIs can leak authorization codes and tokens to the network and bypass replay protection.",
     "remediation": "Replace HTTP redirect URIs with HTTPS equivalents and remove unused redirects.",
-    "references": ["OAuth 2.0 Security BCP", "Microsoft Entra redirect URI guidance"],
-    "control_ids": ["AUDITEX-APP-REDIRECT-HTTP"],
+    "references": [
+      "OAuth 2.0 Security BCP",
+      "Microsoft Entra redirect URI guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-REDIRECT-HTTP"
+    ],
     "expected_value": "All non-localhost redirect URIs use HTTPS."
   },
   "app_credentials.no_owner": {
@@ -94,8 +194,12 @@
     "description": "Application registration has no listed owners.",
     "impact": "Apps without owners drift out of governance and become hard to retire or rotate.",
     "remediation": "Assign at least one accountable owner; remove the app if it is no longer required.",
-    "references": ["Microsoft Entra application ownership review"],
-    "control_ids": ["AUDITEX-APP-NO-OWNER"],
+    "references": [
+      "Microsoft Entra application ownership review"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-NO-OWNER"
+    ],
     "expected_value": "Each tenant-owned application has a documented owner."
   },
   "app_credentials.multi_tenant_audience": {
@@ -103,8 +207,12 @@
     "description": "Application sign-in audience permits multi-tenant or personal Microsoft accounts.",
     "impact": "Multi-tenant or personal-account audiences broaden the population that can interact with the app and can be misused if redirect URIs or scopes are weak.",
     "remediation": "Restrict the audience to single-tenant unless multi-tenant is explicitly required and reviewed.",
-    "references": ["Microsoft Entra application audience review"],
-    "control_ids": ["AUDITEX-APP-AUDIENCE-WIDE"],
+    "references": [
+      "Microsoft Entra application audience review"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-AUDIENCE-WIDE"
+    ],
     "expected_value": "Sign-in audience is 'AzureADMyOrg' for tenant-owned apps unless multi-tenant is justified."
   },
   "app_credentials.certificate_expired": {
@@ -112,8 +220,12 @@
     "description": "An application certificate (keyCredential) has already expired.",
     "impact": "Once a cert expires, downstream Microsoft and partner authentication fails; lingering expired certs also indicate weak rotation hygiene and unmaintained apps.",
     "remediation": "Remove the expired certificate, issue a fresh one with a documented validity window, and confirm the application is still required.",
-    "references": ["Microsoft Entra application credential rotation guidance"],
-    "control_ids": ["AUDITEX-APP-CERT-EXPIRED"],
+    "references": [
+      "Microsoft Entra application credential rotation guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-CERT-EXPIRED"
+    ],
     "expected_value": "All keyCredentials are within their validity window."
   },
   "app_credentials.certificate_expiring": {
@@ -121,8 +233,12 @@
     "description": "An application certificate (keyCredential) will expire within 30 days.",
     "impact": "Certificate rotation has more lead time than secret rotation; flagging at 30 days lets the operator schedule reissuance before authentication breaks.",
     "remediation": "Reissue the certificate before expiry, deploy the new value, and remove the soon-to-expire entry.",
-    "references": ["Microsoft Entra application credential rotation guidance"],
-    "control_ids": ["AUDITEX-APP-CERT-EXPIRING"],
+    "references": [
+      "Microsoft Entra application credential rotation guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-CERT-EXPIRING"
+    ],
     "expected_value": "keyCredentials are rotated at least 30 days before they expire."
   },
   "app_credentials.secret_long_validity": {
@@ -130,8 +246,13 @@
     "description": "An application secret either has no end_date_time or a validity window that exceeds two years.",
     "impact": "Long-lived or open-ended secrets violate cryptographic hygiene, magnify blast radius if leaked, and bypass Entra's default 24-month cap. They are a recurring root cause of supply-chain compromise.",
     "remediation": "Replace with a secret bounded to 6-12 months (or move to certificate auth) and rotate on a schedule.",
-    "references": ["Microsoft Entra default credential lifetime", "OWASP cryptographic storage cheat sheet"],
-    "control_ids": ["AUDITEX-APP-SECRET-LONG-VALIDITY"],
+    "references": [
+      "Microsoft Entra default credential lifetime",
+      "OWASP cryptographic storage cheat sheet"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-SECRET-LONG-VALIDITY"
+    ],
     "expected_value": "Application secrets bounded to <= 24 months."
   },
   "app_credentials.credential_dormant": {
@@ -139,8 +260,12 @@
     "description": "Application has not signed in for more than 365 days (signInActivity observed and null).",
     "impact": "Stale applications expand the attack surface — credentials persist after the workload is gone, owners forget the app exists, and consent grants outlive their purpose.",
     "remediation": "Confirm the application is still required; if not, retire it (delete, or disable and document) and revoke consent grants.",
-    "references": ["Microsoft Entra application lifecycle review"],
-    "control_ids": ["AUDITEX-APP-DORMANT"],
+    "references": [
+      "Microsoft Entra application lifecycle review"
+    ],
+    "control_ids": [
+      "AUDITEX-APP-DORMANT"
+    ],
     "expected_value": "Application has signed in within the last year, or has been retired."
   },
   "cross_tenant_access.default_b2b_collaboration_inbound_open": {
@@ -148,8 +273,12 @@
     "description": "Default cross-tenant access policy allows inbound B2B Collaboration from any external tenant.",
     "impact": "Open inbound B2B Collaboration lets users from any external tenant be invited to resources in your tenant without per-partner scoping or trust requirements; common phishing-driven account-takeover precursor.",
     "remediation": "Set the default B2B Collaboration inbound access to 'blocked' and enable per-partner allow-lists with inbound trust requirements (MFA, compliant device).",
-    "references": ["Microsoft Entra cross-tenant access default policy guidance", "CIS Microsoft 365 Foundations 1.1.4"],
-    "control_ids": ["AUDITEX-CTA-COLLAB-IN-OPEN"],
+    "references": [
+      "Microsoft Entra cross-tenant access default policy guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-CTA-COLLAB-IN-OPEN"
+    ],
     "expected_value": "Default inbound B2B Collaboration is 'blocked' or scoped to specific partners."
   },
   "cross_tenant_access.default_b2b_direct_connect_outbound_open": {
@@ -157,8 +286,12 @@
     "description": "Default cross-tenant access policy allows outbound B2B Direct Connect to any external tenant.",
     "impact": "Open outbound Direct Connect lets your users participate in shared channels in any external tenant; sensitive content can flow out without partner-specific governance.",
     "remediation": "Set default outbound Direct Connect to 'blocked' and enable per-partner where shared-channel collaboration is required.",
-    "references": ["Microsoft Entra cross-tenant access default policy guidance"],
-    "control_ids": ["AUDITEX-CTA-DC-OUT-OPEN"],
+    "references": [
+      "Microsoft Entra cross-tenant access default policy guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-CTA-DC-OUT-OPEN"
+    ],
     "expected_value": "Default outbound B2B Direct Connect is 'blocked' or scoped per partner."
   },
   "cross_tenant_access.auto_user_consent_inbound_enabled": {
@@ -166,8 +299,12 @@
     "description": "Cross-tenant access policy enables automatic user consent for inbound external users.",
     "impact": "Automatic user consent skips the per-app consent prompt for external users, removing a key data-sharing checkpoint and enabling silent over-permissioned flows.",
     "remediation": "Disable automatic user consent inbound and require explicit user or admin consent for external app access.",
-    "references": ["Microsoft Entra automatic user consent settings"],
-    "control_ids": ["AUDITEX-CTA-AUTOCONSENT-IN"],
+    "references": [
+      "Microsoft Entra automatic user consent settings"
+    ],
+    "control_ids": [
+      "AUDITEX-CTA-AUTOCONSENT-IN"
+    ],
     "expected_value": "automaticUserConsentSettings.inboundAllowed = false."
   },
   "cross_tenant_access.auto_user_consent_outbound_enabled": {
@@ -175,8 +312,12 @@
     "description": "Cross-tenant access policy enables automatic user consent for outbound interactions with external apps.",
     "impact": "Outbound auto-consent lets your users grant access to data hosted in external tenants without an explicit consent prompt; weakens data-egress visibility.",
     "remediation": "Disable automatic user consent outbound; require an explicit consent step or admin approval for external app access.",
-    "references": ["Microsoft Entra automatic user consent settings"],
-    "control_ids": ["AUDITEX-CTA-AUTOCONSENT-OUT"],
+    "references": [
+      "Microsoft Entra automatic user consent settings"
+    ],
+    "control_ids": [
+      "AUDITEX-CTA-AUTOCONSENT-OUT"
+    ],
     "expected_value": "automaticUserConsentSettings.outboundAllowed = false."
   },
   "cross_tenant_access.default_b2b_direct_connect_inbound_open": {
@@ -184,8 +325,12 @@
     "description": "Default cross-tenant access policy allows inbound B2B Direct Connect from any tenant.",
     "impact": "Inbound B2B Direct Connect grants external identities elevated collaboration capabilities (shared channels, native Teams identity). Enabling it tenant-wide bypasses partner-specific scoping.",
     "remediation": "Set the default B2B Direct Connect inbound access to 'blocked' and enable it explicitly per partner with inbound trust requirements (MFA, compliant device).",
-    "references": ["Microsoft Entra cross-tenant access settings"],
-    "control_ids": ["AUDITEX-XTA-DEFAULT-B2B-DIRECT-CONNECT-INBOUND"],
+    "references": [
+      "Microsoft Entra cross-tenant access settings"
+    ],
+    "control_ids": [
+      "AUDITEX-XTA-DEFAULT-B2B-DIRECT-CONNECT-INBOUND"
+    ],
     "expected_value": "Default inbound B2B Direct Connect is blocked; partner-specific allow-lists are used."
   },
   "cross_tenant_access.default_b2b_collaboration_outbound_open": {
@@ -193,8 +338,12 @@
     "description": "Default cross-tenant access policy permits outbound B2B Collaboration to any tenant.",
     "impact": "Tenant users can be invited into any external tenant by default, increasing the surface for guest-account misuse and conditional access bypass.",
     "remediation": "Restrict default outbound B2B Collaboration and approve outbound trust per partner.",
-    "references": ["Microsoft Entra cross-tenant access settings"],
-    "control_ids": ["AUDITEX-XTA-DEFAULT-B2B-COLLAB-OUTBOUND"],
+    "references": [
+      "Microsoft Entra cross-tenant access settings"
+    ],
+    "control_ids": [
+      "AUDITEX-XTA-DEFAULT-B2B-COLLAB-OUTBOUND"
+    ],
     "expected_value": "Default outbound B2B Collaboration is blocked except for approved partners."
   },
   "cross_tenant_access.partner_inbound_no_mfa": {
@@ -202,8 +351,13 @@
     "description": "Partner-specific inbound B2B Direct Connect is allowed but inbound MFA trust is not accepted.",
     "impact": "Without inbound MFA trust, partner identities can authenticate with weaker controls than tenant users, undermining MFA enforcement on shared resources.",
     "remediation": "Enable inbound MFA trust acceptance for partners that allow B2B Direct Connect, or block direct connect for partners that cannot honour MFA trust.",
-    "references": ["Microsoft Entra cross-tenant access settings", "Microsoft Entra inbound trust"],
-    "control_ids": ["AUDITEX-XTA-PARTNER-NO-MFA"],
+    "references": [
+      "Microsoft Entra cross-tenant access settings",
+      "Microsoft Entra inbound trust"
+    ],
+    "control_ids": [
+      "AUDITEX-XTA-PARTNER-NO-MFA"
+    ],
     "expected_value": "Partners with inbound B2B Direct Connect honour inbound MFA trust."
   },
   "mailbox_forwarding.external_inbox_rule": {
@@ -211,8 +365,13 @@
     "description": "An inbox rule forwards or redirects mail to a recipient outside the tenant's accepted domains.",
     "impact": "External-forwarding inbox rules are the leading indicator of business email compromise (BEC) and active mailbox takeover.",
     "remediation": "Disable the rule, investigate the affected mailbox for compromise, force a password reset, revoke sessions, and review sign-in logs for anomalies.",
-    "references": ["Microsoft 365 BEC investigation playbook", "MITRE ATT&CK T1114.003"],
-    "control_ids": ["AUDITEX-MBX-EXTERNAL-FWD"],
+    "references": [
+      "Microsoft 365 BEC investigation playbook",
+      "MITRE ATT&CK T1114.003"
+    ],
+    "control_ids": [
+      "AUDITEX-MBX-EXTERNAL-FWD"
+    ],
     "expected_value": "No inbox rule forwards mail to external recipients."
   },
   "mailbox_forwarding.hide_from_user": {
@@ -220,8 +379,13 @@
     "description": "An inbox rule moves or deletes mail in a way that hides it from the user (RSS Feeds, Junk, Deleted Items, or delete action).",
     "impact": "Hide-from-user inbox rules are a common BEC technique to suppress visibility of fraud, replies, or forensic alerts.",
     "remediation": "Disable the rule, audit the mailbox for compromise, and review recent inbox-rule mutations in the unified audit log.",
-    "references": ["Microsoft 365 BEC investigation playbook", "MITRE ATT&CK T1564.008"],
-    "control_ids": ["AUDITEX-MBX-HIDE-FROM-USER"],
+    "references": [
+      "Microsoft 365 BEC investigation playbook",
+      "MITRE ATT&CK T1564.008"
+    ],
+    "control_ids": [
+      "AUDITEX-MBX-HIDE-FROM-USER"
+    ],
     "expected_value": "Inbox rules do not silently hide messages from the user."
   },
   "exchange.transport_external_redirect": {
@@ -229,8 +393,12 @@
     "description": "An Exchange transport rule redirects or copies mail to a recipient outside accepted tenant domains.",
     "impact": "Transport-level forwarding can exfiltrate many users' mail before mailbox rules or user visibility expose it.",
     "remediation": "Remove the external recipient from the transport rule or disable the rule until the exception is approved.",
-    "references": ["Exchange transport rule review"],
-    "control_ids": ["AUDITEX-EXO-TRANSPORT-EXTERNAL-REDIRECT"],
+    "references": [
+      "Exchange transport rule review"
+    ],
+    "control_ids": [
+      "AUDITEX-EXO-TRANSPORT-EXTERNAL-REDIRECT"
+    ],
     "expected_value": "Transport rules do not redirect or copy mail to external recipients."
   },
   "exchange.remote_domain_auto_forward_enabled": {
@@ -238,8 +406,13 @@
     "description": "An Exchange remote-domain policy permits automatic forwarding outside the tenant.",
     "impact": "Tenant-level auto-forwarding allows mailbox rules and user settings to exfiltrate mail without a transport exception.",
     "remediation": "Disable automatic forwarding on the default remote-domain policy and approve only specific business exceptions.",
-    "references": ["Exchange Online remote domain review", "MITRE ATT&CK T1114.003"],
-    "control_ids": ["AUDITEX-EXO-REMOTE-DOMAIN-AUTO-FWD"],
+    "references": [
+      "Exchange Online remote domain review",
+      "MITRE ATT&CK T1114.003"
+    ],
+    "control_ids": [
+      "AUDITEX-EXO-REMOTE-DOMAIN-AUTO-FWD"
+    ],
     "expected_value": "Remote-domain policies do not allow automatic forwarding to external domains by default."
   },
   "dns_posture.spf_missing": {
@@ -247,8 +420,13 @@
     "description": "No SPF (Sender Policy Framework) TXT record was discovered for a verified tenant domain.",
     "impact": "Without SPF, receivers cannot validate authorized senders for the domain, which raises the risk of spoofing and phishing of the tenant's brand.",
     "remediation": "Publish an SPF record at the apex (for example, 'v=spf1 include:spf.protection.outlook.com -all') and verify external receivers honour it.",
-    "references": ["RFC 7208", "Microsoft 365 SPF guidance"],
-    "control_ids": ["AUDITEX-DNS-SPF-MISSING"],
+    "references": [
+      "RFC 7208",
+      "Microsoft 365 SPF guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-SPF-MISSING"
+    ],
     "expected_value": "SPF record present with a hard-fail (-all) qualifier."
   },
   "dns_posture.spf_passthrough": {
@@ -256,8 +434,12 @@
     "description": "SPF record terminates with a permissive '+all' or '?all' qualifier.",
     "impact": "Pass-through SPF accepts mail from any sender, defeating the purpose of SPF and enabling spoofing.",
     "remediation": "Replace the trailing qualifier with '-all' (hard fail) or '~all' (soft fail) and revalidate.",
-    "references": ["RFC 7208"],
-    "control_ids": ["AUDITEX-DNS-SPF-PASSTHROUGH"],
+    "references": [
+      "RFC 7208"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-SPF-PASSTHROUGH"
+    ],
     "expected_value": "SPF record ends with '-all' or '~all'."
   },
   "dns_posture.dmarc_missing": {
@@ -265,8 +447,13 @@
     "description": "No DMARC record was discovered at the _dmarc subdomain of a verified tenant domain.",
     "impact": "Without DMARC, receivers cannot enforce alignment between SPF/DKIM and the From header, leaving the domain spoofable.",
     "remediation": "Publish a DMARC record (start with 'v=DMARC1; p=none; rua=mailto:dmarc@<domain>'), monitor reports, and progress to 'p=quarantine' or 'p=reject'.",
-    "references": ["RFC 7489", "Microsoft 365 DMARC guidance"],
-    "control_ids": ["AUDITEX-DNS-DMARC-MISSING"],
+    "references": [
+      "RFC 7489",
+      "Microsoft 365 DMARC guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-DMARC-MISSING"
+    ],
     "expected_value": "DMARC record present with an enforced policy."
   },
   "dns_posture.dmarc_monitor_only": {
@@ -274,8 +461,12 @@
     "description": "DMARC policy is set to 'p=none' (monitor-only) and is not enforcing alignment.",
     "impact": "Monitor-only DMARC reports failures but does not prevent spoofed mail from being delivered.",
     "remediation": "After validating SPF and DKIM via DMARC reports, raise the policy to 'p=quarantine' and then 'p=reject'.",
-    "references": ["RFC 7489"],
-    "control_ids": ["AUDITEX-DNS-DMARC-MONITOR-ONLY"],
+    "references": [
+      "RFC 7489"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-DMARC-MONITOR-ONLY"
+    ],
     "expected_value": "DMARC 'p=quarantine' or 'p=reject'."
   },
   "dns_posture.dkim_missing": {
@@ -283,8 +474,13 @@
     "description": "No DKIM selectors were discovered for a verified tenant domain.",
     "impact": "Without DKIM, mail receivers cannot cryptographically authenticate messages, weakening DMARC alignment.",
     "remediation": "Enable DKIM signing for the domain in Microsoft 365 (selector1/selector2) and publish the corresponding CNAME records.",
-    "references": ["RFC 6376", "Microsoft 365 DKIM guidance"],
-    "control_ids": ["AUDITEX-DNS-DKIM-MISSING"],
+    "references": [
+      "RFC 6376",
+      "Microsoft 365 DKIM guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-DKIM-MISSING"
+    ],
     "expected_value": "At least one DKIM selector resolves with a valid public key."
   },
   "dns_posture.spf_multiple_records": {
@@ -292,8 +488,12 @@
     "description": "More than one SPF (v=spf1) TXT record is published at the domain apex.",
     "impact": "RFC 7208 §4.5 mandates exactly one SPF record; multiple v=spf1 records cause receivers to return PermError, leaving the domain effectively unauthenticated.",
     "remediation": "Merge SPF policy into a single record using nested 'include:' mechanisms and remove the redundant TXT entries.",
-    "references": ["RFC 7208 §4.5"],
-    "control_ids": ["AUDITEX-DNS-SPF-MULTIPLE"],
+    "references": [
+      "RFC 7208 §4.5"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-SPF-MULTIPLE"
+    ],
     "expected_value": "Exactly one v=spf1 record at the domain apex."
   },
   "dns_posture.dmarc_pct_partial": {
@@ -301,8 +501,12 @@
     "description": "DMARC policy is enforcing (p=quarantine or p=reject) but only on a fraction of mail (pct<100).",
     "impact": "Partial enforcement leaves a documented bypass: receivers apply the enforcing policy probabilistically, so spoofed mail can still be delivered to users.",
     "remediation": "Once SPF/DKIM coverage is healthy, raise pct to 100 (or omit pct, which defaults to 100) so the policy applies to every message.",
-    "references": ["RFC 7489 §6.3"],
-    "control_ids": ["AUDITEX-DNS-DMARC-PCT-PARTIAL"],
+    "references": [
+      "RFC 7489 §6.3"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-DMARC-PCT-PARTIAL"
+    ],
     "expected_value": "DMARC pct=100 for enforcing policies."
   },
   "dns_posture.dmarc_rua_invalid": {
@@ -310,8 +514,12 @@
     "description": "DMARC rua= aggregate-report URI list contains entries that are neither well-formed mailto: addresses nor https:// URLs.",
     "impact": "Invalid URIs prevent DMARC report delivery; the operator loses visibility into spoofing attempts and SPF/DKIM alignment failures.",
     "remediation": "Replace malformed entries with mailto:<address>@<domain> or https://<endpoint>; remove bare addresses missing the mailto: scheme and HTTP (clear-text) endpoints.",
-    "references": ["RFC 7489 §6.4"],
-    "control_ids": ["AUDITEX-DNS-DMARC-RUA-INVALID"],
+    "references": [
+      "RFC 7489 §6.4"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-DMARC-RUA-INVALID"
+    ],
     "expected_value": "All rua= URIs use mailto: with a valid address or https://."
   },
   "dns_posture.bimi_logo_insecure": {
@@ -319,8 +527,12 @@
     "description": "BIMI l= logo URL is not served over HTTPS.",
     "impact": "BIMI consumers (e.g., Gmail, Yahoo) require HTTPS-served SVG logos; HTTP delivery prevents brand-indicator rendering and exposes logo fetches to tampering.",
     "remediation": "Host the BIMI SVG over HTTPS and update the l= tag to the https:// URL.",
-    "references": ["BIMI draft (Brand Indicators for Message Identification)"],
-    "control_ids": ["AUDITEX-DNS-BIMI-LOGO-INSECURE"],
+    "references": [
+      "BIMI draft (Brand Indicators for Message Identification)"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-BIMI-LOGO-INSECURE"
+    ],
     "expected_value": "BIMI l= URL uses the https:// scheme."
   },
   "service_health.active_service_issue": {
@@ -328,8 +540,12 @@
     "description": "An active Microsoft 365 service issue is currently affecting the tenant or one of its services.",
     "impact": "Active service degradations or interruptions may invalidate evidence collected during the audit window and can mask other anomalies; operators should correlate the audit findings with the timeline of the service issue.",
     "remediation": "Track the issue in the Microsoft 365 admin center service-health board, document any audit-evidence gaps caused by the outage, and re-run affected collectors once the service is restored.",
-    "references": ["Microsoft 365 service health"],
-    "control_ids": ["AUDITEX-SERVICE-HEALTH-ACTIVE-ISSUE"],
+    "references": [
+      "Microsoft 365 service health"
+    ],
+    "control_ids": [
+      "AUDITEX-SERVICE-HEALTH-ACTIVE-ISSUE"
+    ],
     "expected_value": "No active service issues during the audit window."
   },
   "external_identity.broad_guest_invite_policy": {
@@ -337,8 +553,13 @@
     "description": "Authorization policy allows guest invitations from anyone (including unauthenticated members).",
     "impact": "Tenant-wide ``allowInvitesFrom=everyone`` lets any member invite arbitrary external identities into the tenant, expanding the attack surface and bypassing partner-specific governance.",
     "remediation": "Restrict ``allowInvitesFrom`` to ``adminsAndGuestInviters`` (CIS-recommended) or ``adminsGuestInvitersAndAllMembers`` with reviewer rotation; document who can invite externals.",
-    "references": ["Microsoft Entra authorization policy", "CIS Microsoft 365 Foundations 1.1.5"],
-    "control_ids": ["AUDITEX-EXTID-BROAD-INVITE"],
+    "references": [
+      "Microsoft Entra authorization policy",
+      "CIS Microsoft 365 Foundations v7.0.0 5.1.6.3"
+    ],
+    "control_ids": [
+      "AUDITEX-EXTID-BROAD-INVITE"
+    ],
     "expected_value": "allowInvitesFrom restricted to adminsAndGuestInviters or stricter."
   },
   "consent_policy.admin_consent_workflow_disabled": {
@@ -346,8 +567,12 @@
     "description": "Admin consent request workflow is disabled for users requiring app permissions beyond the user-consent allowlist.",
     "impact": "Without the admin-consent workflow, end-users either consent unilaterally to risky scopes or are blocked entirely with no escalation path — both outcomes erode tenant governance over OAuth grants.",
     "remediation": "Enable the admin consent request workflow (Microsoft Entra → Enterprise applications → Consent and permissions → Admin consent settings) and assign reviewers with a documented SLA.",
-    "references": ["Microsoft Entra admin consent workflow"],
-    "control_ids": ["AUDITEX-CONSENT-WORKFLOW-DISABLED"],
+    "references": [
+      "Microsoft Entra admin consent workflow"
+    ],
+    "control_ids": [
+      "AUDITEX-CONSENT-WORKFLOW-DISABLED"
+    ],
     "expected_value": "Admin consent request workflow enabled with named reviewers."
   },
   "identity.global_admin_singleton": {
@@ -355,8 +580,13 @@
     "description": "Only one Microsoft Entra Global Administrator assignment was observed.",
     "impact": "Loss or compromise of the single Global Administrator can block recovery or concentrate tenant-wide privilege.",
     "remediation": "Maintain at least two protected emergency-capable admins and use narrower roles for routine administration.",
-    "references": ["Microsoft Entra emergency access account guidance", "CIS Microsoft 365 administrator role guidance"],
-    "control_ids": ["AUDITEX-ID-GA-SINGLETON"],
+    "references": [
+      "Microsoft Entra emergency access account guidance",
+      "CIS Microsoft 365 Foundations v7.0.0 1.1.3"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-GA-SINGLETON"
+    ],
     "expected_value": "Two to five protected Global Administrator principals are present."
   },
   "identity.global_admin_sprawl": {
@@ -364,8 +594,13 @@
     "description": "More than five Microsoft Entra Global Administrator assignments were observed.",
     "impact": "A broad Global Administrator set increases tenant-wide blast radius if any privileged principal is compromised.",
     "remediation": "Reduce Global Administrator assignments and move routine administration to least-privileged roles or eligible activation.",
-    "references": ["Microsoft Entra least-privileged roles", "CIS Microsoft 365 administrator role guidance"],
-    "control_ids": ["AUDITEX-ID-GA-SPRAWL"],
+    "references": [
+      "Microsoft Entra least-privileged roles",
+      "CIS Microsoft 365 Foundations v7.0.0 1.1.3"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-GA-SPRAWL"
+    ],
     "expected_value": "Two to five protected Global Administrator principals are present."
   },
   "identity.global_admin_disabled": {
@@ -373,8 +608,13 @@
     "description": "A disabled Microsoft Entra user still has a Global Administrator assignment.",
     "impact": "Dormant privileged assignments create confusing recovery paths and can be reactivated with tenant-wide privilege.",
     "remediation": "Remove Global Administrator from disabled users and keep emergency access accounts explicitly documented.",
-    "references": ["Microsoft Entra administrator role guidance", "CIS Microsoft 365 account governance guidance"],
-    "control_ids": ["AUDITEX-ID-GA-DISABLED"],
+    "references": [
+      "Microsoft Entra administrator role guidance",
+      "CIS Microsoft 365 account governance guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-GA-DISABLED"
+    ],
     "expected_value": "Disabled accounts have no Global Administrator assignments."
   },
   "identity.global_admin_stale_password": {
@@ -382,8 +622,13 @@
     "description": "A Microsoft Entra Global Administrator has not changed password in over 365 days.",
     "impact": "Long-lived privileged passwords raise credential-theft and recovery risk, especially for accounts without documented emergency controls.",
     "remediation": "Rotate or validate the privileged credential and move routine administration to phishing-resistant, least-privileged access.",
-    "references": ["Microsoft Entra password protection guidance", "CIS Microsoft 365 administrator role guidance"],
-    "control_ids": ["AUDITEX-ID-GA-STALE-PASSWORD"],
+    "references": [
+      "Microsoft Entra password protection guidance",
+      "CIS Microsoft 365 administrator role guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-GA-STALE-PASSWORD"
+    ],
     "expected_value": "Privileged administrator credentials are rotated or governed through approved emergency-access procedure."
   },
   "identity.global_admin_mfa_not_registered": {
@@ -391,8 +636,13 @@
     "description": "A Microsoft Entra Global Administrator is not registered for MFA.",
     "impact": "A tenant-wide privileged account without MFA registration is exposed to password-only compromise.",
     "remediation": "Require phishing-resistant MFA for every Global Administrator and confirm registration in authentication method reports.",
-    "references": ["Microsoft Entra authentication methods report", "CIS Microsoft 365 MFA guidance"],
-    "control_ids": ["AUDITEX-ID-GA-MFA-MISSING"],
+    "references": [
+      "Microsoft Entra authentication methods report",
+      "CIS Microsoft 365 Foundations v7.0.0 5.2.2.1"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-GA-MFA-MISSING"
+    ],
     "expected_value": "Every Global Administrator is registered for MFA."
   },
   "identity.user_mfa_not_registered": {
@@ -400,17 +650,55 @@
     "description": "A non-admin member user is not registered for MFA in authentication method reports.",
     "impact": "Password-only users are easier to compromise and can become a foothold for mail, data, and lateral access abuse.",
     "remediation": "Require MFA registration for active member users and follow up on users that remain unregistered.",
-    "references": ["Microsoft Entra authentication methods report", "CIS Microsoft 365 MFA guidance"],
-    "control_ids": ["AUDITEX-ID-USER-MFA-MISSING"],
+    "references": [
+      "Microsoft Entra authentication methods report",
+      "CIS Microsoft 365 Foundations v7.0.0 5.2.2.2"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-USER-MFA-MISSING"
+    ],
     "expected_value": "Active member users are registered for MFA."
+  },
+  "identity.stale_enabled_account": {
+    "risk_rating": "medium",
+    "description": "An enabled account older than 90 days has no successful sign-in in the last 90 days (signInActivity observed).",
+    "impact": "Unused but enabled accounts keep valid credentials, licences, and group memberships that an attacker can reuse without the owner noticing.",
+    "remediation": "Confirm whether the account is still needed; disable or remove it, or document why it must stay enabled (for example a service or shared account with compensating controls). Consider an access review for inactive users.",
+    "references": [
+      "Microsoft Entra manage inactive user accounts",
+      "Microsoft Graph signInActivity"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-STALE-ACCOUNT"
+    ],
+    "expected_value": "Enabled accounts have signed in successfully within 90 days or are disabled."
+  },
+  "identity.privileged_stale_account": {
+    "risk_rating": "high",
+    "description": "An enabled account holding an administrator directory role has no successful sign-in in the last 90 days (signInActivity observed).",
+    "impact": "Dormant privileged accounts are high-value takeover targets: their activity is rarely watched and compromise grants administrative control of the tenant.",
+    "remediation": "Remove the role assignment or disable the account if it is no longer used. Keep documented break-glass accounts monitored, and move standing admin access to eligible (PIM) assignments.",
+    "references": [
+      "Microsoft Entra manage inactive user accounts",
+      "Microsoft Entra privileged access best practices"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-PRIV-STALE-ACCOUNT"
+    ],
+    "expected_value": "Accounts with administrator roles are actively used or have their roles removed."
   },
   "security.risky_signin": {
     "risk_rating": "high",
     "description": "Microsoft Entra sign-in logs show a risky sign-in event.",
     "impact": "Risky sign-ins can indicate credential theft, impossible travel, anomalous token use, or other account-compromise signals.",
     "remediation": "Investigate the sign-in, revoke sessions where needed, reset credentials, and confirm conditional access controls responded.",
-    "references": ["Microsoft Entra risky sign-ins", "Microsoft Graph signIn risk evidence"],
-    "control_ids": ["AUDITEX-SIGNIN-RISKY"],
+    "references": [
+      "Microsoft Entra risky sign-ins",
+      "Microsoft Graph signIn risk evidence"
+    ],
+    "control_ids": [
+      "AUDITEX-SIGNIN-RISKY"
+    ],
     "expected_value": "Observed sign-ins have no active risk state or elevated risk level."
   },
   "security.privilege_change_event": {
@@ -418,8 +706,13 @@
     "description": "Microsoft Entra directory audit logs show an administrative role or privilege change.",
     "impact": "Unexpected privileged-role changes can indicate persistence setup, emergency access drift, or active tenant compromise.",
     "remediation": "Review the initiator, target role, approval trail, and recent sign-ins; revoke unauthorized role assignments.",
-    "references": ["Microsoft Entra directory audit logs", "Privileged role assignment review"],
-    "control_ids": ["AUDITEX-PRIVILEGE-CHANGE-EVENT"],
+    "references": [
+      "Microsoft Entra directory audit logs",
+      "Privileged role assignment review"
+    ],
+    "control_ids": [
+      "AUDITEX-PRIVILEGE-CHANGE-EVENT"
+    ],
     "expected_value": "Privileged role changes are approved, expected, and traceable."
   },
   "intune.device_noncompliant": {
@@ -427,8 +720,13 @@
     "description": "A managed Intune device is marked noncompliant, in conflict, or in error state.",
     "impact": "Noncompliant managed devices can indicate missing security baseline enforcement or a device that should not be trusted for resource access.",
     "remediation": "Review the device compliance failure, remediate or retire the device, and confirm conditional access blocks noncompliant devices where required.",
-    "references": ["Microsoft Intune compliance policy guidance", "CIS Microsoft 365 device compliance guidance"],
-    "control_ids": ["AUDITEX-INTUNE-DEVICE-NONCOMPLIANT"],
+    "references": [
+      "Microsoft Intune compliance policy guidance",
+      "CIS Microsoft 365 device compliance guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEVICE-NONCOMPLIANT"
+    ],
     "expected_value": "Managed devices are compliant or explicitly out of scope."
   },
   "intune.device_stale_sync": {
@@ -436,8 +734,176 @@
     "description": "A managed Intune device has not synced recently.",
     "impact": "Stale device sync can hide missing security baselines, device loss, deprovisioning gaps, or stale access assumptions.",
     "remediation": "Investigate stale managed devices, retire devices no longer in use, and confirm conditional access blocks unknown device posture.",
-    "references": ["Microsoft Intune managed device inventory"],
-    "control_ids": ["AUDITEX-INTUNE-DEVICE-STALE-SYNC"],
+    "references": [
+      "Microsoft Intune managed device inventory"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEVICE-STALE-SYNC"
+    ],
     "expected_value": "Managed devices sync within the approved recency window."
+  },
+  "detection.unified_audit_log_disabled": {
+    "risk_rating": "high",
+    "description": "Exchange Online reports UnifiedAuditLogIngestionEnabled = False, so the Microsoft Purview unified audit log is not recording user and admin activity.",
+    "impact": "Attacker activity such as mailbox access, inbox-rule creation, file downloads, and admin changes is not recorded, and the Management Activity API and Microsoft Sentinel receive no Microsoft 365 audit data. Disabling the audit log is a known defense-evasion step (MITRE T1562.008).",
+    "remediation": "Turn auditing on in the Microsoft Purview portal (Audit > Start recording user and admin activity) or have an authorised admin run Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true in Exchange Online PowerShell, then confirm with Get-AdminAuditLogConfig.",
+    "references": [
+      "https://learn.microsoft.com/en-us/purview/audit-log-enable-disable",
+      "MITRE ATT&CK T1562.008"
+    ],
+    "control_ids": [
+      "AUDITEX-DETECTION-UAL-DISABLED"
+    ],
+    "expected_value": "UnifiedAuditLogIngestionEnabled is True when read in Exchange Online PowerShell."
+  },
+  "detection.mailbox_audit_disabled": {
+    "risk_rating": "high",
+    "description": "Get-OrganizationConfig reports AuditDisabled = True, so mailbox auditing on by default is turned off for the whole organization.",
+    "impact": "No mailbox actions are audited, even on mailboxes whose AuditEnabled property is True. Business email compromise (MailItemsAccessed, Send, UpdateInboxRules) leaves no mailbox audit trail.",
+    "remediation": "Have an authorised Exchange admin run Set-OrganizationConfig -AuditDisabled $false and verify with Get-OrganizationConfig | Format-List AuditDisabled.",
+    "references": [
+      "https://learn.microsoft.com/en-us/purview/audit-mailboxes",
+      "MITRE ATT&CK T1562.008"
+    ],
+    "control_ids": [
+      "AUDITEX-DETECTION-MAILBOX-AUDIT-DISABLED"
+    ],
+    "expected_value": "AuditDisabled is False."
+  },
+  "detection.mailbox_audit_bypass": {
+    "risk_rating": "medium",
+    "description": "One or more accounts have AuditBypassEnabled = True on their mailbox audit bypass association.",
+    "impact": "Every mailbox action by a bypassed account, on its own mailbox or any mailbox it can access, is not logged. A compromised bypassed account can read mail without leaving mailbox audit records.",
+    "remediation": "Review each bypass association with Get-MailboxAuditBypassAssociation, remove bypass for accounts that do not strictly need it (Set-MailboxAuditBypassAssociation -AuditBypassEnabled $false), and document any remaining exception.",
+    "references": [
+      "https://learn.microsoft.com/en-us/purview/audit-mailboxes",
+      "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-mailboxauditbypassassociation"
+    ],
+    "control_ids": [
+      "AUDITEX-DETECTION-MAILBOX-AUDIT-BYPASS"
+    ],
+    "expected_value": "No account has AuditBypassEnabled set to True."
+  },
+  "detection.no_alert_policies": {
+    "risk_rating": "medium",
+    "description": "Get-ProtectionAlert returned no enabled alert policy for the tenant.",
+    "impact": "Suspicious activity recorded in the audit log (forwarding rules, elevation of privilege, malware campaigns) does not raise an alert, so responders learn about incidents late or not at all.",
+    "remediation": "Re-enable the Microsoft default alert policies in the Microsoft Defender or Purview portal and route notifications to a monitored mailbox or SIEM.",
+    "references": [
+      "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert"
+    ],
+    "control_ids": [
+      "AUDITEX-DETECTION-NO-ALERT-POLICIES"
+    ],
+    "expected_value": "At least the default alert policies are enabled."
+  },
+  "detection.no_risk_based_policies": {
+    "risk_rating": "medium",
+    "description": "No enabled Conditional Access policy includes signInRiskLevels or userRiskLevels conditions.",
+    "impact": "Identity Protection detections such as leaked credentials, password spray, and token anomalies do not trigger MFA, password change, or blocking automatically.",
+    "remediation": "If the tenant has Microsoft Entra ID P2, create Conditional Access policies that require MFA for medium or high sign-in risk and a secure password change for high user risk, start in report-only mode, then enable.",
+    "references": [
+      "https://learn.microsoft.com/en-us/graph/api/resources/conditionalaccessconditionset?view=graph-rest-1.0"
+    ],
+    "control_ids": [
+      "AUDITEX-DETECTION-NO-RISK-POLICIES"
+    ],
+    "expected_value": "At least one enabled Conditional Access policy acts on sign-in or user risk."
+  },
+  "detection.signin_logs_unavailable": {
+    "risk_rating": "medium",
+    "description": "Microsoft Graph refused /auditLogs/signIns with a licensing error, so Entra sign-in logs are not available to the audit identity or to downstream tooling.",
+    "impact": "Without sign-in logs, investigators cannot trace password spray, token theft, risky locations, or legacy-authentication use, and those events cannot be exported to a SIEM.",
+    "remediation": "License the tenant for Microsoft Entra ID P1 or higher so sign-in logs are retained and readable through Microsoft Graph, then rerun the security collector.",
+    "references": [
+      "https://learn.microsoft.com/en-us/graph/api/signin-list?view=graph-rest-1.0"
+    ],
+    "control_ids": [
+      "AUDITEX-DETECTION-SIGNIN-LOGS-UNAVAILABLE"
+    ],
+    "expected_value": "Sign-in logs are readable through Microsoft Graph."
+  },
+  "dns_posture.mta_sts_missing": {
+    "risk_rating": "low",
+    "description": "No MTA-STS TXT record (v=STSv1) was found at _mta-sts.<domain> for a verified custom domain.",
+    "impact": "Sending servers cannot require TLS or validate the receiving certificate for this domain, so inbound mail can be downgraded or intercepted in transit.",
+    "remediation": "Host an MTA-STS policy at https://mta-sts.<domain>/.well-known/mta-sts.txt, publish the _mta-sts TXT record, start in testing mode, then move to enforce.",
+    "references": [
+      "RFC 8461",
+      "https://learn.microsoft.com/en-us/exchange/security-and-compliance/enhance-mail-flow-using-strict-transport-security"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-MTA-STS-MISSING"
+    ],
+    "expected_value": "MTA-STS TXT record and policy published in enforce mode."
+  },
+  "dns_posture.mta_sts_testing_mode": {
+    "risk_rating": "low",
+    "description": "The domain publishes an MTA-STS policy whose mode is testing or none.",
+    "impact": "Senders report TLS failures but still deliver over unprotected connections, so the policy does not stop downgrade or interception.",
+    "remediation": "After TLS reports show no failures, change the policy mode to enforce and update the id value in the _mta-sts TXT record.",
+    "references": [
+      "RFC 8461",
+      "https://learn.microsoft.com/en-us/exchange/security-and-compliance/enhance-mail-flow-using-strict-transport-security"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-MTA-STS-TESTING"
+    ],
+    "expected_value": "MTA-STS policy mode is enforce."
+  },
+  "dns_posture.mta_sts_policy_invalid": {
+    "risk_rating": "medium",
+    "description": "The _mta-sts TXT record exists, but https://mta-sts.<domain>/.well-known/mta-sts.txt could not be fetched or did not contain a valid STSv1 policy.",
+    "impact": "Senders that honour MTA-STS cannot obtain a valid policy, which can cause delivery failures once a cached policy expires and leaves the domain without the intended transport protection.",
+    "remediation": "Serve a valid STSv1 policy over HTTPS with a certificate for mta-sts.<domain>, without redirects, and update the TXT record id after each change.",
+    "references": [
+      "RFC 8461 section 3.3",
+      "https://learn.microsoft.com/en-us/exchange/security-and-compliance/enhance-mail-flow-using-strict-transport-security"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-MTA-STS-INVALID"
+    ],
+    "expected_value": "MTA-STS policy file returns HTTP 200 with a valid STSv1 policy."
+  },
+  "dns_posture.tls_rpt_missing": {
+    "risk_rating": "low",
+    "description": "No SMTP TLS Reporting record (v=TLSRPTv1) was found at _smtp._tls.<domain>.",
+    "impact": "The domain owner receives no reports about failed or downgraded TLS sessions, so interception attempts and MTA-STS misconfiguration go unnoticed.",
+    "remediation": "Publish a TXT record at _smtp._tls.<domain> such as 'v=TLSRPTv1; rua=mailto:tls-reports@<domain>' and monitor the reports.",
+    "references": [
+      "RFC 8460"
+    ],
+    "control_ids": [
+      "AUDITEX-DNS-TLS-RPT-MISSING"
+    ],
+    "expected_value": "TLS-RPT record published with a monitored reporting address."
+  },
+  "exposure.federated_domain_metadata_public": {
+    "risk_rating": "low",
+    "description": "A verified domain is federated, and the tenant's public OpenID discovery metadata for the domain is readable without credentials. Anyone can learn the tenant ID and that sign-in is handed to an external identity provider.",
+    "impact": "Informational. The public footprint helps attackers target the federation provider (for example forged SAML tokens against a compromised IdP). It is not a misconfiguration by itself.",
+    "remediation": "No change is needed for the metadata itself. Keep the federation provider patched and monitored, protect its token-signing keys, and consider moving the domain to managed (cloud) authentication.",
+    "references": [
+      "https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc"
+    ],
+    "control_ids": [
+      "AUDITEX-EXPOSURE-FEDERATED-METADATA"
+    ],
+    "expected_value": "Federated domains are known, documented, and their identity provider is monitored."
+  },
+  "secure_score.low_overall": {
+    "risk_rating": "medium",
+    "title": "Microsoft Secure Score is below half of the achievable score",
+    "description": "The latest Microsoft Secure Score snapshot returned by Microsoft Graph is below 50% of the maximum achievable score.",
+    "impact": "Microsoft's own posture assessment reports that more than half of the available security controls are not implemented, so baseline gaps are likely across identity, email, and data protection.",
+    "remediation": "Review the Secure Score reconciliation table in the report pack, confirm the gaps that Auditex findings also show, and plan improvement actions for the highest-weight controls first.",
+    "references": [
+      "Microsoft Secure Score",
+      "Microsoft Graph secureScore resource"
+    ],
+    "control_ids": [
+      "AUDITEX-SECURE-SCORE-LOW"
+    ],
+    "expected_value": "Secure Score current score is at least 50% of the maximum score."
   }
 }

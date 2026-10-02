@@ -7,17 +7,21 @@
         "Directory.Read.All",
         "User.Read.All",
         "Group.Read.All",
-        "Application.Read.All"
+        "Application.Read.All",
+        "AuditLog.Read.All"
       ],
       "query_plan": [
         "organization",
         "domains",
         "users",
+        "userSignInActivity",
         "groups",
         "applications",
         "servicePrincipals",
         "roleDefinitions",
-        "roleAssignments"
+        "roleAssignments",
+        "roleAssignableGroupMembers",
+        "roleAssignableGroupOwners"
       ]
     },
     "security": {
@@ -51,7 +55,7 @@
       "required_permissions": [
         "SecurityEvents.Read.All",
         "SecurityIncident.Read.All",
-        "SecurityActions.Read.All"
+        "SecurityAlert.Read.All"
       ],
       "query_plan": [
         "securityAlerts",
@@ -89,9 +93,11 @@
       "enabled": true,
       "description": "Microsoft 365 usage report samples for Exchange, SharePoint, and OneDrive.",
       "required_permissions": [
-        "Reports.Read.All"
+        "Reports.Read.All",
+        "ReportSettings.Read.All"
       ],
       "query_plan": [
+        "reportSettings",
         "office365ActiveUserCounts",
         "sharePointSiteUsageDetail",
         "oneDriveUsageAccountDetail",
@@ -116,7 +122,8 @@
       "description": "Admin consent workflow, user consent, and permission grant policy posture.",
       "required_permissions": [
         "Policy.Read.All",
-        "Directory.Read.All"
+        "Directory.Read.All",
+        "Policy.Read.PermissionGrant"
       ],
       "query_plan": [
         "adminConsentRequestPolicy",
@@ -126,13 +133,14 @@
     },
     "dns_posture": {
       "enabled": true,
-      "description": "Email-authentication DNS posture (SPF, DKIM, DMARC, MTA-STS, BIMI) for verified tenant domains.",
+      "description": "Email-authentication DNS posture (SPF, DKIM, DMARC, MTA-STS with policy fetch, TLS-RPT, BIMI) and the public tenant discovery footprint for verified tenant domains.",
       "required_permissions": [
         "Directory.Read.All"
       ],
       "query_plan": [
         "domains",
-        "domainPosture"
+        "domainPosture",
+        "publicFootprint"
       ]
     },
     "cross_tenant_access": {
@@ -211,31 +219,39 @@
       "description": "Microsoft Sentinel / unified XDR posture via Graph (capability-gated).",
       "required_permissions": [
         "SecurityIncident.Read.All",
-        "SecurityEvents.Read.All"
+        "SecurityAlert.Read.All"
       ],
       "query_plan": [
         "xdrIncidents",
         "xdrAlerts"
       ]
     },
-    "defender_cloud_apps": {
+    "identity_protection": {
       "enabled": false,
-      "description": "Microsoft Defender for Cloud Apps (CASB) posture (capability-gated; E5/Defender required).",
+      "description": "Microsoft Entra ID Protection availability: aggregate risky-user counts only, no identities (capability-gated; Entra ID P2 required).",
       "required_permissions": [
-        "CloudApp-Discovery.Read.All",
-        "Application.Read.All"
+        "IdentityRiskyUser.Read.All"
       ],
       "query_plan": [
-        "cloudAppSecurityProfiles",
+        "riskyUserSummary"
+      ]
+    },
+    "defender_cloud_apps": {
+      "enabled": false,
+      "description": "App consent request inventory via documented Graph endpoints (capability-gated). Defender for Cloud Apps app risk profiles have no Graph REST endpoint and are reviewed in the Defender portal.",
+      "required_permissions": [
+        "ConsentRequest.Read.All"
+      ],
+      "query_plan": [
         "appConsentRequests"
       ]
     },
     "copilot_governance": {
       "enabled": false,
-      "description": "Microsoft 365 Copilot governance posture (capability-gated; Copilot license required).",
+      "description": "Microsoft 365 Copilot governance posture: limited mode and aggregate usage counts (capability-gated; Copilot license required).",
       "required_permissions": [
         "Reports.Read.All",
-        "AiEnterpriseInteraction.Read.All"
+        "CopilotSettings-LimitedMode.Read"
       ],
       "query_plan": [
         "copilotAdminSettings",
@@ -324,11 +340,13 @@
       "description": "Application & service principal credential hygiene: secrets, certificates, redirect URIs, federated identity credentials, ownership, and audience drift.",
       "required_permissions": [
         "Application.Read.All",
-        "Directory.Read.All"
+        "Directory.Read.All",
+        "AuditLog.Read.All"
       ],
       "query_plan": [
         "applicationCredentials",
-        "servicePrincipalCredentials"
+        "servicePrincipalCredentials",
+        "servicePrincipalSignInActivities"
       ]
     },
     "app_consent": {
@@ -337,7 +355,7 @@
       "required_permissions": [
         "Directory.Read.All",
         "DelegatedPermissionGrant.Read.All",
-        "AppRoleAssignment.ReadWrite.All"
+        "Application.Read.All"
       ],
       "query_plan": [
         "servicePrincipals",
@@ -379,7 +397,7 @@
     },
     "intune_depth": {
       "enabled": true,
-      "description": "Deeper Intune policy, script, app protection, and sampled assignment inventory",
+      "description": "Deeper Intune policy, script metadata, app protection, and sampled assignment inventory (groupPolicyConfigurations and deviceManagementScripts use Graph beta; script bodies are never requested)",
       "required_permissions": [
         "DeviceManagementConfiguration.Read.All",
         "DeviceManagementApps.Read.All"
@@ -597,7 +615,7 @@
       "description": "Mailbox forwarding settings and inbox rules per licensed user (BEC indicator: external forwarding, hide-from-user patterns).",
       "required_permissions": [
         "User.Read.All",
-        "MailboxSettings.Read.All"
+        "MailboxSettings.Read"
       ],
       "query_plan": [
         "users",
@@ -608,7 +626,7 @@
     },
     "exchange_policy": {
       "enabled": true,
-      "description": "Exchange transport, connector, domain, and mailbox forwarding policy posture",
+      "description": "Exchange transport, connector, domain, mailbox forwarding, and audit/alerting (detection coverage) policy posture",
       "required_permissions": [],
       "query_plan": [
         "transportRules",
@@ -616,7 +634,11 @@
         "outboundConnectors",
         "acceptedDomains",
         "remoteDomains",
-        "mailboxForwarding"
+        "mailboxForwarding",
+        "adminAuditLogConfig",
+        "organizationAuditConfig",
+        "mailboxAuditBypass",
+        "protectionAlerts"
       ],
       "command_collectors": [
         {
@@ -660,6 +682,34 @@
           "commands": [
             "Get-EXOMailbox -ResultSize 50 | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward"
           ]
+        },
+        {
+          "name": "adminAuditLogConfig",
+          "category": "detection",
+          "commands": [
+            "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled"
+          ]
+        },
+        {
+          "name": "organizationAuditConfig",
+          "category": "detection",
+          "commands": [
+            "Get-OrganizationConfig | Select-Object AuditDisabled"
+          ]
+        },
+        {
+          "name": "mailboxAuditBypass",
+          "category": "detection",
+          "commands": [
+            "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count"
+          ]
+        },
+        {
+          "name": "protectionAlerts",
+          "category": "detection",
+          "commands": [
+            "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"
+          ]
         }
       ]
     }
@@ -688,14 +738,15 @@
     "onedrive_posture",
     "power_platform",
     "sentinel_xdr",
+    "identity_protection",
     "defender_cloud_apps",
     "copilot_governance",
     "teams",
     "teams_policy",
     "purview",
     "ediscovery",
-      "exchange",
-      "exchange_policy",
-      "mailbox_forwarding"
-    ]
+    "exchange",
+    "exchange_policy",
+    "mailbox_forwarding"
+  ]
 }

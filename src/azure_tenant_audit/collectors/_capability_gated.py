@@ -8,7 +8,9 @@ a structured diagnostic instead of crashing the run.
 """
 from __future__ import annotations
 
+import csv
 import time
+from io import StringIO
 from typing import Any, Callable, Iterable, Optional
 
 from ..graph import GraphError
@@ -39,6 +41,12 @@ def _coverage_row(
     }
 
 
+def _parse_csv(content: str) -> list[dict[str, str]]:
+    if not content or not content.strip():
+        return []
+    return [dict(row) for row in csv.DictReader(StringIO(content.lstrip("\ufeff")))]
+
+
 def run_capability_gated_endpoints(
     collector_name: str,
     client: Any,
@@ -46,7 +54,9 @@ def run_capability_gated_endpoints(
     *,
     log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
     skip_reason: str = "no Graph client available; service likely unlicensed in this tenant",
+    csv_rows: Optional[dict[str, Callable[[list[dict[str, str]]], list[dict[str, Any]]]]] = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Run each endpoint once; ``csv_rows`` maps endpoint names that return CSV reports to a row mapper."""
     payload: dict[str, Any] = {}
     coverage: list[dict[str, Any]] = []
 
@@ -74,9 +84,13 @@ def run_capability_gated_endpoints(
         error_class: str | None = None
         error: str | None = None
         try:
-            response = client.get_json(endpoint)
+            if csv_rows and name in csv_rows:
+                rows = csv_rows[name](_parse_csv(client.get_content(endpoint)))
+                response = None
+            else:
+                response = client.get_json(endpoint)
             if isinstance(response, dict):
-                values = response.get("value", [])
+                values = response.get("value") if "value" in response else response
                 if isinstance(values, list):
                     rows = [item for item in values if isinstance(item, dict)]
                 elif isinstance(values, dict):

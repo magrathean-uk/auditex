@@ -5,13 +5,14 @@
         "Directory.Read.All",
         "User.Read.All",
         "Group.Read.All",
-        "Application.Read.All"
+        "Application.Read.All",
+        "AuditLog.Read.All"
       ],
       "minimum_role_hints": [
         "Global Reader",
         "Security Reader"
       ],
-      "notes": "Read-only endpoint set; requires at least directory read permissions in app registration."
+      "notes": "Read-only endpoint set; requires at least directory read permissions in app registration. AuditLog.Read.All plus Microsoft Entra ID P1/P2 adds user signInActivity for stale-account findings; without it identity still runs and records a coverage gap."
     },
     "security": {
       "graph_scopes": [
@@ -38,14 +39,14 @@
       "graph_scopes": [
         "SecurityEvents.Read.All",
         "SecurityIncident.Read.All",
-        "SecurityActions.Read.All",
+        "SecurityAlert.Read.All",
         "AuditLog.Read.All"
       ],
       "minimum_role_hints": [
         "Security Reader",
         "Global Reader"
       ],
-      "notes": "Defender alert/incidence and secure score APIs are covered by Security Reader in most environments."
+      "notes": "Defender alerts (alerts_v2), incidents and secure score APIs are covered by Security Reader in most environments. The legacy /security/alerts API retires on 2026-10-15."
     },
     "service_health": {
       "graph_scopes": [
@@ -116,13 +117,14 @@
     },
     "reports_usage": {
       "graph_scopes": [
-        "Reports.Read.All"
+        "Reports.Read.All",
+        "ReportSettings.Read.All"
       ],
       "minimum_role_hints": [
         "Reports Reader",
         "Global Reader"
       ],
-      "notes": "Global Reader can access tenant-level usage reporting, while detailed report visibility often requires Reports Reader or a workload-specific reader role."
+      "notes": "Global Reader can access tenant-level usage reporting, while detailed report visibility often requires Reports Reader or a workload-specific reader role. ReportSettings.Read.All reads /admin/reportSettings first; when displayConcealedNames is true, per-user report rows are hashed and Auditex records reports_usage.concealed_names."
     },
     "external_identity": {
       "graph_scopes": [
@@ -138,7 +140,8 @@
     "consent_policy": {
       "graph_scopes": [
         "Policy.Read.All",
-        "Directory.Read.All"
+        "Directory.Read.All",
+        "Policy.Read.PermissionGrant"
       ],
       "minimum_role_hints": [
         "Global Reader",
@@ -174,7 +177,7 @@
       "minimum_role_hints": [
         "Global Reader"
       ],
-      "notes": "Resolves email-auth DNS records over DoH for verified tenant domains; works with any read-only tenant role since the data is queried from public DNS, not Microsoft Graph."
+      "notes": "Resolves email-auth DNS records (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI) over DoH for verified tenant domains. Live runs also make unauthenticated, read-only HTTPS GETs for those verified domains only: the MTA-STS policy file (https://mta-sts.<domain>/.well-known/mta-sts.txt, only when the _mta-sts TXT record exists, no redirects) and the public Entra OpenID discovery document (https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration). No usernames are probed. Offline runs make no lookups."
     },
     "intune": {
       "graph_scopes": [
@@ -229,7 +232,7 @@
     "sentinel_xdr": {
       "graph_scopes": [
         "SecurityIncident.Read.All",
-        "SecurityEvents.Read.All"
+        "SecurityAlert.Read.All"
       ],
       "minimum_role_hints": [
         "Security Reader",
@@ -237,28 +240,36 @@
       ],
       "notes": "Capability-gated. Reads /security/incidents and /security/alerts_v2 from Microsoft Graph; tenants without unified XDR / Sentinel ingestion will yield empty results, surfaced as 'service_not_available' diagnostics."
     },
-    "defender_cloud_apps": {
+    "identity_protection": {
       "graph_scopes": [
-        "CloudApp-Discovery.Read.All",
-        "Application.Read.All",
-        "SecurityEvents.Read.All"
+        "IdentityRiskyUser.Read.All"
       ],
       "minimum_role_hints": [
         "Security Reader",
-        "Cloud App Security Administrator"
+        "Global Reader"
       ],
-      "notes": "Capability-gated. Defender for Cloud Apps (CASB) posture requires E5/Defender licensing and tenant onboarding; failure modes map to 'insufficient_permissions' or 'service_not_available'."
+      "notes": "Capability-gated. Reads one page of GET /identityProtection/riskyUsers (Graph v1.0, read-only) and keeps aggregate counts only; no user names or UPNs are stored. Requires Microsoft Entra ID P2; a licensing error is reported as risk detection 'off', permission errors as 'unknown'."
+    },
+    "defender_cloud_apps": {
+      "graph_scopes": [
+        "ConsentRequest.Read.All"
+      ],
+      "minimum_role_hints": [
+        "Security Reader",
+        "Global Reader"
+      ],
+      "notes": "Capability-gated. Reads pending app consent requests only. Microsoft Graph has no documented REST endpoint for Defender for Cloud Apps app risk profiles, so those are not collected; review them in the Defender portal."
     },
     "copilot_governance": {
       "graph_scopes": [
         "Reports.Read.All",
-        "AiEnterpriseInteraction.Read.All"
+        "CopilotSettings-LimitedMode.Read"
       ],
       "minimum_role_hints": [
         "Reports Reader",
         "Global Reader"
       ],
-      "notes": "Capability-gated. Copilot admin settings and usage reports require Microsoft 365 Copilot licensing; failure modes map to 'service_not_available'."
+      "notes": "Capability-gated. Reads /copilot/admin/settings/limitedMode (delegated only; app-only runs record a coverage gap) and the aggregate /copilot/reports/getMicrosoft365CopilotUserCountSummary CSV. No per-user Copilot activity or interaction content is read. Requires Microsoft 365 Copilot licensing; failure modes map to 'service_not_available'."
     },
     "teams": {
       "graph_scopes": [
@@ -294,7 +305,7 @@
       "graph_scopes": [
         "Directory.Read.All",
         "DelegatedPermissionGrant.Read.All",
-        "AppRoleAssignment.ReadWrite.All"
+        "Application.Read.All"
       ],
       "minimum_role_hints": [
         "Global Reader",
@@ -306,14 +317,15 @@
     "app_credentials": {
       "graph_scopes": [
         "Application.Read.All",
-        "Directory.Read.All"
+        "Directory.Read.All",
+        "AuditLog.Read.All"
       ],
       "minimum_role_hints": [
         "Global Reader",
         "Cloud Application Administrator",
         "Application Administrator"
       ],
-      "notes": "Application credential hygiene reads passwordCredentials, keyCredentials, redirect URIs, federatedIdentityCredentials, and owner counts via Microsoft Graph."
+      "notes": "Application credential hygiene reads passwordCredentials, keyCredentials, redirect URIs, federatedIdentityCredentials, and owner counts via Microsoft Graph. AuditLog.Read.All enables the Graph beta servicePrincipalSignInActivities report used for dormant-application findings; when unavailable the collector records a coverage gap and the dormant rule stays inert."
     },
     "licensing": {
       "graph_scopes": [
@@ -350,7 +362,7 @@
         "Intune Reader",
         "Global Reader"
       ],
-      "notes": "Deeper Intune policy and assignment surfaces can still return empty or partial results when Intune is not licensed or the tenant does not use those workloads."
+      "notes": "Deeper Intune policy and assignment surfaces can still return empty or partial results when Intune is not licensed or the tenant does not use those workloads. groupPolicyConfigurations and deviceManagementScripts are Graph beta endpoints; script metadata is read with a fixed $select that excludes scriptContent."
     },
     "exchange": {
       "graph_scopes": [],
@@ -377,15 +389,14 @@
     "mailbox_forwarding": {
       "graph_scopes": [
         "User.Read.All",
-        "MailboxSettings.Read.All",
-        "Mail.Read"
+        "MailboxSettings.Read"
       ],
       "minimum_role_hints": [
         "Global Reader",
         "Exchange Administrator",
         "Security Reader"
       ],
-      "notes": "Inbox-rule and mailbox-setting reads require MailboxSettings.Read.All for app-only flows or per-user delegated Mail.Read; tenants on Exchange-only licensing can rely on delegated tokens for the audited mailboxes."
+      "notes": "Inbox rules (messageRules) and mailbox settings are read with the MailboxSettings.Read permission (application or delegated). Mail.Read is never requested: the audit does not read message content."
     },
     "exchange_policy": {
       "graph_scopes": [],
@@ -394,7 +405,7 @@
         "Exchange Administrator",
         "Global Reader"
       ],
-      "notes": "Exchange policy depth uses Exchange PowerShell cmdlets and requires PowerShell plus Exchange connectivity.",
+      "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert is available only in Security & Compliance PowerShell (Connect-IPPSSession). None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal, never 'off'.",
       "command_tools": [
         "pwsh",
         "powershell_graph"
@@ -405,20 +416,25 @@
         "Get-OutboundConnector",
         "Get-AcceptedDomain",
         "Get-RemoteDomain",
-        "Get-EXOMailbox"
+        "Get-EXOMailbox",
+        "Get-AdminAuditLogConfig",
+        "Get-OrganizationConfig",
+        "Get-MailboxAuditBypassAssociation",
+        "Get-ProtectionAlert"
       ]
     }
   },
   "global_app_recommendation": [
     "Directory.Read.All",
     "DelegatedPermissionGrant.Read.All",
-    "AppRoleAssignment.ReadWrite.All",
+    "Application.Read.All",
     "User.Read.All",
     "AuditLog.Read.All",
     "SecurityEvents.Read.All",
     "ServiceHealth.Read.All",
     "ServiceMessage.Read.All",
     "SecurityIncident.Read.All",
+    "SecurityAlert.Read.All",
     "DeviceManagementManagedDevices.Read.All",
     "DeviceManagementConfiguration.Read.All",
     "DeviceManagementApps.Read.All",
@@ -430,6 +446,9 @@
     "Channel.ReadBasic.All",
     "TeamSettings.Read.All",
     "Group.Read.All",
-    "Sites.Read.All"
+    "Sites.Read.All",
+    "Policy.Read.PermissionGrant",
+    "ReportSettings.Read.All",
+    "ConsentRequest.Read.All"
   ]
 }

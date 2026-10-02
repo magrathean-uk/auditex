@@ -12,6 +12,7 @@ class ConsentPolicyCollector(Collector):
     required_permissions = [
         "Policy.Read.All",
         "Directory.Read.All",
+        "Policy.Read.PermissionGrant",
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:

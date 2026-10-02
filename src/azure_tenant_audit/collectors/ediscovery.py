@@ -74,7 +74,7 @@ class EDiscoveryCollector(Collector):
         write_export_summary = context.get("write_export_summary")
 
         base_queries = {
-            "cases": {"endpoint": "/security/cases", "params": {}},
+            "cases": {"endpoint": "/security/cases/ediscoveryCases", "params": {}},
         }
         base_payload, base_coverage = run_graph_endpoints(
             self.name,
@@ -101,11 +101,11 @@ class EDiscoveryCollector(Collector):
                     graph_client,
                     {
                         "searches": {
-                            "endpoint": f"/security/cases/{case_id}/searches",
+                            "endpoint": f"/security/cases/ediscoveryCases/{case_id}/searches",
                             "params": {},
                         },
                         "operations": {
-                            "endpoint": f"/security/cases/{case_id}/operations",
+                            "endpoint": f"/security/cases/ediscoveryCases/{case_id}/operations",
                             "params": {},
                             "query_page_minimum": None,
                         },

@@ -215,11 +215,23 @@ fi
 
 # shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
-python -m pip install --upgrade pip
-python -m pip install -e "${ROOT_DIR}"
+
+# Venvs made by uv have no pip; install through uv then, or bootstrap pip with ensurepip.
+venv_pip_install() {
+  if python -m pip --version >/dev/null 2>&1; then
+    python -m pip install "$@"
+  elif command -v uv >/dev/null 2>&1; then
+    uv pip install --python "${VENV_DIR}/bin/python" "$@"
+  else
+    python -m ensurepip --upgrade
+    python -m pip install "$@"
+  fi
+}
+
+venv_pip_install -e "${ROOT_DIR}"
 
 if [[ "${INSTALL_MCP}" -eq 1 ]]; then
-  python -m pip install -e "${ROOT_DIR}[mcp]"
+  venv_pip_install -e "${ROOT_DIR}[mcp]"
 fi
 
 if ! ensure_azure_cli; then

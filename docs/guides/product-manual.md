@@ -204,6 +204,38 @@ A completed run directory contains the contract artifacts. Start with:
 `validation.json` must be valid for customer handoff. Partial audits can still be useful, but the blocker reasons must be explicit.
 Accepted-risk findings with expired waiver dates are stale for handoff and should be treated like a review blocker until re-approved.
 
+### Attack paths
+
+The report pack lists privilege-escalation paths from footholds to tier-0 control. Auditex builds a read-only graph from the run's normalized evidence: users, groups, service principals, applications, directory roles, PIM schedules, app and service principal owners, Microsoft Graph application permissions, delegated grants, MFA registration, and app credentials. It then looks for the shortest routes (at most five privilege hops, ten paths) from ordinary users, guests, users without MFA, third-party or multi-tenant apps, and apps with long-lived or expired secrets to tier-0 roles such as Global Administrator or to Graph permissions such as `RoleManagement.ReadWrite.Directory`.
+
+Each path names every hop, its MITRE ATT&CK technique, and the normalized record that proves it, plus the breakpoints: the single changes that remove the route. High and critical paths also appear as findings. Open the explorer's Attack paths tab or read `attack_paths` and `attack_graph` in `reports/report-pack.json`.
+
+The graph only sees what the run collected. Group membership is read for role-assignable groups and the groups nested in them, and app role assignments are read for Microsoft Graph and the first ten service principals. A missing collector or permission means fewer edges, so treat "no path found" as "no path in the collected evidence".
+
+### Detection coverage and public footprint
+
+`reports/report-pack.json` answers "could this tenant see an attack?" in
+`detection_coverage`: a list of signals (unified audit log, mailbox auditing,
+audit bypass, alert policies, risk-based Conditional Access, Identity
+Protection, sign-in and directory audit logs, Defender alerts API, SIEM export),
+each `on`, `off`, or `unknown`, with `evidence_ref` and `why_it_matters`. The
+`score` counts only signals with evidence; `unknown` means not collected or
+blocked and is never treated as `off`. `off` signals raise `detection.*`
+findings. Exchange cmdlets need an Exchange Online PowerShell session, and
+`Get-ProtectionAlert` needs Security & Compliance PowerShell. Enable the
+`identity_protection` collector (`IdentityRiskyUser.Read.All`, Entra ID P2) to
+assess risk detection.
+
+`public_footprint` lists what anyone can learn about each verified domain
+without credentials (tenant ID, region, federation). It is informational. A
+federated domain raises the low-severity
+`exposure.federated_domain_metadata_public` finding. MTA-STS and TLS-RPT gaps
+raise `dns_posture.mta_sts_missing`, `dns_posture.mta_sts_testing_mode`,
+`dns_posture.mta_sts_policy_invalid`, and `dns_posture.tls_rpt_missing`. See
+`docs/reference/security-privacy.md` for the external lookups involved.
+
+`reports/report-pack.json` also carries `baseline_alignment`. It shows the status of each CIS Microsoft 365 v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, and Microsoft cloud security benchmark control that Auditex rules map to, and a Secure Score reconciliation table. To list rules by product area or framework, run `auditex rules packs --kind framework` or `auditex rules inventory`. [Framework Mappings](../reference/framework-mappings.md) describes the sources and limits.
+
 ## Render Reports
 
 ```bash
@@ -242,7 +274,10 @@ Compare completed runs from the same tenant:
 
 ```bash
 auditex compare --run-dir outputs/baseline/client --run-dir outputs/current/client
+auditex compare --run-dir outputs/baseline/client --run-dir outputs/current/client --format md
 ```
+
+JSON is the default. `--format md` prints a before/after summary of the first and last run: risk grade change, and new, resolved, and changed findings grouped by severity.
 
 Use drift gates in CI or scheduled checks:
 

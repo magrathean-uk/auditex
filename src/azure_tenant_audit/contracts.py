@@ -57,6 +57,8 @@ _AI_SAFE_KEY_ALLOWLIST = re.compile(
     r"provider|providers|flow|flows)$"
     r"|^(?:password|key|application|service_principal)_credentials$"
     r"|^app_credentials$"
+    r"|^federated_credentials$"
+    r"|^is_passwordless_capable$"
     r"|^(?:application|service_principal)_credential_objects$",
     re.IGNORECASE,
 )
@@ -77,9 +79,18 @@ _OPTIONAL_MANIFEST_ARTIFACT_FIELDS = (
 # bundle if a finding's framework_mappings drifts from this set, since SARIF/
 # OSCAL exporters depend on knowing the framework taxonomy at bundle-build
 # time.
+#
+# ``cis_m365_v3`` is a deprecated legacy key: still accepted so older bundles
+# and operator overrides validate, but shipped mappings emit ``cis_m365_v7``.
+# configs/framework-catalog.json must list the same keys (tested).
 _KNOWN_FRAMEWORK_KEYS = frozenset(
     {
+        "cis_m365_v7",
         "cis_m365_v3",
+        "cisa_scuba",
+        "ms_secure_score",
+        "ms_zero_trust",
+        "mcsb",
         "google_workspace_baseline",
         "nist_800_53",
         "iso_27001",

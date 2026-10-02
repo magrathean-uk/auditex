@@ -6,6 +6,14 @@ from typing import Any
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
+# deviceManagementScripts returns ``scriptContent`` (the base64 script body) unless
+# $select excludes it. Script bodies are file content and must never be collected,
+# so this select list is fixed and must not include scriptContent.
+DEVICE_MANAGEMENT_SCRIPT_SELECT = (
+    "id,displayName,description,runAsAccount,enforceSignatureCheck,fileName,"
+    "createdDateTime,lastModifiedDateTime"
+)
+
 
 class IntuneDepthCollector(Collector):
     name = "intune_depth"
@@ -27,13 +35,17 @@ class IntuneDepthCollector(Collector):
                     "endpoint": "/deviceManagement/deviceConfigurations",
                     "params": {},
                 },
+                # groupPolicyConfigurations and deviceManagementScripts exist only on
+                # the Graph beta API; v1.0 returns 404 for both.
                 "groupPolicyConfigurations": {
                     "endpoint": "/deviceManagement/groupPolicyConfigurations",
+                    "api_version": "beta",
                     "params": {},
                 },
                 "deviceManagementScripts": {
                     "endpoint": "/deviceManagement/deviceManagementScripts",
-                    "params": {},
+                    "api_version": "beta",
+                    "params": {"$select": DEVICE_MANAGEMENT_SCRIPT_SELECT},
                 },
                 "androidManagedAppProtections": {
                     "endpoint": "/deviceAppManagement/androidManagedAppProtections",

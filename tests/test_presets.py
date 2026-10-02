@@ -112,7 +112,8 @@ def test_rule_inventory_lists_generated_m365_and_google_rules() -> None:
 
     assert m365["platform"] == "m365"
     assert m365["product_family"] == "identity"
-    assert m365["framework_mappings"]["cis_m365_v3"]
+    assert m365["framework_mappings"]["cis_m365_v7"]
+    assert "m365.identity" in m365["packs"]
     assert google["platform"] == "google_workspace"
     assert google["product_family"] == "identity"
     assert google["framework_mappings"]["google_workspace_baseline"] == ["identity.2sv"]

@@ -113,13 +113,22 @@ def test_graph_client_stops_after_repeated_permission_failures(monkeypatch) -> N
 
     exc = None
     try:
-        client.get_json("/security/incidents")
+        client.get_json("/security/alerts")
     except Exception as caught:  # noqa: BLE001
         exc = caught
 
     assert isinstance(exc, GraphError)
     assert exc.error_code == "PermissionStop"
     assert calls["count"] == 2
+
+    # A sibling endpoint needs a different permission, so it is still tried.
+    sibling = None
+    try:
+        client.get_json("/security/incidents")
+    except GraphError as caught:
+        sibling = caught
+    assert sibling is not None and sibling.error_code != "PermissionStop"
+    assert calls["count"] == 3
 
 
 def test_graph_client_uses_shared_package_user_agent(monkeypatch) -> None:
@@ -208,3 +217,34 @@ def test_graph_client_batches_get_requests_exposes_item_errors(monkeypatch) -> N
     assert responses[0]["status"] == 403
     assert responses[0]["error_code"] == "Authorization_RequestDenied"
     assert "Access denied" in responses[0]["error"]
+
+
+def test_classify_graph_error_separates_license_gaps_from_permission_gaps() -> None:
+    from azure_tenant_audit.collectors.base import _classify_graph_error
+
+    premium = GraphError("Tenant is not a B2C tenant and doesn't have premium license", status=403, request="/auditLogs/signIns")
+    spo = GraphError("Tenant does not have a SPO license.", status=400, request="/sites")
+    intune = GraphError('{"ErrorCode":"Forbidden","Message":"An error has occurred"}', status=401, request="/deviceManagement/managedDevices")
+    expired = GraphError("Lifetime validation failed, the token is expired.", status=401, request="/users")
+
+    assert _classify_graph_error(premium)[0] == "license_required"
+    assert _classify_graph_error(spo)[0] == "license_required"
+    assert _classify_graph_error(intune)[0] == "insufficient_permissions"
+    assert _classify_graph_error(expired)[0] == "unauthenticated"
+
+
+def test_classify_graph_error_recognises_p2_and_unprovisioned_defender() -> None:
+    p2 = GraphError("The tenant needs to have Microsoft Entra ID P2 or Microsoft Entra ID Governance license.", status=400, request="/x")
+    defender = GraphError("Unauthorized request - Account is not provisioned.", status=401, request="/security/alerts_v2")
+
+    assert _classify_graph_error(p2)[0] == "license_required"
+    assert _classify_graph_error(defender)[0] == "service_not_available"
+
+
+def test_permission_stop_families_separate_security_endpoints() -> None:
+    from azure_tenant_audit.graph import GraphClient
+
+    family = GraphClient._request_family
+    assert family(None, "https://graph.microsoft.com/v1.0/security/alerts_v2?$top=5") == "security/alerts_v2"
+    assert family(None, "https://graph.microsoft.com/v1.0/security/secureScores") == "security/secureScores"
+    assert family(None, "https://graph.microsoft.com/beta/reports/getX(period='D30')") == "reports/getX"

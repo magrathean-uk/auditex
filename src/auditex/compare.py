@@ -207,3 +207,131 @@ def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenan
 
 def compare_runs(run_dirs: Iterable[str | Path], *, allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
     return compare_run_directories(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)
+
+
+_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+
+
+def _severity(row: dict[str, Any]) -> str:
+    text = str(row.get("severity") or row.get("risk_rating") or "info").strip().lower()
+    return text if text in _SEVERITY_ORDER else "info"
+
+
+def _finding_key(row: dict[str, Any]) -> str:
+    return str(row.get("id") or f"{row.get('rule_id')}:{','.join(str(item) for item in row.get('affected_objects') or [])}")
+
+
+def _risk_snapshot(run: dict[str, Any], findings: list[dict[str, Any]]) -> dict[str, Any]:
+    risk = run.get("risk") if isinstance(run.get("risk"), dict) else {}
+    if risk.get("grade") is not None:
+        return {"grade": risk.get("grade"), "score": risk.get("score")}
+    from azure_tenant_audit.findings import build_risk_rollup
+
+    rollup = build_risk_rollup(findings)
+    return {"grade": rollup.get("grade"), "score": rollup.get("score")}
+
+
+def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
+    """Summarise findings that are new, resolved, or changed between two runs."""
+    left_rows = RunBundle(Path(str(left_run.get("path")))).finding_rows() if left_run.get("path") else []
+    right_rows = RunBundle(Path(str(right_run.get("path")))).finding_rows() if right_run.get("path") else []
+    left = {_finding_key(row): row for row in left_rows}
+    right = {_finding_key(row): row for row in right_rows}
+
+    def _summary(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row.get("id"),
+            "rule_id": row.get("rule_id"),
+            "severity": _severity(row),
+            "status": row.get("status"),
+            "title": row.get("title"),
+        }
+
+    new = [_summary(right[key]) for key in sorted(set(right) - set(left))]
+    resolved = [_summary(left[key]) for key in sorted(set(left) - set(right))]
+    changed: list[dict[str, Any]] = []
+    for key in sorted(set(left) & set(right)):
+        before, after = left[key], right[key]
+        if _severity(before) != _severity(after) or str(before.get("status") or "") != str(after.get("status") or ""):
+            changed.append(
+                {
+                    **_summary(after),
+                    "severity_before": _severity(before),
+                    "status_before": before.get("status"),
+                }
+            )
+    return {
+        "new": new,
+        "resolved": resolved,
+        "changed": changed,
+        "risk_before": _risk_snapshot(left_run, left_rows),
+        "risk_after": _risk_snapshot(right_run, right_rows),
+    }
+
+
+def _md(value: Any) -> str:
+    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _severity_counts(rows: list[dict[str, Any]]) -> str:
+    counts = {severity: 0 for severity in _SEVERITY_ORDER}
+    for row in rows:
+        counts[_severity(row)] += 1
+    parts = [f"{severity} {count}" for severity, count in counts.items() if count]
+    return ", ".join(parts) if parts else "none"
+
+
+def _finding_table(title: str, rows: list[dict[str, Any]], *, changed: bool = False) -> list[str]:
+    lines = [f"## {title} ({len(rows)})", ""]
+    if not rows:
+        return lines + ["None.", ""]
+    ordered = sorted(rows, key=lambda row: (_SEVERITY_ORDER.index(_severity(row)), str(row.get("id") or "")))
+    if changed:
+        lines += ["| Severity | Was | Status | Was | Finding | Rule |", "| --- | --- | --- | --- | --- | --- |"]
+        for row in ordered:
+            lines.append(
+                f"| {_md(row.get('severity'))} | {_md(row.get('severity_before'))} | {_md(row.get('status'))} | "
+                f"{_md(row.get('status_before'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} |"
+            )
+    else:
+        lines += ["| Severity | Finding | Rule |", "| --- | --- | --- |"]
+        for row in ordered:
+            lines.append(f"| {_md(row.get('severity'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} |")
+    return lines + [""]
+
+
+def render_compare_markdown(result: dict[str, Any]) -> str:
+    """Render a readable before/after summary of the baseline (first vs last) comparison."""
+    runs = [row for row in result.get("runs") or [] if isinstance(row, dict)]
+    baseline = result.get("baseline_diff") if isinstance(result.get("baseline_diff"), dict) else {}
+    context = result.get("compare_context") if isinstance(result.get("compare_context"), dict) else {}
+    lines = ["# Auditex Run Comparison", ""]
+    if len(runs) < 2:
+        return "\n".join(lines + ["At least two runs are needed for a comparison.", ""])
+    before, after = runs[0], runs[-1]
+    lines += [
+        f"- Tenant: {_md(context.get('tenant_key') or before.get('tenant_name') or before.get('tenant_id'))}",
+        f"- Before: {_md(before.get('run_id') or before.get('path'))} ({_md(before.get('created_utc'))})",
+        f"- After: {_md(after.get('run_id') or after.get('path'))} ({_md(after.get('created_utc'))})",
+        f"- Runs compared: {len(runs)}",
+    ]
+    if baseline.get("status") == "blocked":
+        lines += [f"- Status: blocked ({_md(baseline.get('reason'))})", ""]
+        return "\n".join(lines)
+    delta = build_finding_delta(before, after)
+    risk_before, risk_after = delta["risk_before"], delta["risk_after"]
+    grade_before, grade_after = risk_before.get("grade") or "unknown", risk_after.get("grade") or "unknown"
+    risk_change = "unchanged" if grade_before == grade_after else f"{grade_before} -> {grade_after}"
+    summary = baseline.get("summary") if isinstance(baseline.get("summary"), dict) else {}
+    lines += [
+        f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({_md(risk_change)}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
+        f"- New findings: {len(delta['new'])} ({_severity_counts(delta['new'])})",
+        f"- Resolved findings: {len(delta['resolved'])} ({_severity_counts(delta['resolved'])})",
+        f"- Changed findings: {len(delta['changed'])} ({_severity_counts(delta['changed'])})",
+        f"- Object changes: {_md(summary.get('added', 0))} added, {_md(summary.get('removed', 0))} removed, {_md(summary.get('changed', 0))} changed",
+        "",
+    ]
+    lines += _finding_table("New findings", delta["new"])
+    lines += _finding_table("Resolved findings", delta["resolved"])
+    lines += _finding_table("Changed findings", delta["changed"], changed=True)
+    return "\n".join(lines)

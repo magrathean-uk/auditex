@@ -31,6 +31,31 @@ safety counts. Final audit-plane validation rejects bundles that report tenant
 writes or body or file content reads. These artifacts support review of a run;
 they do not authorize access or replace an operator's obligations.
 
+## External lookups
+
+Live Microsoft 365 runs with the `dns_posture` collector make unauthenticated,
+read-only requests about the audited tenant's own verified domains:
+
+- DNS-over-HTTPS queries (default resolver `cloudflare-dns.com`) for SPF,
+  DMARC, DKIM, MTA-STS, TLS-RPT, and BIMI records.
+- An HTTPS GET of `https://mta-sts.<domain>/.well-known/mta-sts.txt`, only when
+  the `_mta-sts` TXT record exists. Redirects are not followed.
+- An HTTPS GET of the public Entra OpenID discovery document,
+  `https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration`.
+  Only tenant-level facts (tenant ID, region scope, cloud instance) are kept,
+  as the informational `public_footprint` report section.
+
+These requests reveal the audited domain names to the DNS resolver, the
+domain's web host, and Microsoft. No usernames, mailboxes, or accounts are
+probed, and no user enumeration endpoint is called. Unverified domains and
+domains outside the tenant are never looked up. Offline runs make no external
+lookups; embedded callers can pass `public_lookups: False` in the collector
+context to skip the HTTPS reads.
+
+The opt-in `identity_protection` collector stores only aggregate risky-user
+counts, never user names or UPNs. The `exchange_policy` mailbox audit bypass
+check stores only a count of bypassed accounts.
+
 ## Evidence and customer packs
 
 Evidence is written locally under the selected output directory. Auditex does

@@ -1,9 +1,7 @@
 {
-  "_documentation": "ATT&CK mapping policy (auditex 2026-05-09): every rule_id maps to at least one MITRE ATT&CK technique where the threat is real (collector.issue.* diagnostics are exempt \u2014 they're operational, not adversarial). Email-auth controls (SPF/DKIM/DMARC/BIMI) anchor to T1566 (Phishing) parent and T1566.002 (Spearphishing Link) sub-technique because spoofed-domain phishing campaigns most commonly use links \u2014 attachment-based delivery (T1566.001) does not lean on SPF/DMARC alignment as heavily. Application-credential rules (expired/expiring/long-validity/dormant) anchor to T1078.004 (Valid Accounts: Cloud Accounts) for the credential-abuse vector and T1098.001 (Account Manipulation: Additional Cloud Credentials) when the rule directly enables credential creation/persistence. Cross-tenant access rules anchor to T1199 (Trusted Relationship) for inbound and T1567 (Exfiltration Over Web Service) for outbound; rogue-consent surfaces anchor to T1528 (Steal Application Access Token). Mailbox forwarding anchors to T1114.003 (Email Collection: Email Forwarding Rule) plus T1098 (Account Manipulation) and T1567 for external recipients; hide-from-user rules anchor to T1564.008 (Hide Artifacts: Email Hiding Rules). SharePoint broad-link sharing anchors to T1530 (Data from Cloud Storage). When in doubt, prefer the parent technique over a too-specific sub-technique.",
+  "_documentation": "ATT&CK mapping policy (auditex 2026-05-09): every rule_id maps to at least one MITRE ATT&CK technique where the threat is real (collector.issue.* diagnostics are exempt — they're operational, not adversarial). Email-auth controls (SPF/DKIM/DMARC/BIMI) anchor to T1566 (Phishing) parent and T1566.002 (Spearphishing Link) sub-technique because spoofed-domain phishing campaigns most commonly use links — attachment-based delivery (T1566.001) does not lean on SPF/DMARC alignment as heavily. Application-credential rules (expired/expiring/long-validity/dormant) anchor to T1078.004 (Valid Accounts: Cloud Accounts) for the credential-abuse vector and T1098.001 (Account Manipulation: Additional Cloud Credentials) when the rule directly enables credential creation/persistence. Cross-tenant access rules anchor to T1199 (Trusted Relationship) for inbound and T1567 (Exfiltration Over Web Service) for outbound; rogue-consent surfaces anchor to T1528 (Steal Application Access Token). Mailbox forwarding anchors to T1114.003 (Email Collection: Email Forwarding Rule) plus T1098 (Account Manipulation) and T1567 for external recipients; hide-from-user rules anchor to T1564.008 (Hide Artifacts: Email Hiding Rules). SharePoint broad-link sharing anchors to T1530 (Data from Cloud Storage). When in doubt, prefer the parent technique over a too-specific sub-technique.",
+  "_documentation_baselines": "Baseline mapping policy (auditex 2026-10-02): cis_m365_v7, cisa_scuba, ms_secure_score, ms_zero_trust and mcsb values must be listed in configs/framework-catalog.json, which records the verified source version, date and URLs. Diagnostic and coverage rules (collector.issue.*, coverage.gap, service_health.*) do not claim benchmark controls. cis_m365_v3 is a deprecated legacy key and is no longer emitted. Leave a framework out rather than guess.",
   "collector.issue.permission": {
-    "cis_m365_v3": [
-      "1.1.1"
-    ],
     "nist_800_53": [
       "AC-3",
       "AC-6",
@@ -28,9 +26,6 @@
     ]
   },
   "collector.issue.service": {
-    "cis_m365_v3": [
-      "1.1.1"
-    ],
     "nist_800_53": [
       "CP-2",
       "SI-12"
@@ -50,9 +45,6 @@
     ]
   },
   "collector.issue.collector": {
-    "cis_m365_v3": [
-      "1.1.1"
-    ],
     "nist_800_53": [
       "AU-12",
       "SI-4"
@@ -71,9 +63,6 @@
     ]
   },
   "coverage.gap": {
-    "cis_m365_v3": [
-      "1.1.1"
-    ],
     "nist_800_53": [
       "AU-2",
       "AU-6",
@@ -96,10 +85,33 @@
       "T1078"
     ]
   },
+  "reports_usage.concealed_names": {
+    "nist_800_53": [
+      "AU-2",
+      "CA-7"
+    ],
+    "iso_27001": [
+      "A.5.34",
+      "A.8.15"
+    ],
+    "soc2": [
+      "CC7.2"
+    ]
+  },
   "sharepoint.broad_link": {
-    "cis_m365_v3": [
-      "7.2.5",
+    "cis_m365_v7": [
+      "7.2.3",
       "7.2.7"
+    ],
+    "cisa_scuba": [
+      "MS.SHAREPOINT.1.1v1",
+      "MS.SHAREPOINT.2.1v1"
+    ],
+    "ms_secure_score": [
+      "spo_external_sharing_managed"
+    ],
+    "ms_zero_trust": [
+      "data"
     ],
     "nist_800_53": [
       "AC-3",
@@ -124,9 +136,19 @@
     ]
   },
   "sharepoint.external_principal": {
-    "cis_m365_v3": [
-      "7.2.5",
-      "7.2.7"
+    "cis_m365_v7": [
+      "7.2.3",
+      "7.2.6"
+    ],
+    "cisa_scuba": [
+      "MS.SHAREPOINT.1.1v1",
+      "MS.SHAREPOINT.1.3v1"
+    ],
+    "ms_secure_score": [
+      "spo_external_sharing_managed"
+    ],
+    "ms_zero_trust": [
+      "data"
     ],
     "nist_800_53": [
       "AC-3",
@@ -150,10 +172,135 @@
       "T1530"
     ]
   },
+  "attack_path.app_owner_to_tier0": {
+    "nist_800_53": [
+      "AC-2",
+      "AC-6",
+      "AC-6(5)"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.5.18",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.3"
+    ],
+    "nis2": [
+      "Article 21(2)(d)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1098.001",
+      "T1098.003"
+    ],
+    "mcsb": [
+      "PA-1",
+      "PA-7",
+      "IM-3"
+    ],
+    "ms_zero_trust": [
+      "identities",
+      "apps"
+    ]
+  },
+  "attack_path.no_mfa_to_tier0": {
+    "nist_800_53": [
+      "IA-2(1)",
+      "AC-6",
+      "AC-6(5)"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.5.18",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)",
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1098.003"
+    ],
+    "cis_m365_v7": [
+      "5.2.2.1"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.6v1"
+    ],
+    "ms_secure_score": [
+      "AdminMFAV2"
+    ],
+    "mcsb": [
+      "IM-6",
+      "PA-1"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ]
+  },
+  "attack_path.privilege_escalation": {
+    "nist_800_53": [
+      "AC-2",
+      "AC-6",
+      "AC-6(5)"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.5.18",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.3"
+    ],
+    "nis2": [
+      "Article 21(2)(d)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1098",
+      "T1098.003"
+    ],
+    "mcsb": [
+      "PA-1",
+      "PA-7"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ]
+  },
   "app_consent.high_privilege": {
-    "cis_m365_v3": [
-      "5.1.6",
-      "5.2.5"
+    "cis_m365_v7": [
+      "5.1.5.1"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.5.2v1"
+    ],
+    "ms_secure_score": [
+      "IntegratedApps"
+    ],
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "PA-7"
     ],
     "nist_800_53": [
       "AC-2",
@@ -182,8 +329,14 @@
     ]
   },
   "dns_posture.spf_missing": {
-    "cis_m365_v3": [
-      "4.4"
+    "cis_m365_v7": [
+      "2.1.8"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.2.2v2"
+    ],
+    "ms_secure_score": [
+      "exo_SPF_records_for_all_domains"
     ],
     "nist_800_53": [
       "SC-7",
@@ -209,8 +362,14 @@
     ]
   },
   "dns_posture.spf_passthrough": {
-    "cis_m365_v3": [
-      "4.4"
+    "cis_m365_v7": [
+      "2.1.8"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.2.2v2"
+    ],
+    "ms_secure_score": [
+      "exo_SPF_records_for_all_domains"
     ],
     "nist_800_53": [
       "SC-7",
@@ -235,8 +394,11 @@
     ]
   },
   "dns_posture.dmarc_missing": {
-    "cis_m365_v3": [
-      "4.6"
+    "cis_m365_v7": [
+      "2.1.10"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.4.1v1"
     ],
     "nist_800_53": [
       "SC-7",
@@ -263,8 +425,11 @@
     ]
   },
   "dns_posture.dmarc_monitor_only": {
-    "cis_m365_v3": [
-      "4.6"
+    "cis_m365_v7": [
+      "2.1.10"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.4.2v1"
     ],
     "nist_800_53": [
       "SC-7",
@@ -288,8 +453,11 @@
     ]
   },
   "dns_posture.dkim_missing": {
-    "cis_m365_v3": [
-      "4.5"
+    "cis_m365_v7": [
+      "2.1.9"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.3.1v1"
     ],
     "nist_800_53": [
       "SC-8",
@@ -313,8 +481,14 @@
     ]
   },
   "dns_posture.spf_multiple_records": {
-    "cis_m365_v3": [
-      "4.4"
+    "cis_m365_v7": [
+      "2.1.8"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.2.2v2"
+    ],
+    "ms_secure_score": [
+      "exo_SPF_records_for_all_domains"
     ],
     "nist_800_53": [
       "SC-7",
@@ -340,8 +514,11 @@
     ]
   },
   "dns_posture.dmarc_pct_partial": {
-    "cis_m365_v3": [
-      "4.6"
+    "cis_m365_v7": [
+      "2.1.10"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.4.2v1"
     ],
     "nist_800_53": [
       "SC-7",
@@ -367,8 +544,11 @@
     ]
   },
   "dns_posture.dmarc_rua_invalid": {
-    "cis_m365_v3": [
-      "4.6"
+    "cis_m365_v7": [
+      "2.1.10"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.4.4v1"
     ],
     "nist_800_53": [
       "AU-6",
@@ -392,9 +572,6 @@
     ]
   },
   "dns_posture.bimi_logo_insecure": {
-    "cis_m365_v3": [
-      "4.5"
-    ],
     "nist_800_53": [
       "SC-8"
     ],
@@ -416,9 +593,21 @@
     ]
   },
   "mailbox_forwarding.external_inbox_rule": {
-    "cis_m365_v3": [
-      "1.2.2",
+    "cis_m365_v7": [
       "6.2.1"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.1.1v2"
+    ],
+    "ms_secure_score": [
+      "mdo_autoforwardingmode",
+      "mdo_blockmailforward"
+    ],
+    "ms_zero_trust": [
+      "data"
+    ],
+    "mcsb": [
+      "DP-2"
     ],
     "nist_800_53": [
       "AC-4",
@@ -451,9 +640,11 @@
     ]
   },
   "mailbox_forwarding.hide_from_user": {
-    "cis_m365_v3": [
-      "1.2.2",
-      "6.2.1"
+    "ms_zero_trust": [
+      "secops"
+    ],
+    "mcsb": [
+      "LT-1"
     ],
     "nist_800_53": [
       "AU-12",
@@ -480,8 +671,20 @@
     ]
   },
   "exchange.transport_external_redirect": {
-    "cis_m365_v3": [
+    "cis_m365_v7": [
       "6.2.1"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.1.1v2"
+    ],
+    "ms_secure_score": [
+      "mdo_blockmailforward"
+    ],
+    "ms_zero_trust": [
+      "data"
+    ],
+    "mcsb": [
+      "DP-2"
     ],
     "nist_800_53": [
       "AC-4",
@@ -513,8 +716,21 @@
     ]
   },
   "exchange.remote_domain_auto_forward_enabled": {
-    "cis_m365_v3": [
+    "cis_m365_v7": [
       "6.2.1"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.1.1v2"
+    ],
+    "ms_secure_score": [
+      "mdo_autoforwardingmode",
+      "mdo_blockmailforward"
+    ],
+    "ms_zero_trust": [
+      "data"
+    ],
+    "mcsb": [
+      "DP-2"
     ],
     "nist_800_53": [
       "AC-4",
@@ -546,8 +762,12 @@
     ]
   },
   "app_credentials.secret_expired": {
-    "cis_m365_v3": [
-      "5.1.5"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "IM-3",
+      "IM-8"
     ],
     "nist_800_53": [
       "IA-5",
@@ -573,8 +793,12 @@
     ]
   },
   "app_credentials.secret_expiring": {
-    "cis_m365_v3": [
-      "5.1.5"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "IM-3",
+      "IM-8"
     ],
     "nist_800_53": [
       "IA-5"
@@ -598,8 +822,11 @@
     ]
   },
   "app_credentials.redirect_insecure": {
-    "cis_m365_v3": [
-      "5.1.6"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "IM-3"
     ],
     "nist_800_53": [
       "SC-8",
@@ -627,8 +854,12 @@
     ]
   },
   "app_credentials.no_owner": {
-    "cis_m365_v3": [
-      "5.1.6"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "IM-3",
+      "PA-3"
     ],
     "nist_800_53": [
       "AC-2",
@@ -654,8 +885,11 @@
     ]
   },
   "app_credentials.multi_tenant_audience": {
-    "cis_m365_v3": [
-      "5.1.4"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "IM-3"
     ],
     "nist_800_53": [
       "AC-3",
@@ -682,8 +916,12 @@
     ]
   },
   "app_credentials.certificate_expired": {
-    "cis_m365_v3": [
-      "5.1.5"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "DP-7",
+      "IM-3"
     ],
     "nist_800_53": [
       "IA-5",
@@ -712,8 +950,12 @@
     ]
   },
   "app_credentials.certificate_expiring": {
-    "cis_m365_v3": [
-      "5.1.5"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "DP-7",
+      "IM-3"
     ],
     "nist_800_53": [
       "IA-5",
@@ -738,8 +980,15 @@
     ]
   },
   "app_credentials.secret_long_validity": {
-    "cis_m365_v3": [
-      "5.1.5"
+    "cis_m365_v7": [
+      "5.1.5.4"
+    ],
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "IM-3",
+      "IM-8"
     ],
     "nist_800_53": [
       "IA-5(1)",
@@ -765,8 +1014,12 @@
     ]
   },
   "app_credentials.credential_dormant": {
-    "cis_m365_v3": [
-      "5.1.6"
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "IM-3",
+      "PA-3"
     ],
     "nist_800_53": [
       "AC-2(3)",
@@ -792,8 +1045,11 @@
     ]
   },
   "cross_tenant_access.default_b2b_collaboration_inbound_open": {
-    "cis_m365_v3": [
-      "1.1.4"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-7"
     ],
     "nist_800_53": [
       "AC-3",
@@ -824,8 +1080,11 @@
     ]
   },
   "cross_tenant_access.default_b2b_direct_connect_outbound_open": {
-    "cis_m365_v3": [
-      "1.1.4"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-7"
     ],
     "nist_800_53": [
       "AC-3",
@@ -853,9 +1112,11 @@
     ]
   },
   "cross_tenant_access.auto_user_consent_inbound_enabled": {
-    "cis_m365_v3": [
-      "1.1.4",
-      "1.1.5"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-7"
     ],
     "nist_800_53": [
       "AC-3",
@@ -883,8 +1144,11 @@
     ]
   },
   "cross_tenant_access.auto_user_consent_outbound_enabled": {
-    "cis_m365_v3": [
-      "1.1.5"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-7"
     ],
     "nist_800_53": [
       "AC-3",
@@ -909,8 +1173,11 @@
     ]
   },
   "cross_tenant_access.default_b2b_direct_connect_inbound_open": {
-    "cis_m365_v3": [
-      "1.1.4"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-7"
     ],
     "nist_800_53": [
       "AC-3",
@@ -940,8 +1207,11 @@
     ]
   },
   "cross_tenant_access.default_b2b_collaboration_outbound_open": {
-    "cis_m365_v3": [
-      "1.1.4"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-7"
     ],
     "nist_800_53": [
       "AC-3",
@@ -967,8 +1237,12 @@
     ]
   },
   "cross_tenant_access.partner_inbound_no_mfa": {
-    "cis_m365_v3": [
-      "1.1.4"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6",
+      "IM-7"
     ],
     "nist_800_53": [
       "AC-3",
@@ -998,9 +1272,6 @@
     ]
   },
   "service_health.active_service_issue": {
-    "cis_m365_v3": [
-      "1.1.1"
-    ],
     "nist_800_53": [
       "CP-2",
       "SI-12"
@@ -1021,8 +1292,17 @@
     ]
   },
   "external_identity.broad_guest_invite_policy": {
-    "cis_m365_v3": [
-      "1.1.5"
+    "cis_m365_v7": [
+      "5.1.6.3"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.8.2v1"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "PA-3"
     ],
     "nist_800_53": [
       "AC-2",
@@ -1051,9 +1331,20 @@
     ]
   },
   "consent_policy.admin_consent_workflow_disabled": {
-    "cis_m365_v3": [
-      "5.1.5",
-      "5.2.5"
+    "cis_m365_v7": [
+      "5.1.5.2"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.5.3v1"
+    ],
+    "ms_secure_score": [
+      "aad_admin_consent_workflow"
+    ],
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "AM-2"
     ],
     "nist_800_53": [
       "AC-3",
@@ -1078,9 +1369,20 @@
     ]
   },
   "identity.global_admin_singleton": {
-    "cis_m365_v3": [
-      "1.1.2",
+    "cis_m365_v7": [
       "1.1.3"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.7.1v1"
+    ],
+    "ms_secure_score": [
+      "OneAdmin"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "PA-5"
     ],
     "nist_800_53": [
       "AC-2",
@@ -1106,9 +1408,22 @@
     ]
   },
   "identity.global_admin_sprawl": {
-    "cis_m365_v3": [
-      "1.1.2",
+    "cis_m365_v7": [
       "1.1.3"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.7.1v1",
+      "MS.AAD.7.2v1"
+    ],
+    "ms_secure_score": [
+      "RoleOverlap"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "PA-1",
+      "PA-7"
     ],
     "nist_800_53": [
       "AC-2",
@@ -1133,9 +1448,11 @@
     ]
   },
   "identity.global_admin_disabled": {
-    "cis_m365_v3": [
-      "1.1.2",
-      "1.1.3"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "PA-3"
     ],
     "nist_800_53": [
       "AC-2",
@@ -1160,9 +1477,11 @@
     ]
   },
   "identity.global_admin_stale_password": {
-    "cis_m365_v3": [
-      "1.1.2",
-      "1.1.3"
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "PA-1"
     ],
     "nist_800_53": [
       "IA-5",
@@ -1187,10 +1506,22 @@
     ]
   },
   "identity.global_admin_mfa_not_registered": {
-    "cis_m365_v3": [
-      "1.1.2",
-      "1.1.3",
-      "5.2.2"
+    "cis_m365_v7": [
+      "5.2.2.1",
+      "5.2.3.4"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.6v1"
+    ],
+    "ms_secure_score": [
+      "AdminMFAV2"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6",
+      "PA-1"
     ],
     "nist_800_53": [
       "IA-2",
@@ -1216,9 +1547,22 @@
     ]
   },
   "identity.user_mfa_not_registered": {
-    "cis_m365_v3": [
-      "1.1.2",
-      "1.1.3"
+    "cis_m365_v7": [
+      "5.2.2.2",
+      "5.2.3.4"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.1v1",
+      "MS.AAD.3.2v1"
+    ],
+    "ms_secure_score": [
+      "MFARegistrationV2"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6"
     ],
     "nist_800_53": [
       "IA-2",
@@ -1240,10 +1584,73 @@
       "T1078.004"
     ]
   },
+  "identity.stale_enabled_account": {
+    "nist_800_53": [
+      "AC-2(3)",
+      "AC-2"
+    ],
+    "iso_27001": [
+      "A.5.16",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(4)(c)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ],
+    "mcsb": [
+      "PA-3"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ]
+  },
+  "identity.privileged_stale_account": {
+    "nist_800_53": [
+      "AC-2(3)",
+      "AC-6(7)"
+    ],
+    "iso_27001": [
+      "A.5.18",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.3"
+    ],
+    "nis2": [
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(4)(c)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ],
+    "mcsb": [
+      "PA-3",
+      "PA-1"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ]
+  },
   "security.risky_signin": {
-    "cis_m365_v3": [
-      "1.1.2",
-      "1.1.3"
+    "ms_zero_trust": [
+      "identities",
+      "secops"
+    ],
+    "mcsb": [
+      "LT-2"
     ],
     "nist_800_53": [
       "AU-6",
@@ -1270,9 +1677,12 @@
     ]
   },
   "security.privilege_change_event": {
-    "cis_m365_v3": [
-      "5.1.5",
-      "5.2.2"
+    "ms_zero_trust": [
+      "identities",
+      "secops"
+    ],
+    "mcsb": [
+      "LT-2"
     ],
     "nist_800_53": [
       "AC-2",
@@ -1302,9 +1712,11 @@
     ]
   },
   "intune.device_noncompliant": {
-    "cis_m365_v3": [
-      "8.5.1",
-      "8.5.2"
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
     ],
     "nist_800_53": [
       "CM-8",
@@ -1329,9 +1741,11 @@
     ]
   },
   "intune.device_stale_sync": {
-    "cis_m365_v3": [
-      "8.5.1",
-      "8.5.2"
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "AM-1"
     ],
     "nist_800_53": [
       "CM-8",
@@ -1355,6 +1769,336 @@
     ],
     "mitre_attack": [
       "T1200"
+    ]
+  },
+  "detection.unified_audit_log_disabled": {
+    "nist_800_53": [
+      "AU-2",
+      "AU-12",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.8.15",
+      "A.8.16"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(b)"
+    ],
+    "dora": [
+      "Article 10(1)"
+    ],
+    "mitre_attack": [
+      "T1562.008"
+    ],
+    "mcsb": [
+      "LT-1"
+    ],
+    "ms_zero_trust": [
+      "secops"
+    ]
+  },
+  "detection.mailbox_audit_disabled": {
+    "nist_800_53": [
+      "AU-2",
+      "AU-12"
+    ],
+    "iso_27001": [
+      "A.8.15"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(b)"
+    ],
+    "dora": [
+      "Article 10(1)"
+    ],
+    "mitre_attack": [
+      "T1562.008",
+      "T1114.002"
+    ],
+    "mcsb": [
+      "LT-1",
+      "DP-2"
+    ],
+    "ms_zero_trust": [
+      "secops",
+      "data"
+    ]
+  },
+  "detection.mailbox_audit_bypass": {
+    "nist_800_53": [
+      "AU-2",
+      "AU-9"
+    ],
+    "iso_27001": [
+      "A.8.15"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(b)"
+    ],
+    "dora": [
+      "Article 10(1)"
+    ],
+    "mitre_attack": [
+      "T1562.008",
+      "T1114.002"
+    ],
+    "mcsb": [
+      "LT-1",
+      "DP-2"
+    ],
+    "ms_zero_trust": [
+      "secops",
+      "data"
+    ]
+  },
+  "detection.no_alert_policies": {
+    "nist_800_53": [
+      "SI-4",
+      "IR-4",
+      "AU-6"
+    ],
+    "iso_27001": [
+      "A.8.16",
+      "A.5.25"
+    ],
+    "soc2": [
+      "CC7.2",
+      "CC7.3"
+    ],
+    "nis2": [
+      "Article 21(2)(b)"
+    ],
+    "dora": [
+      "Article 10(1)"
+    ],
+    "mitre_attack": [
+      "T1562"
+    ],
+    "mcsb": [
+      "LT-1"
+    ],
+    "ms_zero_trust": [
+      "secops"
+    ]
+  },
+  "detection.no_risk_based_policies": {
+    "nist_800_53": [
+      "AC-7",
+      "IA-2",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1110.003"
+    ],
+    "mcsb": [
+      "LT-2",
+      "IM-7"
+    ],
+    "ms_zero_trust": [
+      "identities",
+      "secops"
+    ]
+  },
+  "detection.signin_logs_unavailable": {
+    "nist_800_53": [
+      "AU-2",
+      "AU-6",
+      "AU-12"
+    ],
+    "iso_27001": [
+      "A.8.15",
+      "A.8.16"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(b)"
+    ],
+    "dora": [
+      "Article 10(1)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1110"
+    ],
+    "mcsb": [
+      "LT-2"
+    ],
+    "ms_zero_trust": [
+      "secops"
+    ]
+  },
+  "dns_posture.mta_sts_missing": {
+    "nist_800_53": [
+      "SC-8",
+      "SC-23"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC6.7"
+    ],
+    "nis2": [
+      "Article 21(2)(h)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1557"
+    ],
+    "ms_zero_trust": [
+      "network"
+    ]
+  },
+  "dns_posture.mta_sts_testing_mode": {
+    "nist_800_53": [
+      "SC-8",
+      "SC-23"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC6.7"
+    ],
+    "nis2": [
+      "Article 21(2)(h)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1557"
+    ],
+    "ms_zero_trust": [
+      "network"
+    ]
+  },
+  "dns_posture.mta_sts_policy_invalid": {
+    "nist_800_53": [
+      "SC-8",
+      "SC-23"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC6.7"
+    ],
+    "nis2": [
+      "Article 21(2)(h)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1557"
+    ],
+    "ms_zero_trust": [
+      "network"
+    ]
+  },
+  "dns_posture.tls_rpt_missing": {
+    "nist_800_53": [
+      "SC-8",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.8.16",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(h)"
+    ],
+    "dora": [
+      "Article 10(1)"
+    ],
+    "mitre_attack": [
+      "T1557"
+    ],
+    "ms_zero_trust": [
+      "network",
+      "secops"
+    ]
+  },
+  "exposure.federated_domain_metadata_public": {
+    "nist_800_53": [
+      "IA-8",
+      "SC-7"
+    ],
+    "iso_27001": [
+      "A.5.16",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(4)(c)"
+    ],
+    "mitre_attack": [
+      "T1590.001",
+      "T1606.002"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ]
+  },
+  "secure_score.low_overall": {
+    "ms_zero_trust": [
+      "secops"
+    ],
+    "mcsb": [
+      "PV-2"
+    ],
+    "nist_800_53": [
+      "CA-7",
+      "RA-5"
+    ],
+    "iso_27001": [
+      "A.5.36"
+    ],
+    "soc2": [
+      "CC4.1"
+    ],
+    "nis2": [
+      "Article 21(2)(f)"
     ]
   }
 }

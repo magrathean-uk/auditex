@@ -63,3 +63,25 @@ def test_setup_guide_mcp_tool_is_registered_and_callable() -> None:
     artifact_paths = {row["artifact_path"] for row in payload["citations"]}
     assert "src/auditex/setup_guide.py" in artifact_paths
     assert "configs/collector-definitions.json" in artifact_paths
+
+
+def test_m365_setup_guide_lists_signin_and_report_settings_scopes() -> None:
+    payload = build_setup_guide(provider="m365", auditor_profile="global-reader", collector_preset="full")
+
+    assert "reports_usage" in payload["selected_collectors"]
+    assert "ReportSettings.Read.All" in payload["graph_permissions"]
+    assert "AuditLog.Read.All" in payload["graph_permissions"]
+    assert "CloudApp-Discovery.Read.All" not in payload["graph_permissions"]
+    assert not [scope for scope in payload["graph_permissions"] if "ReadWrite" in scope]
+    rows = {row["collector"]: row for row in payload["collector_permissions"]}
+    assert "AuditLog.Read.All" in rows["identity"]["required_permissions"]
+    assert "ReportSettings.Read.All" in rows["reports_usage"]["required_permissions"]
+    markdown = render_setup_guide_markdown(payload)
+    assert "ReportSettings.Read.All" in markdown
+
+
+def test_m365_setup_guide_defender_cloud_apps_uses_consent_request_scope() -> None:
+    payload = build_setup_guide(provider="m365", collectors=["defender_cloud_apps"])
+
+    assert payload["selected_collectors"] == ["defender_cloud_apps"]
+    assert payload["graph_permissions"] == ["ConsentRequest.Read.All"]

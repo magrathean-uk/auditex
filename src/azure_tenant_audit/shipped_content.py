@@ -84,6 +84,13 @@ SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
         "sample bundle under `examples/sample_audit_bundle/`",
     ),
     ShippedContentArea(
+        "demo_tenant",
+        "examples/demo_tenant",
+        "auditex/examples/demo_tenant",
+        ("examples/demo_tenant/*.json",),
+        "synthetic demo tenant under `examples/demo_tenant/`",
+    ),
+    ShippedContentArea(
         "google_workspace_sample",
         "examples",
         "auditex/examples",

@@ -264,9 +264,9 @@ def test_ediscovery_export_operations_respect_checkpoint_state(monkeypatch) -> N
         {
             "client": _FakeGraphClient(
                 responses={
-                    "/security/cases": [{"id": "case-1"}],
-                    "/security/cases/case-1/searches": [],
-                    "/security/cases/case-1/operations": [],
+                    "/security/cases/ediscoveryCases": [{"id": "case-1"}],
+                    "/security/cases/ediscoveryCases/case-1/searches": [],
+                    "/security/cases/ediscoveryCases/case-1/operations": [],
                 }
             ),
             "top": 10,
@@ -323,9 +323,9 @@ def test_ediscovery_export_operations_invoke_export_callbacks(monkeypatch) -> No
         {
             "client": _FakeGraphClient(
                 responses={
-                    "/security/cases": [{"id": "case-1"}],
-                    "/security/cases/case-1/searches": [{"id": "search-case-1"}],
-                    "/security/cases/case-1/operations": [{"id": "operation-case-1"}],
+                    "/security/cases/ediscoveryCases": [{"id": "case-1"}],
+                    "/security/cases/ediscoveryCases/case-1/searches": [{"id": "search-case-1"}],
+                    "/security/cases/ediscoveryCases/case-1/operations": [{"id": "operation-case-1"}],
                 }
             ),
             "top": 10,
@@ -357,9 +357,9 @@ def test_ediscovery_collector_inventory_plane_skips_export_collectors(monkeypatc
 
     client = _FakeGraphClient(
         responses={
-            "/security/cases": [{"id": "case-1"}],
-            "/security/cases/case-1/searches": [{"id": "search-case-1"}],
-            "/security/cases/case-1/operations": [{"id": "op-case-1"}],
+            "/security/cases/ediscoveryCases": [{"id": "case-1"}],
+            "/security/cases/ediscoveryCases/case-1/searches": [{"id": "search-case-1"}],
+            "/security/cases/ediscoveryCases/case-1/operations": [{"id": "op-case-1"}],
         }
     )
     collector = EDiscoveryCollector()
@@ -398,9 +398,9 @@ def test_ediscovery_collector_full_plane_includes_export_commands(monkeypatch) -
 
     client = _FakeGraphClient(
         responses={
-            "/security/cases": [{"id": "case-1"}],
-            "/security/cases/case-1/searches": [{"id": "search-case-1"}],
-            "/security/cases/case-1/operations": [{"id": "op-case-1"}],
+            "/security/cases/ediscoveryCases": [{"id": "case-1"}],
+            "/security/cases/ediscoveryCases/case-1/searches": [{"id": "search-case-1"}],
+            "/security/cases/ediscoveryCases/case-1/operations": [{"id": "op-case-1"}],
         }
     )
     collector = EDiscoveryCollector()
@@ -434,9 +434,9 @@ def test_ediscovery_collector_marks_partial_when_export_job_fails(monkeypatch) -
 
     client = _FakeGraphClient(
         responses={
-            "/security/cases": [{"id": "case-1"}],
-            "/security/cases/case-1/searches": [{"id": "search-case-1"}],
-            "/security/cases/case-1/operations": [{"id": "op-case-1"}],
+            "/security/cases/ediscoveryCases": [{"id": "case-1"}],
+            "/security/cases/ediscoveryCases/case-1/searches": [{"id": "search-case-1"}],
+            "/security/cases/ediscoveryCases/case-1/operations": [{"id": "op-case-1"}],
         }
     )
     collector = EDiscoveryCollector()

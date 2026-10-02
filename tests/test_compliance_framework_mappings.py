@@ -34,7 +34,9 @@ def test_dns_findings_include_cis_m365_and_mitre_attack_mappings() -> None:
     findings = _findings_for_dns_missing_dmarc()
     finding = next(f for f in findings if f["id"] == "dns_posture:contoso.com:dmarc_missing")
     mappings = finding["framework_mappings"]
-    assert "cis_m365_v3" in mappings
+    assert mappings["cis_m365_v7"] == ["2.1.10"]
+    assert mappings["cisa_scuba"] == ["MS.EXO.4.1v1"]
+    assert "cis_m365_v3" not in mappings
     assert "mitre_attack" in mappings
     assert any(token.startswith("T1566") for token in mappings["mitre_attack"])
 

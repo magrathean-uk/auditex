@@ -241,7 +241,13 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
         lambda token: {
             "tenant_id": "tenant-ctx",
             "audience": "https://graph.microsoft.com",
-            "delegated_scopes": ["Directory.Read.All", "User.Read.All", "Group.Read.All", "Application.Read.All"],
+            "delegated_scopes": [
+                "Directory.Read.All",
+                "User.Read.All",
+                "Group.Read.All",
+                "Application.Read.All",
+                "AuditLog.Read.All",
+            ],
             "app_roles": [],
             "expires_at_utc": "2030-01-01T00:00:00Z",
         },

@@ -43,9 +43,12 @@ def test_conditional_access_graph_builds_relationships_and_findings() -> None:
                             "users": {"includeUsers": ["admin-user"]},
                             "locations": {"includeLocations": ["loc-missing"]},
                             "applications": {"includeApplications": ["app-1"]},
-                            "authenticationStrength": {"includePolicies": ["strength-1"]},
                         },
-                        "grantControls": {"builtInControls": ["mfa"], "operator": "OR"},
+                        "grantControls": {
+                            "builtInControls": ["mfa"],
+                            "operator": "OR",
+                            "authenticationStrength": {"id": "strength-1"},
+                        },
                     },
                     {
                         "id": "ca-2",
@@ -89,3 +92,35 @@ def test_conditional_access_graph_builds_relationships_and_findings() -> None:
     )
 
     assert normalized["snapshot"]["object_counts"]["conditional_access_graph"] == 2
+
+
+def test_conditional_access_relationships_have_citable_keys_and_grant_auth_strength() -> None:
+    from azure_tenant_audit.normalize import build_normalized_snapshot
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="run-ca-keys",
+        collector_payloads={
+            "identity": {"users": {"value": [{"id": "admin-user", "displayName": "Admin"}]}},
+            "conditional_access": {
+                "conditionalAccessPolicies": {
+                    "value": [
+                        {
+                            "id": "ca-1",
+                            "displayName": "Require phishing-resistant MFA",
+                            "state": "enabled",
+                            "conditions": {"users": {"includeUsers": ["admin-user"]}},
+                            "grantControls": {"operator": "OR", "authenticationStrength": {"id": "strength-1"}},
+                        }
+                    ]
+                },
+                "authenticationStrengthPolicies": {"value": [{"id": "strength-1", "displayName": "Phishing-resistant"}]},
+            },
+        },
+    )
+
+    relationships = snapshot["relationships"]["records"]
+    assert relationships, "relationships are emitted"
+    assert all(record.get("key") and record.get("id") for record in relationships)
+    assert len({record["key"] for record in relationships}) == len(relationships)
+    assert any(record.get("target_type") == "auth_strength" and record.get("target_id") == "strength-1" for record in relationships)

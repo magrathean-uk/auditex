@@ -24,6 +24,16 @@ friendly-name, finding-template, and fallback-template surfaces; it also says
 the legacy source-review module and distributable research material were
 removed. See the CSV for the file-level record.
 
+## Framework identifiers
+
+`configs/framework-catalog.json` and `configs/control-mappings.json` reference
+benchmark control identifiers (CIS Microsoft 365 Foundations v7.0.0, CISA SCuBA
+policy ids, Microsoft Secure Score control profile ids, Microsoft cloud
+security benchmark ids, and Zero Trust pillar names). Auditex stores
+identifiers and short paraphrased titles only; no benchmark text is copied. The
+sources used to verify each identifier are listed in the catalog and in
+[Framework Mappings](../reference/framework-mappings.md).
+
 ## Limits
 
 The source record also states that no external legal review or external

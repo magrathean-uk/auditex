@@ -29,12 +29,16 @@ class ConditionalAccessCollector(Collector):
                 "params": {},
             },
             "authenticationStrengthPolicies": {
-                "endpoint": "/identity/conditionalAccess/authenticationStrengthPolicies",
+                "endpoint": "/policies/authenticationStrengthPolicies",
                 "params": {},
+                # Live tenants reject $top here ("Query option 'Top' is not allowed").
+                "apply_top": False,
             },
             "authenticationContextClassReferences": {
                 "endpoint": "/identity/conditionalAccess/authenticationContextClassReferences",
                 "params": {},
+                # Live tenants reject $top here ("Query option 'Top' is not allowed").
+                "apply_top": False,
             },
         }
         payload, coverage = run_graph_endpoints(

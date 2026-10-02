@@ -80,7 +80,7 @@ def test_build_report_pack_includes_findings_and_evidence_paths() -> None:
     assert report["summary"]["open_count"] == 1
     assert report["summary"]["accepted_count"] == 0
     assert report["privacy"] == {}
-    assert report["summary"]["risk"]["score"] == 40
+    assert report["summary"]["risk"]["score"] == 41
     assert report["summary"]["risk"]["grade"] == "high"
     assert report["summary"]["risk"]["open_weight"] == 4
     assert report["findings"][0]["id"] == "security:securityAlerts"
@@ -101,7 +101,7 @@ def test_build_report_pack_risk_rollup_ignores_non_open_findings() -> None:
     )
 
     assert report["summary"]["risk"] == {
-        "score": 60,
+        "score": 72,
         "grade": "critical",
         "open_weight": 6,
         "counts_by_open_severity": {"critical": 1},
@@ -137,7 +137,7 @@ def test_build_report_pack_promotes_coverage_gaps_into_risk_and_action_plan() ->
     )
 
     assert report["summary"]["coverage_gap_count"] == 1
-    assert report["summary"]["risk"]["score"] == 40
+    assert report["summary"]["risk"]["score"] == 42
     assert report["summary"]["risk"]["coverage_gap_weight"] == 4
     assert report["action_plan"][0]["id"] == "coverage_gap:mail"
     assert report["action_plan"][0]["rule_id"] == "coverage.gap"
@@ -248,7 +248,9 @@ def test_build_findings_uses_registry_metadata_for_templates_and_framework_mappi
     assert finding["impact"] == "The report has a confirmed evidence gap for this area, so the related control cannot be asserted from this run."
     assert finding["remediation"] == "Rerun with the minimum read permission required for the blocked surface, or exclude that surface from the agreed scope."
     assert finding["control_ids"] == ["AUDITEX-COLLECTOR-PERMISSION"]
-    assert finding["framework_mappings"]["cis_m365_v3"] == ["1.1.1"]
+    # Diagnostics do not claim benchmark controls (see framework-mappings.md).
+    assert "cis_m365_v3" not in finding["framework_mappings"]
+    assert "cis_m365_v7" not in finding["framework_mappings"]
     assert finding["framework_mappings"]["nist_800_53"] == ["AC-3", "AC-6", "AU-2"]
     assert finding["framework_mappings"]["mitre_attack"] == ["T1078"]
     assert finding["framework_mappings"]["iso_27001"] == ["A.5.15", "A.8.2"]
@@ -922,3 +924,24 @@ def test_build_findings_flags_stale_intune_device_sync() -> None:
     assert len(findings) == 1
     assert findings[0]["severity"] == "medium"
     assert findings[0]["affected_objects"] == ["Old Laptop"]
+
+
+def test_risk_score_tracks_remediation_and_grade_follows_worst_open_severity() -> None:
+    from azure_tenant_audit.findings import build_risk_rollup
+
+    def findings(critical: int, high: int, medium: int) -> list[dict[str, str]]:
+        rows = []
+        for severity, count in (("critical", critical), ("high", high), ("medium", medium)):
+            rows.extend({"id": f"{severity}-{index}", "severity": severity, "status": "open"} for index in range(count))
+        return rows
+
+    before = build_risk_rollup(findings(4, 22, 29))
+    after = build_risk_rollup(findings(0, 18, 24))
+    clean = build_risk_rollup([])
+
+    assert before["grade"] == "critical" and before["score"] < 100
+    assert after["grade"] == "high", "no open critical finding means the grade is not critical"
+    assert 40 <= after["score"] < 70
+    assert before["score"] > after["score"]
+    assert build_risk_rollup(findings(0, 17, 24))["score"] <= after["score"]
+    assert clean == {**clean, "score": 0, "grade": "clean"}

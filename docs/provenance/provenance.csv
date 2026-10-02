@@ -19,3 +19,7 @@ tenant-bootstrap/vendor/microsoft-skills/*,microsoft/skills,MIT,curated vendored
 pyproject.toml dependency requests,psf/requests,Apache-2.0,declared runtime dependency not vendored,keep
 pyproject.toml dependency msal,AzureAD/microsoft-authentication-library-for-python,MIT,declared runtime dependency not vendored,keep
 pyproject.toml optional dependency mcp,modelcontextprotocol/python-sdk,MIT,declared optional dependency not vendored,keep
+configs/framework-catalog.json cis_m365_v7,CIS Microsoft 365 Foundations Benchmark v7.0.0 (cisecurity.org; item numbers checked via tenable.com audit listings),CIS Benchmarks terms of use,recommendation numbers only; titles are Auditex paraphrases; no benchmark text copied,keep
+configs/framework-catalog.json cisa_scuba,cisagov/ScubaGear v1.8.0 baselines,CC0-1.0,policy ids only; titles are Auditex paraphrases,keep
+configs/framework-catalog.json ms_secure_score,Microsoft Graph documentation; mitre/heimdall2 sample output; KelvinTegelaar/CIPP secureScore.json,Microsoft Learn terms; NOASSERTION; AGPL-3.0,control profile ids observed as API identifiers only; no code or text copied,keep
+configs/framework-catalog.json mcsb and ms_zero_trust,Microsoft Learn security benchmark and Zero Trust pages,Microsoft Learn terms,control ids and pillar names only; titles are Auditex paraphrases,keep

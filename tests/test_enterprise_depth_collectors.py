@@ -212,12 +212,18 @@ class _IdentityGovernanceClient:
 class _IntuneDepthClient:
     def __init__(self) -> None:
         self.batch_calls: list[list[str]] = []
+        self.requests: list[tuple[str, dict]] = []
 
     def get_all(self, path, params=None):  # noqa: ANN001, ARG002
+        self.requests.append((path, dict(params or {})))
         responses = {
             "/deviceManagement/deviceConfigurations": [{"id": "config-1", "displayName": "Windows baseline"}],
-            "/deviceManagement/groupPolicyConfigurations": [{"id": "gp-1", "displayName": "Edge hardening"}],
-            "/deviceManagement/deviceManagementScripts": [{"id": "script-1", "displayName": "Repair script"}],
+            "https://graph.microsoft.com/beta/deviceManagement/groupPolicyConfigurations": [
+                {"id": "gp-1", "displayName": "Edge hardening"}
+            ],
+            "https://graph.microsoft.com/beta/deviceManagement/deviceManagementScripts": [
+                {"id": "script-1", "displayName": "Repair script"}
+            ],
             "/deviceAppManagement/androidManagedAppProtections": [{"id": "mam-android-1", "displayName": "Android MAM"}],
             "/deviceAppManagement/iosManagedAppProtections": [{"id": "mam-ios-1", "displayName": "iOS MAM"}],
         }
@@ -267,6 +273,16 @@ class _ServiceHealthClient:
 
 
 class _ReportsUsageClient:
+    def __init__(self, concealed: bool = False) -> None:
+        self.concealed = concealed
+        self.json_calls: list[str] = []
+
+    def get_json(self, path, params=None, full_url=False):  # noqa: ANN001, ARG002
+        self.json_calls.append(path)
+        if path != "/admin/reportSettings":
+            raise AssertionError(f"unexpected path: {path}")
+        return {"id": "reportSettings", "displayConcealedNames": self.concealed}
+
     def get_content(self, path, params=None, full_url=False):  # noqa: ANN001, ARG002
         responses = {
             "/reports/getOffice365ActiveUserCounts(period='D30')": "Report Refresh Date,Exchange,SharePoint\n2026-04-18,10,8\n",
@@ -367,7 +383,7 @@ class _FakeAdapter:
     def dependency_check(self) -> bool:
         return True
 
-    def run(self, command, log_event=None):  # noqa: ANN001, ARG002
+    def run(self, command, log_event=None, session=None):  # noqa: ANN001, ARG002
         response = self._responses.get(command)
         if response is None:
             return {"error": "missing response", "error_class": "command_not_simulated", "command": command}
@@ -440,6 +456,49 @@ def test_intune_depth_collector_collects_configurations_scripts_and_assignments(
     assert result.payload["deviceManagementScripts"]["value"][0]["id"] == "script-1"
     assert result.payload["deviceConfigurationAssignments"]["value"][0]["assignments"][0]["id"] == "assign-1"
     assert client.batch_calls == [["/deviceManagement/deviceConfigurations/config-1/assignments"]]
+    by_name = {row["name"]: row for row in result.coverage or []}
+    assert by_name["deviceManagementScripts"]["api_version"] == "beta"
+    assert by_name["groupPolicyConfigurations"]["api_version"] == "beta"
+    assert by_name["deviceConfigurations"]["api_version"] == "v1.0"
+
+
+def test_intune_depth_never_requests_script_content() -> None:
+    collector = IntuneDepthCollector()
+    client = _IntuneDepthClient()
+    collector.run({"client": client, "top": 100, "audit_logger": None})
+
+    script_requests = [params for path, params in client.requests if path.endswith("/deviceManagement/deviceManagementScripts")]
+    assert script_requests, "deviceManagementScripts must be requested"
+    for params in script_requests:
+        selected = [field.strip() for field in str(params.get("$select") or "").split(",")]
+        assert "id" in selected
+        assert "scriptContent" not in selected
+        assert all("scriptcontent" not in field.lower() for field in selected)
+    for path, params in client.requests:
+        assert "scriptContent" not in path
+        assert "scriptContent" not in str(params)
+
+
+def test_beta_endpoint_spec_builds_full_url_and_records_api_version() -> None:
+    from azure_tenant_audit.collectors.base import run_graph_endpoints
+
+    seen: list[str] = []
+
+    class _Client:
+        def get_json(self, path, params=None, full_url=False):  # noqa: ANN001, ARG002
+            seen.append(path)
+            assert full_url is True
+            return {"value": [{"id": "x"}]}
+
+    _, coverage = run_graph_endpoints(
+        "demo",
+        _Client(),
+        {"betaThing": {"endpoint": "/reports/servicePrincipalSignInActivities", "api_version": "beta", "page": False}},
+        top=None,
+    )
+    assert seen == ["https://graph.microsoft.com/beta/reports/servicePrincipalSignInActivities"]
+    assert coverage[0]["api_version"] == "beta"
+    assert coverage[0]["endpoint"].startswith("https://graph.microsoft.com/beta/")
 
 
 def test_service_health_collector_collects_health_issues_and_messages() -> None:
@@ -459,6 +518,37 @@ def test_reports_usage_collector_collects_csv_report_samples() -> None:
     assert result.status == "ok"
     assert result.payload["office365ActiveUserCounts"]["value"][0]["Exchange"] == "10"
     assert result.payload["oneDriveUsageAccountDetail"]["value"][0]["Owner Principal Name"] == "user@contoso.test"
+    assert result.payload["concealed_names"] is False
+    assert result.coverage[0]["name"] == "reportSettings"
+
+
+def test_reports_usage_reads_report_settings_first_and_flags_concealed_names() -> None:
+    client = _ReportsUsageClient(concealed=True)
+    result = ReportsUsageCollector().run({"client": client, "top": 100, "audit_logger": None})
+
+    assert result.status == "ok"
+    assert client.json_calls == ["/admin/reportSettings"]
+    assert result.coverage[0]["endpoint"] == "/admin/reportSettings"
+    assert result.payload["concealed_names"] is True
+    assert result.payload["mailboxUsageDetail"]["concealed_names"] is True
+    assert "ReportSettings.Read.All" in ReportsUsageCollector.required_permissions
+
+
+def test_reports_usage_records_gap_when_report_settings_unreadable() -> None:
+    from azure_tenant_audit.graph import GraphError
+
+    class _NoSettingsClient(_ReportsUsageClient):
+        def get_json(self, path, params=None, full_url=False):  # noqa: ANN001, ARG002
+            raise GraphError("Forbidden", status=403, request=path)
+
+    result = ReportsUsageCollector().run({"client": _NoSettingsClient(), "top": 100, "audit_logger": None})
+
+    assert result.status == "partial"
+    assert result.payload["concealed_names"] is None
+    settings_row = result.coverage[0]
+    assert settings_row["status"] == "failed"
+    assert settings_row["error_class"] == "insufficient_permissions"
+    assert result.payload["office365ActiveUserCounts"]["value"]
 
 
 def test_external_identity_collector_collects_cross_tenant_and_policy_posture() -> None:
@@ -516,6 +606,16 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
                 "value": [{"Name": "Default"}]
             },
             "Get-EXOMailbox -ResultSize 50 | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward": {"value": [{"DisplayName": "Alice Example"}]},
+            "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled": {
+                "value": [{"UnifiedAuditLogIngestionEnabled": True}]
+            },
+            "Get-OrganizationConfig | Select-Object AuditDisabled": {"value": [{"AuditDisabled": False}]},
+            "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count": {
+                "value": [{"Count": 0}]
+            },
+            "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule": {
+                "value": [{"Name": "Elevation of Exchange admin privilege", "Disabled": False}]
+            },
         }
     )
     monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _name: adapter)
@@ -524,6 +624,8 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
     result = collector.run({"audit_logger": None})
 
     assert result.status == "ok"
+    assert result.payload["adminAuditLogConfig"]["value"][0]["UnifiedAuditLogIngestionEnabled"] is True
+    assert result.payload["mailboxAuditBypass"]["value"] == [{"Count": 0}]
     assert result.payload["transportRules"]["value"][0]["Name"] == "Block Forwarding"
     assert result.payload["mailboxForwarding"]["value"][0]["DisplayName"] == "Alice Example"
 

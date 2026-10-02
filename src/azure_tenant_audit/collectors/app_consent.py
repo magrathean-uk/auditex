@@ -6,6 +6,8 @@ from typing import Any
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
+_MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+
 
 class AppConsentCollector(Collector):
     name = "app_consent"
@@ -13,7 +15,7 @@ class AppConsentCollector(Collector):
     required_permissions = [
         "Directory.Read.All",
         "DelegatedPermissionGrant.Read.All",
-        "AppRoleAssignment.ReadWrite.All",
+        "Application.Read.All",
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
@@ -51,7 +53,15 @@ class AppConsentCollector(Collector):
         assignment_rows: list[dict[str, Any]] = []
         fanout_specs: list[dict[str, Any]] = []
 
-        for service_principal in service_principals[:10]:
+        # Fan out over the first 10 service principals, plus Microsoft Graph so
+        # application permissions granted on Graph (appRoleAssignedTo) are read.
+        fanout_principals = list(service_principals[:10])
+        fanout_principals.extend(
+            item
+            for item in service_principals[10:]
+            if isinstance(item, dict) and item.get("appId") == _MICROSOFT_GRAPH_APP_ID
+        )
+        for service_principal in fanout_principals:
             sp_id = service_principal.get("id")
             if not isinstance(sp_id, str) or not sp_id:
                 continue

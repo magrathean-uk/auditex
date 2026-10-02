@@ -1,19 +1,29 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .attack_graph import analyze_attack_graph
 from .autopilot import build_board_report_sections
+from .baselines import SECURE_SCORE_LOW_THRESHOLD_PERCENT, build_baseline_alignment, latest_secure_score
 from .resources import resolve_resource_path
 from .waivers import apply_waivers, load_waivers
 
 
 _PERMISSION_CLASSES = {"insufficient_permissions", "unauthenticated"}
-_SERVICE_CLASSES = {"service_unavailable", "not_found", "not_enabled"}
+_SERVICE_CLASSES = {
+    "service_unavailable",
+    "service_not_available",
+    "not_found",
+    "resource_not_found",
+    "not_enabled",
+    "license_required",
+}
 
 def _load_rule_registry(path: Path) -> dict[str, dict[str, Any]]:
     path = resolve_resource_path(path)
@@ -227,23 +237,38 @@ def _canonical_severity(value: Any, *, fallback: str = "medium") -> str:
 _RISK_WEIGHTS = {"critical": 6, "high": 4, "medium": 2, "low": 1, "info": 0, "informational": 0}
 
 
+# Each grade owns a score band; the worst open severity sets the floor and volume moves the score
+# within the band without ever saturating, so fixing findings always shows up in the score.
+_RISK_BAND_FLOORS = {"critical": 70, "high": 40, "medium": 15, "low": 1}
+_RISK_BAND_WIDTH = 29
+_RISK_VOLUME_SCALE = 80.0
+
+
 def _risk_grade(score: int) -> str:
-    if score >= 60:
+    if score >= _RISK_BAND_FLOORS["critical"]:
         return "critical"
-    if score >= 30:
+    if score >= _RISK_BAND_FLOORS["high"]:
         return "high"
-    if score >= 10:
+    if score >= _RISK_BAND_FLOORS["medium"]:
         return "medium"
     if score > 0:
         return "low"
     return "clean"
 
 
+def _risk_score(counts: Counter, open_weight: int) -> int:
+    worst = next((severity for severity in ("critical", "high", "medium", "low") if counts.get(severity)), None)
+    if worst is None:
+        return 0
+    volume = round(_RISK_BAND_WIDTH * (1 - math.exp(-open_weight / _RISK_VOLUME_SCALE)))
+    return min(100, _RISK_BAND_FLOORS[worst] + volume)
+
+
 def build_risk_rollup(findings: list[dict[str, Any]]) -> dict[str, Any]:
     open_findings = [item for item in findings if str(item.get("status") or "open") == "open"]
     counts = Counter(_canonical_severity(item.get("severity"), fallback="info") for item in open_findings)
     open_weight = sum(_RISK_WEIGHTS.get(_canonical_severity(item.get("severity"), fallback="info"), 0) for item in open_findings)
-    score = min(100, open_weight * 10)
+    score = _risk_score(counts, open_weight)
 
     def sort_key(item: dict[str, Any]) -> tuple[int, str]:
         severity = _canonical_severity(item.get("severity"), fallback="info")
@@ -323,7 +348,10 @@ def _risk_with_coverage_gaps(findings: list[dict[str, Any]], coverage_gaps: list
         _RISK_WEIGHTS.get(_canonical_severity(gap.get("severity"), fallback="medium"), 0)
         for gap in active_gaps
     )
-    score = min(100, int(risk.get("score") or 0) + coverage_gap_weight * 5)
+    # A surface we could not verify counts like an open finding of the gap's severity.
+    counts = Counter(_canonical_severity(item.get("severity"), fallback="info") for item in findings if str(item.get("status") or "open") == "open")
+    counts.update(_canonical_severity(gap.get("severity"), fallback="medium") for gap in active_gaps)
+    score = _risk_score(counts, int(risk.get("open_weight") or 0) + coverage_gap_weight)
     risk.update(
         {
             "score": score,
@@ -1195,6 +1223,134 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
     return findings
 
 
+_STALE_ACCOUNT_DAYS = 90
+
+
+def _privileged_role_names_by_principal(normalized_snapshot: dict[str, Any]) -> dict[str, list[str]]:
+    """Map principal id (lower-case) to the directory roles it holds whose name marks them as administrative."""
+    role_definitions = (normalized_snapshot.get("role_definitions") or {}).get("records") or []
+    role_assignments = (normalized_snapshot.get("role_assignments") or {}).get("records") or []
+    privileged_roles = {
+        str(item.get("id")): str(item.get("display_name") or "")
+        for item in role_definitions
+        if "administrator" in str(item.get("display_name") or "").strip().lower()
+    }
+    by_principal: dict[str, list[str]] = {}
+    for item in role_assignments:
+        role_name = privileged_roles.get(str(item.get("role_definition_id")))
+        principal = str(item.get("principal_id") or "").lower()
+        if role_name and principal:
+            names = by_principal.setdefault(principal, [])
+            if role_name not in names:
+                names.append(role_name)
+    return by_principal
+
+
+def _is_stale_enabled_user(user: dict[str, Any], *, days: int = _STALE_ACCOUNT_DAYS) -> bool:
+    """Enabled account, created more than ``days`` ago, with no successful sign-in in ``days``.
+
+    Requires signin_data_available=True so a missing licence or scope never reads as
+    "never signed in".
+    """
+    if user.get("signin_data_available") is not True:
+        return False
+    if user.get("enabled") is not True:
+        return False
+    if not _is_stale_timestamp(user.get("created_at"), days=days):
+        return False
+    last_success = user.get("last_successful_signin_at")
+    if last_success in (None, ""):
+        return True
+    return _is_stale_timestamp(last_success, days=days)
+
+
+def _build_stale_account_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    users = (normalized_snapshot.get("users") or {}).get("records") or []
+    privileged = _privileged_role_names_by_principal(normalized_snapshot)
+    findings: list[dict[str, Any]] = []
+    for user in users:
+        if not isinstance(user, dict) or not _is_stale_enabled_user(user):
+            continue
+        user_id = str(user.get("id") or "")
+        affected = user.get("principal_name") or user_id
+        evidence = {
+            "enabled": user.get("enabled"),
+            "created_at": user.get("created_at"),
+            "last_successful_signin_at": user.get("last_successful_signin_at"),
+            "last_signin_at": user.get("last_signin_at"),
+            "user_type": user.get("user_type"),
+            "threshold_days": _STALE_ACCOUNT_DAYS,
+        }
+        evidence_refs = _normalized_evidence_refs("users", user, "identity")
+        roles = privileged.get(user_id.lower())
+        if roles:
+            findings.append(
+                _finalize_finding(
+                    {
+                        "id": f"identity:privileged_stale_account:{user_id}",
+                        "rule_id": "identity.privileged_stale_account",
+                        "severity": "high",
+                        "category": "identity",
+                        "title": "Privileged account has not signed in successfully for over 90 days",
+                        "status": "open",
+                        "collector": "identity",
+                        "affected_objects": [affected],
+                        "evidence": {**evidence, "privileged_roles": sorted(roles)},
+                        "returned_value": user.get("last_successful_signin_at"),
+                        "evidence_refs": evidence_refs,
+                        **_metadata_for("identity.privileged_stale_account"),
+                    }
+                )
+            )
+            continue
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"identity:stale_enabled_account:{user_id}",
+                    "rule_id": "identity.stale_enabled_account",
+                    "severity": "medium",
+                    "category": "identity",
+                    "title": "Enabled account has not signed in successfully for over 90 days",
+                    "status": "open",
+                    "collector": "identity",
+                    "affected_objects": [affected],
+                    "evidence": evidence,
+                    "returned_value": user.get("last_successful_signin_at"),
+                    "evidence_refs": evidence_refs,
+                    **_metadata_for("identity.stale_enabled_account"),
+                }
+            )
+        )
+    return findings
+
+
+def _build_reports_concealed_names_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    records = (normalized_snapshot.get("usage_report_setting_objects") or {}).get("records") or []
+    findings: list[dict[str, Any]] = []
+    for item in records:
+        if not isinstance(item, dict) or item.get("concealed_names") is not True:
+            continue
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "reports_usage:concealed_names",
+                    "rule_id": "reports_usage.concealed_names",
+                    "severity": "low",
+                    "category": "coverage",
+                    "title": "Usage reports conceal user, group, and site names",
+                    "status": "open",
+                    "collector": "reports_usage",
+                    "affected_objects": ["Microsoft 365 admin center report settings"],
+                    "evidence": {"display_concealed_names": True},
+                    "returned_value": True,
+                    "evidence_refs": _normalized_evidence_refs("usage_report_setting_objects", item, "reports_usage"),
+                    **_metadata_for("reports_usage.concealed_names"),
+                }
+            )
+        )
+    return findings
+
+
 def _build_risky_signin_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     risky_states = {"atrisk", "confirmedcompromised"}
     ignored_states = {"", "none", "dismissed", "remediated", "confirmedsafe"}
@@ -1416,10 +1572,99 @@ def _external_recipients(values: Any, accepted_domains: set[str]) -> list[str]:
     return list(dict.fromkeys(recipients))
 
 
+def _attack_path_rule_id(path: dict[str, Any]) -> str:
+    edges = {str(hop.get("edge")) for hop in path.get("hops") or [] if isinstance(hop, dict)}
+    if "owns" in edges:
+        return "attack_path.app_owner_to_tier0"
+    if path.get("foothold") == "no_mfa":
+        return "attack_path.no_mfa_to_tier0"
+    return "attack_path.privilege_escalation"
+
+
+def _build_attack_path_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """One finding per high or critical privilege-escalation graph path."""
+    findings: list[dict[str, Any]] = []
+    for path in analyze_attack_graph(normalized_snapshot).get("paths") or []:
+        if not path.get("finding_id"):
+            continue
+        rule_id = _attack_path_rule_id(path)
+        if rule_id == "attack_path.app_owner_to_tier0":
+            metadata = {"rule_id": "attack_path.app_owner_to_tier0", **_metadata_for("attack_path.app_owner_to_tier0")}
+        elif rule_id == "attack_path.no_mfa_to_tier0":
+            metadata = {"rule_id": "attack_path.no_mfa_to_tier0", **_metadata_for("attack_path.no_mfa_to_tier0")}
+        else:
+            metadata = {"rule_id": "attack_path.privilege_escalation", **_metadata_for("attack_path.privilege_escalation")}
+        evidence_refs: list[dict[str, Any]] = []
+        seen_refs: set[tuple[str, str]] = set()
+        for hop in path.get("hops") or []:
+            ref = hop.get("evidence_ref") if isinstance(hop, dict) else None
+            if not isinstance(ref, dict):
+                continue
+            ref_key = (str(ref.get("artifact_path")), str(ref.get("record_key")))
+            if ref_key not in seen_refs:
+                seen_refs.add(ref_key)
+                evidence_refs.append(dict(ref))
+        findings.append(
+            _finalize_finding(
+                {
+                    **metadata,
+                    "id": path["id"],
+                    "severity": path.get("severity"),
+                    "category": "identity",
+                    "title": f"Privilege escalation path: {path.get('source')} → {path.get('target')}",
+                    "status": "open",
+                    "collector": "identity",
+                    "affected_objects": [path.get("source"), path.get("target")],
+                    "returned_value": path.get("summary"),
+                    "evidence": {
+                        "attack_path_id": path["id"],
+                        "hops": path.get("hops"),
+                        "techniques": path.get("techniques"),
+                        "breakpoints": path.get("breakpoints"),
+                        "risk_score": path.get("risk_score"),
+                        "foothold_count": path.get("foothold_count"),
+                    },
+                    "evidence_refs": evidence_refs,
+                }
+            )
+        )
+    return findings
+
+
+def _build_secure_score_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    latest = latest_secure_score(normalized_snapshot)
+    if latest is None or latest["percentage"] >= SECURE_SCORE_LOW_THRESHOLD_PERCENT:
+        return []
+    record = latest["record"]
+    return [
+        _finalize_finding(
+            {
+                "id": f"secure_score:{record.get('id')}:low_overall",
+                "rule_id": "secure_score.low_overall",
+                "severity": "medium",
+                "category": "posture",
+                "title": "Microsoft Secure Score is below half of the achievable score",
+                "status": "open",
+                "collector": "defender",
+                "affected_objects": [str(record.get("id"))],
+                "evidence": {
+                    key: record.get(key) for key in ("id", "created", "current_score", "max_score") if key in record
+                },
+                "returned_value": f"{latest['current_score']:g}/{latest['max_score']:g} ({latest['percentage']:g}%)",
+                "evidence_refs": _normalized_evidence_refs("security_scores", record, "defender"),
+                **_metadata_for("secure_score.low_overall"),
+            }
+        )
+    ]
+
+
 def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     findings.extend(_build_admin_resilience_findings(normalized_snapshot))
+    findings.extend(_build_secure_score_findings(normalized_snapshot))
     findings.extend(_build_user_mfa_findings(normalized_snapshot))
+    findings.extend(_build_stale_account_findings(normalized_snapshot))
+    findings.extend(_build_reports_concealed_names_findings(normalized_snapshot))
     findings.extend(_build_risky_signin_findings(normalized_snapshot))
     findings.extend(_build_privilege_event_findings(normalized_snapshot))
     tenant_domains = _tenant_domains(normalized_snapshot)
@@ -1516,7 +1761,21 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
         "Directory.Read.All",
         "RoleManagement.Read.Directory",
         "Mail.Read",
+        "Mail.ReadWrite",
+        "Mail.Send",
         "Sites.Read.All",
+        "Sites.ReadWrite.All",
+        "Sites.FullControl.All",
+        "Directory.ReadWrite.All",
+        "RoleManagement.ReadWrite.Directory",
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.ReadWrite.All",
+        "User.ReadWrite.All",
+        "Group.ReadWrite.All",
+        "Policy.ReadWrite.ConditionalAccess",
+        "UserAuthenticationMethod.ReadWrite.All",
+        "Files.ReadWrite.All",
+        "full_access_as_app",
         "AuditLog.Read.All",
         "eDiscovery.Read.All",
         "Exchange.ManageAsApp",
@@ -1906,6 +2165,35 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                     }
                 )
             )
+        findings.extend(_build_transport_security_findings(item, domain, evidence_refs))
+
+    for item in ((normalized_snapshot.get("public_footprint_objects") or {}).get("records") or []):
+        if str(item.get("authentication_type") or "").lower() != "federated":
+            continue
+        domain = str(item.get("domain") or item.get("id") or "")
+        if not domain:
+            continue
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"exposure:{domain}:federated_domain_metadata_public",
+                    "rule_id": "exposure.federated_domain_metadata_public",
+                    "severity": "low",
+                    "category": "identity",
+                    "title": "Federated domain sign-in metadata is publicly discoverable",
+                    "status": "open",
+                    "collector": "dns_posture",
+                    "affected_objects": [domain],
+                    "evidence": item,
+                    "returned_value": {
+                        "authentication_type": item.get("authentication_type"),
+                        "tenant_id_public": bool(item.get("tenant_id")),
+                    },
+                    "evidence_refs": _normalized_evidence_refs("public_footprint_objects", item, "dns_posture"),
+                    **_metadata_for("exposure.federated_domain_metadata_public"),
+                }
+            )
+        )
 
     consent_policy_records = ((normalized_snapshot.get("consent_policy_objects") or {}).get("records") or [])
     for item in consent_policy_records:
@@ -2033,6 +2321,8 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
             )
         )
 
+    findings.extend(_build_attack_path_findings(normalized_snapshot))
+
     for item in ((normalized_snapshot.get("ca_findings") or {}).get("records") or []):
         finding_id = item.get("finding_type") or item.get("id")
         policy_key = item.get("policy_id") or item.get("id") or item.get("policy_name") or "policy"
@@ -2052,6 +2342,137 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
             )
         )
 
+    return findings
+
+
+def _build_transport_security_findings(
+    item: dict[str, Any], domain: str, evidence_refs: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """MTA-STS (RFC 8461) and TLS-RPT (RFC 8460) findings for one custom domain.
+
+    Fires only on evidence that was collected: a resolver error, a bundle without
+    TLS-RPT data, or an MTA-STS policy that was never fetched never yields a finding.
+    """
+    if item.get("resolver_error"):
+        return []
+    rows: list[dict[str, Any]] = []
+
+    def _add(spec: dict[str, str], returned_value: Any) -> None:
+        rule_id = spec["rule_id"]
+        rows.append(
+            _finalize_finding(
+                {
+                    "id": f"dns_posture:{domain}:{rule_id.split('.', 1)[1]}",
+                    "rule_id": rule_id,
+                    "severity": spec["severity"],
+                    "category": "mail_flow",
+                    "title": spec["title"],
+                    "status": "open",
+                    "collector": "dns_posture",
+                    "affected_objects": [domain],
+                    "evidence": item,
+                    "returned_value": returned_value,
+                    "evidence_refs": evidence_refs,
+                    **_metadata_for(rule_id),
+                }
+            )
+        )
+
+    fetch_status = item.get("mta_sts_policy_fetch_status")
+    mode = str(item.get("mta_sts_policy_mode") or "").lower()
+    if item.get("mta_sts_dns_present") is False:
+        _add({"rule_id": "dns_posture.mta_sts_missing", "severity": "low", "title": "MTA-STS is not published"}, None)
+    elif fetch_status and fetch_status not in {"ok", "skipped"}:
+        _add(
+            {
+                "rule_id": "dns_posture.mta_sts_policy_invalid",
+                "severity": "medium",
+                "title": "MTA-STS TXT record exists but the policy file is unreachable or invalid",
+            },
+            {"fetch_status": fetch_status, "http_status": item.get("mta_sts_policy_http_status")},
+        )
+    elif fetch_status == "ok" and mode in {"testing", "none"}:
+        _add(
+            {"rule_id": "dns_posture.mta_sts_testing_mode", "severity": "low", "title": "MTA-STS policy does not enforce TLS"},
+            mode,
+        )
+    if item.get("tls_rpt_present") is False:
+        _add(
+            {
+                "rule_id": "dns_posture.tls_rpt_missing",
+                "severity": "low",
+                "title": "SMTP TLS reporting (TLS-RPT) is not published",
+            },
+            None,
+        )
+    return rows
+
+
+# Detection signal -> (rule_id, severity, title). Only an "off" signal emits a finding;
+# "unknown" signals never do (they surface as coverage gaps instead).
+_DETECTION_SIGNAL_RULES: dict[str, dict[str, str]] = {
+    "unified_audit_log": {
+        "rule_id": "detection.unified_audit_log_disabled",
+        "severity": "high",
+        "title": "Unified audit log ingestion is turned off",
+    },
+    "mailbox_audit_default": {
+        "rule_id": "detection.mailbox_audit_disabled",
+        "severity": "high",
+        "title": "Mailbox auditing on by default is turned off for the organization",
+    },
+    "mailbox_audit_bypass_clear": {
+        "rule_id": "detection.mailbox_audit_bypass",
+        "severity": "medium",
+        "title": "Accounts are configured to bypass mailbox audit logging",
+    },
+    "alert_policies": {
+        "rule_id": "detection.no_alert_policies",
+        "severity": "medium",
+        "title": "No enabled Purview alert policies were found",
+    },
+    "risk_based_conditional_access": {
+        "rule_id": "detection.no_risk_based_policies",
+        "severity": "medium",
+        "title": "No enabled Conditional Access policy acts on sign-in or user risk",
+    },
+    "signin_logs": {
+        "rule_id": "detection.signin_logs_unavailable",
+        "severity": "medium",
+        "title": "Entra sign-in logs are unavailable because the tenant lacks the required license",
+    },
+}
+
+
+def _build_detection_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for item in ((normalized_snapshot.get("detection_signal_objects") or {}).get("records") or []):
+        if item.get("status") != "off":
+            continue
+        rule = _DETECTION_SIGNAL_RULES.get(str(item.get("name") or ""))
+        if rule is None:
+            continue
+        rule_id, severity, title = rule["rule_id"], rule["severity"], rule["title"]
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"detection_coverage:{item.get('name')}",
+                    "rule_id": rule_id,
+                    "severity": severity,
+                    "category": "security",
+                    "title": title,
+                    "status": "open",
+                    "collector": str(item.get("source_collector") or "exchange_policy"),
+                    "affected_objects": [str(item.get("title") or item.get("name"))],
+                    "evidence": item,
+                    "returned_value": item.get("observed_value", item.get("reason")),
+                    "evidence_refs": _normalized_evidence_refs(
+                        "detection_signal_objects", item, str(item.get("source_collector") or "exchange_policy")
+                    ),
+                    **_metadata_for(rule_id),
+                }
+            )
+        )
     return findings
 
 
@@ -2151,8 +2572,25 @@ def build_findings(
         findings.append(_finalize_finding(body))
     if normalized_snapshot:
         findings.extend(_normalized_findings(normalized_snapshot))
+        findings.extend(_build_detection_findings(normalized_snapshot))
     waiver_rows = load_waivers(Path(waiver_file)) if waiver_file else []
     return apply_waivers(findings, waiver_rows) if waiver_rows else findings
+
+
+def _has_attack_graph(attack_graph: dict[str, Any] | None) -> bool:
+    return isinstance(attack_graph, dict) and isinstance(attack_graph.get("summary"), dict)
+
+
+def _merge_attack_paths(
+    attack_graph: dict[str, Any] | None, keyword_paths: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Graph-derived paths first; the keyword stage path only when no graph path exists."""
+    graph_paths = [
+        deepcopy(item)
+        for item in ((attack_graph or {}).get("paths") or [])
+        if isinstance(item, dict)
+    ]
+    return graph_paths if graph_paths else list(keyword_paths)
 
 
 def build_report_pack(
@@ -2166,6 +2604,9 @@ def build_report_pack(
     diff_summary: dict[str, Any] | None = None,
     privacy: dict[str, Any] | None = None,
     artifact_map: dict[str, Any] | None = None,
+    attack_graph: dict[str, Any] | None = None,
+    normalized_snapshot: dict[str, Any] | None = None,
+    coverage_ledger: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     coverage_gap_rows = [dict(item) for item in (coverage_gaps or []) if isinstance(item, dict)]
     active_coverage_gap_rows = _active_coverage_gaps(coverage_gap_rows, findings)
@@ -2228,10 +2669,16 @@ def build_report_pack(
         "next_actions": board_sections["next_actions"],
         "license_profile": board_sections["license_profile"],
         "auditor_score": board_sections["auditor_score"],
-        "attack_paths": board_sections["attack_paths"],
+        "attack_paths": _merge_attack_paths(attack_graph, board_sections["attack_paths"]),
+        **({"attack_graph": dict(attack_graph["summary"])} if _has_attack_graph(attack_graph) else {}),
         "control_simulator": board_sections["control_simulator"],
         "report_qa": board_sections["report_qa"],
         "replay_context": board_sections["replay_context"],
+        "baseline_alignment": build_baseline_alignment(
+            findings,
+            normalized_snapshot=normalized_snapshot,
+            coverage_ledger=coverage_ledger,
+        ),
     }
 
 
@@ -2251,6 +2698,18 @@ def apply_coverage_gaps_to_report_pack(report_pack: dict[str, Any], coverage_gap
         coverage_gaps=coverage_gaps,
         privacy=payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {},
         artifact_map=payload.get("artifact_map") if isinstance(payload.get("artifact_map"), dict) else {},
+        attack_graph=(
+            {
+                "summary": payload["attack_graph"],
+                "paths": [
+                    item
+                    for item in payload.get("attack_paths") or []
+                    if isinstance(item, dict) and item.get("kind") == "privilege_graph"
+                ],
+            }
+            if isinstance(payload.get("attack_graph"), dict)
+            else None
+        ),
     )
     refreshed["summary"].update(
         {
@@ -2271,4 +2730,12 @@ def apply_coverage_gaps_to_report_pack(report_pack: dict[str, Any], coverage_gap
         )
     )
     refreshed["summary"]["coverage_gaps"] = coverage_gaps
+    # Keep sections added after build_report_pack (detection_coverage, public_footprint,
+    # fixture_provenance, ...) instead of silently dropping them on the refresh.
+    for key, value in payload.items():
+        refreshed.setdefault(key, value)
+    if isinstance(payload.get("baseline_alignment"), dict):
+        # The refresh has no snapshot or coverage ledger; keep the alignment
+        # computed when the bundle was written.
+        refreshed["baseline_alignment"] = payload["baseline_alignment"]
     return refreshed
