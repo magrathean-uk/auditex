@@ -16,6 +16,29 @@ component that remains in or is declared by this repository.
 - Retained scope: 11 selected `SKILL.md` files plus required reference files, catalog, and manifest. The full upstream repository is not included in this package.
 - Modifications: MAGRATHEAN UK LTD modified one retained file. `skills/mcp-builder/scripts/requirements.txt` raises the declared minimum versions to `anthropic>=1.8.0,<2` and `mcp>=1.30.0,<2` (upstream: `anthropic>=0.39.0`, `mcp>=1.1.0`) and carries a comment marking the change. Every other retained skill file matches upstream commit `33b598366fd91350f032be9b385389ff14876dcc`.
 
+## Bundled run-explorer assets
+
+These ship inside the Python package under `src/auditex/explorer_assets/` and are embedded
+in every page that `auditex report explorer` writes.
+
+### Lucide icons
+
+- Location: SVG path data in `src/auditex/explorer_assets/explorer.js` (23 icons, some simplified)
+- Upstream: `lucide-icons/lucide`
+- License: ISC; icons derived from Feather are MIT (Copyright (c) 2013-present Cole Bemis)
+- Notice: the upstream licence is copied at `src/auditex/explorer_assets/LICENSE-lucide.txt`,
+  and the ISC and MIT notices are reproduced in the script header, so every generated page
+  carries them.
+
+### Barlow and Barlow Condensed fonts
+
+- Location: `src/auditex/explorer_assets/fonts/` (WOFF2 latin and latin-ext subsets:
+  Barlow 400 and 600, Barlow Condensed 600), embedded in generated pages as data URIs
+- Upstream: Google Fonts (`google/fonts`, `ofl/barlow`), by The Barlow Project Authors
+- License: SIL Open Font License 1.1
+- Notice: the licence is copied at `src/auditex/explorer_assets/fonts/OFL.txt`. The font
+  files are unmodified and keep their reserved name.
+
 ## Declared Python dependencies
 
 These dependencies are declared in `pyproject.toml` / `requirements.txt`. They are not vendored in this source package.

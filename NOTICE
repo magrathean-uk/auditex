@@ -10,7 +10,15 @@ tenant-bootstrap/vendor/microsoft-skills/LICENSE. Magrathean modified
 skills/mcp-builder/scripts/requirements.txt in that subset to raise its declared
 dependency versions.
 
-See docs/legal/third-party-notices.md for the declared Python dependency inventory.
+src/auditex/explorer_assets/ (run explorer) bundles:
+- Lucide icon path data — ISC — Copyright (c) 2026 Lucide Icons and Contributors;
+  icons derived from Feather — MIT — Copyright (c) 2013-present Cole Bemis.
+  Licence text: src/auditex/explorer_assets/LICENSE-lucide.txt.
+- Barlow and Barlow Condensed fonts — SIL Open Font License 1.1 — Copyright 2017
+  The Barlow Project Authors. Licence text: src/auditex/explorer_assets/fonts/OFL.txt.
+
+See docs/legal/third-party-notices.md for the full inventory, including the declared
+Python dependencies.
 
 Auditex is independent. It is not affiliated with, endorsed by or supported by Microsoft
 Corporation or Google LLC.
