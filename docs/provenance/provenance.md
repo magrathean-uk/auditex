@@ -41,7 +41,10 @@ The run explorer (`src/auditex/explorer_assets/`) inlines SVG path data for
 Contributors), some simplified. The script carries an attribution comment, and
 the explorer page loads no icon font or remote asset. The explorer's
 stylesheet recreates the Industry design-system tokens from the Auditex design
-handoff with system font stacks; no Barlow font files are shipped.
+handoff. Barlow 400/600 and Barlow Condensed 600 (Copyright 2017 The Barlow
+Project Authors, SIL Open Font License 1.1) are shipped as unmodified WOFF2
+subsets from Google Fonts in `src/auditex/explorer_assets/fonts/` with their
+`OFL.txt`, and embedded as data URIs so the page makes no network requests.
 
 ## Limits
 

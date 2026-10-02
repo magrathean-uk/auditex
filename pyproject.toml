@@ -40,7 +40,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-auditex = ["explorer_assets/*.css", "explorer_assets/*.html", "explorer_assets/*.js"]
+auditex = ["explorer_assets/*.css", "explorer_assets/*.html", "explorer_assets/*.js", "explorer_assets/fonts/*.woff2", "explorer_assets/fonts/*.range", "explorer_assets/fonts/OFL.txt"]
 
 [tool.setuptools.data-files]
 "auditex/assets" = ["assets/*"]

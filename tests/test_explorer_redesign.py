@@ -63,7 +63,9 @@ def test_page_has_no_remote_urls_or_html_sinks(halcyon_runs: tuple[Path, Path]) 
     assert not re.search(r"https?://", page, re.I), "no http(s) URL anywhere in the page"
     assert not HTML_SINKS.search(page), "tenant strings must never reach an HTML parser"
     assert "fetch(" not in page and "XMLHttpRequest" not in page and "@import" not in page
-    assert "@font-face" not in page and "support.js" not in page
+    assert "support.js" not in page
+    for source in re.findall(r"src:url\(([^)]*)\)", page):
+        assert source.startswith("data:font/woff2;base64,"), "fonts are embedded, never fetched"
     assert page.count("<script") == 2, "only the JSON data block and the one inline script"
 
 
@@ -241,3 +243,19 @@ def test_explorer_assets_ship_as_package_data() -> None:
     patterns = pyproject["tool"]["setuptools"]["package-data"]["auditex"]
     for name in ("explorer.html", "explorer.css", "explorer.js"):
         assert any(Path(name).match(Path(pattern).name) and pattern.startswith("explorer_assets/") for pattern in patterns), name
+
+
+def test_barlow_fonts_are_embedded_and_allowed_only_as_data(tmp_path) -> None:  # noqa: ANN001
+    from azure_tenant_audit.cli import run_offline
+    from pathlib import Path as _Path
+
+    from auditex.explorer import write_explorer
+
+    sample = _Path(__file__).resolve().parents[1] / "examples" / "sample_audit_bundle" / "known_bad_result.json"
+    assert run_offline(sample, tmp_path, "demo", "fonts") == 0
+    page = write_explorer(tmp_path / "demo-fonts", tmp_path / "page.html").read_text(encoding="utf-8")
+
+    assert page.count("@font-face") == 6
+    assert "font-family:'Barlow Condensed'" in page and "font/woff2;base64," in page
+    assert "font-src data:" in page
+    assert "fonts.googleapis" not in page and "fonts.gstatic" not in page

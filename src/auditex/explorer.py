@@ -982,6 +982,29 @@ def _asset(name: str) -> str:
     return importlib_resources.files("auditex").joinpath("explorer_assets", name).read_text(encoding="utf-8")
 
 
+# Barlow and Barlow Condensed (SIL Open Font License 1.1, Google Fonts), embedded so the page
+# still makes no network requests. Licence: explorer_assets/fonts/OFL.txt.
+_EMBEDDED_FONTS = (
+    ("Barlow", 400, "Barlow-400"),
+    ("Barlow", 600, "Barlow-600"),
+    ("Barlow Condensed", 600, "BarlowCondensed-600"),
+)
+
+
+def _font_faces() -> str:
+    fonts = importlib_resources.files("auditex").joinpath("explorer_assets", "fonts")
+    rules = ["/* Barlow, Barlow Condensed: Copyright 2017 The Barlow Project Authors, SIL Open Font License 1.1 */"]
+    for family, weight, stem in _EMBEDDED_FONTS:
+        for subset in ("latin-ext", "latin"):
+            data = base64.b64encode(fonts.joinpath(f"{stem}-{subset}.woff2").read_bytes()).decode("ascii")
+            unicode_range = fonts.joinpath(f"{stem}-{subset}.woff2.range").read_text(encoding="utf-8").strip()
+            rules.append(
+                f"@font-face{{font-family:'{family}';font-style:normal;font-weight:{weight};font-display:swap;"
+                f"src:url(data:font/woff2;base64,{data}) format('woff2');unicode-range:{unicode_range}}}"
+            )
+    return "\n".join(rules) + "\n"
+
+
 def _logo_data_uri() -> str:
     try:
         payload = resolve_resource_path("assets/auditex-logo-64.png").read_bytes()
@@ -1018,10 +1041,10 @@ def render_explorer_html(data: dict[str, Any] | list[dict[str, Any]]) -> str:
         **bundle,
     }
     script = _asset("explorer.js")
-    style = _asset("explorer.css")
+    style = _font_faces() + _asset("explorer.css")
     primary = bundle["runs"][bundle.get("default_run") or 0]
     tenant = (primary.get("meta") or {}).get("display_name") or primary.get("tenant") or "run"
-    csp = f"default-src 'none'; script-src {script_hash(script)}; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
+    csp = f"default-src 'none'; script-src {script_hash(script)}; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"
     logo = _logo_data_uri()
     replacements = {
         "__CSP__": html.escape(csp, quote=True),
