@@ -42,19 +42,6 @@ repos:
       language: system
       types: [text]
       stages: [manual]
-    - id: actionlint-local
-      name: actionlint GitHub workflows
-      entry: actionlint -shellcheck= -pyflakes=
-      language: system
-      files: ^\.github/workflows/.*\.ya?ml$
-    - id: zizmor-local
-      name: zizmor GitHub workflow security
-      entry: zizmor --no-progress .github/workflows
-      language: python
-      additional_dependencies: [zizmor==1.30.1]
-      pass_filenames: false
-      files: ^\.github/workflows/
-      stages: [manual]
     - id: shellcheck-local
       stages: [manual]
       name: shellcheck

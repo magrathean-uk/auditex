@@ -12,7 +12,7 @@ source .venv/bin/activate
 python -m pip install -e . pytest
 ```
 
-Install `.[google]` or `.[mcp]` only when working on those integrations. The CI test job uses Python 3.13. Local tooling and optional adapters are described in [the runbook](../docs/development/runbook.md).
+Install `.[google]` or `.[mcp]` only when working on those integrations. Local tooling and optional adapters are described in [the runbook](../docs/development/runbook.md).
 
 Auditex development follows [Clean Development](https://github.com/magrathean-uk/clean-development). Run builds, tests, and installs through `clean-development run --session session-only -- <command>`, and keep tool homes and caches out of `~`. The mandatory rules are in [AGENTS.md](../AGENTS.md).
 

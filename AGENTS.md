@@ -16,7 +16,7 @@ Check `git status --short` before editing. Preserve unrelated work.
 
 ## Commands
 
-Use Python 3.11 or newer (CI uses 3.13). Wrap anything that installs, builds,
+Use Python 3.11 or newer. There is no hosted CI; run the checks locally. Wrap anything that installs, builds,
 or writes caches in Clean Development (see below), for example
 `clean-development run --session session-only -- make test`.
 
@@ -29,7 +29,6 @@ make test                         # pytest via scripts/select-python.sh (prefers
 .venv/bin/python -m pytest tests/test_cli.py -k offline       # one test by name
 make contract-smoke               # deletes and recreates outputs/ci-contract, validates bundle
 ./scripts/oss-taint-scan.sh
-python3 scripts/build-pages-site.py /tmp/auditex-pages       # deletes the destination first
 auditex --help
 auditex doctor --json
 auditex guided-run --help

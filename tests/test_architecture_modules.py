@@ -59,21 +59,6 @@ def test_probe_uses_runtime_modules_instead_of_cli_private_helpers() -> None:
     assert "from .cli import" not in source
 
 
-def test_release_workflow_restores_ship_checks() -> None:
-    source = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
-
-    assert "make lint" in source
-    assert "make test" in source
-    assert "make contract-smoke" in source
-    assert "./scripts/oss-taint-scan.sh" in source
-    assert "python3 scripts/build-pages-site.py /tmp/auditex-pages" in source
-    assert "python -m build" in source
-    assert ".[google,mcp]" in source
-    assert "bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke" in source
-    assert "gh release create" in source
-    assert "from azure_tenant_audit.versioning import package_version" in source
-    assert 'if [ "$TAG" != "v$PACKAGE_VERSION" ]; then' in source
-
 
 def test_release_smoke_script_covers_base_google_and_mcp_matrix() -> None:
     source = Path("scripts/release-smoke.sh").read_text(encoding="utf-8")

@@ -91,11 +91,10 @@ Install pytest for development: `python -m pip install -e . pytest`.
 | `make test` | Runs pytest with the interpreter selected by `scripts/select-python.sh`. |
 | `make contract-smoke` | Deletes and recreates `outputs/ci-contract`, validates an offline bundle and its evidence index. |
 | `./scripts/oss-taint-scan.sh` | Checks forbidden research/derived paths and taint markers. |
-| `python3 scripts/build-pages-site.py /tmp/auditex-pages` | Recreates the destination as a redirect artifact to the configured site. It deletes an existing destination. |
 
 The existing `.pre-commit-config.yaml` also declares checks including a manual Ruff hook. This runbook does not change or install hooks. Use focused tests for changed behavior. Contract changes need contract smoke. See [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) for contribution scope and check reporting.
 
-The existing release workflow installs Google and MCP extras, runs the checks above, builds the wheel and source distribution, and invokes `bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke`. That script creates isolated environments for base, Google, and MCP package checks. The release tag must be `v` followed by the packaged version. These are workflow definitions, not a statement that a particular release has passed.
+There is no hosted CI; the repository is stored on Git and checks run locally. Before tagging a release, install the Google and MCP extras, run the checks above, build the wheel and source distribution, and run `bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke`, which creates isolated environments for base, Google, and MCP package checks. The release tag must be `v` followed by the packaged version.
 
 ## Lab tools
 

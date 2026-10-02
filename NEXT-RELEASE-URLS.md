@@ -27,6 +27,5 @@ their original URLs when the value is part of the record.
 - `.venv/lib/python3.14/site-packages/auditex-1.0.0.dist-info/METADATA:30` — `<a href="https://auditex.hu/privacy/">Privacy</a>`
 - `README.md:10` — `<a href="https://auditex.hu">Website</a> ·`
 - `README.md:12` — `<a href="https://auditex.hu/privacy/">Privacy</a>`
-- `scripts/build-pages-site.py:9` — `SITE_DOMAIN = "auditex.hu"`
 - `src/auditex.egg-info/PKG-INFO:28` — `<a href="https://auditex.hu">Website</a> ·`
 - `src/auditex.egg-info/PKG-INFO:30` — `<a href="https://auditex.hu/privacy/">Privacy</a>`
