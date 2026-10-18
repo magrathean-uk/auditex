@@ -3,10 +3,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from ..chunk_reader import iter_endpoint_records
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
 _MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+_SERVICE_PRINCIPAL_FANOUT_LIMIT = 10
 
 
 class AppConsentCollector(Collector):
@@ -29,7 +31,7 @@ class AppConsentCollector(Collector):
                 "servicePrincipals": {
                     "endpoint": "/servicePrincipals",
                     "params": {
-                        "$select": "id,displayName,appId,servicePrincipalType,appOwnerOrganizationId,verifiedPublisher",
+                        "$select": "id,displayName,appId,servicePrincipalType,appOwnerOrganizationId,verifiedPublisher,accountEnabled",
                     },
                 },
                 "oauth2PermissionGrants": {
@@ -45,22 +47,27 @@ class AppConsentCollector(Collector):
             log_event=context.get("audit_logger"),
         )
 
-        service_principals = payload.get("servicePrincipals", {}).get("value", [])
-        if not isinstance(service_principals, list):
-            service_principals = []
-
         owner_rows: list[dict[str, Any]] = []
         assignment_rows: list[dict[str, Any]] = []
         fanout_specs: list[dict[str, Any]] = []
 
         # Fan out over the first 10 service principals, plus Microsoft Graph so
         # application permissions granted on Graph (appRoleAssignedTo) are read.
-        fanout_principals = list(service_principals[:10])
-        fanout_principals.extend(
-            item
-            for item in service_principals[10:]
-            if isinstance(item, dict) and item.get("appId") == _MICROSOFT_GRAPH_APP_ID
-        )
+        section = payload.get("servicePrincipals", {})
+        input_issues: list[dict[str, Any]] = []
+        input_count = 0
+        fanout_by_id: dict[str, dict[str, Any]] = {}
+        graph_found = False
+        for index, item in enumerate(iter_endpoint_records(section, context.get("run_dir"), issues=input_issues)):
+            input_count += 1
+            is_graph = str(item.get("appId") or "").lower() == _MICROSOFT_GRAPH_APP_ID
+            graph_found = graph_found or is_graph
+            sp_id = item.get("id")
+            if isinstance(sp_id, str) and sp_id and (index < _SERVICE_PRINCIPAL_FANOUT_LIMIT or is_graph):
+                fanout_by_id.setdefault(sp_id, item)
+        # Count/missing-file failures can occur at iterator exhaustion. Schedule
+        # only after that validation, preserving the intended first-ten scope.
+        fanout_principals = list(fanout_by_id.values()) if not input_issues else []
         for service_principal in fanout_principals:
             sp_id = service_principal.get("id")
             if not isinstance(sp_id, str) or not sp_id:
@@ -217,8 +224,37 @@ class AppConsentCollector(Collector):
                         }
                     )
 
-        payload["servicePrincipalOwners"] = {"value": owner_rows}
-        payload["servicePrincipalAppRoleAssignments"] = {"value": assignment_rows}
+        omitted = max(input_count - len(fanout_principals), 0)
+        input_failed = bool(section.get("error")) if isinstance(section, dict) else True
+        input_limited = bool(section.get("collection_limit_reached") or section.get("collection_truncated")) if isinstance(section, dict) else False
+        failed_operations = sum(1 for row in coverage if row.get("name") in {"servicePrincipalOwners", "servicePrincipalAppRoleAssignments"} and row.get("status") != "ok")
+        limited = bool(omitted or input_limited)
+        incomplete = bool(input_issues or input_failed or failed_operations)
+        fanout = {
+            "fanout_scope": "first_10_service_principals_plus_microsoft_graph",
+            "fanout_limit": _SERVICE_PRINCIPAL_FANOUT_LIMIT,
+            "input_record_count": input_count,
+            "input_complete": not (input_issues or input_failed or input_limited),
+            "input_issues": input_issues,
+            "input_collection_limited": input_limited,
+            "fanout_target_count": len(fanout_principals),
+            "fanout_omitted_count": omitted,
+            "microsoft_graph_found": graph_found,
+            "requested_operation_count": len(fanout_specs),
+            "failed_operation_count": failed_operations,
+            "collection_truncated": limited,
+            "fanout_complete": not (limited or incomplete),
+        }
+        coverage.append({
+            "collector": self.name, "type": "derived", "name": "servicePrincipalFanout",
+            "status": "partial" if limited or incomplete else "ok", "item_count": 0,
+            "error_class": "incomplete_evidence" if incomplete else "collection_limit" if limited else None,
+            "error": "Service-principal fan-out inputs or relationships are incomplete." if incomplete else
+                     "Service-principal relationships cover only the first ten principals plus Microsoft Graph." if limited else None,
+            **fanout,
+        })
+        payload["servicePrincipalOwners"] = {"value": owner_rows, "fanout": fanout, "collection_truncated": limited}
+        payload["servicePrincipalAppRoleAssignments"] = {"value": assignment_rows, "fanout": fanout, "collection_truncated": limited}
         total = sum(item.get("item_count", 0) for item in coverage)
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(

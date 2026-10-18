@@ -7,9 +7,10 @@ tier-0 control. Edges describe how one principal can gain the rights of the
 next one, and each edge carries a MITRE ATT&CK technique id plus an evidence
 reference to the normalized record it came from.
 
-Path search walks from footholds (ordinary users, guests, users without MFA,
-third-party or multi-tenant apps, apps with long-lived or expired secrets) to
-tier-0 targets. Nothing here calls a tenant API.
+Path search identifies conditional routes from assumed footholds to tier-0
+targets. Registration reports do not establish effective sign-in protection,
+and expired credentials do not establish a usable foothold. Nothing here calls
+a tenant API or verifies execution of a route.
 """
 from __future__ import annotations
 
@@ -123,25 +124,24 @@ _EDGE_PHRASES = {
     "has_app_role": "holds the Graph application permission",
     "consented": "holds the delegated Graph grant",
     "can_reset": "can reset the credentials of",
-    "no_mfa": "can be signed in to with a password only as",
-    "credential": "has a client credential usable for",
+    "no_mfa": "has a registration gap reported for",
+    "credential": "assumes possession of a current app credential for",
     "third_party": "is controlled outside this tenant for",
 }
 _FOOTHOLD_BONUS = {
-    "no_mfa": 3,
+    # Registration is not evidence that effective sign-in protection is absent.
+    "no_mfa": 0,
     "guest": 2,
     "third_party_app": 2,
     "multi_tenant_app": 1,
-    "expired_secret": 1,
     "long_lived_secret": 1,
     "ordinary_user": 0,
 }
 _FOOTHOLD_LABELS = {
-    "no_mfa": "user without MFA",
+    "no_mfa": "user with a reported MFA registration gap",
     "guest": "guest user",
     "third_party_app": "third-party app",
     "multi_tenant_app": "multi-tenant app",
-    "expired_secret": "app with an expired secret",
     "long_lived_secret": "app with a long-lived secret",
     "ordinary_user": "ordinary user",
 }
@@ -230,18 +230,28 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 
 def _secret_state(credentials: Any, now: datetime) -> str | None:
-    """Return 'expired' or 'long_lived' for the riskiest client secret, else None."""
-    state: str | None = None
+    """Identify a long-lived secret only while its known validity permits use."""
     for credential in credentials if isinstance(credentials, list) else []:
         if not isinstance(credential, dict):
             continue
         start = _parse_datetime(credential.get("start_date_time"))
         end = _parse_datetime(credential.get("end_date_time"))
-        if end is None or (start is not None and (end - start).days > _LONG_SECRET_DAYS):
+        if end is None or end <= now or (start is not None and start > now):
+            continue
+        if start is not None and (end - start).days > _LONG_SECRET_DAYS:
             return "long_lived"
-        if end < now:
-            state = "expired"
-    return state
+    return None
+
+
+def _has_current_credential(credentials: Any, now: datetime) -> bool:
+    for credential in credentials if isinstance(credentials, list) else []:
+        if not isinstance(credential, dict):
+            continue
+        start = _parse_datetime(credential.get("start_date_time"))
+        end = _parse_datetime(credential.get("end_date_time"))
+        if end is not None and end > now and (start is None or start <= now):
+            return True
+    return False
 
 
 def _scopes(value: Any) -> list[str]:
@@ -310,6 +320,7 @@ def build_attack_graph(snapshot: dict[str, Any], *, now: datetime | None = None)
             sp.get("display_name"),
             app_id=sp.get("app_id"),
             owner_tenant=sp.get("app_owner_organization_id"),
+            enabled=sp.get("enabled") if "enabled" in sp else sp.get("account_enabled"),
         )
         if section == "service_principal_credential_objects":
             graph.nodes[node]["credential_record"] = (section, sp, collector)
@@ -440,6 +451,31 @@ def build_attack_graph(snapshot: dict[str, Any], *, now: datetime | None = None)
         principal_index.setdefault(target_id.lower(), target)
         graph.add_edge(owner, target, "owns", evidence_ref("app_owner_edges", item, str(item.get("collector") or "app_consent")))
 
+    for item in _records(snapshot, "directory_relationship_objects"):
+        parent_id, object_id = str(item.get("parent_id") or ""), str(item.get("object_id") or "")
+        parent_type, relation = item.get("parent_type"), item.get("relationship")
+        if not parent_id or not object_id or (parent_type, relation) not in {("group", "members"), ("group", "owners"), ("application", "owners")}:
+            continue
+        parent = principal_index.get(parent_id.lower())
+        if parent is None:
+            prefix = "group" if parent_type == "group" else "app"
+            parent = graph.add_node(f"{prefix}:{parent_id}", parent_type, item.get("parent_display_name"), app_id=item.get("parent_app_id"))
+            principal_index[parent_id.lower()] = parent
+        elif item.get("parent_app_id"):
+            graph.nodes[parent].setdefault("app_id", item["parent_app_id"])
+        member = principal_index.get(object_id.lower())
+        if member is None:
+            object_type = str(item.get("object_type") or "").lower()
+            prefix, kind = ({"#microsoft.graph.user": ("user", "user"),
+                             "#microsoft.graph.group": ("group", "group"),
+                             "#microsoft.graph.serviceprincipal": ("sp", "service_principal")}
+                            .get(object_type, ("principal", "principal")))
+            member = graph.add_node(f"{prefix}:{object_id}", kind, item.get("object_display_name"))
+            principal_index[object_id.lower()] = member
+        ref = evidence_ref("directory_relationship_objects", item, "directory_relationships")
+        graph.nodes[parent].setdefault("record", ("directory_relationship_objects", item, "directory_relationships"))
+        graph.add_edge(member, parent, "member_of" if relation == "members" else "owns_group" if parent_type == "group" else "owns", ref)
+
     for node_id, node in list(graph.nodes.items()):
         if node["type"] != "application" or not node.get("app_id"):
             continue
@@ -529,12 +565,18 @@ def build_attack_graph(snapshot: dict[str, Any], *, now: datetime | None = None)
             str(registration.get("user_principal_name") or "").lower()
         )
         if node and graph.nodes[node]["type"] == "user":
-            graph.add_node("entry:password_only", "entry", "Password-only sign-in")
+            graph.add_node("entry:mfa_registration_gap", "entry", "MFA registration report")
             graph.add_edge(
-                "entry:password_only",
+                "entry:mfa_registration_gap",
                 node,
                 "no_mfa",
                 evidence_ref("auth_method_registration_objects", registration, "auth_methods"),
+                classification="conditional_hypothesis",
+                basis="registration_report",
+                unmet_preconditions=[
+                    "Establish initial access to the account.",
+                    "Evaluate effective sign-in protection; MFA registration alone does not establish password-only access.",
+                ],
             )
 
     home_tenants = {
@@ -549,9 +591,11 @@ def build_attack_graph(snapshot: dict[str, Any], *, now: datetime | None = None)
         if node["type"] in {"application", "service_principal"} and credential:
             section, record, collector = credential
             secret = _secret_state(record.get("password_credentials"), now)
-            has_credential = bool(record.get("password_credentials") or record.get("key_credentials"))
+            has_credential = _has_current_credential(record.get("password_credentials"), now) or _has_current_credential(
+                record.get("key_credentials"), now
+            )
             if has_credential:
-                graph.add_node("entry:app_credential", "entry", "Leaked or reused app credential")
+                graph.add_node("entry:app_credential", "entry", "Assumed app credential access")
                 graph.add_edge(
                     "entry:app_credential",
                     node_id,
@@ -605,6 +649,8 @@ def _footholds(graph: AttackGraph, tier0: set[str]) -> dict[str, list[str]]:
             entry_targets.setdefault(edge.target, set()).add(edge.edge)
     for node_id, node in graph.nodes.items():
         kinds: list[str] = []
+        if node.get("enabled") is False:
+            continue
         if node["type"] == "user":
             if node_id in tier0 or node.get("enabled") is False:
                 continue
@@ -616,9 +662,7 @@ def _footholds(graph: AttackGraph, tier0: set[str]) -> dict[str, list[str]]:
         elif node["type"] in {"application", "service_principal"}:
             if node.get("external"):
                 kinds.append(str(node["external"]))
-            if node.get("secret_state") == "expired":
-                kinds.append("expired_secret")
-            elif node.get("secret_state") == "long_lived":
+            if node.get("secret_state") == "long_lived":
                 kinds.append("long_lived_secret")
         if kinds:
             reasons[node_id] = kinds
@@ -674,7 +718,7 @@ def _hop(graph: AttackGraph, edge: Edge) -> dict[str, Any]:
     }
     if edge.attrs.get("eligible"):
         hop["eligible"] = True
-    for key in ("consent_type", "validity", "reason"):
+    for key in ("consent_type", "validity", "reason", "classification", "basis", "unmet_preconditions"):
         if edge.attrs.get(key):
             hop[key] = edge.attrs[key]
     return hop
@@ -692,15 +736,17 @@ def _severity(score: int) -> str:
 
 def _summary_sentence(source_kind: str, source_label: str, target_label: str, hops: list[dict[str, Any]]) -> str:
     steps = "; ".join(
-        f"{hop['from']} {_EDGE_PHRASES.get(hop['edge'], hop['edge'])} {hop['to']}"
+        f"{hop['from']} "
+        f"{'is eligible for the role' if hop.get('eligible') else _EDGE_PHRASES.get(hop['edge'], hop['edge'])} {hop['to']}"
         + (" (PIM-eligible)" if hop.get("eligible") else "")
         for hop in hops
         if hop["edge"] not in ENTRY_EDGES
     )
     count = sum(1 for hop in hops if hop["edge"] not in ENTRY_EDGES)
     return (
-        f"{_FOOTHOLD_LABELS.get(source_kind, 'Foothold').capitalize()} {source_label} can reach tier-0 "
-        f"{target_label} in {count} step{'s' if count != 1 else ''}: {steps}."
+        f"Potential route from {_FOOTHOLD_LABELS.get(source_kind, 'foothold')} {source_label} to tier-0 "
+        f"{target_label} in {count} step{'s' if count != 1 else ''}: {steps}. "
+        "Initial access and route execution have not been verified."
     )
 
 
@@ -715,8 +761,15 @@ def analyze_attack_graph(
     graph = build_attack_graph(snapshot or {}, now=now)
     tier0 = _tier0_principals(graph)
     footholds = _footholds(graph, tier0)
-    dist = _distances_to_targets(graph, graph.edges, max_depth)
-    outgoing = graph.out_edges()
+    # Keep observed configuration edges in the inventory, but do not turn a
+    # disabled principal into a traversable authentication/privilege route.
+    active_edges = [edge for edge in graph.edges
+                    if graph.nodes[edge.source].get("enabled") is not False
+                    and graph.nodes[edge.target].get("enabled") is not False]
+    dist = _distances_to_targets(graph, active_edges, max_depth)
+    outgoing: dict[str, list[Edge]] = {}
+    for edge in active_edges:
+        outgoing.setdefault(edge.source, []).append(edge)
     entry_by_target: dict[str, list[Edge]] = {}
     for edge in graph.edges:
         if edge.edge in ENTRY_EDGES:
@@ -740,7 +793,7 @@ def analyze_attack_graph(
         kinds = footholds[source]
         primary_kind = kinds[0]
         entry_edge_name = {"no_mfa": "no_mfa", "third_party_app": "third_party", "multi_tenant_app": "third_party"}.get(
-            primary_kind, "credential" if primary_kind in {"expired_secret", "long_lived_secret"} else None
+            primary_kind, "credential" if primary_kind == "long_lived_secret" else None
         )
         entry = next(
             (edge for edge in entry_by_target.get(source, []) if edge.edge == entry_edge_name),
@@ -804,6 +857,16 @@ def analyze_attack_graph(
         techniques = list(dict.fromkeys(hop["technique"] for hop in hops))
         also = [graph.nodes[item]["label"] for item in candidate["also"]]
         emits_finding = severity in {"high", "critical"}
+        unmet_preconditions = ["Establish control of the starting principal."]
+        if candidate["entry"]:
+            entry = candidate["entry"]
+            unmet_preconditions.extend(entry.attrs.get("unmet_preconditions") or [])
+            if entry.edge == "credential":
+                unmet_preconditions.append("Demonstrate possession and successful use of the current app credential.")
+            elif entry.edge == "third_party":
+                unmet_preconditions.append("Establish control of the external publisher or application.")
+        if candidate["eligible"]:
+            unmet_preconditions.append("Verify PIM activation requirements and successful activation.")
         path = {
             "id": path_id,
             "kind": "privilege_graph",
@@ -819,6 +882,9 @@ def analyze_attack_graph(
             "eligible": candidate["eligible"],
             "risk_score": candidate["score"],
             "severity": severity,
+            "classification": "conditional_hypothesis",
+            "execution_verified": False,
+            "unmet_preconditions": unmet_preconditions,
             "techniques": techniques,
             "summary": _summary_sentence(candidate["kinds"][0], source_label, target_label, hops),
             "breakpoints": breakpoints,

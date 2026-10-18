@@ -600,6 +600,20 @@ def compare_many_runs(run_dirs: list[str], allow_cross_tenant: bool = False, cla
     return compare_runs(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)
 
 
+def normalize_external_assessment(source: str, input_path: str, tenant_id: str | None = None) -> dict[str, Any]:
+    from .external_assessments import import_assessment
+
+    return import_assessment(source, input_path, tenant_id=tenant_id)
+
+
+def compare_external_assessment_files(
+    assessment_paths: list[str], expected_tenant_id: str | None = None, run_dir: str | None = None,
+) -> dict[str, Any]:
+    from .assessment_review import compare_external_assessments
+
+    return compare_external_assessments(assessment_paths, expected_tenant_id=expected_tenant_id, run_dir=run_dir)
+
+
 def preview_report(
     run_dir: str,
     format_name: str = "json",
@@ -936,6 +950,16 @@ def main(argv: list[str] | None = None) -> int:
 
     def auditex_compare_runs(run_dirs: list[str], allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
         return compare_many_runs(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)
+
+    def auditex_normalize_external_assessment(
+        source: str, input_path: str, tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        return normalize_external_assessment(source, input_path, tenant_id=tenant_id)
+
+    def auditex_compare_external_assessments(
+        assessment_paths: list[str], expected_tenant_id: str | None = None, run_dir: str | None = None,
+    ) -> dict[str, Any]:
+        return compare_external_assessment_files(assessment_paths, expected_tenant_id=expected_tenant_id, run_dir=run_dir)
 
     def auditex_probe_live(
         tenant_name: str,

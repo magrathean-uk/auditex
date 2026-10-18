@@ -13,6 +13,8 @@ questions and issue reports, see [SUPPORT.md](../.github/SUPPORT.md).
 - [Setup Guide](guides/setup-guide.md): provider scopes, roles, admin steps, and generated setup plans.
 - [Administrator Permission Guide](guides/admin-permission-guide.md): Microsoft 365 and Google Workspace access models.
 - [Customer Handoff Guide](guides/customer-handoff-guide.md): pack contents, integrity checks, evidence review, and partial runs.
+- [External Assessment Comparison](guides/external-assessments.md): offline Maester, ScubaGear and Monkey365 imports, evidence references, and cross-tool review.
+- [Model Development](guides/model-development.md): pinned model references, unreviewed corpus assembly, recorded-answer evaluation, and a separate single-base training handoff.
 - [Troubleshooting Guide](guides/troubleshooting.md): local runtime, authentication, provider scope, report, and pack failures.
 
 ## Assurance and contracts

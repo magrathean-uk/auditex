@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections import deque
+from pathlib import Path
 import time
 from typing import Any
 
+from ..chunk_reader import iter_endpoint_records
 from ..graph import GraphClient
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
@@ -60,11 +63,11 @@ class IdentityCollector(Collector):
             },
             "applications": {
                 "endpoint": "/applications",
-                "params": {"$select": "id,displayName,createdDateTime,signInAudience"},
+                "params": {"$select": "id,displayName,appId,createdDateTime,signInAudience"},
             },
             "servicePrincipals": {
                 "endpoint": "/servicePrincipals",
-                "params": {"$select": "id,displayName,appId,servicePrincipalType"},
+                "params": {"$select": "id,displayName,appId,servicePrincipalType,accountEnabled"},
             },
             "roleDefinitions": {
                 "endpoint": "/roleManagement/directory/roleDefinitions",
@@ -85,7 +88,7 @@ class IdentityCollector(Collector):
             chunk_writer=context.get("chunk_writer"),
             log_event=context.get("audit_logger"),
         )
-        payload.update(self._privileged_group_relations(client, payload, coverage))
+        payload.update(self._privileged_group_relations(client, payload, coverage, run_dir=context.get("run_dir")))
         total_items = sum(entry.get("item_count", 0) for entry in coverage)
         partial = any(item.get("status") != "ok" for item in coverage)
         message = "Identity collection partially completed" if partial else ""
@@ -119,6 +122,8 @@ class IdentityCollector(Collector):
         client: GraphClient,
         payload: dict[str, Any],
         coverage: list[dict[str, Any]],
+        *,
+        run_dir: str | Path | None = None,
     ) -> dict[str, Any]:
         """Read members and owners of role-assignable groups only.
 
@@ -127,23 +132,44 @@ class IdentityCollector(Collector):
         groups found among the members are expanded too. The reads are
         GET-only and bounded by ``_PRIVILEGED_GROUP_FANOUT_LIMIT`` groups.
         """
-        groups = (payload.get("groups") or {}).get("value") or []
-        assignments = (payload.get("roleAssignments") or {}).get("value") or []
+        input_issues: list[dict[str, Any]] = []
+        input_counts: dict[str, int] = {}
+        input_limited: list[str] = []
+        input_failed: list[str] = []
+
+        def read_input(name: str) -> list[dict[str, Any]]:
+            section = payload.get(name) or {}
+            issues: list[dict[str, Any]] = []
+            rows = list(iter_endpoint_records(section, run_dir, issues=issues))
+            input_counts[name] = len(rows)
+            input_issues.extend({"source_name": name, **issue} for issue in issues)
+            if isinstance(section, dict):
+                if section.get("error"):
+                    input_failed.append(name)
+                if section.get("collection_limit_reached") or section.get("collection_truncated"):
+                    input_limited.append(name)
+            return rows
+
+        groups = read_input("groups")
+        assignments = read_input("roleAssignments")
         role_principal_ids = {
             str(item.get("principalId")) for item in assignments if isinstance(item, dict) and item.get("principalId")
         }
-        queue = [
-            group
-            for group in groups
-            if isinstance(group, dict)
-            and group.get("id")
-            and (group.get("isAssignableToRole") is True or str(group.get("id")) in role_principal_ids)
-        ]
+        candidates = {
+            str(group["id"]): group for group in groups
+            if group.get("id")
+            and (group.get("isAssignableToRole") is True or str(group["id"]) in role_principal_ids)
+        }
+        # Validate the entire input before scheduling fan-out; a broken chunk
+        # must not silently shift the bounded queue to a different sample.
+        queue = deque(candidates.values()) if not input_issues else deque()
+        discovered = set(candidates) if not input_issues else set()
         expanded: set[str] = set()
         members: list[dict[str, Any]] = []
         owners: list[dict[str, Any]] = []
+        failed_relationship_count = 0
         while queue and len(expanded) < _PRIVILEGED_GROUP_FANOUT_LIMIT:
-            group = queue.pop(0)
+            group = queue.popleft()
             group_id = str(group["id"])
             if group_id in expanded:
                 continue
@@ -160,16 +186,15 @@ class IdentityCollector(Collector):
                     rows_out.append({"groupId": group_id, "displayName": group.get("displayName"), relation: rows})
                     if relation == "members":
                         # Nested groups inherit the privileged group's roles; expand them too.
-                        queue.extend(
-                            row
-                            for row in rows
-                            if row.get("id")
-                            and "group" in str(row.get("@odata.type") or "").lower()
-                            and str(row.get("id")) not in expanded
-                        )
+                        for row in rows:
+                            nested_id = str(row.get("id") or "")
+                            if nested_id and "group" in str(row.get("@odata.type") or "").lower() and nested_id not in discovered:
+                                discovered.add(nested_id)
+                                queue.append(row)
                     status, error_class, error = "ok", None, None
                 except Exception as exc:  # noqa: BLE001
                     rows = []
+                    failed_relationship_count += 1
                     status = "failed"
                     error_class, error = _classify_graph_error(exc)
                 coverage.append(
@@ -186,7 +211,34 @@ class IdentityCollector(Collector):
                         "error": error,
                     }
                 )
+        remaining = len(discovered - expanded)
+        limited = bool(remaining or input_limited)
+        incomplete = bool(input_issues or input_failed or failed_relationship_count)
+        fanout = {
+            "fanout_scope": "role_assignable_or_role_holding_groups_and_nested_groups",
+            "fanout_limit": _PRIVILEGED_GROUP_FANOUT_LIMIT,
+            "candidate_group_count": len(candidates),
+            "discovered_group_count": len(discovered),
+            "expanded_group_count": len(expanded),
+            "unexpanded_group_count": len(candidates) if input_issues else remaining,
+            "failed_relationship_count": failed_relationship_count,
+            "input_record_counts": input_counts,
+            "input_complete": not (input_issues or input_failed or input_limited),
+            "input_limited_sections": input_limited,
+            "input_failed_sections": input_failed,
+            "input_issues": input_issues,
+            "collection_truncated": limited,
+            "fanout_complete": not (limited or incomplete),
+        }
+        coverage.append({
+            "collector": self.name, "type": "derived", "name": "privilegedGroupFanout",
+            "status": "partial" if limited or incomplete else "ok", "item_count": 0,
+            "error_class": "incomplete_evidence" if incomplete else "collection_limit" if limited else None,
+            "error": "Privileged-group fan-out inputs or relationships are incomplete." if incomplete else
+                     "Privileged-group fan-out or input collection limit reached." if limited else None,
+            **fanout,
+        })
         return {
-            "roleAssignableGroupMembers": {"value": members},
-            "roleAssignableGroupOwners": {"value": owners},
+            "roleAssignableGroupMembers": {"value": members, "fanout": fanout, "collection_truncated": limited},
+            "roleAssignableGroupOwners": {"value": owners, "fanout": fanout, "collection_truncated": limited},
         }

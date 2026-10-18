@@ -19,6 +19,19 @@ Every successful bundle must contain:
 
 Current bundles may also stamp `provider_adapter_version` and `api_inventory_recorder_version`. These are internal conformance markers for the shared provider finalization path, not customer-facing contract breaks.
 
+Tenant identity is mirrored in the manifest, summary, report summary, AI-context
+run metadata and SQLite `run_meta`. `tenant_id_requested` preserves the operator's
+input; `tenant_id` contains the canonical observed UUID for Microsoft 365.
+`tenant_identity` records status, source artifact pointers and conflicts.
+`verified` means the recorded organization/token tenant observations agree;
+it does not authenticate a saved bundle or verify a token signature. Input
+labels and aliases alone produce `unknown`; explicit synthetic fixtures retain
+that status. Google customer identifiers use separate provider semantics.
+Conflicting evidence or mirrored metadata invalidates a bundle. Comparisons,
+explorers and drift gates reject conflicting identities and different established
+tenant UUIDs, while allowing renamed labels for the same UUID. Legacy fallback
+is explicit in `compare_context.identity_basis` and `legacy_fallback`.
+
 Known-bad or seeded offline bundles may also stamp optional `fixture_provenance` metadata in `run-manifest.json` and `reports/report-pack.json`. This is replay metadata for regression fixtures, not live tenant evidence.
 
 New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inventory.json`; validation keeps the required artifact list stable so older bundles remain readable.
@@ -47,6 +60,17 @@ Raw evidence remains local-only. `ai_safe/` artifacts are checked for sensitive 
 
 ### Attack paths
 
+New graph-derived paths are explicitly conditional hypotheses:
+`classification` is `conditional_hypothesis`, `execution_verified` is `false`,
+and `unmet_preconditions` records the initial-access, authentication-policy,
+credential-possession or PIM activation evidence still needed. Legacy
+`no_mfa` identifiers remain for compatibility; their registration-report basis
+does not establish that sign-in bypasses MFA. Expired or not-yet-valid app
+credentials do not create credential entry edges by themselves.
+Disabled users and service principals retain their observed inventory links,
+but are excluded as footholds and from traversable privilege paths. This models
+configured account state; it does not establish outstanding session state.
+
 `reports/report-pack.json` carries `attack_paths` and, for Microsoft 365 runs with directory data, `attack_graph`. Both are derived offline from `normalized/*.json`; no extra tenant call is made to build them.
 
 Graph-derived paths come first and have `kind: "privilege_graph"`. Each path has `id`, `source`, `source_type`, `foothold` and `foothold_reasons` (`ordinary_user`, `guest`, `no_mfa`, `third_party_app`, `multi_tenant_app`, `expired_secret`, `long_lived_secret`), `target` (a tier-0 directory role or a tier-0 Microsoft Graph permission), `hops`, `hop_count`, `eligible`, `risk_score`, `severity`, `techniques`, `summary`, `breakpoints`, `foothold_count`, and `also_reachable_from`. Each hop has `from`, `to`, `edge`, `technique` (MITRE ATT&CK id), and `evidence_ref` with the same required fields as finding evidence references, pointing at the normalized record the hop came from. Edge types are `member_of`, `has_role`, `guest_with_role`, `owns`, `owns_group`, `authenticates_as`, `has_app_role`, `consented`, `can_reset`, and the entry edges `no_mfa`, `credential`, and `third_party`. An entry edge is an optional first hop that shows how the foothold is reached; `hop_count` and the depth bound (5) count only the privilege hops after it. `breakpoints` lists the hops whose single removal leaves the source with no route to any tier-0 target within the bound. At most 10 paths are kept, ordered by `risk_score`.
@@ -59,6 +83,44 @@ For compatibility, graph paths also carry `chain` (edge types), `stage_count`, a
 
 `normalized/*.json` payloads may expose `records`. Record rows need a stable machine key via `key`, `id`, `name`, `display_name`, `collector`, or `surface`.
 
+Paged Graph collection stores the collected rows in the raw section's
+`chunk_files`, with an inline `value` sample capped at 20 rows. `item_count`
+counts the collected rows; `sample_truncated` indicates that the inline sample
+is smaller. Normalization reads all declared chunks beneath the run directory
+without appending the inline sample. Findings, graph analysis, evidence indexing
+and normalized comparisons therefore use all readable **collected** rows.
+Missing, malformed, duplicate or unsafe chunks and count mismatches produce
+`normalized/normalization_coverage.json` issues and `incomplete_evidence`
+blockers; the run finalizes as partial. Symlink escapes and paths outside the run
+are rejected. Successfully saved pages survive a later-page collection failure.
+
+`normalized/snapshot.json` and the AI-safe summary expose
+`normalization_complete`, `normalization_issue_count`,
+`normalization_incomplete_sections` and `collection_limited_sections`.
+Normalization completeness describes collected evidence, not the whole tenant;
+`result_limit`, collection errors and fan-out limits still bound coverage.
+`full_counts` uses the maximum reported per-source inventory count rather than
+adding duplicate inventories; `full_counts_basis` is
+`maximum_per_source_not_unique_union`. Normalized counts describe actual records.
+The chunk reader streams, while the final normalized snapshot is memory-resident.
+
+The optional `directory_relationships` collector emits
+`directory_relationship_objects` and `directory_relationship_coverage`.
+Relationships have stable parent/relation/object keys; failed owner/member
+reads retain an unknown count rather than claiming zero. Graph evidence points
+to the individual observed relationship. Its bounded inventories and link reads
+are documented in the [API call catalog](api-call-catalog.md).
+
+Probe capability records use an explicit `key` derived from the surface,
+collector, probe mode, operation name, endpoint or command, and toolchain.
+Repeated observations of the same operation receive an occurrence suffix.
+Shared labels such as `organization` or `servicePrincipalOwners` therefore
+remain distinct across collectors and target objects; changing a result's
+status, count or duration does not change its operation key.
+Graph probe rows also carry `observed_permissions` from the sanitized token
+claims, so the probe's API inventory records write-capable scope risk even
+though its operations are read-only.
+
 `index/evidence.sqlite` is rebuilt during finalization. The required tables are:
 
 - `run_meta`
@@ -68,5 +130,15 @@ For compatibility, graph paths also carry `chain` (edge types), `stage_count`, a
 Report and compare code can use this database as the durable lookup surface instead of rewalking every JSON file.
 
 ## MCP contract surface
+
+External assessment review is a separate local contract. Normalized imports
+carry a source version, tenant identity, source SHA-256, original JSON pointers
+and checks with `pass`, `fail`, `unknown`, `not_applicable` or `error` status.
+They do not alter finalized run artifacts or become native findings.
+`auditex_normalize_external_assessment` returns an import in memory;
+`auditex_compare_external_assessments` compares explicit control identifiers
+within one tenant and optionally includes a valid finalized Auditex run.
+Both tools are read-only and make no tenant or inference calls. See
+[external assessment comparison](../guides/external-assessments.md).
 
 `auditex_summarize_run` returns the same contract status and evidence index path exposed by CLI output. `auditex_api_inventory` exposes the API call ledger, `auditex_permissions_ledger` exposes required and missing scopes, `auditex_proof_table` exposes finding-to-evidence rows, `auditex_enterprise_handoff` exposes the customer handoff index for review, and `auditex_verify_customer_pack` verifies generated customer pack integrity. `auditex_contract_schema_manifest` lists shipped schema files and the active contract version so MCP clients can detect drift before interpreting a bundle.

@@ -255,6 +255,9 @@ def _organization(run_dir: Path) -> dict[str, Any]:
 
 
 def _tenant_meta(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    from .run_bundle import RunBundle
+
+    metadata = RunBundle(run_dir).metadata()
     organization = _organization(run_dir)
     domain = ""
     for row in _records(_read_json(run_dir / "normalized" / "domain_hybrid_objects.json", {})):
@@ -269,7 +272,9 @@ def _tenant_meta(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     users = _read_json(run_dir / "normalized" / "users.json", None)
     return {
         "display_name": _text(organization.get("displayName")) or _text(manifest.get("tenant_name")) or "Unknown tenant",
-        "tenant_id": _text(manifest.get("tenant_id") or organization.get("id")),
+        "tenant_id": _text(metadata.get("tenant_id")),
+        "tenant_id_requested": metadata.get("tenant_id_requested"),
+        "tenant_identity": metadata.get("tenant_identity"),
         "domain": domain or _text(manifest.get("tenant_domain") or manifest.get("primary_domain")),
         "users": len(_records(users)) if users is not None else None,
     }
@@ -877,7 +882,23 @@ class ExplorerCompareError(ValueError):
     """Raised when runs passed to the explorer cannot be compared."""
 
 
+def _identity_guard(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    from .compare import _tenant_gate
+
+    gate = _tenant_gate([
+        {**run.get("meta", {}), "tenant_name": run.get("tenant"), "platform": run.get("platform")}
+        for run in runs
+    ])
+    if gate["gate"] != "same_tenant":
+        raise ExplorerCompareError(
+            f"refusing to compare runs from different tenants or platforms ({gate['gate']}); "
+            "pass runs of one tenant, or write one explorer per tenant"
+        )
+    return gate
+
+
 def _compare(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    identity_context = _identity_guard([before, after])
     old = {row["id"]: row for row in before["findings"]}
     new = {row["id"]: row for row in after["findings"]}
     resolved = [row for key, row in old.items() if key not in new]
@@ -919,6 +940,7 @@ def _compare(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     return {
         "a": run_ref(before),
         "b": run_ref(after),
+        "compare_context": identity_context,
         "rows": rows,
         "resolved": [brief(row) for row in resolved],
         "added": [brief(row) for row in added],
@@ -942,16 +964,7 @@ def build_explorer_bundle(run_dirs: Path | str | Sequence[Path | str]) -> dict[s
         raise ExplorerCompareError("at least one run directory is required")
     runs = [build_explorer_data(path) for path in dirs]
     if len(runs) > 1:
-        from .compare import _tenant_gate
-
-        gate = _tenant_gate(
-            [{"tenant_id": run["meta"].get("tenant_id") or None, "tenant_name": run.get("tenant"), "platform": run.get("platform")} for run in runs]
-        )
-        if gate["gate"] != "same_tenant":
-            raise ExplorerCompareError(
-                f"refusing to compare runs from different tenants or platforms ({gate['gate']}); "
-                "pass runs of one tenant, or write one explorer per tenant"
-            )
+        _identity_guard(runs)
     primary = runs[0]
     order = sorted(range(len(runs)), key=lambda index: (_text(runs[index].get("created_utc")), runs[index]["run_name"], index))
     ordered = [runs[index] for index in order]
@@ -1033,6 +1046,8 @@ def render_explorer_html(data: dict[str, Any] | list[dict[str, Any]]) -> str:
         bundle = data
     else:
         bundle = {"runs": [data], "default_run": 0, "compare": None}
+    if len(bundle["runs"]) > 1:
+        _identity_guard(bundle["runs"])
     bundle = {
         "format": "auditex-explorer",
         "format_version": FORMAT_VERSION,

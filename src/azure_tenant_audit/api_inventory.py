@@ -148,6 +148,8 @@ class ApiInventoryRecorder:
 
     def record_many(self, rows: list[dict[str, Any]]) -> None:
         for row in _rows(rows):
+            if row.get("type") == "derived":
+                continue
             self.record(row)
 
     def observed_calls(self) -> list[dict[str, Any]]:

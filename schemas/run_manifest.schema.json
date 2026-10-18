@@ -25,6 +25,12 @@
     "tenant_id": {
       "type": ["string", "null"]
     },
+    "tenant_id_requested": {
+      "type": ["string", "null"]
+    },
+    "tenant_identity": {
+      "type": "object"
+    },
     "platform": {
       "type": "string"
     },

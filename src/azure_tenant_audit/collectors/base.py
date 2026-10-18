@@ -145,6 +145,8 @@ def run_graph_endpoints(
         error_class: str | None = None
         error: str | None = None
         status = "ok"
+        accumulator: EndpointAccumulator | None = None
+        collection_truncated = False
 
         try:
             if page:
@@ -157,7 +159,8 @@ def run_graph_endpoints(
                             raise GraphError(f"Non-list response from {endpoint}", request=endpoint)
                         if window.exhausted:
                             break
-                        limited_values, window = window.take([item for item in values if isinstance(item, dict)])
+                        page_values = [item for item in values if isinstance(item, dict)]
+                        limited_values, window = window.take(page_values)
                         if limited_values:
                             chunk_path = chunk_writer(
                                 collector,
@@ -170,6 +173,7 @@ def run_graph_endpoints(
                         else:
                             accumulator.add_page(limited_values)
                         if window.exhausted:
+                            collection_truncated = len(limited_values) < len(page_values) or bool(page_payload.get("@odata.nextLink"))
                             break
                     item_count = accumulator.item_count
                     payload[key] = accumulator.payload()
@@ -201,7 +205,22 @@ def run_graph_endpoints(
         except Exception as exc:  # noqa: BLE001
             status = "failed"
             error_class, error = _classify_graph_error(exc)
-            payload[key] = {"error": error, "error_class": error_class}
+            # Successfully written pages remain evidence when a later page
+            # fails. Keep their manifest and bounded sample on partial runs.
+            if accumulator is not None:
+                item_count = accumulator.item_count
+                payload[key] = accumulator.payload()
+            else:
+                payload[key] = {}
+            payload[key].update({"error": error, "error_class": error_class})
+        if page and isinstance(payload.get(key), dict):
+            payload[key].update(
+                {
+                    "result_limit": collection_limit,
+                    "collection_limit_reached": collection_limit is not None and item_count >= collection_limit,
+                    "collection_truncated": collection_truncated,
+                }
+            )
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
         if log_event:
             log_event(
@@ -232,6 +251,8 @@ def run_graph_endpoints(
                 "page_count": payload.get(key, {}).get("page_count") if isinstance(payload.get(key), dict) else None,
                 "chunk_count": payload.get(key, {}).get("chunk_count") if isinstance(payload.get(key), dict) else None,
                 "sample_truncated": payload.get(key, {}).get("sample_truncated") if isinstance(payload.get(key), dict) else None,
+                "collection_limit_reached": payload.get(key, {}).get("collection_limit_reached") if page else None,
+                "collection_truncated": collection_truncated if page else None,
                 "duration_ms": duration_ms,
                 "error_class": error_class,
                 "error": error,

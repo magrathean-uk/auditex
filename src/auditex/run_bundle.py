@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.tenant_identity import IDENTITY_FIELDS, reconcile_tenant_identity
+
 
 def _read_json(path: Path, fallback: Any) -> Any:
     try:
@@ -207,6 +209,20 @@ class RunBundle:
         manifest = self.manifest()
         summary = self.summary()
         report_summary = self.report_summary()
+        platform = manifest.get("platform") or report_summary.get("platform") or summary.get("platform") or "m365"
+        _, report_pack = self.report_pack()
+        _, ai_context = self.ai_context()
+        identity_surfaces = {
+            "run-manifest.json": manifest,
+            "summary.json": summary,
+            "reports/report-pack.json#/summary": _mapping(_mapping(report_pack).get("summary")),
+            "ai_context.json#/run": _mapping(_mapping(ai_context).get("run")),
+        }
+        if any(key in _mapping(report_pack) for key in IDENTITY_FIELDS):
+            identity_surfaces["reports/report-pack.json"] = _mapping(report_pack)
+        if indexed:
+            identity_surfaces["index/evidence.sqlite#run_meta"] = indexed
+        identity_fields = reconcile_tenant_identity(self.run_dir, identity_surfaces, platform=str(platform))
         section_stats = indexed.get("section_stats") or self._summary_section_stats(summary)
         item_count = indexed.get("item_count")
         if item_count is None:
@@ -215,12 +231,14 @@ class RunBundle:
         return {
             "path": str(self.run_dir),
             "run_id": indexed.get("run_id") or manifest.get("run_id") or summary.get("run_id"),
-            "platform": manifest.get("platform") or report_summary.get("platform") or summary.get("platform") or "m365",
-            "tenant_name": indexed.get("tenant_name")
-            or manifest.get("tenant_name")
+            "platform": platform,
+            "tenant_name": manifest.get("tenant_name")
+            or indexed.get("tenant_name")
             or report_summary.get("tenant_name")
             or summary.get("tenant_name"),
-            "tenant_id": indexed.get("tenant_id") or manifest.get("tenant_id") or summary.get("tenant_id"),
+            **identity_fields,
+            "workspace_domain": manifest.get("workspace_domain"),
+            "customer_id": manifest.get("customer_id"),
             "created_utc": indexed.get("created_utc") or manifest.get("created_utc") or summary.get("created_utc"),
             "overall_status": indexed.get("overall_status")
             or report_summary.get("overall_status")

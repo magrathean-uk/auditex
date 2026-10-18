@@ -1,5 +1,11 @@
 {
   "collectors": {
+    "directory_relationships": {
+      "enabled": true,
+      "description": "Read-only security-group member/owner links and application-registration ownership; explicit bounded fan-out coverage.",
+      "required_permissions": ["Directory.Read.All", "Group.Read.All", "Application.Read.All"],
+      "query_plan": ["relationshipGroups", "relationshipApplications", "groupMembers", "groupOwners", "applicationOwners"]
+    },
     "identity": {
       "enabled": true,
       "description": "Core tenant, user, groups, and application posture data from Microsoft Entra",
@@ -716,6 +722,7 @@
   },
   "default_order": [
     "identity",
+    "directory_relationships",
     "app_consent",
     "app_credentials",
     "security",

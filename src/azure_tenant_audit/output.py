@@ -11,6 +11,7 @@ import time
 
 from .assurance import build_assurance_summary, build_coverage_gap_summary, build_provider_scorecard, build_surface_coverage_map
 from .findings import apply_coverage_gaps_to_report_pack
+from .tenant_identity import IDENTITY_FIELDS
 
 LOG = logging.getLogger("azure_tenant_audit.output")
 RUN_MANIFEST_SCHEMA_VERSION = "2026-04-21"
@@ -451,8 +452,10 @@ class AuditWriter:
         self._manifest["duration_seconds"] = metadata.get("duration_seconds", 0)
         self._manifest["mode"] = metadata.get("mode", "live")
         self._manifest["auditor_profile"] = metadata.get("auditor_profile", "auto")
-        if metadata.get("tenant_id") is not None:
-            self._manifest["tenant_id"] = metadata.get("tenant_id")
+        for key in IDENTITY_FIELDS:
+            if key in metadata:
+                # Unknown/conflicting identity must clear a stale ID on resume.
+                self._manifest[key] = metadata[key]
         self._manifest["plane"] = metadata.get("plane", "inventory")
         self._manifest["session_context"] = metadata.get("session_context", {})
         self._manifest["command_line"] = metadata.get("command_line", [])
@@ -545,13 +548,17 @@ class AuditWriter:
         self._manifest["surface_coverage"] = surface_coverage
         self._manifest["coverage_gaps"] = coverage_gaps
         self._manifest["provider_scorecard"] = provider_scorecard
-        if coverage_gaps:
-            report_pack_path = self.run_dir / str(self._manifest.get("report_pack_path") or "reports/report-pack.json")
-            report_pack = self._safe_load_json(report_pack_path)
-            if isinstance(report_pack, dict):
-                self.write_report_pack(apply_coverage_gaps_to_report_pack(report_pack, coverage_gaps))
+        identity_fields = {key: self._manifest[key] for key in IDENTITY_FIELDS if key in self._manifest}
+        report_pack_path = self.run_dir / str(self._manifest.get("report_pack_path") or "reports/report-pack.json")
+        report_pack = self._safe_load_json(report_pack_path)
+        if isinstance(report_pack, dict):
+            if coverage_gaps:
+                report_pack = apply_coverage_gaps_to_report_pack(report_pack, coverage_gaps)
+            report_pack.setdefault("summary", {}).update(identity_fields)
+            self.write_report_pack(report_pack)
         self.summary["schema_version"] = SUMMARY_SCHEMA_VERSION
         self.summary["tenant_name"] = self._manifest["tenant_name"]
+        self.summary.update(identity_fields)
         self.summary["run_id"] = self.run_id
         self.summary["overall_status"] = self._manifest.get("overall_status")
         self.summary["duration_seconds"] = self._manifest.get("duration_seconds", 0)

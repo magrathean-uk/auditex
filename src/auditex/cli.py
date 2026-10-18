@@ -48,6 +48,8 @@ def _build_root_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("compare", help="Compare completed runs.")
     subparsers.add_parser("report", help="Preview or render reports from a run.")
     subparsers.add_parser("export", help="List and run exporters.")
+    subparsers.add_parser("assessment", help="Import and compare local Microsoft assessment reports.")
+    subparsers.add_parser("model", help="Stage reference data, evaluate recorded answers, and prepare training packs offline.")
     subparsers.add_parser("notify", help="Build or send post-run notifications.")
     subparsers.add_parser("rules", help="Inspect built-in rule packs.")
     subparsers.add_parser("auth", help="Inspect and manage local auth state.")
@@ -525,6 +527,72 @@ def gate_findings(*, run_dir: str, fail_on: str) -> dict[str, object]:
     }
 
 
+def _build_model_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="auditex model",
+        description="Prepare model-development materials locally; no inference, training or downloads.",
+    )
+    commands = parser.add_subparsers(dest="model_command", required=True)
+    commands.add_parser("sources", help="List pinned model and dataset reference metadata.")
+    stage = commands.add_parser("stage", help="Deduplicate public conversations into an unreviewed corpus.")
+    stage.add_argument("--manifest", required=True, help="Pinned source manifest with training and evaluation paths.")
+    stage.add_argument("--output-dir", required=True, help="New or empty destination outside finalized audit runs.")
+    for name, help_text in (("evaluate", "Check recorded structured answers against reviewed cases."),
+                            ("combine", "Curate unanimous reviewed training candidates from recorded answers.")):
+        command = commands.add_parser(name, help=help_text)
+        command.add_argument("--cases", required=True, help="Auditex review cases JSONL.")
+        command.add_argument("--responses", required=True, action="append" if name == "combine" else "store",
+                             help="Recorded answers JSONL; repeat for combine.")
+        command.add_argument("--output", help="Write JSON to a new file outside finalized audit runs.")
+    prepare = commands.add_parser("prepare", help="Write a guarded single-base LoRA recipe and reviewed data exports.")
+    prepare.add_argument("--cases", required=True, action="append", help="Review cases JSONL; repeat to combine case files.")
+    prepare.add_argument("--output-dir", required=True, help="New or empty training-pack destination.")
+    prepare.add_argument("--base-model", default="Qwen/Qwen3.8-27B", help="One Hugging Face model repository.")
+    prepare.add_argument("--revision", help="Immutable 40-character base-model commit SHA.")
+    prepare.add_argument("--max-steps", type=int, default=100, help="Pilot optimizer step limit for the generated recipe.")
+    return parser
+
+
+def _model_output_directory(value: str) -> str:
+    path = Path(value).expanduser().resolve()
+    if any((parent / "run-manifest.json").exists() for parent in (path, *path.parents)):
+        raise ValueError("Model-development output must be outside finalized run bundles.")
+    return str(path)
+
+
+def _build_assessment_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="auditex assessment",
+        description="Review external Microsoft assessment results locally without tenant access.",
+    )
+    commands = parser.add_subparsers(dest="assessment_command", required=True)
+    commands.add_parser("sources", help="List supported formats and pinned integration references.")
+    importer = commands.add_parser("import", help="Normalize an existing assessment JSON report.")
+    importer.add_argument("--source", required=True, choices=("maester", "scubagear", "monkey365"))
+    importer.add_argument("--input", required=True, help="Existing JSON report; kept unchanged.")
+    importer.add_argument("--tenant-id", help="Bind reports without tenant metadata to an immutable tenant ID.")
+    importer.add_argument("--output", help="Write JSON to a new file outside finalized run bundles.")
+    comparison = commands.add_parser("compare", help="Compare normalized reports by explicit control IDs.")
+    comparison.add_argument("--assessment", action="append", required=True, help="Normalized assessment JSON; repeat for each report.")
+    comparison.add_argument("--tenant-id", help="Expected immutable tenant ID.")
+    comparison.add_argument("--run-dir", help="Optional finalized Auditex run to include in the comparison.")
+    comparison.add_argument("--output", help="Write JSON to a new file outside finalized run bundles.")
+    return parser
+
+
+def _emit_assessment(payload: dict[str, object], output: str | None) -> None:
+    if output is None:
+        print(json.dumps(payload, indent=2))
+        return
+    path = Path(output).expanduser().resolve()
+    if any((parent / "run-manifest.json").exists() for parent in path.parents):
+        raise ValueError("Assessment output must be outside finalized run bundles.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, indent=2) + "\n")
+    print(json.dumps({"output": str(path)}, indent=2))
+
+
 def _build_gate_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="auditex gate", description="Severity-threshold gate for CI / GitHub Action integration.")
     parser.add_argument("run_dir", help="Completed run directory.")
@@ -543,8 +611,13 @@ def gate_drift(*, baseline_run_dir: str, current_run_dir: str, fail_on: str) -> 
         raise ValueError(f"unsupported --fail-on severity: {fail_on}")
 
     from .run_bundle import RunBundle
+    from .compare import require_same_tenant_runs
     from azure_tenant_audit.waivers import accepted_risk_summary, is_accepted_status
 
+    try:
+        tenant_context = require_same_tenant_runs([baseline_run_dir, current_run_dir])
+    except ValueError as exc:
+        return {"pass": False, "status": "blocked", "reason": str(exc)}
     baseline_rows = RunBundle(baseline_run_dir).finding_rows()
     current_rows = RunBundle(current_run_dir).finding_rows()
 
@@ -639,6 +712,7 @@ def gate_drift(*, baseline_run_dir: str, current_run_dir: str, fail_on: str) -> 
         "fail_on": threshold,
         "baseline_run_dir": str(baseline_run_dir),
         "current_run_dir": str(current_run_dir),
+        "compare_context": tenant_context,
         "new": [{"id": key, **{k: v for k, v in current_index[key].items() if k in {"severity", "title", "rule_id", "collector"}}} for key in new_keys],
         "resolved": [{"id": key, **{k: v for k, v in baseline_index[key].items() if k in {"severity", "title", "rule_id", "collector"}}} for key in resolved_keys],
         "persisting": [{"id": key} for key in persisting_keys],
@@ -738,6 +812,62 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--json", action="store_true", help="Print JSON report.")
         args = parser.parse_args(argv[1:])
         return print_doctor_report(json_output=args.json)
+    if argv[0] == "assessment":
+        from .assessment_review import compare_external_assessments
+        from .assessment_sources import list_assessment_sources
+        from .external_assessments import import_assessment
+
+        parser = _build_assessment_parser()
+        args = parser.parse_args(argv[1:])
+        try:
+            if args.assessment_command == "sources":
+                print(json.dumps(list_assessment_sources(), indent=2))
+            elif args.assessment_command == "import":
+                payload = import_assessment(args.source, args.input, tenant_id=args.tenant_id)
+                _emit_assessment(payload, args.output)
+            else:
+                payload = compare_external_assessments(
+                    args.assessment,
+                    expected_tenant_id=args.tenant_id,
+                    run_dir=args.run_dir,
+                )
+                _emit_assessment(payload, args.output)
+        except (OSError, ValueError) as exc:
+            print(f"Assessment review failed: {exc}", file=sys.stderr)
+            return 2
+        return 0
+    if argv[0] == "model":
+        parser = _build_model_parser()
+        args = parser.parse_args(argv[1:])
+        try:
+            if args.model_command == "sources":
+                from .model_sources import list_model_sources
+
+                payload = list_model_sources()
+            elif args.model_command == "stage":
+                from .model_corpus import stage_public_corpus
+
+                payload = stage_public_corpus(args.manifest, _model_output_directory(args.output_dir))
+            elif args.model_command == "prepare":
+                from .model_training import prepare_training_pack
+
+                payload = prepare_training_pack(
+                    args.cases, _model_output_directory(args.output_dir),
+                    base_model=args.base_model, revision=args.revision, max_steps=args.max_steps,
+                )
+            elif args.model_command == "evaluate":
+                from .model_eval import evaluate_responses
+
+                payload = evaluate_responses(args.cases, args.responses)
+            else:
+                from .model_eval import combine_model_responses
+
+                payload = combine_model_responses(args.cases, args.responses)
+            _emit_assessment(payload, getattr(args, "output", None))
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"Model preparation failed: {exc}", file=sys.stderr)
+            return 2
+        return 0
     if argv[0] == "demo":
         from .demo import main as demo_main
 

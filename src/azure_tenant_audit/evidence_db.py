@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .perf_runtime import sqlite_bulk_pragmas
+from .tenant_identity import decode_identity_metadata
 
 
 _SCHEMA = (
@@ -200,6 +201,7 @@ def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
         "run_id": meta.get("run_id"),
         "tenant_name": meta.get("tenant_name"),
         "tenant_id": meta.get("tenant_id"),
+        **decode_identity_metadata(meta),
         "created_utc": meta.get("created_utc"),
         "overall_status": meta.get("overall_status"),
         "auditor_profile": meta.get("auditor_profile"),

@@ -23,7 +23,7 @@ from .config import AuthConfig, CollectorConfig
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
 from .findings import build_findings
 from .graph import GraphClient
-from .normalize import build_ai_safe_summary, build_normalized_snapshot
+from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
 from .output import AuditWriter
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
@@ -227,11 +227,6 @@ def run_offline(
         }
         for row in result_rows
     ]
-    coverage_ledger = run_core.build_coverage_ledger(
-        capability_rows=capability_rows,
-        result_rows=result_rows,
-        diagnostics=diagnostics,
-    )
     normalized_snapshot = build_normalized_snapshot(
         tenant_name=tenant_name,
         run_id=writer.run_id,
@@ -240,6 +235,15 @@ def run_offline(
         result_rows=result_rows,
         coverage_rows=coverage_rows,
         run_dir=writer.run_dir,
+    )
+    diagnostics.extend(build_normalization_diagnostics(normalized_snapshot))
+    if diagnostics:
+        writer.write_diagnostics(diagnostics)
+        writer.write_blockers(diagnostics)
+    coverage_ledger = run_core.build_coverage_ledger(
+        capability_rows=capability_rows,
+        result_rows=result_rows,
+        diagnostics=diagnostics,
     )
     findings = build_findings(diagnostics, normalized_snapshot=normalized_snapshot)
     writer.write_normalized("capability_matrix", {"kind": "capability_matrix", "records": capability_rows})
@@ -261,6 +265,8 @@ def run_offline(
     ]
     if findings:
         evidence_paths.append("findings/findings.json")
+    if diagnostics:
+        evidence_paths.append("blockers/blockers.json")
     evidence_paths.extend(f"normalized/{name}.json" for name in ["capability_matrix", "coverage_ledger", *normalized_snapshot.keys()])
     privacy = build_privacy_block(safe_for_external_llm=False)
     write_provider_bundle(
@@ -270,7 +276,7 @@ def run_offline(
             tenant_id=None,
             executed_by="azure_tenant_audit",
             selected_collectors=[row["name"] for row in result_rows],
-            overall_status="ok",
+            overall_status="partial" if diagnostics else "ok",
             duration_seconds=0,
             mode="offline",
             auditor_profile=auditor_profile,
@@ -293,7 +299,7 @@ def run_offline(
         ),
     )
     LOG.info("Offline sample written to %s", writer.run_dir)
-    return 0
+    return 1 if diagnostics else 0
 
 
 def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None) -> int:
@@ -610,19 +616,6 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         permission_hints=permission_hints,
         auditor_profile=run_cfg.auditor_profile,
     )
-    if diagnostics:
-        writer.write_diagnostics(diagnostics)
-        writer.write_blockers(diagnostics)
-        writer.log_event(
-            "run.diagnostics.generated",
-            "Failure diagnostics generated",
-            {"count": len(diagnostics)},
-        )
-    coverage_ledger = run_core.build_coverage_ledger(
-        capability_rows=capability_rows,
-        result_rows=result_rows,
-        diagnostics=diagnostics,
-    )
     capability_rows = run_core.reconcile_capability_matrix_rows(
         capability_rows,
         result_rows,
@@ -637,6 +630,21 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         result_rows=result_rows,
         coverage_rows=coverage_rows,
         run_dir=writer.run_dir,
+    )
+    normalization_diagnostics = build_normalization_diagnostics(normalized_snapshot)
+    diagnostics.extend(normalization_diagnostics)
+    if diagnostics:
+        writer.write_diagnostics(diagnostics)
+        writer.write_blockers(diagnostics)
+        writer.log_event(
+            "run.diagnostics.generated",
+            "Failure diagnostics generated",
+            {"count": len(diagnostics)},
+        )
+    coverage_ledger = run_core.build_coverage_ledger(
+        capability_rows=capability_rows,
+        result_rows=result_rows,
+        diagnostics=diagnostics,
     )
     findings = build_findings(
         diagnostics,
@@ -660,7 +668,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         evidence_paths.append("findings/findings.json")
     evidence_paths.extend(f"normalized/{name}.json" for name in normalized_snapshot)
     evidence_paths.extend(["ai_context.json", "validation.json"])
-    overall_status = "partial" if failures or preflight_skipped else "ok"
+    overall_status = "partial" if failures or preflight_skipped or normalization_diagnostics else "ok"
     privacy = build_privacy_block(safe_for_external_llm=False)
     writer.log_event(
         "run.complete",
@@ -704,7 +712,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         ),
     )
     LOG.info("Completed in %.2fs. Output in %s", duration, writer.run_dir)
-    return 1 if failures or preflight_skipped else 0
+    return 1 if overall_status == "partial" else 0
 
 
 def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]], None] | None = None) -> int:

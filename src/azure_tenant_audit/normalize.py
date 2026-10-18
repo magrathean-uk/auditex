@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from collections import Counter
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 import re
 from typing import Any
 
+from .chunk_reader import iter_endpoint_records
 from .detection_coverage import build_detection_signals
+from .directory_relationships import normalize_directory_relationships
 from .friendly_names import build_friendly_name_catalog
 
 
@@ -38,6 +41,142 @@ def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     if isinstance(values, list):
         return [item for item in values if isinstance(item, dict)]
     return []
+
+
+def _latest_endpoint_coverage(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A resumed endpoint replaces its earlier observation, not its row count."""
+    latest = {}
+    for row in rows:
+        if isinstance(row, dict):
+            key = (str(row.get("collector") or ""), str(row.get("name") or ""),
+                   str(row.get("endpoint") or row.get("command") or ""))
+            latest[key] = row
+    return list(latest.values())
+
+
+class _NormalizationSources:
+    """Run-scoped reads and completeness accounting, without caching full raw rows."""
+
+    def __init__(
+        self,
+        payloads: dict[str, dict[str, Any]],
+        run_dir: Path | None,
+        coverage_rows: list[dict[str, Any]],
+    ) -> None:
+        self.payloads = payloads
+        self.run_dir = run_dir
+        self.collector_names = {id(payload): name for name, payload in payloads.items()}
+        self.coverage: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in _latest_endpoint_coverage(coverage_rows):
+            self.coverage[(str(row.get("collector") or ""), str(row.get("name") or ""))].append(row)
+        self.reports: dict[str, dict[str, Any]] = {}
+
+    @staticmethod
+    def is_endpoint(section: Any) -> bool:
+        return isinstance(section, dict) and any(
+            key in section for key in ("value", "chunk_files", "sample_truncated", "item_count")
+        )
+
+    def values(self, payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
+        section = payload.get(key) if isinstance(payload, dict) else None
+        if not self.is_endpoint(section):
+            return []
+        collector = self.collector_names.get(id(payload), "unknown")
+        effective_section = dict(section)
+        coverage = self.coverage.get((collector, key), [])
+        # A fan-out can have many coverage rows counting nested members rather
+        # than its wrapper records. Only a single paged endpoint is comparable.
+        if len(coverage) == 1 and ("chunk_files" in section or section.get("sample_truncated")):
+            if effective_section.get("item_count") is None and coverage[0].get("item_count") is not None:
+                effective_section["item_count"] = coverage[0]["item_count"]
+        issues: list[dict[str, Any]] = []
+        rows = list(iter_endpoint_records(effective_section, self.run_dir, issues=issues))
+        if len(coverage) == 1 and "chunk_files" in section:
+            count = coverage[0].get("item_count")
+            if type(count) is int and count != len(rows):
+                issues.append({"code": "coverage_count_mismatch", "expected_count": count, "observed_count": len(rows)})
+
+        result_limit = section.get("result_limit")
+        if result_limit is None and len(coverage) == 1:
+            result_limit = coverage[0].get("result_limit")
+        try:
+            limit = max(int(result_limit or 0), 0)
+        except (TypeError, ValueError):
+            limit = 0
+        count = effective_section.get("item_count")
+        collected_count = count if type(count) is int and count >= 0 else len(rows)
+        collection_limited = bool(
+            section.get("collection_limit_reached") or section.get("collection_truncated")
+            or (limit and collected_count >= limit)
+        )
+        source_failed = bool(section.get("error")) or any(row.get("status") == "failed" for row in coverage)
+        source = f"{collector}.{key}"
+        previous = self.reports.get(source)
+        if previous:
+            if previous["record_count"] != len(rows):
+                issues.append({"code": "inconsistent_endpoint_read"})
+            issues.extend(issue for issue in previous["issues"] if issue not in issues)
+        self.reports[source] = {
+            "key": f"normalization:{source}",
+            "collector": collector,
+            "source_name": key,
+            "source": source,
+            "storage": "chunks" if section.get("chunk_files") else "inline",
+            "record_count": len(rows),
+            "expected_count": count,
+            "sample_count": len(section["value"]) if isinstance(section.get("value"), list) else 0,
+            "complete": not issues,
+            "status": "partial" if issues else "complete",
+            "collection_status": "failed" if source_failed else "limited" if collection_limited else "collected",
+            "collection_limited": collection_limited,
+            "result_limit": limit or None,
+            "issues": issues,
+        }
+        return rows
+
+    def analysis_payloads(self, collectors: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+        """Temporary complete views for analyses that consume raw-shaped sections."""
+        result: dict[str, dict[str, Any]] = {}
+        for collector in collectors:
+            payload = self.payloads.get(collector)
+            if not isinstance(payload, dict):
+                continue
+            result[collector] = {}
+            for name, section in payload.items():
+                if not self.is_endpoint(section):
+                    result[collector][name] = section
+                    continue
+                view = {**section, "value": self.values(payload, name)}
+                view.pop("chunk_files", None)
+                report = self.reports[f"{collector}.{name}"]
+                incomplete = not report["complete"] or report["collection_limited"]
+                view["sample_truncated"] = incomplete
+                if incomplete and not view.get("error"):
+                    view["error"] = "Endpoint evidence is incomplete."
+                    view["error_class"] = "incomplete_evidence"
+                result[collector][name] = view
+        return result
+
+    def friendly_names(self, records: dict[str, list[dict[str, Any]]]) -> tuple[list[dict[str, Any]], int]:
+        catalog, warnings = build_friendly_name_catalog(records)
+        entries = {row["key"]: row for row in catalog}
+        # The legacy catalog loader accepts arbitrary paths. Supply already
+        # checked rows and no run_dir so it never reopens unvalidated chunks.
+        # Loading one endpoint at a time also avoids retaining a full raw copy
+        # of every collector alongside the normalized snapshot.
+        for collector, payload in sorted(self.payloads.items()):
+            if not isinstance(payload, dict):
+                continue
+            for name, section in payload.items():
+                view = section
+                if self.is_endpoint(section):
+                    view = {**section, "value": self.values(payload, name)}
+                    view.pop("chunk_files", None)
+                extra, missing = build_friendly_name_catalog({}, collector_payloads={collector: {name: view}})
+                warnings += missing
+                for row in extra:
+                    entries.setdefault(row["key"], row)
+        return [entries[key] for key in sorted(entries)], warnings
 
 
 def _secure_score_control_scores(value: Any) -> list[dict[str, Any]]:
@@ -112,13 +251,18 @@ def _collector_count_summaries(
     truncated_sections: list[str] = []
     chunk_paths: dict[str, list[str]] = {}
 
-    for row in coverage_rows:
-        if not isinstance(row, dict):
-            continue
+    coverage_counts: dict[tuple[str, str], int] = defaultdict(int)
+    for row in _latest_endpoint_coverage(coverage_rows):
         key = _canonical_count_key(str(row.get("name") or ""))
         if not key:
             continue
-        full_counts[key] = full_counts.get(key, 0) + int(row.get("item_count") or 0)
+        count = row.get("item_count")
+        if type(count) is int and count >= 0:
+            coverage_counts[(str(row.get("collector") or ""), key)] += count
+    for (_collector, key), count in coverage_counts.items():
+        # Different collectors can inventory the same objects. This legacy
+        # surface is a per-source maximum, never a unique union of identities.
+        full_counts[key] = max(full_counts.get(key, 0), count)
 
     for payload in collector_payloads.values():
         if not isinstance(payload, dict):
@@ -129,8 +273,8 @@ def _collector_count_summaries(
                 continue
             values = section.get("value")
             if isinstance(values, list):
-                sample_counts[key] = sample_counts.get(key, 0) + len(values)
-            if isinstance(section.get("item_count"), int):
+                sample_counts[key] = max(sample_counts.get(key, 0), len(values))
+            if type(section.get("item_count")) is int:
                 full_counts[key] = max(full_counts.get(key, 0), int(section["item_count"]))
             if section.get("sample_truncated"):
                 truncated_sections.append(key)
@@ -489,13 +633,14 @@ def _build_conditional_access_graph(
     auth_strengths: list[dict[str, Any]],
     auth_contexts: list[dict[str, Any]],
     auth_methods_payload: dict[str, Any],
+    values: Callable[[dict[str, Any], str], list[dict[str, Any]]] = _values,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
-    users = _values(identity_payload, "users")
-    groups = _values(identity_payload, "groups")
-    role_definitions = _values(identity_payload, "roleDefinitions")
-    role_assignments = _values(identity_payload, "roleAssignments")
-    applications = _values(identity_payload, "applications")
-    service_principals = _values(identity_payload, "servicePrincipals")
+    users = values(identity_payload, "users")
+    groups = values(identity_payload, "groups")
+    role_definitions = values(identity_payload, "roleDefinitions")
+    role_assignments = values(identity_payload, "roleAssignments")
+    applications = values(identity_payload, "applications")
+    service_principals = values(identity_payload, "servicePrincipals")
 
     indices: dict[str, dict[str, dict[str, Any]]] = {
         "group": _build_index(groups),
@@ -509,7 +654,7 @@ def _build_conditional_access_graph(
         "service_principal_app_id": {item.get("appId"): item for item in service_principals if item.get("appId")},
     }
 
-    mfa_stats = _normalize_mfa_registration(_values(auth_methods_payload, "userRegistrationDetails"))
+    mfa_stats = _normalize_mfa_registration(values(auth_methods_payload, "userRegistrationDetails"))
     break_glass_candidates = _build_break_glass_candidates(role_assignments, role_definitions, groups)
 
     reference_tracker: dict[str, list[str]] = {}
@@ -826,7 +971,10 @@ def _owner_type(owner: dict[str, Any]) -> str:
     return "user"
 
 
-def _build_group_membership_edges(identity_payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _build_group_membership_edges(
+    identity_payload: dict[str, Any],
+    values: Callable[[dict[str, Any], str], list[dict[str, Any]]] = _values,
+) -> list[dict[str, Any]]:
     """Membership and ownership of role-assignable groups (identity fan-out).
 
     Only role-assignable groups (and groups that hold directory roles) are
@@ -838,7 +986,7 @@ def _build_group_membership_edges(identity_payload: dict[str, Any]) -> list[dict
         ("roleAssignableGroupMembers", "member", "members"),
         ("roleAssignableGroupOwners", "owner", "owners"),
     ):
-        for item in _values(identity_payload, source_name):
+        for item in values(identity_payload, source_name):
             group_id = str(item.get("groupId") or "")
             rows = item.get(list_key)
             if not group_id or not isinstance(rows, list):
@@ -868,6 +1016,7 @@ def _build_group_membership_edges(identity_payload: dict[str, Any]) -> list[dict
 def _build_app_owner_edges(
     app_consent_payload: dict[str, Any],
     app_credentials_payload: dict[str, Any],
+    values: Callable[[dict[str, Any], str], list[dict[str, Any]]] = _values,
 ) -> list[dict[str, Any]]:
     """Owners of service principals and application objects.
 
@@ -875,7 +1024,7 @@ def _build_app_owner_edges(
     privilege-escalation edge in the attack graph.
     """
     records: list[dict[str, Any]] = []
-    for item in _values(app_consent_payload, "servicePrincipalOwners"):
+    for item in values(app_consent_payload, "servicePrincipalOwners"):
         sp_id = str(item.get("servicePrincipalId") or "")
         owners = item.get("owners")
         if not sp_id or not isinstance(owners, list):
@@ -904,7 +1053,7 @@ def _build_app_owner_edges(
         ("applicationCredentials", "application"),
         ("servicePrincipalCredentials", "service_principal"),
     ):
-        for item in _values(app_credentials_payload, source_name):
+        for item in values(app_credentials_payload, source_name):
             object_id = str(item.get("id") or "")
             owners = item.get("owners")
             if not object_id or not isinstance(owners, list):
@@ -946,6 +1095,10 @@ def build_normalized_snapshot(
     diagnostics = diagnostics or []
     result_rows = result_rows or []
     coverage_rows = coverage_rows or []
+    sources = _NormalizationSources(collector_payloads, run_dir, coverage_rows)
+    # All section reads, including the relationship helpers, use this run's
+    # checked chunk reader. The caller's bounded inline samples stay untouched.
+    _values = sources.values
 
     identity_payload = collector_payloads.get("identity", {})
     signin_section = identity_payload.get("userSignInActivity") if isinstance(identity_payload, dict) else None
@@ -997,6 +1150,7 @@ def build_normalized_snapshot(
             "identity.applications",
             str(item.get("id")),
             display_name=item.get("displayName"),
+            app_id=item.get("appId"),
             created=item.get("createdDateTime"),
             audience=item.get("signInAudience"),
         )
@@ -1011,6 +1165,7 @@ def build_normalized_snapshot(
             display_name=item.get("displayName"),
             app_id=item.get("appId"),
             service_principal_type=item.get("servicePrincipalType"),
+            enabled=item.get("accountEnabled"),
         )
         for item in _values(collector_payloads.get("identity", {}), "servicePrincipals")
         if item.get("id")
@@ -1308,6 +1463,20 @@ def build_normalized_snapshot(
     app_consent_payload = collector_payloads.get("app_consent", {})
     app_service_principals = _values(app_consent_payload, "servicePrincipals")
     app_service_principal_by_id = _build_index(app_service_principals)
+    service_principal_records = {str(row["id"]): row for row in service_principals}
+    for item in app_service_principals:
+        if not item.get("id"):
+            continue
+        object_id = str(item["id"])
+        consent_record = _record(
+            "service_principal", "app_consent.servicePrincipals", object_id,
+            display_name=item.get("displayName"), app_id=item.get("appId"),
+            service_principal_type=item.get("servicePrincipalType"), enabled=item.get("accountEnabled"),
+        )
+        # Identity is the primary inventory. Consent-only runs still need SP
+        # nodes, but a second observation must not erase its enabled state.
+        service_principal_records[object_id] = {**consent_record, **service_principal_records.get(object_id, {})}
+    service_principals = list(service_principal_records.values())
     app_owners_by_sp_id = {
         str(item.get("servicePrincipalId")): item.get("owners", [])
         for item in _values(app_consent_payload, "servicePrincipalOwners")
@@ -1356,8 +1525,8 @@ def build_normalized_snapshot(
                     source_name="servicePrincipalAppRoleAssignments",
                 )
             )
-    group_membership_edges = _build_group_membership_edges(collector_payloads.get("identity", {}))
-    app_owner_edges = _build_app_owner_edges(app_consent_payload, collector_payloads.get("app_credentials", {}))
+    group_membership_edges = _build_group_membership_edges(collector_payloads.get("identity", {}), values=_values)
+    app_owner_edges = _build_app_owner_edges(app_consent_payload, collector_payloads.get("app_credentials", {}), values=_values)
     license_inventory = [
         _record(
             "license_sku",
@@ -1559,7 +1728,7 @@ def build_normalized_snapshot(
     for source_name in ("crossTenantAccessPolicy", "authorizationPolicy", "authenticationFlowsPolicy"):
         section = collector_payloads.get("external_identity", {})
         value = section.get(source_name)
-        rows = value.get("value", []) if isinstance(value, dict) and isinstance(value.get("value"), list) else [value] if isinstance(value, dict) else []
+        rows = _values(section, source_name) if sources.is_endpoint(value) else [value] if isinstance(value, dict) else []
         for item in rows:
             object_id = str(item.get("id") or item.get("displayName") or source_name)
             external_identity_objects.append(
@@ -1576,7 +1745,7 @@ def build_normalized_snapshot(
     for source_name in ("adminConsentRequestPolicy", "permissionGrantPolicies", "authorizationPolicy"):
         section = collector_payloads.get("consent_policy", {})
         value = section.get(source_name)
-        rows = value.get("value", []) if isinstance(value, dict) and isinstance(value.get("value"), list) else [value] if isinstance(value, dict) else []
+        rows = _values(section, source_name) if sources.is_endpoint(value) else [value] if isinstance(value, dict) else []
         for item in rows:
             object_id = str(item.get("id") or item.get("displayName") or source_name)
             consent_policy_objects.append(
@@ -1886,7 +2055,7 @@ def build_normalized_snapshot(
     detection_signal_objects = (
         [
             _record("detection_signal", "detection_coverage", str(row["name"]), **row)
-            for row in build_detection_signals(collector_payloads, diagnostics)
+            for row in build_detection_signals(sources.analysis_payloads(_DETECTION_SOURCE_COLLECTORS), diagnostics)
         ]
         if any(collector_payloads.get(name) for name in _DETECTION_SOURCE_COLLECTORS)
         else []
@@ -2112,6 +2281,11 @@ def build_normalized_snapshot(
         "copilot_admin_setting_objects": copilot_admin_setting_records,
         "copilot_usage_objects": copilot_usage_records,
     }
+    directory_payload = collector_payloads.get("directory_relationships", {})
+    if directory_payload:
+        directory_payload = sources.analysis_payloads(("directory_relationships",))["directory_relationships"]
+        for section, payload in normalize_directory_relationships(directory_payload).items():
+            records_by_section[section] = payload["records"]
 
     conditional_access_graph_records, relationships, graph_summary, policy_findings = _build_conditional_access_graph(
         policies=_values(collector_payloads.get("conditional_access", {}), "conditionalAccessPolicies"),
@@ -2120,6 +2294,7 @@ def build_normalized_snapshot(
         auth_strengths=_values(collector_payloads.get("conditional_access", {}), "authenticationStrengthPolicies"),
         auth_contexts=_values(collector_payloads.get("conditional_access", {}), "authenticationContextClassReferences"),
         auth_methods_payload=collector_payloads.get("auth_methods", {}),
+        values=_values,
     )
     if conditional_access_graph_records:
         records_by_section["conditional_access_graph"] = conditional_access_graph_records
@@ -2133,20 +2308,25 @@ def build_normalized_snapshot(
             # Make graph summary available in snapshot-level counts without inventing a separate section.
             pass
 
-    translation_catalog, translation_warning_count = build_friendly_name_catalog(
-        records_by_section,
-        collector_payloads=collector_payloads,
-        run_dir=run_dir,
-    )
+    translation_catalog, translation_warning_count = sources.friendly_names(records_by_section)
     if translation_catalog:
         records_by_section["translation_catalog"] = translation_catalog
+    normalization_coverage = [sources.reports[key] for key in sorted(sources.reports)]
+    if normalization_coverage:
+        records_by_section["normalization_coverage"] = normalization_coverage
+    incomplete_sections = [row["source"] for row in normalization_coverage if not row["complete"]]
+    collection_limited_sections = [row["source"] for row in normalization_coverage if row["collection_limited"]]
 
     object_counts = {name: len(records) for name, records in records_by_section.items() if records}
     full_counts, sample_counts, chunk_counts, truncated_sections, chunk_paths = _collector_count_summaries(
         collector_payloads,
         coverage_rows,
     )
-    diagnostic_classes = Counter(str(item.get("error_class") or "unknown") for item in diagnostics)
+    all_diagnostics = [
+        *diagnostics,
+        *build_normalization_diagnostics({"normalization_coverage": {"records": normalization_coverage}}),
+    ]
+    diagnostic_classes = Counter(str(item.get("error_class") or "unknown") for item in all_diagnostics)
 
     normalized: dict[str, dict[str, Any]] = {
         "snapshot": {
@@ -2155,14 +2335,20 @@ def build_normalized_snapshot(
             "object_counts": object_counts,
             "normalized_counts": object_counts,
             "full_counts": full_counts,
+            "full_counts_basis": "maximum_per_source_not_unique_union",
             "sample_counts": sample_counts,
             "chunk_counts": chunk_counts,
             "chunk_paths": chunk_paths,
             "sample_truncated": bool(truncated_sections),
             "truncated_sections": truncated_sections,
+            "normalization_scope": "collected_rows",
+            "normalization_complete": not incomplete_sections,
+            "normalization_issue_count": sum(len(row["issues"]) for row in normalization_coverage),
+            "normalization_incomplete_sections": incomplete_sections,
+            "collection_limited_sections": collection_limited_sections,
             "collector_count": len(result_rows),
             "coverage_row_count": len(coverage_rows),
-            "blocker_count": len(diagnostics),
+            "blocker_count": len(all_diagnostics),
             "diagnostic_classes": dict(diagnostic_classes),
             "friendly_name_warning_count": translation_warning_count,
         }
@@ -2171,6 +2357,37 @@ def build_normalized_snapshot(
         if records:
             normalized[section] = {"kind": section, "records": _ordered_value(records)}
     return _ordered_value(normalized)
+
+
+def build_normalization_diagnostics(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Promote unreadable collected evidence to ordinary run coverage blockers.
+
+    Call after normalization and before findings/coverage-ledger finalization.
+    Collection caps remain separate metadata, since they are not read failures.
+    """
+    diagnostics = []
+    for row in (normalized_snapshot.get("normalization_coverage") or {}).get("records", []):
+        if row.get("complete") is not False:
+            continue
+        diagnostics.append(
+            {
+                "collector": row["collector"],
+                "item": row["source_name"],
+                "status": "partial",
+                "error_class": "incomplete_evidence",
+                "error": "Collected endpoint evidence could not be read completely; review normalization coverage.",
+                "evidence_refs": [
+                    {
+                        "artifact_path": "normalized/normalization_coverage.json",
+                        "artifact_kind": "normalized_json",
+                        "collector": row["collector"],
+                        "record_key": row["key"],
+                        "source_name": row["source_name"],
+                    }
+                ],
+            }
+        )
+    return diagnostics
 
 
 def build_ai_safe_summary(
@@ -2186,10 +2403,16 @@ def build_ai_safe_summary(
         "object_counts": snapshot.get("normalized_counts", snapshot.get("object_counts", {})),
         "normalized_counts": snapshot.get("normalized_counts", snapshot.get("object_counts", {})),
         "full_counts": snapshot.get("full_counts", {}),
+        "full_counts_basis": snapshot.get("full_counts_basis"),
         "sample_counts": snapshot.get("sample_counts", {}),
         "chunk_counts": snapshot.get("chunk_counts", {}),
         "sample_truncated": snapshot.get("sample_truncated", False),
         "truncated_sections": snapshot.get("truncated_sections", []),
+        "normalization_scope": snapshot.get("normalization_scope"),
+        "normalization_complete": snapshot.get("normalization_complete"),
+        "normalization_issue_count": snapshot.get("normalization_issue_count", 0),
+        "normalization_incomplete_sections": snapshot.get("normalization_incomplete_sections", []),
+        "collection_limited_sections": snapshot.get("collection_limited_sections", []),
         "blocker_count": snapshot.get("blocker_count", 0),
         "translation_catalog_count": len((normalized_snapshot.get("translation_catalog") or {}).get("records", [])),
         "friendly_name_warning_count": snapshot.get("friendly_name_warning_count", 0),

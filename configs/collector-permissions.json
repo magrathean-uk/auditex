@@ -1,5 +1,10 @@
 {
   "collector_permissions": {
+    "directory_relationships": {
+      "graph_scopes": ["Directory.Read.All", "Group.Read.All", "Application.Read.All"],
+      "minimum_role_hints": ["Global Reader"],
+      "notes": "Opt-in GET-only security-group members/owners and application-registration owners. At most 100 groups and 100 applications are expanded, with --top limiting each inventory and relationship; unbounded --top still caps each relationship at 5000. Limit hits and unreadable links remain explicit coverage gaps. No role assignment, license assignment, credentials or message/file content."
+    },
     "identity": {
       "graph_scopes": [
         "Directory.Read.All",

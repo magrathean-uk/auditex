@@ -5,7 +5,14 @@
   "required": ["schema_version", "run", "privacy", "counts", "coverage", "findings", "artifacts", "read_order"],
   "properties": {
     "schema_version": { "type": "string" },
-    "run": { "type": "object" },
+    "run": {
+      "type": "object",
+      "properties": {
+        "tenant_id": { "type": ["string", "null"] },
+        "tenant_id_requested": { "type": ["string", "null"] },
+        "tenant_identity": { "type": "object" }
+      }
+    },
     "privacy": { "type": "object" },
     "counts": { "type": "object" },
     "coverage": { "type": "object" },

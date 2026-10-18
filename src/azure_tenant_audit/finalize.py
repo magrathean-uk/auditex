@@ -13,6 +13,7 @@ from .data_handling import build_data_handling_summary
 from .evidence_db import build_run_evidence_index
 from .output import AuditWriter
 from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
+from .tenant_identity import canonical_tenant_uuid, resolve_tenant_identity
 
 
 def _append_report_evidence_path(writer: AuditWriter, relative_path: str) -> None:
@@ -141,6 +142,33 @@ def finalize_bundle_contract(
 
     privacy = bundle_metadata.get("privacy") or build_privacy_block(safe_for_external_llm=False)
     metadata = dict(bundle_metadata)
+    platform = str(metadata.get("platform") or run_metadata.get("platform") or "m365")
+    requested = run_metadata.get("tenant_id_requested", metadata.get("tenant_id_requested"))
+    if "tenant_id_requested" not in run_metadata and "tenant_id_requested" not in metadata:
+        requested = run_metadata.get("tenant_id") or metadata.get("tenant_id")
+    identity_fields = resolve_tenant_identity(
+        writer.run_dir, platform=platform, requested=requested, metadata=metadata,
+        additional_requests=[("bundle_metadata.tenant_id", metadata.get("tenant_id")), ("run_metadata.tenant_id", run_metadata.get("tenant_id"))],
+    )
+    identity = identity_fields["tenant_identity"]
+    previous = writer._safe_load_json(writer.run_dir / "run-manifest.json") or {}
+    previous_id = canonical_tenant_uuid(previous.get("tenant_id")) if platform == "m365" else None
+    observed_ids = {row["tenant_id"] for row in identity["sources"]}
+    if previous_id and observed_ids and observed_ids != {previous_id}:
+        identity["conflicts"].append({"code": "existing_tenant_mismatch", "tenant_id": previous_id})
+    previous_identity = previous.get("tenant_identity") or {}
+    if previous_id and not observed_ids and isinstance(previous_identity, dict) and previous_identity.get("status") == "verified":
+        identity["conflicts"].append({"code": "existing_tenant_evidence_missing", "tenant_id": previous_id})
+    if isinstance(previous_identity, dict) and previous_identity.get("status") == "conflict":
+        for conflict in previous_identity.get("conflicts") or []:
+            if conflict not in identity["conflicts"]:
+                identity["conflicts"].append(conflict)
+    if identity["conflicts"]:
+        identity["status"] = "conflict"
+        identity["reason"] = "inconsistent_tenant_evidence"
+        identity_fields["tenant_id"] = None
+    metadata.update(identity_fields)
+    run_metadata = {**run_metadata, **identity_fields, "platform": platform}
     selected_collectors = [str(item) for item in run_metadata.get("selected_collectors") or metadata.get("collectors") or [] if str(item)]
     if not metadata.get("data_handling_path"):
         data_handling_payload = build_data_handling_summary(
@@ -171,7 +199,6 @@ def finalize_bundle_contract(
         )
         metadata["live_readiness_path"] = str(live_readiness_path.relative_to(writer.run_dir))
         _append_report_evidence_path(writer, metadata["live_readiness_path"])
-    platform = str(metadata.get("platform") or run_metadata.get("platform") or "m365")
     collector_rows = [dict(row) for row in writer.summary.get("collectors", []) if isinstance(row, dict)]
     coverage_rows = [dict(row) for row in writer.coverage if isinstance(row, dict)]
     surface_coverage = build_surface_coverage_map(collector_rows=collector_rows, platform=platform)

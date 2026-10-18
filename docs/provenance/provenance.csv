@@ -15,6 +15,15 @@ configs/collector-presets.json,microsoft/EntraExporter,MIT,inspired by named col
 src/azure_tenant_audit/graph.py,microsoft/EntraExporter,MIT,inspired by Microsoft Graph batch API usage only,keep
 src/auditex/evidence_db.py,dirkjanm/ROADtools,MIT,inspired by offline evidence index concept only,rewrite
 src/auditex/exporters.py,dirkjanm/ROADtools,MIT,inspired by plugin/exporter extension concept only,rewrite
+src/auditex/external_assessments.py,"maester365/maester; cisagov/ScubaGear; silverhack/monkey365",not applicable to independent format readers,"independent readers of structured export formats; no upstream runtime source copied",keep
+src/auditex/assessment_review.py,"prowler-cloud/prowler; Servosity/msp-skills; KelvinTegelaar/CIPP",not applicable to independent interface implementation,"typed offline review and exact-control comparison concepts; no upstream runtime source copied",keep
+configs/assessment-sources.json,referenced repositories,source metadata only,repository URLs and inspected commit identifiers only,keep
+configs/model-sources.json,"OpenAdminOS/openadmin-8b; AYI-NEDJIMI/m365-expert-v3; OpenAdminOS/openadmin-sft; OpenAdminOS/OpenAdminOS; Qwen/Qwen3.8-27B; mistralai/Ministral-3-8B-Instruct-2512",source metadata only,"pinned repository identifiers and artifact checksums; originals retained outside distributable tree",keep
+src/auditex/model_training.py,OpenAdminOS/OpenAdminOS,not applicable to independent implementation,"completion-only and held-out evaluation ideas; own guarded single-base recipe and case format",keep
+"src/auditex/model_corpus.py; src/auditex/model_eval.py",OpenAdminOS/OpenAdminOS,not applicable to independent implementation,"independent conversation staging and exact structured evaluation; no upstream runtime source copied",keep
+examples/model_development/*.jsonl,Auditex synthetic generator,own generated content,"48 unreviewed case proposals and two recorded-answer fixtures; no tenant data or executed model output",keep
+src/azure_tenant_audit/attack_graph.py,cartography-cncf/cartography,not applicable to independent semantics changes,"observed relationships separated from conditional paths; own implementation and synthetic counterexamples",keep
+src/azure_tenant_audit/adapters/m365dsc.py,Microsoft365DSC/Microsoft365DSC,not applicable to independent compatibility checks,"local version preflight from published module metadata; no upstream runtime source copied",keep
 tenant-bootstrap/vendor/microsoft-skills/*,microsoft/skills,MIT,curated vendored subset retained with license notice,keep
 pyproject.toml dependency requests,psf/requests,Apache-2.0,declared runtime dependency not vendored,keep
 pyproject.toml dependency msal,AzureAD/microsoft-authentication-library-for-python,MIT,declared runtime dependency not vendored,keep

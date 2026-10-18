@@ -226,6 +226,9 @@ def build_coverage_ledger(
         elif _has_permission_block(collector):
             coverage_status = "blocked_permission"
             coverage_reason = "permission_or_auth_blocker"
+        elif any(item.get("error_class") == "incomplete_evidence" for item in diagnostics_by_collector.get(collector, [])):
+            coverage_status = "partial_success"
+            coverage_reason = "normalization_incomplete"
         elif actual_status == "ok":
             if expected_status == "supported_effective_role":
                 coverage_status = "complete_effective_role"

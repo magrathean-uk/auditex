@@ -129,6 +129,16 @@ TOOL_REGISTRY: tuple[McpToolEntry, ...] = (
         read_only_hint=True,
     ),
     McpToolEntry(
+        name="auditex_normalize_external_assessment",
+        description="Normalize a local Maester, ScubaGear, or Monkey365 JSON export in memory, retaining source hashes and evidence pointers.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
+        name="auditex_compare_external_assessments",
+        description="Review exact shared control outcomes across local normalized assessments and an optional completed Microsoft 365 bundle, with strict tenant-ID gating.",
+        read_only_hint=True,
+    ),
+    McpToolEntry(
         name="auditex_probe_live",
         description="Run a live capability probe against a tenant and emit capability/toolchain/blocker artifacts.",
         read_only_hint=False,

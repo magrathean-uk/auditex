@@ -5,6 +5,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .tenant_identity import IDENTITY_FIELDS
+
 
 def build_privacy_block(*, safe_for_external_llm: bool) -> dict[str, Any]:
     if safe_for_external_llm:
@@ -94,6 +96,8 @@ def build_ai_context(
         "run": {
             "tenant_name": run_metadata.get("tenant_name"),
             "tenant_id": run_metadata.get("tenant_id"),
+            **{key: run_metadata[key] for key in IDENTITY_FIELDS if key in run_metadata},
+            "platform": run_metadata.get("platform", "m365"),
             "run_id": run_metadata.get("run_id"),
             "overall_status": run_metadata.get("overall_status"),
             "auditor_profile": run_metadata.get("auditor_profile"),

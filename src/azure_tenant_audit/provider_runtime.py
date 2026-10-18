@@ -81,6 +81,7 @@ def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
         writer=writer,
         bundle_metadata={
             **plan.bundle_metadata,
+            "tenant_id_requested": plan.tenant_id,
             "executed_by": plan.executed_by,
             "collectors": plan.selected_collectors,
             "overall_status": plan.overall_status,
@@ -95,7 +96,7 @@ def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
         run_metadata={
             **plan.run_metadata,
             "tenant_name": plan.tenant_name,
-            "tenant_id": plan.tenant_id,
+            "tenant_id_requested": plan.tenant_id,
             "run_id": writer.run_id,
             "overall_status": plan.overall_status,
             "auditor_profile": plan.auditor_profile,

@@ -25,7 +25,9 @@ The public audit surface does not write to production tenants. It also does not 
 - Guided setup and audit flows, capability probes, local auth-context management, and diagnostics.
 - Offline fixtures for contract checks and demonstrations.
 - Report rendering, CSV/JSON and other exporters, comparison and drift gates, customer handoff packs, and a local MCP server.
-- Read-only privilege-escalation graph: attack paths from ordinary users, guests, users without MFA, and third-party apps to tier-0 control, with an ATT&CK technique and evidence record per hop and the single change that breaks each path.
+- Offline imports and control-by-control review of Maester, ScubaGear and Monkey365 JSON assessments, with source hashes and strict tenant identity checks.
+- Offline model-development tools for staging public conversations, checking recorded structured answers, and preparing a reviewed single-base LoRA training pack.
+- Read-only privilege graph: potential routes from users, groups and applications to tier-0 control, with evidence per hop, explicit unverified prerequisites and candidate breakpoints.
 - Detection coverage ("could this tenant see an attack?") and the tenant's public footprint, including MTA-STS and TLS-RPT.
 - Baseline alignment with CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, and the Microsoft cloud security benchmark. See [framework mappings](docs/reference/framework-mappings.md).
 - `auditex demo`, a guided walkthrough on a fictional company, and `auditex report explorer`, a self-contained interactive HTML view of any run.
@@ -120,7 +122,19 @@ auditex google probe --auth domain-delegation --domain example.com \
 
 ## Read a run and prepare a handoff
 
+External Microsoft assessment reports can also be reviewed locally with
+`auditex assessment import` and `auditex assessment compare`. See
+[external assessment comparison](docs/guides/external-assessments.md) for
+supported formats, evidence references and comparison limits.
+
 Each finalized run contains a manifest, summary, report pack, evidence index, AI context, and validation result. The current contract version is recorded in `run-manifest.json`; required files and evidence rules are documented in [the output contract](docs/reference/output-contract.md).
+
+For the proposed specialist reasoning model, use `auditex model sources`,
+`stage`, `evaluate`, `combine`, and `prepare`. These commands operate on local
+files. See [model development](docs/guides/model-development.md) for reference
+availability, review gates, and the separate training recipe. The supplied
+examples are unreviewed proposals; no trained Auditex model or measured model
+quality is claimed.
 
 ```bash
 auditex report render <run-dir> --format md

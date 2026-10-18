@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from azure_tenant_audit.collectors.base import CollectorResult
-from azure_tenant_audit.probe import ProbeConfig, run_live_probe
+from azure_tenant_audit.probe import ProbeConfig, _build_probe_snapshot, run_live_probe
 
 
 class _FakeCollector:
@@ -91,6 +92,68 @@ def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, mo
     assert manifest["provider_adapter_version"] == "2026-05-31"
     assert manifest["api_inventory_recorder_version"] == "2026-05-31"
     assert (run_dir / "index" / "evidence.sqlite").exists()
+
+
+def test_repeated_probe_labels_and_per_object_endpoints_have_distinct_indexed_keys(tmp_path: Path, monkeypatch) -> None:
+    class _RepeatedCollector:
+        def __init__(self, name, endpoints):
+            self.name = name
+            self.endpoints = endpoints
+
+        def run(self, _context):
+            return CollectorResult(
+                name=self.name, status="ok", item_count=0, message="ok", payload={},
+                coverage=[{
+                    "collector": self.name, "type": "graph", "name": name,
+                    "endpoint": endpoint, "status": "ok", "item_count": 0,
+                } for name, endpoint in self.endpoints],
+            )
+
+    monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
+    monkeypatch.setattr("azure_tenant_audit.probe._acquire_azure_cli_access_token", lambda *_, **__: "token")
+    monkeypatch.setattr("azure_tenant_audit.probe._capture_signed_in_context", lambda *_, **__: {})
+    monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
+    monkeypatch.setattr("azure_tenant_audit.probe.REGISTRY", {
+        "identity": _RepeatedCollector("identity", [("servicePrincipals", "/servicePrincipals")]),
+        "app_consent": _RepeatedCollector("app_consent", [
+            ("servicePrincipals", "/servicePrincipals"),
+            ("servicePrincipalOwners", "/servicePrincipals/app-one/owners"),
+            ("servicePrincipalOwners", "/servicePrincipals/app-two/owners"),
+            ("servicePrincipalOwners", "/servicePrincipals/app-two/owners"),
+        ]),
+    })
+
+    assert run_live_probe(ProbeConfig(
+        tenant_name="fixture", tenant_id="tenant-id", output_dir=tmp_path,
+        surface="identity,app_consent", run_name="overlap",
+    )) == 0
+    run = tmp_path / "fixture-overlap"
+    rows = json.loads((run / "normalized/capabilities.json").read_text())["records"]
+    assert len(rows) == len({row["key"] for row in rows}) == 5
+    assert json.loads((run / "validation.json").read_text())["valid"] is True
+    with sqlite3.connect(run / "index/evidence.sqlite") as connection:
+        indexed = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT record_key) FROM normalized_records WHERE section_name = ?",
+            ("probe_capability",),
+        ).fetchone()
+    assert indexed == (5, 5)
+
+
+def test_probe_keys_survive_reordering_and_changed_results_without_rewriting_raw_rows() -> None:
+    rows = [{"surface": "app_consent", "collector": "app_consent", "type": "graph",
+             "name": "owners", "endpoint": f"/servicePrincipals/{app}/owners", "status": "blocked"}
+            for app in ("one", "two")]
+    def keys(selected):
+        snapshot = _build_probe_snapshot(
+            tenant_name="fixture", run_id="run", capability_matrix=selected,
+            toolchain_rows=[], blockers=[], session_context={},
+        )
+        return {row["endpoint"]: row["key"] for row in snapshot["capabilities"]["records"]}
+
+    changed = [{**row, "status": "supported_exact_scope", "item_count": 3, "duration_ms": 5}
+               for row in reversed(rows)]
+    assert keys(rows) == keys(changed)
+    assert all("key" not in row for row in rows)
 
 
 def test_response_probe_requires_lab_guard_but_still_writes_blockers(tmp_path: Path, monkeypatch) -> None:
@@ -204,7 +267,7 @@ def test_probe_live_app_mode_writes_token_claims(tmp_path: Path, monkeypatch) ->
                 "tenant_id": "tenant-app",
                 "audience": "https://graph.microsoft.com",
                 "delegated_scopes": [],
-                "app_roles": ["AuditLog.Read.All", "Directory.Read.All"],
+                "app_roles": ["AuditLog.Read.All", "Directory.Read.All", "Application.ReadWrite.All"],
                 "app_id": "app-id",
             }
 
@@ -232,4 +295,8 @@ def test_probe_live_app_mode_writes_token_claims(tmp_path: Path, monkeypatch) ->
     run_dir = tmp_path / "contoso-probe-app-context"
     auth_context = json.loads((run_dir / "auth-context.json").read_text(encoding="utf-8"))
     assert auth_context["auth_mode"] == "app"
-    assert auth_context["token_claims"]["app_roles"] == ["AuditLog.Read.All", "Directory.Read.All"]
+    assert auth_context["token_claims"]["app_roles"] == ["Application.ReadWrite.All", "AuditLog.Read.All", "Directory.Read.All"]
+    safety = json.loads((run_dir / "api-inventory.json").read_text())["safety"]
+    assert safety["scope_risk"] == "write_capable_scope_present"
+    assert safety["write_capable_scopes"] == ["Application.ReadWrite.All"]
+    assert safety["read_only"] is True and safety["write_actions"] is False

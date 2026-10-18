@@ -24,6 +24,38 @@ friendly-name, finding-template, and fallback-template surfaces; it also says
 the legacy source-review module and distributable research material were
 removed. See the CSV for the file-level record.
 
+## Offline assessment interoperability
+
+`configs/assessment-sources.json` records the repository revisions and selected
+paths inspected for the external assessment integrations. The Maester,
+ScubaGear and Monkey365 adapters are independent implementations of their JSON
+output formats. Prowler and CIPP informed the typed reviewer interfaces;
+Cartography informed tenant-scoped relationship semantics and fixtures.
+EntraExporter and Microsoft365DSC informed coverage and adapter compatibility
+review. The Entra AI prototypes informed evidence selection and explicit
+separation of conclusions from collection gaps. No external runtime source is
+vendored by these integrations, and report processing never loads a reference
+checkout or executes report content.
+
+## Model-development references
+
+`configs/model-sources.json` pins the inspected OpenAdmin and M365 Expert
+model artifacts, OpenAdmin public dataset and source pipeline, and proposed
+base checkpoints. Reference models, original data and sparse source copies
+are retained outside the distributable tree under
+`/Volumes/4TB/models/auditex/` and the workspace's third-party area.
+Per-file hashes and upstream revisions accompany the development kit.
+
+Auditex's corpus staging, structured evaluator, case curation and training-pack
+writer are independent implementations. The source pipeline informed separate
+holdouts, completion-only training and explicit abstention checks. No upstream
+generator or model runtime source is vendored. The 48 shipped Auditex cases
+and two recorded-response fixtures are newly generated synthetic proposals;
+they contain no tenant evidence and carry no human approval. Public source
+conversations remain unreviewed, and matching text from those sources is not
+shipped as Auditex training gold. No upstream evaluation result is presented
+as an Auditex measurement.
+
 ## Framework identifiers
 
 `configs/framework-catalog.json` and `configs/control-mappings.json` reference

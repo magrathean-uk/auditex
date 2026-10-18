@@ -9,6 +9,7 @@ from .defender_cloud_apps import DefenderCloudAppsCollector
 from .defender import DefenderCollector
 from .dns_posture import DnsPostureCollector
 from .domains_hybrid import DomainsHybridCollector
+from .directory_relationships import DirectoryRelationshipsCollector
 from .ediscovery import EDiscoveryCollector
 from .exchange_policy import ExchangePolicyCollector
 from .external_identity import ExternalIdentityCollector
@@ -34,6 +35,7 @@ from .exchange import ExchangeCollector
 
 REGISTRY = {
     "identity": IdentityCollector(),
+    "directory_relationships": DirectoryRelationshipsCollector(),
     "app_consent": AppConsentCollector(),
     "app_credentials": AppCredentialsCollector(),
     "security": SecurityCollector(),

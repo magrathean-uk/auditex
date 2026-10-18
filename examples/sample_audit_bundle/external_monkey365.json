@@ -1,0 +1,66 @@
+[
+  {
+    "synthetic": true,
+    "description": "Synthetic Monkey365 OCSF-shaped export. No tenant was contacted. The OCSF writer does not export benchmark control mappings.",
+    "metadata": {
+      "product": {"name": "Monkey365", "version": "1.0.0"},
+      "version": "1.1.0"
+    },
+    "findingInfo": {
+      "id": "Monkey365-synthetic-mfa-review-001",
+      "title": "Synthetic MS.AAD.3.1v1 scenario: manual phishing-resistant MFA review"
+    },
+    "cloud": {
+      "provider": "Microsoft365",
+      "organization": {"id": "11111111-1111-4111-8111-111111111111"},
+      "account": {"id": "11111111-1111-4111-8111-111111111111"}
+    },
+    "time": "2026-10-18T12:00:00Z",
+    "statusCode": "manual",
+    "status": "New",
+    "severity": "High",
+    "resources": {"id": null}
+  },
+  {
+    "synthetic": true,
+    "metadata": {
+      "product": {"name": "Monkey365", "version": "1.0.0"},
+      "version": "1.1.0"
+    },
+    "findingInfo": {
+      "id": "Monkey365-synthetic-application-review-002",
+      "title": "Synthetic application permission review"
+    },
+    "cloud": {
+      "provider": "Microsoft365",
+      "organization": {"id": "11111111-1111-4111-8111-111111111111"},
+      "account": {"id": "11111111-1111-4111-8111-111111111111"}
+    },
+    "time": "2026-10-18T12:00:00Z",
+    "statusCode": "fail",
+    "status": "New",
+    "severity": "High",
+    "resources": {"id": "22222222-2222-4222-8222-222222222222"}
+  },
+  {
+    "synthetic": true,
+    "metadata": {
+      "product": {"name": "Monkey365", "version": "1.0.0"},
+      "version": "1.1.0"
+    },
+    "findingInfo": {
+      "id": "Monkey365-synthetic-baseline-review-003",
+      "title": "Synthetic baseline configuration check"
+    },
+    "cloud": {
+      "provider": "Microsoft365",
+      "organization": {"id": "11111111-1111-4111-8111-111111111111"},
+      "account": {"id": "11111111-1111-4111-8111-111111111111"}
+    },
+    "time": "2026-10-18T12:00:00Z",
+    "statusCode": "pass",
+    "status": "New",
+    "severity": "Informational",
+    "resources": {"id": null}
+  }
+]

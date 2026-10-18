@@ -22,6 +22,24 @@ Each observed Graph call records `api_version` (`v1.0` or `beta`). Auditex calls
 Other v1.0 reads with gating worth knowing:
 
 - `identity` reads `/users?$select=id,signInActivity` as a separate query (page size at most 500; `AuditLog.Read.All` plus Microsoft Entra ID P1 or P2). A licence or scope failure leaves a coverage gap and identity continues.
+- Identity relationship expansion reads complete collected group and
+  role-assignment evidence, including chunk rows, and expands at most 50
+  distinct privileged or nested groups. Coverage records input completeness,
+  expanded groups and remaining discovered groups.
+- App-consent relationship expansion covers the first ten collected service
+  principals plus Microsoft Graph wherever it appears within the collected
+  inventory. Coverage reports selected and omitted principals, collection
+  limits and unreadable evidence. Invalid chunk inputs retain raw evidence and
+  produce a coverage gap. Derived fan-out summaries are coverage observations,
+  not additional API calls.
+- `directory_relationships` is opt-in and reads security-group inventories,
+  `GET /groups/{id}/members`, `GET /groups/{id}/owners`, application inventories
+  and `GET /applications/{id}/owners`. Permissions are `Directory.Read.All`,
+  `Group.Read.All`, and `Application.Read.All`. It expands at most 100 groups
+  and 100 applications; `--top` limits each inventory and relationship (5000
+  relationship rows maximum for unbounded runs). Each failed or capped read
+  has a coverage row. Application registration ownership and enterprise-app
+  service-principal ownership remain distinct observations.
 - `reports_usage` reads `/admin/reportSettings` (`ReportSettings.Read.All`) before the usage reports. When `displayConcealedNames` is true, per-user report rows are hashed and Auditex raises `reports_usage.concealed_names`.
 - `defender_cloud_apps` reads only `/identityGovernance/appConsent/appConsentRequests` (`ConsentRequest.Read.All`). Microsoft Graph has no documented endpoint for Defender for Cloud Apps app risk profiles.
 

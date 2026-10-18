@@ -102,3 +102,52 @@ There is no hosted CI; the repository is stored on Git and checks run locally. B
 `tenant-bootstrap/` seeds lab tenant data and contains writable operations. `run-enterprise-audit.sh` runs bootstrap before audit by default; it is not a production audit shortcut. Inspect its `--help` and the selected configuration before any separately authorized lab work. Keep lab credentials and outputs separate from customer audits.
 
 The response plane is hidden by default and guarded separately. Do not enable it for an ordinary audit. Agent command templates under `agent/` include lab tools as well as audit commands; inspect the selected tool before execution.
+
+### Entra Free directory fixtures
+
+`tenant-bootstrap/scripts/seed-free-directory.py` is a separate lab writer for
+unlicensed directory scenarios. Its fixed fixture set contains disabled users,
+assigned mail-disabled security groups, single-tenant applications and disabled
+service principals, with membership/ownership links between the new fixtures.
+Its write operations are limited to those directory objects and links.
+
+Print an offline plan first:
+
+```sh
+clean-development run --session session-only -- .venv/bin/python tenant-bootstrap/scripts/seed-free-directory.py \
+  --tenant-id "$TENANT_ID" --domain example.onmicrosoft.com \
+  --prefix auditex-lab-example --output-dir outputs/free-directory-plan
+```
+
+For an authorized lab, repeat with `--execute` and a new output directory.
+Execution uses the explicitly selected tenant's Azure CLI session, checks its
+verified domain, fixture-name collisions and dynamic licence assignments, and
+records created IDs incrementally in a private manifest. Keep that manifest for
+review of partial runs. The broader enterprise bootstrap profile is a separate
+workload/licensing flow.
+
+Use normal `auditex probe live` and `auditex run` for read-only before/after
+collection. `scripts/build-lab-model-cases.py` can then export fixture-only,
+unreviewed cases from the finalized audit; see [model development](../guides/model-development.md#cases-from-a-directory-lab).
+
+To exercise a completed free-directory lab, use its private seed manifest:
+
+```sh
+clean-development run --session session-only -- .venv/bin/python tenant-bootstrap/scripts/exercise-free-directory.py \
+  --seed-manifest outputs/free-directory-seed/manifest.json --action apply \
+  --output-dir outputs/free-directory-change-plan
+```
+
+Add `--execute` with a fresh output directory to swap the fixture application's
+owner and one member of the inner nested group. Capture a baseline first, then
+the changed state, using `auditex run --collectors identity,licensing,directory_relationships`
+and the same tenant, profile and collection limits. `directory_relationships`
+is opt-in and records explicit link coverage. The scenario verifies all fixture
+identities, disabled account state, empty app permissions/credentials, and
+unlicensed assigned groups before reference-only mutations. Each operation is
+journaled privately; uncertain writes are not retried.
+
+Use `--action restore --execute` with another new output directory to restore
+the exact baseline links, including after a known partial application. Capture
+and compare the restored audit. Unexpected identities or link changes stop the
+scenario for review; manifests retain the attempted requests.

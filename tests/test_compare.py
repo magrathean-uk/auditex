@@ -168,6 +168,37 @@ def test_compare_runs_can_allow_cross_tenant(tmp_path: Path) -> None:
     assert result["baseline_diff"]["status"] == "ok"
 
 
+def test_matching_display_name_cannot_override_conflicting_tenant_ids(tmp_path: Path) -> None:
+    runs = []
+    for index, tenant_id in enumerate(("tenant-a", "tenant-b"), 1):
+        run_dir = _write_run(
+            tmp_path,
+            tenant_name="Same customer label",
+            run_id=f"run-{index}",
+            created_utc=f"2026-04-0{index}T00:00:00Z",
+            status="ok",
+            collector_name="users",
+            normalized_name="users",
+            records=[],
+        )
+        manifest_path = run_dir / "run-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["tenant_id"] = tenant_id
+        _write_json(manifest_path, manifest)
+        runs.append(run_dir)
+
+    blocked = compare_runs(runs)
+    assert blocked["compare_context"]["same_tenant"] is False
+    assert blocked["baseline_diff"]["status"] == "blocked"
+    assert blocked["baseline_diff"]["compare_context"]["same_tenant"] is False
+    assert blocked["adjacent_diffs"][0]["compare_context"]["same_tenant"] is False
+
+    explicitly_allowed = compare_runs(runs, allow_cross_tenant=True)
+    assert explicitly_allowed["baseline_diff"]["status"] == "ok"
+    assert explicitly_allowed["baseline_diff"]["compare_context"]["same_tenant"] is False
+    assert explicitly_allowed["baseline_diff"]["compare_context"]["gate"] == "allow_cross_tenant"
+
+
 def test_compare_runs_result_is_json_serializable(tmp_path: Path) -> None:
     run_a = _write_run(
         tmp_path,

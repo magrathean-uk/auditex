@@ -1611,7 +1611,7 @@ def _build_attack_path_findings(normalized_snapshot: dict[str, Any]) -> list[dic
                     "id": path["id"],
                     "severity": path.get("severity"),
                     "category": "identity",
-                    "title": f"Privilege escalation path: {path.get('source')} → {path.get('target')}",
+                    "title": f"Potential privilege escalation route: {path.get('source')} → {path.get('target')}",
                     "status": "open",
                     "collector": "identity",
                     "affected_objects": [path.get("source"), path.get("target")],
@@ -1623,6 +1623,9 @@ def _build_attack_path_findings(normalized_snapshot: dict[str, Any]) -> list[dic
                         "breakpoints": path.get("breakpoints"),
                         "risk_score": path.get("risk_score"),
                         "foothold_count": path.get("foothold_count"),
+                        "classification": path.get("classification", "conditional_hypothesis"),
+                        "execution_verified": False,
+                        "unmet_preconditions": path.get("unmet_preconditions", []),
                     },
                     "evidence_refs": evidence_refs,
                 }

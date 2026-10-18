@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, TypedDict
 
 from .collectors.base import CollectorResult
@@ -57,6 +58,7 @@ class CollectorRunHooks:
     write_export_summary: ExportSummaryWriter | None = None
     chunk_writer: ChunkWriter | None = None
     audit_logger: AuditLogger | None = None
+    run_dir: str | Path | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class CollectorRunContext:
             "write_export_summary": self.hooks.write_export_summary,
             "chunk_writer": self.hooks.chunk_writer,
             "audit_logger": self.hooks.audit_logger,
+            "run_dir": self.hooks.run_dir,
         }
         context.update(self.extra)
         return context
@@ -130,6 +133,7 @@ class AuditWriterCollectorAdapter:
             write_export_summary=self._write_export_summary if hasattr(self.writer, "write_export_summary") else None,
             chunk_writer=self._write_chunk_records if hasattr(self.writer, "write_chunk_records") else None,
             audit_logger=self.log_event,
+            run_dir=getattr(self.writer, "run_dir", None),
         )
 
     def _relative(self, path: Any) -> str:

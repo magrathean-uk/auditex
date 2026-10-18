@@ -91,6 +91,13 @@ SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
         "synthetic demo tenant under `examples/demo_tenant/`",
     ),
     ShippedContentArea(
+        "model_development",
+        "examples/model_development",
+        "auditex/examples/model_development",
+        ("examples/model_development/*.jsonl",),
+        "synthetic model-development cases under `examples/model_development/`",
+    ),
+    ShippedContentArea(
         "google_workspace_sample",
         "examples",
         "auditex/examples",

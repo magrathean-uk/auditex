@@ -10,6 +10,9 @@
       "required": ["tenant_name", "overall_status", "finding_count", "blocker_count"],
       "properties": {
         "tenant_name": { "type": "string" },
+        "tenant_id": { "type": ["string", "null"] },
+        "tenant_id_requested": { "type": ["string", "null"] },
+        "tenant_identity": { "type": "object" },
         "overall_status": { "type": "string" },
         "finding_count": { "type": "integer" },
         "blocker_count": { "type": "integer" },

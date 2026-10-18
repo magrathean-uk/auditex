@@ -325,7 +325,25 @@ Use MCP tools for bundle-backed answers only. Every answer should cite bundle ev
 - `auditex_enterprise_handoff`
 - `auditex_verify_customer_pack`
 - `auditex_compare_runs`
+- `auditex_normalize_external_assessment`
+- `auditex_compare_external_assessments`
 - `auditex_rules_inventory`
+
+External Microsoft assessment JSON can be imported and compared locally with
+`auditex assessment import` and `auditex assessment compare`. These commands
+and the corresponding MCP tools preserve original source hashes and reject
+conflicting tenant identities. See [external assessment comparison](external-assessments.md)
+for supported exports, synthetic rehearsal files and control-mapping limits.
+
+## Specialist model development
+
+`auditex model sources|stage|evaluate|combine|prepare` works on local model
+reference metadata, public conversations, review cases and recorded answers.
+It stages unreviewed data, checks structured facts and evidence references,
+and writes a separate training pack. It does not access tenants or run a
+model. Supplied response files are fixtures, and the 48 proposed Auditex
+cases require review. See [model development](model-development.md) for
+formats, immutable base revisions and the training handoff.
 
 ## Validation before release
 

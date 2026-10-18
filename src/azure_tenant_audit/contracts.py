@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import sqlite3
+import tempfile
 from collections import Counter
 from collections.abc import Mapping
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 from .resources import list_resource_files, resolve_resource_path
+from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
 
 CONTRACT_VERSION = "2026-04-21"
 
@@ -403,20 +408,69 @@ def _validate_sensitive_contract_artifacts(run_dir: Path, issues: list[dict[str,
             issues.append(_issue("unsafe_contract_artifact", path=relative, details=hits[:25]))
 
 
-def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]]) -> None:
+def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_only: bool = False) -> dict[str, Any]:
     db_path = run_dir / "index" / "evidence.sqlite"
     if not db_path.exists():
         issues.append(_issue("missing_required_artifact", path="index/evidence.sqlite"))
-        return
-    try:
-        with sqlite3.connect(db_path) as conn:
+        return {}
+
+    metadata: dict[str, Any] = {}
+
+    def inspect(path: Path) -> None:
+        nonlocal metadata
+        # Connection context managers do not close SQLite connections. Close
+        # explicitly before cleaning up the temporary database and sidecars.
+        with closing(sqlite3.connect(path)) as conn:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             required = {"run_meta", "section_stats", "normalized_records"}
             missing = sorted(required - tables)
             if missing:
                 issues.append(_issue("invalid_evidence_sqlite_schema", path="index/evidence.sqlite", details=missing))
-    except sqlite3.DatabaseError as exc:
+            if "run_meta" in tables:
+                metadata = decode_identity_metadata(dict(conn.execute("SELECT key, value FROM run_meta")))
+
+    try:
+        if read_only:
+            # Even SELECT against a WAL database can modify its shared-memory
+            # sidecar. Inspect only a private copy, including committed data
+            # still in the WAL, without opening the original through SQLite.
+            with tempfile.TemporaryDirectory(prefix="auditex-validation-", dir=os.environ.get("TMPDIR")) as temporary:
+                copied_path = Path(temporary) / db_path.name
+                for suffix in ("", "-wal", "-shm"):
+                    source = db_path.with_name(db_path.name + suffix)
+                    if source.exists():
+                        shutil.copy2(source, copied_path.with_name(copied_path.name + suffix))
+                inspect(copied_path)
+        else:
+            inspect(db_path)
+    except (sqlite3.DatabaseError, OSError) as exc:
         issues.append(_issue("invalid_evidence_sqlite", path="index/evidence.sqlite", details=str(exc)))
+    return metadata
+
+
+def _validate_tenant_identity(
+    run_dir: Path,
+    manifest: Mapping[str, Any],
+    ai_context: Any,
+    indexed: Mapping[str, Any],
+    issues: list[dict[str, Any]],
+) -> None:
+    summary = _read_json(run_dir / "summary.json", {})
+    report = _read_json(run_dir / "reports/report-pack.json", {})
+    report_summary = report.get("summary") if isinstance(report, Mapping) else {}
+    ai_run = ai_context.get("run") if isinstance(ai_context, Mapping) else {}
+    surfaces = {
+        "run-manifest.json": manifest,
+        "summary.json": summary if isinstance(summary, Mapping) else {},
+        "reports/report-pack.json#/summary": report_summary if isinstance(report_summary, Mapping) else {},
+        "ai_context.json#/run": ai_run if isinstance(ai_run, Mapping) else {},
+        "index/evidence.sqlite#run_meta": indexed,
+    }
+    if isinstance(report, Mapping) and any(key in report for key in IDENTITY_FIELDS):
+        surfaces["reports/report-pack.json"] = report
+    resolved = reconcile_tenant_identity(run_dir, surfaces, platform=str(manifest.get("platform") or "m365"))
+    if resolved["tenant_identity"]["status"] == "conflict":
+        issues.append(_issue("tenant_identity_conflict", path="run-manifest.json", details=resolved["tenant_identity"]["conflicts"]))
 
 
 def _validate_manifest_artifact_paths(run_dir: Path, issues: list[dict[str, Any]]) -> dict[str, Any]:
@@ -616,6 +670,7 @@ def build_validation_report(
     ai_context: dict[str, Any] | None = None,
     findings: list[dict[str, Any]] | None = None,
     required_artifacts: tuple[str, ...] = ROOT_REQUIRED_ARTIFACTS,
+    read_only: bool = False,
 ) -> dict[str, Any]:
     run_path = Path(run_dir)
     issues: list[dict[str, Any]] = []
@@ -636,7 +691,7 @@ def build_validation_report(
     _validate_finding_framework_mappings(loaded_findings, issues)
     _validate_ai_safe(run_path, issues)
     _validate_sensitive_contract_artifacts(run_path, issues)
-    _validate_evidence_db(run_path, issues)
+    indexed_identity = _validate_evidence_db(run_path, issues, read_only=read_only)
     manifest = _validate_manifest_artifact_paths(run_path, issues)
     _validate_data_handling(run_path, manifest, issues)
     _validate_live_readiness(run_path, manifest, issues)
@@ -645,6 +700,7 @@ def build_validation_report(
     _validate_report_pack(run_path, issues)
 
     context = ai_context if isinstance(ai_context, Mapping) else _read_json(run_path / "ai_context.json", fallback={})
+    _validate_tenant_identity(run_path, manifest, context, indexed_identity, issues)
     if not isinstance(context, Mapping):
         issues.append(_issue("invalid_json_artifact", path="ai_context.json"))
     else:

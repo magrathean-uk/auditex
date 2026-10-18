@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
 from .run_bundle import RunBundle
 
@@ -35,34 +36,64 @@ def _run_metadata(run_dir: Path) -> dict[str, Any]:
 def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     platforms = [run.get("platform") or "m365" for run in runs]
     same_platform = len(set(platforms)) <= 1
-    tenant_ids = [run.get("tenant_id") for run in runs]
+    tenant_ids = [
+        (canonical_tenant_uuid(run.get("tenant_id")) or run.get("tenant_id"))
+        if platform == "m365" else (run.get("tenant_id") if run.get("tenant_id") != "my_customer" else None)
+        for run, platform in zip(runs, platforms)
+    ]
     tenant_names = [run.get("tenant_name") for run in runs]
-    if all(tenant_ids) and len(set(tenant_ids)) == 1:
-        gate = "same_tenant" if same_platform else "same_platform_required"
-        return {
-            "same_tenant": True,
-            "same_platform": same_platform,
-            "gate": gate,
-            "tenant_key": tenant_ids[0],
-            "platform_key": platforms[0] if same_platform and platforms else None,
-        }
-    if all(tenant_names) and len(set(tenant_names)) == 1:
-        gate = "same_tenant" if same_platform else "same_platform_required"
-        return {
-            "same_tenant": True,
-            "same_platform": same_platform,
-            "gate": gate,
-            "tenant_key": tenant_names[0],
-            "platform_key": platforms[0] if same_platform and platforms else None,
-        }
-    gate = "same_tenant_required" if same_platform else "same_platform_required"
-    return {
+    identities = [run.get("tenant_identity") or {} for run in runs]
+    verified = bool(runs) and all(identity.get("status") == "verified" for identity in identities)
+    context: dict[str, Any] = {
         "same_tenant": False,
         "same_platform": same_platform,
-        "gate": gate,
+        "gate": "same_tenant_required" if same_platform else "same_platform_required",
         "tenant_key": None,
         "platform_key": platforms[0] if same_platform and platforms else None,
+        "identity_basis": "unknown",
+        "identity_verified": verified,
+        "legacy_fallback": False,
+        "unknown_identity_count": sum(identity.get("status") != "verified" for identity in identities),
     }
+    if any(identity.get("status") == "conflict" for identity in identities):
+        return {**context, "gate": "tenant_identity_conflict", "identity_basis": "conflict", "identity_verified": False}
+    established_uuids = {canonical_tenant_uuid(value) for value, platform in zip(tenant_ids, platforms) if platform == "m365"}
+    established_uuids.discard(None)
+    if same_platform and len(established_uuids) > 1:
+        return {**context, "gate": "tenant_id_mismatch", "identity_basis": "conflicting_tenant_ids", "identity_verified": False}
+
+    def matched(key: Any, basis: str, *, fallback: bool = False) -> dict[str, Any]:
+        return {
+            **context,
+            "same_tenant": True,
+            "gate": "same_tenant" if same_platform else "same_platform_required",
+            "tenant_key": key,
+            "identity_basis": basis,
+            "legacy_fallback": fallback,
+        }
+
+    if tenant_ids and all(tenant_ids) and len(set(tenant_ids)) == 1:
+        return matched(tenant_ids[0], "verified_tenant_id" if verified else "legacy_tenant_id", fallback=not verified)
+    # A display name is only a legacy fallback when known immutable IDs do not
+    # contradict each other. Different tenants can have the same display name.
+    known_tenant_ids = {tenant_id for tenant_id in tenant_ids if tenant_id}
+    domains = [str(run.get("workspace_domain") or identity.get("domain") or "").lower() for run, identity in zip(runs, identities)]
+    if len(known_tenant_ids) <= 1:
+        if len({domain for domain in domains if domain}) > 1:
+            return {**context, "identity_basis": "different_domain_aliases"}
+        if domains and all(domains) and len(set(domains)) == 1:
+            return matched(domains[0], "domain_alias", fallback=True)
+        if tenant_names and all(tenant_names) and len(set(tenant_names)) == 1:
+            return matched(tenant_names[0], "legacy_tenant_name", fallback=True)
+    return context
+
+
+def require_same_tenant_runs(run_dirs: Iterable[str | Path]) -> dict[str, Any]:
+    """Shared identity guard for finding-only consumers such as drift gates."""
+    context = _tenant_gate([RunBundle(run_dir).metadata() for run_dir in run_dirs])
+    if context["gate"] != "same_tenant":
+        raise ValueError(f"refusing to compare runs: {context['gate']}")
+    return context
 
 
 def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -77,20 +108,13 @@ def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _blocked_diff(left_run: dict[str, Any], right_run: dict[str, Any], reason: str) -> dict[str, Any]:
-    same_tenant = (
-        bool(left_run.get("tenant_id"))
-        and left_run.get("tenant_id") == right_run.get("tenant_id")
-    ) or (
-        bool(left_run.get("tenant_name"))
-        and left_run.get("tenant_name") == right_run.get("tenant_name")
-    )
-    same_platform = (left_run.get("platform") or "m365") == (right_run.get("platform") or "m365")
+    context = _tenant_gate([left_run, right_run])
     return {
         "left_run": _public_run(left_run),
         "right_run": _public_run(right_run),
         "status": "blocked",
         "reason": reason,
-        "compare_context": {"same_tenant": same_tenant, "same_platform": same_platform, "gate": reason},
+        "compare_context": {**context, "gate": reason},
         "summary": {"added": 0, "removed": 0, "changed": 0, "object_kinds": 0},
         "changes": {},
         "compared_files": [],
@@ -113,13 +137,16 @@ def _public_run(run: dict[str, Any]) -> dict[str, Any]:
 def _compare_pair(
     left_run: dict[str, Any],
     right_run: dict[str, Any],
-    same_tenant: bool,
+    context: dict[str, Any],
     *,
     allow_cross_tenant: bool,
     classic: bool,
 ) -> dict[str, Any]:
     if (left_run.get("platform") or "m365") != (right_run.get("platform") or "m365"):
         return _blocked_diff(left_run, right_run, "same_platform_required")
+    if context["gate"] in {"tenant_identity_conflict", "tenant_id_mismatch"}:
+        return _blocked_diff(left_run, right_run, context["gate"])
+    same_tenant = context["same_tenant"]
     if not same_tenant and not allow_cross_tenant:
         return _blocked_diff(left_run, right_run, "same_tenant_required")
     diff = diff_run_directories(left_run["path"], right_run["path"], classic=classic)
@@ -128,6 +155,7 @@ def _compare_pair(
     diff["status"] = "ok"
     diff["reason"] = None
     diff["compare_context"] = {
+        **context,
         "same_tenant": same_tenant,
         "same_platform": True,
         "gate": "same_tenant" if same_tenant else "allow_cross_tenant",
@@ -156,14 +184,14 @@ def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenan
     adjacent_diffs: list[dict[str, Any]] = []
     for left_run, right_run in zip(ordered_runs, ordered_runs[1:]):
         adjacent_diffs.append(
-            _compare_pair(left_run, right_run, compare_context["same_tenant"], allow_cross_tenant=allow_cross_tenant, classic=classic)
+            _compare_pair(left_run, right_run, compare_context, allow_cross_tenant=allow_cross_tenant, classic=classic)
         )
 
     if len(ordered_runs) >= 2:
         baseline_diff = _compare_pair(
             ordered_runs[0],
             ordered_runs[-1],
-            compare_context["same_tenant"],
+            compare_context,
             allow_cross_tenant=allow_cross_tenant,
             classic=classic,
         )
@@ -314,6 +342,7 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
         f"- Before: {_md(before.get('run_id') or before.get('path'))} ({_md(before.get('created_utc'))})",
         f"- After: {_md(after.get('run_id') or after.get('path'))} ({_md(after.get('created_utc'))})",
         f"- Runs compared: {len(runs)}",
+        f"- Tenant identity: {_md(context.get('identity_basis', 'unknown'))} (verified: {str(bool(context.get('identity_verified'))).lower()})",
     ]
     if baseline.get("status") == "blocked":
         lines += [f"- Status: blocked ({_md(baseline.get('reason'))})", ""]

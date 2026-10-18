@@ -1,0 +1,76 @@
+{
+  "schema_version": "2026-10-18",
+  "verified_at": "2026-10-18",
+  "tenant_access": false,
+  "external_execution": false,
+  "inference_executed": false,
+  "training_executed": false,
+  "assembly_method": "Review source data and recorded outputs; train one base-model adapter after approval and evaluation. No cross-architecture weight merge.",
+  "sources": [
+    {
+      "id": "openadmin-8b",
+      "repository": "OpenAdminOS/openadmin-8b",
+      "url": "https://huggingface.co/OpenAdminOS/openadmin-8b",
+      "revision": "7a788e3d56b6146b6248966b55d990edd419a5ec",
+      "role": "comparison_model_and_possible_teacher",
+      "format": "GGUF Q4_K_M",
+      "artifact": "openadmin-8b-Q4_K_M.gguf",
+      "bytes": 5198385984,
+      "sha256": "050f74746c39cadefcca4966e40d175e829433cb8c35fdc646ed8a7b50d77009",
+      "author_declared_base": "mistralai/Ministral-3-8B-Instruct-2512",
+      "availability": "Inference artifact acquired. Full precision weights and LoRA adapters are absent from this specialist repository.",
+      "evaluation": "Author-reported results only; not independently run."
+    },
+    {
+      "id": "m365-expert-v3",
+      "repository": "AYI-NEDJIMI/m365-expert-v3",
+      "url": "https://huggingface.co/AYI-NEDJIMI/m365-expert-v3",
+      "revision": "af16949cc5e84e2d1828a88dfd01a1d3d7e0d658",
+      "role": "comparison_model_and_possible_teacher",
+      "format": "GGUF Q4_K_M",
+      "artifact": "m365-expert-v3-Q4_K_M.gguf",
+      "bytes": 5027783392,
+      "sha256": "bf8c234a578f5f107964a93846902ec610273afd3252307ee7b4ef51d88238b1",
+      "author_declared_base": "Qwen/Qwen3-8B",
+      "availability": "Inference artifact acquired. A matching public corpus for the claimed 40962 training examples was not established.",
+      "evaluation": "Author-reported results only; not independently run."
+    },
+    {
+      "id": "openadmin-public-sft",
+      "repository": "OpenAdminOS/openadmin-sft",
+      "url": "https://huggingface.co/datasets/OpenAdminOS/openadmin-sft",
+      "revision": "96322ce9bf9c449ec2ddc01774338598931ae617",
+      "role": "unreviewed_reference_conversations",
+      "format": "JSONL conversations",
+      "availability": "499 unique v1 examples acquired. train-v1 duplicates the four component tracks; this is not the full released 8B corpus."
+    },
+    {
+      "id": "openadmin-model-pipeline",
+      "repository": "OpenAdminOS/OpenAdminOS",
+      "url": "https://github.com/OpenAdminOS/OpenAdminOS",
+      "revision": "db79d97c66739c2eb4f61451ee6ba5577d1fb2ee",
+      "role": "unreviewed_data_and_evaluation_reference",
+      "format": "JSONL tracks, YAML evaluation cases, source recipes",
+      "availability": "Sparse model pipeline acquired: 25 training JSONL files, 408 task YAML files, 40 holdout YAML files. Assembled training runs overlap; do not concatenate them as independent examples.",
+      "execution": "Source generators, harness and hosted-service calls were not executed."
+    },
+    {
+      "id": "qwen-auditex-base-candidate",
+      "repository": "Qwen/Qwen3.8-27B",
+      "url": "https://huggingface.co/Qwen/Qwen3.8-27B",
+      "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+      "role": "proposed_single_training_base",
+      "format": "Qwen3.5-family multimodal configuration; use explicit text backbone",
+      "availability": "Metadata pinned; weights not acquired or runtime-qualified for this work."
+    },
+    {
+      "id": "ministral-base-reference",
+      "repository": "mistralai/Ministral-3-8B-Instruct-2512",
+      "url": "https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512",
+      "revision": "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d",
+      "role": "alternative_base_reference",
+      "format": "Published checkpoint requires separate precision and runtime qualification",
+      "availability": "Metadata pinned; weights not acquired. OpenAdmin's source recipe uses a separate mirror."
+    }
+  ]
+}

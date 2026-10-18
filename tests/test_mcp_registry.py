@@ -20,6 +20,8 @@ def test_registry_owns_tool_names_and_read_only_hints(monkeypatch) -> None:
     assert by_name["auditex_proof_table"]["readOnlyHint"] is True
     assert by_name["auditex_enterprise_handoff"]["readOnlyHint"] is True
     assert by_name["auditex_verify_customer_pack"]["readOnlyHint"] is True
+    assert by_name["auditex_normalize_external_assessment"]["readOnlyHint"] is True
+    assert by_name["auditex_compare_external_assessments"]["readOnlyHint"] is True
     assert "auditex_run_response_action" not in by_name
     assert len(by_name) == len(specs)
 

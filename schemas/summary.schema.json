@@ -6,6 +6,9 @@
   "properties": {
     "schema_version": { "type": "string" },
     "tenant_name": { "type": "string" },
+    "tenant_id": { "type": ["string", "null"] },
+    "tenant_id_requested": { "type": ["string", "null"] },
+    "tenant_identity": { "type": "object" },
     "run_id": { "type": "string" },
     "overall_status": { "type": ["string", "null"] },
     "duration_seconds": { "type": ["number", "integer", "null"] },

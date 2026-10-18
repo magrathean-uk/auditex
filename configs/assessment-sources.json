@@ -1,0 +1,145 @@
+{
+  "schema_version": "2026-10-18",
+  "sources": [
+    {
+      "id": "maester",
+      "repository": "https://github.com/maester365/maester",
+      "revision": "7413c42d3fcc724dfea94d2726e690ddd364d914",
+      "release_ref": "2.3.0",
+      "role": "assessment_format",
+      "use": "Pester check results and independent assessment comparison",
+      "paths": [
+        "powershell/internal/ConvertTo-MtMaesterResult.ps1",
+        "powershell/public/Get-MtConditionalAccessPolicy.ps1"
+      ],
+      "import_supported": true
+    },
+    {
+      "id": "scubagear",
+      "repository": "https://github.com/cisagov/ScubaGear",
+      "revision": "2446ad723b7f55031cc02c8aca244d731d468cba",
+      "release_ref": null,
+      "role": "assessment_format",
+      "use": "CISA control results, raw-provider separation and API inventory",
+      "paths": [
+        "PowerShell/ScubaGear/Modules/Orchestrator.psm1",
+        "docs/execution/reports.md"
+      ],
+      "import_supported": true
+    },
+    {
+      "id": "monkey365",
+      "repository": "https://github.com/silverhack/monkey365",
+      "revision": "cecfcbe7e5fca891a9aae961369f927d3d9ed65d",
+      "release_ref": "v1.0.0",
+      "role": "assessment_format",
+      "use": "Declarative checks and structured cloud findings",
+      "paths": [
+        "src/monkey365/core/modules/monkeyoutput",
+        "src/monkey365/rules/rulesets/monkey_entra_0.1.json"
+      ],
+      "import_supported": true
+    },
+    {
+      "id": "entraexporter",
+      "repository": "https://github.com/microsoft/EntraExporter",
+      "revision": "ce0d04cf096611183258d65a8e5aa487c55a1f5f",
+      "release_ref": null,
+      "role": "coverage_reference",
+      "use": "Schema-based Graph endpoint and permission inventory",
+      "paths": [
+        "src/Get-EEDefaultSchema.ps1",
+        "src/Get-EERequiredScopes.ps1"
+      ],
+      "import_supported": false
+    },
+    {
+      "id": "cartography",
+      "repository": "https://github.com/cartography-cncf/cartography",
+      "revision": "d9944394187c405182145f982b3d26433e8cfd76",
+      "release_ref": null,
+      "role": "graph_reference",
+      "use": "Tenant-scoped relationship fixtures and observed versus derived graph facts",
+      "paths": [
+        "cartography/intel/microsoft",
+        "tests/data/microsoft/entra"
+      ],
+      "import_supported": false
+    },
+    {
+      "id": "microsoft365dsc",
+      "repository": "https://github.com/Microsoft365DSC/Microsoft365DSC",
+      "revision": "ec5bf30ecd96a5b5d14d9b146305720a0245f48e",
+      "release_ref": "2.26.1015.1",
+      "role": "adapter_reference",
+      "use": "Export adapter compatibility and module/runtime preflight",
+      "paths": [
+        "Modules/Microsoft365DSC"
+      ],
+      "import_supported": false
+    },
+    {
+      "id": "prowler",
+      "repository": "https://github.com/prowler-cloud/prowler",
+      "revision": "f45173997b8331e6cba3deac78bc2e1043b9281d",
+      "release_ref": null,
+      "role": "interface_reference",
+      "use": "Typed finding search and reviewer interfaces",
+      "paths": [
+        "mcp_server"
+      ],
+      "import_supported": false
+    },
+    {
+      "id": "cipp",
+      "repository": "https://github.com/KelvinTegelaar/CIPP",
+      "revision": "51953b2270963d8ef14f702f19d5ff0c13ad1ab0",
+      "release_ref": null,
+      "role": "workflow_reference",
+      "use": "Assessment states, licence-aware review and drift triage",
+      "paths": [
+        "public"
+      ],
+      "import_supported": false
+    },
+    {
+      "id": "cipp-mcp",
+      "repository": "https://github.com/Servosity/msp-skills",
+      "revision": "a79e29c9b1d5bf08024001fc368e26b202dc5600",
+      "release_ref": null,
+      "role": "interface_reference",
+      "use": "Offline fleet analytics and read-only query interfaces",
+      "paths": [
+        "skills/cipp/cli/internal/mcp",
+        "skills/cipp/cli/internal/cli"
+      ],
+      "import_supported": false
+    },
+    {
+      "id": "entra-posture-ai",
+      "repository": "https://github.com/kumaran16/ps-entra-tenant-security-posture-ai-analyzer",
+      "revision": "f5681f0eedec4c6a2378dc1e54bac72c1cd81dc2",
+      "release_ref": null,
+      "role": "reasoning_reference",
+      "use": "Curated evidence and confirmed-findings versus collection-gap separation",
+      "paths": [
+        "Entra-Tenant-Security-Posture-AI-Analyzer.ps1"
+      ],
+      "import_supported": false
+    },
+    {
+      "id": "entra-audit-agent",
+      "repository": "https://github.com/stasdot/entra-audit-agent",
+      "revision": "3b69f11989c1be24145433c954b9ef28b4cf8ec4",
+      "release_ref": null,
+      "role": "reasoning_reference",
+      "use": "Entity-oriented assessment review and persistent findings",
+      "paths": [
+        "app.py"
+      ],
+      "import_supported": false
+    }
+  ],
+  "tenant_access": false,
+  "external_execution": false
+}

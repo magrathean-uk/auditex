@@ -163,7 +163,9 @@ def test_response_execute_uses_jwt_saved_auth_context_and_writes_auth_artifact(t
     assert auth_context["name"] == "customer-token"
     assert auth_context["tenant_id"] == "tenant-saved"
     assert auth_context["token_claims"]["delegated_scopes"] == ["Directory.Read.All"]
-    assert manifest["tenant_id"] == "tenant-saved"
+    assert manifest["tenant_id"] is None
+    assert manifest["tenant_id_requested"] == "tenant-saved"
+    assert manifest["tenant_identity"]["status"] == "unknown"
     validation = json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))
     assert manifest["auth_context_path"] == "auth-context.json"
     assert manifest["contract_status"] == "valid"

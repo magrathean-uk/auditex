@@ -24,6 +24,15 @@ google = [
     "google-auth-oauthlib>=1.4.1,<2",
     "google-api-python-client>=2.200.0,<3",
 ]
+# Candidate training environment only; Arm64/GH200 qualification is separate.
+model_train = [
+    "torch==2.14.1",
+    "transformers==5.20.1",
+    "trl==1.16.0",
+    "peft==0.21.2",
+    "accelerate==1.15.0",
+    "datasets==5.1.0",
+]
 
 [project.scripts]
 azure-tenant-audit = "azure_tenant_audit.cli:main"
@@ -59,4 +68,5 @@ auditex = ["explorer_assets/*.css", "explorer_assets/*.html", "explorer_assets/*
 "auditex/skills/evidence-pack" = ["skills/evidence-pack/SKILL.md"]
 "auditex/examples/sample_audit_bundle" = ["examples/sample_audit_bundle/*.json"]
 "auditex/examples/demo_tenant" = ["examples/demo_tenant/*.json"]
+"auditex/examples/model_development" = ["examples/model_development/*.jsonl"]
 "auditex/examples" = ["examples/google_workspace_sample.json"]

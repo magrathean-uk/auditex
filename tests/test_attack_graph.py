@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import copy
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.attack_graph import analyze_attack_graph
+import pytest
+
+from azure_tenant_audit.attack_graph import analyze_attack_graph, build_attack_graph
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.findings import build_findings, build_report_pack
 from azure_tenant_audit.normalize import build_normalized_snapshot
@@ -170,6 +173,24 @@ def test_pim_eligible_assignment_is_marked_and_no_mfa_entry_hop_is_added() -> No
     assert role_hop["evidence_ref"]["artifact_path"] == "normalized/governance_objects.json"
     assert "PIM-eligible" in path["summary"]
     assert path["hop_count"] == 1
+    assert path["classification"] == "conditional_hypothesis"
+    assert path["execution_verified"] is False
+    assert path["hops"][0]["basis"] == "registration_report"
+    assert any("effective sign-in protection" in item for item in path["unmet_preconditions"])
+    assert any("PIM activation" in item for item in path["unmet_preconditions"])
+    assert "can reach" not in path["summary"]
+    assert path["hops"][0]["from"] == "MFA registration report"
+
+
+def test_mfa_registration_gap_does_not_increase_score_as_if_sign_in_protection_were_absent() -> None:
+    payloads = _payloads()
+    absent = _path_from(analyze_attack_graph(_snapshot(payloads)), "eligible@contoso.example")
+    payloads["auth_methods"]["userRegistrationDetails"]["value"][1]["isMfaRegistered"] = True
+    registered = _path_from(analyze_attack_graph(_snapshot(payloads)), "eligible@contoso.example")
+
+    assert absent is not None and registered is not None
+    assert absent["risk_score"] == registered["risk_score"]
+    assert absent["classification"] == registered["classification"] == "conditional_hypothesis"
 
 
 def test_no_path_when_owner_removed() -> None:
@@ -322,6 +343,54 @@ def test_long_lived_app_secret_is_a_foothold_without_sensitive_keys() -> None:
         return []
 
     assert not [key for key in keys(analysis) if sensitive.search(key)]
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ("2010-01-01T00:00:00Z", "2025-01-01T00:00:00Z"),  # expired despite its long lifetime
+        ("2027-01-01T00:00:00Z", "2035-01-01T00:00:00Z"),  # not active yet
+        ("2010-01-01T00:00:00Z", "2026-10-18T00:00:00Z"),  # expiry boundary
+        ("2010-01-01T00:00:00Z", None),  # unknown validity is not proof of usability
+        ("2010-01-01T00:00:00Z", "invalid-date"),
+    ],
+)
+def test_unusable_app_secret_does_not_create_a_credential_foothold(start: str, end: str | None) -> None:
+    payloads = _payloads()
+    payloads["app_credentials"] = {
+        "applicationCredentials": {
+            "value": [{
+                "id": "app-obj",
+                "display_name": "Payroll Export",
+                "app_id": "app-payroll",
+                "password_credentials": [{"start_date_time": start, "end_date_time": end}],
+            }]
+        }
+    }
+    snapshot = _snapshot(payloads)
+    now = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    graph = build_attack_graph(snapshot, now=now)
+
+    assert not any(edge.edge == "credential" and edge.target == "app:app-obj" for edge in graph.edges)
+    assert _path_from(analyze_attack_graph(snapshot, now=now), "Payroll Export") is None
+    # Independent observed ownership remains useful even without that foothold.
+    assert _path_from(analyze_attack_graph(snapshot, now=now), "owner@contoso.example") is not None
+
+
+def test_expired_secret_does_not_hide_an_independently_current_long_lived_secret() -> None:
+    snapshot = _snapshot()
+    snapshot["application_credential_objects"] = {"records": [{
+        "id": "app-obj", "key": "app:app-obj", "display_name": "Payroll Export", "app_id": "app-payroll",
+        "password_credentials": [
+            {"start_date_time": "2010-01-01T00:00:00Z", "end_date_time": "2025-01-01T00:00:00Z"},
+            {"start_date_time": "2026-01-01T00:00:00Z", "end_date_time": "2030-01-01T00:00:00Z"},
+        ],
+    }]}
+    path = _path_from(analyze_attack_graph(snapshot, now=datetime(2026, 10, 18, tzinfo=timezone.utc)), "Payroll Export")
+
+    assert path is not None and path["foothold"] == "long_lived_secret"
+    assert path["execution_verified"] is False
+    assert any("possession and successful use" in item for item in path["unmet_preconditions"])
 
 
 def test_offline_known_bad_bundle_stays_contract_valid(tmp_path: Path) -> None:

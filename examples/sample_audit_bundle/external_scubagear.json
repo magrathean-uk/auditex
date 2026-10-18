@@ -1,0 +1,41 @@
+{
+  "Synthetic": true,
+  "Description": "Synthetic ScubaGear-shaped consolidated export for offline demonstrations. No tenant was contacted.",
+  "MetaData": {
+    "TenantId": "11111111-1111-4111-8111-111111111111",
+    "DisplayName": "Synthetic tenant",
+    "Tool": "ScubaGear",
+    "ToolVersion": "1.8.0",
+    "TimestampZulu": "2026-10-18T12:00:00Z"
+  },
+  "Results": {
+    "AAD": [
+      {
+        "GroupName": "Synthetic authentication checks",
+        "Controls": [
+          {
+            "Control ID": "MS.AAD.3.1v1",
+            "Requirement": "Synthetic phishing-resistant MFA requirement",
+            "Result": "Fail",
+            "Criticality": "Shall",
+            "Details": "Synthetic expected failure; this example contains no collected policy evidence."
+          },
+          {
+            "Control ID": "MS.AAD.3.2v2",
+            "Requirement": "Synthetic MFA requirement",
+            "Result": "Pass",
+            "Criticality": "Shall",
+            "Details": "Synthetic expected pass."
+          },
+          {
+            "Control ID": "MS.AAD.2.2v1",
+            "Requirement": "Synthetic notification configuration review",
+            "Result": "N/A",
+            "Criticality": "Should - Not-Implemented",
+            "Details": "Synthetic manual check; N/A means unverified here, not proven inapplicable."
+          }
+        ]
+      }
+    ]
+  }
+}

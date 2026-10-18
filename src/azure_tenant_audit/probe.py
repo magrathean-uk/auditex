@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import os
@@ -450,9 +451,22 @@ def _build_probe_snapshot(
     session_context: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     status_counts: dict[str, int] = {}
+    records: list[dict[str, Any]] = []
+    occurrences: dict[str, int] = {}
     for row in capability_matrix:
         status = str(row.get("status") or "unknown")
         status_counts[status] = status_counts.get(status, 0) + 1
+        # Labels repeat between collectors and per-object probes. Identify the
+        # operation, not its result, so status/count changes retain their key.
+        identity = {field: row.get(field) for field in (
+            "surface", "probe_mode", "collector", "type", "name", "endpoint", "command", "toolchain",
+        )}
+        digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        key = f"probe_capability:{digest}"
+        occurrences[key] = occurrences.get(key, 0) + 1
+        if occurrences[key] > 1:
+            key = f"{key}:{occurrences[key]}"
+        records.append({**row, "key": key})
     return {
         "snapshot": {
             "tenant_name": tenant_name,
@@ -466,7 +480,7 @@ def _build_probe_snapshot(
                 "roles": session_context.get("roles", []),
             },
         },
-        "capabilities": {"kind": "probe_capability", "records": capability_matrix},
+        "capabilities": {"kind": "probe_capability", "records": records},
         "toolchains": {"kind": "toolchain_readiness", "records": toolchain_rows},
     }
 
@@ -744,6 +758,11 @@ def run_live_probe(cfg: ProbeConfig) -> int:
             }
         )
 
+    claims = (auth_context_payload or {}).get("token_claims") or {}
+    observed_permissions = sorted(set(claims.get("delegated_scopes", []) + claims.get("app_roles", [])))
+    for row in capability_matrix:
+        if row.get("type") == "graph":
+            row["observed_permissions"] = observed_permissions
     capability_path = writer.write_json_artifact("capability-matrix.json", capability_matrix)
     toolchain_payload = {row["name"]: row for row in toolchain_rows}
     toolchain_path = writer.write_json_artifact("toolchain-readiness.json", toolchain_payload)
