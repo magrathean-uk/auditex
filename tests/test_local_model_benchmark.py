@@ -123,7 +123,7 @@ def _case(case_id="case-a", *, scenario="NORMAL", split="test", approved=True):
                        "review_status": "approved" if approved else "unreviewed",
                        **({"reviewer": "synthetic test reviewer"} if approved else {})},
         "messages": [{"role": "system", "content": "Return structured JSON."},
-                     {"role": "user", "content": f"{scenario} {case_id}: directory has count 2."},
+                     {"role": "user", "content": f"{scenario} {case_id} [{split}]: directory has count 2."},
                      {"role": "assistant", "content": json.dumps(response)}],
         "expected": {**response, "allowed_evidence_ids": ["directory", "EVALUATION_ONLY_MARKER"]},
     }

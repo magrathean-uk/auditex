@@ -26,16 +26,18 @@ from auditex.model_training import (
 REVISION = "1" * 40
 
 
-def _case(case_id: str, split: str = "train", *, approved: bool = True) -> dict:
+def _case(case_id: str, split: str = "train", *, approved: bool = True, scenario: str | None = None) -> dict:
     response = {
         "claims": [{"id": "count", "status": "confirmed", "evidence_ids": ["E1"], "value": 2}],
         "limitations": ["effective_sign_in_not_collected"], "recommendations": ["review_authentication"],
     }
+    # Prompts differ by scenario text, not only by case id: id-only variants count as the same example.
+    scenario = scenario or split
     return {
         "id": case_id, "family": f"family-{case_id}", "split": split,
         "provenance": {"source": "synthetic unit-test fixture", "synthetic": True,
                        "review_status": "approved" if approved else "unreviewed", "reviewer": "unit-test-only"},
-        "messages": [{"role": "user", "content": f"Case {case_id}: E1 records two privileged users. Explain the evidence."},
+        "messages": [{"role": "user", "content": f"Case {case_id}: E1 records two privileged users in scenario {scenario}. Explain the evidence."},
                      {"role": "assistant", "content": json.dumps(response)}],
         "expected": {**response, "allowed_evidence_ids": ["E1"]},
     }
@@ -61,7 +63,8 @@ def test_pack_separates_approved_splits_and_quarantines_proposed_labels(tmp_path
 
     manifest = prepare_training_pack(source, output, revision=REVISION)
 
-    assert manifest["counts"] == {"train": 1, "validation": 1, "test": 1, "quarantined": 1}
+    assert manifest["counts"] == {"train": 1, "validation": 1, "test": 1, "quarantined": 1,
+                                  "exported_train": 1, "exported_validation": 1}
     assert manifest["job_ready"] is True
     assert manifest["runtime_qualification"].startswith("pending")
     assert manifest["token_budget"]["training_tokens"] is None
@@ -69,15 +72,57 @@ def test_pack_separates_approved_splits_and_quarantines_proposed_labels(tmp_path
     assert manifest["one_base_model"] is True and manifest["weight_merging"] is False
     assert manifest["sources"][0]["sha256"] == hashlib.sha256(original).hexdigest()
     train = [json.loads(line) for line in (output / "train.jsonl").read_text().splitlines()]
-    assert set(train[0]) == {"prompt", "completion"}
+    assert set(train[0]) == {"prompt", "completion", "chat_template_kwargs"}
     assert train[0]["prompt"] == cases[0]["messages"][:-1]
     assert train[0]["completion"] == [cases[0]["messages"][-1]]
+    assert train[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert manifest["counts"]["exported_train"] == 1 and manifest["deduplicated_ids"] == {"train": [], "validation": []}
     assert load_cases(output / "test.jsonl") == [cases[2]]
     assert load_cases(output / "quarantine.jsonl") == [cases[3]]
     assert source.read_bytes() == original
     for name, digest in manifest["files"].items():
         assert hashlib.sha256((output / name).read_bytes()).hexdigest() == digest
     assert validate_training_pack(output)[0] == manifest
+
+
+def test_pack_exports_each_id_only_duplicate_once_and_keeps_approved_rows(tmp_path: Path) -> None:
+    twin = _case("train-twin", scenario="train")
+    twin["family"] = "family-train"
+    source = _write_cases(tmp_path / "cases.jsonl", [_case("train"), twin, _case("validation", "validation"), _case("test", "test")])
+    output = tmp_path / "pack"
+
+    manifest = prepare_training_pack(source, output, revision=REVISION)
+
+    assert manifest["counts"]["train"] == 2 and manifest["counts"]["exported_train"] == 1
+    assert manifest["deduplicated_ids"]["train"] == ["train-twin"]
+    assert len((output / "train.jsonl").read_text().splitlines()) == 1
+    assert len(load_cases(output / "approved-cases.jsonl")) == 4
+    validate_training_pack(output)
+
+
+def test_id_only_variant_across_splits_is_prompt_leakage(tmp_path: Path) -> None:
+    twin = _case("heldout", "test", scenario="train")
+    with pytest.raises(ValueError, match="normalized prompt leakage"):
+        validate_cases([_case("train"), twin])
+
+
+def test_training_overrides_are_allowlisted_and_recorded(tmp_path: Path) -> None:
+    source = _write_cases(tmp_path / "cases.jsonl", [_case("train"), _case("validation", "validation"), _case("test", "test")])
+    overrides = {"sft": {"max_steps": 30, "gradient_accumulation_steps": 2, "save_steps": 3, "eval_steps": 3,
+                         "save_total_limit": None, "warmup_steps": 0.1},
+                 "peft": {"r": 8, "lora_alpha": 16}}
+
+    manifest = prepare_training_pack(source, tmp_path / "pack", revision=REVISION, training_overrides=overrides)
+
+    config = json.loads((tmp_path / "pack" / "training-config.json").read_text())
+    assert config["sft"]["max_steps"] == 30 and config["sft"]["save_total_limit"] is None
+    assert config["sft"]["completion_only_loss"] is True and config["peft"]["r"] == 8
+    assert manifest["training_overrides"] == overrides
+    validate_training_pack(tmp_path / "pack")
+    for bad in ({"sft": {"completion_only_loss": False}}, {"sft": {"max_steps": 0}}, {"runtime": {}},
+                {"sft": {"load_best_model_at_end": True, "save_strategy": "epoch"}}):
+        with pytest.raises(ValueError):
+            prepare_training_pack(source, tmp_path / f"pack-{len(str(bad))}", revision=REVISION, training_overrides=bad)
 
 
 def test_unreviewed_only_pack_is_inspectable_but_cannot_load_training_runtime(tmp_path: Path) -> None:
@@ -348,3 +393,25 @@ def test_actual_tokenizer_preflight_excludes_test_and_refuses_silent_truncation(
     assert len(seen) == 2 and not any("Case test:" in prompt for prompt in seen)
     with pytest.raises(ValueError, match="instead of truncating"):
         _measure_training_tokens(cases, _Tokenizer(), 5)
+
+
+def test_tokenizer_preflight_reads_transformers_5_batch_encoding() -> None:
+    cases = [_case("train"), _case("validation", "validation")]
+
+    class _MappingTokenizer:
+        # Transformers 5 returns a BatchEncoding mapping; len() of it is the key count, not the token count.
+        def apply_chat_template(self, messages, **kwargs):
+            return {"input_ids": list(range(12)), "attention_mask": [1] * 12}
+
+    measured = _measure_training_tokens(cases, _MappingTokenizer(), 20)
+    assert measured["tokens_per_pass"] == {"train": 12, "validation": 12}
+    assert measured["max_case_tokens"] == 12
+    with pytest.raises(ValueError, match="instead of truncating"):
+        _measure_training_tokens(cases, _MappingTokenizer(), 11)
+
+    class _TensorTokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            return {"input_ids": [[1, 2, 3]]}
+
+    with pytest.raises(ValueError, match="flat list of token ids"):
+        _measure_training_tokens(cases, _TensorTokenizer(), 20)

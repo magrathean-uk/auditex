@@ -22,7 +22,8 @@ def test_prepare_example_cases_does_not_invent_approval(tmp_path, capsys):
     destination = tmp_path / "pack"
     assert main(["model", "prepare", "--cases", str(EXAMPLES / "cases.jsonl"), "--output-dir", str(destination), "--revision", REVISION]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert result["counts"] == {"train": 0, "validation": 0, "test": 0, "quarantined": 48}
+    assert result["counts"] == {"train": 0, "validation": 0, "test": 0, "quarantined": 48,
+                                "exported_train": 0, "exported_validation": 0}
     assert result["job_ready"] is False
     assert result["token_budget"]["gpu_hours"] is None
     assert (destination / "jupiter-auditex.sbatch").is_file()

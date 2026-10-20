@@ -11,7 +11,7 @@ Training and JUPITER runtime qualification remain separate steps.
 ## Available materials
 
 Run `auditex model sources` to inspect the pinned source inventory. The prepared
-external materials live under `/Volumes/4TB/models/auditex/`:
+external materials live under `/Volumes/4TB/dev/auditex-data/`:
 
 - Two downloaded, checksum-verified Q4_K_M GGUF comparison models: OpenAdmin 8B
   and M365 Expert v3, approximately 10.2 GB combined. These are inference
@@ -43,8 +43,8 @@ From the repository root, select the prepared kit directory. Use new output
 paths; commands refuse to replace existing results.
 
 ```sh
-source ~/dev/env.zsh
-export AUDITEX_MODEL_ROOT=/Volumes/4TB/models/auditex
+source ~/dev/machine/env.zsh
+export AUDITEX_MODEL_ROOT=/Volumes/4TB/dev/auditex-data
 export AUDITEX_KIT=/absolute/path/to/the/prepared/development-kit
 
 clean-development run --session session-only -- .venv/bin/auditex model sources
@@ -174,7 +174,15 @@ The pack contains `training-config.json`, `train_lora.py`, a guarded
 `jupiter-auditex.sbatch` and a checksum manifest. `job_ready` means approved
 train/validation/test data and an immutable base revision exist; runtime
 qualification remains a separate pending requirement. Unreviewed data cannot
-pass the launch guard. The default **100 optimizer steps is a pilot limit**, not
+pass the launch guard. Train and validation rows carry
+`chat_template_kwargs: {"enable_thinking": false}` so TRL renders exactly the
+thinking-off inference prefix (empty think block, no reasoning-effort preamble)
+and the completion-only loss starts at the JSON answer; evaluate adapters with
+thinking disabled. Id-only duplicates (same prompt and answer apart from the
+case id) are exported once and listed under `deduplicated_ids`. Pass
+`--training-overrides overrides.json` with reviewed `{"sft": {...}, "peft": {...}}`
+values (allow-listed keys only; the offline completion-only guards cannot be
+overridden) and the manifest records them. The default **100 optimizer steps is a pilot limit**, not
 a GPU-hour estimate; preparation leaves token counts and runtime unknown.
 
 Claude must stage the exact base checkpoint in the project Hugging Face cache,

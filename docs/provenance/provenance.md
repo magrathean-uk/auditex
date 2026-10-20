@@ -43,7 +43,7 @@ checkout or executes report content.
 model artifacts, OpenAdmin public dataset and source pipeline, and proposed
 base checkpoints. Reference models, original data and sparse source copies
 are retained outside the distributable tree under
-`/Volumes/4TB/models/auditex/` and the workspace's third-party area.
+`/Volumes/4TB/dev/auditex-data/` and the workspace's third-party area.
 Per-file hashes and upstream revisions accompany the development kit.
 
 Auditex's corpus staging, structured evaluator, case curation and training-pack

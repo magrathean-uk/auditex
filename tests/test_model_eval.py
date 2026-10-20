@@ -25,7 +25,7 @@ def _case(case_id: str = "case-a", *, split: str = "train", review: str = "appro
                        "review_status": review, **({"reviewer": "unit-test fixture reviewer"} if review == "approved" else {})},
         "messages": [
             {"role": "system", "content": "Return structured claims, limitations and recommendations only."},
-            {"role": "user", "content": f"Case {case_id}: directory evidence {case_id}:directory has count 2."},
+            {"role": "user", "content": f"Case {case_id} ({split}): directory evidence {case_id}:directory has count 2."},
             {"role": "assistant", "content": json.dumps(response)},
         ],
         "expected": {**response, "allowed_evidence_ids": [f"{case_id}:directory"]},

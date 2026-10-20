@@ -550,6 +550,8 @@ def _build_model_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--base-model", default="Qwen/Qwen3.8-27B", help="One Hugging Face model repository.")
     prepare.add_argument("--revision", help="Immutable 40-character base-model commit SHA.")
     prepare.add_argument("--max-steps", type=int, default=100, help="Pilot optimizer step limit for the generated recipe.")
+    prepare.add_argument("--training-overrides",
+                         help="JSON file with reviewed {\"sft\": {...}, \"peft\": {...}} hyperparameter overrides.")
     return parser
 
 
@@ -849,11 +851,15 @@ def main(argv: list[str] | None = None) -> int:
 
                 payload = stage_public_corpus(args.manifest, _model_output_directory(args.output_dir))
             elif args.model_command == "prepare":
-                from .model_training import prepare_training_pack
+                from .model_training import _parse_json, prepare_training_pack
 
+                overrides = None
+                if args.training_overrides:
+                    overrides = _parse_json(Path(args.training_overrides).read_text(encoding="utf-8"))
                 payload = prepare_training_pack(
                     args.cases, _model_output_directory(args.output_dir),
                     base_model=args.base_model, revision=args.revision, max_steps=args.max_steps,
+                    training_overrides=overrides,
                 )
             elif args.model_command == "evaluate":
                 from .model_eval import evaluate_responses

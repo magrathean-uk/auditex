@@ -7,6 +7,7 @@ by an explicitly invoked, qualified-runtime training entry point.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import hashlib
 import json
 import os
@@ -119,12 +120,46 @@ def validate_case(payload: Any) -> dict[str, Any]:
     return payload
 
 
-def _normalized_prompt(case: dict[str, Any]) -> str:
-    messages = [
-        {"role": item["role"], "content": " ".join(unicodedata.normalize("NFKC", item["content"]).casefold().split())}
-        for item in case["messages"][:-1]
-    ]
+def _normalized_prompt(case: dict[str, Any], *, mask_id: bool = False) -> str:
+    """Casefolded, whitespace-normalized prompt; with mask_id the case's own id is hidden where it labels
+    the case (the quoted case_id value and the `<id>:` evidence-id prefix), so id-only variants compare equal."""
+    case_id = case["id"].strip()
+    messages = []
+    for item in case["messages"][:-1]:
+        content = item["content"]
+        if mask_id:
+            content = content.replace(f'"{case_id}"', '"<case>"').replace(f"{case_id}:", "<case>:")
+        messages.append({"role": item["role"],
+                         "content": " ".join(unicodedata.normalize("NFKC", content).casefold().split())})
     return json.dumps(messages, ensure_ascii=False, sort_keys=True)
+
+
+def _answer_key(case: dict[str, Any], *, mask_id: bool = False) -> str:
+    """Canonical answer; with mask_id the `<id>:` evidence prefix is hidden, matching _normalized_prompt."""
+    case_id = case["id"].strip()
+    expected = case["expected"]
+    response = {key: expected[key] for key in ("claims", "limitations", "recommendations")}
+    allowed = set(expected["allowed_evidence_ids"])
+    if mask_id:
+        response["claims"] = [{**claim, "evidence_ids": [item.replace(f"{case_id}:", "<case>:") for item in claim["evidence_ids"]]}
+                              for claim in expected["claims"]]
+        allowed = {item.replace(f"{case_id}:", "<case>:") for item in allowed}
+    return _response_key(response, allowed)
+
+
+def distinct_cases(cases: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Keep the first of each id-only duplicate (same masked prompt and answer); report the dropped ids."""
+    kept: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for case in cases:
+        key = (_normalized_prompt(case, mask_id=True), _answer_key(case, mask_id=True))
+        if key in seen:
+            dropped.append(case["id"].strip())
+            continue
+        seen.add(key)
+        kept.append(case)
+    return kept, dropped
 
 
 def validate_cases(cases: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -140,21 +175,21 @@ def validate_cases(cases: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ValueError(f"duplicate case id: {case_id}")
         ids.add(case_id)
         family = unicodedata.normalize("NFKC", case["family"]).strip().casefold()
-        prompt = _normalized_prompt(case)
         split = case["split"]
         if family in families and families[family] != split:
             raise ValueError(f"family leakage across splits: {case['family']}")
-        if prompt in prompts and prompts[prompt] != split:
-            raise ValueError(f"normalized prompt leakage across splits: {case_id}")
-        expected = case["expected"]
-        answer = _response_key(
-            {key: expected[key] for key in ("claims", "limitations", "recommendations")},
-            set(expected["allowed_evidence_ids"]),
-        )
-        if prompt in answers and answers[prompt] != answer:
-            raise ValueError(f"conflicting labels for normalized prompt: {case_id}")
-        answers[prompt] = answer
-        families[family] = prompts[prompt] = split
+        # Both the literal prompt and the id-masked prompt must stay inside one split with one answer, so a
+        # copied prompt and an id-only re-skin are both caught.
+        for mask_id in (False, True):
+            prompt = _normalized_prompt(case, mask_id=mask_id)
+            answer = _answer_key(case, mask_id=mask_id)
+            if prompt in prompts and prompts[prompt] != split:
+                raise ValueError(f"normalized prompt leakage across splits: {case_id}")
+            if prompt in answers and answers[prompt] != answer:
+                raise ValueError(f"conflicting labels for normalized prompt: {case_id}")
+            answers[prompt] = answer
+            prompts[prompt] = split
+        families[family] = split
         result.append(case)
     return result
 
@@ -202,7 +237,46 @@ def _outside_audit_runs(path: Path) -> None:
 
 
 def _trl_record(case: dict[str, Any]) -> dict[str, Any]:
-    return {"prompt": case["messages"][:-1], "completion": [case["messages"][-1]]}
+    # TRL applies the chat template per example with these kwargs. Thinking must be off so the prompt renders
+    # exactly as the thinking-off inference prefix (empty think block, no reasoning-effort preamble) and the
+    # completion-only loss starts at the JSON answer.
+    return {"prompt": case["messages"][:-1], "completion": [case["messages"][-1]],
+            "chat_template_kwargs": {"enable_thinking": False}}
+
+
+_SFT_OVERRIDE_KEYS = {
+    # warmup_steps takes an integer step count or a float ratio in [0, 1); transformers 5 has no warmup_ratio.
+    "max_steps", "num_train_epochs", "learning_rate", "lr_scheduler_type", "warmup_steps",
+    "weight_decay", "max_grad_norm", "per_device_train_batch_size", "per_device_eval_batch_size",
+    "gradient_accumulation_steps", "save_strategy", "save_steps", "save_total_limit", "eval_strategy", "eval_steps",
+    "logging_steps", "load_best_model_at_end", "metric_for_best_model", "greater_is_better", "max_length", "seed",
+    "ddp_find_unused_parameters", "dataloader_num_workers",
+}
+_PEFT_OVERRIDE_KEYS = {"r", "lora_alpha", "lora_dropout", "target_modules", "use_rslora", "use_dora"}
+
+
+def _apply_training_overrides(config: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, Any]:
+    """Merge a reviewed {"sft": {...}, "peft": {...}} document; the recipe's guards cannot be overridden."""
+    if overrides is None:
+        return config
+    if not isinstance(overrides, dict) or not set(overrides) <= {"sft", "peft"}:
+        raise ValueError("training overrides must be an object with only sft and/or peft sections")
+    for section, allowed in (("sft", _SFT_OVERRIDE_KEYS), ("peft", _PEFT_OVERRIDE_KEYS)):
+        values = overrides.get(section, {})
+        if not isinstance(values, dict):
+            raise ValueError(f"training overrides {section} must be an object")
+        unknown = sorted(set(values) - allowed)
+        if unknown:
+            raise ValueError(f"training overrides {section} keys not allowed: {', '.join(unknown)}")
+        config[section].update(values)
+    sft = config["sft"]
+    if type(sft.get("max_steps")) is not int or type(sft.get("per_device_train_batch_size")) is not int \
+            or type(sft.get("gradient_accumulation_steps")) is not int or sft["per_device_train_batch_size"] < 1 \
+            or sft["gradient_accumulation_steps"] < 1 or (sft["max_steps"] < 1 and sft["max_steps"] != -1):
+        raise ValueError("max_steps must be -1 (epochs) or positive; batch and accumulation must be positive integers")
+    if sft.get("load_best_model_at_end") and (sft.get("save_strategy") != sft.get("eval_strategy")):
+        raise ValueError("load_best_model_at_end requires matching save and eval strategies")
+    return config
 
 
 _TRAIN_SCRIPT = '''#!/usr/bin/env python3
@@ -215,13 +289,17 @@ if __name__ == "__main__":
 
 _SLURM_SCRIPT = '''#!/bin/bash
 # Submit manually with the confirmed account, e.g. sbatch --account=ACCOUNT this-file.
+#SBATCH --job-name=auditex-pilot
 #SBATCH --partition=booster
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=288
 #SBATCH --gpus-per-node=4
-#SBATCH --time=00:30:00
+#SBATCH --exclusive
+#SBATCH --time=01:30:00
 set -euo pipefail
+# Slurm 22.05-23.02 stopped passing --cpus-per-task to srun steps; exporting it keeps every rank's threads.
+export SRUN_CPUS_PER_TASK="${SLURM_CPUS_PER_TASK:-288}"
 : "${JUPITER_ENV_SETUP:?Set an absolute, qualified Arm64 environment setup file}"
 : "${AUDITEX_PACK_DIR:?Set the absolute reviewed training-pack directory}"
 : "${AUDITEX_TRAIN_OUTPUT:?Set a new durable checkpoint/output directory}"
@@ -254,11 +332,14 @@ def prepare_training_pack(
     base_model: str = DEFAULT_BASE_MODEL,
     revision: str | None = None,
     max_steps: int = 100,
+    training_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Prepare one base model's data and recipes, preserving proposed labels."""
     paths = [case_paths] if isinstance(case_paths, (str, Path)) else list(case_paths)
     if not paths:
         raise ValueError("at least one cases JSONL is required")
+    if training_overrides is not None:
+        json.dumps(training_overrides, allow_nan=False)
     base_model = _text(base_model, "base_model")
     if not _MODEL_ID.fullmatch(base_model):
         raise ValueError("base_model must identify one owner/model repository, not a local path or model list")
@@ -270,13 +351,16 @@ def prepare_training_pack(
     approved = [case for case in cases if case["provenance"]["review_status"] == "approved"]
     quarantined = [case for case in cases if case["provenance"]["review_status"] != "approved"]
     splits = {split: [case for case in approved if case["split"] == split] for split in sorted(_SPLITS)}
+    # Id-only duplicates would give one template double weight; export each distinct example once.
+    distinct_train, dropped_train = distinct_cases(splits["train"])
+    distinct_validation, dropped_validation = distinct_cases(splits["validation"])
     destination = Path(output_dir)
     _outside_audit_runs(destination)
     if destination.is_symlink() or destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
         raise ValueError("training output directory must be new or empty")
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _write_jsonl(destination / "train.jsonl", (_trl_record(case) for case in splits["train"]))
-    _write_jsonl(destination / "validation.jsonl", (_trl_record(case) for case in splits["validation"]))
+    _write_jsonl(destination / "train.jsonl", (_trl_record(case) for case in distinct_train))
+    _write_jsonl(destination / "validation.jsonl", (_trl_record(case) for case in distinct_validation))
     _write_jsonl(destination / "test.jsonl", splits["test"])
     _write_jsonl(destination / "approved-cases.jsonl", approved)
     _write_jsonl(destination / "quarantine.jsonl", quarantined)
@@ -290,9 +374,10 @@ def prepare_training_pack(
             "gradient_checkpointing_kwargs": {"use_reentrant": False},
             "completion_only_loss": True, "max_length": 4096, "max_steps": max_steps,
             "per_device_train_batch_size": 1, "gradient_accumulation_steps": 8,
-            "learning_rate": 0.0001, "num_train_epochs": 2,
+            "learning_rate": 0.0001, "lr_scheduler_type": "cosine", "warmup_steps": 0.05, "num_train_epochs": 2,
             "save_strategy": "steps", "save_steps": 25, "save_total_limit": 2,
             "eval_strategy": "steps", "eval_steps": 25, "logging_steps": 5,
+            "load_best_model_at_end": True, "metric_for_best_model": "eval_loss", "greater_is_better": False,
             "report_to": "none", "seed": 42,
         },
         "local_files_only": True,
@@ -301,6 +386,7 @@ def prepare_training_pack(
         "runtime_package_candidates": RUNTIME_PACKAGE_CANDIDATES,
         "text_only": True,
     }
+    config = _apply_training_overrides(config, training_overrides)
     _write_json(destination / "training-config.json", config)
     (destination / "train_lora.py").write_text(_TRAIN_SCRIPT, encoding="utf-8")
     (destination / "jupiter-auditex.sbatch").write_text(_SLURM_SCRIPT, encoding="utf-8")
@@ -317,7 +403,10 @@ def prepare_training_pack(
         "base_model": base_model, "base_revision": config["revision"],
         "one_base_model": True, "weight_merging": False,
         "sources": sources,
-        "counts": {**{split: len(rows) for split, rows in splits.items()}, "quarantined": len(quarantined)},
+        "counts": {**{split: len(rows) for split, rows in splits.items()}, "quarantined": len(quarantined),
+                   "exported_train": len(distinct_train), "exported_validation": len(distinct_validation)},
+        "deduplicated_ids": {"train": dropped_train, "validation": dropped_validation},
+        "training_overrides": training_overrides,
         "families": {split: sorted({case["family"] for case in rows}) for split, rows in splits.items()},
         "job_ready": not blocked,
         "blocked_reasons": blocked,
@@ -367,7 +456,7 @@ def validate_training_pack(pack_dir: str | Path) -> tuple[dict[str, Any], dict[s
         if not selected or len(selected) != manifest["counts"][split]:
             raise ValueError(f"approved {split} cases missing or count mismatch")
         records = [_parse_json(line) for line in (root / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()]
-        expected = selected if split == "test" else [_trl_record(case) for case in selected]
+        expected = selected if split == "test" else [_trl_record(case) for case in distinct_cases(selected)[0]]
         if records != expected:
             raise ValueError(f"{split} export conflicts with approved cases")
     return manifest, config
@@ -402,7 +491,12 @@ def _measure_training_tokens(cases: list[dict[str, Any]], tokenizer: Any, max_le
     for case in cases:
         if case["split"] not in counts:
             continue
-        tokens = tokenizer.apply_chat_template(case["messages"], tokenize=True, add_generation_prompt=False)
+        encoded = tokenizer.apply_chat_template(case["messages"], tokenize=True, add_generation_prompt=False,
+                                                enable_thinking=False)
+        # Transformers 5 returns a BatchEncoding mapping by default; earlier releases return the id list.
+        tokens = encoded["input_ids"] if isinstance(encoded, Mapping) else encoded
+        if not isinstance(tokens, (list, tuple)) or not all(isinstance(token, int) for token in tokens):
+            raise ValueError("tokenizer must return a flat list of token ids for the length guard")
         length = len(tokens)
         if not 0 < length <= max_length:
             raise ValueError(f"case {case['id']} has {length} tokens; review it before training instead of truncating at {max_length}")
@@ -501,11 +595,20 @@ def training_main(argv: list[str] | None = None) -> int:
     trainer.save_state()
     if trainer.is_world_process_zero():
         tokenizer.save_pretrained(output / "adapter")
+        trainable, total = trainer.model.get_nb_trainable_parameters()
+        adapter_keys = [name for name, _ in trainer.model.named_parameters() if "lora_A" in name]
         _write_json(output / "auditex-training-run.json", {
             "base_model": manifest["base_model"], "base_revision": manifest["base_revision"],
             "pack_manifest_sha256": _digest(root / "manifest.json"), "metrics": result.metrics,
             "runtime_package_versions": {name: version(name) for name in RUNTIME_PACKAGE_CANDIDATES},
             "token_budget": token_budget,
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"), "world_size": int(os.environ.get("WORLD_SIZE", "1")),
+            "trainable_parameters": trainable, "total_parameters": total,
+            "adapter_key_prefix_sample": adapter_keys[:1],
+            "adapter_note": "LoRA keys follow the text-only Qwen3_5ForCausalLM module names (model.layers.*); "
+                            "loading into Qwen3_5ForConditionalGeneration or a serving runtime needs the "
+                            "model.language_model.* prefix mapped back and must be verified before deployment.",
+            "log_history": trainer.state.log_history,
             "evaluation_status": "independent_held_out_evaluation_required", "test_cases_used_for_training": False,
         })
     return 0
