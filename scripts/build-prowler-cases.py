@@ -19,14 +19,24 @@ leaves it unmapped, otherwise any `MANUAL` part makes it `MANUAL`, otherwise it 
 
 Prowler needs its own dependencies (pydantic, msgraph-sdk, microsoft-kiota-abstractions, azure-identity, msal, colorama,
 dnspython, python-dateutil, pyyaml, jsonschema); run this script with an interpreter that has them. See
-docs/guides/model-development.md for the exact setup. Builders exist for the Entra (AAD) checks and the Global Administrator
-count; other mapped checks are reported as `no_builder`.
+docs/guides/model-development.md for the exact setup. Builders exist for every mapped check: Entra and the Admin Center
+(AAD), Exchange, Defender, Purview (SecuritySuite and EXO), SharePoint and Teams. A check with no builder is reported as
+`no_builder`.
+
+Evidence rules, shared by every builder. A setting the check reads and the variant carries is passed through unchanged. A
+setting the check reads and the variant lacks is central (UNMAPPED, `evidence_missing:<section>.<key>`) or peripheral, meaning
+ScubaGear never exports it: it is then assumed compliant, so the verdict can fail only on exported evidence, and the
+assumption is written on every row. A check whose evidence ScubaGear does not export at all is UNMAPPED with
+`not_exported:<what>`. Policies that ScubaGear skips in a US Government region are UNMAPPED with
+`scubagear_not_applicable:us_government_region`, with Prowler's own verdict kept as `prowler_status`.
 
 The output directory is new; an existing one is refused.
 """
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import hashlib
 import importlib
 import json
@@ -192,7 +202,7 @@ def consensus_row(facts: dict, mapped: list[dict], verdict_rows: list[dict] | No
     if verdict_rows is None:
         out["reason"] = "variant_not_found"
         return out
-    out["prowler_checks"] = [{k: r.get(k) for k in ("prowler_check", "status", "status_extended", "reason", "assumptions") if r.get(k)}
+    out["prowler_checks"] = [{k: r.get(k) for k in ("prowler_check", "status", "prowler_status", "status_extended", "reason", "assumptions") if r.get(k)}
                              for r in verdict_rows]
     status, reason = combine_statuses(verdict_rows)
     out["prowler_verdict"] = status
@@ -401,6 +411,342 @@ def build_directory_roles(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[s
     return {"directory_roles": {"Global Administrator": role}}, []
 
 
+# ---- Exchange, Defender, Purview, SharePoint and Teams ---------------------------------------------------------------
+#
+# Rules shared by these builders. A setting a check reads and the variant carries is passed through unchanged. A setting
+# the check reads and the variant does not carry is either central (the check cannot say anything without it: the
+# builder raises `evidence_missing:<section>.<key>`) or peripheral (ScubaGear never exports it: it is assumed compliant,
+# so the verdict can only fail on exported evidence, and the assumption is returned and recorded on every row).
+# A check whose evidence ScubaGear does not export at all raises `not_exported:<what>`.
+
+def _entries(inp: dict, name: str) -> list[dict]:
+    """The objects in a list section. Prowler skips the empty entries PowerShell leaves for "nothing found", so this does too."""
+    values = [v for v in _section(inp, name, list) if v not in (None, {}, [])]
+    if not all(isinstance(v, dict) for v in values):
+        raise EvidenceGap(f"shape:{name} holds entries that are not objects")
+    return values
+
+
+def _single(inp: dict, name: str) -> dict:
+    """The one entry of a section Prowler holds as a single object."""
+    values = _entries(inp, name)
+    if not values:
+        raise EvidenceGap(f"evidence_missing:{name}")
+    if len(values) > 1:
+        raise EvidenceGap(f"shape:{name} has {len(values)} entries; Prowler holds one")
+    return values[0]
+
+
+def _global_entry(inp: dict, name: str, notes: list[str]) -> dict:
+    """The Global entry of a policy list; Prowler reads only the tenant-wide Global policy, ScubaGear may read every entry."""
+    values = _entries(inp, name)
+    chosen = [v for v in values if v.get("Identity") == "Global"]
+    if not chosen:
+        raise EvidenceGap(f"evidence_missing:{name}.Global")
+    if len(values) > len(chosen):
+        notes.append(f"Prowler reads only the Global entry of {name}; {len(values) - len(chosen)} other entries are not read")
+    return chosen[0]
+
+
+def _need(raw: dict, key: str, where: str) -> Any:
+    if raw.get(key) is None:
+        raise EvidenceGap(f"evidence_missing:{where}.{key}")
+    return raw[key]
+
+
+def _flag(raw: dict, key: str, where: str) -> bool:
+    value = _need(raw, key, where)
+    if not isinstance(value, bool):
+        raise EvidenceGap(f"shape:{where}.{key} is {type(value).__name__}, not a boolean")
+    return value
+
+
+def _as_list(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    return [str(v) for v in value] if isinstance(value, list) else [str(value)]
+
+
+def _not_exported(what: str) -> Callable:
+    def build(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+        raise EvidenceGap(f"not_exported:{what}")
+    return build
+
+
+def build_transport_config(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    exchange = rt.module("exchange")
+    raw = _single(inp, "transport_config")
+    return {"transport_config": exchange.TransportConfig(smtp_auth_disabled=_flag(raw, "SmtpClientAuthenticationDisabled", "transport_config"))}, []
+
+
+def build_organization_config(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    exchange = rt.module("exchange")
+    raw = _single(inp, "org_config")
+    org = exchange.Organization(
+        name=str(raw.get("Name") or ""), guid=str(raw.get("Identity") or ""), audit_disabled=_flag(raw, "AuditDisabled", "org_config"),
+        oauth_enabled=True, mailtips_enabled=True, mailtips_external_recipient_enabled=False, mailtips_group_metrics_enabled=True,
+        mailtips_large_audience_threshold=25)
+    return {"organization_config": org}, []
+
+
+def build_dkim(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    configs = [defender.DkimConfig(dkim_signing_enabled=_flag(raw, "Enabled", "dkim_config"), id=str(_need(raw, "Domain", "dkim_config")))
+               for raw in _entries(inp, "dkim_config")]
+    return {"dkim_configurations": configs}, []
+
+
+class _TxtAnswer:
+    """A TXT answer as dnspython hands it to Prowler: `strings` is a tuple of bytes."""
+
+    def __init__(self, text: str):
+        self.strings = (text.encode("utf-8"),)
+
+
+@contextlib.contextmanager
+def _dmarc_answers(defender: Any, records: dict[str, list[str]]):
+    """Answer Prowler's `_dmarc.<domain>` TXT lookups from the variant, so its own record parsing runs and nothing touches the network."""
+    resolver = defender.dns.asyncresolver
+    original = resolver.resolve
+
+    async def resolve(qname: str, rdtype: str = "A", *args: Any, **kwargs: Any) -> list:
+        domain = str(qname).removeprefix("_dmarc.")
+        if rdtype != "TXT" or domain == str(qname) or domain not in records:
+            raise defender.dns.resolver.NXDOMAIN()
+        if not records[domain]:
+            raise defender.dns.resolver.NoAnswer()
+        return [_TxtAnswer(text) for text in records[domain]]
+
+    resolver.resolve = resolve
+    try:
+        yield
+    finally:
+        resolver.resolve = original
+
+
+def build_dmarc(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    records: dict[str, list[str]] = {}
+    for raw in _entries(inp, "dmarc_records"):
+        rdata = raw.get("rdata")
+        if rdata is not None and not isinstance(rdata, list):
+            raise EvidenceGap("shape:dmarc_records.rdata is not a list")
+        records[str(_need(raw, "domain", "dmarc_records"))] = [str(text) for text in rdata or []]
+
+    async def lookup() -> list[tuple[Any, bool]]:
+        return await asyncio.gather(*(defender.Defender._get_dmarc_txt_record(domain) for domain in records))
+
+    with _dmarc_answers(defender, records):
+        results = asyncio.run(lookup())
+    configurations = {domain: defender.DomainDmarcConfiguration(domain=domain, dmarc_record=record, lookup_failed=failed)
+                      for domain, (record, failed) in zip(records, results)}
+    return ({"domain_dmarc_configurations": configurations, "domain_discovery_failed": False},
+            ["a domain with no TXT data is read as a confirmed absence of a DMARC record; ScubaGear does not distinguish a failed DNS lookup"])
+
+
+def _connection_filter(ip_allow_list: bool) -> Callable:
+    def build(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+        defender = rt.module("defender")
+        raw = _single(inp, "conn_filter")
+        allow = raw.get("IPAllowList")
+        if ip_allow_list and allow is None:
+            raise EvidenceGap("evidence_missing:conn_filter.IPAllowList")
+        safe = _flag(raw, "EnableSafeList", "conn_filter") if not ip_allow_list else False
+        policy = defender.ConnectionFilterPolicy(ip_allow_list=list(allow or []), identity=str(raw.get("Name") or "Default"), enable_safe_list=safe)
+        return {"connection_filter_policy": policy}, []
+    return build
+
+
+def _filter_rules(inp: dict, section: str, policy_key: str, model: Any, notes: list[str]) -> dict:
+    """Policy name -> rule, the shape Prowler keeps for every Defender filter-rule section."""
+    rules = {}
+    for raw in _entries(inp, section):
+        if raw.get("Priority") is None:
+            notes.append(f"{section} priority is not exported and is reported as 0")
+        rules[str(_need(raw, policy_key, section))] = model(
+            state=str(_need(raw, "State", section)), priority=int(raw.get("Priority") or 0), users=_as_list(raw.get("SentTo")),
+            groups=_as_list(raw.get("SentToMemberOf")), domains=_as_list(raw.get("RecipientDomainIs")))
+    return rules
+
+
+def build_malware(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    notes = ["the default anti-malware policy is identified by the identity 'Default'; ScubaGear does not export IsDefault"]
+    policies = []
+    for raw in _entries(inp, "anti_malware_policies"):
+        identity = str(_need(raw, "Identity", "anti_malware_policies"))
+        file_types = raw.get("FileTypes")
+        if not isinstance(file_types, list):
+            raise EvidenceGap("evidence_missing:anti_malware_policies.FileTypes")
+        policies.append(defender.MalwarePolicy(
+            enable_file_filter=_flag(raw, "EnableFileFilter", "anti_malware_policies"), identity=identity,
+            enable_internal_sender_admin_notifications=False, internal_sender_admin_address="", file_types=[str(t) for t in file_types],
+            is_default=identity == "Default"))
+    policies.sort(key=lambda p: p.is_default, reverse=True)  # Prowler keeps the default policy first
+    rules = _filter_rules(inp, "anti_malware_rules", "MalwareFilterPolicy", defender.MalwareRule, notes)
+    return {"malware_policies": policies, "malware_rules": rules}, notes
+
+
+def build_inbound_spam(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    notes: list[str] = []
+    policies = []
+    for raw in _entries(inp, "hosted_content_filter_policies"):
+        domains = raw.get("AllowedSenderDomains")
+        if not isinstance(domains, list):
+            raise EvidenceGap("evidence_missing:hosted_content_filter_policies.AllowedSenderDomains")
+        policies.append(defender.DefenderInboundSpamPolicy(
+            identity=str(_need(raw, "Identity", "hosted_content_filter_policies")), allowed_sender_domains=[str(d) for d in domains],
+            default=_flag(raw, "IsDefault", "hosted_content_filter_policies")))
+    policies.sort(key=lambda p: p.default, reverse=True)
+    rules = _filter_rules(inp, "hosted_content_filter_rules", "HostedContentFilterPolicy", defender.InboundSpamRule, notes)
+    return {"inbound_spam_policies": policies, "inbound_spam_rules": rules}, notes
+
+
+def build_safe_attachments(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    notes: list[str] = []
+    policies = {}
+    for raw in _entries(inp, "safe_attachment_policies"):
+        name = str(_need(raw, "Identity", "safe_attachment_policies"))
+        if raw.get("Enable") is None or raw.get("QuarantineTag") is None:
+            notes.append("Safe Attachments Enable and QuarantineTag are not exported and are assumed enabled and AdminOnlyAccessPolicy")
+        policies[name] = defender.SafeAttachmentsPolicy(
+            name=name, identity=name, enable=True if raw.get("Enable") is None else bool(raw["Enable"]),
+            action=str(_need(raw, "Action", "safe_attachment_policies")),
+            quarantine_tag="AdminOnlyAccessPolicy" if raw.get("QuarantineTag") is None else str(raw["QuarantineTag"]),
+            redirect=False, redirect_address="", is_built_in_protection=name == "Built-In Protection Policy")
+    rules = _filter_rules(inp, "safe_attachment_rules", "SafeAttachmentPolicy", defender.SafeAttachmentsRule, notes)
+    return {"safe_attachments_policies": policies, "safe_attachments_rules": rules}, notes
+
+
+def build_atp_policy(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    raw = _single(inp, "atp_policy_for_o365")
+    policy = defender.AdvancedThreatProtectionPolicy(
+        identity=str(raw.get("Identity") or "Default"), enable_atp_for_spo_teams_odb=_flag(raw, "EnableATPForSPOTeamsODB", "atp_policy_for_o365"),
+        enable_safe_docs=True, allow_safe_docs_open=False)
+    return {"advanced_threat_protection_policy": policy}, [
+        "Safe Documents (EnableSafeDocs, AllowSafeDocsOpen) is not exported and is assumed enabled with click-through blocked"]
+
+
+def build_anti_phishing(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    notes = ["spoof intelligence, DMARC honouring and the quarantine actions are not exported and are assumed enabled and Quarantine"]
+    policies = {}
+    for raw in _entries(inp, "anti_phish_policies"):
+        name = str(raw.get("Name") or _need(raw, "Identity", "anti_phish_policies"))
+        policies[name] = defender.AntiphishingPolicy(
+            name=name, spoof_intelligence=True, spoof_intelligence_action="Quarantine", dmarc_reject_action="Quarantine",
+            dmarc_quarantine_action="Quarantine", safety_tips=_flag(raw, "EnableFirstContactSafetyTips", "anti_phish_policies"),
+            unauthenticated_sender_action=_flag(raw, "EnableUnauthenticatedSender", "anti_phish_policies"),
+            show_tag=_flag(raw, "EnableViaTag", "anti_phish_policies"), honor_dmarc_policy=True, default=bool(raw.get("IsDefault")))
+    policies = dict(sorted(policies.items(), key=lambda item: item[1].default, reverse=True))
+    rules = _filter_rules(inp, "anti_phish_rules", "AntiPhishPolicy", defender.AntiphishingRule, notes)
+    return {"antiphishing_policies": policies, "antiphishing_rules": rules}, notes
+
+
+SAFE_LINKS_FLAGS = {"EnableSafeLinksForEmail": "enable_safe_links_for_email", "EnableSafeLinksForTeams": "enable_safe_links_for_teams",
+                    "EnableSafeLinksForOffice": "enable_safe_links_for_office", "TrackClicks": "track_clicks", "ScanUrls": "scan_urls",
+                    "EnableForInternalSenders": "enable_for_internal_senders", "DeliverMessageAfterScan": "deliver_message_after_scan"}
+
+
+def build_safe_links(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    defender = rt.module("defender")
+    notes = ["Safe Links AllowClickThrough and DisableUrlRewrite are not exported and are assumed off"]
+    policies = {}
+    for raw in _entries(inp, "safe_links_policies"):
+        name = str(_need(raw, "Identity", "safe_links_policies"))
+        flags = {field: _flag(raw, key, "safe_links_policies") for key, field in SAFE_LINKS_FLAGS.items()}
+        policies[name] = defender.SafeLinksPolicy(
+            name=name, identity=name, allow_click_through=False, disable_url_rewrite=False, is_built_in_protection=name == "Built-In Protection Policy",
+            is_default=False, **flags)
+    rules = _filter_rules(inp, "safe_links_rules", "SafeLinksPolicy", defender.SafeLinksRule, notes)
+    return {"safe_links_policies": policies, "safe_links_rules": rules}, notes
+
+
+def build_audit_log(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    purview = rt.module("purview")
+    raw = _single(inp, "admin_audit_log_config")
+    return {"audit_log_config": purview.AuditLogConfig(audit_log_search=_flag(raw, "UnifiedAuditLogIngestionEnabled", "admin_audit_log_config"))}, []
+
+
+def build_password_policy(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    admincenter = rt.module("admincenter")
+    settings = inp.get("domain_settings")
+    entries = settings if isinstance(settings, list) else [settings] if isinstance(settings, dict) and settings else []
+    if not entries:
+        raise EvidenceGap("evidence_missing:domain_settings")
+    period = _need(entries[0], "PasswordValidityPeriodInDays", "domain_settings")
+    return {"password_policy": admincenter.PasswordPolicy(password_validity_period=period)}, []
+
+
+SHARING_CAPABILITY = {0: "Disabled", 1: "ExternalUserSharingOnly", 2: "ExternalUserAndGuestSharing", 3: "ExistingExternalUserSharingOnly"}
+SHARING_DOMAIN_MODE = {0: "none", 1: "allowList", 2: "blockList"}
+
+
+def _sharepoint_settings(domain_restriction: bool) -> Callable:
+    def build(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+        sharepoint = rt.module("sharepoint")
+        raw = _single(inp, "SPO_tenant")
+        capability = _need(raw, "SharingCapability", "SPO_tenant")
+        if capability not in SHARING_CAPABILITY:
+            raise EvidenceGap(f"shape:SPO_tenant.SharingCapability={capability!r}")
+        mode, allowed, blocked, notes = "none", None, None, []
+        if domain_restriction:
+            code = _need(raw, "SharingDomainRestrictionMode", "SPO_tenant")
+            if code not in SHARING_DOMAIN_MODE:
+                raise EvidenceGap(f"shape:SPO_tenant.SharingDomainRestrictionMode={code!r}")
+            mode = SHARING_DOMAIN_MODE[code]
+            if mode != "none":
+                notes.append("the SharePoint allowed and blocked domain lists are not exported and the list for the selected mode is assumed non-empty")
+                allowed = ["assumed.invalid"] if mode == "allowList" else None
+                blocked = ["assumed.invalid"] if mode == "blockList" else None
+        settings = sharepoint.SharePointSettings(
+            sharingCapability=SHARING_CAPABILITY[capability], sharingAllowedDomainList=allowed, sharingBlockedDomainList=blocked,
+            sharingDomainRestrictionMode=mode, resharingEnabled=False, legacyAuth=False, allowedDomainGuidsForSyncApp=[])
+        return {"settings": settings}, notes
+    return build
+
+
+def _teams_meeting_policy(key: str, field: str) -> Callable:
+    def build(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+        teams, notes = rt.module("teams"), []
+        raw = _global_entry(inp, "meeting_policies", notes)
+        return {"global_meeting_policy": teams.GlobalMeetingPolicy(**{field: _need(raw, key, "meeting_policies")})}, notes
+    return build
+
+
+def _teams_user_settings(key: str, field: str) -> Callable:
+    def build(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+        teams, notes = rt.module("teams"), []
+        raw = _global_entry(inp, "federation_configuration", notes)
+        return {"user_settings": teams.UserSettings(**{field: _need(raw, key, "federation_configuration")})}, notes
+    return build
+
+
+def build_teams_settings(inp: dict, rt: "ProwlerRuntime") -> tuple[dict, list[str]]:
+    teams, notes = rt.module("teams"), []
+    raw = _global_entry(inp, "client_configuration", notes)
+    storage = teams.CloudStorageSettings(allow_box=True, allow_drop_box=True, allow_egnyte=True, allow_google_drive=True, allow_share_file=True)
+    return {"teams_settings": teams.TeamsSettings(cloud_storage_settings=storage, allow_email_into_channel=_flag(raw, "AllowEmailIntoChannel", "client_configuration"))}, notes
+
+
+# Teams check -> (ScubaGear key, Prowler model field) for the settings each reads.
+TEAMS_MEETING_SETTINGS = {
+    "teams_meeting_external_control_disabled": ("AllowExternalParticipantGiveRequestControl", "allow_external_participant_give_request_control"),
+    "teams_meeting_anonymous_user_start_disabled": ("AllowAnonymousUsersToStartMeeting", "allow_anonymous_users_to_start_meeting"),
+    "teams_meeting_external_lobby_bypass_disabled": ("AutoAdmittedUsers", "allow_external_users_to_bypass_lobby"),
+    "teams_meeting_dial_in_lobby_bypass_disabled": ("AllowPSTNUsersToBypassLobby", "allow_pstn_users_to_bypass_lobby"),
+    "teams_meeting_recording_disabled": ("AllowCloudRecording", "allow_cloud_recording"),
+}
+TEAMS_USER_SETTINGS = {
+    "teams_external_domains_restricted": ("AllowFederatedUsers", "allow_external_access"),
+    "teams_external_users_cannot_start_conversations": ("AllowTeamsConsumerInbound", "allow_teams_consumer_inbound"),
+    "teams_unmanaged_communication_disabled": ("AllowTeamsConsumer", "allow_teams_consumer"),
+}
+
+
 ATTRIBUTE_BUILDERS: dict[str, tuple[str, Callable]] = {
     "conditional_access": ("entra", build_conditional_access),
     "authentication_methods": ("entra", build_authentication_methods),
@@ -410,6 +756,28 @@ ATTRIBUTE_BUILDERS: dict[str, tuple[str, Callable]] = {
     "privileged_users": ("entra", build_privileged_users),
     "pim_approval": ("entra", build_pim_approval),
     "directory_roles": ("admincenter", build_directory_roles),
+    "password_policy": ("admincenter", build_password_policy),
+    "transport_config": ("exchange", build_transport_config),
+    "organization_config": ("exchange", build_organization_config),
+    "external_in_outlook": ("exchange", _not_exported("external_in_outlook")),
+    "outbound_spam_policy": ("defender", _not_exported("outbound_spam_policy")),
+    "sharing_policy_state": ("admincenter", _not_exported("sharing_policy_enabled")),
+    "dkim": ("defender", build_dkim),
+    "dmarc": ("defender", build_dmarc),
+    "connection_filter_ip_allow_list": ("defender", _connection_filter(True)),
+    "connection_filter_safe_list": ("defender", _connection_filter(False)),
+    "inbound_spam": ("defender", build_inbound_spam),
+    "malware": ("defender", build_malware),
+    "safe_attachments": ("defender", build_safe_attachments),
+    "atp_policy": ("defender", build_atp_policy),
+    "anti_phishing": ("defender", build_anti_phishing),
+    "safe_links": ("defender", build_safe_links),
+    "audit_log": ("purview", build_audit_log),
+    "sharepoint_sharing_capability": ("sharepoint", _sharepoint_settings(False)),
+    "sharepoint_domain_restriction": ("sharepoint", _sharepoint_settings(True)),
+    "teams_settings": ("teams", build_teams_settings),
+    **{f"teams_meeting:{check}": ("teams", _teams_meeting_policy(*fields)) for check, fields in TEAMS_MEETING_SETTINGS.items()},
+    **{f"teams_user:{check}": ("teams", _teams_user_settings(*fields)) for check, fields in TEAMS_USER_SETTINGS.items()},
 }
 CHECK_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "entra_legacy_authentication_blocked": ("conditional_access",),
@@ -432,7 +800,51 @@ CHECK_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "entra_admin_users_cloud_only": ("privileged_users",),
     "entra_pim_global_administrator_approval_required": ("pim_approval",),
     "admincenter_users_between_two_and_four_global_admins": ("directory_roles",),
+    "admincenter_settings_password_never_expire": ("password_policy",),
+    "admincenter_external_calendar_sharing_disabled": ("sharing_policy_state",),
+    "exchange_transport_config_smtp_auth_disabled": ("transport_config",),
+    "exchange_organization_mailbox_auditing_enabled": ("organization_config",),
+    "exchange_external_email_tagging_enabled": ("external_in_outlook",),
+    "defender_antispam_outbound_policy_forwarding_disabled": ("outbound_spam_policy",),
+    "defender_domain_dkim_enabled": ("dkim",),
+    "defender_domain_dmarc_records_published": ("dmarc",),
+    "defender_antispam_connection_filter_policy_empty_ip_allowlist": ("connection_filter_ip_allow_list",),
+    "defender_antispam_connection_filter_policy_safe_list_off": ("connection_filter_safe_list",),
+    "defender_antispam_policy_inbound_no_allowed_domains": ("inbound_spam",),
+    "defender_malware_policy_comprehensive_attachments_filter_applied": ("malware",),
+    "defender_malware_policy_common_attachments_filter_enabled": ("malware",),
+    "defender_safe_attachments_policy_enabled": ("safe_attachments",),
+    "defender_atp_safe_attachments_and_docs_configured": ("atp_policy",),
+    "defender_antiphishing_policy_configured": ("anti_phishing",),
+    "defender_safelinks_policy_enabled": ("safe_links",),
+    "purview_audit_log_search_enabled": ("audit_log",),
+    "sharepoint_external_sharing_restricted": ("sharepoint_sharing_capability",),
+    "sharepoint_external_sharing_managed": ("sharepoint_domain_restriction",),
+    "teams_email_sending_to_channel_disabled": ("teams_settings",),
+    **{check: (f"teams_meeting:{check}",) for check in TEAMS_MEETING_SETTINGS},
+    **{check: (f"teams_user:{check}",) for check in TEAMS_USER_SETTINGS},
 }
+
+# Prowler audit_config values applied to one check, with the assumption recorded on every row of that check. Prowler's own
+# list of recommended blocked file types has 53 entries and every ScubaGear fixture blocks exactly the baseline's three, so
+# without this the check would fail every fixture and say nothing about the filter, rule state or default-policy logic.
+CHECK_AUDIT_CONFIG: dict[str, tuple[dict, str]] = {
+    "defender_malware_policy_comprehensive_attachments_filter_applied": (
+        {"recommended_blocked_file_types": ["exe", "cmd", "vbe"]},
+        "Prowler's recommended_blocked_file_types is set to the baseline's three types (exe, cmd, vbe); its default list has 53"),
+}
+
+# ScubaGear counts these policies as met, without testing them, in a US Government region, so the label says nothing to compare.
+US_GOVERNMENT_REGIONS = frozenset({"gcc", "gcchigh", "dod"})
+NOT_APPLICABLE_POLICIES = {policy: "us_government_region" for policy in ("MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1")}
+
+
+def scubagear_not_applicable(policy: str, inp: dict) -> str | None:
+    """Reason ScubaGear skips `policy` for this variant (and records it as met), or None."""
+    scuba = inp.get("scuba_config")
+    if policy in NOT_APPLICABLE_POLICIES and isinstance(scuba, dict) and scuba.get("M365Environment") in US_GOVERNMENT_REGIONS:
+        return NOT_APPLICABLE_POLICIES[policy]
+    return None
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -442,7 +854,8 @@ CHECK_ATTRIBUTES: dict[str, tuple[str, ...]] = {
 class ProwlerRuntime:
     """Imports Prowler from `root` and runs M365 checks against stub service clients (no Graph, PowerShell or network)."""
 
-    SERVICES = {"entra": "Entra", "admincenter": "AdminCenter"}
+    SERVICES = {"entra": "Entra", "admincenter": "AdminCenter", "exchange": "Exchange", "defender": "Defender", "purview": "Purview",
+                "sharepoint": "SharePoint", "teams": "Teams"}
     BASE_ATTRIBUTES = {"tenant_domain": "oracle.invalid", "tenant_id": "oracle", "audited_tenant": "oracle", "audited_domain": "oracle.invalid"}
 
     def __init__(self, root: Path):
@@ -489,11 +902,12 @@ class ProwlerRuntime:
         sys.modules[name] = stub
         self._clients[service] = client
 
-    def execute(self, check_id: str, service: str, attributes: dict) -> list[tuple[str, str]]:
+    def execute(self, check_id: str, service: str, attributes: dict, audit_config: dict | None = None) -> list[tuple[str, str]]:
         """Run one check on a stub client holding exactly `attributes`; return (status, status_extended) per finding."""
         client = self._clients[service]
         client.__dict__.clear()
         client.__dict__.update(self.BASE_ATTRIBUTES)
+        client.__dict__.update(audit_config=dict(audit_config or {}), fixer_config={})
         client.__dict__.update(attributes)
         if check_id not in self._checks:
             module = importlib.import_module(f"{M365_SERVICES}.{service}.{check_id}.{check_id}")
@@ -537,12 +951,15 @@ def run_variant(rt: ProwlerRuntime | None, inp: dict, rows: list[dict]) -> list[
         if needs is None or rt is None:
             return "UNMAPPED", "", "no_builder", []
         attributes, assumptions = {}, []
+        audit_config, audit_note = CHECK_AUDIT_CONFIG.get(check_id, (None, None))
         try:
             for name in needs:
                 built, notes = group(name)
                 attributes.update(built)
                 assumptions += notes
-            findings = rt.execute(check_id, service, attributes)
+            if audit_note:
+                assumptions.append(audit_note)
+            findings = rt.execute(check_id, service, attributes, audit_config)
         except EvidenceGap as gap:
             return "UNMAPPED", "", gap.reason, []
         except Exception as error:  # noqa: BLE001 - one broken check must not stop the run; it is reported per row
@@ -562,6 +979,10 @@ def run_variant(rt: ProwlerRuntime | None, inp: dict, rows: list[dict]) -> list[
         status, text, reason, assumptions = results[key]
         item = {"scubagear_policy": row["scubagear_policy"], "prowler_check": key, "confidence": row["confidence"],
                 "status": status, "status_extended": text}
+        skipped = scubagear_not_applicable(row["scubagear_policy"], inp)
+        if skipped and status != "UNMAPPED":
+            item.update(status="UNMAPPED", prowler_status=status)  # Prowler's own verdict stays visible, but is not compared
+            reason = f"scubagear_not_applicable:{skipped}"
         if reason:
             item["reason"] = reason
         if assumptions:
@@ -582,13 +1003,17 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
 
 
+# Unmapped reasons that carry a detail after the colon; the summary counts the family, `unmapped-evidence.json` keeps the detail.
+REASON_FAMILIES = ("check_error", "shape", "evidence_missing", "not_exported", "missing_attribute")
+
+
 def summarise(consensus: list[dict], verdicts: list[dict]) -> dict:
     by_policy: dict[str, Counter] = defaultdict(Counter)
     reasons: Counter = Counter()
     for row in consensus:
         by_policy[row["scubagear_policy"]][row["consensus"]] += 1
         if row["reason"]:
-            reasons[row["reason"].split(":")[0] if row["reason"].startswith(("check_error", "shape")) else row["reason"]] += 1
+            reasons[row["reason"].split(":")[0] if row["reason"].startswith(REASON_FAMILIES) else row["reason"]] += 1
     compared = [r for r in consensus if r["consensus"] in ("agree", "disagree")]
     return {
         "cases": len(consensus),
@@ -613,6 +1038,18 @@ def unmapped_report(verdicts: list[dict]) -> dict:
             examples[row["reason"]].append(row["variant"])
     return {"by_reason": dict(by_reason.most_common()), "by_check": {c: dict(r.most_common()) for c, r in sorted(by_check.items())},
             "example_variants": dict(examples)}
+
+
+def check_outcomes(verdicts: list[dict]) -> dict:
+    """Which checks produced a Prowler verdict, and for the rest why none could be produced (reasons by row count)."""
+    ran: set[str] = set()
+    blocked: dict[str, Counter] = defaultdict(Counter)
+    for row in verdicts:
+        if row["status"] != "UNMAPPED" or "prowler_status" in row:
+            ran.add(row["prowler_check"])
+        else:
+            blocked[row["prowler_check"]][row["reason"]] += 1
+    return {"checks_executed": sorted(ran), "checks_not_evaluated": {c: dict(r.most_common()) for c, r in sorted(blocked.items()) if c not in ran}}
 
 
 def run(args: argparse.Namespace) -> int:
@@ -661,11 +1098,11 @@ def run(args: argparse.Namespace) -> int:
             consensus.append(row)
         all_verdicts += verdicts
         all_consensus += consensus
-        per_product[product] = {"variants": len(hashes), "distinct_inputs": len(variants), **summarise(consensus, verdicts)}
+        per_product[product] = {"variants": len(hashes), "distinct_inputs": len(variants), **summarise(consensus, verdicts), **check_outcomes(verdicts)}
     write_jsonl(out_dir / "verdicts.jsonl", all_verdicts)
     write_jsonl(out_dir / "consensus.jsonl", all_consensus)
     (out_dir / "unmapped-evidence.json").write_text(json.dumps(unmapped_report(all_verdicts), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    checks_run = sorted({r["prowler_check"] for r in all_verdicts if r["status"] != "UNMAPPED" or r.get("reason") != "no_builder"})
+    checks_run = check_outcomes(all_verdicts)["checks_executed"]
     meta = {"kit": str(kit), "map": str(Path(args.map).resolve()), "prowler_root": str(rt.root), "prowler_commit": prowler_commit(rt.root),
             "scubagear_commit": doc["scubagear"]["commit"], "python": sys.version.split()[0], "products": per_product,
             "checks_with_builders": sorted(CHECK_ATTRIBUTES), "checks_executed": checks_run}

@@ -1,8 +1,9 @@
 """Prowler consensus oracle: policy map, consensus logic and an offline run of real Prowler checks.
 
-The map and consensus tests are pure. The tests marked `needs_prowler` import Prowler's own models from a checkout whose
-`prowler/providers/m365` is on disk and need Prowler's dependencies in the interpreter (see docs/guides/model-development.md);
-they are skipped otherwise.
+The map, evidence-helper and consensus tests are pure. The tests marked `needs_prowler` import Prowler's own models from a
+checkout whose `prowler/providers/m365` is on disk and need Prowler's dependencies in the interpreter (see
+docs/guides/model-development.md); they are skipped otherwise. They run real Prowler checks for every product the script
+builds evidence for (Entra, Exchange, Defender, Purview, SharePoint, Teams) with network access blocked.
 """
 from __future__ import annotations
 
@@ -123,11 +124,14 @@ def test_validator_flags_bad_rows(script):
 
 def test_builders_and_checks_agree_with_the_map(script, policy_map):
     mapped = {r["prowler_check"] for r in policy_map["rows"] if r["scubagear_policy"]}
-    assert set(script.CHECK_ATTRIBUTES) <= mapped
+    assert set(script.CHECK_ATTRIBUTES) == mapped, "every mapped check has a builder and every builder serves a mapped check"
     for groups in script.CHECK_ATTRIBUTES.values():
         assert set(groups) <= set(script.ATTRIBUTE_BUILDERS)
+    assert set(script.CHECK_AUDIT_CONFIG) <= mapped
     services = {r["prowler_check"]: r["prowler_service"] for r in policy_map["rows"]}
-    assert {services[c] for c in script.CHECK_ATTRIBUTES} <= {"entra", "admincenter"}
+    assert {services[c] for c in script.CHECK_ATTRIBUTES} == set(script.ProwlerRuntime.SERVICES)
+    for check, groups in script.CHECK_ATTRIBUTES.items():
+        assert script.ATTRIBUTE_BUILDERS[groups[0]][0] == services[check], f"{check}: builder service differs from the map"
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -246,6 +250,67 @@ def test_summary_and_unmapped_report_count_every_row(script):
     assert report["example_variants"] == {"no_finding": ["variant-0001", "variant-0002"]}
 
 
+def test_summary_buckets_detailed_reasons_by_family(script):
+    consensus = [{"scubagear_policy": "P", "consensus": "unmapped", "confidence": "partial", "reason": reason} for reason in (
+        "not_exported:a", "not_exported:b", "evidence_missing:x.y", "evidence_missing:z", "scubagear_not_applicable:us_government_region",
+        "missing_attribute:q", "no_finding")]
+    assert script.summarise(consensus, [])["unmapped_reasons"] == {
+        "not_exported": 2, "evidence_missing": 2, "scubagear_not_applicable:us_government_region": 1, "missing_attribute": 1, "no_finding": 1}
+
+
+def test_evidence_helpers_report_gaps_instead_of_guessing(script):
+    gap = script.EvidenceGap
+    with pytest.raises(gap, match="evidence_missing:transport_config$"):
+        script._single({"transport_config": []}, "transport_config")
+    with pytest.raises(gap, match="shape:transport_config has 2 entries"):
+        script._single({"transport_config": [{"a": 1}, {"b": 2}]}, "transport_config")
+    with pytest.raises(gap, match="evidence_missing:transport_config$"):
+        script._single({}, "transport_config")
+    assert script._entries({"x": [None, {}, {"a": 1}]}, "x") == [{"a": 1}], "PowerShell's empty entries are skipped, as Prowler skips them"
+    with pytest.raises(gap, match="shape:x holds entries"):
+        script._entries({"x": ["bad-data"]}, "x")
+    with pytest.raises(gap, match="evidence_missing:org_config.AuditDisabled"):
+        script._need({"Name": "A"}, "AuditDisabled", "org_config")
+    assert script._need({"AuditDisabled": False}, "AuditDisabled", "org_config") is False
+    with pytest.raises(gap, match="shape:org_config.AuditDisabled is str"):
+        script._flag({"AuditDisabled": "no"}, "AuditDisabled", "org_config")
+    notes: list[str] = []
+    chosen = script._global_entry({"p": [{"Identity": "Tag:A"}, {"Identity": "Global", "v": 1}]}, "p", notes)
+    assert chosen["v"] == 1 and notes == ["Prowler reads only the Global entry of p; 1 other entries are not read"]
+    with pytest.raises(gap, match="evidence_missing:p.Global"):
+        script._global_entry({"p": [{"Identity": "Tag:A"}]}, "p", [])
+    assert script._as_list(None) is None and script._as_list("a") == ["a"] and script._as_list(["a", 1]) == ["a", "1"]
+
+
+def test_not_exported_groups_always_report_why(script):
+    with pytest.raises(script.EvidenceGap, match="not_exported:external_in_outlook"):
+        script.ATTRIBUTE_BUILDERS["external_in_outlook"][1]({}, None)
+
+
+def test_scubagear_not_applicable_in_us_government_regions(script):
+    gov = {"scuba_config": {"M365Environment": "gcchigh"}}
+    assert script.scubagear_not_applicable("MS.TEAMS.2.2v2", gov) == "us_government_region"
+    assert script.scubagear_not_applicable("MS.TEAMS.4.1v1", {"scuba_config": {"M365Environment": "dod"}}) == "us_government_region"
+    assert script.scubagear_not_applicable("MS.TEAMS.2.1v2", gov) is None, "2.1 has no regional exemption"
+    assert script.scubagear_not_applicable("MS.TEAMS.2.2v2", {"scuba_config": {"M365Environment": "commercial"}}) is None
+    assert script.scubagear_not_applicable("MS.TEAMS.2.2v2", {"scuba_config": []}) is None
+    assert script.scubagear_not_applicable("MS.TEAMS.2.2v2", {}) is None
+
+
+def test_check_outcomes_separate_executed_checks_from_blocked_ones(script):
+    verdicts = [
+        {"prowler_check": "ran_everywhere", "status": "PASS"},
+        {"prowler_check": "ran_sometimes", "status": "FAIL"},
+        {"prowler_check": "ran_sometimes", "status": "UNMAPPED", "reason": "no_finding"},
+        {"prowler_check": "only_not_applicable", "status": "UNMAPPED", "reason": "scubagear_not_applicable:us_government_region", "prowler_status": "PASS"},
+        {"prowler_check": "never", "status": "UNMAPPED", "reason": "not_exported:x"},
+        {"prowler_check": "never", "status": "UNMAPPED", "reason": "not_exported:x"},
+        {"prowler_check": "never", "status": "UNMAPPED", "reason": "evidence_missing:y.z"}]
+    outcome = script.check_outcomes(verdicts)
+    assert outcome["checks_executed"] == ["only_not_applicable", "ran_everywhere", "ran_sometimes"]
+    assert outcome["checks_not_evaluated"] == {"never": {"not_exported:x": 2, "evidence_missing:y.z": 1}}
+
+
 # --------------------------------------------------------------------------------------------------------------------
 # Real Prowler checks, offline
 # --------------------------------------------------------------------------------------------------------------------
@@ -352,6 +417,229 @@ def test_end_to_end_on_a_synthetic_kit(script, runtime, policy_map, tmp_path):
     assert summary["products"]["AAD"]["consensus"] == {"agree": 1, "disagree": 1, "unmapped": 1}
     assert "entra_legacy_authentication_blocked" in summary["checks_executed"]
     assert script.main(["--kit-dir", str(kit), "--prowler-root", str(PROWLER_ROOT), "--output-dir", str(out)]) == 2, "an existing output directory is refused"
+
+
+@pytest.fixture
+def offline(monkeypatch):
+    """Fail the test on any socket connection or name lookup, so a check that reached for the network cannot pass."""
+    def no_network(*args, **kwargs):
+        raise AssertionError("network access attempted")
+    monkeypatch.setattr(socket.socket, "connect", no_network)
+    monkeypatch.setattr(socket.socket, "sendto", no_network)
+    monkeypatch.setattr(socket, "getaddrinfo", no_network)
+
+
+def _statuses(script, runtime, policy_map, inp, policy_id):
+    return {r["prowler_check"]: r["status"] for r in _verdict_for(script, runtime, policy_map, inp, policy_id)}
+
+
+@needs_prowler
+def test_exchange_checks_run_offline_on_a_scubagear_variant(script, runtime, policy_map, offline):
+    base = {"org_config": [{"AuditDisabled": False, "Identity": "Test name", "Name": "A"}],
+            "transport_config": [{"Name": "A", "SmtpClientAuthenticationDisabled": True}],
+            "dkim_config": [{"Domain": "test.name", "Enabled": True}],
+            "dmarc_records": [{"domain": "test.name", "rdata": ["v=DMARC1; p=reject; pct=100; rua=mailto:reports@dmarc.cyber.dhs.gov"]}]}
+
+    def verdicts(**changes):
+        inp = {**base, **changes}
+        return {policy: _statuses(script, runtime, policy_map, inp, policy) for policy in
+                ("MS.EXO.13.1v1", "MS.EXO.5.1v1", "MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1")}
+
+    good = verdicts()
+    assert good == {"MS.EXO.13.1v1": {"exchange_organization_mailbox_auditing_enabled": "PASS"},
+                    "MS.EXO.5.1v1": {"exchange_transport_config_smtp_auth_disabled": "PASS"},
+                    "MS.EXO.3.1v1": {"defender_domain_dkim_enabled": "PASS"},
+                    "MS.EXO.4.1v1": {"defender_domain_dmarc_records_published": "PASS"},
+                    "MS.EXO.4.2v1": {"defender_domain_dmarc_records_published": "PASS"}}
+    bad = verdicts(org_config=[{"AuditDisabled": True, "Identity": "x", "Name": "A"}], transport_config=[{"Name": "A", "SmtpClientAuthenticationDisabled": False}],
+                   dkim_config=[{"Domain": "test.name", "Enabled": False}], dmarc_records=[{"domain": "test.name", "rdata": []}])
+    assert {check: status for statuses in bad.values() for check, status in statuses.items()} == {
+        "exchange_organization_mailbox_auditing_enabled": "FAIL", "exchange_transport_config_smtp_auth_disabled": "FAIL",
+        "defender_domain_dkim_enabled": "FAIL", "defender_domain_dmarc_records_published": "FAIL"}
+    monitoring = _verdict_for(script, runtime, policy_map, {**base, "dmarc_records": [{"domain": "test.name", "rdata": ["v=DMARC1; p=none"]}]}, "MS.EXO.4.1v1")[0]
+    assert monitoring["status"] == "FAIL" and "p=none" in monitoring["status_extended"]
+    assert any("DNS lookup" in a for a in monitoring["assumptions"])
+    quarantine = _verdict_for(script, runtime, policy_map, {**base, "dmarc_records": [{"domain": "test.name", "rdata": ["v=DMARC1; p=quarantine"]}]}, "MS.EXO.4.2v1")[0]
+    assert quarantine["status"] == "PASS", "Prowler accepts p=quarantine where ScubaGear 4.2 wants p=reject, which is why the row is partial"
+    for policy, reason in (("MS.EXO.1.1v2", "not_exported:outbound_spam_policy"), ("MS.EXO.7.1v1", "not_exported:external_in_outlook"),
+                           ("MS.EXO.6.2v1", "not_exported:sharing_policy_enabled")):
+        row = _verdict_for(script, runtime, policy_map, base, policy)[0]
+        assert (row["status"], row["reason"]) == ("UNMAPPED", reason)
+    missing = _verdict_for(script, runtime, policy_map, {**base, "transport_config": [{"Name": "A"}]}, "MS.EXO.5.1v1")[0]
+    assert (missing["status"], missing["reason"]) == ("UNMAPPED", "evidence_missing:transport_config.SmtpClientAuthenticationDisabled")
+    resolver = runtime.module("defender").dns.asyncresolver
+    assert resolver.resolve.__module__.startswith("dns."), "the offline DNS answers are removed again after each build"
+
+
+def _ss(**changes) -> dict:
+    inp = {"anti_malware_policies": [{"EnableFileFilter": True, "FileTypes": ["exe", "cmd", "vbe"], "Identity": "Default", "ZapEnabled": True}],
+           "anti_malware_rules": [],
+           "conn_filter": [{"EnableSafeList": False, "IPAllowList": [], "Name": "A"}],
+           "admin_audit_log_config": [{"Identity": "Admin Audit Log Settings", "UnifiedAuditLogIngestionEnabled": True}],
+           "atp_policy_for_o365": [{"EnableATPForSPOTeamsODB": True, "Identity": "Default"}],
+           "hosted_content_filter_policies": [{"AllowedSenderDomains": [], "HighConfidencePhishAction": "Quarantine", "HighConfidenceSpamAction": "Quarantine",
+                                               "Identity": "Default", "IsDefault": True, "PhishSpamAction": "Quarantine", "RecommendedPolicyType": "Custom",
+                                               "SpamAction": "MoveToJmf"}],
+           "hosted_content_filter_rules": [],
+           "safe_links_policies": [{"DeliverMessageAfterScan": True, "EnableForInternalSenders": True, "EnableSafeLinksForEmail": True,
+                                    "EnableSafeLinksForOffice": True, "EnableSafeLinksForTeams": True, "Identity": "Compliant Custom Policy", "ScanUrls": True,
+                                    "TrackClicks": True}],
+           "safe_links_rules": [{"Identity": "Compliant Custom Policy", "Priority": 0, "RecipientDomainIs": None, "SafeLinksPolicy": "Compliant Custom Policy",
+                                 "SentTo": None, "SentToMemberOf": None, "State": "Enabled"}],
+           "safe_attachment_policies": [{"Action": "Block", "Identity": "Built-In Protection Policy"}], "safe_attachment_rules": [],
+           "anti_phish_policies": [{"EnableFirstContactSafetyTips": True, "EnableSimilarDomainsSafetyTips": True, "EnableSimilarUsersSafetyTips": True,
+                                    "EnableUnauthenticatedSender": True, "EnableUnusualCharactersSafetyTips": True, "EnableViaTag": True, "Enabled": True,
+                                    "Identity": "Office365 AntiPhish Default", "IsDefault": True, "Name": "Office365 AntiPhish Default"}],
+           "anti_phish_rules": []}
+    inp.update(changes)
+    return inp
+
+
+@needs_prowler
+def test_defender_and_purview_checks_run_offline_on_a_scubagear_variant(script, runtime, policy_map, offline):
+    def run(policy, **changes):
+        return _verdict_for(script, runtime, policy_map, _ss(**changes), policy)
+
+    everything = ("MS.SECURITYSUITE.1.1v1", "MS.SECURITYSUITE.1.3v1", "MS.SECURITYSUITE.1.4v1", "MS.SECURITYSUITE.2.4v1", "MS.SECURITYSUITE.5.1v1",
+                  "MS.SECURITYSUITE.6.2v1", "MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1", "MS.SECURITYSUITE.8.1v1",
+                  "MS.SECURITYSUITE.8.2v1")
+    for policy in everything:
+        rows = run(policy)
+        assert {r["status"] for r in rows} == {"PASS"}, (policy, rows)
+    # the extension list is Prowler's own check logic run with the baseline's three types, and the override is recorded
+    short = run("MS.SECURITYSUITE.1.1v1", anti_malware_policies=[{"EnableFileFilter": True, "FileTypes": ["exe", "cmd"], "Identity": "Default", "ZapEnabled": True}])
+    by_check = {r["prowler_check"]: r for r in short}
+    assert by_check["defender_malware_policy_comprehensive_attachments_filter_applied"]["status"] == "FAIL"
+    assert "vbe" in by_check["defender_malware_policy_comprehensive_attachments_filter_applied"]["status_extended"]
+    assert by_check["defender_malware_policy_common_attachments_filter_enabled"]["status"] == "PASS"
+    assert any("recommended_blocked_file_types" in a for a in by_check["defender_malware_policy_comprehensive_attachments_filter_applied"]["assumptions"])
+    assert script.combine_statuses(short) == ("FAIL", None)
+    assert run("MS.SECURITYSUITE.8.1v1", conn_filter=[{"EnableSafeList": False, "IPAllowList": ["192.0.2.1"], "Name": "A"}])[0]["status"] == "FAIL"
+    assert run("MS.SECURITYSUITE.8.2v1", conn_filter=[{"EnableSafeList": True, "IPAllowList": [], "Name": "A"}])[0]["status"] == "FAIL"
+    assert run("MS.SECURITYSUITE.5.1v1", admin_audit_log_config=[{"Identity": "x", "UnifiedAuditLogIngestionEnabled": False}])[0]["status"] == "FAIL"
+    assert run("MS.SECURITYSUITE.1.4v1", atp_policy_for_o365=[{"EnableATPForSPOTeamsODB": False, "Identity": "Default"}])[0]["status"] == "FAIL"
+    domains = [dict(_ss()["hosted_content_filter_policies"][0], AllowedSenderDomains=["example.com"])]
+    blocked = run("MS.SECURITYSUITE.6.2v1", hosted_content_filter_policies=domains)[0]
+    assert blocked["status"] == "FAIL" and "example.com" in blocked["status_extended"]
+    weak = dict(_ss()["safe_links_policies"][0], TrackClicks=False)
+    assert {r["status"] for r in run("MS.SECURITYSUITE.7.3v1", safe_links_policies=[weak])} == {"FAIL"}
+    assumed = run("MS.SECURITYSUITE.7.1v1")[0]["assumptions"]
+    assert any("AllowClickThrough" in a for a in assumed)
+    # evidence the variant lacks is reported, never defaulted: a policy without the safety-tip keys cannot be judged
+    bare = [{"Identity": "Standard Preset Security Policy1", "IsDefault": False, "Name": "Standard Preset Security Policy"}]
+    gap = run("MS.SECURITYSUITE.2.4v1", anti_phish_policies=bare)[0]
+    assert (gap["status"], gap["reason"]) == ("UNMAPPED", "evidence_missing:anti_phish_policies.EnableFirstContactSafetyTips")
+    silent = run("MS.SECURITYSUITE.6.2v1", hosted_content_filter_policies=[])[0]
+    assert (silent["status"], silent["reason"]) == ("UNMAPPED", "no_finding")
+    assert run("MS.SECURITYSUITE.1.1v1", anti_malware_rules=[None])[0]["status"] == "PASS", "a null rule list entry is skipped, as Prowler skips it"
+
+
+@needs_prowler
+def test_sharepoint_checks_run_offline_on_a_scubagear_variant(script, runtime, policy_map, offline):
+    def run(policy, **tenant):
+        base = {"SharingCapability": 0, "SharingDomainRestrictionMode": 0, "ODBSharingCapability": 0}
+        base.update(tenant)
+        return _verdict_for(script, runtime, policy_map, {"SPO_tenant": [{k: v for k, v in base.items() if v is not None}]}, policy)[0]
+
+    assert [run("MS.SHAREPOINT.1.1v1", SharingCapability=value)["status"] for value in (0, 1, 2, 3)] == ["PASS", "PASS", "FAIL", "PASS"]
+    assert run("MS.SHAREPOINT.1.3v1", SharingCapability=0)["status"] == "PASS", "sharing off counts as managed"
+    assert run("MS.SHAREPOINT.1.3v1", SharingCapability=2, SharingDomainRestrictionMode=0)["status"] == "FAIL"
+    allowed = run("MS.SHAREPOINT.1.3v1", SharingCapability=2, SharingDomainRestrictionMode=1)
+    assert allowed["status"] == "PASS" and any("assumed non-empty" in a for a in allowed["assumptions"])
+    assert run("MS.SHAREPOINT.1.3v1", SharingCapability=2, SharingDomainRestrictionMode=2)["status"] == "PASS"
+    for policy, tenant, reason in (("MS.SHAREPOINT.1.1v1", {"SharingCapability": None}, "evidence_missing:SPO_tenant.SharingCapability"),
+                                   ("MS.SHAREPOINT.1.3v1", {"SharingDomainRestrictionMode": None}, "evidence_missing:SPO_tenant.SharingDomainRestrictionMode"),
+                                   ("MS.SHAREPOINT.1.1v1", {"SharingCapability": 9}, "shape:SPO_tenant.SharingCapability=9")):
+        row = run(policy, **tenant)
+        assert (row["status"], row["reason"]) == ("UNMAPPED", reason)
+    empty = _verdict_for(script, runtime, policy_map, {"SPO_tenant": []}, "MS.SHAREPOINT.1.1v1")[0]
+    assert (empty["status"], empty["reason"]) == ("UNMAPPED", "evidence_missing:SPO_tenant")
+
+
+def _teams(**changes) -> dict:
+    inp = {"meeting_policies": [{"AllowAnonymousUsersToStartMeeting": False, "AllowCloudRecording": False, "AllowExternalParticipantGiveRequestControl": False,
+                                 "AllowPSTNUsersToBypassLobby": False, "AutoAdmittedUsers": "EveryoneInCompanyExcludingGuests", "Identity": "Global"}],
+           "federation_configuration": [{"AllowFederatedUsers": False, "AllowPublicUsers": False, "AllowTeamsConsumer": False, "AllowTeamsConsumerInbound": False,
+                                         "AllowedDomains": [], "Identity": "Global"}],
+           "client_configuration": [{"AllowEmailIntoChannel": False, "Identity": "Global"}],
+           "scuba_config": {"M365Environment": "commercial"}}
+    inp.update(changes)
+    return inp
+
+
+@needs_prowler
+def test_teams_checks_run_offline_on_a_scubagear_variant(script, runtime, policy_map, offline):
+    policies = ("MS.TEAMS.1.1v1", "MS.TEAMS.1.2v2", "MS.TEAMS.1.3v1", "MS.TEAMS.1.5v1", "MS.TEAMS.1.6v1", "MS.TEAMS.2.1v2", "MS.TEAMS.2.2v2",
+                "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1")
+    compliant = {p: _verdict_for(script, runtime, policy_map, _teams(), p)[0]["status"] for p in policies}
+    assert set(compliant.values()) == {"PASS"}, compliant
+    meeting = _teams()["meeting_policies"][0]
+    flipped = {"MS.TEAMS.1.1v1": ("AllowExternalParticipantGiveRequestControl", True), "MS.TEAMS.1.2v2": ("AllowAnonymousUsersToStartMeeting", True),
+               "MS.TEAMS.1.3v1": ("AutoAdmittedUsers", "Everyone"), "MS.TEAMS.1.5v1": ("AllowPSTNUsersToBypassLobby", True),
+               "MS.TEAMS.1.6v1": ("AllowCloudRecording", True)}
+    for policy, (key, value) in flipped.items():
+        row = _verdict_for(script, runtime, policy_map, _teams(meeting_policies=[{**meeting, key: value}]), policy)[0]
+        assert row["status"] == "FAIL", policy
+    federation = _teams()["federation_configuration"][0]
+    for policy, key in (("MS.TEAMS.2.1v2", "AllowFederatedUsers"), ("MS.TEAMS.2.2v2", "AllowTeamsConsumerInbound"), ("MS.TEAMS.2.3v2", "AllowTeamsConsumer")):
+        assert _verdict_for(script, runtime, policy_map, _teams(federation_configuration=[{**federation, key: True}]), policy)[0]["status"] == "FAIL", policy
+    assert _verdict_for(script, runtime, policy_map, _teams(client_configuration=[{"AllowEmailIntoChannel": True, "Identity": "Global"}]), "MS.TEAMS.4.1v1")[0]["status"] == "FAIL"
+    # Prowler reads only the Global policy; the others are recorded as unread, and a tenant without a Global policy cannot be judged
+    extra = _teams(meeting_policies=[meeting, {**meeting, "Identity": "Tag:Custom", "AllowCloudRecording": True}])
+    only_global = _verdict_for(script, runtime, policy_map, extra, "MS.TEAMS.1.6v1")[0]
+    assert only_global["status"] == "PASS" and any("1 other entries are not read" in a for a in only_global["assumptions"])
+    none = _verdict_for(script, runtime, policy_map, _teams(meeting_policies=[{**meeting, "Identity": "Tag:Custom"}]), "MS.TEAMS.1.6v1")[0]
+    assert (none["status"], none["reason"]) == ("UNMAPPED", "evidence_missing:meeting_policies.Global")
+    # ScubaGear records 2.2, 2.3 and 4.1 as met in a US Government region without testing them, so they are not compared
+    gcc = _teams(scuba_config={"M365Environment": "gcc"}, client_configuration=[{"AllowEmailIntoChannel": True, "Identity": "Global"}])
+    row = _verdict_for(script, runtime, policy_map, gcc, "MS.TEAMS.4.1v1")[0]
+    assert (row["status"], row["prowler_status"], row["reason"]) == ("UNMAPPED", "FAIL", "scubagear_not_applicable:us_government_region")
+    assert _verdict_for(script, runtime, policy_map, gcc, "MS.TEAMS.1.6v1")[0]["status"] == "PASS", "policies without a regional exemption still run"
+
+
+@needs_prowler
+def test_consensus_counts_on_a_synthetic_multi_product_kit(script, runtime, policy_map, tmp_path, offline):
+    kit = tmp_path / "kit"
+    exo = {"transport_config": [{"Name": "A", "SmtpClientAuthenticationDisabled": True}]}
+    exo_open = {"transport_config": [{"Name": "A", "SmtpClientAuthenticationDisabled": False}]}
+    ss = _ss(conn_filter=[{"EnableSafeList": False, "IPAllowList": ["192.0.2.1"], "Name": "A"}])
+    sharepoint = {"SPO_tenant": [{"SharingCapability": 1, "SharingDomainRestrictionMode": 0}]}
+    teams, teams_gcc = _teams(), _teams(scuba_config={"M365Environment": "gcc"})
+    plan = {  # product -> package -> [(variant name, input)] and the cases (policy, variant index, ScubaGear label)
+        "EXO": ("exo", [exo, exo_open], [("MS.EXO.5.1v1", 0, True), ("MS.EXO.5.1v1", 1, True), ("MS.EXO.1.1v2", 0, True), ("MS.EXO.5.1v1", 0, None)]),
+        "SecuritySuite": ("securitysuite", [ss], [("MS.SECURITYSUITE.8.1v1", 0, False)]),
+        "Sharepoint": ("sharepoint", [sharepoint], [("MS.SHAREPOINT.1.1v1", 0, False)]),
+        "Teams": ("teams", [teams, teams_gcc], [("MS.TEAMS.1.6v1", 0, True), ("MS.TEAMS.4.1v1", 1, True)])}
+    products = {}
+    for product, (package, variants, cases) in plan.items():
+        (kit / f"variants-{package}").mkdir(parents=True)
+        shas = []
+        for index, inp in enumerate(variants):
+            data = json.dumps(inp, sort_keys=True, separators=(",", ":"))
+            (kit / f"variants-{package}" / f"variant-{index:04d}.json").write_text(data, encoding="utf-8")
+            shas.append(hashlib.sha256(data.encode()).hexdigest())
+        rows = [_case(policy=policy, variant=f"test_{n}", sha=shas[index], value=bool(label), status="confirmed" if label is not None else "unknown",
+                      case_id=f"{product}-{n}") for n, (policy, index, label) in enumerate(cases)]
+        (kit / f"cases-{package}.jsonl").write_text("".join(json.dumps(c) + "\n" for c in rows), encoding="utf-8")
+        products[product] = {"package": package, "sections_per_policy": {r["scubagear_policy"]: [] for r in policy_map["rows"] if r["product"] == product}}
+    (kit / "summary.json").write_text(json.dumps({"products": products}), encoding="utf-8")
+    out = tmp_path / "out"
+    assert script.main(["--kit-dir", str(kit), "--prowler-root", str(PROWLER_ROOT), "--output-dir", str(out), "--products", *plan]) == 0
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))["products"]
+    assert {p: summary[p]["consensus"] for p in plan} == {
+        "EXO": {"agree": 1, "disagree": 1, "unmapped": 2},
+        "SecuritySuite": {"agree": 1},
+        "Sharepoint": {"disagree": 1},
+        "Teams": {"agree": 1, "unmapped": 1}}
+    consensus = {r["case_id"]: r for r in map(json.loads, (out / "consensus.jsonl").read_text(encoding="utf-8").splitlines())}
+    assert consensus["EXO-1"]["consensus"] == "disagree" and consensus["EXO-1"]["prowler_verdict"] == "FAIL"
+    assert consensus["EXO-2"]["reason"] == "not_exported:outbound_spam_policy"
+    assert consensus["EXO-3"]["reason"] == "scubagear_label_unknown"
+    assert consensus["Sharepoint-0"]["prowler_verdict"] == "PASS", "Prowler accepts New and existing guests where ScubaGear 1.1 does not"
+    assert consensus["Teams-1"]["reason"] == "scubagear_not_applicable:us_government_region"
+    assert summary["EXO"]["checks_executed"] == ["exchange_transport_config_smtp_auth_disabled"]
+    assert "defender_antispam_outbound_policy_forwarding_disabled" in summary["EXO"]["checks_not_evaluated"]
+    assert summary["Sharepoint"]["compared_by_confidence"] == {"exact": {}, "partial": {"disagree": 1}}
 
 
 def test_missing_provider_directory_is_a_clear_error(script, tmp_path):
