@@ -41,8 +41,8 @@
   var SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info', clean: 'Clean' };
   var SEV_LEVEL = { critical: 4, high: 3, medium: 2, low: 1, info: 0, clean: 0 };
   var VIEWS = ['overview', 'findings', 'paths', 'detection', 'baselines', 'access', 'compare'];
-  var FW_ORDER = ['cis_m365_v7', 'cisa_scuba', 'ms_secure_score', 'ms_zero_trust', 'mcsb', 'nist_800_53', 'iso_27001', 'mitre_attack', 'soc2', 'nis2', 'dora', 'google_workspace_baseline', 'cis_m365_v3'];
-  var FW_LABEL = { cis_m365_v7: 'CIS M365 v7', cisa_scuba: 'CISA SCuBA', ms_secure_score: 'Secure Score', ms_zero_trust: 'Zero Trust', mcsb: 'MCSB', nist_800_53: 'NIST 800-53', iso_27001: 'ISO 27001', mitre_attack: 'MITRE ATT&CK', soc2: 'SOC 2', nis2: 'NIS2', dora: 'DORA', google_workspace_baseline: 'Google Workspace', cis_m365_v3: 'CIS M365 v3 (legacy)' };
+  var FW_ORDER = ['cis_m365_v7', 'cisa_scuba', 'ms_secure_score', 'ms_zero_trust', 'mcsb', 'cyber_essentials', 'nist_800_53', 'iso_27001', 'mitre_attack', 'soc2', 'nis2', 'dora', 'google_workspace_baseline', 'cis_m365_v3'];
+  var FW_LABEL = { cis_m365_v7: 'CIS M365 v7', cisa_scuba: 'CISA SCuBA', ms_secure_score: 'Secure Score', ms_zero_trust: 'Zero Trust', mcsb: 'MCSB', cyber_essentials: 'Cyber Essentials', nist_800_53: 'NIST 800-53', iso_27001: 'ISO 27001', mitre_attack: 'MITRE ATT&CK', soc2: 'SOC 2', nis2: 'NIS2', dora: 'DORA', google_workspace_baseline: 'Google Workspace', cis_m365_v3: 'CIS M365 v3 (legacy)' };
   var NODE_LABEL = { user: 'User', guest: 'Guest', group: 'Group', service_principal: 'Enterprise app', application: 'Application', directory_role: 'Directory role', graph_permission: 'Graph permission', entry: 'Entry', principal: 'Principal' };
   var NODE_ICON = { user: 'user', guest: 'guest', group: 'users', service_principal: 'app-window', application: 'app-window', directory_role: 'shield', graph_permission: 'key-round', entry: 'log-in', principal: 'users' };
   var GRAPH_COLLECTORS = ['identity', 'app_consent', 'app_credentials', 'auth_methods'];

@@ -35,7 +35,7 @@
         "top": {
           "type": "integer",
           "required": false,
-          "default": 500
+          "default": 0
         },
         "run_name": {
           "type": "string",
@@ -77,7 +77,7 @@
         "top": {
           "type": "integer",
           "required": false,
-          "default": 500
+          "default": 0
         },
         "run_name": {
           "type": "string",
@@ -125,7 +125,7 @@
         "top": {
           "type": "integer",
           "required": false,
-          "default": 500
+          "default": 0
         },
         "run_name": {
           "type": "string",
@@ -167,7 +167,7 @@
         "top": {
           "type": "integer",
           "required": false,
-          "default": 500
+          "default": 0
         },
         "run_name": {
           "type": "string",
@@ -426,6 +426,7 @@
   ],
   "notes": [
     "Do not store credentials in source files.",
-    "Use environment variables from configs/tenant-audit.example.env for local runs."
+    "Use environment variables from configs/tenant-audit.example.env for local runs.",
+    "A top of 0 means no row limit: every list is paged to its last row. A positive top is an explicit limit, and a list it cuts is recorded as a coverage gap."
   ]
 }

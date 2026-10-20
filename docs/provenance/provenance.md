@@ -96,8 +96,16 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
 `configs/framework-catalog.json` and `configs/control-mappings.json` reference
 benchmark control identifiers (CIS Microsoft 365 Foundations v7.0.0, CISA SCuBA
 policy ids, Microsoft Secure Score control profile ids, Microsoft cloud
-security benchmark ids, and Zero Trust pillar names). Auditex stores
-identifiers and short paraphrased titles only; no benchmark text is copied. The
+security benchmark ids, and Zero Trust pillar names) and cite headings of the
+NCSC Cyber Essentials Requirements for IT Infrastructure v3.3 under Auditex-local
+requirement ids. Auditex stores identifiers, headings and short paraphrased
+titles only; no benchmark or standard text is copied. NCSC content is Crown
+copyright and may be reused under the [Open Government Licence
+v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/)
+with acknowledgement of the source, as the [NCSC
+terms](https://www.ncsc.gov.uk/section/about-this-website/terms-and-conditions)
+state. The IASME notices used for the effective dates are IASME content, not
+Crown copyright, and are cited for dates only. The
 sources used to verify each identifier are listed in the catalog and in
 [Framework Mappings](../reference/framework-mappings.md).
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from .assurance import build_live_readiness_summary
 from .capability_gate import INTUNE_COLLECTORS, enrich_capability_row, intune_license_state
+from .collection_gaps import sample_only
 from .config import CollectorConfig, RunConfig
 from .ai_context import build_privacy_block
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
@@ -288,7 +289,7 @@ def run_preflight_probe(
 ) -> tuple[list[str], list[dict[str, Any]], str]:
     rows: list[dict[str, Any]] = []
     runnable: list[str] = []
-    preflight_top = max(1, min(5, run_cfg.top_items))
+    preflight_top = 5 if run_cfg.top_items is None else max(1, min(5, run_cfg.top_items))
     preflight_page_size = max(1, min(5, run_cfg.page_size))
     writer.log_event(
         "preflight.started",
@@ -321,20 +322,22 @@ def run_preflight_probe(
 
         writer.log_event("preflight.collector.started", "Preflight collector started", {"collector": name})
         try:
-            result = collector.run(
-                {
-                    "client": client,
-                    "top": preflight_top,
-                    "page_size": preflight_page_size,
-                    "plane": "inventory",
-                    "since": run_cfg.since,
-                    "until": run_cfg.until,
-                    "collector_checkpoint_state": {},
-                    "operation_checkpoint_state": {},
-                    "chunk_writer": None,
-                    "audit_logger": writer.log_event,
-                }
-            )
+            # The preflight asks whether a list can be read, so its 5-row limit is a sample, not a gap.
+            with sample_only():
+                result = collector.run(
+                    {
+                        "client": client,
+                        "top": preflight_top,
+                        "page_size": preflight_page_size,
+                        "plane": "inventory",
+                        "since": run_cfg.since,
+                        "until": run_cfg.until,
+                        "collector_checkpoint_state": {},
+                        "operation_checkpoint_state": {},
+                        "chunk_writer": None,
+                        "audit_logger": writer.log_event,
+                    }
+                )
             coverage = result.coverage or []
             has_ok = any(item.get("status") == "ok" for item in coverage)
             decision = "run" if include_blocked or result.item_count > 0 or has_ok else "skip"

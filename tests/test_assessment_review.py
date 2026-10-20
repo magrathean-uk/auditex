@@ -199,7 +199,7 @@ def test_completed_auditex_baselines_compared_without_mutating_bundle(tmp_path: 
     assert result["summary"]["agreement_pair_count"] == 1
     assert result["summary"]["disagreement_pair_count"] == 0
     assert result["assessments"][1]["source_version"] is None
-    assert result["assessments"][1]["schema_contract_version"] == "2026-04-21"
+    assert result["assessments"][1]["schema_contract_version"] == "2026-10-20"
     identity_ref = result["assessments"][1]["provenance"]["identity_ref"]
     assert identity_ref["json_pointer"] == "/tenant_id"
     assert identity_ref["input_sha256"] == sha256((run_dir / "run-manifest.json").read_bytes()).hexdigest()

@@ -6,6 +6,9 @@ from ..graph import GraphClient
 from .base import Collector, CollectorResult, run_graph_endpoints
 
 
+SYNC_SAMPLE_LIMIT = 100
+
+
 class DomainsHybridCollector(Collector):
     name = "domains_hybrid"
     description = "Domain posture and sampled hybrid sync signals."
@@ -26,9 +29,11 @@ class DomainsHybridCollector(Collector):
                     "params": {
                         "$select": "id,userPrincipalName,onPremisesSyncEnabled,onPremisesImmutableId,onPremisesDomainName,onPremisesLastSyncDateTime"
                     },
+                    # A sample by design: hybrid sync is judged from the first users, so this bound is not a gap.
+                    "sample_limit": SYNC_SAMPLE_LIMIT,
                 },
             },
-            top=min(context.get("top", 100), 100),
+            top=context.get("top"),
             page_size=context.get("page_size"),
             chunk_writer=context.get("chunk_writer"),
             log_event=context.get("audit_logger"),

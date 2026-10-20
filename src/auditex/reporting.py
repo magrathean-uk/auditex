@@ -1838,6 +1838,7 @@ def _append_baseline_alignment_markdown(lines: list[str], payload: Mapping[str, 
             ("Not assessed", "not_assessed"),
         ),
     )
+    _append_cyber_essentials_markdown(lines, _mapping(frameworks.get("cyber_essentials")))
     secure_score = _mapping(payload.get("secure_score"))
     if secure_score:
         _append_rows_markdown(
@@ -1853,6 +1854,52 @@ def _append_baseline_alignment_markdown(lines: list[str], payload: Mapping[str, 
                 ("Agreement", "agreement"),
             ),
         )
+
+
+def _append_cyber_essentials_markdown(lines: list[str], section: Mapping[str, Any]) -> None:
+    """Per-requirement table for the ``cyber_essentials`` baseline. Requirements Auditex cannot judge show their status, never a verdict."""
+    if not section:
+        return
+    rows = []
+    for control in _dict_rows(section.get("controls")):
+        evidence = _mapping(control.get("evidence"))
+        rows.append(
+            {
+                "requirement": control.get("control_id"),
+                "requirement_status": control.get("requirement_status"),
+                "status": control.get("status"),
+                "reason": control.get("reason"),
+                "rules": ", ".join(str(rule) for rule in control.get("rule_ids") or []) or "none",
+                "evaluated": f"{evidence.get('rules_evaluated', 0)}/{evidence.get('rules_mapped', 0)}",
+                "open_findings": control.get("open_finding_count", 0),
+                "citation": control.get("citation"),
+            }
+        )
+    _append_rows_markdown(
+        lines,
+        "Cyber Essentials Requirements",
+        rows,
+        (
+            ("Requirement", "requirement"),
+            ("Requirement status", "requirement_status"),
+            ("Status", "status"),
+            ("Reason", "reason"),
+            ("Rules", "rules"),
+            ("Rules evaluated", "evaluated"),
+            ("Open findings", "open_findings"),
+            ("Document heading", "citation"),
+        ),
+    )
+    document = " ".join(
+        part
+        for part in (
+            _text(section.get("document_title")) or _text(section.get("title")),
+            f"(effective {_text(section.get('effective_date'))})" if section.get("effective_date") else "",
+            _text(section.get("document_url")),
+        )
+        if part
+    )
+    lines.extend(["", f"Source: {_markdown_cell(document)}", "", _markdown_cell(section.get("disclaimer"))])
 
 
 def _append_rows_markdown(

@@ -298,6 +298,7 @@
       "platform": "m365",
       "title": "Microsoft 365 exchange rules",
       "rules": [
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "mailbox_forwarding.external_inbox_rule",
@@ -329,9 +330,11 @@
         "app_credentials.secret_expired",
         "app_credentials.secret_expiring",
         "app_credentials.secret_long_validity",
+        "ca.break_glass_exclusion_missing",
         "ca.enforcement_unverified",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "consent_policy.admin_consent_workflow_disabled",
         "consent_policy.user_consent_unrestricted",
         "consent_policy.user_consent_unverified",
@@ -352,6 +355,33 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered"
+      ]
+    },
+    {
+      "name": "m365.identity_governance",
+      "kind": "area",
+      "platform": "m365",
+      "title": "Microsoft 365 identity governance rules",
+      "rules": [
+        "identity_governance.standing_privilege_only"
+      ]
+    },
+    {
+      "name": "m365.intune_depth",
+      "kind": "area",
+      "platform": "m365",
+      "title": "Microsoft 365 intune depth rules",
+      "rules": [
+        "intune_depth.policies_without_assignments"
+      ]
+    },
+    {
+      "name": "m365.onedrive",
+      "kind": "area",
+      "platform": "m365",
+      "title": "Microsoft 365 onedrive rules",
+      "rules": [
+        "onedrive.external_sharing_enabled"
       ]
     },
     {
@@ -390,7 +420,18 @@
       "title": "Microsoft 365 sharepoint rules",
       "rules": [
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "sharepoint.site_orphaned",
+        "sharepoint.site_weak_ownership"
+      ]
+    },
+    {
+      "name": "m365.teams",
+      "kind": "area",
+      "platform": "m365",
+      "title": "Microsoft 365 teams rules",
+      "rules": [
+        "teams.external_federation_open"
       ]
     },
     {
@@ -461,6 +502,32 @@
       ]
     },
     {
+      "name": "framework.cyber_essentials",
+      "kind": "framework",
+      "framework": "cyber_essentials",
+      "title": "Rules mapped to cyber_essentials",
+      "rules": [
+        "attack_path.no_mfa_to_tier0",
+        "ca.legacy_auth_not_blocked",
+        "ca.mfa_not_enforced",
+        "consent_policy.user_consent_unrestricted",
+        "google.admin_2sv_not_enforced",
+        "google.admin_2sv_not_enrolled",
+        "google.admin_stale_login",
+        "google.super_admin_sprawl",
+        "google.suspended_admin",
+        "google.user_2sv_not_enrolled",
+        "identity.global_admin_disabled",
+        "identity.global_admin_mfa_not_registered",
+        "identity.global_admin_sprawl",
+        "identity.privileged_mfa_not_registered",
+        "identity.privileged_stale_account",
+        "identity.stale_enabled_account",
+        "identity.user_mfa_not_registered",
+        "intune.device_noncompliant"
+      ]
+    },
+    {
       "name": "framework.dora",
       "kind": "framework",
       "framework": "dora",
@@ -479,9 +546,11 @@
         "attack_path.app_owner_to_tier0",
         "attack_path.no_mfa_to_tier0",
         "attack_path.privilege_escalation",
+        "ca.break_glass_exclusion_missing",
         "ca.enforcement_unverified",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "collector.issue.collector",
         "collector.issue.permission",
         "collector.issue.service",
@@ -515,6 +584,7 @@
         "dns_posture.spf_multiple_records",
         "dns_posture.spf_passthrough",
         "dns_posture.tls_rpt_missing",
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "exposure.federated_domain_metadata_public",
@@ -528,15 +598,21 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered",
+        "identity_governance.standing_privilege_only",
         "intune.device_noncompliant",
         "intune.device_stale_sync",
+        "intune_depth.policies_without_assignments",
         "mailbox_forwarding.external_inbox_rule",
         "mailbox_forwarding.hide_from_user",
+        "onedrive.external_sharing_enabled",
         "security.privilege_change_event",
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "sharepoint.site_orphaned",
+        "sharepoint.site_weak_ownership",
+        "teams.external_federation_open"
       ]
     },
     {
@@ -614,9 +690,11 @@
         "attack_path.app_owner_to_tier0",
         "attack_path.no_mfa_to_tier0",
         "attack_path.privilege_escalation",
+        "ca.break_glass_exclusion_missing",
         "ca.enforcement_unverified",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "collector.issue.collector",
         "collector.issue.permission",
         "collector.issue.service",
@@ -650,6 +728,7 @@
         "dns_posture.spf_multiple_records",
         "dns_posture.spf_passthrough",
         "dns_posture.tls_rpt_missing",
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "exposure.federated_domain_metadata_public",
@@ -709,17 +788,23 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered",
+        "identity_governance.standing_privilege_only",
         "intune.device_noncompliant",
         "intune.device_stale_sync",
+        "intune_depth.policies_without_assignments",
         "mailbox_forwarding.external_inbox_rule",
         "mailbox_forwarding.hide_from_user",
+        "onedrive.external_sharing_enabled",
         "reports_usage.concealed_names",
         "secure_score.low_overall",
         "security.privilege_change_event",
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "sharepoint.site_orphaned",
+        "sharepoint.site_weak_ownership",
+        "teams.external_federation_open"
       ]
     },
     {
@@ -801,6 +886,7 @@
         "ca.enforcement_unverified",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "collector.issue.permission",
         "consent_policy.admin_consent_workflow_disabled",
         "consent_policy.user_consent_unrestricted",
@@ -832,6 +918,7 @@
         "dns_posture.spf_multiple_records",
         "dns_posture.spf_passthrough",
         "dns_posture.tls_rpt_missing",
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "exposure.federated_domain_metadata_public",
@@ -850,14 +937,17 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered",
+        "identity_governance.standing_privilege_only",
         "intune.device_noncompliant",
         "intune.device_stale_sync",
         "mailbox_forwarding.external_inbox_rule",
         "mailbox_forwarding.hide_from_user",
+        "onedrive.external_sharing_enabled",
         "security.privilege_change_event",
         "security.risky_signin",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "teams.external_federation_open"
       ]
     },
     {
@@ -906,8 +996,10 @@
         "attack_path.app_owner_to_tier0",
         "attack_path.no_mfa_to_tier0",
         "attack_path.privilege_escalation",
+        "ca.break_glass_exclusion_missing",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "consent_policy.admin_consent_workflow_disabled",
         "consent_policy.user_consent_unrestricted",
         "cross_tenant_access.auto_user_consent_inbound_enabled",
@@ -927,6 +1019,7 @@
         "dns_posture.mta_sts_policy_invalid",
         "dns_posture.mta_sts_testing_mode",
         "dns_posture.tls_rpt_missing",
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "exposure.federated_domain_metadata_public",
@@ -940,15 +1033,21 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered",
+        "identity_governance.standing_privilege_only",
         "intune.device_noncompliant",
         "intune.device_stale_sync",
+        "intune_depth.policies_without_assignments",
         "mailbox_forwarding.external_inbox_rule",
         "mailbox_forwarding.hide_from_user",
+        "onedrive.external_sharing_enabled",
         "secure_score.low_overall",
         "security.privilege_change_event",
         "security.risky_signin",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "sharepoint.site_orphaned",
+        "sharepoint.site_weak_ownership",
+        "teams.external_federation_open"
       ]
     },
     {
@@ -970,9 +1069,11 @@
         "attack_path.app_owner_to_tier0",
         "attack_path.no_mfa_to_tier0",
         "attack_path.privilege_escalation",
+        "ca.break_glass_exclusion_missing",
         "ca.enforcement_unverified",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "collector.issue.collector",
         "collector.issue.permission",
         "collector.issue.service",
@@ -1006,6 +1107,7 @@
         "dns_posture.spf_multiple_records",
         "dns_posture.spf_passthrough",
         "dns_posture.tls_rpt_missing",
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "exposure.federated_domain_metadata_public",
@@ -1019,16 +1121,22 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered",
+        "identity_governance.standing_privilege_only",
         "intune.device_noncompliant",
         "intune.device_stale_sync",
+        "intune_depth.policies_without_assignments",
         "mailbox_forwarding.external_inbox_rule",
         "mailbox_forwarding.hide_from_user",
+        "onedrive.external_sharing_enabled",
         "secure_score.low_overall",
         "security.privilege_change_event",
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "sharepoint.site_orphaned",
+        "sharepoint.site_weak_ownership",
+        "teams.external_federation_open"
       ]
     },
     {
@@ -1050,9 +1158,11 @@
         "attack_path.app_owner_to_tier0",
         "attack_path.no_mfa_to_tier0",
         "attack_path.privilege_escalation",
+        "ca.break_glass_exclusion_missing",
         "ca.enforcement_unverified",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "collector.issue.collector",
         "collector.issue.permission",
         "collector.issue.service",
@@ -1086,6 +1196,7 @@
         "dns_posture.spf_multiple_records",
         "dns_posture.spf_passthrough",
         "dns_posture.tls_rpt_missing",
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "exposure.federated_domain_metadata_public",
@@ -1147,17 +1258,23 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered",
+        "identity_governance.standing_privilege_only",
         "intune.device_noncompliant",
         "intune.device_stale_sync",
+        "intune_depth.policies_without_assignments",
         "mailbox_forwarding.external_inbox_rule",
         "mailbox_forwarding.hide_from_user",
+        "onedrive.external_sharing_enabled",
         "reports_usage.concealed_names",
         "secure_score.low_overall",
         "security.privilege_change_event",
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "sharepoint.site_orphaned",
+        "sharepoint.site_weak_ownership",
+        "teams.external_federation_open"
       ]
     },
     {
@@ -1179,9 +1296,11 @@
         "attack_path.app_owner_to_tier0",
         "attack_path.no_mfa_to_tier0",
         "attack_path.privilege_escalation",
+        "ca.break_glass_exclusion_missing",
         "ca.enforcement_unverified",
         "ca.legacy_auth_not_blocked",
         "ca.mfa_not_enforced",
+        "ca.policy_report_only",
         "collector.issue.collector",
         "collector.issue.permission",
         "collector.issue.service",
@@ -1215,6 +1334,7 @@
         "dns_posture.spf_multiple_records",
         "dns_posture.spf_passthrough",
         "dns_posture.tls_rpt_missing",
+        "exchange.mailbox_forwarding_configured",
         "exchange.remote_domain_auto_forward_enabled",
         "exchange.transport_external_redirect",
         "exposure.federated_domain_metadata_public",
@@ -1276,17 +1396,23 @@
         "identity.privileged_stale_account",
         "identity.stale_enabled_account",
         "identity.user_mfa_not_registered",
+        "identity_governance.standing_privilege_only",
         "intune.device_noncompliant",
         "intune.device_stale_sync",
+        "intune_depth.policies_without_assignments",
         "mailbox_forwarding.external_inbox_rule",
         "mailbox_forwarding.hide_from_user",
+        "onedrive.external_sharing_enabled",
         "reports_usage.concealed_names",
         "secure_score.low_overall",
         "security.privilege_change_event",
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.external_principal",
+        "sharepoint.site_orphaned",
+        "sharepoint.site_weak_ownership",
+        "teams.external_federation_open"
       ]
     }
   ]

@@ -21,6 +21,8 @@ GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 # every beta call is recorded with api_version="beta" in coverage and the API ledger.
 GRAPH_BETA_ROOT = "https://graph.microsoft.com/beta"
 GRAPH_API_ROOTS = {"v1.0": GRAPH_ROOT, "beta": GRAPH_BETA_ROOT}
+# Error code of a refused @odata.nextLink; the paging that stopped is recorded as a coverage gap.
+NEXT_LINK_REFUSED = "NextLinkRefused"
 
 
 def graph_url(path: str, api_version: str = "v1.0") -> str:
@@ -32,6 +34,12 @@ def graph_url(path: str, api_version: str = "v1.0") -> str:
     except KeyError as exc:
         raise ValueError(f"Unsupported Graph api_version: {api_version!r}") from exc
     return f"{root}{path}"
+
+
+def graph_host_url(url: str) -> bool:
+    """Whether url is an HTTPS URL on the Microsoft Graph host the client talks to."""
+    parsed = urlparse(url)
+    return parsed.scheme == "https" and parsed.hostname == urlparse(GRAPH_ROOT).hostname
 
 
 def graph_api_version(url: str) -> str:
@@ -470,7 +478,26 @@ class GraphClient:
             raise GraphError(response.text, status=response.status_code, request=response.url)
         return response.text
 
+    def _require_graph_url(self, url: Any) -> None:
+        """Refuse to send the bearer token anywhere but Microsoft Graph, and never read a stopped list as complete."""
+        if isinstance(url, str) and graph_host_url(url):
+            return
+        host = urlparse(str(url)).hostname or "unknown"
+        self._emit(
+            "graph.request.next_link_refused",
+            "Refused a URL outside Microsoft Graph",
+            {"host": host},
+        )
+        raise GraphError(
+            f"Refusing to request {host}, which is not Microsoft Graph; the list is incomplete.",
+            request=host,
+            error_code=NEXT_LINK_REFUSED,
+        )
+
     def iter_pages(self, path: str, params: Optional[Dict[str, Any]] = None) -> Iterator[Dict[str, Any]]:
+        if path.startswith("http"):
+            # An absolute first URL (a batch body's nextLink, a beta endpoint) gets the same host check as every later page.
+            self._require_graph_url(path)
         page_url: Optional[str] = path if path.startswith("http") else f"{GRAPH_ROOT}{path}"
         current_params = params
         while page_url:
@@ -479,6 +506,8 @@ class GraphClient:
                 raise GraphError(f"Non-dict response from {page_url}", request=page_url)
             yield payload
             page_url = payload.get("@odata.nextLink")
+            if page_url:
+                self._require_graph_url(page_url)
             current_params = None
 
     def iter_items(

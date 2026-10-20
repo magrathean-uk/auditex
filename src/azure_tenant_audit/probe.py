@@ -19,6 +19,7 @@ from .auth_runtime import (
 )
 from . import run as run_core
 from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunOptions, CollectorRunner
+from .collection_gaps import sample_only
 from .collectors import REGISTRY
 from .collectors.base import run_graph_endpoints
 from .config import AuthConfig
@@ -418,17 +419,18 @@ def _run_windows365_probe(
             "params": {},
         },
     }
-    payload, coverage = run_graph_endpoints(
-        "windows365",
-        client,
-        endpoints,
-        top=cfg.top,
-        page_size=cfg.page_size,
-        chunk_writer=lambda collector_name, endpoint_name, page_number, records, metadata=None: str(
-            writer.write_chunk_records(collector_name, endpoint_name, page_number, records, metadata).relative_to(writer.run_dir)
-        ),
-        log_event=writer.log_event,
-    )
+    with sample_only():
+        payload, coverage = run_graph_endpoints(
+            "windows365",
+            client,
+            endpoints,
+            top=cfg.top,
+            page_size=cfg.page_size,
+            chunk_writer=lambda collector_name, endpoint_name, page_number, records, metadata=None: str(
+                writer.write_chunk_records(collector_name, endpoint_name, page_number, records, metadata).relative_to(writer.run_dir)
+            ),
+            log_event=writer.log_event,
+        )
     result_row = {
         "name": "windows365",
         "status": "partial" if any(row.get("status") != "ok" for row in coverage) else "ok",
@@ -714,20 +716,22 @@ def run_live_probe(cfg: ProbeConfig) -> int:
                     )
                     continue
 
-                output = collector_runner.run(
-                    collector,
-                    CollectorRunContext(
-                        client=client,
-                        top=cfg.top,
-                        page_size=cfg.page_size,
-                        plane="inventory",
-                        since=cfg.since,
-                        until=cfg.until,
-                        hooks=writer_adapter.hooks(),
-                    ),
-                    name=surface,
-                    options=CollectorRunOptions(write_checkpoint=False),
-                )
+                # A probe asks whether a surface can be read; its row limit is a sample, not a coverage gap.
+                with sample_only():
+                    output = collector_runner.run(
+                        collector,
+                        CollectorRunContext(
+                            client=client,
+                            top=cfg.top,
+                            page_size=cfg.page_size,
+                            plane="inventory",
+                            since=cfg.since,
+                            until=cfg.until,
+                            hooks=writer_adapter.hooks(),
+                        ),
+                        name=surface,
+                        options=CollectorRunOptions(write_checkpoint=False),
+                    )
                 collector_payloads[surface] = output.result.payload
                 row = dict(output.result_row)
                 result_rows.append(row)

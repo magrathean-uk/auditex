@@ -160,6 +160,12 @@
             "type": "string"
           }
         },
+        "cyber_essentials": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "google_workspace_baseline": {
           "type": "array",
           "items": {

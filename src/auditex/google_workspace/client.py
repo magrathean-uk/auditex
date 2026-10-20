@@ -26,6 +26,30 @@ def classify_google_error(exc: Exception) -> tuple[str, str]:
     return "client_error", message
 
 
+class CollectedRows(list):
+    """Rows of one Google list, plus whether the list continued past the operator's limit.
+
+    A plain ``list`` is what a caller that does not know about limits returns; the collectors
+    read ``truncated`` with ``getattr`` so both work.
+    """
+
+    truncated: bool = False
+    result_limit: int | None = None
+
+    def __init__(self, rows: Any = (), *, truncated: bool = False, result_limit: int | None = None) -> None:
+        super().__init__(rows)
+        self.truncated = truncated
+        self.result_limit = result_limit
+
+
+def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
+    """Dict rows of a single-call list cut to ``limit``; ``truncated`` says rows were dropped."""
+    rows = [item for item in values if isinstance(item, dict)]
+    if not limit or len(rows) <= limit:
+        return CollectedRows(rows, result_limit=limit or None)
+    return CollectedRows(rows[:limit], truncated=True, result_limit=limit)
+
+
 @dataclass
 class GoogleWorkspaceClient:
     credentials: Any
@@ -57,7 +81,8 @@ class GoogleWorkspaceClient:
         item_key: str,
         *,
         limit: int | None,
-    ) -> list[dict[str, Any]]:
+    ) -> CollectedRows:
+        limit = limit or None
         rows: list[dict[str, Any]] = []
         token: str | None = None
         while True:
@@ -65,11 +90,12 @@ class GoogleWorkspaceClient:
             values = payload.get(item_key) or payload.get("items") or payload.get("value") or []
             if isinstance(values, list):
                 rows.extend(item for item in values if isinstance(item, dict))
-            if limit is not None and len(rows) >= limit:
-                return rows[:limit]
             token = payload.get("nextPageToken")
+            if limit is not None and len(rows) >= limit:
+                # More rows, or a further page, means the list was cut at the operator's limit.
+                return CollectedRows(rows[:limit], truncated=len(rows) > limit or bool(token), result_limit=limit)
             if not token:
-                return rows
+                return CollectedRows(rows, result_limit=limit)
 
     def list_directory(self, resource: str, *, top: int | None = None, domain: str | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
@@ -96,12 +122,10 @@ class GoogleWorkspaceClient:
             return self._collect_pages(request, "groups", limit=top)
         if resource == "orgUnits":
             payload = service.orgunits().list(customerId=self.customer, type="all").execute()
-            values = payload.get("organizationUnits") or []
-            return [item for item in values if isinstance(item, dict)][: top or None]
+            return _cut(payload.get("organizationUnits") or [], top)
         if resource == "domains":
             payload = service.domains().list(customer=self.customer).execute()
-            values = payload.get("domains") or []
-            return [item for item in values if isinstance(item, dict)][: top or None]
+            return _cut(payload.get("domains") or [], top)
         if resource == "roles":
             return self._collect_pages(
                 lambda page_token: service.roles().list(customer=self.customer, maxResults=page_size, pageToken=page_token),
@@ -132,14 +156,12 @@ class GoogleWorkspaceClient:
     def list_user_aliases(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         payload = service.users().aliases().list(userKey=user_key).execute()
-        values = payload.get("aliases") or []
-        return [item for item in values if isinstance(item, dict)][: top or None]
+        return _cut(payload.get("aliases") or [], top)
 
     def list_user_tokens(self, user_key: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         payload = service.tokens().list(userKey=user_key).execute()
-        values = payload.get("items") or []
-        return [item for item in values if isinstance(item, dict)][: top or None]
+        return _cut(payload.get("items") or [], top)
 
     def list_report_activities(
         self,

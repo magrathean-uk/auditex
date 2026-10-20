@@ -996,5 +996,123 @@
       "AUDITEX-SECURE-SCORE-LOW"
     ],
     "expected_value": "Secure Score current score is at least 50% of the maximum score."
+  },
+  "sharepoint.site_orphaned": {
+    "risk_rating": "high",
+    "description": "A SharePoint site shows no principal in its sampled permissions, so nobody is accountable for who can reach its content.",
+    "impact": "An orphaned site keeps its permissions and sharing links while no owner reviews them, so stale and external access persists unnoticed.",
+    "remediation": "Assign at least two active owners to the site or retire it, then review its members and sharing links.",
+    "references": [
+      "SharePoint site ownership review"
+    ],
+    "control_ids": [
+      "AUDITEX-SPO-SITE-ORPHANED"
+    ],
+    "expected_value": "Every SharePoint site has at least two active owners."
+  },
+  "sharepoint.site_weak_ownership": {
+    "risk_rating": "medium",
+    "description": "A SharePoint site shows a single principal in its sampled permissions, so one account change leaves the site without an owner.",
+    "impact": "A site that depends on one owner is likely to become orphaned, and its access then goes unreviewed.",
+    "remediation": "Assign at least two active owners to the site and confirm each one still needs it.",
+    "references": [
+      "SharePoint site ownership review"
+    ],
+    "control_ids": [
+      "AUDITEX-SPO-SITE-WEAK-OWNERSHIP"
+    ],
+    "expected_value": "Every SharePoint site has at least two active owners."
+  },
+  "onedrive.external_sharing_enabled": {
+    "risk_rating": "high",
+    "description": "A personal OneDrive site allows sharing with people outside the organisation.",
+    "impact": "Users can share work files externally without review, which exposes content outside the approved collaboration boundary.",
+    "remediation": "Restrict OneDrive sharing to the tenant, or to named partner domains, and review existing external shares.",
+    "references": [
+      "OneDrive sharing policy review"
+    ],
+    "control_ids": [
+      "AUDITEX-ONEDRIVE-EXTERNAL-SHARING"
+    ],
+    "expected_value": "OneDrive sharing is limited to the organisation or approved partner domains."
+  },
+  "exchange.mailbox_forwarding_configured": {
+    "risk_rating": "high",
+    "description": "A mailbox forwards mail to an SMTP address configured on the mailbox itself.",
+    "impact": "Mailbox-level forwarding copies mail out of the tenant without a transport rule, and it is a common persistence step after a mailbox takeover.",
+    "remediation": "Remove the forwarding address unless an approved business case exists, and confirm the mailbox was not compromised.",
+    "references": [
+      "Exchange mailbox forwarding review",
+      "MITRE ATT&CK T1114.003"
+    ],
+    "control_ids": [
+      "AUDITEX-EXO-MAILBOX-FORWARDING"
+    ],
+    "expected_value": "No mailbox has a forwarding SMTP address unless it is approved."
+  },
+  "teams.external_federation_open": {
+    "risk_rating": "medium",
+    "description": "Microsoft Teams federation allows chat and meetings with users in external organisations or public accounts.",
+    "impact": "Open federation lets outside parties contact staff directly, which supports phishing and data sharing outside approved partners.",
+    "remediation": "Limit external access to an allow-list of partner domains, or turn it off where it is not needed.",
+    "references": [
+      "Microsoft Teams external access review"
+    ],
+    "control_ids": [
+      "AUDITEX-TEAMS-EXTERNAL-FEDERATION"
+    ],
+    "expected_value": "Teams external access is limited to approved partner domains."
+  },
+  "identity_governance.standing_privilege_only": {
+    "risk_rating": "medium",
+    "description": "Privileged role assignments exist without any eligibility schedules, so privileged access is permanent rather than time-bound.",
+    "impact": "Standing privilege widens the window in which a stolen administrator credential can be used.",
+    "remediation": "Move administrator roles to eligible assignments in Privileged Identity Management and activate them only when needed.",
+    "references": [
+      "Microsoft Entra Privileged Identity Management"
+    ],
+    "control_ids": [
+      "AUDITEX-GOV-STANDING-PRIVILEGE"
+    ],
+    "expected_value": "Privileged roles are eligible and time-bound, with standing assignments limited to emergency access accounts."
+  },
+  "intune_depth.policies_without_assignments": {
+    "risk_rating": "medium",
+    "description": "Intune policies were observed, but no policy assignments were found in the sampled assignment data.",
+    "impact": "A policy that is assigned to nobody enforces nothing, so devices may be unmanaged although a baseline appears to exist.",
+    "remediation": "Assign each Intune policy to the intended device or user groups and confirm devices receive it.",
+    "references": [
+      "Microsoft Intune policy assignment guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-POLICY-UNASSIGNED"
+    ],
+    "expected_value": "Every in-scope Intune policy is assigned to a device or user group."
+  },
+  "ca.policy_report_only": {
+    "risk_rating": "medium",
+    "description": "A Conditional Access policy is in report-only mode, so it records its decision but does not enforce it.",
+    "impact": "Users and devices the policy was meant to control are not held to it, although the tenant appears to have the policy.",
+    "remediation": "Review the report-only results, then enable the policy or retire it.",
+    "references": [
+      "Microsoft Entra Conditional Access report-only mode"
+    ],
+    "control_ids": [
+      "AUDITEX-CA-REPORT-ONLY"
+    ],
+    "expected_value": "Conditional Access policies are enabled, or report-only for a documented and short evaluation period."
+  },
+  "ca.break_glass_exclusion_missing": {
+    "risk_rating": "high",
+    "description": "An enabled Conditional Access policy does not explicitly exclude a detected emergency-access account or group.",
+    "impact": "A policy or sign-in service failure can lock out every administrator, including the accounts kept for recovery.",
+    "remediation": "Exclude the emergency-access accounts from the policy, and monitor their sign-ins separately.",
+    "references": [
+      "Microsoft Entra emergency access accounts"
+    ],
+    "control_ids": [
+      "AUDITEX-CA-BREAK-GLASS-EXCLUSION"
+    ],
+    "expected_value": "Emergency-access accounts are excluded from every enforcing Conditional Access policy and monitored."
   }
 }

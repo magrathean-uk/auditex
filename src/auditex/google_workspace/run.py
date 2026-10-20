@@ -62,7 +62,7 @@ class GoogleRunConfig:
     collector_preset: str | None = "core-security"
     collectors: str | None = None
     exclude: str | None = None
-    top: int = 100
+    top: int | None = None
     page_size: int = 100
     since: str | None = None
     until: str | None = None
@@ -316,7 +316,7 @@ def _write_google_bundle(
         diagnostics=diagnostics,
         result_rows=result_rows,
         coverage_rows=coverage_rows,
-        top_limit=config.top,
+        top_limit=config.top or None,
     )
     findings = build_google_findings(normalized_snapshot, diagnostics=diagnostics)
     if findings:
@@ -389,7 +389,7 @@ def _write_google_bundle(
                 "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path is not None else None,
                 "command_line": scrub_google_command_line(command_line or []),
                 "coverage_count": len(coverage_rows),
-                "top_limit": config.top,
+                "top_limit": config.top or None,
                 "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
                 "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
             },
@@ -784,7 +784,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
     try:
         credentials = build_google_credentials(auth_config)
         client = GoogleWorkspaceClient(credentials, customer_id=config.customer_id, domain=config.domain, page_size=config.page_size)
-        preflight_rows = build_google_preflight_rows(client, selected, domain=config.domain, top=max(1, min(config.top, 5)))
+        preflight_rows = build_google_preflight_rows(client, selected, domain=config.domain, top=5 if config.top is None else max(1, min(config.top, 5)))
         payload["preflight"] = preflight_rows
         payload["capability_matrix"] = build_google_capability_rows(
             selected,

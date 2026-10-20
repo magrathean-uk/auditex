@@ -158,6 +158,7 @@ def test_contract_accepts_new_framework_keys() -> None:
                     "ms_secure_score": ["AdminMFAV2"],
                     "ms_zero_trust": ["identities"],
                     "mcsb": ["IM-6"],
+                    "cyber_essentials": ["ce.uac.mfa_cloud_services"],
                     "cis_m365_v3": ["1.1.1"],
                 }
             )

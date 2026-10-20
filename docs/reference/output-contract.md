@@ -1,6 +1,6 @@
 # Auditex Output Contract
 
-Contract version: `2026-04-21`.
+Contract version: `2026-10-20`. This version records every list that was cut short as a coverage gap (see "Collection limits and coverage gaps") and adds the `truncated_list_reported_ok` and `collection_gap_not_recorded` validation codes. Bundles written under `2026-04-21` stay valid: a coverage row is checked only when it carries a `truncation_reason`, and older rows that flag `collection_truncated` on an `ok` row carry none.
 
 Auditex treats completed run directories as product contracts, not incidental implementation output. Public `run` and `probe` flows must finish through the shared bundle finalizer so the same required artifacts and validation semantics are applied.
 
@@ -56,9 +56,9 @@ Raw evidence remains local-only. `ai_safe/` artifacts are checked for sensitive 
 
 `api-inventory.json` records the enterprise API call ledger: declared collectors, observed endpoint calls, required and missing permissions, status, item counts, read/write classification, data class, and no-content-read safety. Audit-plane bundles fail validation when this artifact reports tenant writes or body/file content reads. See `docs/reference/api-call-catalog.md` for the customer-facing review path.
 
-`framework_mappings` uses canonical keys only: `cis_m365_v7`, `cisa_scuba`, `ms_secure_score`, `ms_zero_trust`, `mcsb`, `google_workspace_baseline`, `nist_800_53`, `iso_27001`, `soc2`, `nis2`, `dora`, `mitre_attack`, and the deprecated `cis_m365_v3`. The validator still accepts `cis_m365_v3` for older bundles and operator overrides, but shipped mappings no longer emit it. Exporters treat those keys as stable taxonomy labels for SARIF, OSCAL, and the CSV `framework_mappings` column. `configs/framework-catalog.json` records the source version, date, URLs, and verified control ids for each benchmark key; see `docs/reference/framework-mappings.md`.
+`framework_mappings` uses canonical keys only: `cis_m365_v7`, `cisa_scuba`, `ms_secure_score`, `ms_zero_trust`, `mcsb`, `cyber_essentials`, `google_workspace_baseline`, `nist_800_53`, `iso_27001`, `soc2`, `nis2`, `dora`, `mitre_attack`, and the deprecated `cis_m365_v3`. The validator still accepts `cis_m365_v3` for older bundles and operator overrides, but shipped mappings no longer emit it. Exporters treat those keys as stable taxonomy labels for SARIF, OSCAL, and the CSV `framework_mappings` column. `configs/framework-catalog.json` records the source version, date, URLs, and verified control ids for each benchmark key; see `docs/reference/framework-mappings.md`.
 
-`reports/report-pack.json` carries `baseline_alignment`. For each of `cis_m365_v7`, `cisa_scuba`, `ms_secure_score`, `ms_zero_trust`, and `mcsb` it lists the controls the shipped rules map to, with `status` (`fail`, `accepted_risk`, `pass`, or `not_assessed`), the mapped `rule_ids`, per-rule `rule_statuses`, and open `finding_ids`. Each `rule_statuses` entry has `rule_id`, `status`, and `evaluated`; a rule that was not evaluated also has a `reason`. A rule passes only when it was evaluated: every collector that feeds it completed and the evidence it reads was present. A control passes only when every mapped rule passed. `baseline_alignment.unmapped_findings` (`count`, `open_count`, `accepted_count`, `collectors` as a list of `{collector, count}`, `finding_ids`) counts findings with no `rule_id`, which no control can see. `baseline_alignment.schema_version` is `2026-10-20` for this shape. `baseline_alignment.secure_score` reconciles the latest Microsoft Secure Score snapshot with Auditex findings: `overall` (score, maximum, percentage) and one row per mapped control profile with Microsoft's score and maximum, `microsoft_state`, `auditex_state`, and `agreement` (`agrees`, `auditex_only`, `microsoft_only`, or `no_microsoft_data`). `normalized/security_score_control_profiles.json` holds the control profile ids, titles, and maximum scores used for that table.
+`reports/report-pack.json` carries `baseline_alignment`. For each of `cis_m365_v7`, `cisa_scuba`, `ms_secure_score`, `ms_zero_trust`, and `mcsb` it lists the controls the shipped rules map to, with `status` (`fail`, `accepted_risk`, `pass`, or `not_assessed`), the mapped `rule_ids`, per-rule `rule_statuses`, and open `finding_ids`. Each `rule_statuses` entry has `rule_id`, `status`, and `evaluated`; a rule that was not evaluated also has a `reason`. A rule passes only when it was evaluated: every collector that feeds it completed and the evidence it reads was present. A control passes only when every mapped rule passed. `baseline_alignment.unmapped_findings` (`count`, `open_count`, `accepted_count`, `collectors` as a list of `{collector, count}`, `finding_ids`) counts findings with no `rule_id`, which no control can see. Every finding this version emits carries a `rule_id` (the finalizer refuses one without), so `count` is 0 for these bundles; a non-zero count marks a bundle from an earlier version or findings imported from elsewhere, and its open findings are not in any control row. `baseline_alignment.frameworks.cyber_essentials` is the exception: it lists every requirement in the catalog (Cyber Essentials Requirements for IT Infrastructure v3.3), not only the mapped ones, and each row adds `theme`, `requirement_status` (`automated`, `partial`, `manual`, `ce_plus_assessor_test`, or `provider_responsibility`), `citation`, `evidence_limits`, an `evidence` count object, a per-rule `confidence` (`full` or `partial`), and `ce_plus_test` where one applies. Its `status` keeps the four values above, but a `manual`, `ce_plus_assessor_test` or `provider_responsibility` row is always `not_assessed` with `reason` `requirement_status:<status>`, and it is never `pass`. A `partial` row can be `fail` or `accepted_risk`; when its mapped rules are all evaluated and clean it is `not_assessed` with `reason` `partial_requirement_no_gap_found`, never `pass`. Only an `automated` row can be `pass`, and v3.3 has none. The section also carries `requirement_status_counts`, `uncatalogued_requirement_ids`, `document_url`, `effective_date` and a `disclaimer` that the output is assessor evidence, not a certification. `baseline_alignment.schema_version` is `2026-10-20` for this shape. `baseline_alignment.secure_score` reconciles the latest Microsoft Secure Score snapshot with Auditex findings: `overall` (score, maximum, percentage) and one row per mapped control profile with Microsoft's score and maximum, `microsoft_state`, `auditex_state`, and `agreement` (`agrees`, `auditex_only`, `microsoft_only`, or `no_microsoft_data`). `normalized/security_score_control_profiles.json` holds the control profile ids, titles, and maximum scores used for that table.
 
 ### Attack paths
 
@@ -100,11 +100,114 @@ are rejected. Successfully saved pages survive a later-page collection failure.
 `normalization_complete`, `normalization_issue_count`,
 `normalization_incomplete_sections` and `collection_limited_sections`.
 Normalization completeness describes collected evidence, not the whole tenant;
-`result_limit`, collection errors and fan-out limits still bound coverage.
+`result_limit`, collection errors and fan-out limits still bound coverage, and
+each cut list is recorded under "Collection limits and coverage gaps" below.
 `full_counts` uses the maximum reported per-source inventory count rather than
 adding duplicate inventories; `full_counts_basis` is
 `maximum_per_source_not_unique_union`. Normalized counts describe actual records.
 The chunk reader streams, while the final normalized snapshot is memory-resident.
+
+### Collection limits and coverage gaps
+
+Compatibility notes for consumers of earlier bundles:
+
+- The coverage row `result_limit` is now the effective limit: `null` without `--top`,
+  the sample bound for a sampled list (500 for event logs, 100 for the hybrid sync
+  sample), and the operator's limit otherwise. It used to repeat the raw `--top` value
+  even when the list was unlimited or sampled.
+- Google Workspace `truncated_sections` in `normalized/snapshot.json` and the manifest
+  changed format and meaning. It lists `<collector>.<list>` (for example
+  `google_directory.users`) for each list that was cut, where it used to list the names
+  of collectors whose total item count had reached `--top`. `sample_truncated` is true
+  only when a list was cut. Consumers that matched collector names must change; this is
+  a breaking change. The Google `--top` default also changed from 100 to no limit, and
+  `top_limit` is omitted from the manifest unless an operator set one.
+- `normalized/normalization_coverage.json` records gain `truncation_reason` (null unless
+  the list was cut) and `derived_fanout` (true for a fan-out wrapper section, which
+  restates its own coverage row and is not a list). The AI-safe summary
+  (`ai_safe/run_summary.json`) gains `collection_gap_count`.
+- The audit log (`audit-log.jsonl`) records `graph.request.next_link_refused` with the
+  refused host when a next-page link or absolute first URL outside Microsoft Graph is
+  refused, and `collector.endpoint.finished` events carry `collection_truncated`.
+
+Without `--top`, every list is paged to its last row: users, user registration
+details, role assignments, Conditional Access policies, groups and applications on
+Microsoft 365, and users, groups, OAuth tokens and devices on Google Workspace.
+`--top N` is an explicit operator limit for very large tenants, applied to every
+list (`--top 0` means no limit). A list that stops before its last row is a
+coverage gap, never a silent pass:
+
+- The list's coverage row (`coverage.json`) has `collection_truncated: true` and a
+  `truncation_reason`: `operator_limit` (the `--top` limit was reached and the list
+  continued), `pagination_failed` (a later page could not be read, so the rows read
+  so far are a prefix), `next_link_refused` (a next-page link outside Microsoft
+  Graph was not followed), `fanout_limit` (a collector's own bound on how many
+  objects it expands) or `input_limited` (a derived result built from a list that
+  was cut). A limit hit sets the row `status` to `partial` with `error_class`
+  `collection_limit`, and `item_count` is the rows collected. A page that failed or
+  was refused keeps `failed` and its error. A first page that cannot be read is a
+  blocked read, not a truncation.
+- The collector is `partial`, so the run is `partial` (exit status 1) and baseline
+  rules that read it report `not_assessed` with `collector_not_complete:<collector>`
+  instead of `pass`. Findings that name the collector issue are raised from the row.
+- `normalized/collection_gaps.json` has one record per cut list: `collector`, `list`,
+  `rows_collected`, `reason`, and `result_limit` and `endpoint` where known, keyed
+  `collection_gap:<collector>.<list>`. The file exists only when a list was cut.
+  `normalized/snapshot.json` carries `collection_gap_count`; the Google snapshot
+  also lists the cut lists in `truncated_sections` (`<collector>.<list>`) with
+  `sample_truncated`.
+- Each affected `coverage_gaps` row in `run-manifest.json` and `summary.json` has a
+  `truncated_lists` array of the same `{collector, list, rows_collected, reason}`
+  records, and its `message` names them. The manifest records the operator limit as
+  `top_limit` when one was set.
+- `validation.json` reports `truncated_list_reported_ok` when a cut list sits in a
+  manifest whose `overall_status` is `ok`, and `collection_gap_not_recorded` when the
+  manifest's gaps do not name it.
+
+Some bounds are samples by design and are not gaps: the Entra sign-in and directory
+audit logs and the Google Reports event logs and Drive file crawl keep the most
+recent 500 rows (narrow them with `--since` and `--until`), the hybrid sync check
+reads the first 100 users, and capability probes and preflights read a few rows to
+test access. Their coverage rows carry `bounded_sample: true` and
+`collection_truncated: false`. An explicit `--top` below a sample bound is still a
+gap; a `--top` at or above it does not raise the bound, on Microsoft 365 or Google Workspace.
+
+Per-object fan-outs are not samples. Each reads only the first objects of its list and
+adds a derived `partial` coverage row (`truncation_reason` `fanout_limit`, with
+`fanout_total` and `fanout_limit`, `rows_collected` being the objects expanded) when more
+exist, so the collector is `partial` and the rules that read it are `not_assessed`:
+
+| Collector | Fan-out | Objects expanded | Coverage row |
+| --- | --- | --- | --- |
+| `sharepoint_access` | site permissions | first 10 sites | `sitePermissionsFanout` |
+| `intune_depth` | device configuration assignments | first 10 policies | `deviceConfigurationAssignmentsFanout` |
+| `teams` | team channels | first 10 teams | `teamChannelsFanout` |
+| `app_consent` | service principal owners and role grants | first 10 principals plus Microsoft Graph | `servicePrincipalFanout` |
+| `identity` | members and owners of role-assignable groups | 50 groups | `privilegedGroupFanout` |
+| `directory_relationships` | group members and owners, application owners | 100 groups and 100 applications | `relationshipGroups`, `relationshipApplications` and the per-parent member and owner rows |
+
+A rule that reads a fan-out can still `fail` from what the expanded objects show. The
+`intune_depth.policies_without_assignments` finding counts policies from
+`intune_depth`'s own `deviceConfigurations`, and `identity_governance.standing_privilege_only`
+needs a successful, empty `roleEligibilitySchedules` read; neither is raised when the read
+failed or was cut. Baselines evaluate the Intune rule only when
+`normalization_coverage` shows both the policy inventory and the assignments were read in
+full (`device_configurations_not_collected`, `device_configurations_not_read_in_full`,
+`no_device_configurations` and `policy_assignments_not_read_in_full` are the reasons it
+reports otherwise).
+
+The Google Workspace fan-outs run one call per object and are the slow part of a large
+domain: `google_directory` makes two calls per user (aliases and OAuth tokens) and one or
+more per group (members); `google_gmail_settings` makes eight calls per user
+(auto-forwarding, filters, forwarding addresses, send-as, IMAP, POP, vacation and
+delegates); `google_groups_settings` one per group; `google_calendar_posture` one per
+calendar. A 20,000-user domain is about 160,000 Gmail settings calls on its own. For a
+large domain set `--top` so the user and group lists, and with them the fan-outs, are
+limited; every cut list is then recorded as a gap, which is the point.
+
+Reads are kept as far as they got: when a later page fails or is refused after rows were
+read, those rows stay in the evidence in both the chunked and the in-memory path, and the
+list is recorded with `pagination_failed` or `next_link_refused`.
 
 The optional `directory_relationships` collector emits
 `directory_relationship_objects` and `directory_relationship_coverage`.

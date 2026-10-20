@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from ..collection_gaps import (
+    REASON_NEXT_LINK_REFUSED,
+    REASON_OPERATOR_LIMIT,
+    REASON_PAGINATION_FAILED,
+    TRUNCATION_ERROR_CLASS,
+    sampling,
+    truncation_message,
+)
 from ..perf_runtime import EndpointAccumulator, PageWindow
-from ..graph import GraphClient, GraphError, graph_url
+from ..graph import GraphClient, GraphError, NEXT_LINK_REFUSED, graph_url
 
 if TYPE_CHECKING:
     from ..collector_runner import CollectorRunContext
@@ -16,6 +25,8 @@ def _classify_graph_error(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, GraphError):
         if exc.error_code == "PermissionStop":
             return "permission_stop", message
+        if exc.error_code == NEXT_LINK_REFUSED:
+            return "next_link_refused", message
         status = exc.status
         lower = message.lower()
         if status in {400, 401, 403} and any(
@@ -94,8 +105,47 @@ def normalize_collection_limit(value: Any, *, default: int | None) -> int | None
     return limit
 
 
+def context_limit(context: Mapping[str, Any], *, default: int | None = None) -> int | None:
+    """The operator's row limit from a collector context.
+
+    ``top`` absent means the caller expressed no preference, so ``default`` applies. ``top`` set
+    to ``None``, 0 or a negative number means no limit: lists are paged to their last row.
+    """
+    if "top" not in context:
+        return default
+    return normalize_collection_limit(context.get("top"), default=None)
+
+
 def apply_collection_limit(rows: list[dict[str, Any]], limit: int | None) -> list[dict[str, Any]]:
     return list(rows) if limit is None else rows[:limit]
+
+
+def limit_rows(rows: list[Any], limit: int | None) -> tuple[list[Any], bool]:
+    """Rows cut to ``limit`` and whether any were cut."""
+    if limit is None or len(rows) <= limit:
+        return list(rows), False
+    return rows[:limit], True
+
+
+def record_truncation(
+    row: dict[str, Any],
+    *,
+    list_name: str,
+    rows: int,
+    limit: int | None,
+    reason: str = REASON_OPERATOR_LIMIT,
+) -> None:
+    """Mark a coverage row as a list that was cut short, which makes it a coverage gap.
+
+    A limit hit makes the row ``partial`` with the ``collection_limit`` error class. A page that
+    failed or was refused keeps the failed status and error the read already carries.
+    """
+    row["collection_truncated"] = True
+    row["truncation_reason"] = reason
+    if reason == REASON_OPERATOR_LIMIT:
+        row["status"] = "partial"
+        row["error_class"] = TRUNCATION_ERROR_CLASS
+        row["error"] = truncation_message(list_name, rows, reason, limit)
 
 
 def run_graph_endpoints(
@@ -111,6 +161,13 @@ def run_graph_endpoints(
     """Execute a set of Graph endpoints for one collector.
 
     Returns both the raw payload per section and per-endpoint coverage entries.
+
+    ``top`` is the operator's explicit row limit; ``None`` (or 0) pages every list to its last
+    row. A list cut short for any reason (the limit, a failed page, a refused next link) is
+    recorded on its coverage row and raw section as ``collection_truncated`` with a
+    ``truncation_reason``. Limit hits make the row ``partial``, so the collector is not
+    complete. A spec may carry ``sample_limit`` for a list that is a sample by design; hitting
+    that bound is not a gap.
     """
     payload: dict[str, Any] = {}
     coverage: list[dict[str, Any]] = []
@@ -124,7 +181,13 @@ def run_graph_endpoints(
             endpoint = graph_url(endpoint, api_version)
         page = spec.get("page", True)
         apply_top = spec.get("apply_top", True)
-        collection_limit = normalize_collection_limit(top, default=None)
+        operator_limit = normalize_collection_limit(top, default=None)
+        collection_limit = operator_limit
+        sample_limit = spec.get("sample_limit")
+        limit_is_sample = False
+        if isinstance(sample_limit, int) and sample_limit > 0 and (operator_limit is None or sample_limit <= operator_limit):
+            collection_limit = sample_limit
+            limit_is_sample = True
         effective_top = page_size if page_size is not None else collection_limit
         if not page or not apply_top:
             # Non-collection calls often do not accept $top.
@@ -146,7 +209,9 @@ def run_graph_endpoints(
         error: str | None = None
         status = "ok"
         accumulator: EndpointAccumulator | None = None
+        streamed_rows: list[Any] = []
         collection_truncated = False
+        truncation_reason: str | None = None
 
         try:
             if page:
@@ -179,10 +244,16 @@ def run_graph_endpoints(
                     payload[key] = accumulator.payload()
                 else:
                     if hasattr(client, "iter_items"):
-                        rows = list(client.iter_items(endpoint, params=query, result_limit=collection_limit))
+                        # One row past the limit proves the list continues without paging further.
+                        probe = None if collection_limit is None else collection_limit + 1
+                        # Collected one by one so the rows read before a failed later page are kept.
+                        for streamed in client.iter_items(endpoint, params=query, result_limit=probe):
+                            streamed_rows.append(streamed)
+                        rows = streamed_rows
                     else:
                         rows = client.get_all(endpoint, params=query)
                     if isinstance(rows, list):
+                        rows, collection_truncated = limit_rows(rows, collection_limit)
                         item_count = len(rows)
                         payload[key] = {"value": rows}
                     elif isinstance(rows, dict):
@@ -190,6 +261,8 @@ def run_graph_endpoints(
                         item_count = len(rows.get("value", [])) if isinstance(rows.get("value"), list) else 0
                     else:
                         payload[key] = {"value": rows}
+                if collection_truncated:
+                    truncation_reason = REASON_OPERATOR_LIMIT
             else:
                 page_result = (
                     client.get_json(endpoint, params=query, full_url=True)
@@ -210,18 +283,66 @@ def run_graph_endpoints(
             if accumulator is not None:
                 item_count = accumulator.item_count
                 payload[key] = accumulator.payload()
+            elif streamed_rows:
+                kept, _cut = limit_rows(streamed_rows, collection_limit)
+                item_count = len(kept)
+                payload[key] = {"value": kept}
             else:
                 payload[key] = {}
             payload[key].update({"error": error, "error_class": error_class})
+            if page and item_count > 0:
+                # Rows were read before the list stopped: the evidence is a prefix, not a blocked read.
+                collection_truncated = True
+                truncation_reason = (
+                    REASON_NEXT_LINK_REFUSED if error_class == "next_link_refused" else REASON_PAGINATION_FAILED
+                )
+        # A cut at a bound the collector chose (a sample, or a probe) is not a gap; any other cut is.
+        bounded_sample = bool(
+            page and collection_truncated and truncation_reason == REASON_OPERATOR_LIMIT and (limit_is_sample or sampling())
+        )
+        is_gap = bool(page and collection_truncated and not bounded_sample)
         if page and isinstance(payload.get(key), dict):
             payload[key].update(
                 {
                     "result_limit": collection_limit,
                     "collection_limit_reached": collection_limit is not None and item_count >= collection_limit,
-                    "collection_truncated": collection_truncated,
+                    "collection_truncated": is_gap,
                 }
             )
+            if is_gap and truncation_reason:
+                payload[key]["truncation_reason"] = truncation_reason
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
+        coverage_row: dict[str, Any] = {
+            "collector": collector,
+            "type": "graph",
+            "name": key,
+            "endpoint": endpoint,
+            "api_version": api_version,
+            "status": status,
+            "top": query.get("$top"),
+            "result_limit": collection_limit if page else None,
+            "page": page,
+            "item_count": item_count,
+            "page_count": payload.get(key, {}).get("page_count") if isinstance(payload.get(key), dict) else None,
+            "chunk_count": payload.get(key, {}).get("chunk_count") if isinstance(payload.get(key), dict) else None,
+            "sample_truncated": payload.get(key, {}).get("sample_truncated") if isinstance(payload.get(key), dict) else None,
+            "collection_limit_reached": payload.get(key, {}).get("collection_limit_reached") if page else None,
+            "collection_truncated": is_gap if page else None,
+            "duration_ms": duration_ms,
+            "error_class": error_class,
+            "error": error,
+        }
+        if bounded_sample:
+            coverage_row["bounded_sample"] = True
+        if is_gap:
+            record_truncation(
+                coverage_row,
+                list_name=key,
+                rows=item_count,
+                limit=collection_limit,
+                reason=truncation_reason or REASON_OPERATOR_LIMIT,
+            )
         if log_event:
             log_event(
                 "collector.endpoint.finished",
@@ -229,35 +350,14 @@ def run_graph_endpoints(
                 {
                     "collector": collector,
                     "endpoint_name": key,
-                    "status": status,
+                    "status": coverage_row["status"],
                     "item_count": item_count,
                     "duration_ms": duration_ms,
-                    "error_class": error_class,
+                    "error_class": coverage_row["error_class"],
+                    "collection_truncated": is_gap,
                 },
             )
-
-        coverage.append(
-            {
-                "collector": collector,
-                "type": "graph",
-                "name": key,
-                "endpoint": endpoint,
-                "api_version": api_version,
-                "status": status,
-                "top": query.get("$top"),
-                "result_limit": top if page else None,
-                "page": page,
-                "item_count": item_count,
-                "page_count": payload.get(key, {}).get("page_count") if isinstance(payload.get(key), dict) else None,
-                "chunk_count": payload.get(key, {}).get("chunk_count") if isinstance(payload.get(key), dict) else None,
-                "sample_truncated": payload.get(key, {}).get("sample_truncated") if isinstance(payload.get(key), dict) else None,
-                "collection_limit_reached": payload.get(key, {}).get("collection_limit_reached") if page else None,
-                "collection_truncated": collection_truncated if page else None,
-                "duration_ms": duration_ms,
-                "error_class": error_class,
-                "error": error,
-            }
-        )
+        coverage.append(coverage_row)
 
     return payload, coverage
 

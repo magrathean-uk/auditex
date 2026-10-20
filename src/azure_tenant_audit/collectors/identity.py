@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from ..chunk_reader import iter_endpoint_records
+from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_INPUT_LIMITED, section_was_cut
 from ..graph import GraphClient
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
@@ -34,7 +35,7 @@ class IdentityCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient = context["client"]
-        top = context.get("top", 500)
+        top = context.get("top")
         page_size = context.get("page_size")
         selectors = {
             "organization": {
@@ -96,7 +97,8 @@ class IdentityCollector(Collector):
         core_failed = any(
             row.get("status") != "ok" for row in coverage if row.get("name") != SIGNIN_ACTIVITY_SECTION
         )
-        if signin_row is not None and signin_row.get("status") != "ok":
+        # A sign-in list that was read and then cut short is a coverage gap, not a gated capability.
+        if signin_row is not None and signin_row.get("status") == "failed" and not signin_row.get("collection_truncated"):
             error_class = str(signin_row.get("error_class") or "")
             signin_row["capability_gated"] = True
             signin_row["coverage_note"] = (
@@ -146,7 +148,7 @@ class IdentityCollector(Collector):
             if isinstance(section, dict):
                 if section.get("error"):
                     input_failed.append(name)
-                if section.get("collection_limit_reached") or section.get("collection_truncated"):
+                if section_was_cut(section):
                     input_limited.append(name)
             return rows
 
@@ -236,6 +238,7 @@ class IdentityCollector(Collector):
             "error_class": "incomplete_evidence" if incomplete else "collection_limit" if limited else None,
             "error": "Privileged-group fan-out inputs or relationships are incomplete." if incomplete else
                      "Privileged-group fan-out or input collection limit reached." if limited else None,
+            "truncation_reason": (REASON_FANOUT_LIMIT if remaining else REASON_INPUT_LIMITED) if limited else None,
             **fanout,
         })
         return {

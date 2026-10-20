@@ -419,6 +419,9 @@ def _normalized_evidence_refs(section: str, record: dict[str, Any], collector: s
 
 def _finalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(finding)
+    if not str(result.get("rule_id") or "").strip():
+        # A finding with no rule cannot reach a framework control, a template or a baseline status.
+        raise ValueError(f"Finding {result.get('id')!r} has no rule_id; every finding needs a rule and a template.")
     severity = _canonical_severity(result.get("severity"))
     result["severity"] = severity
     result["risk_rating"] = severity
@@ -1917,6 +1920,31 @@ def _build_secure_score_findings(normalized_snapshot: dict[str, Any]) -> list[di
     ]
 
 
+# Conditional Access finding types produced by normalization, and the rule each one reports under.
+_CA_FINDING_RULES = {
+    "ca_reporting_only": {"rule_id": "ca.policy_report_only"},
+    "ca_break_glass_exclusion": {"rule_id": "ca.break_glass_exclusion_missing"},
+}
+
+# SharePoint site ownership states that raise a finding, with the rule and severity of each.
+_SITE_OWNERSHIP_RULES = {
+    "orphaned": {"rule_id": "sharepoint.site_orphaned", "severity": "high", "suffix": "orphaned_site"},
+    "weak": {"rule_id": "sharepoint.site_weak_ownership", "severity": "medium", "suffix": "weak_ownership"},
+}
+
+
+def _normalization_report(normalized_snapshot: dict[str, Any], source: str) -> dict[str, Any]:
+    for row in (normalized_snapshot.get("normalization_coverage") or {}).get("records") or []:
+        if isinstance(row, dict) and row.get("source") == source:
+            return row
+    return {}
+
+
+def _read_in_full(report: dict[str, Any]) -> bool:
+    """Whether an endpoint was read without error, cut or unreadable rows, so an empty result means none."""
+    return bool(report) and report.get("collection_status") == "collected" and report.get("complete") is True
+
+
 def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     findings.extend(_build_admin_resilience_findings(normalized_snapshot))
@@ -1977,14 +2005,16 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
         )
 
     for item in ((normalized_snapshot.get("sharepoint_site_posture_objects") or {}).get("records") or []):
-        ownership_state = str(item.get("ownership_state") or "").lower()
-        if ownership_state not in {"weak", "orphaned"}:
+        site_rule = _SITE_OWNERSHIP_RULES.get(str(item.get("ownership_state") or "").lower())
+        if site_rule is None:
             continue
+        site_rule_id = site_rule["rule_id"]
         findings.append(
             _finalize_finding(
                 {
-                "id": f"sharepoint_site_posture:{item.get('id')}:{'orphaned_site' if ownership_state == 'orphaned' else 'weak_ownership'}",
-                "severity": "high" if ownership_state == "orphaned" else "medium",
+                "id": f"sharepoint_site_posture:{item.get('id')}:{site_rule['suffix']}",
+                "rule_id": site_rule_id,
+                "severity": site_rule["severity"],
                 "category": "exposure",
                 "title": "SharePoint site ownership is weak",
                 "status": "open",
@@ -1992,6 +2022,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                 "affected_objects": [item.get("site_name") or item.get("id")],
                 "evidence": item,
                 "evidence_refs": _normalized_evidence_refs("sharepoint_site_posture_objects", item, "sharepoint_access"),
+                **_metadata_for(site_rule_id),
             }
             )
         )
@@ -2005,6 +2036,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
             _finalize_finding(
                 {
                 "id": f"onedrive_posture:{item.get('id')}:external_sharing_enabled",
+                "rule_id": "onedrive.external_sharing_enabled",
                 "severity": "high",
                 "category": "exposure",
                 "title": "OneDrive external sharing is enabled",
@@ -2013,6 +2045,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                 "affected_objects": [item.get("site_name") or item.get("id")],
                 "evidence": item,
                 "evidence_refs": _normalized_evidence_refs("onedrive_posture_objects", item, "onedrive_posture"),
+                **_metadata_for("onedrive.external_sharing_enabled"),
             }
             )
         )
@@ -2078,6 +2111,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
             _finalize_finding(
                 {
                 "id": f"exchange:{item.get('id')}:mailbox_forwarding",
+                "rule_id": "exchange.mailbox_forwarding_configured",
                 "severity": "high",
                 "category": "mail_flow",
                 "title": "Mailbox forwarding configured",
@@ -2086,6 +2120,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                 "affected_objects": [item.get("display_name") or item.get("primary_smtp_address")],
                 "evidence": item,
                 "evidence_refs": _normalized_evidence_refs("exchange_policy_objects", item, "exchange_policy"),
+                **_metadata_for("exchange.mailbox_forwarding_configured"),
             }
             )
         )
@@ -2159,6 +2194,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
             _finalize_finding(
                 {
                 "id": f"teams_policy:{item.get('id')}:external_federation_open",
+                "rule_id": "teams.external_federation_open",
                 "severity": "medium",
                 "category": "collaboration",
                 "title": "Teams external federation is enabled",
@@ -2167,6 +2203,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                 "affected_objects": [item.get("policy_name") or item.get("id")],
                 "evidence": item,
                 "evidence_refs": _normalized_evidence_refs("teams_policy_objects", item, "teams_policy"),
+                **_metadata_for("teams.external_federation_open"),
             }
             )
         )
@@ -2526,11 +2563,16 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
     governance_records = ((normalized_snapshot.get("governance_objects") or {}).get("records") or [])
     assignment_count = sum(1 for item in governance_records if item.get("kind") == "role_assignment_schedule")
     eligibility_count = sum(1 for item in governance_records if item.get("kind") == "role_eligibility_schedule")
-    if assignment_count and not eligibility_count:
+    # Standing privilege is only a finding when the eligibility read itself succeeded and was empty;
+    # a failed or gated eligibility read says nothing about what is eligible.
+    eligibility_read = _read_in_full(_normalization_report(normalized_snapshot, "identity_governance.roleEligibilitySchedules"))
+    assignment_read = _read_in_full(_normalization_report(normalized_snapshot, "identity_governance.roleAssignmentSchedules"))
+    if assignment_count and not eligibility_count and eligibility_read and assignment_read:
         findings.append(
             _finalize_finding(
                 {
                 "id": "identity_governance:standing_privilege_only",
+                "rule_id": "identity_governance.standing_privilege_only",
                 "severity": "medium",
                 "category": "governance",
                 "title": "Privileged standing assignments observed without eligibility schedules",
@@ -2550,17 +2592,23 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                         source_name="role_assignment_schedule",
                     )
                 ],
+                **_metadata_for("identity_governance.standing_privilege_only"),
             }
             )
         )
 
     intune_assignments = ((normalized_snapshot.get("intune_assignment_objects") or {}).get("records") or [])
-    policy_count = ((normalized_snapshot.get("snapshot") or {}).get("object_counts") or {}).get("policies", 0)
-    if policy_count and not intune_assignments:
+    # Policies and assignments both come from intune_depth: policies counted from other collectors say
+    # nothing about this one, and an unread assignment list is not an empty one.
+    configuration_report = _normalization_report(normalized_snapshot, "intune_depth.deviceConfigurations")
+    policy_count = int(configuration_report.get("record_count") or 0)
+    assignments_read = _read_in_full(_normalization_report(normalized_snapshot, "intune_depth.deviceConfigurationAssignments"))
+    if policy_count and not intune_assignments and _read_in_full(configuration_report) and assignments_read:
         findings.append(
             _finalize_finding(
                 {
                 "id": "intune:intune_policies_without_assignments",
+                "rule_id": "intune_depth.policies_without_assignments",
                 "severity": "medium",
                 "category": "device_management",
                 "title": "Policies observed without sampled Intune assignments",
@@ -2577,6 +2625,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                         source_name="snapshot",
                     )
                 ],
+                **_metadata_for("intune_depth.policies_without_assignments"),
             }
             )
         )
@@ -2586,10 +2635,16 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
     for item in ((normalized_snapshot.get("ca_findings") or {}).get("records") or []):
         finding_id = item.get("finding_type") or item.get("id")
         policy_key = item.get("policy_id") or item.get("id") or item.get("policy_name") or "policy"
+        ca_rule = _CA_FINDING_RULES.get(str(item.get("finding_type")))
+        if ca_rule is None:
+            # Normalization and this map move together; an unmapped type must not become a rule-less finding.
+            raise ValueError(f"Conditional Access finding type {item.get('finding_type')!r} has no rule_id.")
+        ca_rule_id = ca_rule["rule_id"]
         findings.append(
             _finalize_finding(
                 {
                 "id": f"conditional_access:{finding_id}:{policy_key}",
+                "rule_id": ca_rule_id,
                 "severity": item.get("severity", "medium"),
                 "category": "identity",
                 "title": item.get("title") or item.get("finding_type") or "Conditional Access finding",
@@ -2598,6 +2653,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                 "affected_objects": [item.get("policy_name") or item.get("policy_id")],
                 "evidence": item,
                 "evidence_refs": _normalized_evidence_refs("ca_findings", item, "conditional_access"),
+                **_metadata_for(ca_rule_id),
             }
             )
         )

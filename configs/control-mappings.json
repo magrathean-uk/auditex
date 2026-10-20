@@ -1,6 +1,230 @@
 {
   "_documentation": "ATT&CK mapping policy (auditex 2026-05-09): every rule_id maps to at least one MITRE ATT&CK technique where the threat is real (collector.issue.* diagnostics are exempt — they're operational, not adversarial). Email-auth controls (SPF/DKIM/DMARC/BIMI) anchor to T1566 (Phishing) parent and T1566.002 (Spearphishing Link) sub-technique because spoofed-domain phishing campaigns most commonly use links — attachment-based delivery (T1566.001) does not lean on SPF/DMARC alignment as heavily. Application-credential rules (expired/expiring/long-validity/dormant) anchor to T1078.004 (Valid Accounts: Cloud Accounts) for the credential-abuse vector and T1098.001 (Account Manipulation: Additional Cloud Credentials) when the rule directly enables credential creation/persistence. Cross-tenant access rules anchor to T1199 (Trusted Relationship) for inbound and T1567 (Exfiltration Over Web Service) for outbound; rogue-consent surfaces anchor to T1528 (Steal Application Access Token). Mailbox forwarding anchors to T1114.003 (Email Collection: Email Forwarding Rule) plus T1098 (Account Manipulation) and T1567 for external recipients; hide-from-user rules anchor to T1564.008 (Hide Artifacts: Email Hiding Rules). SharePoint broad-link sharing anchors to T1530 (Data from Cloud Storage). When in doubt, prefer the parent technique over a too-specific sub-technique.",
-  "_documentation_baselines": "Baseline mapping policy (auditex 2026-10-02): cis_m365_v7, cisa_scuba, ms_secure_score, ms_zero_trust and mcsb values must be listed in configs/framework-catalog.json, which records the verified source version, date and URLs. Diagnostic and coverage rules (collector.issue.*, coverage.gap, service_health.*) do not claim benchmark controls. cis_m365_v3 is a deprecated legacy key and is no longer emitted. Leave a framework out rather than guess.",
+  "_documentation_baselines": "Baseline mapping policy (auditex 2026-10-02): cis_m365_v7, cisa_scuba, ms_secure_score, ms_zero_trust, mcsb and cyber_essentials values must be listed in configs/framework-catalog.json, which records the verified source version, date and URLs. Diagnostic and coverage rules (collector.issue.*, coverage.gap, service_health.*) do not claim benchmark controls. cis_m365_v3 is a deprecated legacy key and is no longer emitted. Leave a framework out rather than guess.",
+  "_documentation_cyber_essentials": "Cyber Essentials mapping policy (auditex 2026-10-20): the cyber_essentials key lists requirement ids from configs/framework-catalog.json (Requirements for IT Infrastructure v3.3). A rule is mapped only when its evidence tests the condition a requirement names, or part of it. _cyber_essentials_confidence records, per rule and requirement, whether the rule tests the named condition for the audited tenant ('full') or a proxy or subset ('partial'); every cyber_essentials mapping must have an entry. Google Workspace rules are mapped in src/auditex/google_workspace/findings.py and listed here for confidence only. Requirements whose catalog status is manual, ce_plus_assessor_test or provider_responsibility never report a verdict, so rules mapped to them are supporting evidence only. Diagnostic rules do not claim Cyber Essentials requirements.",
+  "sharepoint.site_orphaned": {
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "AC-3"
+    ],
+    "iso_27001": [
+      "A.5.9",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ]
+  },
+  "sharepoint.site_weak_ownership": {
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "AC-3"
+    ],
+    "iso_27001": [
+      "A.5.9",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ]
+  },
+  "onedrive.external_sharing_enabled": {
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-21"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.3"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.7"
+    ],
+    "nis2": [
+      "Article 21(2)(g)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1530"
+    ]
+  },
+  "exchange.mailbox_forwarding_configured": {
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-4",
+      "AC-20",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.16"
+    ],
+    "soc2": [
+      "CC6.7",
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1114.003"
+    ]
+  },
+  "teams.external_federation_open": {
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-20"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.5.15"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.6"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1566"
+    ]
+  },
+  "identity_governance.standing_privilege_only": {
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.3"
+    ],
+    "nis2": [
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "intune_depth.policies_without_assignments": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "nist_800_53": [
+      "CM-2",
+      "CM-6"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.9"
+    ],
+    "soc2": [
+      "CC6.8",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ]
+  },
+  "ca.policy_report_only": {
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "IA-2"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ],
+    "mitre_attack": [
+      "T1078"
+    ]
+  },
+  "ca.break_glass_exclusion_missing": {
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "CP-2"
+    ],
+    "iso_27001": [
+      "A.5.18",
+      "A.5.30"
+    ],
+    "soc2": [
+      "CC6.2",
+      "A1.2"
+    ],
+    "nis2": [
+      "Article 21(2)(c)"
+    ],
+    "dora": [
+      "Article 11(1)"
+    ]
+  },
   "collector.issue.permission": {
     "nist_800_53": [
       "AC-3",
@@ -249,6 +473,9 @@
     ],
     "ms_zero_trust": [
       "identities"
+    ],
+    "cyber_essentials": [
+      "ce.uac.mfa_admin_accounts"
     ]
   },
   "attack_path.privilege_escalation": {
@@ -1404,6 +1631,9 @@
     ],
     "mitre_attack": [
       "T1528"
+    ],
+    "cyber_essentials": [
+      "ce.sc.saas_configuration"
     ]
   },
   "consent_policy.user_consent_unverified": {
@@ -1506,6 +1736,9 @@
     ],
     "mitre_attack": [
       "T1078.004"
+    ],
+    "cyber_essentials": [
+      "ce.uac.special_access_privileges"
     ]
   },
   "identity.global_admin_disabled": {
@@ -1535,6 +1768,9 @@
     ],
     "mitre_attack": [
       "T1078.004"
+    ],
+    "cyber_essentials": [
+      "ce.uac.special_access_privileges"
     ]
   },
   "identity.global_admin_stale_password": {
@@ -1605,6 +1841,10 @@
     ],
     "mitre_attack": [
       "T1078.004"
+    ],
+    "cyber_essentials": [
+      "ce.uac.mfa_admin_accounts",
+      "ce.uac.mfa_cloud_services"
     ]
   },
   "identity.privileged_mfa_not_registered": {
@@ -1646,6 +1886,10 @@
     ],
     "mitre_attack": [
       "T1078.004"
+    ],
+    "cyber_essentials": [
+      "ce.uac.mfa_admin_accounts",
+      "ce.uac.mfa_cloud_services"
     ]
   },
   "ca.mfa_not_enforced": {
@@ -1685,6 +1929,9 @@
     "mitre_attack": [
       "T1078.004",
       "T1110"
+    ],
+    "cyber_essentials": [
+      "ce.uac.mfa_cloud_services"
     ]
   },
   "ca.legacy_auth_not_blocked": {
@@ -1723,6 +1970,10 @@
     "mitre_attack": [
       "T1078.004",
       "T1110.003"
+    ],
+    "cyber_essentials": [
+      "ce.sc.saas_configuration",
+      "ce.uac.mfa_cloud_services"
     ]
   },
   "ca.enforcement_unverified": {
@@ -1784,6 +2035,9 @@
     ],
     "mitre_attack": [
       "T1078.004"
+    ],
+    "cyber_essentials": [
+      "ce.uac.mfa_cloud_services"
     ]
   },
   "identity.stale_enabled_account": {
@@ -1814,6 +2068,10 @@
     ],
     "ms_zero_trust": [
       "identities"
+    ],
+    "cyber_essentials": [
+      "ce.sc.unnecessary_accounts",
+      "ce.uac.remove_unused_accounts"
     ]
   },
   "identity.privileged_stale_account": {
@@ -1844,6 +2102,11 @@
     ],
     "ms_zero_trust": [
       "identities"
+    ],
+    "cyber_essentials": [
+      "ce.sc.unnecessary_accounts",
+      "ce.uac.remove_unused_accounts",
+      "ce.uac.special_access_privileges"
     ]
   },
   "security.risky_signin": {
@@ -1940,6 +2203,9 @@
     ],
     "mitre_attack": [
       "T1200"
+    ],
+    "cyber_essentials": [
+      "ce.sum.vulnerability_fixes_14_days"
     ]
   },
   "intune.device_stale_sync": {
@@ -2302,5 +2568,71 @@
     "nis2": [
       "Article 21(2)(f)"
     ]
+  },
+  "_cyber_essentials_confidence": {
+    "attack_path.no_mfa_to_tier0": {
+      "ce.uac.mfa_admin_accounts": "partial"
+    },
+    "ca.legacy_auth_not_blocked": {
+      "ce.sc.saas_configuration": "partial",
+      "ce.uac.mfa_cloud_services": "partial"
+    },
+    "ca.mfa_not_enforced": {
+      "ce.uac.mfa_cloud_services": "full"
+    },
+    "consent_policy.user_consent_unrestricted": {
+      "ce.sc.saas_configuration": "partial"
+    },
+    "google.admin_2sv_not_enforced": {
+      "ce.uac.mfa_admin_accounts": "full",
+      "ce.uac.mfa_cloud_services": "full"
+    },
+    "google.admin_2sv_not_enrolled": {
+      "ce.uac.mfa_admin_accounts": "partial",
+      "ce.uac.mfa_cloud_services": "partial"
+    },
+    "google.admin_stale_login": {
+      "ce.sc.unnecessary_accounts": "partial",
+      "ce.uac.remove_unused_accounts": "full",
+      "ce.uac.special_access_privileges": "partial"
+    },
+    "google.super_admin_sprawl": {
+      "ce.uac.special_access_privileges": "partial"
+    },
+    "google.suspended_admin": {
+      "ce.uac.special_access_privileges": "full"
+    },
+    "google.user_2sv_not_enrolled": {
+      "ce.uac.mfa_cloud_services": "partial"
+    },
+    "identity.global_admin_disabled": {
+      "ce.uac.special_access_privileges": "full"
+    },
+    "identity.global_admin_mfa_not_registered": {
+      "ce.uac.mfa_admin_accounts": "partial",
+      "ce.uac.mfa_cloud_services": "partial"
+    },
+    "identity.global_admin_sprawl": {
+      "ce.uac.special_access_privileges": "partial"
+    },
+    "identity.privileged_mfa_not_registered": {
+      "ce.uac.mfa_admin_accounts": "partial",
+      "ce.uac.mfa_cloud_services": "partial"
+    },
+    "identity.privileged_stale_account": {
+      "ce.sc.unnecessary_accounts": "partial",
+      "ce.uac.remove_unused_accounts": "full",
+      "ce.uac.special_access_privileges": "partial"
+    },
+    "identity.stale_enabled_account": {
+      "ce.sc.unnecessary_accounts": "partial",
+      "ce.uac.remove_unused_accounts": "full"
+    },
+    "identity.user_mfa_not_registered": {
+      "ce.uac.mfa_cloud_services": "partial"
+    },
+    "intune.device_noncompliant": {
+      "ce.sum.vulnerability_fixes_14_days": "partial"
+    }
   }
 }

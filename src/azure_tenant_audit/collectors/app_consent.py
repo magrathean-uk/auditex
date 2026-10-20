@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from ..chunk_reader import iter_endpoint_records
+from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_INPUT_LIMITED, section_was_cut
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
@@ -22,7 +23,7 @@ class AppConsentCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient = context["client"]
-        top = context.get("top", 250)
+        top = context.get("top")
         page_size = context.get("page_size")
         payload, coverage = run_graph_endpoints(
             self.name,
@@ -226,7 +227,7 @@ class AppConsentCollector(Collector):
 
         omitted = max(input_count - len(fanout_principals), 0)
         input_failed = bool(section.get("error")) if isinstance(section, dict) else True
-        input_limited = bool(section.get("collection_limit_reached") or section.get("collection_truncated")) if isinstance(section, dict) else False
+        input_limited = section_was_cut(section)
         failed_operations = sum(1 for row in coverage if row.get("name") in {"servicePrincipalOwners", "servicePrincipalAppRoleAssignments"} and row.get("status") != "ok")
         limited = bool(omitted or input_limited)
         incomplete = bool(input_issues or input_failed or failed_operations)
@@ -251,6 +252,7 @@ class AppConsentCollector(Collector):
             "error_class": "incomplete_evidence" if incomplete else "collection_limit" if limited else None,
             "error": "Service-principal fan-out inputs or relationships are incomplete." if incomplete else
                      "Service-principal relationships cover only the first ten principals plus Microsoft Graph." if limited else None,
+            "truncation_reason": (REASON_FANOUT_LIMIT if omitted else REASON_INPUT_LIMITED) if limited else None,
             **fanout,
         })
         payload["servicePrincipalOwners"] = {"value": owner_rows, "fanout": fanout, "collection_truncated": limited}

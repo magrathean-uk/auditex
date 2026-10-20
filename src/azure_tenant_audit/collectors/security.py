@@ -5,6 +5,9 @@ from typing import Any
 from ..graph import GraphClient
 from .base import Collector, CollectorResult, run_graph_endpoints
 
+# Most recent events kept per Entra log when the operator sets no row limit.
+LOG_SAMPLE_LIMIT = 500
+
 
 class SecurityCollector(Collector):
     name = "security"
@@ -15,7 +18,7 @@ class SecurityCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient = context["client"]
-        top = context.get("top", 500)
+        top = context.get("top")
         page_size = context.get("page_size")
         since = context.get("since")
         until = context.get("until")
@@ -32,13 +35,18 @@ class SecurityCollector(Collector):
             directory_filter_clauses.append(f"activityDateTime le {until}")
         directory_audit_params = {"$filter": " and ".join(directory_filter_clauses)} if directory_filter_clauses else {}
         queries = {
+            # Event logs are the most recent events, a sample by design: without --since/--until an
+            # unbounded read of a large tenant's logs is not practical. An explicit --top below the
+            # sample size is still recorded as a coverage gap.
             "signIns": {
                 "endpoint": "/auditLogs/signIns",
                 "params": sign_in_params,
+                "sample_limit": LOG_SAMPLE_LIMIT,
             },
             "directoryAudits": {
                 "endpoint": "/auditLogs/directoryAudits",
                 "params": directory_audit_params,
+                "sample_limit": LOG_SAMPLE_LIMIT,
             },
         }
         payload, coverage = run_graph_endpoints(

@@ -67,6 +67,7 @@ _FRAMEWORK_LABELS = {
     "ms_secure_score": "Secure Score",
     "ms_zero_trust": "Zero Trust",
     "mcsb": "MCSB",
+    "cyber_essentials": "Cyber Essentials",
     "nist_800_53": "NIST 800-53",
     "iso_27001": "ISO 27001",
     "mitre_attack": "MITRE ATT&CK",
@@ -552,6 +553,7 @@ def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
                 continue
             raw = _text(control.get("status"))
             status = {"accepted_risk": "accepted"}.get(raw, raw if raw in {"fail", "pass", "not_assessed"} else "not_assessed")
+            requirement_status = _text(control.get("requirement_status"))
             finding_ids = [str(item) for item in control.get("finding_ids") or []]
             controls.append(
                 {
@@ -562,7 +564,13 @@ def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
                     "note": (
                         "Accepted risk recorded in the run."
                         if status == "accepted"
-                        else "No collector in this run evidences this control." if status == "not_assessed" else ""
+                        else (
+                            f"CE requirement status is {requirement_status.replace('_', ' ')}; Auditex reports no verdict for it."
+                            if status == "not_assessed" and requirement_status and control.get("reason") == f"requirement_status:{requirement_status}"
+                            else "Mapped rules found no gap, but they cover only part of this requirement, so Auditex reports no verdict."
+                            if status == "not_assessed" and control.get("reason") == "partial_requirement_no_gap_found"
+                            else "No collector in this run evidences this control." if status == "not_assessed" else ""
+                        )
                     ),
                 }
             )

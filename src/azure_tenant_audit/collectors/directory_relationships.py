@@ -6,8 +6,9 @@ import time
 from typing import Any
 from uuid import UUID
 
+from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_OPERATOR_LIMIT, sampling
 from ..graph import GraphError
-from .base import Collector, CollectorResult, _classify_graph_error, normalize_collection_limit
+from .base import Collector, CollectorResult, _classify_graph_error, context_limit
 
 
 DIRECTORY_FANOUT_LIMIT = 100
@@ -22,7 +23,7 @@ class DirectoryRelationshipsCollector(Collector):
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context["client"]
         coverage: list[dict[str, Any]] = []
-        requested = normalize_collection_limit(context.get("top"), default=500)
+        requested = context_limit(context, default=500)
         parent_limit = min(requested if requested is not None else DIRECTORY_FANOUT_LIMIT, DIRECTORY_FANOUT_LIMIT)
         relation_limit = min(requested if requested is not None else RELATIONSHIP_ROW_LIMIT, RELATIONSHIP_ROW_LIMIT)
         page_size = max(1, min(int(context.get("page_size") or 100), 999))
@@ -40,8 +41,13 @@ class DirectoryRelationshipsCollector(Collector):
                     values = client.get_all(path, params=query)
                 if not isinstance(values, list) or any(not isinstance(value, dict) or not value.get("id") for value in values):
                     raise GraphError("Malformed directory relationship response", request=path)
-                if len(values) > limit:
-                    row.update(status="partial", error_class="collection_limit", error="Directory relationship collection limit reached.", collection_truncated=True)
+                if len(values) > limit and sampling():
+                    # A probe reads a few rows to test access; that is a sample, not a gap.
+                    row.update(bounded_sample=True, collection_truncated=False)
+                elif len(values) > limit:
+                    # The operator's limit when it is what bound this read; otherwise the collector's own fan-out bound.
+                    reason = REASON_OPERATOR_LIMIT if requested is not None and limit == requested else REASON_FANOUT_LIMIT
+                    row.update(status="partial", error_class="collection_limit", error="Directory relationship collection limit reached.", collection_truncated=True, truncation_reason=reason)
                 values = values[:limit]
                 row["item_count"] = len(values)
                 return values

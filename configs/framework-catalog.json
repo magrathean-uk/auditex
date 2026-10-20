@@ -193,6 +193,274 @@
         "PV-4": "Audit and enforce compute configurations"
       }
     },
+    "cyber_essentials": {
+      "title": "Cyber Essentials: Requirements for IT Infrastructure",
+      "version": "v3.3",
+      "published": "2026-04-27",
+      "effective_date": "2026-04-27",
+      "verified_on": "2026-10-20",
+      "status": "current",
+      "supersedes": "v3.2 (28 April 2025)",
+      "question_set": "Danzell (IASME self-assessment question set for v3.3)",
+      "id_format": "Auditex-local requirement id ce.<theme>.<name>. The NCSC document has no numbered requirements, so each id cites the heading path as printed in the document.",
+      "document_title": "Cyber Essentials: Requirements for IT Infrastructure v3.3",
+      "document_url": "https://www.ncsc.gov.uk/sites/default/files/documents/cyber-essentials-requirements-for-it-infrastructure-v3-3.pdf",
+      "effective_note": "NCSC lists v3.3 as the current Requirements for IT infrastructure, dated 27 April 2026. IASME applies it to assessment accounts created after 26 April 2026 (its November 2025 notice says 27 April); accounts created earlier keep v3.2 for six months, so both versions are in use until late October 2026.",
+      "related_documents": [
+        {
+          "title": "Cyber Essentials Plus Test Specification",
+          "version": "v3.2",
+          "published": "2025-04-28",
+          "url": "https://www.ncsc.gov.uk/sites/default/files/documents/cyber-essentials-plus-test-specification-v3-2.pdf",
+          "note": "No v3.3 test specification exists; NCSC still lists v3.2 as current for CE+ assessments."
+        }
+      ],
+      "sources": [
+        "https://www.ncsc.gov.uk/sites/default/files/documents/cyber-essentials-requirements-for-it-infrastructure-v3-3.pdf",
+        "https://www.ncsc.gov.uk/cyberessentials/resources",
+        "https://iasme.co.uk/articles/important-update-changes-to-cyber-essentials-for-april-2026/",
+        "https://iasme.co.uk/articles/upcoming-changes-to-the-cyber-essentials-scheme-april-2026-update/",
+        "https://iasme.co.uk/cyber-essentials/schedules/cb-schedule-12/",
+        "https://www.ncsc.gov.uk/sites/default/files/documents/cyber-essentials-plus-test-specification-v3-2.pdf"
+      ],
+      "themes": {
+        "firewalls": "1. Firewalls",
+        "secure_configuration": "2. Secure Configuration",
+        "security_update_management": "3. Security Update Management",
+        "user_access_control": "4. User Access Control",
+        "malware_protection": "5. Malware protection"
+      },
+      "requirement_statuses": {
+        "automated": "Tenant evidence alone can decide the whole requirement. No Cyber Essentials requirement qualifies in this version: each one also spans devices, other cloud services or organisational practice.",
+        "partial": "Tenant evidence covers part of the requirement. A rule can show a gap, and the requirement then fails; a clean result is recorded as not assessed, never as pass, because it says nothing about the rest.",
+        "manual": "The applicant answers and evidences it. Auditex has no tenant evidence and reports no verdict.",
+        "ce_plus_assessor_test": "The CE+ assessor tests it technically. Auditex reports no verdict; any rules listed are supporting evidence only.",
+        "provider_responsibility": "The cloud provider typically implements it for SaaS. The applicant must hold the contractual commitment. Auditex reports no verdict."
+      },
+      "mapping_confidence": {
+        "full": "The rule tests the condition the requirement names, for the audited tenant.",
+        "partial": "The rule tests a proxy or a subset of the condition, for example registration rather than enforcement."
+      },
+      "disclaimer": "Auditex output is evidence for a Cyber Essentials assessor. It is not a Cyber Essentials assessment, certificate or CE+ result, and a pass here never replaces the applicant's own answers or the assessor's tests.",
+      "controls": {
+        "ce.fw.device_firewall": {
+          "title": "Every in-scope device is protected by a correctly configured firewall",
+          "theme": "firewalls",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 1. Firewalls > Requirements",
+          "evidence_limits": "Device and network firewalls are not visible to a tenant audit. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.fw.admin_interface": {
+          "title": "Firewall default administrative passwords changed and the admin interface not exposed to the internet without MFA or an IP allow list",
+          "theme": "firewalls",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 1. Firewalls > Requirements",
+          "evidence_limits": "Boundary device configuration is outside the Microsoft 365 and Google Workspace APIs. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.fw.inbound_rules": {
+          "title": "Unauthenticated inbound connections blocked by default; inbound rules approved, documented and removed when unneeded",
+          "theme": "firewalls",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 1. Firewalls > Requirements",
+          "evidence_limits": "Firewall rule sets and their approval records are not collected. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.fw.internet_exposure": {
+          "title": "Only secure and necessary network services can be reached from the internet",
+          "theme": "firewalls",
+          "status": "ce_plus_assessor_test",
+          "citation": "E. Requirements by technical control theme > 1. Firewalls > Aim",
+          "evidence_limits": "The CE+ assessor scans every internet-facing address in scope. Auditex DNS posture rules do not test open services.",
+          "ce_plus_test": "Test case 1: Remote vulnerability assessment"
+        },
+        "ce.fw.saas_provider": {
+          "title": "For SaaS, the cloud provider implements the firewall control; the applicant holds the contractual commitment",
+          "theme": "firewalls",
+          "status": "provider_responsibility",
+          "citation": "D. Scope > (iv) Cloud services > Table 1: Explanation of who may typically implement each control",
+          "evidence_limits": "Microsoft 365 and Google Workspace are SaaS. The applicant must hold the provider's contractual or trust-centre commitment. Auditex cannot see it."
+        },
+        "ce.sc.unnecessary_accounts": {
+          "title": "Unnecessary user accounts, such as unused administrative accounts, removed or disabled",
+          "theme": "secure_configuration",
+          "status": "partial",
+          "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Computers and network devices",
+          "evidence_limits": "Covers inactive tenant accounts only. Local and device accounts, guest accounts on devices and unused service accounts are not checked."
+        },
+        "ce.sc.default_passwords": {
+          "title": "Default or guessable account passwords changed",
+          "theme": "secure_configuration",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Computers and network devices",
+          "evidence_limits": "Auditex never tests credentials. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.sc.unnecessary_software": {
+          "title": "Unnecessary software, utilities and network services removed or disabled",
+          "theme": "secure_configuration",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Computers and network devices",
+          "evidence_limits": "Installed software and services on devices are not collected. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.sc.autorun_disabled": {
+          "title": "Auto-run that executes files without user authorisation disabled",
+          "theme": "secure_configuration",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Computers and network devices",
+          "evidence_limits": "Device configuration profiles are not normalised. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.sc.user_authentication": {
+          "title": "Users authenticated before access to organisational data or services",
+          "theme": "secure_configuration",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Computers and network devices",
+          "evidence_limits": "Anonymous or unauthenticated access to organisational services is not tested as a requirement. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.sc.device_unlocking": {
+          "title": "Device unlocking credentials in place and protected against brute force; PIN or password of at least 6 characters",
+          "theme": "secure_configuration",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Device unlocking credentials",
+          "evidence_limits": "Intune compliance settings (lock, PIN length, encryption) are not normalised yet. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.sc.saas_configuration": {
+          "title": "SaaS cloud services configured securely and providing only the services required",
+          "theme": "secure_configuration",
+          "status": "partial",
+          "citation": "D. Scope > (iv) Cloud services; E. Requirements by technical control theme > 2. Secure Configuration > Aim",
+          "evidence_limits": "Covers legacy authentication and user app consent only. Other SaaS settings are not tested against this requirement."
+        },
+        "ce.sum.supported_software": {
+          "title": "All in-scope software is licensed and supported, and removed when it becomes unsupported",
+          "theme": "security_update_management",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
+          "evidence_limits": "osVersion is collected but there is no end-of-life table, so no rule judges support status. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.sum.automatic_updates": {
+          "title": "Automatic updates enabled where possible",
+          "theme": "security_update_management",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
+          "evidence_limits": "Windows Update for Business rings and update policies are not collected. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.sum.vulnerability_fixes_14_days": {
+          "title": "Critical and high-risk updates and vulnerability fixes installed within 14 days of release",
+          "theme": "security_update_management",
+          "status": "ce_plus_assessor_test",
+          "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
+          "evidence_limits": "Intune noncompliance is supporting evidence only: it does not say which setting failed and no rule measures update age. The CE+ assessor decides this with an authenticated vulnerability scan of sampled devices.",
+          "ce_plus_test": "Test case 2: Check patching, by authenticated vulnerability scan of devices"
+        },
+        "ce.sum.saas_provider": {
+          "title": "For SaaS, the cloud provider implements security update management; the applicant holds the contractual commitment",
+          "theme": "security_update_management",
+          "status": "provider_responsibility",
+          "citation": "D. Scope > (iv) Cloud services > Table 1: Explanation of who may typically implement each control",
+          "evidence_limits": "Microsoft 365 and Google Workspace are SaaS. The applicant must hold the provider's commitment. Auditex cannot see it."
+        },
+        "ce.uac.account_approval": {
+          "title": "A process to create and approve user accounts",
+          "theme": "user_access_control",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
+          "evidence_limits": "Joiner and approval processes are not visible in tenant data. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.uac.unique_credentials": {
+          "title": "Users authenticate with unique credentials before access to applications or devices",
+          "theme": "user_access_control",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
+          "evidence_limits": "Shared accounts cannot be told apart from named accounts in the collected data. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.uac.remove_unused_accounts": {
+          "title": "User accounts removed or disabled when no longer required, including after a defined period of inactivity",
+          "theme": "user_access_control",
+          "status": "partial",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
+          "evidence_limits": "Covers inactive enabled tenant accounts only. Leavers still active within the inactivity window and third-party accounts are not detected."
+        },
+        "ce.uac.mfa_cloud_services": {
+          "title": "MFA implemented where available; authentication to cloud services always uses MFA",
+          "theme": "user_access_control",
+          "status": "partial",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements; E. Requirements by technical control theme > 4. User Access Control > Multi-factor authentication (MFA)",
+          "evidence_limits": "Covers the audited Microsoft 365 or Google Workspace tenant only. Every other cloud service the organisation uses needs separate evidence. Registration rules show capability, not enforcement.",
+          "ce_plus_test": "Test case 4: Check multi-factor authentication configuration"
+        },
+        "ce.uac.mfa_admin_accounts": {
+          "title": "MFA protects administrative accounts and accounts reachable from the internet",
+          "theme": "user_access_control",
+          "status": "partial",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Multi-factor authentication (MFA)",
+          "evidence_limits": "Covers administrator roles in the audited tenant only. PIM-eligible and group-based administrators depend on the identity collectors completing.",
+          "ce_plus_test": "Test case 4: Check multi-factor authentication configuration"
+        },
+        "ce.uac.separate_admin_accounts": {
+          "title": "Separate accounts used for administrative activities only",
+          "theme": "user_access_control",
+          "status": "ce_plus_assessor_test",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
+          "evidence_limits": "No Auditex rule yet checks whether administrators also hold a mailbox or licence for daily work. The CE+ assessor tests account separation on sampled devices and cloud environments.",
+          "ce_plus_test": "Test case 5: Check account separation"
+        },
+        "ce.uac.special_access_privileges": {
+          "title": "Special access privileges removed or disabled when no longer required",
+          "theme": "user_access_control",
+          "status": "partial",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
+          "evidence_limits": "Covers privileged role assignments in the audited tenant. Role changes when staff move are not observed, and PIM-eligible or group-based assignments may be missed."
+        },
+        "ce.uac.password_brute_force": {
+          "title": "Password guessing limited by MFA, throttling or lock-out (no more than 10 guesses in 5 minutes)",
+          "theme": "user_access_control",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Password-based authentication",
+          "evidence_limits": "Smart lockout and device lock-out settings are not collected. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.uac.password_quality": {
+          "title": "Password quality enforced by MFA, 12 characters, or 8 characters with a deny list",
+          "theme": "user_access_control",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Password-based authentication",
+          "evidence_limits": "Password policy and banned-password settings are not collected. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.uac.password_guidance": {
+          "title": "Users supported to choose unique passwords, with no forced expiry or complexity rules and a process to change compromised passwords",
+          "theme": "user_access_control",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Password-based authentication",
+          "evidence_limits": "These are organisational practices. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.uac.third_party_accounts": {
+          "title": "Third-party and supplier accounts, such as managed service provider accounts, controlled like internal accounts",
+          "theme": "user_access_control",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements; D. Scope > (v) Accounts used by third parties and managed infrastructure",
+          "evidence_limits": "Supplier accounts cannot be identified from tenant data alone. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.mp.antimalware": {
+          "title": "Anti-malware software active on in-scope devices, kept up to date, preventing malicious code and malicious websites",
+          "theme": "malware_protection",
+          "status": "ce_plus_assessor_test",
+          "citation": "E. Requirements by technical control theme > 5. Malware protection > Requirements > Anti-malware software (option for in scope devices running Windows or MacOS including servers, desktop computers, laptops)",
+          "evidence_limits": "Defender antivirus status and endpoint-security policies are not collected, so there is no tenant evidence yet. The CE+ assessor tests it with malware test files.",
+          "ce_plus_test": "Test case 3: Check malware protection"
+        },
+        "ce.mp.app_allow_listing": {
+          "title": "Alternatively, only approved, code-signed applications can run",
+          "theme": "malware_protection",
+          "status": "manual",
+          "citation": "E. Requirements by technical control theme > 5. Malware protection > Requirements > Application allow listing (option for all in scope devices)",
+          "evidence_limits": "Application control policies are not collected. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+        },
+        "ce.mp.saas_provider": {
+          "title": "For SaaS, the cloud provider implements malware protection; the applicant holds the contractual commitment",
+          "theme": "malware_protection",
+          "status": "provider_responsibility",
+          "citation": "D. Scope > (iv) Cloud services > Table 1: Explanation of who may typically implement each control",
+          "evidence_limits": "Microsoft 365 and Google Workspace are SaaS. The applicant must hold the provider's commitment. Auditex cannot see it."
+        }
+      }
+    },
     "google_workspace_baseline": {
       "title": "Google Workspace baseline (Auditex)",
       "status": "current",

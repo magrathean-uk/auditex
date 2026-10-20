@@ -12,10 +12,11 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from .collection_gaps import list_truncations
 from .resources import list_resource_files, resolve_resource_path
 from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
 
-CONTRACT_VERSION = "2026-04-21"
+CONTRACT_VERSION = "2026-10-20"
 
 ROOT_REQUIRED_ARTIFACTS = (
     "run-manifest.json",
@@ -96,6 +97,7 @@ _KNOWN_FRAMEWORK_KEYS = frozenset(
         "ms_secure_score",
         "ms_zero_trust",
         "mcsb",
+        "cyber_essentials",
         "google_workspace_baseline",
         "nist_800_53",
         "iso_27001",
@@ -487,6 +489,31 @@ def _validate_manifest_artifact_paths(run_dir: Path, issues: list[dict[str, Any]
     return dict(manifest)
 
 
+def _validate_collection_gaps(run_dir: Path, manifest: Mapping[str, Any], issues: list[dict[str, Any]]) -> None:
+    """A list cut short is a coverage gap: the run is not ``ok`` and the manifest names the list."""
+    coverage_path = manifest.get("coverage_path")
+    if not coverage_path:
+        return
+    coverage = _read_json(run_dir / str(coverage_path), fallback=[])
+    # Only rows that name a reason were written by a version that records gaps; bundles from before
+    # flagged a cut on an ``ok`` row with no reason and stay valid.
+    truncations = list_truncations(coverage if isinstance(coverage, list) else [], require_reason=True)
+    if not truncations:
+        return
+    if manifest.get("overall_status") == "ok":
+        issues.append(_issue("truncated_list_reported_ok", path="run-manifest.json", details=truncations[:25]))
+    recorded = {
+        (str(item.get("collector")), str(item.get("list")))
+        for gap in manifest.get("coverage_gaps") or []
+        if isinstance(gap, Mapping)
+        for item in gap.get("truncated_lists") or []
+        if isinstance(item, Mapping)
+    }
+    missing = [item for item in truncations if (item["collector"], item["list"]) not in recorded]
+    if missing:
+        issues.append(_issue("collection_gap_not_recorded", path="run-manifest.json", details=missing[:25]))
+
+
 def _validate_data_handling(run_dir: Path, manifest: Mapping[str, Any], issues: list[dict[str, Any]]) -> None:
     relative = manifest.get("data_handling_path")
     if not relative:
@@ -693,6 +720,7 @@ def build_validation_report(
     _validate_sensitive_contract_artifacts(run_path, issues)
     indexed_identity = _validate_evidence_db(run_path, issues, read_only=read_only)
     manifest = _validate_manifest_artifact_paths(run_path, issues)
+    _validate_collection_gaps(run_path, manifest, issues)
     _validate_data_handling(run_path, manifest, issues)
     _validate_live_readiness(run_path, manifest, issues)
     _validate_audit_plan(run_path, manifest, issues)

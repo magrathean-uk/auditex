@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ..adapters import get_adapter
-from .base import Collector, CollectorResult, run_graph_endpoints
+from .base import Collector, CollectorResult, normalize_collection_limit, run_graph_endpoints
 
 
 class EDiscoveryCollector(Collector):
@@ -62,7 +62,7 @@ class EDiscoveryCollector(Collector):
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get(
             "audit_logger"
         )
-        top = context.get("top", 500)
+        top = context.get("top")
         page_size = context.get("page_size")
         plane = str(context.get("plane", "inventory")).lower()
         payload: dict[str, Any] = {}
@@ -89,6 +89,9 @@ class EDiscoveryCollector(Collector):
         payload.update(base_payload)
         total += sum(row.get("item_count", 0) for row in base_coverage if row.get("type") == "graph")
 
+        operator_limit = normalize_collection_limit(top, default=None)
+        # Each case's searches and operations get half the operator's limit; no limit means none.
+        case_top = None if operator_limit is None else max(1, operator_limit // 2)
         cases = (base_payload.get("cases", {}) or {}).get("value", []) or []
         if isinstance(cases, list):
             for case in cases:
@@ -110,7 +113,7 @@ class EDiscoveryCollector(Collector):
                             "query_page_minimum": None,
                         },
                     },
-                    top=max(1, top // 2),
+                    top=case_top,
                     page_size=page_size,
                     chunk_writer=context.get("chunk_writer"),
                     log_event=log_event,

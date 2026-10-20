@@ -22,6 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from .cyber_essentials import CE_FRAMEWORK_KEY, build_cyber_essentials_section
 from .identity_controls import (
     CONTROL_EFFECTIVE_MFA,
     CONTROL_LEGACY_AUTH,
@@ -32,7 +33,7 @@ from .resources import resolve_resource_path
 from .waivers import is_accepted_status
 
 BASELINE_ALIGNMENT_SCHEMA_VERSION = "2026-10-20"
-BASELINE_FRAMEWORK_KEYS = ("cis_m365_v7", "cisa_scuba", "ms_secure_score", "ms_zero_trust", "mcsb")
+BASELINE_FRAMEWORK_KEYS = ("cis_m365_v7", "cisa_scuba", "ms_secure_score", "ms_zero_trust", "mcsb", CE_FRAMEWORK_KEY)
 SECURE_SCORE_LOW_THRESHOLD_PERCENT = 50.0
 
 _FRAMEWORK_CATALOG_PATH = Path("configs/framework-catalog.json")
@@ -77,13 +78,17 @@ _NAMESPACE_COLLECTORS = {
     "exposure": "dns_posture",
     "external_identity": "external_identity",
     "identity": "identity",
+    "identity_governance": "identity_governance",
     "intune": "intune",
+    "intune_depth": "intune_depth",
     "mailbox_forwarding": "mailbox_forwarding",
+    "onedrive": "onedrive_posture",
     "reports_usage": "reports_usage",
     "secure_score": "defender",
     "security": "security",
     "service_health": "service_health",
     "sharepoint": "sharepoint_access",
+    "teams": "teams_policy",
 }
 # Detection rule -> detection signal that decides whether it was evaluated. Mirrors
 # ``_DETECTION_SIGNAL_RULES`` in findings.py (a test keeps the two in step).
@@ -133,6 +138,20 @@ def _shipped_control_mappings() -> dict[str, dict[str, list[str]]]:
         str(rule_id): {str(key): [str(item) for item in value] for key, value in mapping.items() if isinstance(value, list)}
         for rule_id, mapping in payload.items()
         if isinstance(rule_id, str) and not rule_id.startswith("_") and isinstance(mapping, Mapping)
+    }
+
+
+@lru_cache(maxsize=1)
+def _shipped_cyber_essentials_confidence() -> dict[str, dict[str, str]]:
+    """``rule id -> requirement id -> full|partial`` from the shipped control mappings."""
+    payload = _read_json(_CONTROL_MAPPINGS_PATH)
+    table = payload.get("_cyber_essentials_confidence") if isinstance(payload, Mapping) else None
+    if not isinstance(table, Mapping):
+        return {}
+    return {
+        str(rule_id): {str(requirement): str(value) for requirement, value in requirements.items()}
+        for rule_id, requirements in table.items()
+        if isinstance(requirements, Mapping)
     }
 
 
@@ -440,9 +459,29 @@ def _verdict_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str
     return None
 
 
+def _intune_assignment_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    """The unassigned-policy rule reads intune_depth's own policy inventory and assignment reads."""
+    if snapshot is None:
+        return "inputs_not_available"
+    reports = {str(record.get("source")): record for record in _records(snapshot, "normalization_coverage")}
+    configurations = reports.get("intune_depth.deviceConfigurations")
+    if configurations is None:
+        return "device_configurations_not_collected"
+    if configurations.get("collection_status") != "collected" or configurations.get("complete") is not True:
+        return "device_configurations_not_read_in_full"
+    if not configurations.get("record_count"):
+        return "no_device_configurations"
+    assignments = reports.get("intune_depth.deviceConfigurationAssignments")
+    if assignments is None or assignments.get("collection_status") != "collected" or assignments.get("complete") is not True:
+        return "policy_assignments_not_read_in_full"
+    return None
+
+
 def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
     """Why a rule's inputs were absent, or ``None`` when the evidence it reads is present."""
     namespace = rule_id.split(".", 1)[0]
+    if rule_id == "intune_depth.policies_without_assignments":
+        return _intune_assignment_inputs_gap(snapshot)
     if rule_id in _RULE_VERDICT_CONTROLS:
         return _verdict_inputs_gap(snapshot, rule_id)
     if rule_id in _DETECTION_RULE_SIGNALS:
@@ -526,6 +565,20 @@ def build_baseline_alignment(
             if rule_id and isinstance(framework_mappings, Mapping):
                 for control_id in framework_mappings.get(framework) or []:
                     rules_by_control[str(control_id)].add(rule_id)
+        if framework == CE_FRAMEWORK_KEY:
+            # Requirement rows come from the catalog, so requirements no rule maps to still appear.
+            frameworks[framework] = build_cyber_essentials_section(
+                framework_entry(framework),
+                rules_by_control,
+                evaluate=lambda rule_id: _rule_evaluation(
+                    rule_id, open_by_rule, accepted_by_rule, complete, normalized_snapshot, not_applicable
+                ),
+                open_by_rule=open_by_rule,
+                control_status=_control_status,
+                status_order=_STATUS_ORDER,
+                confidence=_shipped_cyber_essentials_confidence() if mappings is None else None,
+            )
+            continue
         controls = []
         for control_id in sorted(rules_by_control):
             rule_ids = sorted(rules_by_control[control_id])

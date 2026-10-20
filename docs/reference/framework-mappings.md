@@ -14,8 +14,9 @@ The mapping data lives in three files:
 
 ## Benchmark sources
 
-Sources were checked on 2026-10-02. Auditex stores control ids and short paraphrased titles
-only. Read the source benchmarks for the authoritative wording.
+Sources were checked on 2026-10-02; the Cyber Essentials entry was checked on 2026-10-20.
+Auditex stores control ids and short paraphrased titles only. Read the source benchmarks for the
+authoritative wording.
 
 | Key | Framework | Version | Published | Identifier format |
 | --- | --- | --- | --- | --- |
@@ -24,6 +25,7 @@ only. Read the source benchmarks for the authoritative wording.
 | `ms_secure_score` | Microsoft Secure Score control profiles | Rolling Graph service | Rolling | `secureScoreControlProfile` id, for example `AdminMFAV2` |
 | `ms_zero_trust` | Microsoft Zero Trust technology pillars | Zero Trust adoption model | 2025-02-26 | Pillar slug: `identities`, `endpoints`, `data`, `apps`, `infrastructure`, `network`, `secops` |
 | `mcsb` | Microsoft cloud security benchmark | v2 (preview, supersedes v1) | 2025-12-01 | `<domain>-<n>`, for example `IM-6` |
+| `cyber_essentials` | Cyber Essentials: Requirements for IT Infrastructure (NCSC) | v3.3 | 2026-04-27 | Auditex-local requirement id, for example `ce.uac.mfa_cloud_services` |
 | `cis_m365_v3` | CIS Microsoft 365 Foundations Benchmark (legacy) | 3.x | — | Deprecated. Not emitted. |
 
 Verification sources:
@@ -59,6 +61,14 @@ Verification sources:
   and the v2 domain pages, for example
   <https://learn.microsoft.com/en-us/security/benchmark/azure/mcsb-v2-identity-management>. Version 2
   is still in preview. The control ids Auditex uses appear in v2. They were not checked against v1.
+
+- Cyber Essentials: the NCSC document
+  <https://www.ncsc.gov.uk/sites/default/files/documents/cyber-essentials-requirements-for-it-infrastructure-v3-3.pdf>
+  (v3.3, April 2026), listed as current on <https://www.ncsc.gov.uk/cyberessentials/resources>.
+  IASME's notices
+  <https://iasme.co.uk/articles/important-update-changes-to-cyber-essentials-for-april-2026/> and
+  <https://iasme.co.uk/cyber-essentials/schedules/cb-schedule-12/> confirm the effective date. See
+  [Cyber Essentials](#cyber-essentials).
 
 The pre-existing keys (`nist_800_53`, `iso_27001`, `soc2`, `nis2`, `dora`, `mitre_attack`, and
 `google_workspace_baseline`) keep their earlier values. The catalog does not list their control
@@ -146,10 +156,14 @@ was not evaluated also has a `reason`:
   not be `unknown`. `ca.enforcement_unverified` needs both the `effective_mfa` and
   `legacy_authentication_block` verdicts.
 
+`baseline_alignment.frameworks.cyber_essentials` has a different shape: one row per catalogued
+requirement, including those no rule maps to. See [Cyber Essentials](#cyber-essentials).
+
 `baseline_alignment.unmapped_findings` counts findings that carry no `rule_id` (`count`,
 `open_count`, `accepted_count`, `collectors` as a list of `{collector, count}`, and up to 20 `finding_ids`). They cannot reach a
-control row, so a control can read `pass` while one of them is open. Check this bucket before
-quoting a framework roll-up.
+control row. Every finding this version emits carries a `rule_id`, so `count` is 0 for these bundles;
+a non-zero count means a bundle from an earlier version or imported findings, whose open findings are
+in no control row, so check this bucket before quoting a roll-up from such a bundle.
 
 `src/azure_tenant_audit/baselines.py` links each rule to its evidence collectors: `_RULE_COLLECTORS`
 for rules that read from specific collectors (every collector listed must complete: the detection
@@ -184,7 +198,10 @@ The `secure_score.low_overall` rule raises a finding when the latest snapshot's
    `configs/control-mappings.json`. Include `nist_800_53` or `iso_27001`, plus any verified
    benchmark controls. Do not add `cis_m365_v3`.
 2. If a benchmark id is not yet in `configs/framework-catalog.json`, verify it against the source
-   and add it there.
+   and add it there. For a Cyber Essentials requirement, add the id to the rule's `cyber_essentials`
+   list and declare its `full` or `partial` confidence in `_cyber_essentials_confidence`; Google
+   Workspace rules carry the id in `src/auditex/google_workspace/findings.py` and are listed in the
+   same confidence table.
 3. Add the rule's namespace to `_NAMESPACE_COLLECTORS` in
    `src/azure_tenant_audit/baselines.py` so a clean run can report `pass`. If the rule reads from a
    different collector than its namespace, or needs input that may be absent, add it to
@@ -230,6 +247,109 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   `restricted` or `unrestricted`. An `unknown` or missing verdict reports `not_assessed` with
   `verdict_unknown:<control>` or `verdict_not_collected:<control>`, never `pass`.
 
+## Cyber Essentials
+
+The `cyber_essentials` key follows **Cyber Essentials: Requirements for IT Infrastructure v3.3**
+(NCSC, April 2026, listed as current on 2026-10-20). IASME applies v3.3 and the Danzell question set
+to assessment accounts created after 26 April 2026 (its November 2025 notice says 27 April).
+Accounts created earlier keep v3.2 for six months, so both versions are still in use until late
+October 2026. The Cyber Essentials Plus Test Specification is still v3.2 (28 April 2025); there is no
+v3.3 test specification. The catalog entry records the title, version, dates and URLs. The NCSC
+documents are Crown copyright and are reused under the
+[Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/),
+as the [NCSC terms](https://www.ncsc.gov.uk/section/about-this-website/terms-and-conditions) allow, with
+this acknowledgement: Auditex cites their headings and test-case names and copies no document text. The
+IASME notices are cited for dates only.
+
+**Method.** The NCSC document has no numbered requirements. Auditex gives each requirement a stable
+local id, `ce.<theme>.<name>`, and cites the heading path as printed in the document, for example
+`E. Requirements by technical control theme > 4. User Access Control > Requirements`. The five
+themes are Firewalls, Secure Configuration, Security Update Management, User Access Control and
+Malware protection. Every requirement carries one status:
+
+- `automated`: tenant evidence alone decides the whole requirement. None qualifies in v3.3, because
+  each requirement also spans devices, other cloud services or organisational practice.
+- `partial`: tenant evidence covers part of the requirement. A rule can show a gap, and the requirement
+  then fails. A partial requirement never reads `pass`: a clean result is recorded as not assessed with
+  the evidence counts.
+- `manual`: the applicant answers and evidences it. Auditex reports no verdict.
+- `ce_plus_assessor_test`: the CE+ assessor tests it technically. Auditex reports no verdict and any
+  rules listed are supporting evidence only. The catalog names the CE+ test case.
+- `provider_responsibility`: for SaaS such as Microsoft 365 and Google Workspace the cloud provider
+  typically implements the control (Table 1 in the document), and the applicant holds the contractual
+  commitment. Auditex reports no verdict.
+
+Most requirements are device, network or process side, so most are `manual`, `ce_plus_assessor_test`
+or `provider_responsibility`. Only user access control and parts of secure configuration have tenant
+evidence.
+
+| Requirement | Status | Rules |
+| --- | --- | --- |
+| `ce.fw.device_firewall` | manual | none |
+| `ce.fw.admin_interface` | manual | none |
+| `ce.fw.inbound_rules` | manual | none |
+| `ce.fw.internet_exposure` | CE+ assessor test | none |
+| `ce.fw.saas_provider` | provider responsibility | none |
+| `ce.sc.unnecessary_accounts` | partial | `google.admin_stale_login`, `identity.privileged_stale_account`, `identity.stale_enabled_account` |
+| `ce.sc.default_passwords` | manual | none |
+| `ce.sc.unnecessary_software` | manual | none |
+| `ce.sc.autorun_disabled` | manual | none |
+| `ce.sc.user_authentication` | manual | none |
+| `ce.sc.device_unlocking` | manual | none |
+| `ce.sc.saas_configuration` | partial | `ca.legacy_auth_not_blocked`, `consent_policy.user_consent_unrestricted` |
+| `ce.sum.supported_software` | manual | none |
+| `ce.sum.automatic_updates` | manual | none |
+| `ce.sum.vulnerability_fixes_14_days` | CE+ assessor test | `intune.device_noncompliant` |
+| `ce.sum.saas_provider` | provider responsibility | none |
+| `ce.uac.account_approval` | manual | none |
+| `ce.uac.unique_credentials` | manual | none |
+| `ce.uac.remove_unused_accounts` | partial | `google.admin_stale_login`, `identity.privileged_stale_account`, `identity.stale_enabled_account` |
+| `ce.uac.mfa_cloud_services` | partial | `ca.legacy_auth_not_blocked`, `ca.mfa_not_enforced`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.user_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered` |
+| `ce.uac.mfa_admin_accounts` | partial | `attack_path.no_mfa_to_tier0`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered` |
+| `ce.uac.separate_admin_accounts` | CE+ assessor test | none |
+| `ce.uac.special_access_privileges` | partial | `google.admin_stale_login`, `google.super_admin_sprawl`, `google.suspended_admin`, `identity.global_admin_disabled`, `identity.global_admin_sprawl`, `identity.privileged_stale_account` |
+| `ce.uac.password_brute_force` | manual | none |
+| `ce.uac.password_quality` | manual | none |
+| `ce.uac.password_guidance` | manual | none |
+| `ce.uac.third_party_accounts` | manual | none |
+| `ce.mp.antimalware` | CE+ assessor test | none |
+| `ce.mp.app_allow_listing` | manual | none |
+| `ce.mp.saas_provider` | provider responsibility | none |
+
+**Mapping confidence.** `_cyber_essentials_confidence` in `configs/control-mappings.json` records, for
+each rule and requirement, whether the rule tests the named condition for the audited tenant (`full`,
+for example `ca.mfa_not_enforced` for MFA on cloud services) or a proxy or subset (`partial`, for
+example MFA registration, or Intune noncompliance for update management). A mapping with no declared
+confidence is read as `partial`, and a test requires every shipped mapping to declare one.
+
+**Report section.** `baseline_alignment.frameworks.cyber_essentials` lists every catalogued
+requirement in catalog order, including those no rule maps to, so none is omitted. Each row has
+`control_id`, `title`, `theme`, `requirement_status`, `status`, `citation`, `evidence_limits`,
+`rule_ids`, `rule_statuses` (each with the rule's `confidence`), `evidence` (counts of rules mapped,
+evaluated, passed, failed, accepted and not assessed, plus open findings), `open_finding_count`,
+`finding_ids`, and `ce_plus_test` where the document or test specification names one.
+
+- `status` keeps the four baseline values. `automated` rows take `pass`, `fail`, `accepted_risk` or
+  `not_assessed` from their rules, by the same rules as the other frameworks. No requirement is
+  `automated` in v3.3, so the shipped section never reads `pass`.
+- `partial` rows can read `fail` or `accepted_risk`. When every mapped rule was evaluated and is clean,
+  the row reads `not_assessed` with `reason` `partial_requirement_no_gap_found`, and `evidence` shows
+  how many rules were evaluated and passed. A partial requirement never reads `pass`. A row whose rules
+  were not all evaluated is `not_assessed` too, and the per-rule `reason` says why.
+- `manual`, `ce_plus_assessor_test` and `provider_responsibility` rows are always `not_assessed`, with
+  `reason` set to `requirement_status:<status>`, whatever their mapped rules report. An unknown
+  catalog status is treated the same way. Their `rule_statuses` and `evidence` are supporting detail.
+- Requirement ids named by a finding or mapping but missing from the catalog are listed in
+  `uncatalogued_requirement_ids`.
+- Google Workspace rules reach the section through their findings' `framework_mappings` only. They are
+  not in the Microsoft collector map, so a Google requirement shows a rule only when a finding exists,
+  and a clean Google run leaves those requirements `not_assessed`.
+
+**Caveat.** Auditex output is evidence for a Cyber Essentials assessor. It is not a Cyber Essentials
+assessment, a certificate or a CE+ result. `not_assessed` with `partial_requirement_no_gap_found` means
+the mapped rules found no gap in the audited tenant, which is not the same as the requirement being
+met. The applicant's own answers and the assessor's tests decide that.
+
 ## Limitations
 
 - CIS v7 coverage is partial. Auditex maps 16 of the benchmark's recommendations, chosen where
@@ -237,6 +357,11 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   collectors completed and its inputs were present) and raised no finding, not a full CIS audit
   result.
 - `consent_policy.user_consent_unrestricted` fires only when users can consent to any app. CIS v7 `5.1.5.1` and SCuBA `MS.AAD.5.2v1` ask for no user consent, so a clean result against them means no unrestricted user consent, not that consent is off.
+- Cyber Essentials coverage is partial by design. Six of 30 requirements have tenant evidence behind
+  them and none is `automated`, so no Cyber Essentials row can read `pass`. No rule yet checks separate administrator accounts, Defender or other
+  anti-malware status, operating system support dates, update age or device lock settings; those stay
+  `manual` or `ce_plus_assessor_test` until a collector and rule exist. CE+ is assessed against the v3.2
+  test specification, so a future v3.3 specification may change the test-case names.
 - MCSB v2 is a preview release, and its ids could change before it is generally available.
 - Secure Score control ids are service-defined and change over time. Microsoft does not publish
   a complete list.

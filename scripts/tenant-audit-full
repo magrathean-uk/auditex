@@ -13,7 +13,7 @@ Defaults:
   TENANT_ID: organizations
   TENANT_NAME: tenant_id
   COLLECTORS: identity,security,intune,teams
-  TOP: 500
+  TOP: none (every list is paged to its last row; --top N sets an explicit limit and records the cut as a coverage gap)
   OUTPUT: ./audit-output
   
 The --include-exchange flag triggers Microsoft 365 CLI login (m365) and optional command collectors.
@@ -29,7 +29,7 @@ USAGE
 TENANT_ID="organizations"
 TENANT_NAME=""
 COLLECTORS="identity,security,intune,teams"
-TOP="500"
+TOP=""
 OUT_DIR="./audit-output"
 RUN_NAME=""
 INCLUDE_EXCHANGE=0
@@ -154,11 +154,13 @@ CMD=(
   --use-azure-cli-token
   --collectors
   "${COLLECTORS}"
-  --top
-  "${TOP}"
   --out
   "${OUT_DIR}"
 )
+
+if [[ -n "${TOP}" ]]; then
+  CMD+=(--top "${TOP}")
+fi
 
 if [[ "${INCLUDE_EXCHANGE}" -eq 1 ]]; then
   CMD+=(--include-exchange)

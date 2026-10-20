@@ -18,6 +18,7 @@ from .auth_runtime import (
     scrub_command_line as _scrub_command_line,
 )
 from .collectors import REGISTRY
+from .collectors.base import normalize_collection_limit
 from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
 from .config import AuthConfig, CollectorConfig
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
@@ -105,7 +106,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run.")
     parser.add_argument("--exclude", default=None, help="Comma-separated collectors to skip.")
     parser.add_argument("--include-exchange", action="store_true", help="Enable optional exchange collectors.")
-    parser.add_argument("--top", type=int, default=500, help="Per-endpoint result limit.")
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=None,
+        help=(
+            "Explicit per-list row limit for very large tenants. By default every list is paged to its last row. "
+            "A list cut by this limit is recorded as a coverage gap and the run is partial."
+        ),
+    )
     parser.add_argument("--page-size", type=int, default=100, help="Per-request page size for paged Graph endpoints.")
     parser.add_argument(
         "--throttle-mode",
@@ -716,6 +725,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
                 "coverage_count": len(coverage_rows),
                 "throttle_mode": args.throttle_mode,
                 "preflight_path": preflight_path,
+                "top_limit": normalize_collection_limit(run_cfg.top_items, default=None),
                 "platform": "m365",
             },
         ),

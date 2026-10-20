@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from azure_tenant_audit.collectors.base import CollectorResult, normalize_collection_limit
+from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT
+from azure_tenant_audit.collectors.base import CollectorResult, context_limit, record_truncation
 from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT, DohClient, DohError, collect_domain_posture
 
 from .client import classify_google_error
@@ -12,8 +13,26 @@ from .client import classify_google_error
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 
 
-def _context_limit(context: dict[str, Any], default: int = 100) -> int | None:
-    return normalize_collection_limit(context.get("top"), default=default)
+# Rows kept per event log or file crawl when the operator sets no row limit: a sample by design,
+# since an unbounded read of a large domain's audit events or Drive files is not practical.
+# Narrow the logs with --since/--until. An explicit --top below this is recorded as a coverage gap.
+STREAM_SAMPLE_LIMIT = 500
+
+
+def _context_limit(context: dict[str, Any]) -> int | None:
+    """The operator's row limit; without one every directory list is paged to its last row."""
+    return context_limit(context)
+
+
+def _stream_limit(top: int | None) -> tuple[int, bool]:
+    """Limit for an event log or file crawl, and whether it is the built-in sample bound.
+
+    The sample bound is a ceiling: ``--top`` at or above it does not raise it (as on Microsoft 365),
+    so only a ``--top`` below it is an operator limit whose cut is a coverage gap.
+    """
+    if not top:
+        return STREAM_SAMPLE_LIMIT, True
+    return min(top, STREAM_SAMPLE_LIMIT), top >= STREAM_SAMPLE_LIMIT
 
 
 def _coverage(
@@ -52,30 +71,49 @@ def _call(
     log_event: AuditLogger | None,
     func: Callable[[], list[dict[str, Any]]],
     endpoint: str | None = None,
+    bounded_sample: bool = False,
 ) -> list[dict[str, Any]]:
+    """Run one list read and record it on the coverage ledger.
+
+    A list the client reports as cut short (``truncated``) is a coverage gap: its row is
+    ``partial`` and carries the truncation reason, so the collector and the run are not ``ok``.
+    ``bounded_sample`` marks a cut at a bound the collector chose, which is recorded but is not a gap.
+    """
     start = time.perf_counter()
+    truncated = False
+    result_limit: int | None = None
     try:
         rows = func()
         status = "ok"
         error_class = None
         error = None
+        truncated = bool(getattr(rows, "truncated", False))
+        result_limit = getattr(rows, "result_limit", None)
     except Exception as exc:  # noqa: BLE001
         rows = []
         status = "failed"
         error_class, error = classify_google_error(exc)
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
-    coverage.append(
-        _coverage(
-            collector,
-            name,
-            status=status,
-            item_count=len(rows),
-            duration_ms=duration_ms,
-            endpoint=endpoint,
-            error_class=error_class,
-            error=error,
-        )
+    row = _coverage(
+        collector,
+        name,
+        status=status,
+        item_count=len(rows),
+        duration_ms=duration_ms,
+        endpoint=endpoint,
+        error_class=error_class,
+        error=error,
     )
+    if result_limit:
+        row["result_limit"] = result_limit
+    if truncated and bounded_sample:
+        row["bounded_sample"] = True
+        row["collection_truncated"] = False
+    elif truncated:
+        record_truncation(row, list_name=name, rows=len(rows), limit=result_limit, reason=REASON_OPERATOR_LIMIT)
+    elif status == "ok":
+        row["collection_truncated"] = False
+    coverage.append(row)
     if log_event:
         log_event(
             "collector.endpoint.finished",
@@ -83,10 +121,11 @@ def _call(
             {
                 "collector": collector,
                 "endpoint_name": name,
-                "status": status,
+                "status": row["status"],
                 "item_count": len(rows),
                 "duration_ms": duration_ms,
-                "error_class": error_class,
+                "error_class": row.get("error_class"),
+                "collection_truncated": bool(row.get("collection_truncated")),
             },
         )
     return rows
@@ -283,6 +322,7 @@ class GoogleReportsCollector:
         if client is None:
             row = _coverage(self.name, "client", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {}, 0, "Google client unavailable", coverage=[row])
+        log_limit, sampled = _stream_limit(top)
         for application in self.applications:
             key = f"{application}Activities"
             rows = _call(
@@ -291,7 +331,8 @@ class GoogleReportsCollector:
                 coverage=coverage,
                 log_event=log_event,
                 endpoint=f"admin.reports.activities.{application}",
-                func=lambda application=application: client.list_report_activities(application, top=top, start_time=since, end_time=until),
+                func=lambda application=application: client.list_report_activities(application, top=log_limit, start_time=since, end_time=until),
+                bounded_sample=sampled,
             )
             payload[key] = {"value": rows}
         partial = any(row.get("status") != "ok" for row in coverage)
@@ -521,13 +562,15 @@ class GoogleDrivePostureCollector:
         if client is None:
             row = _coverage(self.name, "client", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {}, 0, "Google client unavailable", coverage=[row])
+        file_limit, sampled = _stream_limit(top)
         drive_files = _call(
             collector=self.name,
             name="driveFiles",
             coverage=coverage,
             log_event=log_event,
             endpoint="drive.files.list",
-            func=lambda: client.list_drive_files(top=top),
+            func=lambda: client.list_drive_files(top=file_limit),
+            bounded_sample=sampled,
         )
         shared_drives = _call(
             collector=self.name,

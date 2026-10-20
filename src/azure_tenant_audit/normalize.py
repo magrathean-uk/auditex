@@ -8,6 +8,14 @@ import re
 from typing import Any
 
 from .chunk_reader import iter_endpoint_records
+from .collection_gaps import (
+    COLLECTION_GAP_SECTION,
+    REASON_OPERATOR_LIMIT,
+    REASON_UNKNOWN,
+    collection_gap_records,
+    list_truncations,
+    truncations_from_payloads,
+)
 from .detection_coverage import build_detection_signals
 from .directory_relationships import normalize_directory_relationships
 from .friendly_names import build_friendly_name_catalog
@@ -119,10 +127,18 @@ class _NormalizationSources:
             limit = 0
         count = effective_section.get("item_count")
         collected_count = count if type(count) is int and count >= 0 else len(rows)
-        collection_limited = bool(
-            section.get("collection_limit_reached") or section.get("collection_truncated")
-            or (limit and collected_count >= limit)
-        )
+        truncated = section.get("collection_truncated")
+        if isinstance(truncated, bool):
+            # The collector knew whether the list continued; a limit that equals the list's length is not a cut.
+            collection_limited = truncated
+        else:
+            collection_limited = bool(section.get("collection_limit_reached") or (limit and collected_count >= limit))
+        truncation_reason = None
+        if collection_limited:
+            truncation_reason = section.get("truncation_reason")
+            if truncation_reason is None and len(coverage) == 1:
+                truncation_reason = coverage[0].get("truncation_reason")
+            truncation_reason = str(truncation_reason or (REASON_OPERATOR_LIMIT if limit else REASON_UNKNOWN))
         source_failed = bool(section.get("error")) or any(row.get("status") == "failed" for row in coverage)
         source = f"{collector}.{key}"
         previous = self.reports.get(source)
@@ -143,6 +159,8 @@ class _NormalizationSources:
             "status": "partial" if issues else "complete",
             "collection_status": "failed" if source_failed else "limited" if collection_limited else "collected",
             "collection_limited": collection_limited,
+            "truncation_reason": truncation_reason,
+            "derived_fanout": isinstance(section.get("fanout"), dict),
             "result_limit": limit or None,
             "issues": issues,
         }
@@ -1713,6 +1731,9 @@ def build_normalized_snapshot(
                 )
             )
     intune_assignment_objects: list[dict[str, Any]] = []
+    # "No assignments" is evidence only when the policy inventory and the assignment reads both
+    # succeeded, so the inventory gets a normalization coverage report too (its rows are not kept).
+    _values(collector_payloads.get("intune_depth", {}), "deviceConfigurations")
     for item in _values(collector_payloads.get("intune_depth", {}), "deviceConfigurationAssignments"):
         policy_id = str(item.get("policyId") or "")
         assignments = item.get("assignments")
@@ -2425,6 +2446,27 @@ def build_normalized_snapshot(
         records_by_section["normalization_coverage"] = normalization_coverage
     incomplete_sections = [row["source"] for row in normalization_coverage if not row["complete"]]
     collection_limited_sections = [row["source"] for row in normalization_coverage if row["collection_limited"]]
+    # Every list that was cut short is a coverage gap: from the coverage ledger, the raw sections,
+    # and any endpoint whose read says it stopped at a limit.
+    gap_truncations = list_truncations(coverage_rows)
+    gap_truncations.extend(truncations_from_payloads(collector_payloads, gap_truncations))
+    gap_keys = {(item["collector"], item["list"]) for item in gap_truncations}
+    for row in normalization_coverage:
+        # A fan-out wrapper restates its own coverage row (privilegedGroupFanout and the like).
+        if row["collection_limited"] and not row["derived_fanout"] and (row["collector"], row["source_name"]) not in gap_keys:
+            gap_keys.add((row["collector"], row["source_name"]))
+            gap = {
+                "collector": row["collector"],
+                "list": row["source_name"],
+                "rows_collected": row["record_count"],
+                "reason": row["truncation_reason"] or REASON_UNKNOWN,
+            }
+            if row["result_limit"]:
+                gap["result_limit"] = row["result_limit"]
+            gap_truncations.append(gap)
+    collection_gaps = collection_gap_records(sorted(gap_truncations, key=lambda item: (item["collector"], item["list"])))
+    if collection_gaps:
+        records_by_section[COLLECTION_GAP_SECTION] = collection_gaps
 
     object_counts = {name: len(records) for name, records in records_by_section.items() if records}
     full_counts, sample_counts, chunk_counts, truncated_sections, chunk_paths = _collector_count_summaries(
@@ -2455,6 +2497,7 @@ def build_normalized_snapshot(
             "normalization_issue_count": sum(len(row["issues"]) for row in normalization_coverage),
             "normalization_incomplete_sections": incomplete_sections,
             "collection_limited_sections": collection_limited_sections,
+            "collection_gap_count": len(collection_gaps),
             "collector_count": len(result_rows),
             "coverage_row_count": len(coverage_rows),
             "blocker_count": len(all_diagnostics),
@@ -2472,7 +2515,8 @@ def build_normalization_diagnostics(normalized_snapshot: dict[str, Any]) -> list
     """Promote unreadable collected evidence to ordinary run coverage blockers.
 
     Call after normalization and before findings/coverage-ledger finalization.
-    Collection caps remain separate metadata, since they are not read failures.
+    A list cut short is not a read failure: its collector already reports ``partial`` and the cut
+    is listed in ``collection_gaps``, so it is not promoted here.
     """
     diagnostics = []
     for row in (normalized_snapshot.get("normalization_coverage") or {}).get("records", []):
@@ -2522,6 +2566,7 @@ def build_ai_safe_summary(
         "normalization_issue_count": snapshot.get("normalization_issue_count", 0),
         "normalization_incomplete_sections": snapshot.get("normalization_incomplete_sections", []),
         "collection_limited_sections": snapshot.get("collection_limited_sections", []),
+        "collection_gap_count": snapshot.get("collection_gap_count", 0),
         "blocker_count": snapshot.get("blocker_count", 0),
         "translation_catalog_count": len((normalized_snapshot.get("translation_catalog") or {}).get("records", [])),
         "friendly_name_warning_count": snapshot.get("friendly_name_warning_count", 0),

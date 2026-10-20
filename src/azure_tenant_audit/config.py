@@ -33,7 +33,7 @@ class RunConfig:
     offline: bool = False
     sample_path: Optional[Path] = None
     run_name: Optional[str] = None
-    top_items: int = 500
+    top_items: Optional[int] = None
     page_size: int = 100
     auditor_profile: str = "auto"
     default_collectors: tuple[str, ...] = ()

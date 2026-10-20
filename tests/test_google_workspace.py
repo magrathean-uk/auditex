@@ -718,13 +718,24 @@ def test_google_normalized_snapshot_marks_top_limited_sections() -> None:
         collector_payloads={"google_directory": {"users": {"value": [{"id": "u-1", "primaryEmail": "a@example.com"}]}}},
         domain="example.com",
         customer_id="C123",
-        result_rows=[{"name": "google_directory", "status": "ok", "item_count": 500}],
+        result_rows=[{"name": "google_directory", "status": "partial", "item_count": 500}],
+        coverage_rows=[
+            {
+                "collector": "google_directory",
+                "name": "users",
+                "status": "partial",
+                "item_count": 500,
+                "result_limit": 500,
+                "collection_truncated": True,
+                "truncation_reason": "operator_limit",
+            }
+        ],
         top_limit=500,
     )["snapshot"]
 
     assert snapshot["top_limit"] == 500
     assert snapshot["sample_truncated"] is True
-    assert snapshot["truncated_sections"] == ["google_directory"]
+    assert snapshot["truncated_sections"] == ["google_directory.users"]
 
 
 def test_google_drive_and_group_settings_findings_from_sample() -> None:

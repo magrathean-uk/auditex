@@ -31,7 +31,7 @@ class OneDrivePostureCollector(Collector):
                 "sharePointSettings": {"endpoint": "/admin/sharepoint/settings", "page": False, "params": {}},
                 "sites": {"endpoint": "/sites", "params": {"$select": "id,displayName,name,webUrl,createdDateTime"}},
             },
-            top=context.get("top", 100),
+            top=context.get("top"),
             page_size=context.get("page_size"),
             chunk_writer=context.get("chunk_writer"),
             log_event=context.get("audit_logger"),

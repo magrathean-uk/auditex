@@ -32,7 +32,7 @@ def test_offline_bundle_satisfies_frozen_contract(tmp_path: Path) -> None:
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     validation = json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))
 
-    assert manifest["schema_contract_version"] == "2026-04-21"
+    assert manifest["schema_contract_version"] == "2026-10-20"
     assert manifest["contract_status"] == "valid"
     assert manifest["contract_issue_count"] == 0
     assert summary["schema_version"] == "2026-04-21"

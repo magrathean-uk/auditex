@@ -6,9 +6,9 @@ from typing import Any
 
 _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.collector_issue": {"nist_800_53": ["AU-2", "CA-7"], "iso_27001": ["A.8.16"], "soc2": ["CC7.2"]},
-    "google.admin_2sv_not_enforced": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"]},
-    "google.admin_2sv_not_enrolled": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"]},
-    "google.user_2sv_not_enrolled": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"]},
+    "google.admin_2sv_not_enforced": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_admin_accounts", "ce.uac.mfa_cloud_services"]},
+    "google.admin_2sv_not_enrolled": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_admin_accounts", "ce.uac.mfa_cloud_services"]},
+    "google.user_2sv_not_enrolled": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_cloud_services"]},
     "google.login_suspicious_event": {"nist_800_53": ["AU-6", "IR-4"], "iso_27001": ["A.8.15", "A.8.16"], "soc2": ["CC7.2"]},
     "google.admin_privilege_event": {"nist_800_53": ["AC-2", "AC-6", "AU-6"], "iso_27001": ["A.5.15", "A.5.18"], "soc2": ["CC6.1", "CC7.2"]},
     "google.oauth_high_risk_scope": {"nist_800_53": ["AC-3", "AC-6"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
@@ -43,9 +43,9 @@ _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.group_domain_membership": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.alert_active": {"nist_800_53": ["IR-5"], "iso_27001": ["A.5.25"], "soc2": ["CC7.3"]},
     "google.super_admin_singleton": {"nist_800_53": ["CP-2", "AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
-    "google.super_admin_sprawl": {"nist_800_53": ["AC-2", "AC-6"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
-    "google.suspended_admin": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
-    "google.admin_stale_login": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"]},
+    "google.super_admin_sprawl": {"nist_800_53": ["AC-2", "AC-6"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"], "cyber_essentials": ["ce.uac.special_access_privileges"]},
+    "google.suspended_admin": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"], "cyber_essentials": ["ce.uac.special_access_privileges"]},
+    "google.admin_stale_login": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"], "cyber_essentials": ["ce.sc.unnecessary_accounts", "ce.uac.remove_unused_accounts", "ce.uac.special_access_privileges"]},
     "google.mobile_device_compromised": {"nist_800_53": ["SI-4"], "iso_27001": ["A.8.16"], "soc2": ["CC7.2"]},
     "google.mobile_device_stale_sync": {"nist_800_53": ["CM-8", "SI-4"], "iso_27001": ["A.5.9", "A.8.1"], "soc2": ["CC7.1"]},
     "google.chromeos_device_stale_sync": {"nist_800_53": ["CM-8", "SI-4"], "iso_27001": ["A.5.9", "A.8.1"], "soc2": ["CC7.1"]},
@@ -702,7 +702,11 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                 section="coverage_ledger",
                 record=record,
                 description="Google Workspace evidence is incomplete for this surface.",
-                remediation="Fix the Google Workspace auth scope or service availability, then rerun the collector.",
+                remediation=(
+                    "Rerun without --top, or with a higher limit, so the list is paged to its last row."
+                    if error_class == "collection_limit"
+                    else "Fix the Google Workspace auth scope or service availability, then rerun the collector."
+                ),
                 returned_value=row.get("error") or error_class,
             )
         )

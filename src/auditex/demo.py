@@ -284,6 +284,7 @@ _FRAMEWORK_LABELS = {
     "ms_secure_score": "Microsoft Secure Score",
     "ms_zero_trust": "Microsoft Zero Trust",
     "mcsb": "MCSB v2 (preview)",
+    "cyber_essentials": "Cyber Essentials v3.3",
 }
 
 

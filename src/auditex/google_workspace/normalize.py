@@ -3,6 +3,13 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from azure_tenant_audit.collection_gaps import (
+    COLLECTION_GAP_SECTION,
+    collection_gap_records,
+    list_truncations,
+    truncations_from_payloads,
+)
+
 
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     section = payload.get(key, {})
@@ -399,13 +406,15 @@ def build_google_normalized_snapshot(
         "google_calendar_acl_errors": calendar_acl_errors,
         "google_activity_events": activity_records,
     }
+    # Every list cut short (an operator limit, never a silent default) is a coverage gap.
+    truncations = list_truncations(coverage_rows)
+    truncations.extend(truncations_from_payloads(collector_payloads, truncations))
+    collection_gaps = collection_gap_records(sorted(truncations, key=lambda item: (item["collector"], item["list"])))
+    if collection_gaps:
+        sections[COLLECTION_GAP_SECTION] = collection_gaps
     object_counts = {name: len(records) for name, records in sections.items()}
     status_counts = Counter(str(row.get("status") or "unknown") for row in result_rows if isinstance(row, dict))
-    truncated_sections = sorted(
-        str(row.get("name"))
-        for row in result_rows
-        if top_limit is not None and str(row.get("name") or "") and int(row.get("item_count") or 0) >= top_limit
-    )
+    truncated_sections = sorted({f"{item['collector']}.{item['list']}" for item in truncations})
     snapshot = {
         "kind": "snapshot",
         "platform": "google_workspace",
@@ -424,6 +433,7 @@ def build_google_normalized_snapshot(
         "top_limit": top_limit,
         "sample_truncated": bool(truncated_sections),
         "truncated_sections": truncated_sections,
+        "collection_gap_count": len(collection_gaps),
     }
     normalized: dict[str, dict[str, Any]] = {"snapshot": snapshot}
     for name, records in sections.items():

@@ -247,7 +247,15 @@ def _add_google_selection_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--collector-preset", default="core-security")
     parser.add_argument("--collectors", default=None)
     parser.add_argument("--exclude", default=None)
-    parser.add_argument("--top", type=int, default=100)
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=None,
+        help=(
+            "Explicit per-list row limit for very large domains. By default every directory list is paged to its last row. "
+            "A list cut by this limit is recorded as a coverage gap and the run is partial."
+        ),
+    )
     parser.add_argument("--page-size", type=int, default=100)
     parser.add_argument("--since", default=None)
     parser.add_argument("--until", default=None)
@@ -292,7 +300,7 @@ def _google_config_from_args(args: argparse.Namespace) -> GoogleRunConfig:
         collector_preset=getattr(args, "collector_preset", "core-security"),
         collectors=getattr(args, "collectors", None),
         exclude=getattr(args, "exclude", None),
-        top=getattr(args, "top", 100),
+        top=getattr(args, "top", None),
         page_size=getattr(args, "page_size", 100),
         since=getattr(args, "since", None),
         until=getattr(args, "until", None),

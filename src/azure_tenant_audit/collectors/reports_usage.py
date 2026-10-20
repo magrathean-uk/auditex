@@ -5,8 +5,9 @@ from io import StringIO
 import time
 from typing import Any
 
+from ..collection_gaps import REASON_OPERATOR_LIMIT, sampling
 from ..graph import GraphClient
-from .base import Collector, CollectorResult, _classify_graph_error, apply_collection_limit, normalize_collection_limit
+from .base import Collector, CollectorResult, _classify_graph_error, context_limit, limit_rows, record_truncation
 
 
 def _parse_csv_rows(content: str) -> list[dict[str, str]]:
@@ -14,6 +15,10 @@ def _parse_csv_rows(content: str) -> list[dict[str, str]]:
         return []
     reader = csv.DictReader(StringIO(content))
     return [dict(row) for row in reader]
+
+
+# Rows kept per usage report when the caller sets no limit at all; a deliberate sample.
+REPORT_SAMPLE_LIMIT = 100
 
 
 class ReportsUsageCollector(Collector):
@@ -39,24 +44,27 @@ class ReportsUsageCollector(Collector):
             start = time.perf_counter()
             try:
                 content = client.get_content(endpoint)
-                rows = apply_collection_limit(
-                    _parse_csv_rows(content),
-                    normalize_collection_limit(context.get("top"), default=100),
-                )
+                limit = context_limit(context, default=REPORT_SAMPLE_LIMIT)
+                rows, cut = limit_rows(_parse_csv_rows(content), limit)
                 payload[name] = {"value": rows}
-                coverage.append(
-                    {
-                        "collector": self.name,
-                        "type": "graph",
-                        "name": name,
-                        "endpoint": endpoint,
-                        "status": "ok",
-                        "item_count": len(rows),
-                        "duration_ms": round((time.perf_counter() - start) * 1000, 2),
-                        "error_class": None,
-                        "error": None,
-                    }
-                )
+                row = {
+                    "collector": self.name,
+                    "type": "graph",
+                    "name": name,
+                    "endpoint": endpoint,
+                    "status": "ok",
+                    "item_count": len(rows),
+                    "result_limit": limit,
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                    "error_class": None,
+                    "error": None,
+                }
+                if cut and ("top" not in context or sampling()):
+                    row["bounded_sample"] = True
+                elif cut:
+                    payload[name].update(result_limit=limit, collection_truncated=True, truncation_reason=REASON_OPERATOR_LIMIT)
+                    record_truncation(row, list_name=name, rows=len(rows), limit=limit)
+                coverage.append(row)
             except Exception as exc:  # noqa: BLE001
                 error_class, error = _classify_graph_error(exc)
                 payload[name] = {"error": error, "error_class": error_class}

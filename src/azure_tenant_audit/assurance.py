@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .capability_gate import capability_blocker_summary, classify_capability_blocker
+from .collection_gaps import list_truncations, truncation_summary
 from .evidence_gates import build_evidence_gate_summary
 
 
@@ -230,6 +231,7 @@ def build_coverage_gap_summary(
         if name:
             rows_by_collector.setdefault(name, []).append(dict(row))
 
+    truncations = list_truncations(coverage_rows)
     gaps: list[dict[str, Any]] = []
     for surface in surface_coverage:
         status = str(surface.get("status") or "unknown")
@@ -245,16 +247,21 @@ def build_coverage_gap_summary(
             }
         )
         surface_name = str(surface.get("surface") or "unknown")
-        gaps.append(
-            {
-                "surface": surface_name,
-                "status": status,
-                "severity": _gap_severity(status),
-                "collectors": collectors,
-                "error_classes": error_classes,
-                "message": f"{surface_name} coverage is {status}; affected collectors: {', '.join(collectors) if collectors else 'unknown'}",
-            }
-        )
+        message = f"{surface_name} coverage is {status}; affected collectors: {', '.join(collectors) if collectors else 'unknown'}"
+        gap: dict[str, Any] = {
+            "surface": surface_name,
+            "status": status,
+            "severity": _gap_severity(status),
+            "collectors": collectors,
+            "error_classes": error_classes,
+        }
+        # A list cut short (operator limit, failed or refused page) names itself: list, rows collected, reason.
+        truncated_lists = [item for item in truncations if item["collector"] in collectors]
+        if truncated_lists:
+            gap["truncated_lists"] = truncated_lists
+            message += f"; truncated lists: {truncation_summary(truncated_lists)}"
+        gap["message"] = message
+        gaps.append(gap)
     return gaps
 
 

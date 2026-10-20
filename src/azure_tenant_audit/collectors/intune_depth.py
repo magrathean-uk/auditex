@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from ..collection_gaps import FANOUT_OBJECT_LIMIT, fanout_gap_row
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
@@ -25,7 +26,7 @@ class IntuneDepthCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient = context["client"]
-        top = context.get("top", 250)
+        top = context.get("top")
         page_size = context.get("page_size")
         payload, coverage = run_graph_endpoints(
             self.name,
@@ -67,7 +68,7 @@ class IntuneDepthCollector(Collector):
             configuration_rows = []
         assignment_rows: list[dict[str, Any]] = []
         fanout_specs: list[dict[str, Any]] = []
-        for policy in configuration_rows[:10]:
+        for policy in configuration_rows[:FANOUT_OBJECT_LIMIT]:
             policy_id = policy.get("id")
             if not isinstance(policy_id, str) or not policy_id:
                 continue
@@ -163,7 +164,7 @@ class IntuneDepthCollector(Collector):
                     }
                 )
         else:
-            for policy in configuration_rows[:10]:
+            for policy in configuration_rows[:FANOUT_OBJECT_LIMIT]:
                 policy_id = policy.get("id")
                 if not isinstance(policy_id, str) or not policy_id:
                     continue
@@ -211,6 +212,17 @@ class IntuneDepthCollector(Collector):
                         }
                     )
 
+        if len(configuration_rows) > FANOUT_OBJECT_LIMIT:
+            # The unassigned-policy finding reads these assignments, so the remaining policies are a gap.
+            coverage.append(
+                fanout_gap_row(
+                    self.name,
+                    "deviceConfigurationAssignmentsFanout",
+                    total=len(configuration_rows),
+                    expanded=FANOUT_OBJECT_LIMIT,
+                    scope="Device configuration assignments",
+                )
+            )
         payload["deviceConfigurationAssignments"] = {"value": assignment_rows}
         total = sum(item.get("item_count", 0) for item in coverage)
         partial = any(item.get("status") != "ok" for item in coverage)

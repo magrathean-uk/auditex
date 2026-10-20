@@ -64,7 +64,7 @@ class CollectorRunHooks:
 @dataclass(frozen=True)
 class CollectorRunContext:
     client: Any
-    top: int
+    top: int | None
     page_size: int | None = None
     plane: str = "inventory"
     since: str | None = None

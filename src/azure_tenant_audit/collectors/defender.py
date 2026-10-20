@@ -17,7 +17,7 @@ class DefenderCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient = context["client"]
-        top = context.get("top", 500)
+        top = context.get("top")
         page_size = context.get("page_size")
         since = context.get("since")
         until = context.get("until")

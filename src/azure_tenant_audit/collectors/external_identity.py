@@ -24,7 +24,7 @@ class ExternalIdentityCollector(Collector):
                 "authorizationPolicy": {"endpoint": "/policies/authorizationPolicy", "page": False, "params": {}},
                 "authenticationFlowsPolicy": {"endpoint": "/policies/authenticationFlowsPolicy", "page": False, "params": {}},
             },
-            top=context.get("top", 100),
+            top=context.get("top"),
             page_size=context.get("page_size"),
             chunk_writer=context.get("chunk_writer"),
             log_event=context.get("audit_logger"),

@@ -628,3 +628,130 @@ def test_a_privileged_mfa_finding_fails_its_rule() -> None:
 
 def test_the_plain_user_mfa_rule_still_needs_only_registration() -> None:
     assert rule_evidence_collectors("identity.user_mfa_not_registered") == ("auth_methods",)
+
+
+# ---- rules added for previously rule-less findings: each namespace maps to the collector that feeds it ----
+
+_FORMERLY_RULELESS_COLLECTORS = [
+    # rule, collector that supplies the evidence it reads and the collector coverage ledger name it needs
+    ("onedrive.external_sharing_enabled", "onedrive_posture"),
+    ("teams.external_federation_open", "teams_policy"),
+    ("identity_governance.standing_privilege_only", "identity_governance"),
+    ("intune_depth.policies_without_assignments", "intune_depth"),
+    ("ca.policy_report_only", "conditional_access"),
+    ("ca.break_glass_exclusion_missing", "conditional_access"),
+    ("sharepoint.site_orphaned", "sharepoint_access"),
+    ("sharepoint.site_weak_ownership", "sharepoint_access"),
+    ("exchange.mailbox_forwarding_configured", "exchange_policy"),
+]
+
+
+@pytest.mark.parametrize(("rule", "collector"), _FORMERLY_RULELESS_COLLECTORS)
+def test_a_formerly_ruleless_rule_maps_to_a_real_collector(rule: str, collector: str) -> None:
+    import json
+    from pathlib import Path
+
+    definitions = json.loads(Path("configs/collector-definitions.json").read_text(encoding="utf-8"))["collectors"]
+
+    assert rule_evidence_collectors(rule) == (collector,)
+    assert collector in definitions
+
+
+def _read_in_full(*sources: str) -> dict[str, Any]:
+    return {"normalization_coverage": {"records": [
+        {"source": source, "collection_status": "collected", "complete": True, "record_count": 3} for source in sources
+    ]}}
+
+
+# Rules that read their own inputs from the normalized snapshot, so a clean run needs those inputs too.
+_CLEAN_RUN_SNAPSHOTS = {
+    "intune_depth.policies_without_assignments": _read_in_full(
+        "intune_depth.deviceConfigurations", "intune_depth.deviceConfigurationAssignments"
+    ),
+}
+
+
+@pytest.mark.parametrize(("rule", "collector"), _FORMERLY_RULELESS_COLLECTORS)
+def test_a_formerly_ruleless_rule_is_evaluated_on_a_clean_run(rule: str, collector: str) -> None:
+    alignment = _alignment(rule, ledger=_ledger(collector), snapshot=_CLEAN_RUN_SNAPSHOTS.get(rule))
+
+    assert _rule(alignment, rule) == {"rule_id": rule, "status": "pass", "evaluated": True}
+    assert _control_status(alignment) == "pass"
+
+
+@pytest.mark.parametrize("status", ["blocked_permission", "partial_success", "not_applicable"])
+@pytest.mark.parametrize(("rule", "collector"), _FORMERLY_RULELESS_COLLECTORS)
+def test_a_formerly_ruleless_rule_is_not_assessed_when_its_collector_did_not_complete(rule: str, collector: str, status: str) -> None:
+    alignment = _alignment(rule, ledger=_ledger(collector, status=status))
+
+    assert _rule(alignment, rule) == {
+        "rule_id": rule,
+        "status": "not_assessed",
+        "evaluated": False,
+        "reason": f"collector_not_complete:{collector}",
+    }
+    assert _control_status(alignment) == "not_assessed"
+
+
+@pytest.mark.parametrize(("rule", "collector"), _FORMERLY_RULELESS_COLLECTORS)
+def test_a_formerly_ruleless_rule_is_not_assessed_when_its_collector_never_ran(rule: str, collector: str) -> None:
+    other = "identity" if collector != "identity" else "security"
+
+    assert _rule(_alignment(rule, ledger=_ledger(other)), rule)["reason"] == f"collector_not_complete:{collector}"
+    assert _rule(_alignment(rule), rule)["evaluated"] is False
+
+
+@pytest.mark.parametrize(("rule", "collector"), _FORMERLY_RULELESS_COLLECTORS)
+def test_a_formerly_ruleless_rule_with_an_open_finding_fails_and_an_accepted_one_is_accepted(rule: str, collector: str) -> None:
+    open_finding = [{"id": f"{collector}:1", "rule_id": rule, "status": "open"}]
+    accepted = [{"id": f"{collector}:1", "rule_id": rule, "status": "accepted_risk"}]
+
+    assert _rule(_alignment(rule, findings=open_finding, ledger=_ledger(collector)), rule)["status"] == "fail"
+    assert _rule(_alignment(rule, findings=accepted, ledger=_ledger(collector)), rule)["status"] == "accepted_risk"
+
+
+def test_each_formerly_ruleless_builder_reports_under_the_collector_its_namespace_maps_to() -> None:
+    from azure_tenant_audit.findings import build_findings
+
+    snapshot = {
+        "ca_findings": {"records": [
+            {"id": "p1", "finding_type": "ca_reporting_only", "policy_id": "p1", "severity": "medium"},
+            {"id": "p2:x", "finding_type": "ca_break_glass_exclusion", "policy_id": "p2", "severity": "high"},
+        ]},
+        "sharepoint_site_posture_objects": {"records": [
+            {"id": "s1", "site_name": "Orphan", "ownership_state": "orphaned"},
+            {"id": "s2", "site_name": "Weak", "ownership_state": "weak"},
+        ]},
+        "onedrive_posture_objects": {"records": [{"id": "o1", "site_kind": "personal", "sharing_capability": "ExternalUserSharingOnly"}]},
+        "exchange_policy_objects": {"records": [
+            {"id": "m1", "source_name": "mailboxForwarding", "forwarding_smtp_address": "x@example.net", "display_name": "Box"}
+        ]},
+        "teams_policy_objects": {"records": [
+            {"id": "t1", "source_name": "tenantFederationConfiguration", "allow_federated_users": True}
+        ]},
+        "governance_objects": {"records": [{"kind": "role_assignment_schedule"}]},
+        "intune_assignment_objects": {"records": []},
+        **_read_in_full(
+            "identity_governance.roleAssignmentSchedules",
+            "identity_governance.roleEligibilitySchedules",
+            "intune_depth.deviceConfigurations",
+            "intune_depth.deviceConfigurationAssignments",
+        ),
+    }
+
+    emitted = {finding["rule_id"]: finding["collector"] for finding in build_findings([], normalized_snapshot=snapshot)}
+
+    assert emitted == dict(_FORMERLY_RULELESS_COLLECTORS)
+    for rule, collector in emitted.items():
+        assert rule_evidence_collector(rule) == collector, rule
+
+
+def test_every_shipped_rule_with_a_mapping_has_an_evidence_collector() -> None:
+    # Collector and coverage diagnostics describe the run itself and have no evidence collector.
+    missing = sorted(
+        rule
+        for rule in baselines._shipped_control_mappings()
+        if rule.split(".", 1)[0] not in {"collector", "coverage"} and not rule_evidence_collectors(rule)
+    )
+
+    assert missing == [], f"add these rules' namespaces to _NAMESPACE_COLLECTORS or list them in _RULE_COLLECTORS: {missing}"

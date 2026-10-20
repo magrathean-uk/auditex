@@ -308,7 +308,7 @@ def build_guided_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auditor-profile", default="global-reader", choices=profile_choices())
     parser.add_argument("--out", default="outputs/guided")
     parser.add_argument("--run-name", default=None)
-    parser.add_argument("--top", type=int, default=500)
+    parser.add_argument("--top", type=int, default=None, help="Explicit per-list row limit; default is no limit.")
     parser.add_argument("--page-size", type=int, default=50)
     parser.add_argument("--browser-command", default=None)
     parser.add_argument("--collectors", default=None)
@@ -510,13 +510,13 @@ def run_guided(args: argparse.Namespace) -> int:
         args.auditor_profile,
         "--out",
         args.out,
-        "--top",
-        str(args.top),
         "--page-size",
         str(args.page_size),
         "--throttle-mode",
         args.throttle_mode,
     ]
+    if args.top:
+        argv.extend(["--top", str(args.top)])
     if auth_mode == "delegated":
         argv.append("--use-azure-cli-token")
     else:

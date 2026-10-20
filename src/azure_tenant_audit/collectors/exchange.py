@@ -80,7 +80,7 @@ class ExchangeCollector(Collector):
         total = 0
         coverage: list[dict[str, Any]] = []
         graph_client = context.get("client")
-        top = context.get("top", 500)
+        top = context.get("top")
 
         for command in self.command_collectors:
             start = time.perf_counter()
@@ -188,9 +188,9 @@ class ExchangeCollector(Collector):
         command = "graph /users?$select=mail (mail-enabled users)"
         try:
             params: dict[str, str] = {"$select": "id,displayName,userPrincipalName,mail"}
-            limit = normalize_collection_limit(top, default=500)
-            if limit is not None:
-                params["$top"] = str(limit)
+            limit = normalize_collection_limit(top, default=None)
+            # get_all pages to the last row, so $top is only the page size.
+            params["$top"] = str(limit if limit is not None else 999)
             users = graph_client.get_all("/users", params=params)
             return {
                 "command": command,

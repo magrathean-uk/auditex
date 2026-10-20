@@ -29,7 +29,7 @@ The public audit surface does not write to production tenants. It also does not 
 - Offline model-development tools for staging public conversations, checking recorded structured answers, and preparing a reviewed single-base LoRA training pack.
 - Read-only privilege graph: potential routes from users, groups and applications to tier-0 control, with evidence per hop, explicit unverified prerequisites and candidate breakpoints.
 - Detection coverage ("could this tenant see an attack?") and the tenant's public footprint, including MTA-STS and TLS-RPT.
-- Baseline alignment with CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, and the Microsoft cloud security benchmark. See [framework mappings](docs/reference/framework-mappings.md).
+- Baseline alignment with CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, the Microsoft cloud security benchmark, and the NCSC Cyber Essentials requirements (v3.3), where device-side requirements show as manual or assessor-tested and tenant-backed ones never read pass. See [framework mappings](docs/reference/framework-mappings.md).
 - `auditex demo`, a guided walkthrough on a fictional company, and `auditex report explorer`, a self-contained interactive HTML view of any run.
 
 The package is Python 3.11 or newer. Its required runtime dependencies are `requests` and `msal`. Google Workspace and MCP support are optional extras.

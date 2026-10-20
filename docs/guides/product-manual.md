@@ -167,6 +167,20 @@ auditex google run \
   --out outputs/google
 ```
 
+## Row Limits And Coverage Gaps
+
+Auditex collects every list to its last row. Without `--top` there is no limit: Microsoft 365 users, registration details, role assignments, Conditional Access policies, groups and applications, and Google Workspace users, groups, OAuth tokens and devices are all paged to the end. `--top N` on `auditex run` and `auditex google run` caps each list at N rows for a very large tenant; `--top 0` means no limit, and `--page-size` sets the request size.
+
+A list that `--top` cuts, a later page that cannot be read, or a next-page link outside Microsoft Graph that is refused is recorded as a coverage gap:
+
+- The run is `partial` and exits with status 1. The collector that read the list is not complete.
+- `run-manifest.json` and `summary.json` name each cut list, the rows collected and the reason under `coverage_gaps[].truncated_lists`, and `normalized/collection_gaps.json` has one record per list.
+- Baseline rules that read the list report `not_assessed` with `collector_not_complete:<collector>` instead of `pass`, so a limited run never reads as clean.
+
+Use `--top` for a quick look, not for evidence you report as complete. A few reads are bounded samples by default and are not gaps: the Microsoft 365 sign-in and directory audit logs and the Google Reports event logs and Drive file crawl keep the most recent 500 rows (narrow them with `--since` and `--until`), and capability probes read only a few rows. Per-object reads are different: they open one call per object and read only the first ten sites, Intune policies, teams or service principals (and 50 privileged groups), so when more exist the collector reports a `fanout_limit` gap and the rules that read it are `not_assessed`; they are never a clean run.
+
+Large Google Workspace domains are slow because of those per-object calls: two directory calls per user (aliases and OAuth tokens), one per group, and eight Gmail settings calls per user (about 160,000 for 20,000 users). For a large domain run with `--top` for a first pass and expect the run to be recorded as `partial`, or schedule the full run for off-hours. [Output Contract](../reference/output-contract.md) lists the fields.
+
 ## Offline Smoke
 
 Microsoft 365 sample:
@@ -235,6 +249,8 @@ raise `dns_posture.mta_sts_missing`, `dns_posture.mta_sts_testing_mode`,
 `docs/reference/security-privacy.md` for the external lookups involved.
 
 `reports/report-pack.json` also carries `baseline_alignment`. It shows the status of each CIS Microsoft 365 v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, and Microsoft cloud security benchmark control that Auditex rules map to, and a Secure Score reconciliation table. To list rules by product area or framework, run `auditex rules packs --kind framework` or `auditex rules inventory`. [Framework Mappings](../reference/framework-mappings.md) describes the sources and limits.
+
+`baseline_alignment` also has a Cyber Essentials section, following the NCSC Requirements for IT Infrastructure v3.3. It lists every requirement with its status and the rules and evidence counts behind it, and the Markdown report shows it as a table. Most Cyber Essentials requirements concern devices, networks and process, so they appear as `manual`, `ce_plus_assessor_test` or `provider_responsibility` with no verdict; only user access control and parts of secure configuration take a verdict from tenant evidence, and that verdict can only be a fail. A clean result there is recorded as not assessed (`partial_requirement_no_gap_found`) with the evidence counts, never as a pass. Auditex output is evidence for a Cyber Essentials assessor, not a certification or a CE+ result.
 
 ## Render Reports
 

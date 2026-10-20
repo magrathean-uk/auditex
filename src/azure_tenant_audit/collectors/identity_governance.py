@@ -18,7 +18,7 @@ class IdentityGovernanceCollector(Collector):
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient = context["client"]
-        top = context.get("top", 250)
+        top = context.get("top")
         page_size = context.get("page_size")
         payload, coverage = run_graph_endpoints(
             self.name,
