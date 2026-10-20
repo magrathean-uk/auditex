@@ -25,12 +25,15 @@ flags = "--model --alias --host --port --ctx-size --parallel --threads --threads
 if "--version" in sys.argv:
     print("FAKE LLAMA SERVER FOR TESTS ONLY; NO INFERENCE")
     raise SystemExit(0)
+reasoning_help = REASONING_HELP_PLACEHOLDER
 if "--help" in sys.argv:
     print(flags)
+    print(reasoning_help)
     raise SystemExit(0)
 parser = argparse.ArgumentParser()
 for flag in flags.split():
     parser.add_argument(flag, **({"action": "store_true"} if flag in ("--jinja", "--no-context-shift", "--offline") else {}))
+parser.add_argument("--reasoning-format")
 args = parser.parse_args()
 config = json.loads(Path(args.model).read_bytes()[4:])
 if config.get("exit"):
@@ -59,7 +62,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/apply-template":
             self.reply({"prompt": json.dumps(request["messages"])})
         elif self.path == "/tokenize":
+            if request["content"].startswith("TOKENIZE_DROP"):
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.connection.close()
+                return
+            if request["content"].startswith("TOKENIZE_STALL"):
+                time.sleep(3)
+            if request["content"].startswith("TOKENIZE_FAIL"):
+                self.reply({"error": "synthetic tokenizer failure"}, 500)
+                return
             count = int(args.ctx_size) if "OVERLONG" in request["content"] else 3
+            if not request["content"].startswith("["):  # reasoning text, not a rendered prompt
+                count = len(request["content"].split())
             self.reply({"tokens": list(range(count))})
         elif self.path == "/v1/chat/completions":
             text = request["messages"][-1]["content"]
@@ -96,13 +110,36 @@ class Handler(BaseHTTPRequestHandler):
             if "BAD_SCHEMA" in text: content = '{}'
             if "WRONG_VALUE" in text: content = content.replace('"value": 2', '"value": 999')
             finish = "length" if "TRUNCATED" in text else "stop"
-            self.reply({"choices": [{"finish_reason": finish, "message": {"role": "assistant", "content": content}}],
-                        "usage": {"prompt_tokens": 4 if "TOKEN_MISMATCH" in text else 3,
-                                  "completion_tokens": 30, "total_tokens": 33},
+            message = {"role": "assistant", "content": content}
+            usage = {"prompt_tokens": 4 if "TOKEN_MISMATCH" in text else 3, "completion_tokens": 30, "total_tokens": 33}
+            if "REASONING" in text:
+                message["reasoning_content"] = "think alpha beta gamma"
+            for scenario in ("FAIL", "DROP", "STALL"):
+                if f"REASONING_TOKENIZE_{scenario}" in text:
+                    message["reasoning_content"] = f"TOKENIZE_{scenario} think"
+            if "REASONING_TRUNCATED" in text:
+                message["content"], finish = "", "length"
+            if "REASONING_USAGE" in text:
+                usage["completion_tokens_details"] = {"reasoning_tokens": 17}
+            if "REASONING_BAD_TYPE" in text:
+                message["reasoning_content"] = 5
+            self.reply({"choices": [{"finish_reason": finish, "message": message}], "usage": usage,
                         "timings": {"prompt_ms": 1.25, "predicted_ms": 2.5}})
         else: self.reply({"error": "unexpected endpoint"}, 404)
 HTTPServer((args.host, int(args.port)), Handler).serve_forever()
 '''
+
+
+REASONING_HELP = {
+    "full": "--reasoning-format FORMAT  one of:\n - none: leaves thoughts unparsed\n"
+            " - deepseek: puts thoughts in message.reasoning_content\n - deepseek-legacy: keeps <think> tags",
+    "no_flag": "",
+    "no_value": "--reasoning-format FORMAT  one of:\n - none: leaves thoughts unparsed\n - deepseek-legacy: keeps <think> tags",
+}
+
+
+def _fake_server(reasoning_help="full"):
+    return FAKE_SERVER.replace("REASONING_HELP_PLACEHOLDER", repr(REASONING_HELP[reasoning_help]))
 
 
 @pytest.fixture
@@ -134,9 +171,9 @@ def _write_cases(path, cases):
     return path
 
 
-def _setup(tmp_path, runner, cases=None, config=None, extra=()):
+def _setup(tmp_path, runner, cases=None, config=None, extra=(), reasoning_help="full"):
     executable = tmp_path / "fake-llama-server"
-    executable.write_text("#!" + sys.executable + "\n" + FAKE_SERVER, encoding="utf-8")
+    executable.write_text("#!" + sys.executable + "\n" + _fake_server(reasoning_help), encoding="utf-8")
     executable.chmod(0o700)
     model = tmp_path / "synthetic.gguf"
     model.write_bytes(b"GGUF" + json.dumps(config or {}).encode())
@@ -382,3 +419,186 @@ def test_missing_runtime_and_runtime_overrides_do_not_install_or_fallback(runner
 def test_unbounded_timeouts_are_not_accepted(runner, value):
     with pytest.raises(SystemExit):
         runner.parser().parse_args(["--case-timeout", value])
+
+
+REASONING_ARM = {
+    "on": (["--enable-thinking"], {"enable_thinking": True}, "enabled", "deepseek"),
+    "off": (["--disable-thinking"], {"enable_thinking": False}, "disabled", None),
+    "default": ([], None, "template_default", None),
+}
+
+
+@pytest.mark.parametrize("arm", list(REASONING_ARM))
+def test_thinking_protocol_block_runtime_block_and_server_command(tmp_path, runner, arm):
+    flags, kwargs, mode, reasoning_format = REASONING_ARM[arm]
+    args = _setup(tmp_path, runner, extra=flags)
+    settings = runner.protocol_settings(args)
+    assert settings.get("chat_template_kwargs") == kwargs
+    assert ("chat_template_kwargs" in settings) == (kwargs is not None)
+    manifest = runner.run_benchmark(args)
+    assert manifest["status"] == "completed"
+    assert manifest["schema_version"] == "2026-10-20"
+    assert manifest["protocol"].get("chat_template_kwargs") == kwargs
+    assert manifest["thinking"]["mode"] == mode
+    assert manifest["thinking"]["chat_template_kwargs"] == kwargs
+    assert manifest["thinking"]["reasoning_format"] == manifest["runtime"]["reasoning_format"] == reasoning_format
+    # max_tokens is the whole-completion limit, and the manifest says so.
+    assert manifest["protocol"]["max_tokens"] == 32
+    assert "whole completion including any reasoning" in manifest["thinking"]["max_tokens_scope"]
+    assert any("whole completion including any reasoning_content" in note for note in manifest["protocol_notes"])
+    assert any("control arm only" in note for note in manifest["protocol_notes"]) == (arm == "on")
+    process = manifest["process"]
+    # Off and default launch exactly the legacy server command; only thinking on appends the reasoning flag.
+    legacy = [manifest["runtime"]["executable"], "--model", str(args.model.resolve()), "--alias", process["alias"],
+              "--host", "127.0.0.1", "--port", str(process["port"]), "--ctx-size", "64", "--parallel", "1",
+              "--threads", "6", "--threads-batch", "6", "--n-gpu-layers", "99", "--seed", "42",
+              "--jinja", "--no-context-shift", "--offline"]
+    assert process["command"] == legacy + (["--reasoning-format", "deepseek"] if arm == "on" else [])
+    record = _rows(args.output_dir / "records.jsonl")[0]
+    trace = json.loads((args.output_dir / record["trace_file"]).read_text())
+    assert trace[-1]["request"].get("chat_template_kwargs") == kwargs
+    assert trace[-1]["request"]["max_tokens"] == 32
+    legacy_keys = {"model", "messages", "temperature", "seed", "top_k", "top_p", "min_p", "repeat_penalty",
+                   "presence_penalty", "frequency_penalty", "max_tokens", "n", "stream", "cache_prompt",
+                   "response_format"}
+    assert set(trace[-1]["request"]) == legacy_keys | ({"chat_template_kwargs"} if kwargs is not None else set())
+    assert [entry["endpoint"] for entry in trace] == ["/apply-template", "/tokenize", "/v1/chat/completions"]
+    # No reasoning came back: recorded as absent rather than missing.
+    assert (record["reasoning_present"], record["reasoning_chars"], record["reasoning_tokens"]) == (False, 0, 0)
+    assert record["reasoning_content"] is None
+    _assert_stopped(manifest)
+
+
+def test_enable_and_disable_thinking_are_mutually_exclusive(runner, capsys):
+    with pytest.raises(SystemExit) as raised:
+        runner.parser().parse_args(["--enable-thinking", "--disable-thinking"])
+    assert raised.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        runner.main(["--check-runtime", "--disable-thinking", "--enable-thinking"])
+
+
+def _setup_in(tmp_path, runner, name, **kwargs):
+    (tmp_path / name).mkdir()
+    return _setup(tmp_path / name, runner, **kwargs)
+
+
+def test_reasoning_flag_is_required_only_when_thinking_is_on(tmp_path, runner, capsys):
+    assert "--reasoning-format" not in runner.REQUIRED_FLAGS
+    full = _setup_in(tmp_path, runner, "full", reasoning_help="full")
+    assert runner.inspect_runtime(full.server)["reasoning_format"] is None
+    assert runner.inspect_runtime(full.server, "deepseek")["reasoning_format"] == "deepseek"
+    assert runner.main(["--check-runtime", "--server", full.server, "--enable-thinking"]) == 0
+    assert '"reasoning_format":"deepseek"' in capsys.readouterr().out
+
+    bare = _setup_in(tmp_path, runner, "bare", reasoning_help="no_flag", extra=["--enable-thinking"])
+    assert runner.inspect_runtime(bare.server)["reasoning_format"] is None  # thinking off: not required
+    assert runner.main(["--check-runtime", "--server", bare.server]) == 0
+    capsys.readouterr()
+    with pytest.raises(ValueError, match="lacks required flags: --reasoning-format"):
+        runner.inspect_runtime(bare.server, "deepseek")
+    assert runner.main(["--check-runtime", "--server", bare.server, "--enable-thinking"]) == 2
+    assert "--reasoning-format" in capsys.readouterr().err
+    with pytest.raises(ValueError, match="lacks required flags: --reasoning-format"):
+        runner.run_benchmark(bare)  # refused after input checks, before any server start
+    assert not bare.output_dir.exists()
+
+    novalue = _setup_in(tmp_path, runner, "novalue", reasoning_help="no_value")
+    assert runner.inspect_runtime(novalue.server)["reasoning_format"] is None
+    with pytest.raises(ValueError, match="does not list the 'deepseek' value"):
+        runner.inspect_runtime(novalue.server, "deepseek")  # deepseek-legacy is not deepseek
+
+
+def test_reasoning_fields_are_recorded_per_case_and_never_scored_or_repaired(tmp_path, runner):
+    scenarios = {
+        "NORMAL": ("completed", False, 0, "none"),
+        "REASONING": ("completed", True, 4, "tokenize_reasoning_content_estimate"),
+        "REASONING_USAGE": ("completed", True, 17, "usage.completion_tokens_details.reasoning_tokens"),
+        "REASONING_TRUNCATED": ("incomplete_completion", True, 4, "tokenize_reasoning_content_estimate"),
+        "REASONING_TOKENIZE_FAIL": ("completed", True, None, "unavailable"),
+        "REASONING_BAD_TYPE": ("completion_schema_error", None, None, None),
+    }
+    cases = [_case(name, scenario=name) for name in scenarios]
+    args = _setup(tmp_path, runner, cases, extra=["--enable-thinking"])
+    manifest = runner.run_benchmark(args)
+    records = {row["case_id"]: row for row in _rows(args.output_dir / "records.jsonl")}
+    for name, (status, present, tokens, source) in scenarios.items():
+        row = records[name]
+        assert row["status"] == status
+        if present is None:  # Malformed reasoning_content type: failed before any metrics.
+            assert "reasoning_present" not in row
+            continue
+        assert row["reasoning_present"] is present
+        assert row["reasoning_tokens"] == tokens
+        assert row["reasoning_tokens_source"] == source
+        assert row["reasoning_chars"] == len(row["reasoning_content"] or "")
+    assert records["REASONING"]["reasoning_content"] == "think alpha beta gamma"
+    assert records["REASONING"]["reasoning_chars"] == len("think alpha beta gamma")
+    assert "reasoning_tokens_error" in records["REASONING_TOKENIZE_FAIL"]
+    assert not any(row.get("abort_remaining") for row in records.values())
+    # A completion that ran out of budget while reasoning stays visible, and the answer is not repaired.
+    assert records["REASONING_TRUNCATED"]["response_text"] == ""
+    assert records["REASONING_TRUNCATED"]["finish_reason"] == "length"
+    trace = json.loads((args.output_dir / records["REASONING"]["trace_file"]).read_text())
+    assert [entry["endpoint"] for entry in trace] == ["/apply-template", "/tokenize", "/v1/chat/completions", "/tokenize"]
+    assert trace[-1]["request"] == {"content": "think alpha beta gamma", "add_special": False, "parse_special": False}
+    # Exposed server counts need no extra /tokenize request.
+    usage_trace = json.loads((args.output_dir / records["REASONING_USAGE"]["trace_file"]).read_text())
+    assert [entry["endpoint"] for entry in usage_trace][-1] == "/v1/chat/completions"
+    # Reasoning stays out of the evaluator inputs; only message.content is the answer.
+    for name in ("responses.jsonl", "evaluation.json"):
+        assert "think alpha" not in (args.output_dir / name).read_text()
+    responses = {row["case_id"]: row["response"] for row in _rows(args.output_dir / "responses.jsonl")}
+    assert responses["REASONING"]["claims"][0]["id"] == "count"
+    assert responses["REASONING_TRUNCATED"] is None
+    assert manifest["model_scores"][0]["mechanical_pass_count"] == 4
+    _assert_stopped(manifest)
+
+
+@pytest.mark.parametrize("arm", [[], ["--enable-thinking"]], ids=["default", "thinking-on"])
+@pytest.mark.parametrize("failure", ["DROP", "STALL"])
+def test_reasoning_token_count_failure_never_changes_status_or_answer(tmp_path, runner, failure, arm):
+    # The default arm matters too: llama.cpp's --reasoning-format auto returns reasoning_content there.
+    cases = [_case("counted", scenario=f"REASONING_TOKENIZE_{failure}"), _case("later")]
+    args = _setup(tmp_path, runner, cases, extra=[*arm, "--case-timeout", ".5"])
+    started = time.monotonic()
+    manifest = runner.run_benchmark(args)
+    assert time.monotonic() - started < 4
+    rows = _rows(args.output_dir / "records.jsonl")
+    code = "transport_error" if failure == "DROP" else "timeout"
+    # The valid completion keeps its status and its answer; only the token count is lost.
+    assert rows[0]["status"] == "completed"
+    assert "error" not in rows[0]
+    assert rows[0]["response_text"].startswith('{"claims"')
+    assert rows[0]["reasoning_present"] is True
+    assert rows[0]["reasoning_tokens"] is None
+    assert rows[0]["reasoning_tokens_source"] == "unavailable"
+    assert rows[0]["reasoning_tokens_error"].startswith(code)
+    answer = _rows(args.output_dir / "responses.jsonl")[0]["response"]
+    assert answer["claims"][0]["id"] == "count"
+    assert manifest["model_scores"][0]["mechanical_pass_count"] == 1
+    # The fatal transport failure stops the remaining cases, and says why.
+    assert rows[0]["abort_remaining"] is True
+    assert rows[1]["status"] == "not_attempted"
+    assert rows[1]["blocked_by"]["code"] == code
+    assert manifest["case_status_counts"] == {"completed": 1, "not_attempted": 1}
+    trace = json.loads((args.output_dir / rows[0]["trace_file"]).read_text())
+    assert [entry["endpoint"] for entry in trace] == ["/apply-template", "/tokenize", "/v1/chat/completions", "/tokenize"]
+    _assert_stopped(manifest)
+
+
+@pytest.mark.parametrize("arm,status", [([], "completed"), (["--disable-thinking"], "completed"),
+                                        (["--enable-thinking"], "completion_schema_error")],
+                         ids=["default", "thinking-off", "thinking-on"])
+def test_non_string_reasoning_content_is_enforced_only_when_thinking_is_on(tmp_path, runner, arm, status):
+    args = _setup(tmp_path, runner, [_case("bad", scenario="REASONING_BAD_TYPE")], extra=arm)
+    runner.run_benchmark(args)
+    row = _rows(args.output_dir / "records.jsonl")[0]
+    assert row["status"] == status
+    if status == "completed":  # As at git HEAD: recorded raw and scored on content alone.
+        assert row["reasoning_content"] == 5
+        assert (row["reasoning_present"], row["reasoning_chars"], row["reasoning_tokens"]) == (False, 0, None)
+        assert row["reasoning_tokens_source"] == "not_a_string"
+        assert _rows(args.output_dir / "responses.jsonl")[0]["response"]["claims"][0]["id"] == "count"
+    else:
+        assert "reasoning_content" not in row
