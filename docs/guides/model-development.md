@@ -299,3 +299,71 @@ untouched held-out cases and its intended deployment machine before promotion.
 
 Implementation references: [Transformers Qwen text and vision model classes](https://huggingface.co/docs/transformers/model_doc/qwen3_5),
 [TRL supervised fine-tuning](https://huggingface.co/docs/trl/en/sft_trainer).
+
+### Checkpoint selection by generation (G3)
+
+Eval loss is next-token fit to the teacher-forced answer; it does not say whether a checkpoint's own generated JSON
+passes the reviewed rubric. `scripts/score-adapter-checkpoints.py` chooses the checkpoint by generated answers on
+held-out cases and never by eval loss. It loads the text-only base once (the loader `train_lora` uses, offline,
+`local_files_only`), attaches each checkpoint's adapter with PEFT, renders every prompt from the same
+prompt/`chat_template_kwargs` record the trainer reads (`enable_thinking` false, generation prompt appended, the
+assistant target never included), generates greedily (`do_sample` false) until the chat turn end or
+`--max-new-tokens`, and parses the raw text as strict JSON. A fenced, prefixed, suffixed, duplicate-key or truncated
+answer is kept as raw text and fails the evaluator as a `response_schema_error`; nothing is repaired. The adapter is
+unloaded (checked for leftover LoRA layers) and memory freed before the next checkpoint. Only approved cases in the
+requested splits are generated for (default `validation` and `test`, never `train`); `--splits validation` is
+the recommended selection run, keeping `test` for one final report of the winner.
+
+The rule is recorded in `selection.json`: highest strict pass rate; ties go to the lowest overconfidence (claims
+expected `unknown` answered `confirmed`), then the lowest over-abstention (expected `confirmed` or `inferred`
+answered `unknown`), then the earliest step. A tie on the first three keys is listed under `tied_with` and in
+`warnings`, as is a zero pass rate or a `--limit` smoke. Each checkpoint also records schema errors, strict-JSON
+failures, token-limit hits, issue counts, adapter hashes and `seconds_per_case`.
+
+The output directory must be new and holds `responses.jsonl` (rows `{case_id, model_id, response}` with
+`model_id` `<base>@<revision>+<checkpoint name>`, exactly what `auditex model evaluate` reads),
+`generations.jsonl` (raw text, parse error, token counts, finish reason), `scored-cases.jsonl`, `evaluation.json`
+(the evaluator's output over all checkpoints) and `selection.json`. Checkpoints with an
+`auditex-training-input.json` must match `--base-model` and `--revision`; without one a warning is logged.
+
+On JUPITER, after training, run it as a separate single-GPU job against the run's output directory (a 27B base in
+bf16 is loaded to one device; pick it with `CUDA_VISIBLE_DEVICES`). Trainer `save_total_limit` is 2 by default, which
+keeps only the newest and the best-by-loss checkpoint, so prepare the pack with
+`--training-overrides` `{"sft": {"save_total_limit": 8}}` (or more) to leave several candidates. Use the repository
+checkout or payload that keeps `scripts/` beside `src/`, and the qualified environment file for `PYTHON_BIN` and the
+cache variables:
+
+```sh
+source "$JUPITER_ENV_SETUP"
+"$PYTHON_BIN" scripts/score-adapter-checkpoints.py \
+  --base-model Qwen/Qwen3.8-27B --revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 \
+  --checkpoints-root "$AUDITEX_TRAIN_OUTPUT" \
+  --cases "$AUDITEX_PACK_DIR/approved-cases.jsonl" --splits validation \
+  --output-dir /absolute/path/to/new-g3-scores \
+  --device cuda --max-new-tokens 512 --batch-size 8
+```
+
+Run it first with `--limit 8` to read `seconds_per_case`. Add `--checkpoint "$AUDITEX_TRAIN_OUTPUT/adapter"` to
+include the trainer's final (best-by-loss) adapter as a comparator. Batching can shift bf16 numerics slightly; it is
+held constant across checkpoints and recorded, and `--batch-size 1` removes the effect. Then score the selected
+`selected_path` once on `--splits test` and report that as the held-out result.
+
+On the Mac, smoke the pipeline with the 0.8B base from the offline travel copy of the cache, using the second
+virtual environment (the repository one has no torch). `--device mps` works; `cpu` is slower. The qualification
+run's checkpoints are not kept, so use any PEFT adapter saved from the text-only 0.8B model, such as a few-step
+local training run's `checkpoint-N`. An untrained adapter behaves like the untuned base and mostly fails strict
+parsing, which is the expected smoke outcome; it validates the plumbing, not quality. Linear-attention layers fall
+back to reference PyTorch kernels without `flash-linear-attention`, roughly 20 s per case at 160 new tokens on the
+Mac, so keep `--limit` small:
+
+```sh
+HF_HOME=$HOME/dev/machine/work/auditex-data/hf-home clean-development run --session session-only -- \
+  $HOME/dev/machine/work/auditex-data/venv-model-qual/bin/python scripts/score-adapter-checkpoints.py \
+  --base-model Qwen/Qwen3.5-0.8B --revision 2fc06364715b967f1860aea9cf38778875588b17 \
+  --checkpoints-root /absolute/path/to/smoke-run \
+  --cases /absolute/path/to/approved-cases.jsonl --splits validation --limit 4 \
+  --device mps --batch-size 2 --max-new-tokens 160 --output-dir /absolute/path/to/new-g3-smoke
+```
+
+The scoring and selection logic is covered by `tests/test_score_adapter_checkpoints.py` with a stub generator; only
+the prompt-equality test uses the staged tokenizer and is skipped when it or `transformers` is absent.
