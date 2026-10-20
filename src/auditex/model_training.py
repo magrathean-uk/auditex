@@ -25,6 +25,11 @@ RUNTIME_PACKAGE_CANDIDATES = {
 _REVISION = re.compile(r"[0-9a-fA-F]{40}")
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*")
 _SPLITS = {"train", "validation", "test"}
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_PROVENANCE_REQUIRED = {"source", "synthetic", "review_status"}
+# template groups cases by reasoning template and distinct_prompt_sha256 marks id-only duplicates; both are
+# optional curation aids written by scripts/build-oracle-cases.py and read by scripts/split-oracle-cases.py.
+_PROVENANCE_OPTIONAL = {"reviewer", "template", "distinct_prompt_sha256"}
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -78,15 +83,19 @@ def validate_case(payload: Any) -> dict[str, Any]:
     if not isinstance(payload["split"], str) or payload["split"] not in _SPLITS:
         raise ValueError("case split must be train, validation or test")
     provenance = payload["provenance"]
-    if not isinstance(provenance, dict) or not {"source", "synthetic", "review_status"} <= set(provenance) <= {"source", "synthetic", "review_status", "reviewer"}:
-        raise ValueError("provenance requires source, synthetic, review_status and optional reviewer")
+    if not isinstance(provenance, dict) or not _PROVENANCE_REQUIRED <= set(provenance) <= _PROVENANCE_REQUIRED | _PROVENANCE_OPTIONAL:
+        raise ValueError("provenance requires source, synthetic, review_status and optional reviewer, template and distinct_prompt_sha256")
     _text(provenance["source"], "provenance source")
     if type(provenance["synthetic"]) is not bool:
         raise ValueError("provenance synthetic must be a boolean")
     if not isinstance(provenance["review_status"], str) or provenance["review_status"] not in {"approved", "unreviewed"}:
         raise ValueError("review_status must be approved or unreviewed")
-    if "reviewer" in provenance:
-        _text(provenance["reviewer"], "reviewer")
+    for optional in ("reviewer", "template"):
+        if optional in provenance:
+            _text(provenance[optional], optional)
+    if "distinct_prompt_sha256" in provenance and not (
+            isinstance(provenance["distinct_prompt_sha256"], str) and _SHA256.fullmatch(provenance["distinct_prompt_sha256"])):
+        raise ValueError("distinct_prompt_sha256 must be a lowercase hex SHA-256 digest")
     messages = payload["messages"]
     if not isinstance(messages, list) or len(messages) < 2:
         raise ValueError("messages require a prompt and final assistant response")
@@ -132,6 +141,11 @@ def _normalized_prompt(case: dict[str, Any], *, mask_id: bool = False) -> str:
         messages.append({"role": item["role"],
                          "content": " ".join(unicodedata.normalize("NFKC", content).casefold().split())})
     return json.dumps(messages, ensure_ascii=False, sort_keys=True)
+
+
+def distinct_prompt_sha256(case: dict[str, Any]) -> str:
+    """SHA-256 of the id-masked normalized prompt, the key that makes id-only duplicates detectable."""
+    return hashlib.sha256(_normalized_prompt(case, mask_id=True).encode("utf-8")).hexdigest()
 
 
 def _answer_key(case: dict[str, Any], *, mask_id: bool = False) -> str:

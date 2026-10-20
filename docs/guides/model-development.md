@@ -83,7 +83,9 @@ The starter pack therefore has `job_ready: false` and no training rows.
 Each JSONL case has `id`, `family`, `split`, `provenance`, `messages` and
 `expected`. Provenance records `source`, a boolean `synthetic`,
 `review_status` (`unreviewed` or `approved`) and a `reviewer` required for approved
-cases (optional for unreviewed proposals).
+cases (optional for unreviewed proposals). Two optional curation keys are accepted:
+`template`, a reasoning-template label, and `distinct_prompt_sha256`, the SHA-256 of the
+case-id-masked normalized prompt, so id-only duplicates can be found without a full comparison.
 Messages contain string `role`/`content` fields and finish with an assistant
 response. Approval describes an actual review; scripts never grant it.
 
@@ -134,6 +136,79 @@ answers. Every exported case stays in one tenant-specific **train** family,
 including later runs from that tenant. Build independent validation/test
 scenarios separately. Exporting cases neither approves targets nor runs a model.
 
+## Oracle-labelled cases
+
+Cases whose labels come from running CISA ScubaGear's Rego policies, a deterministic open-source
+engine, offline over fictional tenant configurations. No tenant is contacted. Needs a ScubaGear
+checkout (`PowerShell/ScubaGear`, pinned commit in `configs/assessment-sources.json`) and OPA 1.20.2,
+the version ScubaGear pins; OPA 1.21 rejects a helper in `Rego/Utils/TestAssertions.rego`. The
+end-to-end tests in `tests/test_oracle_cases.py` run when `AUDITEX_TEST_OPA` and
+`AUDITEX_TEST_SCUBAGEAR` are exported (optionally `AUDITEX_TEST_ORACLE_REFERENCE` for a label
+comparison); otherwise they are skipped.
+
+```sh
+clean-development run --session session-only -- .venv/bin/python scripts/build-oracle-cases.py \
+  --scuba /absolute/path/to/ScubaGear/PowerShell/ScubaGear --opa /absolute/path/to/opa-1.20.2 \
+  --output-dir /absolute/path/to/new-oracle-cases [--products PowerPlatform ...] [--not-collected-every 4]
+clean-development run --session session-only -- .venv/bin/python scripts/split-oracle-cases.py \
+  --cases /absolute/path/to/new-oracle-cases/cases.jsonl \
+  --output /absolute/path/to/new-oracle-split/cases.jsonl --approve-as-oracle
+```
+
+`build-oracle-cases.py` loads each product's base fixture, replays the `json.patch` mutations and
+literals from CISA's own unit tests as tenant variants, evaluates them, and writes one case per
+distinct (policy, evidence view): `requirement_met` confirmed true or false, plus every Nth case with
+its first section marked `not_collected` and an `unknown` answer. The output directory is new
+(`cases.jsonl`, `cases-<product>.jsonl`, `summary.json`, `variants-<product>/`); an existing one is
+refused. Every case carries the commit, policy id, test name, OPA version and input hash in
+`provenance.source`, a `provenance.template` of `<product>/<policy id>/<mutation family>` (which
+fields of its evidence the variant changes; `not_collected:<section>` for gap cases) and
+`provenance.distinct_prompt_sha256`. Cases are written `unreviewed` in `train`. At the pinned commit
+a full run yields 4,247 cases, 3,780 with distinct prompts.
+
+`split-oracle-cases.py` first keeps the first case of each `distinct_prompt_sha256`, then splits by
+whole policy group and whole template, so no family or template appears in two splits. Per product
+the last group becomes test, the one before it validation, the rest train; products with fewer than
+three groups stay in train. `split-report.json` (beside the output) records counts, families,
+distinct counts and a leakage check per split, and `test_sha256`, the hash of the test split as
+written, which freezes the holdout. The hash changes if approval is toggled; `test_ids_sha256` does
+not. Both files are new: created exclusively with mode 0600 (new parent directories 0700), and an
+existing file, a symlink, the same path for output and report, or a location inside a finalized audit
+run is refused.
+
+Deduplication matters for the holdout. At the pinned commit the deduplicated test split has 280 rows.
+`auditex model prepare` removes id-only duplicates from train and validation only and writes
+`test.jsonl` as given, so a pack prepared from an approved file that was not deduplicated carries
+more test rows (371 in the first oracle training pack, prepared from the un-deduplicated prototype file).
+Benchmarks run on that 371-row test split are not on the frozen holdout; identify the holdout by
+`test_sha256` or `test_ids_sha256` from `split-report.json`.
+
+Approval convention (provisional, pending G's confirmation): `--approve-as-oracle` sets
+`review_status: approved` and `reviewer: oracle:cisa-scubagear@<commit>/opa-<version>; deterministic
+policy evaluation, no human review`, so `auditex model prepare` accepts the rows. `<commit>` is the
+12-character short commit the miner records in every case's `provenance.source` (`summary.json`
+holds the full 40-character commit under `oracle.commit`). Approval is strict: only unreviewed,
+`synthetic: true` cases that name no reviewer and whose source matches the miner's
+`oracle:cisa-scubagear@<hex commit> ...; opa=<x.y.z>; ...` form are approved; anything else is an
+error, and already-approved cases are left untouched. It is a labelling convention, not a human
+review; the scripts never grant any other approval.
+
+Caveats:
+
+- Labels are deterministic engine output, not human judgement, and inherit any gap between ScubaGear's
+  policy logic and its baseline text. Fixtures are fictional; the mutations are CISA's, so coverage
+  follows what CISA tests, not what tenants do.
+- Power BI (120 cases) and Exchange (81) are thin: many unit tests patch values through Rego
+  expressions, which the patch replay cannot parse (39 Power BI and 10 Exchange unit tests were
+  skipped as unparsable) until those expressions are evaluated.
+- Evidence views come from the references in each policy's rule head plus a widening step, so many
+  views carry sections the policy does not read, and the gap case always masks the first listed
+  section, usually the alphabetically first. Treat them as a starting point, not a minimal evidence set.
+- The `policy` evidence quotes baseline text, partly adapted from Microsoft documentation under
+  CC BY 4.0. Attribute Microsoft and CISA when redistributing, or strip `baseline_text`. ScubaGear is
+  CC0 1.0 and is not vendored; CISA does not endorse Auditex or models trained on this data. See
+  [Source provenance](../provenance/provenance.md#oracle-labelled-cases).
+
 ## Local GGUF benchmarks
 
 `scripts/run-model-benchmark.py` launches one owned localhost `llama-server`,
@@ -161,6 +236,23 @@ Case approval is attributed provenance, not proof of independent human review.
 Report agent-reviewed reference results as such, and separate same-tenant live
 calibration from held-out synthetic results. Exact ID matching is a mechanical
 protocol check, not a standalone measure of natural-language factual accuracy.
+
+Thinking is a recorded protocol choice. `--disable-thinking` (`enable_thinking`
+false) is the adapter's serving protocol and the setting for every adapter
+result. `--enable-thinking` is a control arm only, for scoring an untuned base
+with reasoning on: it sets `enable_thinking` true and starts the server with
+`--reasoning-format deepseek`, so the think block is returned in
+`reasoning_content` and only `content` is scored as the answer. With neither flag
+the template default applies and the manifest says so (`thinking.mode`). The two
+flags are mutually exclusive. `--max-tokens` bounds the whole completion
+including reasoning (there is no separate reasoning budget), so a case that
+spends it thinking ends with `finish_reason=length` and fails. Each record
+carries `reasoning_present`, `reasoning_chars` and `reasoning_tokens` (the
+server's count if exposed, else a best-effort `/tokenize` estimate of
+`reasoning_content` taken after the answer is judged, so a failed count leaves
+`reasoning_tokens` null and never changes the case result); the reasoning text
+is retained in `records.jsonl`, never sent to the evaluator, and the answer is
+not extracted or repaired.
 
 ## Claude execution handoff
 

@@ -56,6 +56,33 @@ conversations remain unreviewed, and matching text from those sources is not
 shipped as Auditex training gold. No upstream evaluation result is presented
 as an Auditex measurement.
 
+## Oracle-labelled cases
+
+`scripts/build-oracle-cases.py` and `scripts/split-oracle-cases.py` produce model-development
+cases whose labels are the deterministic output of CISA's ScubaGear policy engine, run offline.
+
+- **cisagov/ScubaGear**, commit `2446ad723b7f55031cc02c8aca244d731d468cba`, CC0 1.0 Universal
+  (public domain dedication). Used: the Rego policies (`PowerShell/ScubaGear/Rego/`), the unit-test
+  fixtures and their `json.patch` mutations (`Testing/Unit/Rego/`) and the baseline markdown
+  (`baselines/*.md`). The policies are evaluated with Open Policy Agent 1.20.2 (Apache-2.0, the version
+  ScubaGear pins; not redistributed) over fictional tenant configurations. No ScubaGear code, fixture
+  or baseline file is vendored or shipped in the product; the scripts read a local checkout supplied on
+  the command line, and each case records the commit (the 12-character short commit, in `provenance.source` and
+  in the oracle reviewer; the run's `summary.json` holds the full 40-character commit), policy id, test name, OPA
+  version and input hash.
+- The `policy` evidence object quotes up to 600 characters of baseline text per policy. CISA states
+  that parts of those baselines are adapted from Microsoft documentation under CC BY 4.0, so a
+  dataset that keeps `baseline_text` must carry attribution to Microsoft and CISA for that prose;
+  otherwise strip the field before redistribution. CISA provides the baselines "as is", TLP:CLEAR,
+  and does not endorse any product: nothing here implies CISA endorsement of Auditex, the dataset or
+  any model trained on it.
+- **mmorris35/m365-sim**, commit `203d66163b089eec63af258d8142c171d982994c`, Apache-2.0. Reference only:
+  it informed the idea of simulated tenant fixtures. No code, data or text from it is used, and it is
+  not a label source.
+- Labels are engine output, not human judgement. `scripts/split-oracle-cases.py --approve-as-oracle`
+  records the engine and OPA version as reviewer so the pack preparer accepts the rows; see
+  [Model development](../guides/model-development.md#oracle-labelled-cases).
+
 ## Framework identifiers
 
 `configs/framework-catalog.json` and `configs/control-mappings.json` reference

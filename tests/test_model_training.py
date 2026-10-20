@@ -15,6 +15,7 @@ from auditex.model_training import (
     _measure_training_tokens,
     _record_checkpoint_input,
     _validate_resume_input,
+    distinct_prompt_sha256,
     load_cases,
     prepare_training_pack,
     training_main,
@@ -273,6 +274,25 @@ def test_approved_case_requires_a_named_reviewer() -> None:
         validate_case(case)
     case["provenance"]["review_status"] = "unreviewed"
     assert validate_case(case) == case
+
+
+def test_provenance_accepts_template_and_prompt_digest_and_rejects_other_keys() -> None:
+    case = _case("a")
+    case["provenance"].update(template="aad/MS.AAD.1.1v1/base", distinct_prompt_sha256=distinct_prompt_sha256(case))
+    assert validate_case(copy.deepcopy(case)) == case
+    for key, value in (("surprise", "x"), ("template", ""), ("distinct_prompt_sha256", "abc"), ("distinct_prompt_sha256", 7)):
+        broken = copy.deepcopy(case)
+        broken["provenance"][key] = value
+        with pytest.raises(ValueError):
+            validate_case(broken)
+
+
+def test_prompt_digest_hides_only_the_case_id() -> None:
+    first, second = _case("a", scenario="shared"), _case("b", scenario="shared")
+    for case in (first, second):
+        case["messages"][0]["content"] = f'Case "{case["id"]}": E1 records two privileged users. Explain the evidence.'
+    assert distinct_prompt_sha256(first) == distinct_prompt_sha256(second)
+    assert distinct_prompt_sha256(first) != distinct_prompt_sha256(_case("a", scenario="other"))
 
 
 def test_approved_answer_may_reorder_evidence_and_gap_ids() -> None:
