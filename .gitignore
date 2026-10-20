@@ -16,3 +16,7 @@ tenant-bootstrap/.secrets/
 .venv*/
 ._*
 .DS_Store
+# --- secrets (clean-development) ---
+.env
+.env.*
+!.env.example
