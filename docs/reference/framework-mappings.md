@@ -118,12 +118,46 @@ finding's own mappings, touches. Each row has a status:
 
 - `fail`: at least one mapped rule has an open finding.
 - `accepted_risk`: the only findings for the mapped rules are waived.
-- `pass`: every mapped rule's evidence collector reached a `complete_*` coverage status and
-  produced no finding.
-- `not_assessed`: everything else, including blocked, partial, or skipped collectors.
+- `pass`: every mapped rule was evaluated and produced no finding. A rule counts as evaluated
+  only when every collector that feeds it reached a `complete_*` coverage status and the
+  evidence it reads was present.
+- `not_assessed`: everything else, including blocked, partial, or skipped collectors and rules
+  whose inputs were missing. Absence of a finding is never treated as a pass on its own.
 
-`src/azure_tenant_audit/baselines.py` (`_NAMESPACE_COLLECTORS`) links each rule to its evidence
-collector. A rule namespace missing from that map reports `not_assessed` unless it fails.
+Each entry in a control's `rule_statuses` carries `rule_id`, `status`, and `evaluated`. A rule that
+was not evaluated also has a `reason`:
+
+- `collector_not_complete:<collectors>`: a collector that feeds the rule did not complete. Most
+  rules need `complete_*`; `identity.privileged_mfa_not_registered` also accepts a
+  `not_applicable` `identity_governance` (no PIM data can exist), but not a blocked, partial,
+  failed or missing one.
+- `no_collector_mapping`: the rule's namespace is not in the collector map.
+- `inputs_not_available`: the report was built without the normalized snapshot, so the rule's
+  inputs could not be checked.
+- `no_domain_records`, `resolver_error`: DNS rules need every verified domain resolved.
+- `mta_sts_policy_not_fetched`: the MTA-STS policy rules need the policy file fetched (public
+  lookups off, or the fetch skipped).
+- `tls_rpt_not_collected`: the bundle predates TLS-RPT collection.
+- `public_footprint_not_collected`: the public footprint rule needs footprint records.
+- `signal_unknown:<reason>`, `signal_not_collected`: a detection rule needs its detection signal
+  to be `on` or `off`, not `unknown`.
+- `verdict_unknown:<control>`, `verdict_not_collected:<control>`: a rule decided by an identity
+  control verdict (`ca.*`, `consent_policy.user_consent_*`) needs that verdict record to exist and
+  not be `unknown`. `ca.enforcement_unverified` needs both the `effective_mfa` and
+  `legacy_authentication_block` verdicts.
+
+`baseline_alignment.unmapped_findings` counts findings that carry no `rule_id` (`count`,
+`open_count`, `accepted_count`, `collectors` as a list of `{collector, count}`, and up to 20 `finding_ids`). They cannot reach a
+control row, so a control can read `pass` while one of them is open. Check this bucket before
+quoting a framework roll-up.
+
+`src/azure_tenant_audit/baselines.py` links each rule to its evidence collectors: `_RULE_COLLECTORS`
+for rules that read from specific collectors (every collector listed must complete: the detection
+rules, `attack_path.no_mfa_to_tier0`, the Global Administrator and privileged MFA registration
+rules, which also need role assignments from `identity`) and `_NAMESPACE_COLLECTORS` for the rest
+(`ca` maps to `conditional_access`). A rule that appears in neither reports `not_assessed` unless
+it fails. A finding that is gone from a later run counts as resolved in `gate-drift` and
+`compare` only if its own collector and every collector its rule needs completed there.
 
 ## Secure Score reconciliation
 
@@ -152,7 +186,10 @@ The `secure_score.low_overall` rule raises a finding when the latest snapshot's
 2. If a benchmark id is not yet in `configs/framework-catalog.json`, verify it against the source
    and add it there.
 3. Add the rule's namespace to `_NAMESPACE_COLLECTORS` in
-   `src/azure_tenant_audit/baselines.py` so a clean run can report `pass`. If the rule maps to a
+   `src/azure_tenant_audit/baselines.py` so a clean run can report `pass`. If the rule reads from a
+   different collector than its namespace, or needs input that may be absent, add it to
+   `_RULE_COLLECTORS` and give it an input check, so it reports `not_assessed` instead of `pass`
+   when the evidence was not there. If the rule maps to a
    new product family, add it to `_M365_PRODUCT_FAMILIES` in `src/auditex/rules.py`.
 4. Run `python3 scripts/generate-rule-packs.py` to refresh `configs/rule-packs.json`.
 5. If the rule has a verified CIS v7 or Secure Score control, add it to the expected sets in
@@ -170,11 +207,36 @@ Suggested starting points for rule families being added:
   only the Zero Trust pillar or pillars involved and leave benchmark controls to the member
   rules.
 
+## Identity control verdicts
+
+`ca.mfa_not_enforced`, `ca.legacy_auth_not_blocked` and `consent_policy.user_consent_unrestricted`
+read `normalized/identity_control_verdicts.json` (see `docs/reference/output-contract.md`), not a
+collector's raw rows. Each verdict is three-valued. A negative verdict raises the rule. An `unknown`
+verdict, caused by a blocked, truncated or missing policy read, raises the matching diagnostic rule
+(`ca.enforcement_unverified`, `consent_policy.user_consent_unverified`) instead. Those two rules
+claim no benchmark control, so an unreadable policy list is neither a pass nor a failure.
+
+- `ca.mfa_not_enforced` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v1` (MFA for all users).
+  It does not map to `5.2.2.1`: an administrator-only policy satisfies that control while the
+  rule still fires. `identity.privileged_mfa_not_registered` carries the same mapping as
+  `identity.global_admin_mfa_not_registered`.
+- `ca.legacy_auth_not_blocked` maps to CIS v7 `5.2.2.3`, SCuBA `MS.AAD.1.1v1` and Secure Score
+  `BlockLegacyAuthentication`. The catalog entries were verified on 2026-10-20 against the Tenable
+  CIS v7.0.0 audit list, the ScubaGear v1.8.0 `aad.md` baseline and the CIPP Secure Score profile
+  sample already listed as sources.
+- `ca.*` maps to the `conditional_access` collector and `consent_policy.*` to `consent_policy`
+  (`_NAMESPACE_COLLECTORS`). Baseline alignment also reads the verdict records, so a rule passes
+  only when its verdict is known: `enforced` or `not_enforced`, `blocked` or `not_blocked`,
+  `restricted` or `unrestricted`. An `unknown` or missing verdict reports `not_assessed` with
+  `verdict_unknown:<control>` or `verdict_not_collected:<control>`, never `pass`.
+
 ## Limitations
 
-- CIS v7 coverage is partial. Auditex maps 15 of the benchmark's recommendations, chosen where
-  its evidence tests the condition directly. A `pass` status means "no Auditex finding", not a
-  full CIS audit result.
+- CIS v7 coverage is partial. Auditex maps 16 of the benchmark's recommendations, chosen where
+  its evidence tests the condition directly. A `pass` status means every mapped rule was evaluated (its
+  collectors completed and its inputs were present) and raised no finding, not a full CIS audit
+  result.
+- `consent_policy.user_consent_unrestricted` fires only when users can consent to any app. CIS v7 `5.1.5.1` and SCuBA `MS.AAD.5.2v1` ask for no user consent, so a clean result against them means no unrestricted user consent, not that consent is off.
 - MCSB v2 is a preview release, and its ids could change before it is generally available.
 - Secure Score control ids are service-defined and change over time. Microsoft does not publish
   a complete list.

@@ -155,6 +155,11 @@
         {"id": "0d3e1a7f-0000-4000-8000-000500000005", "displayName": "CA005 - Phishing-resistant MFA for Global Administrators", "state": "enabledForReportingButNotEnforced", "createdDateTime": "2026-08-20T10:00:00Z", "conditions": {"users": {"includeRoles": ["62e90394-69f5-4237-9190-012177145e10"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": [], "authenticationStrength": {"id": "00000000-0000-0000-0000-000000000004", "displayName": "Phishing-resistant MFA"}}}
       ]
     },
+    "identitySecurityDefaultsEnforcementPolicy": {
+      "value": [
+        {"id": "00000000-0000-0000-0000-000000000005", "displayName": "Security Defaults", "description": "Security defaults policy", "isEnabled": false}
+      ]
+    },
     "namedLocations": {
       "value": [
         {"id": "0d3e1a7f-0000-4000-8000-000600000001", "displayName": "Felixstowe HQ and Ipswich Depot", "@odata.type": "#microsoft.graph.ipNamedLocation", "isTrusted": true, "ipRanges": [{"cidrAddress": "198.51.100.0/27"}, {"cidrAddress": "198.51.100.64/28"}]},

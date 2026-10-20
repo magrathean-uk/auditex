@@ -8,7 +8,7 @@ from .base import Collector, CollectorResult, run_graph_endpoints
 
 class ConditionalAccessCollector(Collector):
     name = "conditional_access"
-    description = "Conditional Access policies, named locations, and advanced policy dependencies."
+    description = "Conditional Access policies, security defaults, named locations, and advanced policy dependencies."
     required_permissions = [
         "Policy.Read.All",
         "Directory.Read.All",
@@ -22,6 +22,12 @@ class ConditionalAccessCollector(Collector):
         queries = {
             "conditionalAccessPolicies": {
                 "endpoint": "/identity/conditionalAccess/policies",
+                "params": {},
+            },
+            "identitySecurityDefaultsEnforcementPolicy": {
+                # Singleton read: security defaults are an alternative to Conditional Access for MFA.
+                "endpoint": "/policies/identitySecurityDefaultsEnforcementPolicy",
+                "page": False,
                 "params": {},
             },
             "namedLocations": {

@@ -167,7 +167,7 @@ def test_demo_explorer_embeds_before_and_after(tmp_path: Path) -> None:
     assert [run["run_name"] for run in data["runs"]] == ["halcyon-demo", "halcyon-after-fixes"]
     assert data["runs"][data["default_run"]]["run_name"] == "halcyon-demo"
     assert data["compare"]["a"]["grade"] == "critical"
-    assert data["compare"]["a"]["score"] == 96 and data["compare"]["b"]["score"] == 63
+    assert data["compare"]["a"]["score"] == 97 and data["compare"]["b"]["score"] == 63
 
 
 def test_run_payload_maps_views(halcyon_runs: tuple[Path, Path]) -> None:

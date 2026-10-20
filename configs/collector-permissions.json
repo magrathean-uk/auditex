@@ -38,7 +38,7 @@
         "Identity Governance Administrator",
         "Security Reader"
       ],
-      "notes": "Conditional Access policy graph endpoints are policy-scoped and may require policy admin or equivalent directory read roles."
+      "notes": "Conditional Access policy graph endpoints are policy-scoped and may require policy admin or equivalent directory read roles. GET /policies/identitySecurityDefaultsEnforcementPolicy (security defaults) needs only Policy.Read.All."
     },
     "defender": {
       "graph_scopes": [
@@ -118,7 +118,7 @@
         "Authentication Policy Administrator",
         "Security Reader"
       ],
-      "notes": "Authentication method policy and registration reports can require report-reading access."
+      "notes": "Authentication method policy and registration reports can require report-reading access. The registration report is read with a fixed $select of metadata fields (userType and isAdmin included) and returns no authentication method values."
     },
     "reports_usage": {
       "graph_scopes": [

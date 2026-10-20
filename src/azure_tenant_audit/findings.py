@@ -11,6 +11,7 @@ from typing import Any
 from .attack_graph import analyze_attack_graph
 from .autopilot import build_board_report_sections
 from .baselines import SECURE_SCORE_LOW_THRESHOLD_PERCENT, build_baseline_alignment, latest_secure_score
+from .identity_controls import SECTION as _IDENTITY_CONTROL_SECTION
 from .resources import resolve_resource_path
 from .waivers import apply_waivers, load_waivers
 
@@ -118,9 +119,9 @@ _FALLBACK_FINDING_TEMPLATES = {
     },
     "identity.user_mfa_not_registered": {
         "risk_rating": "medium",
-        "description": "A non-admin member user is not registered for MFA in authentication method reports.",
-        "impact": "Password-only users are easier to compromise and can become a foothold for mail, data, and lateral access abuse.",
-        "remediation": "Require MFA registration for active member users and follow up on users that remain unregistered.",
+        "description": "A non-admin member user has not registered an MFA method in the authentication method registration report. This reports registration only, not whether MFA is required at sign-in.",
+        "impact": "A user with no MFA method cannot satisfy an MFA requirement, so a password alone may be enough to sign in wherever MFA is not enforced.",
+        "remediation": "Have the user register an MFA method, and confirm separately that MFA is enforced through Conditional Access or security defaults.",
         "references": ["Microsoft Entra authentication method registration report"],
         "control_ids": ["AUDITEX-USER-MFA-NOT-REGISTERED"],
         "expected_value": "Active member users are registered for MFA.",
@@ -1169,7 +1170,53 @@ def _global_admin_principal_ids(normalized_snapshot: dict[str, Any]) -> set[str]
     }
 
 
+def _privileged_roles_for_mfa(normalized_snapshot: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Administrator roles per principal id (lower-case): active assignments plus PIM-eligible schedules.
+
+    Each entry keeps its normalized record so a finding can cite the assignment that makes the
+    account privileged.
+    """
+    role_names = {
+        str(item.get("id")): str(item.get("display_name") or "")
+        for item in ((normalized_snapshot.get("role_definitions") or {}).get("records") or [])
+        if "administrator" in str(item.get("display_name") or "").strip().lower()
+    }
+    sources = (
+        ("active", "role_assignments", "identity", (normalized_snapshot.get("role_assignments") or {}).get("records") or []),
+        (
+            "eligible",
+            "governance_objects",
+            "identity_governance",
+            [
+                item
+                for item in ((normalized_snapshot.get("governance_objects") or {}).get("records") or [])
+                if item.get("kind") == "role_eligibility_schedule"
+            ],
+        ),
+    )
+    by_principal: dict[str, list[dict[str, Any]]] = {}
+    for assignment, section, collector, records in sources:
+        for item in records:
+            role_name = role_names.get(str(item.get("role_definition_id")))
+            principal = str(item.get("principal_id") or "").lower()
+            if not role_name or not principal:
+                continue
+            entries = by_principal.setdefault(principal, [])
+            if not any(entry["role"] == role_name and entry["assignment"] == assignment for entry in entries):
+                entries.append(
+                    {"role": role_name, "assignment": assignment, "section": section, "collector": collector, "record": item}
+                )
+    return by_principal
+
+
 def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """MFA registration findings.
+
+    These report registration only: whether MFA is required at sign-in is the effective-MFA
+    verdict (``ca.mfa_not_enforced``). Global Administrators have their own critical rule; any
+    other account holding an administrator role, or flagged ``isAdmin`` by the registration
+    report, gets the privileged rule instead of the generic user rule.
+    """
     users_by_id = {
         str(item.get("id")).lower(): item
         for item in ((normalized_snapshot.get("users") or {}).get("records") or [])
@@ -1181,6 +1228,7 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
         if item.get("principal_name")
     }
     admin_principal_ids = {item.lower() for item in _global_admin_principal_ids(normalized_snapshot)}
+    privileged_roles = _privileged_roles_for_mfa(normalized_snapshot)
     findings: list[dict[str, Any]] = []
     for registration in ((normalized_snapshot.get("auth_method_registration_objects") or {}).get("records") or []):
         if registration.get("is_mfa_registered") is not False:
@@ -1190,14 +1238,48 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
         user = users_by_id.get(reg_id) or users_by_upn.get(upn)
         if reg_id in admin_principal_ids or (user and str(user.get("id") or "").lower() in admin_principal_ids):
             continue
-        if registration.get("is_admin") is True:
-            continue
         if user and user.get("enabled") is False:
+            continue
+        affected = (user or {}).get("principal_name") or registration.get("user_principal_name") or registration.get("id")
+        roles = privileged_roles.get(str((user or {}).get("id") or reg_id).lower()) or privileged_roles.get(reg_id) or []
+        registration_refs = _normalized_evidence_refs("auth_method_registration_objects", registration, "auth_methods")
+        # Privileged accounts are reported whatever their user type. A guest administrator's MFA may be
+        # satisfied in the home tenant, but that is for the reviewer to confirm, not for the rule to assume.
+        if roles or registration.get("is_admin") is True:
+            identified_by = [name for name, present in (
+                ("directory_role", bool(roles)),
+                ("registration_report_is_admin", registration.get("is_admin") is True),
+            ) if present]
+            role_rows = [{"role": entry["role"], "assignment": entry["assignment"]} for entry in roles]
+            findings.append(
+                _finalize_finding(
+                    {
+                        "id": f"identity:privileged_mfa_not_registered:{registration.get('id') or affected}",
+                        "rule_id": "identity.privileged_mfa_not_registered",
+                        "severity": "high",
+                        "category": "identity",
+                        "title": "Privileged account is not registered for MFA",
+                        "status": "open",
+                        "collector": "auth_methods",
+                        "affected_objects": [affected],
+                        "evidence": {**registration, "privileged_roles": role_rows, "identified_by": identified_by},
+                        "returned_value": {"is_mfa_registered": False, "privileged_roles": role_rows},
+                        "evidence_refs": [
+                            *registration_refs,
+                            *(
+                                ref
+                                for entry in roles
+                                for ref in _normalized_evidence_refs(entry["section"], entry["record"], entry["collector"])
+                            ),
+                        ],
+                        **_metadata_for("identity.privileged_mfa_not_registered"),
+                    }
+                )
+            )
             continue
         user_type = str((user or {}).get("user_type") or registration.get("user_type") or "").lower()
         if user_type and user_type != "member":
             continue
-        affected = (user or {}).get("principal_name") or registration.get("user_principal_name") or registration.get("id")
         findings.append(
             _finalize_finding(
                 {
@@ -1211,12 +1293,186 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
                     "affected_objects": [affected],
                     "evidence": registration,
                     "returned_value": registration,
-                    "evidence_refs": _normalized_evidence_refs(
-                        "auth_method_registration_objects",
-                        registration,
-                        "auth_methods",
-                    ),
+                    "evidence_refs": registration_refs,
                     **_metadata_for("identity.user_mfa_not_registered"),
+                }
+            )
+        )
+    return findings
+
+
+_MFA_NOT_ENFORCED_POLICY_LIMIT = 10
+
+
+def _verdict_records(normalized_snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(item.get("control")): item
+        for item in ((normalized_snapshot.get(_IDENTITY_CONTROL_SECTION) or {}).get("records") or [])
+        if item.get("control")
+    }
+
+
+def _policy_refs(verdict: dict[str, Any], *lists: str) -> list[dict[str, Any]]:
+    """References to the Conditional Access policy records a verdict cites, capped to stay readable."""
+    refs: list[dict[str, Any]] = []
+    for name in lists:
+        for policy in verdict.get(name) or []:
+            if len(refs) >= _MFA_NOT_ENFORCED_POLICY_LIMIT:
+                return refs
+            if policy.get("key"):
+                refs.extend(_normalized_evidence_refs("conditional_access_graph", policy, "conditional_access"))
+    return refs
+
+
+# Verdict "unknown" is never a pass and never a failure of the main rule; it is its own finding.
+_UNVERIFIED_CONTROL_RULES: dict[str, dict[str, str]] = {
+    "effective_mfa": {
+        "rule_id": "ca.enforcement_unverified",
+        "id": "conditional_access:effective_mfa:unverified",
+        "collector": "conditional_access",
+        "title": "MFA enforcement could not be verified",
+        "affected": "Tenant MFA enforcement",
+    },
+    "legacy_authentication_block": {
+        "rule_id": "ca.enforcement_unverified",
+        "id": "conditional_access:legacy_authentication_block:unverified",
+        "collector": "conditional_access",
+        "title": "Legacy authentication blocking could not be verified",
+        "affected": "Tenant legacy authentication",
+    },
+    "user_consent": {
+        "rule_id": "consent_policy.user_consent_unverified",
+        "id": "consent_policy:user_consent:unverified",
+        "collector": "consent_policy",
+        "title": "User consent settings could not be verified",
+        "affected": "Tenant user consent",
+    },
+}
+
+
+def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Findings from the tenant-level identity control verdicts.
+
+    A negative verdict (``not_enforced``, ``not_blocked``, ``unrestricted``) raises its rule. An
+    ``unknown`` verdict never raises that rule and never passes: it raises the matching
+    ``*_unverified`` rule so the gap is visible instead of silent.
+    """
+    verdicts = _verdict_records(normalized_snapshot)
+    findings: list[dict[str, Any]] = []
+
+    def _verdict_ref(control: str, collector: str) -> list[dict[str, Any]]:
+        return _normalized_evidence_refs(_IDENTITY_CONTROL_SECTION, verdicts[control], collector)
+
+    mfa = verdicts.get("effective_mfa")
+    if mfa and mfa.get("verdict") == "not_enforced":
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "conditional_access:mfa_not_enforced",
+                    "rule_id": "ca.mfa_not_enforced",
+                    "severity": "high",
+                    "category": "identity",
+                    "title": "Neither security defaults nor Conditional Access enforce MFA for all users",
+                    "status": "open",
+                    "collector": "conditional_access",
+                    "affected_objects": ["Tenant MFA enforcement"],
+                    "evidence": mfa,
+                    "returned_value": {
+                        "verdict": "not_enforced",
+                        "basis": mfa.get("basis") or [],
+                        "basis_summary": mfa.get("basis_summary"),
+                        "non_qualifying_policy_count": len(mfa.get("non_qualifying_mfa_policies") or []),
+                        "report_only_policy_count": len(mfa.get("report_only_mfa_policies") or []),
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("effective_mfa", "conditional_access"),
+                        *_policy_refs(mfa, "non_qualifying_mfa_policies", "report_only_mfa_policies"),
+                    ],
+                    **_metadata_for("ca.mfa_not_enforced"),
+                }
+            )
+        )
+
+    legacy = verdicts.get("legacy_authentication_block")
+    if legacy and legacy.get("verdict") == "not_blocked":
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "conditional_access:legacy_auth_not_blocked",
+                    "rule_id": "ca.legacy_auth_not_blocked",
+                    "severity": "high",
+                    "category": "identity",
+                    "title": "Legacy authentication is not blocked",
+                    "status": "open",
+                    "collector": "conditional_access",
+                    "affected_objects": ["Tenant legacy authentication"],
+                    "evidence": legacy,
+                    "returned_value": {
+                        "verdict": "not_blocked",
+                        "basis_summary": legacy.get("basis_summary"),
+                        "non_qualifying_policy_count": len(legacy.get("non_qualifying_block_policies") or []),
+                        "report_only_policy_count": len(legacy.get("report_only_block_policies") or []),
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("legacy_authentication_block", "conditional_access"),
+                        *_policy_refs(legacy, "non_qualifying_block_policies", "report_only_block_policies"),
+                    ],
+                    **_metadata_for("ca.legacy_auth_not_blocked"),
+                }
+            )
+        )
+
+    consent = verdicts.get("user_consent")
+    if consent and consent.get("verdict") == "unrestricted":
+        policy_objects = [
+            item
+            for item in ((normalized_snapshot.get("consent_policy_objects") or {}).get("records") or [])
+            if item.get("source_name") == "authorizationPolicy"
+        ]
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "consent_policy:user_consent_unrestricted",
+                    "rule_id": "consent_policy.user_consent_unrestricted",
+                    "severity": "high",
+                    "category": "application",
+                    "title": "Users can consent to any application",
+                    "status": "open",
+                    "collector": "consent_policy",
+                    "affected_objects": ["Tenant user consent"],
+                    "evidence": consent,
+                    "returned_value": {
+                        "verdict": "unrestricted",
+                        "unrestricted_policies": consent.get("unrestricted_policies") or [],
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("user_consent", "consent_policy"),
+                        *(ref for item in policy_objects[:1] for ref in _normalized_evidence_refs("consent_policy_objects", item, "consent_policy")),
+                    ],
+                    **_metadata_for("consent_policy.user_consent_unrestricted"),
+                }
+            )
+        )
+
+    for control, spec in _UNVERIFIED_CONTROL_RULES.items():
+        verdict = verdicts.get(control)
+        if not verdict or verdict.get("verdict") != "unknown":
+            continue
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": spec["id"],
+                    "rule_id": spec["rule_id"],
+                    "severity": "medium",
+                    "category": "identity",
+                    "title": spec["title"],
+                    "status": "open",
+                    "collector": spec["collector"],
+                    "affected_objects": [spec["affected"]],
+                    "evidence": verdict,
+                    "returned_value": {"verdict": "unknown", "reasons": verdict.get("reasons") or []},
+                    "evidence_refs": _verdict_ref(control, spec["collector"]),
+                    **_metadata_for(spec["rule_id"]),
                 }
             )
         )
@@ -1666,6 +1922,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
     findings.extend(_build_admin_resilience_findings(normalized_snapshot))
     findings.extend(_build_secure_score_findings(normalized_snapshot))
     findings.extend(_build_user_mfa_findings(normalized_snapshot))
+    findings.extend(_build_identity_control_findings(normalized_snapshot))
     findings.extend(_build_stale_account_findings(normalized_snapshot))
     findings.extend(_build_reports_concealed_names_findings(normalized_snapshot))
     findings.extend(_build_risky_signin_findings(normalized_snapshot))

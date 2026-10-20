@@ -139,6 +139,39 @@ def remediate(source: dict) -> tuple[dict, list[str]]:
             )
             changes.append(f"Registered MFA for admin {registration.get('userPrincipalName')}.")
 
+    emergency_groups = [
+        group.get("id")
+        for group in _values(data, "identity", "groups")
+        if "break glass" in str(group.get("displayName", "")).lower()
+    ]
+    for policy in _values(data, "conditional_access", "conditionalAccessPolicies"):
+        title = str(policy.get("displayName", ""))
+        report_only_mfa = title.startswith("CA002") and policy.get("state") == "enabledForReportingButNotEnforced"
+        disabled_legacy_block = title.startswith("CA004") and policy.get("state") == "disabled"
+        if not (report_only_mfa or disabled_legacy_block):
+            continue
+        policy["state"] = "enabled"
+        users = policy.setdefault("conditions", {}).setdefault("users", {})
+        users["excludeGroups"] = sorted(set(users.get("excludeGroups", [])) | set(emergency_groups))
+        if report_only_mfa:
+            changes.append("Switched 'Require MFA for all users' from report-only to enabled, excluding the emergency access group.")
+        else:
+            changes.append("Enabled the 'Block legacy authentication' policy, excluding the emergency access group.")
+
+    legacy_consent = "ManagePermissionGrantsForSelf.microsoft-user-default-legacy"
+    limited_consent = "ManagePermissionGrantsForSelf.microsoft-user-default-low"
+    consent_changed = False
+    for collector in ("consent_policy", "external_identity"):
+        for policy in _values(data, collector, "authorizationPolicy"):
+            assigned = (policy.get("defaultUserRolePermissions") or {}).get("permissionGrantPoliciesAssigned")
+            if isinstance(assigned, list) and legacy_consent in assigned:
+                policy["defaultUserRolePermissions"]["permissionGrantPoliciesAssigned"] = [
+                    limited_consent if item == legacy_consent else item for item in assigned
+                ]
+                consent_changed = True
+    if consent_changed:
+        changes.append("Limited user consent to verified publishers and low-risk permissions.")
+
     provenance = data.setdefault("_fixture_provenance", {})
     provenance.update(
         {

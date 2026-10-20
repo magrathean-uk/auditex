@@ -255,10 +255,20 @@ def test_missing_scope_wins_over_licence_signal() -> None:
 # --- compare --format md -----------------------------------------------------
 
 
-def _run_with_findings(tmp_path: Path, name: str, created: str, findings: list[dict[str, Any]], grade: str) -> Path:
+def _run_with_findings(
+    tmp_path: Path,
+    name: str,
+    created: str,
+    findings: list[dict[str, Any]],
+    grade: str,
+    collectors: dict[str, str] | None = None,
+) -> Path:
+    """A run whose summary lists these collectors (default: identity completed)."""
+    statuses = {"identity": "ok"} if collectors is None else collectors
     return (
         RunBundleBuilder(tmp_path, name=name)
         .manifest(run_id=name, created_utc=created)
+        .summary(collectors=[{"name": key, "status": value, "item_count": 1} for key, value in statuses.items()])
         .report_pack(
             summary={"tenant_name": "acme", "overall_status": "ok", "finding_count": len(findings), "risk": {"grade": grade, "score": 10}},
             findings=findings,
@@ -273,8 +283,8 @@ def test_compare_markdown_summarises_new_resolved_and_changed_findings(tmp_path:
         "run-a",
         "2026-09-01T00:00:00Z",
         [
-            {"id": "f-keep", "rule_id": "x.keep", "severity": "medium", "status": "open", "title": "Kept finding"},
-            {"id": "f-gone", "rule_id": "x.gone", "severity": "high", "status": "open", "title": "Fixed finding"},
+            {"id": "f-keep", "rule_id": "x.keep", "severity": "medium", "status": "open", "title": "Kept finding", "collector": "identity"},
+            {"id": "f-gone", "rule_id": "x.gone", "severity": "high", "status": "open", "title": "Fixed finding", "collector": "identity"},
         ],
         "high",
     )
@@ -300,6 +310,39 @@ def test_compare_markdown_summarises_new_resolved_and_changed_findings(tmp_path:
     assert "Changed findings: 1 (high 1)" in output
     assert "| critical | Brand new finding | x.new |" in output
     assert "| high | medium | open | open | Kept finding | x.keep |" in output
+    assert "Not reassessed findings: 0 (none)" in output
+
+
+def test_compare_markdown_does_not_call_lost_coverage_resolved(tmp_path: Path, capsys) -> None:
+    gone = {"id": "f-gone", "rule_id": "x.gone", "severity": "high", "status": "open", "title": "Unseen finding", "collector": "teams"}
+    fixed = {"id": "f-fixed", "rule_id": "x.fixed", "severity": "medium", "status": "open", "title": "Fixed finding", "collector": "identity"}
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [gone, fixed], "high", {"identity": "ok", "teams": "ok"})
+    after = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean", {"identity": "ok", "teams": "failed"})
+
+    rc = auditex_cli.main(["compare", "--run-dir", str(before), "--run-dir", str(after), "--format", "md"])
+    output = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Resolved findings: 1 (medium 1)" in output
+    assert "Not reassessed findings: 1 (high 1)" in output
+    assert "| high | Unseen finding | x.gone | collector_failed |" in output
+
+
+def test_finding_delta_marks_unknown_collectors_and_missing_coverage_as_not_reassessed(tmp_path: Path) -> None:
+    from auditex.compare import build_finding_delta
+
+    unattributed = {"id": "f-1", "rule_id": "x.one", "severity": "high", "status": "open", "title": "No collector"}
+    not_run = {"id": "f-2", "rule_id": "x.two", "severity": "low", "status": "open", "title": "Collector not run", "collector": "teams"}
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [unattributed, not_run], "high")
+    after = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean")
+
+    delta = build_finding_delta({"path": str(before)}, {"path": str(after)})
+
+    assert delta["resolved"] == []
+    assert {row["id"]: row["reason"] for row in delta["not_reassessed"]} == {
+        "f-1": "collector_unknown",
+        "f-2": "collector_not_run",
+    }
 
 
 def test_compare_defaults_to_json(tmp_path: Path, capsys) -> None:
@@ -346,3 +389,27 @@ def test_live_handoff_keeps_trust_level(tmp_path: Path) -> None:
         .build()
     )
     assert "- Live readiness: partial" in render_enterprise_handoff_markdown(enterprise_handoff(run_dir))
+
+
+def test_finding_delta_needs_every_collector_the_rule_reads_to_have_completed(tmp_path: Path) -> None:
+    from auditex.compare import build_finding_delta
+
+    mfa = {
+        "id": "identity:global_admin_mfa_not_registered:u1",
+        "rule_id": "identity.global_admin_mfa_not_registered",
+        "severity": "critical",
+        "status": "open",
+        "title": "Global Administrator is not registered for MFA",
+        "collector": "auth_methods",
+    }
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [mfa], "critical", {"auth_methods": "ok", "identity": "ok"})
+    blocked = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean", {"auth_methods": "ok", "identity": "failed"})
+    complete = _run_with_findings(tmp_path, "run-c", "2026-09-21T00:00:00Z", [], "clean", {"auth_methods": "ok", "identity": "ok"})
+
+    lost = build_finding_delta({"path": str(before)}, {"path": str(blocked)})
+    fixed = build_finding_delta({"path": str(before)}, {"path": str(complete)})
+
+    assert lost["resolved"] == []
+    assert lost["not_reassessed"][0]["reason"] == "rule_collector_failed:identity"
+    assert [row["id"] for row in fixed["resolved"]] == [mfa["id"]]
+    assert fixed["not_reassessed"] == []

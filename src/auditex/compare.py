@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from azure_tenant_audit.baselines import unmet_rule_collectors
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
@@ -259,10 +260,45 @@ def _risk_snapshot(run: dict[str, Any], findings: list[dict[str, Any]]) -> dict[
     return {"grade": rollup.get("grade"), "score": rollup.get("score")}
 
 
+def reassessment_gap(finding: dict[str, Any], coverage: dict[str, dict[str, Any]]) -> str | None:
+    """Why a finding that is gone from a later run cannot be called resolved, or ``None``.
+
+    A finding is only resolved when its own collector and every collector its rule reads
+    completed in the later run. If any was blocked, partial, not run, or unknown, the finding
+    was not reassessed: a rule that reads role assignments cannot be judged without them.
+    """
+    collector = str(finding.get("collector") or "")
+    if not collector:
+        return "collector_unknown"
+    row = coverage.get(collector)
+    if row is None:
+        return "collector_not_run"
+    if not row["complete"]:
+        return f"collector_{row['status']}"
+    rule_id = str(finding.get("rule_id") or "")
+    if not rule_id:
+        return None
+    unmet = unmet_rule_collectors(
+        rule_id,
+        complete={name for name, item in coverage.items() if item["complete"]},
+        not_applicable={name for name, item in coverage.items() if item["status"] == "not_applicable"},
+    )
+    if unmet:
+        status = coverage[unmet[0]]["status"] if unmet[0] in coverage else "not_run"
+        return f"rule_collector_{status}:{unmet[0]}"
+    return None
+
+
 def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
-    """Summarise findings that are new, resolved, or changed between two runs."""
+    """Summarise findings that are new, resolved, not reassessed, or changed between two runs.
+
+    A finding that is absent from the later run is ``resolved`` only if its collector
+    completed there; otherwise it is ``not_reassessed`` with a ``reason``.
+    """
     left_rows = RunBundle(Path(str(left_run.get("path")))).finding_rows() if left_run.get("path") else []
-    right_rows = RunBundle(Path(str(right_run.get("path")))).finding_rows() if right_run.get("path") else []
+    right_bundle = RunBundle(Path(str(right_run.get("path")))) if right_run.get("path") else None
+    right_rows = right_bundle.finding_rows() if right_bundle else []
+    right_coverage = right_bundle.collector_coverage() if right_bundle else {}
     left = {_finding_key(row): row for row in left_rows}
     right = {_finding_key(row): row for row in right_rows}
 
@@ -276,7 +312,14 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
         }
 
     new = [_summary(right[key]) for key in sorted(set(right) - set(left))]
-    resolved = [_summary(left[key]) for key in sorted(set(left) - set(right))]
+    resolved: list[dict[str, Any]] = []
+    not_reassessed: list[dict[str, Any]] = []
+    for key in sorted(set(left) - set(right)):
+        gap = reassessment_gap(left[key], right_coverage)
+        if gap is None:
+            resolved.append(_summary(left[key]))
+        else:
+            not_reassessed.append({**_summary(left[key]), "reason": gap})
     changed: list[dict[str, Any]] = []
     for key in sorted(set(left) & set(right)):
         before, after = left[key], right[key]
@@ -291,6 +334,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
     return {
         "new": new,
         "resolved": resolved,
+        "not_reassessed": not_reassessed,
         "changed": changed,
         "risk_before": _risk_snapshot(left_run, left_rows),
         "risk_after": _risk_snapshot(right_run, right_rows),
@@ -309,12 +353,18 @@ def _severity_counts(rows: list[dict[str, Any]]) -> str:
     return ", ".join(parts) if parts else "none"
 
 
-def _finding_table(title: str, rows: list[dict[str, Any]], *, changed: bool = False) -> list[str]:
+def _finding_table(title: str, rows: list[dict[str, Any]], *, changed: bool = False, reason: bool = False) -> list[str]:
     lines = [f"## {title} ({len(rows)})", ""]
     if not rows:
         return lines + ["None.", ""]
     ordered = sorted(rows, key=lambda row: (_SEVERITY_ORDER.index(_severity(row)), str(row.get("id") or "")))
-    if changed:
+    if reason:
+        lines += ["| Severity | Finding | Rule | Reason |", "| --- | --- | --- | --- |"]
+        for row in ordered:
+            lines.append(
+                f"| {_md(row.get('severity'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} | {_md(row.get('reason'))} |"
+            )
+    elif changed:
         lines += ["| Severity | Was | Status | Was | Finding | Rule |", "| --- | --- | --- | --- | --- | --- |"]
         for row in ordered:
             lines.append(
@@ -356,11 +406,13 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
         f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({_md(risk_change)}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
         f"- New findings: {len(delta['new'])} ({_severity_counts(delta['new'])})",
         f"- Resolved findings: {len(delta['resolved'])} ({_severity_counts(delta['resolved'])})",
+        f"- Not reassessed findings: {len(delta['not_reassessed'])} ({_severity_counts(delta['not_reassessed'])})",
         f"- Changed findings: {len(delta['changed'])} ({_severity_counts(delta['changed'])})",
         f"- Object changes: {_md(summary.get('added', 0))} added, {_md(summary.get('removed', 0))} removed, {_md(summary.get('changed', 0))} changed",
         "",
     ]
     lines += _finding_table("New findings", delta["new"])
     lines += _finding_table("Resolved findings", delta["resolved"])
+    lines += _finding_table("Not reassessed findings (collector did not complete in the later run)", delta["not_reassessed"], reason=True)
     lines += _finding_table("Changed findings", delta["changed"], changed=True)
     return "\n".join(lines)

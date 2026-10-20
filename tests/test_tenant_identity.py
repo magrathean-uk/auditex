@@ -35,6 +35,7 @@ def _read(path: Path) -> dict:
 def _prepare(
     root: Path, *, mode: str = "app", label: str = "Customer", requested: str | None = DOMAIN,
     organization: str | None = TENANT, claim: str | None = TENANT, synthetic: bool = False,
+    completed: bool = False,
 ) -> tuple[AuditWriter, ProviderFinalizePlan]:
     writer = AuditWriter(root, tenant_name=label, run_name="audit")
     if organization:
@@ -57,11 +58,16 @@ def _prepare(
         })
     snapshot = {"snapshot": {"normalized_counts": {}}}
     writer.write_normalized("snapshot", snapshot["snapshot"])
+    ledger = [{"collector": "identity", "coverage_status": "complete_exact_scope"}] if completed else []
+    if ledger:
+        writer.write_normalized("coverage_ledger", {"kind": "coverage_ledger", "records": ledger})
     plan = ProviderFinalizePlan(
-        tenant_name=label, tenant_id=requested, executed_by="azure_tenant_audit", selected_collectors=[],
+        tenant_name=label, tenant_id=requested, executed_by="azure_tenant_audit",
+        selected_collectors=["identity"] if completed else [],
         overall_status="ok", duration_seconds=0, mode=mode, auditor_profile="auto", plane="inventory",
         findings=[], blockers=[], evidence_paths=[], normalized_snapshot=snapshot, capability_rows=[],
-        coverage_ledger=[], privacy=build_privacy_block(safe_for_external_llm=False),
+        coverage_ledger=ledger,
+        privacy=build_privacy_block(safe_for_external_llm=False),
         bundle_metadata={"platform": "m365", "fixture_provenance": {"synthetic": True} if synthetic else None},
     )
     return writer, plan
@@ -136,8 +142,9 @@ def test_drift_gate_blocks_different_tenants_before_loading_findings(tmp_path, m
 def test_drift_gate_allows_renamed_verified_tenant_and_reports_identity_basis(tmp_path):
     from auditex.cli import gate_drift
 
-    before = _bundle(tmp_path / "before", label="Previous name")
-    after = _bundle(tmp_path / "after", label="Current name")
+    # The gate only trusts runs in which a collector completed, so these bundles carry one.
+    before = _bundle(tmp_path / "before", label="Previous name", completed=True)
+    after = _bundle(tmp_path / "after", label="Current name", completed=True)
     result = gate_drift(baseline_run_dir=str(before), current_run_dir=str(after), fail_on="high")
     assert result["pass"] is True
     assert result["compare_context"]["identity_basis"] == "verified_tenant_id"

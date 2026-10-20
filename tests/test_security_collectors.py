@@ -18,6 +18,8 @@ class _SecurityClient:
             return [{"id": "da-1"}]
         if path == "/identity/conditionalAccess/policies":
             return [{"id": "ca-1"}]
+        if path == "/policies/identitySecurityDefaultsEnforcementPolicy":
+            return {"id": "00000000-0000-0000-0000-000000000005", "isEnabled": False}
         if path == "/identity/conditionalAccess/namedLocations":
             return [{"id": "nl-1"}]
         if path == "/policies/authenticationStrengthPolicies":
@@ -134,6 +136,12 @@ def test_conditional_access_collector_collects_policy_dependency_surfaces() -> N
 
     assert result.status == "ok"
     assert result.payload["conditionalAccessPolicies"]["value"][0]["id"] == "ca-1"
+    assert result.payload["identitySecurityDefaultsEnforcementPolicy"] == {
+        "id": "00000000-0000-0000-0000-000000000005",
+        "isEnabled": False,
+    }
+    assert "/policies/identitySecurityDefaultsEnforcementPolicy" in client.calls
+    assert client.calls["/policies/identitySecurityDefaultsEnforcementPolicy"] == {}
     assert result.payload["namedLocations"]["value"][0]["id"] == "nl-1"
     assert result.payload["authenticationStrengthPolicies"]["value"][0]["id"] == "as-1"
     assert result.payload["authenticationContextClassReferences"]["value"][0]["id"] == "ac-1"

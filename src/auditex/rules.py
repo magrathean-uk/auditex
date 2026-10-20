@@ -15,6 +15,7 @@ _RULE_METADATA_FIELDS = ("risk_rating", "impact", "remediation", "references", "
 _M365_PRODUCT_FAMILIES = {
     "app_consent": "identity",
     "app_credentials": "identity",
+    "ca": "identity",
     "collector": "core",
     "consent_policy": "identity",
     "coverage": "core",

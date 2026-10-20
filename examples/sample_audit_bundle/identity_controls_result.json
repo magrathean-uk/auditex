@@ -1,0 +1,254 @@
+{
+  "_fixture_provenance": {
+    "fixture_id": "m365-identity-controls",
+    "fixture_version": "2026-10-20",
+    "provider": "m365",
+    "seed_kind": "known_bad",
+    "synthetic": true,
+    "source_path": "examples/sample_audit_bundle/identity_controls_result.json",
+    "description": "Synthetic tenant with registered but unenforced MFA, unblocked legacy authentication, unrestricted user consent and an administrator without MFA. Every identifier is fictional; domains use the reserved .example TLD."
+  },
+  "identity": {
+    "users": {
+      "value": [
+        {
+          "id": "sample-user-01",
+          "displayName": "Example User",
+          "userPrincipalName": "example@contoso.example",
+          "accountEnabled": true,
+          "userType": "Member"
+        },
+        {
+          "id": "sample-admin-01",
+          "displayName": "Casey Admin",
+          "userPrincipalName": "casey.admin@contoso.example",
+          "accountEnabled": true,
+          "userType": "Member"
+        },
+        {
+          "id": "sample-admin-02",
+          "displayName": "Emergency Access",
+          "userPrincipalName": "emergency@contoso.example",
+          "accountEnabled": true,
+          "userType": "Member"
+        },
+        {
+          "id": "sample-admin-03",
+          "displayName": "Pat Mailflow",
+          "userPrincipalName": "pat.mailflow@contoso.example",
+          "accountEnabled": true,
+          "userType": "Member"
+        }
+      ]
+    },
+    "groups": {
+      "value": [
+        {
+          "id": "sample-group-pilot",
+          "displayName": "MFA pilot group",
+          "groupTypes": []
+        }
+      ]
+    },
+    "roleDefinitions": {
+      "value": [
+        {
+          "id": "62e90394-69f5-4237-9190-012177145e10",
+          "displayName": "Global Administrator"
+        },
+        {
+          "id": "29232cdf-9323-42fd-ade2-1d097af3e4de",
+          "displayName": "Exchange Administrator"
+        }
+      ]
+    },
+    "roleAssignments": {
+      "value": [
+        {
+          "id": "sample-assignment-01",
+          "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10",
+          "principalId": "sample-admin-01"
+        },
+        {
+          "id": "sample-assignment-02",
+          "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10",
+          "principalId": "sample-admin-02"
+        },
+        {
+          "id": "sample-assignment-03",
+          "roleDefinitionId": "29232cdf-9323-42fd-ade2-1d097af3e4de",
+          "principalId": "sample-admin-03"
+        }
+      ]
+    }
+  },
+  "auth_methods": {
+    "userRegistrationDetails": {
+      "value": [
+        {
+          "id": "sample-user-01",
+          "userPrincipalName": "example@contoso.example",
+          "userType": "member",
+          "isAdmin": false,
+          "isMfaRegistered": false,
+          "isMfaCapable": false
+        },
+        {
+          "id": "sample-admin-01",
+          "userPrincipalName": "casey.admin@contoso.example",
+          "userType": "member",
+          "isAdmin": true,
+          "isMfaRegistered": true,
+          "isMfaCapable": true
+        },
+        {
+          "id": "sample-admin-02",
+          "userPrincipalName": "emergency@contoso.example",
+          "userType": "member",
+          "isAdmin": true,
+          "isMfaRegistered": true,
+          "isMfaCapable": true
+        },
+        {
+          "id": "sample-admin-03",
+          "userPrincipalName": "pat.mailflow@contoso.example",
+          "userType": "member",
+          "isAdmin": true,
+          "isMfaRegistered": false,
+          "isMfaCapable": false
+        }
+      ]
+    }
+  },
+  "conditional_access": {
+    "conditionalAccessPolicies": {
+      "value": [
+        {
+          "id": "sample-ca-01",
+          "displayName": "Require MFA for the pilot group",
+          "state": "enabled",
+          "conditions": {
+            "users": {
+              "includeGroups": [
+                "sample-group-pilot"
+              ],
+              "excludeUsers": [
+                "sample-admin-02"
+              ]
+            },
+            "applications": {
+              "includeApplications": [
+                "All"
+              ]
+            },
+            "clientAppTypes": [
+              "all"
+            ]
+          },
+          "grantControls": {
+            "operator": "OR",
+            "builtInControls": [
+              "mfa"
+            ]
+          }
+        },
+        {
+          "id": "sample-ca-02",
+          "displayName": "Require MFA for all users (report-only)",
+          "state": "enabledForReportingButNotEnforced",
+          "conditions": {
+            "users": {
+              "includeUsers": [
+                "All"
+              ],
+              "excludeUsers": [
+                "sample-admin-02"
+              ]
+            },
+            "applications": {
+              "includeApplications": [
+                "All"
+              ]
+            },
+            "clientAppTypes": [
+              "all"
+            ]
+          },
+          "grantControls": {
+            "operator": "OR",
+            "builtInControls": [
+              "mfa"
+            ]
+          }
+        },
+        {
+          "id": "sample-ca-03",
+          "displayName": "Block Exchange ActiveSync only",
+          "state": "enabled",
+          "conditions": {
+            "users": {
+              "includeUsers": [
+                "All"
+              ],
+              "excludeUsers": [
+                "sample-admin-02"
+              ]
+            },
+            "applications": {
+              "includeApplications": [
+                "All"
+              ]
+            },
+            "clientAppTypes": [
+              "exchangeActiveSync"
+            ]
+          },
+          "grantControls": {
+            "operator": "OR",
+            "builtInControls": [
+              "block"
+            ]
+          }
+        }
+      ]
+    },
+    "identitySecurityDefaultsEnforcementPolicy": {
+      "id": "00000000-0000-0000-0000-000000000005",
+      "displayName": "Security Defaults",
+      "description": "Security defaults policy",
+      "isEnabled": false
+    },
+    "authenticationStrengthPolicies": {
+      "value": []
+    }
+  },
+  "consent_policy": {
+    "adminConsentRequestPolicy": {
+      "isEnabled": true,
+      "version": 1
+    },
+    "permissionGrantPolicies": {
+      "value": [
+        {
+          "id": "microsoft-user-default-legacy",
+          "displayName": "Default user consent (legacy)"
+        },
+        {
+          "id": "microsoft-user-default-low",
+          "displayName": "Default user consent (low risk)"
+        }
+      ]
+    },
+    "authorizationPolicy": {
+      "id": "authorizationPolicy",
+      "displayName": "Authorization Policy",
+      "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3",
+      "defaultUserRolePermissions": {
+        "allowedToCreateApps": true,
+        "permissionGrantPoliciesAssigned": [
+          "ManagePermissionGrantsForSelf.microsoft-user-default-legacy"
+        ]
+      }
+    }
+  }
+}

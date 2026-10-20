@@ -27,7 +27,10 @@ class AuthMethodsCollector(Collector):
             "userRegistrationDetails": {
                 "endpoint": "/reports/authenticationMethods/userRegistrationDetails",
                 "params": {
-                    "$select": "id,userPrincipalName,isMfaCapable,isMfaRegistered,isPasswordlessCapable,isSsprEnabled",
+                    "$select": (
+                        "id,userPrincipalName,userType,isAdmin,isMfaCapable,isMfaRegistered,"
+                        "isPasswordlessCapable,isSsprEnabled"
+                    ),
                 },
             },
         }

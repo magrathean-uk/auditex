@@ -40,6 +40,9 @@ Other v1.0 reads with gating worth knowing:
   relationship rows maximum for unbounded runs). Each failed or capped read
   has a coverage row. Application registration ownership and enterprise-app
   service-principal ownership remain distinct observations.
+- `conditional_access` reads `GET /policies/identitySecurityDefaultsEnforcementPolicy` (`Policy.Read.All`) beside the Conditional Access policies it already reads. It is a single object with an `isEnabled` flag; Auditex needs it because a tenant on security defaults has no Conditional Access policies yet still requires MFA. Together with `/identity/conditionalAccess/policies` (full conditions: user, group and role include and exclude lists, applications, `clientAppTypes`, grant controls and authentication strength) it feeds the `effective_mfa` and `legacy_authentication_block` verdicts. No new permission is needed.
+- `auth_methods` reads `/reports/authenticationMethods/userRegistrationDetails` with a fixed `$select` of metadata fields: `id`, `userPrincipalName`, `userType`, `isAdmin`, `isMfaCapable`, `isMfaRegistered`, `isPasswordlessCapable`, `isSsprEnabled`. `userType` and `isAdmin` let the MFA registration rules tell privileged and guest accounts from ordinary members. No authentication method values are requested.
+- `consent_policy` already reads `/policies/authorizationPolicy`; normalization now keeps `defaultUserRolePermissions.permissionGrantPoliciesAssigned`, `allowedToCreateApps` and `guestUserRoleId` for the `user_consent` verdict. No new call.
 - `reports_usage` reads `/admin/reportSettings` (`ReportSettings.Read.All`) before the usage reports. When `displayConcealedNames` is true, per-user report rows are hashed and Auditex raises `reports_usage.concealed_names`.
 - `defender_cloud_apps` reads only `/identityGovernance/appConsent/appConsentRequests` (`ConsentRequest.Read.All`). Microsoft Graph has no documented endpoint for Defender for Cloud Apps app risk profiles.
 

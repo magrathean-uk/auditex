@@ -11,6 +11,20 @@ from .chunk_reader import iter_endpoint_records
 from .detection_coverage import build_detection_signals
 from .directory_relationships import normalize_directory_relationships
 from .friendly_names import build_friendly_name_catalog
+from .identity_controls import (
+    EVIDENCE_ABSENT,
+    EVIDENCE_BLOCKED,
+    EVIDENCE_COLLECTED,
+    EVIDENCE_TRUNCATED,
+    KIND as IDENTITY_CONTROL_KIND,
+    SECTION as IDENTITY_CONTROL_SECTION,
+    Evidence,
+    compact_targeting,
+    evaluate_effective_mfa,
+    evaluate_legacy_authentication_block,
+    evaluate_user_consent,
+    policy_targeting,
+)
 
 
 # Detection coverage is assessed for Microsoft 365 runs that collected any of these surfaces.
@@ -133,6 +147,29 @@ class _NormalizationSources:
             "issues": issues,
         }
         return rows
+
+    def endpoint_evidence(self, payload: dict[str, Any], key: str, *, singleton: bool = False) -> Evidence:
+        """How completely one endpoint was collected, for analyses that must not guess.
+
+        ``singleton`` endpoints return one object, which Graph may deliver bare or wrapped in
+        ``value``; every other endpoint must be a collection.
+        """
+        section = payload.get(key) if isinstance(payload, dict) else None
+        if not isinstance(section, dict):
+            return Evidence(EVIDENCE_ABSENT)
+        if section.get("error"):
+            return Evidence(EVIDENCE_BLOCKED, detail=str(section.get("error_class") or "error"))
+        if not self.is_endpoint(section):
+            if singleton and section:
+                return Evidence(EVIDENCE_COLLECTED, (section,))
+            return Evidence(EVIDENCE_ABSENT)
+        rows = tuple(self.values(payload, key))
+        report = self.reports.get(f"{self.collector_names.get(id(payload), 'unknown')}.{key}") or {}
+        if report.get("collection_limited"):
+            return Evidence(EVIDENCE_TRUNCATED, rows, "collection_limit_reached")
+        if report.get("complete") is False:
+            return Evidence(EVIDENCE_TRUNCATED, rows, "incomplete_read")
+        return Evidence(EVIDENCE_COLLECTED, rows)
 
     def analysis_payloads(self, collectors: tuple[str, ...]) -> dict[str, dict[str, Any]]:
         """Temporary complete views for analyses that consume raw-shaped sections."""
@@ -910,6 +947,7 @@ def _build_conditional_access_graph(
                     "excluded_locations": len(exclude_locations),
                 },
                 missing_break_glass_exclusion=missing_break_glass,
+                targeting=compact_targeting(policy_targeting(policy)),
                 mfa_enforcement=mfa_enforcement,
                 relationships=[
                     item
@@ -1080,6 +1118,67 @@ def _build_app_owner_edges(
                     )
                 )
     return list({record["key"]: record for record in records}.values())
+
+
+def _authorization_policy_fields(item: dict[str, Any]) -> dict[str, Any]:
+    """User consent and app-creation settings that the authorization policy carries."""
+    defaults = item.get("defaultUserRolePermissions") if isinstance(item.get("defaultUserRolePermissions"), dict) else {}
+    return {
+        "permission_grant_policies_assigned": defaults.get("permissionGrantPoliciesAssigned"),
+        "allowed_to_create_apps": defaults.get("allowedToCreateApps"),
+        "guest_user_role_id": item.get("guestUserRoleId"),
+    }
+
+
+def _build_identity_control_verdicts(
+    sources: "_NormalizationSources",
+    collector_payloads: dict[str, dict[str, Any]],
+    *,
+    users: list[dict[str, Any]],
+    groups: list[dict[str, Any]],
+    role_definitions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Tenant-level verdicts, one record per control, for every collector that was part of the run."""
+    lookups = {
+        "user": {str(item["id"]): str(item.get("principal_name") or item.get("display_name") or "") for item in users},
+        "group": {str(item["id"]): str(item.get("display_name") or "") for item in groups},
+        "role": {str(item["id"]): str(item.get("display_name") or "") for item in role_definitions},
+    }
+    lookups = {kind: {key: name for key, name in rows.items() if name} for kind, rows in lookups.items()}
+    verdicts: list[dict[str, Any]] = []
+    access_payload = collector_payloads.get("conditional_access")
+    if isinstance(access_payload, dict):
+        policies = sources.endpoint_evidence(access_payload, "conditionalAccessPolicies")
+        security_defaults = sources.endpoint_evidence(
+            access_payload, "identitySecurityDefaultsEnforcementPolicy", singleton=True
+        )
+        strengths = sources.endpoint_evidence(access_payload, "authenticationStrengthPolicies")
+        auth_payload = collector_payloads.get("auth_methods", {})
+        registration = _normalize_mfa_registration(sources.values(auth_payload, "userRegistrationDetails"))
+        verdicts.append(
+            evaluate_effective_mfa(
+                policies=policies,
+                security_defaults=security_defaults,
+                authentication_strengths=strengths,
+                lookups=lookups,
+                registration=registration if registration["sampled_users"] else None,
+            )
+        )
+        verdicts.append(
+            evaluate_legacy_authentication_block(policies=policies, security_defaults=security_defaults, lookups=lookups)
+        )
+    consent_payload = collector_payloads.get("consent_policy")
+    if isinstance(consent_payload, dict):
+        verdicts.append(
+            evaluate_user_consent(
+                authorization_policy=sources.endpoint_evidence(consent_payload, "authorizationPolicy", singleton=True),
+                permission_grant_policies=sources.endpoint_evidence(consent_payload, "permissionGrantPolicies"),
+            )
+        )
+    return [
+        _record(IDENTITY_CONTROL_KIND, f"identity_controls.{item['control']}", str(item["control"]), **item)
+        for item in verdicts
+    ]
 
 
 def build_normalized_snapshot(
@@ -1756,6 +1855,7 @@ def build_normalized_snapshot(
                     source_name=source_name,
                     display_name=item.get("displayName"),
                     is_enabled=item.get("isEnabled"),
+                    **(_authorization_policy_fields(item) if source_name == "authorizationPolicy" else {}),
                 )
             )
     domain_hybrid_objects: list[dict[str, Any]] = []
@@ -2302,6 +2402,15 @@ def build_normalized_snapshot(
         records_by_section["relationships"] = relationships
     if policy_findings:
         records_by_section["ca_findings"] = policy_findings
+    identity_control_verdicts = _build_identity_control_verdicts(
+        sources,
+        collector_payloads,
+        users=users,
+        groups=groups,
+        role_definitions=role_definitions,
+    )
+    if identity_control_verdicts:
+        records_by_section[IDENTITY_CONTROL_SECTION] = identity_control_verdicts
 
     for key, value in graph_summary.items():
         if value:

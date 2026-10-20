@@ -18,7 +18,10 @@
       "ShipTrack Sync: removed the expired secret and the http:// redirect URI, and assigned an owner.",
       "Payroll Export: revoked the RoleManagement.ReadWrite.Directory application permission it never needed.",
       "Removed Global Administrator from the disabled account.",
-      "Registered MFA for admin gareth.pryce@halcyonfreight.example."
+      "Registered MFA for admin gareth.pryce@halcyonfreight.example.",
+      "Switched 'Require MFA for all users' from report-only to enabled, excluding the emergency access group.",
+      "Enabled the 'Block legacy authentication' policy, excluding the emergency access group.",
+      "Limited user consent to verified publishers and low-risk permissions."
     ]
   },
   "identity": {
@@ -161,10 +164,15 @@
     "conditionalAccessPolicies": {
       "value": [
         {"id": "0d3e1a7f-0000-4000-8000-000500000001", "displayName": "CA001 - Require MFA for administrators", "state": "enabled", "createdDateTime": "2023-03-01T10:00:00Z", "conditions": {"users": {"includeRoles": ["62e90394-69f5-4237-9190-012177145e10", "29232cdf-9323-42fd-ade2-1d097af3e4de", "729827e3-9c14-49f7-bb1b-9608f156bbb8", "e8611ab8-c189-46e8-94e1-60213ab1f814"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": ["mfa"]}},
-        {"id": "0d3e1a7f-0000-4000-8000-000500000002", "displayName": "CA002 - Require MFA for all users", "state": "enabledForReportingButNotEnforced", "createdDateTime": "2024-05-14T10:00:00Z", "conditions": {"users": {"includeUsers": ["All"]}, "applications": {"includeApplications": ["All"]}, "locations": {"includeLocations": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": ["mfa"]}},
+        {"id": "0d3e1a7f-0000-4000-8000-000500000002", "displayName": "CA002 - Require MFA for all users", "state": "enabled", "createdDateTime": "2024-05-14T10:00:00Z", "conditions": {"users": {"includeUsers": ["All"], "excludeGroups": ["0d3e1a7f-0000-4000-8000-000200000001"]}, "applications": {"includeApplications": ["All"]}, "locations": {"includeLocations": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": ["mfa"]}},
         {"id": "0d3e1a7f-0000-4000-8000-000500000003", "displayName": "CA003 - Block high-risk sign-ins", "state": "enabled", "createdDateTime": "2025-01-09T10:00:00Z", "conditions": {"users": {"includeUsers": ["All"]}, "applications": {"includeApplications": ["All"]}, "signInRiskLevels": ["high"], "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": ["block"]}},
-        {"id": "0d3e1a7f-0000-4000-8000-000500000004", "displayName": "CA004 - Block legacy authentication", "state": "disabled", "createdDateTime": "2023-03-01T10:05:00Z", "conditions": {"users": {"includeUsers": ["All"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["exchangeActiveSync", "other"]}, "grantControls": {"operator": "OR", "builtInControls": ["block"]}},
+        {"id": "0d3e1a7f-0000-4000-8000-000500000004", "displayName": "CA004 - Block legacy authentication", "state": "enabled", "createdDateTime": "2023-03-01T10:05:00Z", "conditions": {"users": {"includeUsers": ["All"], "excludeGroups": ["0d3e1a7f-0000-4000-8000-000200000001"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["exchangeActiveSync", "other"]}, "grantControls": {"operator": "OR", "builtInControls": ["block"]}},
         {"id": "0d3e1a7f-0000-4000-8000-000500000005", "displayName": "CA005 - Phishing-resistant MFA for Global Administrators", "state": "enabledForReportingButNotEnforced", "createdDateTime": "2026-08-20T10:00:00Z", "conditions": {"users": {"includeRoles": ["62e90394-69f5-4237-9190-012177145e10"]}, "applications": {"includeApplications": ["All"]}, "clientAppTypes": ["all"]}, "grantControls": {"operator": "OR", "builtInControls": [], "authenticationStrength": {"id": "00000000-0000-0000-0000-000000000004", "displayName": "Phishing-resistant MFA"}}}
+      ]
+    },
+    "identitySecurityDefaultsEnforcementPolicy": {
+      "value": [
+        {"id": "00000000-0000-0000-0000-000000000005", "displayName": "Security Defaults", "description": "Security defaults policy", "isEnabled": false}
       ]
     },
     "namedLocations": {
@@ -336,7 +344,7 @@
     },
     "authorizationPolicy": {
       "value": [
-        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-legacy"]}}
+        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-low"]}}
       ]
     }
   },
@@ -348,7 +356,7 @@
     },
     "authorizationPolicy": {
       "value": [
-        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-legacy"]}}
+        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-low"]}}
       ]
     },
     "authenticationFlowsPolicy": {

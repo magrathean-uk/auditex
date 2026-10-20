@@ -144,6 +144,28 @@ class RunBundle:
         path = self.path("normalized/coverage_ledger.json")
         return (path, _read_json(path, {})) if path.exists() else (None, None)
 
+    def collector_coverage(self) -> dict[str, dict[str, Any]]:
+        """Per-collector completion: ``{collector: {"complete": bool, "status": str}}``.
+
+        Reads the coverage ledger; a bundle without one falls back to the collector
+        statuses in ``summary.json``. ``complete`` means the collector finished
+        with full coverage, so its findings (or their absence) can be trusted.
+        """
+        _, ledger = self.coverage_ledger()
+        records = ledger.get("records") if isinstance(ledger, Mapping) else None
+        coverage: dict[str, dict[str, Any]] = {}
+        for row in records if isinstance(records, list) else []:
+            if isinstance(row, Mapping) and row.get("collector"):
+                status = str(row.get("coverage_status") or "unknown")
+                coverage[str(row["collector"])] = {"complete": status.startswith("complete"), "status": status}
+        if coverage:
+            return coverage
+        for row in self._summary_section_stats(self.summary()):
+            if row["name"]:
+                status = str(row.get("status") or "unknown")
+                coverage[row["name"]] = {"complete": status == "ok", "status": status}
+        return coverage
+
     def ai_context(self) -> tuple[Path | None, Any]:
         path = self.path("ai_context.json")
         return (path, _read_json(path, {})) if path.exists() else (None, None)

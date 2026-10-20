@@ -296,7 +296,7 @@ auditex compare --run-dir outputs/baseline/client --run-dir outputs/current/clie
 auditex compare --run-dir outputs/baseline/client --run-dir outputs/current/client --format md
 ```
 
-JSON is the default. `--format md` prints a before/after summary of the first and last run: risk grade change, and new, resolved, and changed findings grouped by severity.
+JSON is the default. `--format md` prints a before/after summary of the first and last run: risk grade change, and new, resolved, not reassessed, and changed findings grouped by severity. A finding that is gone from the later run is resolved only if its collector, and every collector its rule reads, completed there; otherwise it is listed as not reassessed with the reason.
 
 Use drift gates in CI or scheduled checks:
 
@@ -304,6 +304,49 @@ Use drift gates in CI or scheduled checks:
 auditex gate <run-dir> --fail-on high
 auditex gate-drift --baseline <old-run> --current <new-run> --fail-on medium
 ```
+
+Both gates print JSON on stdout, warnings and the blocking reason on stderr, and exit `0` only on a pass. A failed threshold and a blocked run both exit `2`; a blocked result has `status: "blocked"` and a `code`.
+
+### Gates fail closed
+
+A gate never reads missing evidence as "nothing found". Every run it reads must have a readable `run-manifest.json`, a contract that is valid as recorded and when recomputed now (`validation.json` alone is not trusted), a readable findings list that agrees with the report pack, and at least one completed collector. A run with no findings has no `findings/findings.json`; that is a clean result, but an empty, unreadable or missing file when findings exist is not.
+
+| `code` | Meaning |
+| --- | --- |
+| `run_dir_missing`, `missing_manifest`, `unreadable_manifest` | The directory or `run-manifest.json` is missing, empty or not a JSON object. |
+| `contract_invalid` | `validation.json` or the manifest does not record a valid contract, or recomputing it fails. `contract.issue_codes` lists the errors. |
+| `unreadable_findings`, `missing_findings`, `findings_inconsistent` | The findings file is empty, unreadable or not a list; a declared file is missing; or the file, manifest and report pack disagree. |
+| `incomplete_coverage` | A collector did not complete, or `overall_status` is not `ok`. Pass `--allow-partial` to accept known gaps; they are listed under `coverage` and in `warnings`. |
+| `no_completed_collectors` | No collector completed. `--allow-partial` does not override this. |
+| `collector_parity_lost` | (`gate-drift`) The current run completed fewer collectors than the baseline. |
+| `tenant_guard` | (`gate-drift`) The runs are not from the same tenant. |
+
+`auditex gate` counts findings with the same accepted-status rule as the drift gate: `accepted_risk`, `accepted` and `waived` findings do not fail the gate but are reported (`accepted_count`, `accepted_by_severity`, `accepted_risk_summary`) and never dropped from the counts. An accepted finding whose waiver has expired fails the gate at or above the threshold (`stale_accepted_risk_count_at_or_above_threshold`). Accepted risks without an owner, reason or expiry appear under `warnings`.
+
+`auditex gate-drift` reports a baseline finding that is absent from the current run as `resolved` only when that finding's collector and every other collector its rule reads (for example `identity` for the Global Administrator MFA rule) completed in the current run. Otherwise it is listed under `not_reassessed` with a `reason` (`collector_not_run`, `collector_blocked_permission`, `collector_unknown`, `rule_collector_blocked_permission:identity`, and so on): lost coverage is not remediation. `collector_parity` lists the collectors completed in each run and which were lost or gained. A new finding that is already accepted does not fail the drift gate; it is listed under `new_accepted`.
+
+### Waivers
+
+`auditex run --waiver-file waivers.json` (live runs; `--offline` does not apply waivers) turns matching findings into `accepted_risk`. The file is a JSON list, or an object with a `waivers` list:
+
+```json
+{
+  "waivers": [
+    {
+      "rule_id": "dns_posture.bimi_logo_insecure",
+      "collector": "dns_posture",
+      "owner": "security@example.com",
+      "reason": "Brand team migrating the logo host",
+      "expires_on": "2026-12-31"
+    }
+  ]
+}
+```
+
+- A waiver matches a finding only when every populated field of `finding_id`, `rule_id`, `collector` and `category` equals the finding's. It needs `finding_id` or `rule_id`; `collector` and `category` only narrow it, and a waiver with neither id is rejected.
+- `owner`, `reason` (or `comment`) and `expires_on` (or `expires`, an ISO date) are expected. A waiver without them still applies but warns on stderr when the file loads and in the finding's `waiver.missing_fields`, the `accepted_risk_summary` and the gate output.
+- An expired waiver (`expires_on` before today) does not match; a waiver that expires today still does. The applied waiver is recorded on the finding with `waiver.matched_fields`.
+- A waiver file that is missing, unreadable, not valid JSON, the wrong shape, or has an invalid row or date stops the run before any tenant call. A configured file that cannot be trusted never means "no waivers".
 
 ## MCP
 

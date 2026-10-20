@@ -31,6 +31,7 @@ from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .resources import resolve_resource_path
 from .utils import load_env_file
 from .versioning import package_version_line
+from .waivers import WaiverFileError, apply_waivers, load_waivers
 from .ai_context import build_privacy_block
 from .capability_gate import relabel_intune_license_blockers
 from . import run as run_core
@@ -303,6 +304,14 @@ def run_offline(
 
 
 def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None) -> int:
+    # Read the waiver file once, before any tenant call. A file that cannot be trusted must not
+    # let the run finish with no waivers applied (or the wrong ones), and the rows loaded here
+    # are the ones applied later, so a file edited mid-run cannot fail the run after collection.
+    try:
+        waiver_rows = load_waivers(Path(args.waiver_file)) if getattr(args, "waiver_file", None) else []
+    except WaiverFileError as exc:
+        LOG.error("%s", exc)
+        return 2
     out = Path(args.out).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
 
@@ -646,11 +655,11 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         result_rows=result_rows,
         diagnostics=diagnostics,
     )
-    findings = build_findings(
-        diagnostics,
-        normalized_snapshot=normalized_snapshot,
-        waiver_file=args.waiver_file,
-    )
+    # Waivers are the last step build_findings would take; applying the rows read at the start of
+    # the run keeps the file from being read a second time after the tenant calls.
+    findings = build_findings(diagnostics, normalized_snapshot=normalized_snapshot)
+    if waiver_rows:
+        findings = apply_waivers(findings, waiver_rows)
     writer.write_normalized("auth_context", auth_context_payload)
     writer.write_normalized("capability_matrix", {"kind": "capability_matrix", "records": capability_rows})
     writer.write_normalized("coverage_ledger", {"kind": "coverage_ledger", "records": coverage_ledger})

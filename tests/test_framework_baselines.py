@@ -28,6 +28,8 @@ _MAPPINGS = {
 _TEMPLATES = json.loads((_REPO / "configs" / "finding-templates.json").read_text(encoding="utf-8"))
 _DIAGNOSTIC_RULES = {
     "collector.issue.permission",
+    "ca.enforcement_unverified",
+    "consent_policy.user_consent_unverified",
     "reports_usage.concealed_names",
     "collector.issue.service",
     "collector.issue.collector",
@@ -42,7 +44,10 @@ _EXPECTED_CIS_V7 = {
     "app_consent.high_privilege",
     "attack_path.no_mfa_to_tier0",
     "app_credentials.secret_long_validity",
+    "ca.legacy_auth_not_blocked",
+    "ca.mfa_not_enforced",
     "consent_policy.admin_consent_workflow_disabled",
+    "consent_policy.user_consent_unrestricted",
     "dns_posture.dkim_missing",
     "dns_posture.dmarc_missing",
     "dns_posture.dmarc_monitor_only",
@@ -57,6 +62,7 @@ _EXPECTED_CIS_V7 = {
     "identity.global_admin_mfa_not_registered",
     "identity.global_admin_singleton",
     "identity.global_admin_sprawl",
+    "identity.privileged_mfa_not_registered",
     "identity.user_mfa_not_registered",
     "mailbox_forwarding.external_inbox_rule",
     "sharepoint.broad_link",
@@ -65,7 +71,10 @@ _EXPECTED_CIS_V7 = {
 _EXPECTED_SECURE_SCORE = {
     "app_consent.high_privilege",
     "attack_path.no_mfa_to_tier0",
+    "ca.legacy_auth_not_blocked",
+    "ca.mfa_not_enforced",
     "consent_policy.admin_consent_workflow_disabled",
+    "consent_policy.user_consent_unrestricted",
     "dns_posture.spf_missing",
     "dns_posture.spf_multiple_records",
     "dns_posture.spf_passthrough",
@@ -74,6 +83,7 @@ _EXPECTED_SECURE_SCORE = {
     "identity.global_admin_mfa_not_registered",
     "identity.global_admin_singleton",
     "identity.global_admin_sprawl",
+    "identity.privileged_mfa_not_registered",
     "identity.user_mfa_not_registered",
     "mailbox_forwarding.external_inbox_rule",
     "sharepoint.broad_link",
@@ -163,7 +173,9 @@ def test_contract_rejects_unknown_framework_key() -> None:
     assert [issue["code"] for issue in issues] == ["unknown_framework_mapping_key"]
 
 
-def _secure_score_snapshot(current: float = 30.0, maximum: float = 100.0) -> dict:
+def _secure_score_snapshot(
+    current: float = 30.0, maximum: float = 100.0, extra_payloads: dict | None = None
+) -> dict:
     payloads = {
         "defender": {
             "secureScores": {
@@ -199,7 +211,28 @@ def _secure_score_snapshot(current: float = 30.0, maximum: float = 100.0) -> dic
             },
         }
     }
+    payloads.update(extra_payloads or {})
     return build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads=payloads)
+
+
+def _clean_dns_payload() -> dict:
+    """A fully evaluated domain: resolver answered, SPF, DMARC, DKIM, MTA-STS and TLS-RPT all published."""
+    return {
+        "dns_posture": {
+            "domainPosture": {
+                "value": [
+                    {
+                        "domain": "contoso.com",
+                        "spf": {"present": True, "all_qualifier": "-", "mechanisms": ["include:spf.protection.outlook.com"]},
+                        "dmarc": {"present": True, "policy": "reject", "pct": 100},
+                        "dkim": {"selectors_present": ["selector1"], "selectors_missing": []},
+                        "mta_sts": {"dns_present": True, "policy": {"fetch_status": "ok", "mode": "enforce"}},
+                        "tls_rpt": {"present": True},
+                    }
+                ]
+            }
+        }
+    }
 
 
 def test_secure_score_low_overall_finding_uses_latest_snapshot() -> None:
@@ -250,7 +283,7 @@ def test_secure_score_reconciliation_from_synthetic_snapshot() -> None:
 
 
 def test_baseline_alignment_shape_in_report_pack() -> None:
-    snapshot = _secure_score_snapshot()
+    snapshot = _secure_score_snapshot(extra_payloads=_clean_dns_payload())
     findings = build_findings([], normalized_snapshot=snapshot)
     findings.append(
         {

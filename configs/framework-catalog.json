@@ -25,6 +25,7 @@
         "5.1.6.3": "Guest invitations limited",
         "5.2.2.1": "MFA for administrative roles",
         "5.2.2.2": "MFA for all users",
+        "5.2.2.3": "Conditional Access blocks legacy authentication",
         "5.2.3.4": "Member users MFA capable",
         "6.2.1": "Mail forwarding blocked",
         "7.2.3": "External content sharing restricted",
@@ -55,6 +56,7 @@
         "https://github.com/cisagov/ScubaGear/tree/v1.8.0/PowerShell/ScubaGear/baselines"
       ],
       "controls": {
+        "MS.AAD.1.1v1": "Legacy authentication blocked",
         "MS.AAD.3.1v1": "Phishing-resistant MFA for all users",
         "MS.AAD.3.2v1": "Alternative MFA when phishing-resistant MFA is not enforced",
         "MS.AAD.3.6v1": "Phishing-resistant MFA for highly privileged roles",
@@ -129,6 +131,10 @@
         },
         "spo_external_sharing_managed": {
           "title": "SharePoint external sharing managed by domain list",
+          "verification": "graph_output_sample"
+        },
+        "BlockLegacyAuthentication": {
+          "title": "Conditional Access blocks legacy authentication",
           "verification": "graph_output_sample"
         }
       }

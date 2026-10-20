@@ -1368,6 +1368,67 @@
       "T1528"
     ]
   },
+  "consent_policy.user_consent_unrestricted": {
+    "cis_m365_v7": [
+      "5.1.5.1"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.5.2v1"
+    ],
+    "ms_secure_score": [
+      "IntegratedApps"
+    ],
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "AM-2"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.3"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1528"
+    ]
+  },
+  "consent_policy.user_consent_unverified": {
+    "nist_800_53": [
+      "AU-2",
+      "AU-6",
+      "CA-7"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.16"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1078"
+    ]
+  },
   "identity.global_admin_singleton": {
     "cis_m365_v7": [
       "1.1.3"
@@ -1544,6 +1605,147 @@
     ],
     "mitre_attack": [
       "T1078.004"
+    ]
+  },
+  "identity.privileged_mfa_not_registered": {
+    "cis_m365_v7": [
+      "5.2.2.1",
+      "5.2.3.4"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.6v1"
+    ],
+    "ms_secure_score": [
+      "AdminMFAV2"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6",
+      "PA-1"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
+  "ca.mfa_not_enforced": {
+    "cis_m365_v7": [
+      "5.2.2.2"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.2v1"
+    ],
+    "ms_secure_score": [
+      "MFARegistrationV2"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)",
+      "IA-2(2)"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1110"
+    ]
+  },
+  "ca.legacy_auth_not_blocked": {
+    "cis_m365_v7": [
+      "5.2.2.3"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.1.1v1"
+    ],
+    "ms_secure_score": [
+      "BlockLegacyAuthentication"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6"
+    ],
+    "nist_800_53": [
+      "CM-7",
+      "IA-2(1)"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1110.003"
+    ]
+  },
+  "ca.enforcement_unverified": {
+    "nist_800_53": [
+      "AU-2",
+      "AU-6",
+      "CA-7"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.16"
+    ],
+    "soc2": [
+      "CC7.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1078"
     ]
   },
   "identity.user_mfa_not_registered": {

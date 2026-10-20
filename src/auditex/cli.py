@@ -481,50 +481,10 @@ def _build_export_parser() -> argparse.ArgumentParser:
     return parser
 
 
-_SEVERITY_RANKS = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+def gate_findings(*, run_dir: str, fail_on: str, allow_partial: bool = False) -> dict[str, object]:
+    from .gate import gate_findings as _gate_findings
 
-
-def gate_findings(*, run_dir: str, fail_on: str) -> dict[str, object]:
-    threshold = fail_on.strip().lower()
-    if threshold not in _SEVERITY_RANKS:
-        raise ValueError(f"unsupported --fail-on severity: {fail_on}")
-
-    from .run_bundle import RunBundle
-
-    bundle = RunBundle(run_dir)
-    rows = bundle.finding_rows()
-    threshold_rank = _SEVERITY_RANKS[threshold]
-
-    counts_by_severity = {key: 0 for key in _SEVERITY_RANKS}
-    triggered: list[dict[str, object]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        status = str(row.get("status") or "open").lower()
-        if status in {"waived", "accepted", "resolved", "closed"}:
-            continue
-        severity = str(row.get("severity") or "medium").lower()
-        if severity in counts_by_severity:
-            counts_by_severity[severity] += 1
-        if _SEVERITY_RANKS.get(severity, 0) >= threshold_rank:
-            triggered.append(
-                {
-                    "id": row.get("id"),
-                    "rule_id": row.get("rule_id"),
-                    "severity": severity,
-                    "title": row.get("title"),
-                    "collector": row.get("collector"),
-                }
-            )
-
-    triggered_count = len(triggered)
-    return {
-        "pass": triggered_count == 0,
-        "fail_on": threshold,
-        "counts_by_severity": counts_by_severity,
-        "counts_at_or_above_threshold": triggered_count,
-        "threshold_findings": triggered,
-    }
+    return _gate_findings(run_dir=run_dir, fail_on=fail_on, allow_partial=allow_partial)
 
 
 def _build_model_parser() -> argparse.ArgumentParser:
@@ -595,6 +555,21 @@ def _emit_assessment(payload: dict[str, object], output: str | None) -> None:
     print(json.dumps({"output": str(path)}, indent=2))
 
 
+_ALLOW_PARTIAL_HELP = (
+    "Accept a run whose collectors did not all complete. Without it the gate fails closed on partial "
+    "coverage; a run with no completed collector always fails."
+)
+
+
+def _emit_gate_result(command: str, result: dict[str, object]) -> int:
+    print(json.dumps(result, indent=2))
+    for message in result.get("warnings") or []:
+        print(f"warning: {message}", file=sys.stderr)
+    if result.get("status") == "blocked":
+        print(f"auditex {command}: blocked ({result.get('code')}): {result.get('reason')}", file=sys.stderr)
+    return 0 if result["pass"] else 2
+
+
 def _build_gate_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="auditex gate", description="Severity-threshold gate for CI / GitHub Action integration.")
     parser.add_argument("run_dir", help="Completed run directory.")
@@ -604,132 +579,21 @@ def _build_gate_parser() -> argparse.ArgumentParser:
         choices=("low", "medium", "high", "critical"),
         help="Minimum severity that triggers a non-zero exit code.",
     )
+    parser.add_argument("--allow-partial", action="store_true", help=_ALLOW_PARTIAL_HELP)
     return parser
 
 
-def gate_drift(*, baseline_run_dir: str, current_run_dir: str, fail_on: str) -> dict[str, object]:
-    threshold = fail_on.strip().lower()
-    if threshold not in _SEVERITY_RANKS:
-        raise ValueError(f"unsupported --fail-on severity: {fail_on}")
+def gate_drift(
+    *, baseline_run_dir: str, current_run_dir: str, fail_on: str, allow_partial: bool = False
+) -> dict[str, object]:
+    from .gate import gate_drift as _gate_drift
 
-    from .run_bundle import RunBundle
-    from .compare import require_same_tenant_runs
-    from azure_tenant_audit.waivers import accepted_risk_summary, is_accepted_status
-
-    try:
-        tenant_context = require_same_tenant_runs([baseline_run_dir, current_run_dir])
-    except ValueError as exc:
-        return {"pass": False, "status": "blocked", "reason": str(exc)}
-    baseline_rows = RunBundle(baseline_run_dir).finding_rows()
-    current_rows = RunBundle(current_run_dir).finding_rows()
-
-    def _index(rows: list[dict]) -> dict[str, dict]:
-        index: dict[str, dict] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            key = str(row.get("id") or row.get("rule_id") or "")
-            if key:
-                index[key] = row
-        return index
-
-    baseline_index = _index(baseline_rows)
-    current_index = _index(current_rows)
-
-    new_keys = [key for key in current_index if key not in baseline_index]
-    resolved_keys = [key for key in baseline_index if key not in current_index]
-    persisting_keys = [key for key in current_index if key in baseline_index]
-
-    threshold_rank = _SEVERITY_RANKS[threshold]
-    new_above_threshold: list[dict[str, object]] = []
-    reactivated_above_threshold: list[dict[str, object]] = []
-    state_transitions: list[dict[str, object]] = []
-    for key in new_keys:
-        row = current_index[key]
-        severity = str(row.get("severity") or "medium").lower()
-        if _SEVERITY_RANKS.get(severity, 0) >= threshold_rank:
-            new_above_threshold.append(
-                {
-                    "id": row.get("id"),
-                    "rule_id": row.get("rule_id"),
-                    "severity": severity,
-                    "title": row.get("title"),
-                    "collector": row.get("collector"),
-                }
-            )
-
-    for key in persisting_keys:
-        baseline_row = baseline_index[key]
-        current_row = current_index[key]
-        from_status = str(baseline_row.get("status") or "open").lower()
-        to_status = str(current_row.get("status") or "open").lower()
-        if from_status != to_status:
-            state_transitions.append(
-                {
-                    "id": current_row.get("id") or baseline_row.get("id") or key,
-                    "rule_id": current_row.get("rule_id") or baseline_row.get("rule_id"),
-                    "severity": str(current_row.get("severity") or baseline_row.get("severity") or "medium").lower(),
-                    "title": current_row.get("title") or baseline_row.get("title"),
-                    "collector": current_row.get("collector") or baseline_row.get("collector"),
-                    "from_status": from_status,
-                    "to_status": to_status,
-                }
-            )
-        if is_accepted_status(from_status) and not is_accepted_status(to_status):
-            severity = str(current_row.get("severity") or "medium").lower()
-            if _SEVERITY_RANKS.get(severity, 0) >= threshold_rank:
-                reactivated_above_threshold.append(
-                    {
-                        "id": current_row.get("id") or key,
-                        "rule_id": current_row.get("rule_id"),
-                        "severity": severity,
-                        "title": current_row.get("title"),
-                        "collector": current_row.get("collector"),
-                        "from_status": from_status,
-                        "to_status": to_status,
-                    }
-                )
-
-    accepted_summary = accepted_risk_summary(current_rows)
-    stale_accepted_above_threshold: list[dict[str, object]] = []
-    for row in accepted_summary.get("stale") or []:
-        severity = str(row.get("severity") or "medium").lower()
-        if _SEVERITY_RANKS.get(severity, 0) >= threshold_rank:
-            stale_accepted_above_threshold.append(
-                {
-                    "id": row.get("id"),
-                    "rule_id": row.get("rule_id"),
-                    "severity": severity,
-                    "title": row.get("title"),
-                    "collector": row.get("collector"),
-                    "expires_on": row.get("expires_on"),
-                    "days_until_expiry": row.get("days_until_expiry"),
-                }
-            )
-
-    return {
-        "pass": len(new_above_threshold) == 0
-        and len(reactivated_above_threshold) == 0
-        and len(stale_accepted_above_threshold) == 0,
-        "fail_on": threshold,
-        "baseline_run_dir": str(baseline_run_dir),
-        "current_run_dir": str(current_run_dir),
-        "compare_context": tenant_context,
-        "new": [{"id": key, **{k: v for k, v in current_index[key].items() if k in {"severity", "title", "rule_id", "collector"}}} for key in new_keys],
-        "resolved": [{"id": key, **{k: v for k, v in baseline_index[key].items() if k in {"severity", "title", "rule_id", "collector"}}} for key in resolved_keys],
-        "persisting": [{"id": key} for key in persisting_keys],
-        "state_transitions": state_transitions,
-        "accepted_risk_summary": accepted_summary,
-        "new_count": len(new_keys),
-        "resolved_count": len(resolved_keys),
-        "persisting_count": len(persisting_keys),
-        "new_count_at_or_above_threshold": len(new_above_threshold),
-        "new_at_or_above_threshold": new_above_threshold,
-        "reactivated_count_at_or_above_threshold": len(reactivated_above_threshold),
-        "reactivated_at_or_above_threshold": reactivated_above_threshold,
-        "stale_accepted_risk_count_at_or_above_threshold": len(stale_accepted_above_threshold),
-        "stale_accepted_risks_at_or_above_threshold": stale_accepted_above_threshold,
-    }
+    return _gate_drift(
+        baseline_run_dir=baseline_run_dir,
+        current_run_dir=current_run_dir,
+        fail_on=fail_on,
+        allow_partial=allow_partial,
+    )
 
 
 def _build_gate_drift_parser() -> argparse.ArgumentParser:
@@ -745,6 +609,7 @@ def _build_gate_drift_parser() -> argparse.ArgumentParser:
         choices=("low", "medium", "high", "critical"),
         help="Minimum severity for a NEW finding that triggers a non-zero exit code.",
     )
+    parser.add_argument("--allow-partial", action="store_true", help=_ALLOW_PARTIAL_HELP)
     return parser
 
 
@@ -1146,19 +1011,21 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "gate":
         parser = _build_gate_parser()
         args = parser.parse_args(argv[1:])
-        result = gate_findings(run_dir=args.run_dir, fail_on=args.fail_on)
-        print(json.dumps(result, indent=2))
-        return 0 if result["pass"] else 2
+        return _emit_gate_result(
+            "gate", gate_findings(run_dir=args.run_dir, fail_on=args.fail_on, allow_partial=args.allow_partial)
+        )
     if argv[0] == "gate-drift":
         parser = _build_gate_drift_parser()
         args = parser.parse_args(argv[1:])
-        result = gate_drift(
-            baseline_run_dir=args.baseline,
-            current_run_dir=args.current,
-            fail_on=args.fail_on,
+        return _emit_gate_result(
+            "gate-drift",
+            gate_drift(
+                baseline_run_dir=args.baseline,
+                current_run_dir=args.current,
+                fail_on=args.fail_on,
+                allow_partial=args.allow_partial,
+            ),
         )
-        print(json.dumps(result, indent=2))
-        return 0 if result["pass"] else 2
     if argv[0] == "run":
         return tenant_audit_main(argv[1:])
     if argv[0] == "summarize":

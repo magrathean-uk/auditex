@@ -43,13 +43,14 @@
     },
     "conditional_access": {
       "enabled": true,
-      "description": "Conditional Access policy targeting and advanced policy dependency surfaces.",
+      "description": "Conditional Access policy targeting, security defaults, and advanced policy dependency surfaces.",
       "required_permissions": [
         "Policy.Read.All",
         "Directory.Read.All"
       ],
       "query_plan": [
         "conditionalAccessPolicies",
+        "identitySecurityDefaultsEnforcementPolicy",
         "namedLocations",
         "authenticationStrengthPolicies",
         "authenticationContextClassReferences"
