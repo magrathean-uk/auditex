@@ -209,6 +209,134 @@ Caveats:
   CC0 1.0 and is not vendored; CISA does not endorse Auditex or models trained on this data. See
   [Source provenance](../provenance/provenance.md#oracle-labelled-cases).
 
+### Second oracle: Prowler consensus
+
+A second deterministic engine, the Microsoft 365 provider of Prowler, checks the same fictional tenants so that each
+ScubaGear label can be confirmed by consensus. `scripts/build-prowler-cases.py` rebuilds, for every variant in
+`variants-<product>/`, the Prowler service objects the mapped checks read (Prowler's own pydantic models, imported from a
+checkout; nothing is copied), runs each mapped check's `execute()` against a stub client that has no Graph, PowerShell or
+network access, and compares the verdict with each case's `requirement_met` label. `configs/oracle-policy-map.json` pairs
+52 ScubaGear policies (AAD 22, EXO 8, SecuritySuite 11, SharePoint 2, Teams 9) with 48 Prowler checks in 53 rows, 18 `exact`
+and 35 `partial`, and lists 101 further Prowler checks as Prowler-only. Rows were paired by reading both rule sets. `exact`
+means both engines test the same setting with the same pass condition; `partial` means overlapping but different conditions
+(another threshold, a subset of the settings, another evidence source), so a disagreement there is expected and is not by
+itself a wrong label. Rows that share a ScubaGear policy are conjunctive parts (MS.AAD.3.5v2 needs both authentication-method
+checks).
+
+Setup, once per session. The reference checkout `~/dev/opensource/auditex-references/prowler` is sparse to `mcp_server`
+(its `sparse_paths` in `sources.json`), so it has no `prowler/` directory and `--prowler-root` needs a copy that has one.
+Prowler's classifiers list Python 3.10 to 3.13 and its models use `pydantic.v1`, which pydantic does not support on 3.14, so
+use 3.12. The checkout is about 90 MB and the environment about 190 MB, both under `$CLEAN_DEV_BUILDS`.
+
+```sh
+B="$CLEAN_DEV_BUILDS/prowler-m365"; mkdir -p "$B"
+git clone --filter=blob:none --no-checkout --sparse https://github.com/prowler-cloud/prowler.git "$B/src"
+git -C "$B/src" sparse-checkout set --no-cone /prowler/ /LICENSE
+git -C "$B/src" checkout f45173997b8331e6cba3deac78bc2e1043b9281d
+uv venv --python 3.12 "$B/venv"
+uv pip install --python "$B/venv/bin/python" pydantic==2.12.5 msgraph-sdk==1.55.0 microsoft-kiota-abstractions==1.9.10 \
+  azure-identity==1.21.0 msal colorama==0.4.6 dnspython python-dateutil pyyaml jsonschema pytest
+
+"$B/venv/bin/python" scripts/build-prowler-cases.py --kit-dir /absolute/path/to/20261019-oracle-cases \
+  --prowler-root "$B/src" --output-dir /absolute/path/to/new-prowler-consensus [--products AAD EXO ...]
+AUDITEX_TEST_PROWLER_ROOT="$B/src" PYTHONPATH=src "$B/venv/bin/python" -m pytest tests/test_prowler_cases.py
+```
+
+The project `.venv` lacks Prowler's dependencies, so `tests/test_prowler_cases.py` skips the Prowler-backed tests there
+(the map, consensus and parsing tests still run). The test that checks every mapped policy against the miner's policy list
+reads `AUDITEX_TEST_ORACLE_KIT` (default: the 20261019 kit under `~/dev/machine/work/auditex-data/development-kit`) and skips
+when it is absent. The output directory is new; an existing one is refused. It holds:
+
+- `verdicts.jsonl`: one row per (variant file, policy, check): `variant`, `scubagear_policy`, `prowler_check`, `status`
+  (`PASS`, `FAIL`, `MANUAL`) and `status_extended`, plus `confidence`, `assumptions` and `input_sha256`. `status` is
+  `UNMAPPED` with a `reason` when the evidence cannot be expressed as Prowler's models (`evidence_missing:<section>`,
+  `shape:<detail>`), the check found nothing to report (`no_finding`), or no builder exists yet (`no_builder`).
+- `consensus.jsonl`: one row per ScubaGear case with both verdicts and `consensus`: `agree`, `disagree` or `unmapped`
+  (reasons: `policy_not_mapped`, `scubagear_label_unknown` for the deliberate collection-gap cases, `prowler_manual`, or an
+  unmapped verdict reason). A `FAIL` part decides a conjunctive policy, otherwise any unmapped part leaves it unmapped.
+- `unmapped-evidence.json` (rows by reason and check, with example variants) and `summary.json` (counts per product and
+  policy, the commits, the checks that ran).
+
+Builders exist for the Entra (AAD) evidence only. Twenty checks ran: `entra_legacy_authentication_blocked`,
+`entra_identity_protection_user_risk_enabled`, `entra_conditional_access_policy_block_high_medium_sign_in_risk`,
+`entra_users_mfa_enabled`, `entra_admin_users_phishing_resistant_mfa_enabled`,
+`entra_managed_device_required_for_authentication`, `entra_managed_device_required_for_mfa_registration`,
+`entra_conditional_access_policy_device_code_flow_blocked`, `entra_authentication_method_authenticator_show_context`,
+`entra_authentication_method_sms_voice_disabled`, `entra_authentication_method_email_otp_disabled`,
+`entra_thirdparty_integrated_apps_not_allowed`, `entra_policy_restricts_user_consent_for_apps`,
+`entra_policy_guest_users_access_restrictions`, `entra_policy_guest_invite_only_for_admin_roles`,
+`entra_admin_consent_workflow_enabled`, `entra_default_app_management_policy_enabled`, `entra_admin_users_cloud_only`,
+`entra_pim_global_administrator_approval_required` and `admincenter_users_between_two_and_four_global_admins`. The other
+mapped checks (Exchange, Defender, SharePoint, Teams, and the Admin Center password check, whose `domain_settings`
+section is empty in every variant) report `no_builder`.
+
+Result on the 20261019 kit (ScubaGear `2446ad7`, Prowler `f451739`, all 299 AAD variant files, 198 distinct inputs).
+Of 1,428 AAD cases that have a mapped policy and a confirmed label, 1,224 agree and 121 disagree; 83 are unmapped.
+
+| Product | Cases | Agree | Disagree | Unmapped | of which label unknown | policy not mapped | no builder | other |
+|---|---|---|---|---|---|---|---|---|
+| AAD | 2,294 | 1,224 | 121 | 949 | 476 | 390 | 1 | 82 |
+| EXO | 81 | 0 | 0 | 81 | 12 | 26 | 43 | 0 |
+| SecuritySuite | 654 | 0 | 0 | 654 | 96 | 322 | 236 | 0 |
+| SharePoint | 464 | 0 | 0 | 464 | 18 | 348 | 98 | 0 |
+| Teams | 482 | 0 | 0 | 482 | 83 | 152 | 247 | 0 |
+| PowerPlatform | 152 | 0 | 0 | 152 | 0 | 152 | 0 | 0 |
+| PowerBI | 120 | 0 | 0 | 120 | 0 | 120 | 0 | 0 |
+
+AAD `other` is 57 `shape` (a few unit tests put empty strings in enumerations such as `BuiltInControls`, a non-GUID
+`GuestUserRoleId`, or two authorization policies, none of which Prowler's models can hold), 20 `no_finding` (MS.AAD.7.6v1:
+the variant has no Global Administrator approval rule, so Prowler reports nothing) and 5 `prowler_manual` (custom
+authentication strengths). By confidence: `exact` rows 283 agree and 34 disagree; `partial` rows 941 agree and 87 disagree.
+
+| ScubaGear policy | Confidence | Agree | Disagree |
+|---|---|---|---|
+| MS.AAD.1.1v1 | exact | 49 | 30 |
+| MS.AAD.2.1v1 | partial | 71 | 8 |
+| MS.AAD.2.3v1 | partial | 68 | 8 |
+| MS.AAD.3.2v2 | partial | 65 | 12 |
+| MS.AAD.3.3v2 | partial | 94 | 9 |
+| MS.AAD.3.5v2 | partial | 138 | 0 |
+| MS.AAD.3.6v1 | partial | 31 | 37 |
+| MS.AAD.3.7v1 | partial | 80 | 0 |
+| MS.AAD.3.8v1 | partial | 74 | 4 |
+| MS.AAD.3.9v1 | exact | 66 | 4 |
+| MS.AAD.5.1v1 | exact | 5 | 0 |
+| MS.AAD.5.2v1 | partial | 5 | 0 |
+| MS.AAD.5.3v1 | partial | 159 | 0 |
+| MS.AAD.5.5v1 | partial | 6 | 2 |
+| MS.AAD.5.6v1 | partial | 5 | 2 |
+| MS.AAD.5.7v1 | partial | 3 | 5 |
+| MS.AAD.7.1v1 | partial | 5 | 0 |
+| MS.AAD.7.3v1 | exact | 5 | 0 |
+| MS.AAD.7.6v1 | partial | 3 | 0 |
+| MS.AAD.8.1v1 | exact | 158 | 0 |
+| MS.AAD.8.2v1 | partial | 134 | 0 |
+
+(MS.AAD.6.1v1 has one case and no builder.) Reading the disagreements:
+
+- 71 of the 121 disagreements, including all 34 `exact` ones, are tenants whose policy has exclusions (MS.AAD.1.1v1 30,
+  MS.AAD.3.9v1 4, MS.AAD.3.2v2 9, MS.AAD.3.6v1 28). ScubaGear counts a policy with exclusions that are not exempted in
+  `scuba_config` as a near miss, which is not met; Prowler ignores exclusions. That is an engine difference, not evidence
+  that a label is wrong; agreement on exclusion-free variants is the stronger signal.
+- The rest follow the notes in the map. MS.AAD.3.6v1: Prowler treats a phishing-resistant policy with no included roles as
+  an administrator policy and fails fixtures whose role ids are placeholders rather than Entra role GUIDs. MS.AAD.2.1v1 and
+  2.3v1: Prowler's different grant or risk conditions. MS.AAD.3.2v2: Prowler ignores authentication strengths.
+  MS.AAD.3.3v2: ScubaGear treats enforced phishing-resistant MFA as making it not applicable. MS.AAD.3.8v1: Prowler also
+  needs the mfa grant control. MS.AAD.5.5v1 to 5.7v1: one Prowler check stands in for three narrower ScubaGear policies.
+- Evidence the variants do not carry is assumed and recorded per row in `assumptions`: session controls, the default app
+  management policy's enabled flag, PIM approvers (assumed configured) and admin consent reviewer settings. A consensus
+  that rests on such an assumption is weaker than one that does not.
+
+Treat `agree` as corroboration and `disagree` as a review queue, not as an automatic relabel: the two engines read the same
+baseline differently, and every label stays an engine output rather than human judgement.
+
+Licence and provenance: Prowler is Apache-2.0 (`prowler-cloud/prowler`, commit `f45173997b8331e6cba3deac78bc2e1043b9281d`,
+the commit pinned in the reference `sources.json`). The script imports Prowler from a local checkout at run time; no Prowler
+code, metadata text or check message is vendored or shipped, and the map holds check ids with Auditex's own wording. The
+`status_extended` strings in `verdicts.jsonl` and `consensus.jsonl` are Prowler output text, so keep those files with the
+other oracle outputs outside the distributable tree, or attribute Prowler and include its Apache-2.0 licence if you share
+them. See [Source provenance](../provenance/provenance.md#oracle-labelled-cases).
+
 ## Local GGUF benchmarks
 
 `scripts/run-model-benchmark.py` launches one owned localhost `llama-server`,

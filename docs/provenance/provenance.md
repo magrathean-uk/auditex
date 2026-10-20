@@ -79,6 +79,14 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
 - **mmorris35/m365-sim**, commit `203d66163b089eec63af258d8142c171d982994c`, Apache-2.0. Reference only:
   it informed the idea of simulated tenant fixtures. No code, data or text from it is used, and it is
   not a label source.
+- **prowler-cloud/prowler**, commit `f45173997b8331e6cba3deac78bc2e1043b9281d`, Apache-2.0. Used as a second labelling
+  oracle by `scripts/build-prowler-cases.py`: the script imports the Microsoft 365 provider's pydantic service models and check
+  classes from a local checkout supplied on the command line and runs the checks offline against a stub client, so ScubaGear
+  labels can be compared with Prowler verdicts. No Prowler code, metadata text or check message is vendored or shipped;
+  `configs/oracle-policy-map.json` holds check ids with Auditex's own wording. The `status_extended` strings in the generated
+  verdict files are Prowler output text, so those files stay with the other oracle outputs outside the distributable tree
+  (attribute Prowler and include its Apache-2.0 licence if they are shared). Prowler's own dependencies are installed only in a
+  throwaway environment under the build cache, never in the project `.venv`.
 - Labels are engine output, not human judgement. `scripts/split-oracle-cases.py --approve-as-oracle`
   records the engine and OPA version as reviewer so the pack preparer accepts the rows; see
   [Model development](../guides/model-development.md#oracle-labelled-cases).
