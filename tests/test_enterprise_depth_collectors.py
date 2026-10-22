@@ -3,7 +3,7 @@ from __future__ import annotations
 from azure_tenant_audit.collectors.app_consent import AppConsentCollector
 from azure_tenant_audit.collectors.consent_policy import ConsentPolicyCollector
 from azure_tenant_audit.collectors.domains_hybrid import DomainsHybridCollector
-from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
+from azure_tenant_audit.collectors.exchange_policy import MAILBOX_FORWARDING_COMMAND, ExchangePolicyCollector
 from azure_tenant_audit.collectors.external_identity import ExternalIdentityCollector
 from azure_tenant_audit.collectors.identity_governance import IdentityGovernanceCollector
 from azure_tenant_audit.collectors.intune_depth import IntuneDepthCollector
@@ -732,7 +732,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled": {
                 "value": [{"Name": "Default"}]
             },
-            "Get-EXOMailbox -ResultSize 50 | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward": {"value": [{"DisplayName": "Alice Example"}]},
+            MAILBOX_FORWARDING_COMMAND: {"value": [{"DisplayName": "Alice Example"}]},
             "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled": {
                 "value": [{"UnifiedAuditLogIngestionEnabled": True}]
             },

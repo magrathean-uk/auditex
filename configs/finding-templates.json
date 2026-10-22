@@ -659,9 +659,9 @@
   },
   "consent_policy.user_consent_unrestricted": {
     "risk_rating": "high",
-    "description": "The authorization policy assigns the legacy user consent policy, so any user can grant any app access to their data without administrator approval, provided the permissions do not require admin consent. Limited consent (verified publishers, low-risk permissions) is recorded in the evidence but not flagged by this rule.",
+    "description": "The authorization policy assigns the legacy user consent policy, so any user can grant any app access to their data without administrator approval, provided the permissions do not require admin consent. Limited consent (the Microsoft-managed policy, or verified publishers and low-risk permissions) is reported by consent_policy.user_consent_limited.",
     "impact": "Illicit consent grants let a malicious app obtain durable access to mail, files and directory data after one click by an ordinary user, with no password theft and no MFA prompt.",
-    "remediation": "In Microsoft Entra, under Enterprise applications, Consent and permissions, choose 'Do not allow user consent', or limit it to verified publishers and low-risk permissions, and enable the admin consent workflow.",
+    "remediation": "In Microsoft Entra, under Enterprise applications, Consent and permissions, choose 'Do not allow user consent' and enable the admin consent workflow.",
     "references": [
       "Microsoft Entra configure user consent settings",
       "Microsoft Entra detect and remediate illicit consent grants",
@@ -671,11 +671,26 @@
     "control_ids": [
       "AUDITEX-CONSENT-USER-UNRESTRICTED"
     ],
-    "expected_value": "Users cannot consent to apps, or can consent only to verified publishers for low-risk permissions."
+    "expected_value": "Users cannot consent to apps."
+  },
+  "consent_policy.user_consent_limited": {
+    "risk_rating": "medium",
+    "description": "The authorization policy lets users consent to applications within limits: the Microsoft-managed policy (microsoft-user-default-recommended with its companion allow-consent-apps policy), or verified publishers with low-risk permissions (microsoft-user-default-low). CIS 5.1.5.1 asks that users cannot consent at all, and ScubaGear MS.AAD.5.2v1 fails the Microsoft-managed assignment. The permission classifications that decide which permissions count as low risk are not read, so the low-risk setting is judged conservatively.",
+    "impact": "Users can still grant an app access to their data without administrator review, within the limits the policy sets, which a malicious or over-reaching app can stay inside.",
+    "remediation": "In Microsoft Entra, under Enterprise applications, Consent and permissions, choose 'Do not allow user consent', enable the admin consent workflow, and review the permission grants already made.",
+    "references": [
+      "Microsoft Entra configure user consent settings",
+      "CIS Microsoft 365 Foundations v7.0.0 5.1.5.1",
+      "CISA SCuBA MS.AAD.5.2v1"
+    ],
+    "control_ids": [
+      "AUDITEX-CONSENT-USER-LIMITED"
+    ],
+    "expected_value": "Users cannot consent to apps."
   },
   "consent_policy.user_consent_unverified": {
     "risk_rating": "medium",
-    "description": "Auditex could not establish whether users can consent to applications, because the authorization policy was blocked or not collected, did not state its assigned permission grant policies, or assigns a custom permission grant policy that was not evaluated.",
+    "description": "Auditex could not establish whether users can consent to applications, because the authorization policy was blocked or not collected, did not state its assigned permission grant policies, or assigns a custom or unrecognised permission grant policy whose include and exclude conditions were not evaluated.",
     "impact": "The tenant's user consent control cannot be asserted from this run. The run reports neither a pass nor a failure for it.",
     "remediation": "Grant the audit identity Policy.Read.All and rerun the consent_policy collector. For a custom permission grant policy, review its include and exclude conditions manually.",
     "references": [
@@ -749,7 +764,7 @@
     "risk_rating": "critical",
     "description": "A Microsoft Entra Global Administrator, by any route (direct, PIM-eligible or through a group), has not registered an MFA method in the authentication method registration report. This reports registration only, not whether MFA is required at sign-in.",
     "impact": "A tenant-wide privileged account with no registered MFA method cannot meet an MFA requirement and is exposed to password-only compromise.",
-    "remediation": "Register phishing-resistant MFA for every Global Administrator and confirm it in the authentication method registration report. Whether MFA is required at sign-in is assessed by the ca.mfa_not_enforced rule.",
+    "remediation": "Register phishing-resistant MFA for every Global Administrator and confirm it in the authentication method registration report. Whether MFA is required at sign-in is assessed by the ca.admin_mfa_not_enforced rule.",
     "references": [
       "Microsoft Entra authentication methods report",
       "CIS Microsoft 365 Foundations v7.0.0 5.2.2.1"
@@ -763,7 +778,7 @@
     "risk_rating": "high",
     "description": "An enabled account that holds an administrator directory role (active, PIM-eligible or inherited through a role-assignable group), or that the registration report flags as an administrator, has not registered an MFA method. Global Administrators are reported separately as critical. Guest accounts are included, because a guest administrator's MFA may be satisfied in its home tenant through cross-tenant trust; confirm that before accepting the finding. This reports registration only, not whether MFA is required at sign-in.",
     "impact": "Administrator accounts are the highest-value sign-in targets. One with no registered MFA method cannot meet an MFA requirement, so a stolen or guessed password can grant administrative control.",
-    "remediation": "Register phishing-resistant MFA for the account and require MFA for administrator roles in Conditional Access. The ca.mfa_not_enforced rule reports whether MFA is required at sign-in.",
+    "remediation": "Register phishing-resistant MFA for the account and require MFA for administrator roles in Conditional Access. The ca.admin_mfa_not_enforced rule reports whether MFA is required of administrators at sign-in.",
     "references": [
       "Microsoft Entra authentication methods report",
       "Microsoft Entra privileged access best practices",
@@ -776,9 +791,9 @@
   },
   "ca.mfa_not_enforced": {
     "risk_rating": "high",
-    "description": "Security defaults are off and no enabled Conditional Access policy requires MFA, or an authentication strength that requires MFA, for all users on all cloud apps. Policies that are report-only, scoped to groups or roles, narrowed by platform, location, risk or device, that exclude platforms, devices or applications, or that accept a non-MFA alternative do not count. Per-user (legacy) MFA states are not read, so this verdict does not cover a tenant that enforces MFA only through per-user MFA.",
+    "description": "Security defaults are off and no enabled Conditional Access policy requires MFA, or an authentication strength that requires MFA, for all users on all cloud apps. Policies that are report-only, scoped to groups or roles, narrowed by platform, location, risk or device, that exclude platforms, devices or applications, or that accept a non-MFA alternative do not count. A policy that targets all users but excludes anything other than the emergency access accounts listed with --break-glass-accounts (an administrator role, a guest type, another user or group) does not require MFA of the excluded principals: the verdict is enforced_with_exclusions and this rule is raised at medium. Per-user (legacy) MFA states are not read, so this verdict does not cover a tenant that enforces MFA only through per-user MFA.",
     "impact": "Nothing in security defaults or Conditional Access requires MFA. Unless per-user MFA is configured, which this rule does not assess, users can sign in with a password alone, so password spray, phishing and credential stuffing can succeed even where every user has registered an MFA method.",
-    "remediation": "Enable security defaults, or create an enabled Conditional Access policy that targets all users and all cloud apps and requires MFA or an MFA authentication strength. Exclude only documented emergency access accounts, start in report-only mode, then enable. If MFA is enforced only through per-user MFA, move it to Conditional Access, which is the supported model.",
+    "remediation": "Enable security defaults, or create an enabled Conditional Access policy that targets all users and all cloud apps and requires MFA or an MFA authentication strength. Exclude only documented emergency access accounts and list them with --break-glass-accounts, start in report-only mode, then enable. If MFA is enforced only through per-user MFA, move it to Conditional Access, which is the supported model.",
     "references": [
       "Microsoft Entra Conditional Access: require MFA for all users",
       "Microsoft Entra security defaults",
@@ -788,13 +803,43 @@
     "control_ids": [
       "AUDITEX-CA-MFA-NOT-ENFORCED"
     ],
-    "expected_value": "Security defaults are enabled, or an enabled Conditional Access policy requires MFA for all users on all cloud apps with only documented principal exclusions."
+    "expected_value": "Security defaults are enabled, or an enabled Conditional Access policy requires MFA for all users on all cloud apps and excludes only the emergency access accounts the operator listed."
+  },
+  "ca.admin_mfa_not_enforced": {
+    "risk_rating": "high",
+    "description": "Security defaults are off and no enabled Conditional Access policy requires MFA of every administrator: one that targets all users, or every directory role an administrator holds, on all cloud apps, with MFA or an MFA authentication strength, and without excluding an administrator role or an administrator. The roles come from the effective administrator set (direct, PIM-eligible and group-inherited). A policy that excludes a group or a guest type without administrator evidence reads enforced_with_exclusions and raises this rule at medium. Registration reports are not read here: they show who could use MFA, not whether it is required. Per-user (legacy) MFA states are not read.",
+    "impact": "Administrator accounts are the highest-value sign-in targets. Where nothing requires them to use MFA, a stolen or guessed password grants administrative control, whether or not the administrator has registered a method.",
+    "remediation": "Enable security defaults, or create an enabled Conditional Access policy that targets administrator roles, or all users, on all cloud apps and requires MFA, preferably a phishing-resistant authentication strength. Do not exclude administrator roles or administrators; exclude only documented emergency access accounts and list them with --break-glass-accounts.",
+    "references": [
+      "Microsoft Entra Conditional Access: require MFA for administrators",
+      "Microsoft Entra security defaults",
+      "CIS Microsoft 365 Foundations v7.0.0 5.2.2.1",
+      "CISA SCuBA MS.AAD.3.6v1"
+    ],
+    "control_ids": [
+      "AUDITEX-CA-ADMIN-MFA-NOT-ENFORCED"
+    ],
+    "expected_value": "Security defaults are enabled, or an enabled Conditional Access policy requires MFA of every administrator role on all cloud apps with no administrator excluded."
+  },
+  "ca.admin_phishing_resistant_mfa_not_enforced": {
+    "risk_rating": "low",
+    "description": "Administrators are required to use MFA, but no enabled Conditional Access policy requires a phishing-resistant authentication strength (the built-in Phishing-resistant MFA strength, or one that allows only FIDO2, Windows Hello for Business or certificate-based multi-factor credentials) of every administrator. Security defaults require MFA of administrators but accept SMS, voice and push. This rule is raised only when administrator MFA itself is enforced; when it is not, ca.admin_mfa_not_enforced reports the larger gap.",
+    "impact": "MFA by SMS, voice or push can be phished or fatigued. A phishing-resistant method removes the commonest route to taking over an administrator account.",
+    "remediation": "Register FIDO2 keys or Windows Hello for Business for administrators, then require the Phishing-resistant MFA authentication strength for administrator roles in Conditional Access, with an emergency access account excluded.",
+    "references": [
+      "Microsoft Entra authentication strengths",
+      "CISA SCuBA MS.AAD.3.6v1"
+    ],
+    "control_ids": [
+      "AUDITEX-CA-ADMIN-PHISHING-RESISTANT-MFA"
+    ],
+    "expected_value": "Every administrator is required to use a phishing-resistant authentication method."
   },
   "ca.legacy_auth_not_blocked": {
     "risk_rating": "high",
-    "description": "Security defaults are off and no enabled Conditional Access policy blocks the Exchange ActiveSync and other legacy client types for all users on all cloud apps. Policies that exclude platforms, devices or applications, or are narrowed by platform, location, risk or device, do not count. Exchange Online protocol settings such as SMTP AUTH are not evaluated by this rule.",
+    "description": "Security defaults are off and no enabled Conditional Access policy blocks the Exchange ActiveSync and other legacy client types for all users on all cloud apps. Policies that exclude platforms, devices or applications, or are narrowed by platform, location, risk or device, do not count. A block policy that excludes anything other than the emergency access accounts listed with --break-glass-accounts leaves the excluded principals able to use legacy protocols: the verdict is blocked_with_exclusions and this rule is raised at medium. Exchange Online protocol settings such as SMTP AUTH are not evaluated by this rule.",
     "impact": "Legacy authentication protocols cannot perform MFA. Attackers use them for password spray and to bypass the MFA and Conditional Access requirements that apply to modern sign-in.",
-    "remediation": "Create an enabled Conditional Access policy that targets all users and all cloud apps, selects the Exchange ActiveSync and other legacy client app types, and blocks access. Exclude only documented service accounts, start in report-only mode, then enable.",
+    "remediation": "Create an enabled Conditional Access policy that targets all users and all cloud apps, selects the Exchange ActiveSync and other legacy client app types, and blocks access. Exclude only documented emergency access accounts (list them with --break-glass-accounts), start in report-only mode, then enable.",
     "references": [
       "Microsoft Entra Conditional Access: block legacy authentication",
       "Microsoft Entra security defaults",
@@ -808,7 +853,7 @@
   },
   "ca.enforcement_unverified": {
     "risk_rating": "medium",
-    "description": "Auditex could not establish whether MFA is enforced or legacy authentication is blocked, because the Conditional Access policy list or the security defaults setting was blocked, truncated or not collected, or a policy used an authentication strength that could not be checked.",
+    "description": "Auditex could not establish whether MFA is enforced (for all users or for administrators) or legacy authentication is blocked, because the Conditional Access policy list or the security defaults setting was blocked, truncated or not collected, a policy used an authentication strength that could not be checked, or the administrator set a role-targeted policy had to be compared with was not complete.",
     "impact": "The tenant's central sign-in controls cannot be asserted from this run. The run reports neither a pass nor a failure for them.",
     "remediation": "Grant the audit identity Policy.Read.All, rerun the conditional_access collector, and raise the per-endpoint limit if the policy list was truncated. The verdict evidence lists the reasons.",
     "references": [
@@ -1222,9 +1267,9 @@
   },
   "exchange.mailbox_forwarding_configured": {
     "risk_rating": "high",
-    "description": "A mailbox forwards mail to an SMTP address configured on the mailbox itself.",
+    "description": "A mailbox forwards mail to an SMTP address (ForwardingSmtpAddress) or to a mail contact or mailbox (ForwardingAddress) configured on the mailbox itself.",
     "impact": "Mailbox-level forwarding copies mail out of the tenant without a transport rule, and it is a common persistence step after a mailbox takeover.",
-    "remediation": "Remove the forwarding address unless an approved business case exists, and confirm the mailbox was not compromised.",
+    "remediation": "Remove the forwarding address or contact unless an approved business case exists, and confirm the mailbox was not compromised.",
     "references": [
       "Exchange mailbox forwarding review",
       "MITRE ATT&CK T1114.003"
@@ -1232,7 +1277,7 @@
     "control_ids": [
       "AUDITEX-EXO-MAILBOX-FORWARDING"
     ],
-    "expected_value": "No mailbox has a forwarding SMTP address unless it is approved."
+    "expected_value": "No mailbox has a forwarding SMTP address or forwarding contact unless it is approved."
   },
   "teams.external_federation_open": {
     "risk_rating": "medium",

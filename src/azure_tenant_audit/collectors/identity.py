@@ -43,7 +43,12 @@ class IdentityCollector(Collector):
                 "page": False,
                 "params": {"$select": "id,displayName,tenantType,city,country"},
             },
-            "domains": {"endpoint": "/domains", "page": False, "params": {"$select": "id,authenticationType,isDefault,isVerified,isRoot"}},
+            "domains": {
+                "endpoint": "/domains",
+                "apply_top": False,
+                "inline": True,
+                "params": {"$select": "id,authenticationType,isDefault,isVerified,isRoot"},
+            },
             "users": {
                 "endpoint": "/users",
                 "params": {

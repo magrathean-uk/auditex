@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ..collection_gaps import FANOUT_OBJECT_LIMIT, fanout_gap_row
+from ..collection_gaps import FANOUT_OBJECT_LIMIT, fanout_gap_row, section_total
 from ..graph import GraphClient
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
@@ -91,9 +91,10 @@ class TeamsCollector(Collector):
                         "error": team_error,
                     }
                 )
-        if len(teams_rows) > FANOUT_OBJECT_LIMIT:
+        teams_total = section_total(payload.get("teamGroups"), teams_rows)
+        if teams_total > FANOUT_OBJECT_LIMIT:
             coverage.append(
-                fanout_gap_row(self.name, "teamChannelsFanout", total=len(teams_rows), expanded=FANOUT_OBJECT_LIMIT, scope="Team channels")
+                fanout_gap_row(self.name, "teamChannelsFanout", total=teams_total, expanded=FANOUT_OBJECT_LIMIT, scope="Team channels")
             )
         payload["teamsByTeam"] = {"value": team_meta}
         total = sum(item.get("item_count", 0) for item in coverage)

@@ -13,6 +13,7 @@ from gate_support import (
     finding,
     offline_run,
     read_json,
+    rehash,
     set_coverage,
     set_findings_file,
     set_pack_findings,
@@ -126,7 +127,8 @@ def test_gate_counts_accepted_findings_without_failing(run_dir: Path, status: st
 
 
 def test_gate_counts_closed_findings_without_failing(run_dir: Path) -> None:
-    write_findings(run_dir, [finding("f1", "critical", status="resolved")])
+    # The engine never writes a closed status; one counts only with the waiver that stands behind it.
+    write_findings(run_dir, [finding("f1", "critical", status="resolved", waiver={"owner": "ciso"})])
 
     rc, output = _gate(["gate", str(run_dir), "--fail-on", "high"])
 
@@ -242,6 +244,7 @@ def test_gate_fails_on_an_empty_or_unreadable_findings_file(
 ) -> None:
     (run_dir / "findings").mkdir(exist_ok=True)
     (run_dir / "findings" / "findings.json").write_text(content, encoding="utf-8")
+    rehash(run_dir)  # isolate the findings check from the hash manifest check, which would block first
 
     _blocked(["gate", str(run_dir), "--fail-on", "low"], capsys, "unreadable_findings")
 
@@ -262,6 +265,7 @@ def test_gate_fails_when_the_manifest_declares_a_findings_file_that_is_missing(
     manifest["findings_path"] = "findings/findings.json"
     manifest["findings_count"] = 3
     (run_dir / "run-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    rehash(run_dir)
 
     _blocked(["gate", str(run_dir), "--fail-on", "high"], capsys, "missing_findings")
 
@@ -354,6 +358,7 @@ def test_gate_does_not_treat_a_not_applicable_collector_as_a_gap(run_dir: Path) 
 
 def test_gate_uses_summary_collectors_when_the_bundle_has_no_coverage_ledger(run_dir: Path) -> None:
     (run_dir / "normalized" / "coverage_ledger.json").unlink()
+    rehash(run_dir)
     expected = sorted(completed_in_summary(run_dir))
     assert expected
 

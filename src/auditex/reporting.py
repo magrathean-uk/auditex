@@ -4,6 +4,7 @@ import csv
 import hashlib
 import html
 import json
+import os
 import re
 import shutil
 from collections.abc import Iterable, Mapping
@@ -12,8 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.autopilot import build_basic_license_intelligence
-from azure_tenant_audit.bundle_integrity import integrity_failed
+from azure_tenant_audit.bundle_integrity import integrity_failed, is_post_finalization_output
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
+from azure_tenant_audit.private_io import copy_private_file, harden_tree, make_private_dirs, write_private_text
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.waivers import accepted_risk_summary
 
@@ -47,6 +49,10 @@ class BundleIntegrityError(RuntimeError):
         super().__init__(message)
         self.integrity = dict(integrity)
         self.validation = dict(validation or {})
+
+
+class PackOutputError(RuntimeError):
+    """A customer pack was requested into a directory that already holds something that is not a pack."""
 
 
 AUDITEX_SARIF_TOOL_URI = "https://github.com/magrathean-uk/auditex"
@@ -140,29 +146,80 @@ def _provider_label(platform: str) -> str:
     return labels.get(platform, platform.replace("_", " ").title())
 
 
+_TRANSPORT_BASIS = "transport_audit_log"
+_DECLARED_BASIS = "coverage_ledger_only"
+
+
+def _observation_basis(safety: Mapping[str, Any]) -> str:
+    """``transport_audit_log`` when the safety flags were re-derived from the run's audit log, else the declared basis."""
+    return _TRANSPORT_BASIS if str(safety.get("observation_basis") or "") == _TRANSPORT_BASIS else _DECLARED_BASIS
+
+
+def _flag_text(value: Any, basis: str) -> str:
+    """A safety flag with what it rests on, so a declaration never reads as an observed fact."""
+    qualifier = "observed in the transport audit log" if basis == _TRANSPORT_BASIS else "declared, not observed"
+    return f"{_markdown_cell(value)} ({qualifier})"
+
+
+def _basis_text(basis: str) -> str:
+    if basis == _TRANSPORT_BASIS:
+        return (
+            "transport_audit_log: Graph requests and tenant commands only. DNS, exposure and Power Platform "
+            "lookups are outside the ledger."
+        )
+    return (
+        "coverage_ledger_only: the flags rest on declared collector rows and scopes. No transport ledger "
+        "observed these calls."
+    )
+
+
+def _safety_lines(safety: Mapping[str, Any]) -> list[str]:
+    basis = _observation_basis(safety)
+    return [
+        f"- Read-only: {_flag_text(safety.get('read_only'), basis)}",
+        f"- No content reads: {_flag_text(safety.get('no_content_reads'), basis)}",
+        f"- Observation basis: {_basis_text(basis)}",
+    ]
+
+
 def _scope_risk_limitation(
     *,
     platform: str,
     scope_risk: str | None,
     write_capable_scopes: list[str],
+    safety: Mapping[str, Any] | None = None,
+    read_only: bool | None = None,
 ) -> dict[str, Any] | None:
     if not scope_risk:
         return None
     provider = _provider_label(platform)
+    basis = _observation_basis(safety or {})
     if scope_risk == "write_capable_scope_present":
-        message = (
-            f"{provider} auth included write-capable scopes. Auditex still stayed read-only, "
-            "but reviewers should treat the scope set as a higher-trust limitation."
+        subject = f"{provider} auth included write-capable scopes."
+        closing = "reviewers should treat the scope set as a higher-trust limitation."
+    elif scope_risk == "content_capable_scope_present":
+        subject = f"{provider} auth included scopes that can read content (for example Drive readonly); Auditex uses metadata and list endpoints only."
+        closing = "reviewers should confirm the scope set matches the intended audit surface."
+    else:
+        subject = f"{provider} read settings can require broad scopes."
+        closing = "reviewers should confirm the scope set matches the intended audit surface."
+    if read_only is False:
+        observation = "The recorded safety flags say the run was not read-only, so do not rely on read-only behaviour;"
+    elif basis == _TRANSPORT_BASIS:
+        observation = (
+            "The transport audit log recorded no write, refused or content-reading Graph request or tenant command "
+            "(DNS, exposure and Power Platform lookups are outside it);"
         )
     else:
-        message = (
-            f"{provider} read settings can require broad scopes. Auditex still stayed read-only, "
-            "but reviewers should confirm the scope set matches the intended audit surface."
+        observation = (
+            "Whether Auditex stayed read-only was not observed for this run (only declared collector rows and "
+            "scopes exist);"
         )
     limitation = {
         "surface": "scope_risk",
         "status": scope_risk,
-        "message": message,
+        "message": f"{subject} {observation} {closing}",
+        "observation_basis": basis,
     }
     if write_capable_scopes:
         limitation["write_capable_scopes"] = write_capable_scopes
@@ -778,13 +835,24 @@ def _integrity_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     status = str(result.get("status") or "absent")
     modified = [str(row.get("path")) for row in result.get("modified") or [] if isinstance(row, Mapping)]
     missing = [str(item) for item in result.get("missing") or []]
+    symlinks = [str(item) for item in result.get("symlinks") or []]
+    unexpected = [str(item) for item in result.get("unexpected") or []]
     if status == "verified":
         text = f"{result.get('checked_count')} artifact(s) match the hashes recorded when the run was finalized."
     elif status == "mismatch":
-        text = (
-            f"{result.get('modified_count')} artifact(s) changed and {result.get('missing_count')} are missing "
-            "since the run was finalized."
-        )
+        sentences = []
+        if result.get("modified_count") or result.get("missing_count") or not (symlinks or unexpected):
+            sentences.append(
+                f"{result.get('modified_count')} artifact(s) changed and {result.get('missing_count')} are missing "
+                "since the run was finalized."
+            )
+        if result.get("symlink_count"):
+            sentences.append(f"{result.get('symlink_count')} symbolic link(s) sit in the run; links are never followed or trusted.")
+        if result.get("unexpected_count"):
+            sentences.append(
+                f"{result.get('unexpected_count')} file(s) that the hash manifest does not list sit at paths the product reads."
+            )
+        text = " ".join(sentences)
     elif status == "invalid":
         text = str(result.get("message") or "The bundle hash manifest cannot be read.")
     else:
@@ -798,9 +866,13 @@ def _integrity_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "modified_count": result.get("modified_count"),
         "missing_count": result.get("missing_count"),
         "unlisted_count": result.get("unlisted_count"),
+        "symlink_count": result.get("symlink_count"),
+        "unexpected_count": result.get("unexpected_count"),
         "modified_paths": modified,
         "missing_paths": missing,
         "unlisted_paths": [str(item) for item in result.get("unlisted") or []],
+        "symlink_paths": symlinks,
+        "unexpected_paths": unexpected,
         "manifest_sha256": result.get("manifest_sha256"),
     }
 
@@ -840,6 +912,8 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
         platform=_provider_platform(summary, manifest),
         scope_risk=scope_risk,
         write_capable_scopes=write_capable_scopes,
+        safety=api_safety,
+        read_only=data_handling.get("read_only") is not False and api_safety.get("read_only") is not False,
     )
     if scope_risk_limitation:
         limitations.append(scope_risk_limitation)
@@ -858,9 +932,30 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
                 "surface": "bundle_integrity",
                 "status": integrity["status"],
                 "message": integrity["summary"],
-                "paths": [*integrity["modified_paths"], *integrity["missing_paths"]][:10],
+                "paths": [
+                    *integrity["modified_paths"],
+                    *integrity["missing_paths"],
+                    *integrity["symlink_paths"],
+                    *integrity["unexpected_paths"],
+                ][:10],
             }
         )
+    else:
+        # Files the hash manifest does not name, other than the outputs the tooling writes on request, were not
+        # checked and are not copied into a customer pack.
+        unlisted_files = [path for path in integrity["unlisted_paths"] if not is_post_finalization_output(path)]
+        if unlisted_files:
+            limitations.append(
+                {
+                    "surface": "bundle_integrity",
+                    "status": "unlisted_files",
+                    "message": (
+                        f"{len(unlisted_files)} file(s) in the run are not in bundle-hashes.json, so they were not "
+                        "checked and are not copied into a customer pack."
+                    ),
+                    "paths": unlisted_files[:10],
+                }
+            )
     recomputed = _mapping(bundle.recomputed_validation())
     recomputed_summary = summarize_recomputed_validation(recomputed, validation)
     recomputed_failed = recomputed.get("valid") is False
@@ -983,6 +1078,8 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "write_actions": write_actions,
             "scope_risk": scope_risk,
             "write_capable_scopes": write_capable_scopes,
+            "observation_basis": _observation_basis(api_safety),
+            "observed_log_complete": api_safety.get("observed_log_complete"),
         },
         "quality": {
             "audit_plan_status": _mapping(audit_plan.get("quality_gate")).get("status"),
@@ -998,7 +1095,12 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "findings": int(proof_counts.get("findings") or len(bundle.finding_rows())),
             "proof_rows": int(proof_counts.get("proof_rows") or 0),
             "supported_proof_rows": int(proof_counts.get("supported") or 0),
+            # ``api_calls`` keeps its meaning: the declared call rows. The observed figures come from the transport ledger.
             "api_calls": int(_mapping(api.get("counts")).get("observed_calls") or len(_dict_rows(api.get("observed_calls")))),
+            "declared_calls": int(_mapping(api.get("counts")).get("observed_calls") or len(_dict_rows(api.get("observed_calls")))),
+            "observed_graph_requests": _mapping(api.get("counts")).get("observed_graph_requests"),
+            "observed_commands": _mapping(api.get("counts")).get("observed_commands"),
+            "observed_outside_declared": _mapping(api.get("counts")).get("observed_outside_declared"),
         },
         "reviewer_summary": reviewer_summary,
         "accepted_risks": accepted_risks,
@@ -1015,6 +1117,123 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
     }
 
 
+def _status_counts_text(statuses: Any) -> str:
+    if not isinstance(statuses, Mapping) or not statuses:
+        return ""
+    return ", ".join(f"{key}: {statuses[key]}" for key in sorted(statuses, key=str))
+
+
+def _ledger_summary_lines(inventory: Mapping[str, Any]) -> list[str]:
+    """The headline figures of the transport-observed ledger, or a plain statement that there is none."""
+    ledger = _mapping(inventory.get("observed_ledger"))
+    counts = _mapping(inventory.get("counts"))
+    safety = _mapping(inventory.get("safety"))
+    if not ledger:
+        return ["- Observed calls: no transport ledger in this bundle (the call list is declared, not observed)"]
+    if _observation_basis(safety) != _TRANSPORT_BASIS:
+        return ["- Observed calls: none (this provider's calls are not instrumented; the call list is declared, not observed)"]
+    return [
+        f"- Observed Graph requests: {_markdown_cell(counts.get('observed_graph_requests'))}",
+        f"- Observed commands: {_markdown_cell(counts.get('observed_commands'))}",
+        f"- Observed calls outside the declared set: {_markdown_cell(counts.get('observed_outside_declared'))}",
+        f"- Refused calls: {_markdown_cell(counts.get('refused_calls'))}",
+    ]
+
+
+def _observed_ledger_markdown(inventory: Mapping[str, Any], *, level: str = "##") -> list[str]:
+    """The transport-observed ledger as Markdown: what the audit log shows was sent, not what collectors declared."""
+    ledger = _mapping(inventory.get("observed_ledger"))
+    safety = _mapping(inventory.get("safety"))
+    lines = ["", f"{level} Observed calls (transport ledger)", ""]
+    if not ledger:
+        lines.append(
+            "No transport ledger in this bundle: the call list above is declared by the collectors, not observed. "
+            "Do not read it as a record of what was sent."
+        )
+        return lines
+    log = _mapping(ledger.get("log"))
+    graph = _mapping(ledger.get("graph"))
+    commands = _mapping(ledger.get("commands"))
+    outside = _mapping(ledger.get("outside_declared"))
+    basis = str(ledger.get("basis") or "")
+    lines.append(f"- Basis: {_markdown_cell(basis)}")
+    if basis != "transport_audit_log":
+        lines.append(
+            "- This provider's calls are not instrumented. Nothing below was observed; the declared call list is the "
+            "only record, and it is declared, not observed."
+        )
+        return lines
+    lines.extend(
+        [
+            f"- Audit log complete: {_markdown_cell(safety.get('observed_log_complete'))}"
+            f" (readable: {_markdown_cell(log.get('readable'))}, malformed lines: {_markdown_cell(log.get('malformed_lines'))})",
+            f"- Graph requests attempted: {_markdown_cell(graph.get('request_attempts'))}"
+            f" (batch requests: {_markdown_cell(graph.get('batch_requests'))},"
+            f" inner calls: {_markdown_cell(graph.get('batch_inner_requests'))},"
+            f" unverified batches: {_markdown_cell(graph.get('unverified_batch_requests'))})",
+            f"- Methods seen: {_markdown_cell(', '.join(str(item) for item in graph.get('methods_seen') or []))}",
+            f"- Commands executed: {_markdown_cell(sum(int(row.get('count') or 0) for row in _dict_rows(commands.get('executed'))))}",
+            f"- Refused calls: {_markdown_cell(int(graph.get('refused_count') or 0) + int(commands.get('refused_count') or 0))}",
+            f"- Calls outside the declared set: {_markdown_cell(outside.get('count'))}",
+        ]
+    )
+    lines.extend(["", f"{level}# Graph requests", "", "| Method | Endpoint | API version | Count | Statuses |", "| --- | --- | --- | --- | --- |"])
+    graph_rows = _dict_rows(graph.get("endpoints"))
+    if graph_rows:
+        for row in graph_rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _markdown_cell(row.get("method")),
+                        _markdown_cell(row.get("endpoint")),
+                        _markdown_cell(row.get("api_version")),
+                        _markdown_cell(row.get("count")),
+                        _markdown_cell(_status_counts_text(row.get("statuses"))),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("|  |  |  | No Graph requests in the audit log. |  |")
+    lines.extend(["", f"{level}# Commands", "", "| Adapter | Command | Count | Statuses | Read-only |", "| --- | --- | --- | --- | --- |"])
+    command_rows = _dict_rows(commands.get("executed"))
+    if command_rows:
+        for row in command_rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _markdown_cell(row.get("adapter")),
+                        _markdown_cell(row.get("command")),
+                        _markdown_cell(row.get("count")),
+                        _markdown_cell(_status_counts_text(row.get("statuses"))),
+                        _markdown_cell(row.get("read_only")),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("|  | No commands in the audit log. |  |  |  |")
+    refused = [
+        *({"kind": "graph", "call": f"{row.get('method')} {row.get('endpoint')}", "reason": row.get("reason")} for row in _dict_rows(graph.get("refused"))),
+        *({"kind": "command", "call": f"{row.get('adapter')} {row.get('command')}", "reason": row.get("reason")} for row in _dict_rows(commands.get("refused"))),
+    ]
+    outside_rows = [
+        *({"kind": "graph", "call": f"{row.get('method')} {row.get('endpoint')}"} for row in _dict_rows(outside.get("graph"))),
+        *({"kind": "command", "call": f"{row.get('adapter')} {row.get('command')}"} for row in _dict_rows(outside.get("commands"))),
+    ]
+    if refused:
+        lines.extend(["", f"{level}# Refused calls", "", "| Kind | Call | Reason |", "| --- | --- | --- |"])
+        for row in refused:
+            lines.append(f"| {_markdown_cell(row['kind'])} | {_markdown_cell(row['call'])} | {_markdown_cell(row['reason'])} |")
+    if outside_rows:
+        lines.extend(["", f"{level}# Calls outside the declared set", "", "| Kind | Call |", "| --- | --- |"])
+        for row in outside_rows:
+            lines.append(f"| {_markdown_cell(row['kind'])} | {_markdown_cell(row['call'])} |")
+    return lines
+
+
 def render_api_call_inventory_markdown(inventory: Mapping[str, Any]) -> str:
     calls = _dict_rows(inventory.get("observed_calls"))
     counts = _mapping(inventory.get("counts"))
@@ -1024,10 +1243,12 @@ def render_api_call_inventory_markdown(inventory: Mapping[str, Any]) -> str:
         "",
         f"- Run: {_markdown_cell(inventory.get('run_dir'))}",
         f"- Platform: {_markdown_cell(inventory.get('platform'))}",
-        f"- Observed calls: {_markdown_cell(counts.get('observed_calls', len(calls)))}",
+        f"- Declared calls: {_markdown_cell(counts.get('observed_calls', len(calls)))} (collector coverage rows: what the collectors report having run)",
         f"- Beta Graph calls: {_markdown_cell(counts.get('beta_calls', sum(1 for call in calls if call.get('api_version') == 'beta')))}",
-        f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
-        f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
+        *_safety_lines(safety),
+        *_ledger_summary_lines(inventory),
+        "",
+        "## Declared calls",
         "",
         "| Collector | Method | Endpoint | Status | Items | Data class |",
         "| --- | --- | --- | --- | --- | --- |",
@@ -1049,7 +1270,8 @@ def render_api_call_inventory_markdown(inventory: Mapping[str, Any]) -> str:
                 + " |"
             )
     else:
-        lines.append("|  |  | No observed calls in this bundle. |  |  |  |")
+        lines.append("|  |  | No declared calls in this bundle. |  |  |  |")
+    lines.extend(_observed_ledger_markdown(inventory))
     return "\n".join(lines) + "\n"
 
 
@@ -1090,6 +1312,22 @@ def render_permissions_ledger_markdown(payload: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _handoff_call_lines(counts: Mapping[str, Any], safety: Mapping[str, Any]) -> list[str]:
+    declared = counts.get("declared_calls", counts.get("api_calls"))
+    lines = [f"- Declared calls: {_markdown_cell(declared)} (collector coverage rows, not a record of what was sent)"]
+    if _observation_basis(safety) == _TRANSPORT_BASIS and counts.get("observed_graph_requests") is not None:
+        lines.extend(
+            [
+                f"- Observed Graph requests: {_markdown_cell(counts.get('observed_graph_requests'))}",
+                f"- Observed commands: {_markdown_cell(counts.get('observed_commands'))}",
+                f"- Observed calls outside the declared set: {_markdown_cell(counts.get('observed_outside_declared'))}",
+            ]
+        )
+    else:
+        lines.append("- Observed calls: none recorded (the declared calls are declared, not observed)")
+    return lines
+
+
 def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
     tenant = _mapping(payload.get("tenant"))
     contract = _mapping(payload.get("contract"))
@@ -1113,13 +1351,12 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
         f"- Validation: {_markdown_cell(validation_summary.get('status'))} / {_markdown_cell(validation_summary.get('issue_count'))} issues",
         f"- Recomputed validation: {_markdown_cell(_mapping(contract.get('recomputed')).get('valid'))}",
         f"- Bundle integrity: {_markdown_cell(_mapping(payload.get('integrity')).get('status'))}",
-        f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
-        f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
+        *_safety_lines(safety),
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
         f"- Live readiness: {_markdown_cell(quality.get('live_readiness')) or 'not recorded'}",
         f"- Findings: {_markdown_cell(counts.get('findings'))}",
         f"- Proof rows: {_markdown_cell(counts.get('proof_rows'))}",
-        f"- API calls: {_markdown_cell(counts.get('api_calls'))}",
+        *_handoff_call_lines(counts, safety),
         f"- Accepted risks: {_markdown_cell(accepted_risks.get('count'))}",
         f"- Stale accepted risks: {_markdown_cell(accepted_risks.get('stale_count'))}",
         "",
@@ -1237,8 +1474,7 @@ def render_proof_table_markdown(payload: Mapping[str, Any]) -> str:
 
 
 def _write_text_artifact(path: Path, content: str) -> dict[str, Any]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    write_private_text(path, content)
     return {
         "path": str(path),
         "name": path.name,
@@ -1261,21 +1497,60 @@ _CUSTOMER_SAFE_SOURCE_ARTIFACTS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _copy_source_artifact(run_path: Path, output_root: Path, relative: str, purpose: str) -> dict[str, Any]:
-    source = run_path / relative
-    destination = output_root / relative
+def _plain_run_file(run_path: Path, relative: str) -> tuple[Path | None, str | None]:
+    """The regular file ``relative`` names in the run, or ``(None, reason)``. A link, or a link anywhere on the path, is refused."""
+    root = Path(os.path.realpath(run_path))
+    candidate = root / relative
+    if os.path.islink(candidate) or Path(os.path.realpath(candidate)) != candidate:
+        return None, "symbolic_link"
+    if not candidate.is_file():
+        return None, "missing"
+    return candidate, None
+
+
+def _listed_artifact_paths(run_path: Path) -> set[str] | None:
+    """The paths ``bundle-hashes.json`` lists, or ``None`` for a bundle that has no manifest to copy by."""
+    try:
+        payload = json.loads((run_path / "bundle-hashes.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rows = payload.get("artifacts") if isinstance(payload, Mapping) else None
+    if not isinstance(rows, list):
+        return None
+    return {str(row.get("path")) for row in rows if isinstance(row, Mapping) and isinstance(row.get("path"), str)}
+
+
+def _copy_source_artifact(
+    run_path: Path,
+    output_root: Path,
+    relative: str,
+    purpose: str,
+    listed: set[str] | None = None,
+) -> dict[str, Any]:
+    """Copy one run artifact into the pack as a private file.
+
+    A link is never followed. When the run has a hash manifest (``listed`` is its path set), only a file the
+    manifest names is copied: the pack vouches for what the run produced, not for what was added later.
+    """
+    source, reason = _plain_run_file(run_path, relative)
     row: dict[str, Any] = {
         "source_path": relative,
         "purpose": purpose,
-        "present": source.exists(),
+        "present": False,
         "customer_safe": True,
     }
-    if not source.exists():
+    if source is None:
+        if reason != "missing":
+            row["skipped_reason"] = reason
         return row
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+    if listed is not None and relative != "bundle-hashes.json" and relative not in listed:
+        row["skipped_reason"] = "not_in_bundle_hashes"
+        return row
+    destination = output_root / relative
+    copy_private_file(source, destination)
     row.update(
         {
+            "present": True,
             "path": str(destination),
             "size_bytes": destination.stat().st_size,
             "sha256": _sha256_file(destination),
@@ -1292,6 +1567,12 @@ def _pack_relative(pack_dir: Path, path: str | Path) -> str:
 
 
 def _pack_file_path(pack_dir: Path, manifest_output_dir: Path, value: Any) -> Path | None:
+    """Where a manifest row's file sits in the pack now.
+
+    Packs write pack-relative paths (``handoff.md``) with ``output_dir`` ``.``. Packs written before that
+    carry the paths as the writer was given them, absolute or relative to its working directory; they are
+    re-rooted on ``pack_dir`` so a pack that was moved still verifies.
+    """
     if not value:
         return None
     path = Path(str(value))
@@ -1300,10 +1581,13 @@ def _pack_file_path(pack_dir: Path, manifest_output_dir: Path, value: Any) -> Pa
             return pack_dir / path.relative_to(manifest_output_dir)
         except ValueError:
             return path
-    try:
-        return pack_dir / path.relative_to(manifest_output_dir)
-    except ValueError:
-        pass
+    if ".." in path.parts:
+        return None
+    if manifest_output_dir.parts:
+        try:
+            return pack_dir / path.relative_to(manifest_output_dir)
+        except ValueError:
+            pass
     return pack_dir / path
 
 
@@ -1325,11 +1609,10 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         f"- Platform: {_markdown_cell(tenant.get('platform'))}",
         f"- Validation: {_markdown_cell(validation_summary.get('status'))}",
         f"- Bundle integrity: {_markdown_cell(_mapping(source.get('integrity')).get('status'))}",
-        f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
-        f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
+        *_safety_lines(safety),
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
         f"- Findings: {_markdown_cell(counts.get('findings'))}",
-        f"- API calls: {_markdown_cell(counts.get('api_calls'))}",
+        *_handoff_call_lines(counts, safety),
         f"- Reviewer prove-this rows: {_markdown_cell(_mapping(reviewer_summary.get('counts')).get('prove_this'))}",
         "",
         "## Start Here",
@@ -1337,10 +1620,12 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         "1. Read `handoff.md`.",
         "2. Check `validation.json` and the validation summary before trusting the pack.",
         "3. Review `report.md` for the client-ready report and reviewer index.",
-        "4. Review `api-calls.md` for every observed API call.",
+        "4. Review `api-calls.md`: the declared calls and, where the run has a transport ledger, every Graph request and command the audit log observed, with any call outside the declared set.",
         "5. Review `permissions.md` for required and missing scopes.",
         "6. Review `proof-table.md` for finding-to-evidence rows.",
-        "7. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity.",
+        "7. Run `auditex report verify-pack <pack-dir>` or use `checksums.sha256` to verify file integrity. "
+        "The pack carries its own checksums, so where origin matters compare the `digests` that command prints with values you "
+        "received through a separate channel, or pass them as `--expect-manifest-sha256` and `--expect-checksums-sha256`.",
         "",
         "## Generated Files",
         "",
@@ -1379,6 +1664,74 @@ def _write_checksums(pack_dir: Path, rows: list[dict[str, Any]]) -> dict[str, An
     return _write_text_artifact(pack_dir / "checksums.sha256", "\n".join(lines) + ("\n" if lines else ""))
 
 
+_PACK_KIND = "auditex_enterprise_handoff_pack"
+_RUN_DIR_PLACEHOLDER = "<run-dir>"
+
+
+def _run_path_roots(run_path: Path) -> list[str]:
+    """Every spelling of the run directory a payload may carry, longest first."""
+    roots = {str(run_path), os.path.abspath(run_path), os.path.realpath(run_path)}
+    return sorted((root.rstrip(os.sep) for root in roots if root and root != os.sep), key=len, reverse=True)
+
+
+def _scrub_run_path(text: str, roots: list[str]) -> str:
+    """Remove the operator's local run path from text: paths below the run become run-relative, the run ``<run-dir>``."""
+    for root in roots:
+        if text == root:
+            return _RUN_DIR_PLACEHOLDER
+        if text.startswith(root + os.sep):
+            return text[len(root) + 1 :]
+    for root in roots:
+        text = text.replace(root, _RUN_DIR_PLACEHOLDER)
+    return text
+
+
+def _pack_safe(value: Any, run_path: Path, *, roots: list[str] | None = None) -> Any:
+    """A copy of ``value`` with no absolute path of the operator's machine in it (the pack goes to a customer)."""
+    roots = roots if roots is not None else _run_path_roots(run_path)
+    if isinstance(value, str):
+        return _scrub_run_path(value, roots)
+    if isinstance(value, Mapping):
+        return {key: _pack_safe(item, run_path, roots=roots) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_pack_safe(item, run_path, roots=roots) for item in value]
+    return value
+
+
+def _pack_payload(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
+    safe = _pack_safe(dict(payload), run_path)
+    if "run_dir" in safe:
+        safe["run_dir"] = run_path.name
+    return safe
+
+
+def _prepare_pack_directory(target_dir: Path) -> None:
+    """Create the pack directory, or reuse one that is empty or holds a pack written earlier.
+
+    Anything else is refused: files a previous owner left would sit next to the pack's own and look like
+    part of it. A previous pack's ``source-artifacts`` are removed, so a file the new run no longer has
+    does not stay behind.
+    """
+    if target_dir.is_symlink() or (target_dir.exists() and not target_dir.is_dir()):
+        raise PackOutputError(f"refusing to write a customer pack to {target_dir}: it is not a directory.")
+    if not target_dir.exists():
+        make_private_dirs(target_dir)
+        return
+    if not any(target_dir.iterdir()):
+        return
+    previous = _mapping(_read_json(target_dir / "pack-manifest.json", {}))
+    if previous.get("kind") != _PACK_KIND:
+        raise PackOutputError(
+            f"refusing to write a customer pack into {target_dir}: it is not empty and holds no earlier pack "
+            "(no pack-manifest.json). Use a new directory."
+        )
+    stale = target_dir / "source-artifacts"
+    if stale.is_symlink():
+        stale.unlink()
+    elif stale.is_dir():
+        shutil.rmtree(stale)
+
+
 def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     target_dir = Path(output_dir)
@@ -1386,8 +1739,9 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     handoff_payload = enterprise_handoff(run_path)
     integrity = _mapping(handoff_payload.get("integrity"))
     recomputed = _mapping(_mapping(handoff_payload.get("contract")).get("recomputed"))
-    # A pack vouches for the bundle it was built from: refuse one that changed since it was finalized,
-    # and one that does not validate as it stands (whatever validation.json recorded).
+    # A pack vouches for the bundle it was built from: refuse one that changed since it was finalized
+    # (a link, or an unlisted file where the product reads, counts as a change), and one that does not
+    # validate as it stands (whatever validation.json recorded).
     if integrity_failed(integrity):
         raise BundleIntegrityError(
             f"refusing to create a customer pack from {run_path}: {integrity.get('summary')}",
@@ -1400,33 +1754,45 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
             integrity,
             recomputed,
         )
-    target_dir.mkdir(parents=True, exist_ok=True)
-    api_payload = api_call_inventory(run_path)
-    permissions_payload = permissions_ledger(run_path)
-    proof_payload = proof_table(run_path)
-    rendered_report = preview_report(run_dir=str(run_path), format_name="md")["content"]
+    _prepare_pack_directory(target_dir)
+    # Everything the pack carries is pack-relative and free of the operator's local paths.
+    handoff_payload = _pack_payload(handoff_payload, run_path)
+    integrity = _mapping(handoff_payload.get("integrity"))
+    api_payload = _pack_payload(api_call_inventory(run_path), run_path)
+    permissions_payload = _pack_payload(permissions_ledger(run_path), run_path)
+    proof_payload = _pack_payload(proof_table(run_path), run_path)
+    rendered_report = _pack_safe(preview_report(run_dir=str(run_path), format_name="md")["content"], run_path)
+
+    def generated_row(name: str, content: str) -> dict[str, Any]:
+        row = _write_text_artifact(target_dir / name, content)
+        row["path"] = name
+        return row
 
     generated = [
-        _write_text_artifact(target_dir / "handoff.md", render_enterprise_handoff_markdown(handoff_payload)),
-        _write_text_artifact(target_dir / "handoff.json", _json(handoff_payload) + "\n"),
-        _write_text_artifact(target_dir / "report.md", rendered_report),
-        _write_text_artifact(target_dir / "api-calls.md", render_api_call_inventory_markdown(api_payload)),
-        _write_text_artifact(target_dir / "api-calls.json", _json(api_payload) + "\n"),
-        _write_text_artifact(target_dir / "permissions.md", render_permissions_ledger_markdown(permissions_payload)),
-        _write_text_artifact(target_dir / "permissions.json", _json(permissions_payload) + "\n"),
-        _write_text_artifact(target_dir / "proof-table.md", render_proof_table_markdown(proof_payload)),
-        _write_text_artifact(target_dir / "proof-table.json", _json(proof_payload) + "\n"),
+        generated_row("handoff.md", render_enterprise_handoff_markdown(handoff_payload)),
+        generated_row("handoff.json", _json(handoff_payload) + "\n"),
+        generated_row("report.md", rendered_report),
+        generated_row("api-calls.md", render_api_call_inventory_markdown(api_payload)),
+        generated_row("api-calls.json", _json(api_payload) + "\n"),
+        generated_row("permissions.md", render_permissions_ledger_markdown(permissions_payload)),
+        generated_row("permissions.json", _json(permissions_payload) + "\n"),
+        generated_row("proof-table.md", render_proof_table_markdown(proof_payload)),
+        generated_row("proof-table.json", _json(proof_payload) + "\n"),
     ]
     source_dir = target_dir / "source-artifacts"
-    source_artifacts = [
-        _copy_source_artifact(run_path, source_dir, relative, purpose)
-        for relative, purpose in _CUSTOMER_SAFE_SOURCE_ARTIFACTS
-    ]
+    listed = _listed_artifact_paths(run_path)
+    source_artifacts = []
+    for relative, purpose in _CUSTOMER_SAFE_SOURCE_ARTIFACTS:
+        row = _copy_source_artifact(run_path, source_dir, relative, purpose, listed)
+        if row.get("path"):
+            row["path"] = f"source-artifacts/{relative}"
+        source_artifacts.append(row)
     manifest = {
-        "schema_version": "2026-04-21",
-        "kind": "auditex_enterprise_handoff_pack",
-        "run_dir": str(run_path),
-        "output_dir": str(target_dir),
+        "schema_version": "2026-10-22",
+        "kind": _PACK_KIND,
+        "path_style": "pack_relative",
+        "run_dir": run_path.name,
+        "output_dir": ".",
         "handoff_status": handoff_payload.get("handoff_status"),
         "source": {
             "tenant": handoff_payload.get("tenant"),
@@ -1447,29 +1813,52 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         "source_artifacts": source_artifacts,
     }
     readme = _write_text_artifact(target_dir / "README.md", _render_pack_readme(manifest))
+    readme["path"] = "README.md"
     manifest["generated_files"].append(readme)
     checksum = _write_checksums(
         target_dir,
         [*manifest["generated_files"], *[row for row in source_artifacts if row.get("present")]],
     )
+    checksum["path"] = "checksums.sha256"
     manifest["generated_files"].append(checksum)
     manifest_path = target_dir / "pack-manifest.json"
-    manifest["pack_manifest_path"] = str(manifest_path)
-    manifest_path.write_text(_json(manifest) + "\n", encoding="utf-8")
-    return manifest
+    manifest["pack_manifest_path"] = "pack-manifest.json"
+    write_private_text(manifest_path, _json(manifest) + "\n")
+    harden_tree(target_dir)
+    # The caller gets the pack's location; the file on disk keeps pack-relative paths only.
+    return {**manifest, "pack_dir": str(target_dir), "pack_manifest_path": str(manifest_path)}
+
+
+def _bundle_hash_rows(path: Path) -> dict[str, str] | None:
+    """``path -> sha256`` from a copied ``bundle-hashes.json``, or ``None`` when it is not a hash manifest."""
+    payload = _read_json(path, None)
+    rows = payload.get("artifacts") if isinstance(payload, Mapping) else None
+    if not isinstance(rows, list):
+        return None
+    result: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, Mapping) or not isinstance(row.get("path"), str) or not isinstance(row.get("sha256"), str):
+            return None
+        result[row["path"]] = row["sha256"]
+    return result
 
 
 def _merge_pack_issues(issues: list[dict[str, Any]], pack_path: Path) -> list[dict[str, Any]]:
     """Report each problem once, with pack-relative paths, listing every check that caught it."""
     pack_root = pack_path.resolve()
+    pack_spelled = Path(os.path.abspath(pack_path))
     merged: dict[tuple[Any, ...], dict[str, Any]] = {}
     for issue in issues:
         path = issue.get("path")
         if isinstance(path, str) and path:
             try:
-                issue = {**issue, "path": Path(path).resolve().relative_to(pack_root).as_posix()}
+                # As spelled first, so a symbolic link is reported where it sits and not as the file it points to.
+                issue = {**issue, "path": Path(os.path.abspath(path)).relative_to(pack_spelled).as_posix()}
             except ValueError:
-                pass
+                try:
+                    issue = {**issue, "path": Path(path).resolve().relative_to(pack_root).as_posix()}
+                except ValueError:
+                    pass
         key = (issue.get("code"), issue.get("path"), issue.get("expected"), issue.get("actual"))
         if issue.get("path") is None or key not in merged:
             merged[key if issue.get("path") is not None else (len(merged), id(issue))] = issue
@@ -1481,12 +1870,25 @@ def _merge_pack_issues(issues: list[dict[str, Any]], pack_path: Path) -> list[di
     return list(merged.values())
 
 
-def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
+def verify_enterprise_handoff_pack(
+    pack_dir: str | Path,
+    *,
+    expect_manifest_sha256: str | None = None,
+    expect_checksums_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Check a customer pack against its own manifest, checksums and copied hash manifest.
+
+    ``expect_manifest_sha256`` is the SHA-256 of the run's ``bundle-hashes.json`` and
+    ``expect_checksums_sha256`` the SHA-256 of the pack's ``checksums.sha256``, each received over a separate
+    channel. The pack carries its own copies of both, so a pack edited and re-hashed by someone who can write to
+    it agrees with itself and only these two values (see ``digests`` in the result) can say otherwise.
+    """
     pack_path = Path(pack_dir)
     manifest_path = pack_path / "pack-manifest.json"
     manifest = _mapping(_read_json(manifest_path, {}))
     issues: list[dict[str, Any]] = []
     checked_files: set[str] = set()
+    listed_paths: set[Path] = {manifest_path.resolve()}
 
     def add_issue(code: str, message: str, **details: Any) -> None:
         issue = {"code": code, "message": message}
@@ -1544,8 +1946,11 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
         )
 
     for row in generated:
+        generated_file = _pack_file_path(pack_path, manifest_output_dir, row.get("path"))
+        if generated_file is not None:
+            listed_paths.add(generated_file.resolve())
         check_file(
-            _pack_file_path(pack_path, manifest_output_dir, row.get("path")),
+            generated_file,
             _text(row.get("sha256")) or None,
             source=f"manifest.generated:{row.get('name') or row.get('path')}",
         )
@@ -1553,8 +1958,11 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
     for row in sources:
         if row.get("present") is False:
             continue
+        source_file = _pack_file_path(pack_path, manifest_output_dir, row.get("path"))
+        if source_file is not None:
+            listed_paths.add(source_file.resolve())
         check_file(
-            _pack_file_path(pack_path, manifest_output_dir, row.get("path")),
+            source_file,
             _text(row.get("sha256")) or None,
             source=f"manifest.source:{row.get('source_path') or row.get('path')}",
         )
@@ -1850,6 +2258,95 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
                 continue
             check_file(candidate, expected, source=f"checksums.sha256:{line_number}")
 
+    if checksum_path.exists():
+        listed_paths.add(checksum_path.resolve())
+
+    # The hash manifest the pack carries says what every run artifact was when the run was finalized. The pack's
+    # own manifest and checksums sit in the same directory and can be re-hashed together; this cannot, without
+    # also changing the manifest digest that was sent separately.
+    integrity_status = str(_mapping(source_payload.get("integrity")).get("status") or _mapping(handoff_payload.get("integrity")).get("status") or "")
+    bundle_hashes_path = pack_path / "source-artifacts" / "bundle-hashes.json"
+    bundle_hashes_sha256 = _sha256_file(bundle_hashes_path) if bundle_hashes_path.is_file() else None
+    if integrity_status == "verified":
+        recorded_digest = _text(
+            _mapping(source_payload.get("integrity")).get("manifest_sha256")
+            or _mapping(handoff_payload.get("integrity")).get("manifest_sha256")
+        )
+        if bundle_hashes_sha256 is None:
+            add_issue(
+                "missing_bundle_hashes",
+                "The run was verified against bundle-hashes.json, but the pack carries no copy of it.",
+                path=str(bundle_hashes_path),
+            )
+        else:
+            if recorded_digest and bundle_hashes_sha256 != recorded_digest:
+                add_issue(
+                    "bundle_hashes_digest_mismatch",
+                    "source-artifacts/bundle-hashes.json is not the manifest the run was verified against.",
+                    path=str(bundle_hashes_path),
+                    expected=recorded_digest,
+                    actual=bundle_hashes_sha256,
+                )
+            hash_rows = _bundle_hash_rows(bundle_hashes_path)
+            if hash_rows is None:
+                add_issue(
+                    "invalid_bundle_hashes",
+                    "source-artifacts/bundle-hashes.json cannot be read as a hash manifest.",
+                    path=str(bundle_hashes_path),
+                )
+            else:
+                for row in sources:
+                    relative = _text(row.get("source_path"))
+                    if row.get("present") is False or not relative or relative == "bundle-hashes.json":
+                        continue
+                    copied = _pack_file_path(pack_path, manifest_output_dir, row.get("path"))
+                    if copied is None or not copied.is_file():
+                        continue
+                    expected_hash = hash_rows.get(relative)
+                    if expected_hash is None:
+                        add_issue(
+                            "source_artifact_not_in_bundle_hashes",
+                            "A copied source artifact is not listed in the pack's bundle-hashes.json.",
+                            path=str(copied),
+                            source_path=relative,
+                        )
+                        continue
+                    actual_hash = _sha256_file(copied)
+                    if actual_hash != expected_hash:
+                        add_issue(
+                            "source_artifact_bundle_hash_mismatch",
+                            "A copied source artifact differs from the hash recorded when the run was finalized.",
+                            path=str(copied),
+                            source_path=relative,
+                            expected=expected_hash,
+                            actual=actual_hash,
+                        )
+    checksums_sha256 = _sha256_file(checksum_path) if checksum_path.is_file() else None
+    for label, expected_digest, actual_digest, code in (
+        ("bundle-hashes.json", expect_manifest_sha256, bundle_hashes_sha256, "expected_manifest_sha256_mismatch"),
+        ("checksums.sha256", expect_checksums_sha256, checksums_sha256, "expected_checksums_sha256_mismatch"),
+    ):
+        if expected_digest and (actual_digest or "") != str(expected_digest).strip().lower():
+            add_issue(
+                code,
+                f"The SHA-256 of {label} is not the value that was supplied for it.",
+                expected=str(expected_digest).strip().lower(),
+                actual=actual_digest,
+            )
+
+    # Nothing may sit in the pack that its manifest does not list: a planted file needs no re-hashing at all.
+    if generated or sources:
+        for current, directories, names in os.walk(str(pack_path), followlinks=False):
+            directories.sort()
+            for name in sorted([*directories, *names]):
+                candidate = Path(current) / name
+                if name == ".DS_Store" or (candidate.is_dir() and not candidate.is_symlink()):
+                    continue
+                if candidate.is_symlink():
+                    add_issue("unexpected_file", "A symbolic link sits in the pack.", path=str(candidate))
+                elif candidate.resolve() not in listed_paths:
+                    add_issue("unexpected_file", "A file in the pack is not listed in pack-manifest.json.", path=str(candidate))
+
     issues = _merge_pack_issues(issues, pack_path)
     return {
         "pack_dir": str(pack_path),
@@ -1860,6 +2357,13 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
         "checksum_line_count": checksum_line_count,
         "generated_file_count": len(generated),
         "source_artifact_count": len(sources),
+        "source_integrity_status": integrity_status or None,
+        # Send these through a separate channel; pass them back as --expect-manifest-sha256 / --expect-checksums-sha256.
+        "digests": {
+            "bundle_hashes_sha256": bundle_hashes_sha256,
+            "checksums_sha256": checksums_sha256,
+            "pack_manifest_sha256": _sha256_file(manifest_path) if manifest_path.is_file() else None,
+        },
         "issues": issues,
     }
 
@@ -1978,15 +2482,38 @@ def _append_cyber_essentials_markdown(lines: list[str], section: Mapping[str, An
     rows = []
     for control in _dict_rows(section.get("controls")):
         evidence = _mapping(control.get("evidence"))
+        supporting = {
+            str(status.get("rule_id"))
+            for status in _dict_rows(control.get("rule_statuses"))
+            if status.get("confidence") == "supporting"
+        }
+        # A row whose rules were not evaluated says why, so an empty reason never hides a collector that did not complete.
+        reasons = [str(item) for item in control.get("not_assessed_reasons") or []]
+        reason = ": ".join(part for part in (_text(control.get("reason")), ", ".join(reasons)) if part)
+        limits = " ".join(
+            part
+            for part in (
+                _text(control.get("evidence_limits")),
+                f"CE+ test: {_text(control.get('ce_plus_test'))}." if control.get("ce_plus_test") else "",
+            )
+            if part
+        )
         rows.append(
             {
                 "requirement": control.get("control_id"),
+                "title": control.get("title"),
                 "requirement_status": control.get("requirement_status"),
                 "status": control.get("status"),
-                "reason": control.get("reason"),
-                "rules": ", ".join(str(rule) for rule in control.get("rule_ids") or []) or "none",
+                "reason": reason,
+                "rules": ", ".join(
+                    f"{rule} (supporting)" if rule in supporting else str(rule) for rule in control.get("rule_ids") or []
+                )
+                or "none",
                 "evaluated": f"{evidence.get('rules_evaluated', 0)}/{evidence.get('rules_mapped', 0)}",
                 "open_findings": control.get("open_finding_count", 0),
+                # Only a failure carries a confidence: whether a rule that tests the named condition fails it.
+                "confidence": control.get("confidence") or "",
+                "evidence_limits": limits,
                 "citation": control.get("citation"),
             }
         )
@@ -1996,14 +2523,25 @@ def _append_cyber_essentials_markdown(lines: list[str], section: Mapping[str, An
         rows,
         (
             ("Requirement", "requirement"),
+            ("Title", "title"),
             ("Requirement status", "requirement_status"),
             ("Status", "status"),
             ("Reason", "reason"),
             ("Rules", "rules"),
             ("Rules evaluated", "evaluated"),
             ("Open findings", "open_findings"),
+            ("Confidence", "confidence"),
+            ("Evidence limits", "evidence_limits"),
             ("Document heading", "citation"),
         ),
+    )
+    lines.extend(
+        [
+            "",
+            "Confidence applies to a failing requirement: `full` when a failing rule tests the condition the requirement "
+            "names for the audited tenant, `partial` when every failing rule is a proxy or a subset of it. Rules marked "
+            "supporting in the rule list never decide a requirement.",
+        ]
     )
     document = " ".join(
         part
@@ -2233,9 +2771,11 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
                 "",
                 "## API Calls",
                 "",
-                f"- Observed calls: {_markdown_cell(counts.get('observed_calls', len(api_calls)))}",
-                f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
-                f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
+                f"- Declared calls: {_markdown_cell(counts.get('observed_calls', len(api_calls)))} (collector coverage rows: what the collectors report having run)",
+                *_safety_lines(safety),
+                *_ledger_summary_lines(api_inventory),
+                "",
+                "### Declared calls",
                 "",
                 "| Collector | Method | Endpoint | Status | Items | Data class |",
                 "| --- | --- | --- | --- | --- | --- |",
@@ -2258,7 +2798,8 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
                     + " |"
                 )
         else:
-            lines.append("|  |  | No observed calls in this bundle. |  |  |  |")
+            lines.append("|  |  | No declared calls in this bundle. |  |  |  |")
+        lines.extend(_observed_ledger_markdown(api_inventory, level="###"))
 
     if "blockers" in selected_sections and _dict_rows(selected_sections.get("blockers")):
         lines.extend(["", "## Blockers", ""])
@@ -2937,6 +3478,6 @@ def render_report(
         exclude_sections=exclude_sections,
     )
     target = Path(output_path) if output_path else _default_output_path(Path(run_dir), format_name)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(preview["content"], encoding="utf-8")
+    # A rendered report holds the same tenant metadata as the bundle: 0600 in a 0700 directory whatever the umask.
+    write_private_text(target, preview["content"])
     return {"format": format_name, "output_path": str(target), "sections": preview["sections"]}

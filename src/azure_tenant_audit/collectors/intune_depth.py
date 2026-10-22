@@ -3,7 +3,13 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ..collection_gaps import FANOUT_OBJECT_LIMIT, REASON_INPUT_LIMITED, TRUNCATION_ERROR_CLASS, fanout_gap_row
+from ..collection_gaps import (
+    FANOUT_OBJECT_LIMIT,
+    REASON_INPUT_LIMITED,
+    TRUNCATION_ERROR_CLASS,
+    fanout_gap_row,
+    section_total,
+)
 from ..endpoint_posture import UPDATE_RING_FIELDS, is_update_ring, project
 from ..graph import GraphClient, GraphError
 from ._endpoint_reads import assignment_fanout, collector_partial, input_rows, mark_section_scoped, scoped_gap_message
@@ -235,13 +241,14 @@ class IntuneDepthCollector(Collector):
                         }
                     )
 
-        if len(configuration_rows) > FANOUT_OBJECT_LIMIT:
+        configuration_total = section_total(payload.get("deviceConfigurations"), configuration_rows)
+        if configuration_total > FANOUT_OBJECT_LIMIT:
             # The unassigned-policy finding reads these assignments, so the remaining policies are a gap.
             coverage.append(
                 fanout_gap_row(
                     self.name,
                     "deviceConfigurationAssignmentsFanout",
-                    total=len(configuration_rows),
+                    total=configuration_total,
                     expanded=FANOUT_OBJECT_LIMIT,
                     scope="Device configuration assignments",
                 )

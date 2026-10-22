@@ -9,6 +9,7 @@ from ..collection_gaps import (
     REASON_NEXT_LINK_REFUSED,
     REASON_OPERATOR_LIMIT,
     REASON_PAGINATION_FAILED,
+    REASON_PAGINATION_NOT_FOLLOWED,
     TRUNCATION_ERROR_CLASS,
     sampling,
     truncation_message,
@@ -142,7 +143,7 @@ def record_truncation(
     """
     row["collection_truncated"] = True
     row["truncation_reason"] = reason
-    if reason == REASON_OPERATOR_LIMIT:
+    if reason in {REASON_OPERATOR_LIMIT, REASON_PAGINATION_NOT_FOLLOWED}:
         row["status"] = "partial"
         row["error_class"] = TRUNCATION_ERROR_CLASS
         row["error"] = truncation_message(list_name, rows, reason, limit)
@@ -215,7 +216,7 @@ def run_graph_endpoints(
 
         try:
             if page:
-                if chunk_writer is not None and hasattr(client, "iter_pages"):
+                if chunk_writer is not None and hasattr(client, "iter_pages") and not spec.get("inline"):
                     accumulator = EndpointAccumulator(sample_limit=20)
                     window = PageWindow.from_limit(collection_limit)
                     for page_number, page_payload in enumerate(client.iter_pages(endpoint, params=query), start=1):
@@ -274,6 +275,11 @@ def run_graph_endpoints(
                 if isinstance(values, list):
                     item_count = len(values)
                     payload[key] = {"value": values}
+                    if isinstance(page_result, dict) and page_result.get("@odata.nextLink"):
+                        # A list read that is not paged must never drop the next-page link silently: the rows after
+                        # this page were not read, so the list is a coverage gap, not a clean read.
+                        collection_truncated = True
+                        truncation_reason = REASON_PAGINATION_NOT_FOLLOWED
             status = "ok"
         except Exception as exc:  # noqa: BLE001
             status = "failed"
@@ -300,7 +306,9 @@ def run_graph_endpoints(
         bounded_sample = bool(
             page and collection_truncated and truncation_reason == REASON_OPERATOR_LIMIT and (limit_is_sample or sampling())
         )
-        is_gap = bool(page and collection_truncated and not bounded_sample)
+        is_gap = bool(collection_truncated and not bounded_sample)
+        if not page and is_gap and isinstance(payload.get(key), dict):
+            payload[key].update({"collection_truncated": True, "truncation_reason": truncation_reason})
         if page and isinstance(payload.get(key), dict):
             payload[key].update(
                 {
@@ -311,6 +319,9 @@ def run_graph_endpoints(
             )
             if is_gap and truncation_reason:
                 payload[key]["truncation_reason"] = truncation_reason
+            if bounded_sample:
+                # The raw section says it too, so replay and resumed runs (which have no coverage row) see the bound.
+                payload[key]["bounded_sample"] = True
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
 
         coverage_row: dict[str, Any] = {
@@ -328,7 +339,7 @@ def run_graph_endpoints(
             "chunk_count": payload.get(key, {}).get("chunk_count") if isinstance(payload.get(key), dict) else None,
             "sample_truncated": payload.get(key, {}).get("sample_truncated") if isinstance(payload.get(key), dict) else None,
             "collection_limit_reached": payload.get(key, {}).get("collection_limit_reached") if page else None,
-            "collection_truncated": is_gap if page else None,
+            "collection_truncated": (is_gap if page else (True if is_gap else None)),
             "duration_ms": duration_ms,
             "error_class": error_class,
             "error": error,

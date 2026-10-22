@@ -169,7 +169,7 @@ class PowerShellGraphAdapter(Adapter):
                         "duration_ms": duration_ms,
                         "stdout_bytes": len(stdout),
                         "stderr_bytes": len(stderr),
-                        "stdout_sample": redact_text(stdout[:500]),
+                        "stdout_sample": redact_text(stdout)[:500],  # redact first: a secret cut at the sample edge is not recognised
                     },
                 )
 

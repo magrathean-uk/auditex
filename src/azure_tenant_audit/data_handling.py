@@ -13,6 +13,11 @@ def classify_auth_scope(scope: str) -> str:
     lower = value.lower()
     if not value:
         return "unknown"
+    from .scope_catalog import GOOGLE_SCOPE_NOTES
+
+    # A scope that can read content is not "read only" because its name says so (Drive readonly reads file content).
+    if GOOGLE_SCOPE_NOTES.get(value, {}).get("risk") == "content_capable":
+        return "content_capable"
     if lower.endswith("/.default"):
         return "tenant_configured"
     if "readwrite" in lower or ".write" in lower or lower.endswith(".write"):
@@ -26,13 +31,20 @@ def classify_auth_scope(scope: str) -> str:
 
 def _scope_summary(auth_scopes: list[str] | None) -> dict[str, Any]:
     scopes = sorted({str(item) for item in auth_scopes or [] if str(item)})
-    by_class: dict[str, list[str]] = {"read_only": [], "write_capable": [], "tenant_configured": [], "unknown": []}
+    by_class: dict[str, list[str]] = {
+        "read_only": [],
+        "write_capable": [],
+        "content_capable": [],
+        "tenant_configured": [],
+        "unknown": [],
+    }
     for scope in scopes:
         by_class.setdefault(classify_auth_scope(scope), []).append(scope)
     return {
         "total": len(scopes),
         "read_only": by_class["read_only"],
         "write_capable": by_class["write_capable"],
+        "content_capable": by_class["content_capable"],
         "tenant_configured": by_class["tenant_configured"],
         "unknown": by_class["unknown"],
     }
@@ -87,7 +99,13 @@ def build_data_handling_summary(
         "read_only": read_only,
         "content_reads": False,
         "write_actions": write_actions,
-        "scope_risk": "write_capable_scope_present" if write_capable_scopes else "read_only_scopes",
+        "scope_risk": (
+            "write_capable_scope_present"
+            if write_capable_scopes
+            else "content_capable_scope_present"
+            if scope_summary["content_capable"]
+            else "read_only_scopes"
+        ),
         "auth_scope_summary": scope_summary,
         "write_capable_scopes": write_capable_scopes,
         "events": event_rows,

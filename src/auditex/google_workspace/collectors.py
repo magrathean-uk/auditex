@@ -5,7 +5,13 @@ from typing import Any, Callable
 
 from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT, fanout_gap_row
 from azure_tenant_audit.collectors.base import CollectorResult, context_limit, record_truncation
-from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT, DohClient, DohError, collect_domain_posture
+from azure_tenant_audit.dns_lookup import (
+    DEFAULT_DOH_ENDPOINT,
+    DohClient,
+    DohError,
+    collect_domain_posture,
+    unknown_posture,
+)
 
 from .auth import POLICIES_SCOPE
 from .client import classify_google_error, minimise_gmail_settings
@@ -635,13 +641,15 @@ class GoogleDnsPostureCollector:
                 status = "ok"
                 error_class = None
                 error = None
+                if posture.get("resolver_error"):
+                    status = "failed"
+                    error_class = "dns_resolver_error"
+                    error = str(posture["resolver_error"])
             except DohError as exc:
                 posture = {
                     "domain": domain_name,
                     "resolver_error": str(exc),
-                    "spf": {"present": False},
-                    "dmarc": {"present": False},
-                    "dkim": {"selectors_present": [], "selectors_missing": ["google"]},
+                    **unknown_posture(("google",)),
                 }
                 status = "failed"
                 error_class = "dns_resolver_error"

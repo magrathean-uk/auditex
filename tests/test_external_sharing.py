@@ -178,8 +178,8 @@ def test_the_capability_is_graded_against_what_each_benchmark_allows() -> None:
     anyone = sharing.grade_external_sharing({"sharing_capability": ANYONE})
 
     # CIS 7.2.3 allows new and existing guests; ScubaGear's MS.SHAREPOINT.1.1v1 does not.
-    assert guests["severity"] == "low" and guests["breaches"] == {"cis_m365_v7": False, "cisa_scuba": True}
-    assert anyone["severity"] == "high" and anyone["breaches"] == {"cis_m365_v7": True, "cisa_scuba": True}
+    assert guests["severity"] == "low" and guests["breaches"] == {"cis_m365_v7": False, "cisa_scuba": True, "cyber_essentials": False}
+    assert anyone["severity"] == "high" and anyone["breaches"] == {"cis_m365_v7": True, "cisa_scuba": True, "cyber_essentials": True}
 
 
 def test_domain_restriction_is_graded_against_what_each_benchmark_allows() -> None:
@@ -480,7 +480,11 @@ def test_graph_settings_alone_raise_anyone_links_high_and_the_domain_rule() -> N
     assert anyone["framework_mappings"]["cisa_scuba"] == ["MS.SHAREPOINT.1.1v1"]
     assert found["sharepoint.sharing_domains_unrestricted"]["framework_mappings"]["cis_m365_v7"] == ["7.2.6"]
     assert found["sharepoint.sharing_domains_unrestricted"]["framework_mappings"]["cisa_scuba"] == ["MS.SHAREPOINT.1.3v1"]
-    assert {row["framework"]: row["breached"] for row in anyone["framework_thresholds"]} == {"cis_m365_v7": True, "cisa_scuba": True}
+    assert {row["framework"]: row["breached"] for row in anyone["framework_thresholds"]} == {
+        "cis_m365_v7": True,
+        "cisa_scuba": True,
+        "cyber_essentials": True,
+    }
 
 
 def test_expiring_view_only_anyone_links_are_medium_and_the_mitigations_are_named() -> None:
@@ -508,7 +512,12 @@ def test_new_and_existing_guests_are_a_low_finding_that_breaches_scuba_but_not_c
     assert set(found) == {"sharepoint.external_sharing_broad"}
     finding = found["sharepoint.external_sharing_broad"]
     assert finding["severity"] == "low" and finding["title"] == "SharePoint and OneDrive allow sharing with new guests"
-    assert {row["framework"]: row["breached"] for row in finding["framework_thresholds"]} == {"cis_m365_v7": False, "cisa_scuba": True}
+    # Authenticated guests are not anonymous access, so Cyber Essentials (users authenticated before access) is not breached.
+    assert {row["framework"]: row["breached"] for row in finding["framework_thresholds"]} == {
+        "cis_m365_v7": False,
+        "cisa_scuba": True,
+        "cyber_essentials": False,
+    }
     assert finding["framework_thresholds"][1]["control_ids"] == ["MS.SHAREPOINT.1.1v1"]
 
 

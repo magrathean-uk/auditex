@@ -219,7 +219,7 @@ def ensure_exchange_online_module() -> int:
         "-NoLogo",
         "-NoProfile",
         "-Command",
-        "Set-PSRepository PSGallery -InstallationPolicy Trusted; "
+        # -Force already skips the untrusted-repository prompt, so the PSGallery trust policy is left as the operator set it.
         "Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber",
     ]
     return subprocess.run(command, check=False).returncode

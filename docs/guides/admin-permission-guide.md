@@ -112,7 +112,7 @@ Everything preset additional scopes:
 https://www.googleapis.com/auth/drive.metadata.readonly,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/apps.groups.settings,https://www.googleapis.com/auth/admin.directory.resource.calendar.readonly,https://www.googleapis.com/auth/calendar.calendarlist.readonly,https://www.googleapis.com/auth/calendar.acls.readonly
 ```
 
-`drive.readonly` is broad. Auditex does not read Drive file content, but Google may require broad scope for some metadata or permission surfaces. The data-handling and API inventory artifacts declare the scope risk and no-content-read claim.
+`drive.readonly` is broad. Auditex does not read Drive file content, but Google may require broad scope for some metadata or permission surfaces. The data-handling and API inventory artifacts declare the scope risk and no-content-read claim: `drive.readonly` is listed under `auth_scope_summary.content_capable` and `scope_risk` is `content_capable_scope_present` when no write-capable scope is present.
 
 #### What each collector's evidence covers
 

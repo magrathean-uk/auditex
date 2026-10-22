@@ -15,6 +15,14 @@ DEFAULT_DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query"
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
 
+# DNS response codes. NOERROR with no answer and NXDOMAIN are definite statements that the record is absent; every
+# other code (SERVFAIL, REFUSED, FORMERR, NOTIMP and so on) means the resolver did not answer the question.
+_RCODE_NOERROR = 0
+_RCODE_NXDOMAIN = 3
+_ABSENT_RCODES = frozenset({_RCODE_NOERROR, _RCODE_NXDOMAIN})
+_RCODE_NAMES = {1: "FORMERR", 2: "SERVFAIL", 4: "NOTIMP", 5: "REFUSED"}
+
+
 class DohError(RuntimeError):
     """Raised when a DoH query cannot be completed."""
 
@@ -45,7 +53,15 @@ class DohClient:
             raise DohError(f"DoH query failed for {record_type} {name}: {exc}") from exc
         if not isinstance(payload, dict):
             raise DohError(f"DoH response was not an object for {record_type} {name}")
-        if int(payload.get("Status", 0)) >= 1 and not payload.get("Answer"):
+        try:
+            rcode = int(payload.get("Status", 0))
+        except (TypeError, ValueError) as exc:
+            raise DohError(f"DoH response carried no usable status for {record_type} {name}") from exc
+        if rcode not in _ABSENT_RCODES and not payload.get("Answer"):
+            # SERVFAIL (2), REFUSED (5) and the other failure codes say the resolver could not answer; they
+            # are not evidence that the record does not exist, so the domain reads unknown, never "missing".
+            raise DohError(f"DoH resolver could not answer {record_type} {name}: {_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
+        if rcode == _RCODE_NXDOMAIN and not payload.get("Answer"):
             return []
         answer = payload.get("Answer") or []
         records: list[str] = []
@@ -244,12 +260,7 @@ def collect_domain_posture(
                 dkim_results[selector] = _summarize_dkim(records)
     except DohError as exc:
         posture["resolver_error"] = str(exc)
-        posture["spf"] = _absent("spf")
-        posture["dmarc"] = _absent("dmarc")
-        posture["dkim"] = {"selectors_present": [], "selectors_missing": list(all_probed)}
-        posture["mta_sts"] = {"dns_present": False}
-        posture["tls_rpt"] = _absent("tls_rpt")
-        posture["bimi"] = _absent("bimi")
+        posture.update(unknown_posture(all_probed))
         return posture
 
     posture["spf"] = _summarize_spf(spf_records)
@@ -259,6 +270,22 @@ def collect_domain_posture(
     posture["tls_rpt"] = _summarize_tls_rpt(tls_rpt_records)
     posture["bimi"] = _summarize_bimi(bimi_records)
     return posture
+
+
+def unknown_posture(probed_selectors: Iterable[str]) -> dict[str, Any]:
+    """The record sections of a domain the resolver could not answer for: ``present`` is ``None``, never ``False``.
+
+    A resolver failure says nothing about what the domain publishes, so no record is called absent.
+    The selectors are listed as probed, not as missing.
+    """
+    return {
+        "spf": {"present": None, "kind": "spf"},
+        "dmarc": {"present": None, "kind": "dmarc"},
+        "dkim": {"selectors_present": [], "selectors_missing": [], "selectors_unresolved": list(probed_selectors)},
+        "mta_sts": {"dns_present": None},
+        "tls_rpt": {"present": None, "kind": "tls_rpt"},
+        "bimi": {"present": None, "kind": "bimi"},
+    }
 
 
 def _summarize_spf(records: list[str]) -> dict[str, Any]:

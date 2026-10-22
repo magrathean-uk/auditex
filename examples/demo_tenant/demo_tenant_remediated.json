@@ -21,7 +21,7 @@
       "Registered MFA for admin gareth.pryce@halcyonfreight.example.",
       "Switched 'Require MFA for all users' from report-only to enabled, excluding the emergency access group.",
       "Enabled the 'Block legacy authentication' policy, excluding the emergency access group.",
-      "Limited user consent to verified publishers and low-risk permissions."
+      "Turned user consent off, so applications need administrator consent."
     ]
   },
   "identity": {
@@ -344,7 +344,7 @@
     },
     "authorizationPolicy": {
       "value": [
-        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-low"]}}
+        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": []}}
       ]
     }
   },
@@ -356,7 +356,7 @@
     },
     "authorizationPolicy": {
       "value": [
-        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": ["ManagePermissionGrantsForSelf.microsoft-user-default-low"]}}
+        {"id": "authorizationPolicy", "displayName": "Authorization Policy", "allowInvitesFrom": "everyone", "allowedToSignUpEmailBasedSubscriptions": true, "allowedToUseSSPR": true, "allowEmailVerifiedUsersToJoinOrganization": false, "blockMsolPowerShell": false, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3", "defaultUserRolePermissions": {"allowedToCreateApps": true, "allowedToCreateSecurityGroups": true, "allowedToReadOtherUsers": true, "permissionGrantPoliciesAssigned": []}}
       ]
     },
     "authenticationFlowsPolicy": {

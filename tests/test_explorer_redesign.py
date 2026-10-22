@@ -169,7 +169,9 @@ def test_demo_explorer_embeds_before_and_after(tmp_path: Path) -> None:
     assert data["compare"]["a"]["grade"] == "critical"
     # The demo judges its devices as of the day the fictional snapshot was taken (DEMO_AS_OF), so the endpoint rules
     # (stale sync, operating-system end of life) read the same on every run and the scores do not drift with the clock.
-    assert data["compare"]["a"]["score"] == 97 and data["compare"]["b"]["score"] == 64
+    # The twin excludes its emergency access group from the MFA and legacy-authentication policies, and the demo does not
+    # list that group with --break-glass-accounts, so both verdicts read "with exclusions" (a medium finding each).
+    assert data["compare"]["a"]["score"] == 97 and data["compare"]["b"]["score"] == 65
 
 
 def test_run_payload_maps_views(halcyon_runs: tuple[Path, Path]) -> None:

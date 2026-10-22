@@ -249,6 +249,8 @@ class AppConsentCollector(Collector):
         coverage.append({
             "collector": self.name, "type": "derived", "name": "servicePrincipalFanout",
             "status": "partial" if limited or incomplete else "ok", "item_count": 0,
+            # The objects this fan-out expanded, so the gap reads "11 rows", not "0 rows".
+            "rows_collected": len(fanout_principals),
             "error_class": "incomplete_evidence" if incomplete else "collection_limit" if limited else None,
             "error": "Service-principal fan-out inputs or relationships are incomplete." if incomplete else
                      "Service-principal relationships cover only the first ten principals plus Microsoft Graph." if limited else None,

@@ -18,7 +18,7 @@ WINDOWS = "00000000-0000-4000-8000-00000000{:04d}"
 
 def _device(number: int, system: str = "Windows") -> dict[str, Any]:
     return {"id": WINDOWS.format(number), "deviceName": f"PC{number:04d}", "operatingSystem": system, "osVersion": "10.0.26200.1",
-            "isEncrypted": True, "lastSyncDateTime": "2026-10-20T07:30:00Z"}
+            "isEncrypted": True, "lastSyncDateTime": "2026-10-20T07:30:00Z", "complianceState": "compliant"}
 
 
 class _Client:

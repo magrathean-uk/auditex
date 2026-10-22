@@ -153,9 +153,22 @@ def _alignment(snapshot: dict[str, Any]) -> dict[str, Any]:
     return build_baseline_alignment(findings, normalized_snapshot=snapshot, coverage_ledger=_ledger(*ALL_COLLECTORS))
 
 
-def _global_admins(count: int) -> dict[str, Any]:
+def _signed_in(names: list[str]) -> dict[str, Any]:
+    """The sign-in activity read (Microsoft Entra ID P1) with a recent successful sign-in for each user."""
+    stamp = "2026-10-01T00:00:00Z"
+    return {
+        "userSignInActivity": {
+            "value": [
+                {"id": name, "signInActivity": {"lastSignInDateTime": stamp, "lastSuccessfulSignInDateTime": stamp}}
+                for name in names
+            ]
+        }
+    }
+
+
+def _global_admins(count: int, *, signin: bool = False) -> dict[str, Any]:
     names = [f"ga-{index}" for index in range(count)]
-    return _snapshot(_identity(names, [_assignment(name) for name in names]))
+    return _snapshot(_identity(names, [_assignment(name) for name in names], extra=_signed_in(names) if signin else None))
 
 
 # --- set construction -------------------------------------------------------------------------------
@@ -862,7 +875,7 @@ def test_every_administrator_set_rule_reads_not_assessed_when_the_set_is_unknown
 
 
 def test_the_same_rules_pass_when_the_set_is_complete_and_fail_when_they_have_a_finding() -> None:
-    snapshot = _global_admins(3)
+    snapshot = _global_admins(3, signin=True)
     complete = set(baselines._complete_collectors(_ledger(*ALL_COLLECTORS)))
 
     for rule_id in baselines._ADMIN_SET_RULES - {"identity.admin_holds_productivity_licence"}:
@@ -878,7 +891,7 @@ def test_a_finding_on_an_unknown_set_still_fails_its_rule() -> None:
 
     assert _rule_status(alignment, "cis_m365_v7", "1.1.3", "identity.global_admin_sprawl")["status"] == "fail"
     assert _rule_status(alignment, "cis_m365_v7", "1.1.3", "identity.global_admin_singleton")["status"] == "not_assessed"
-    assert _rule_status(alignment, "cis_m365_v7", "5.2.2.1", "attack_path.no_mfa_to_tier0")["reason"].startswith("admin_set_unknown:")
+    assert _rule_status(alignment, "mcsb", "IM-6", "attack_path.no_mfa_to_tier0")["reason"].startswith("admin_set_unknown:")
 
 
 def test_a_snapshot_without_the_section_is_not_assessed_not_passed() -> None:
@@ -1209,3 +1222,61 @@ def test_the_offline_fixture_reads_cis_failed_and_scuba_passed_for_five_administ
     assert _control(alignment, "cis_m365_v7", "1.1.3")["status"] == "fail"
     assert _control(alignment, "cisa_scuba", "MS.AAD.7.1v1")["status"] == "pass"
     assert _control(alignment, "cis_m365_v7", "1.1.4")["status"] == "fail"
+
+
+# --- privileged roles that do not say administrator, and the verdict's view of the set ---------------------
+
+
+PARTNER_TIER2 = "e00e864a-17c5-4a4b-9c06-f5b95a8d5bd8"
+DIRECTORY_WRITERS = "9360feb5-f418-4baa-8175-e2a00bac4301"
+
+
+def _with_extra_roles(*assignments: dict[str, Any], users: list[str]) -> dict[str, Any]:
+    identity = _identity(users, list(assignments))
+    identity["roleDefinitions"]["value"] += [
+        {"id": PARTNER_TIER2, "displayName": "Partner Tier2 Support"},
+        {"id": DIRECTORY_WRITERS, "displayName": "Directory Writers"},
+    ]
+    return _snapshot(identity)
+
+
+def test_privileged_roles_without_administrator_in_the_name_make_their_holders_administrators() -> None:
+    snapshot = _with_extra_roles(
+        _assignment("u-partner", PARTNER_TIER2),
+        _assignment("u-writer", DIRECTORY_WRITERS),
+        _assignment("u-reader", "reader-role"),
+        users=["u-partner", "u-writer", "u-reader"],
+    )
+
+    rows = _rows(snapshot)
+
+    assert set(rows) == {"u-partner", "u-writer"}, "Global Reader is not a privileged role"
+    assert rows["u-partner"]["role_names"] == ["Partner Tier2 Support"] and rows["u-partner"]["global_administrator"] is False
+    assert _summary(snapshot)["admin_count"] == 2 and _summary(snapshot)["global_admin_count"] == 0
+
+
+def test_the_administrator_scope_lists_enabled_counted_administrators_and_their_roles() -> None:
+    from azure_tenant_audit.effective_admins import admin_scope
+
+    users = [_user("ga-1"), _user("ga-2", accountEnabled=False), _user("u-exo")]
+    identity = _identity(user_rows=users, assignments=[_assignment("ga-1"), _assignment("ga-2"), _assignment("u-exo", EXCHANGE_ADMIN)])
+    snapshot = _snapshot(identity)
+
+    scope = admin_scope(_records(snapshot), identity["roleDefinitions"]["value"])
+
+    assert scope is not None and scope.complete is True
+    assert scope.admin_principal_ids == frozenset({"ga-1", "u-exo"}), "a disabled administrator cannot sign in"
+    assert scope.held_role_ids == frozenset({GLOBAL_ADMIN.lower(), EXCHANGE_ADMIN.lower()})
+    assert GLOBAL_ADMIN.lower() in scope.privileged_role_ids and "reader-role" not in scope.privileged_role_ids
+    assert scope.guest_admin_count == 0
+
+
+def test_the_administrator_scope_is_incomplete_when_the_set_is_unknown_and_absent_without_one() -> None:
+    from azure_tenant_audit.effective_admins import admin_scope
+
+    snapshot = _snapshot(_identity(["u1"], [_assignment("u1")]), governance={})
+
+    scope = admin_scope(_records(snapshot), [])
+
+    assert scope is not None and scope.complete is False
+    assert admin_scope([], []) is None

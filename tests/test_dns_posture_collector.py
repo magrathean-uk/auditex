@@ -306,7 +306,10 @@ def test_dns_posture_collector_records_resolver_failures_per_domain() -> None:
 
     record = result.payload["domainPosture"]["value"][0]
     assert record["resolver_error"] is not None
-    assert record["spf"]["present"] is False
+    # Unknown, never "absent": a resolver failure says nothing about what the domain publishes.
+    assert record["spf"]["present"] is None
+    assert record["dmarc"]["present"] is None
+    assert record["dkim"]["selectors_missing"] == []
 
 
 # ----- Tiered DKIM probe (A2) -----

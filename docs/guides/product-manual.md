@@ -253,7 +253,7 @@ raise `dns_posture.mta_sts_missing`, `dns_posture.mta_sts_testing_mode`,
 
 `reports/report-pack.json` also carries `baseline_alignment`. It shows the status of each CIS Microsoft 365 v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, and Microsoft cloud security benchmark control that Auditex rules map to, and a Secure Score reconciliation table. To list rules by product area or framework, run `auditex rules packs --kind framework` or `auditex rules inventory`. [Framework Mappings](../reference/framework-mappings.md) describes the sources and limits.
 
-`baseline_alignment` also has a Cyber Essentials section, following the NCSC Requirements for IT Infrastructure v3.3. It lists every requirement with its status and the rules and evidence counts behind it, and the Markdown report shows it as a table. Most Cyber Essentials requirements concern devices, networks and process, so they appear as `manual`, `ce_plus_assessor_test` or `provider_responsibility` with no verdict; only user access control, parts of secure configuration and, through Intune and Exchange Online, parts of update management (supported operating systems, update rings, devices that stopped syncing) and malware protection (Defender antivirus state, the default anti-malware policy) take a verdict from tenant evidence, and that verdict can only be a fail. A clean result there is recorded as not assessed (`partial_requirement_no_gap_found`) with the evidence counts, never as a pass. Auditex output is evidence for a Cyber Essentials assessor, not a certification or a CE+ result.
+`baseline_alignment` also has a Cyber Essentials section, following the NCSC Requirements for IT Infrastructure v3.3. It lists every requirement with its status and the rules and evidence counts behind it, and the Markdown report shows it as a table with each requirement's title, the reason a row has no verdict (including which collector did not complete), how far a failure can be trusted (`confidence`) and what the evidence cannot see (`evidence_limits`). Most Cyber Essentials requirements concern devices, networks and process, so they appear as `manual`, `ce_plus_assessor_test` or `provider_responsibility` with no verdict; only user access control, parts of secure configuration and, through Intune and Exchange Online, parts of update management (supported operating systems, update rings, devices that stopped syncing) and malware protection (Defender antivirus state, the default anti-malware policy) take a verdict from tenant evidence, and that verdict can only be a fail. A clean result there is recorded as not assessed (`partial_requirement_no_gap_found`) with the evidence counts, never as a pass. Auditex output is evidence for a Cyber Essentials assessor, not a certification or a CE+ result.
 
 ## Render Reports
 
@@ -289,14 +289,14 @@ The header switches between embedded runs, toggles light and dark themes, and pr
 
 ## Customer Pack
 
-Create the pack in a fresh directory, verify its integrity, and review its content before sharing. Generated packs may contain tenant identifiers and other sensitive metadata; verification is not a disclosure approval.
+Create the pack in a fresh directory (a non-empty directory that holds no earlier pack is refused, exit status 2), verify its integrity, and review its content before sharing. Generated packs may contain tenant identifiers and other sensitive metadata; verification is not a disclosure approval.
 
 ```bash
 auditex report customer-pack <run-dir> --output-dir customer-pack
 auditex report verify-pack customer-pack
 ```
 
-If `verify-pack` returns `valid: false`, do not send the pack. Recreate it from the run directory or investigate missing or tampered files.
+If `verify-pack` returns `valid: false`, do not send the pack. Recreate it from the run directory or investigate missing or tampered files. `verify-pack` also checks the pack's copy of `bundle-hashes.json` (its digest against `integrity.manifest_sha256`, and every copied source artifact against its row), reports files the pack does not list (`unexpected_file`) and prints `digests`; `--expect-manifest-sha256` and `--expect-checksums-sha256` take values you received through a separate channel. The issue codes added are `source_artifact_bundle_hash_mismatch`, `source_artifact_not_in_bundle_hashes`, `bundle_hashes_digest_mismatch`, `missing_bundle_hashes`, `invalid_bundle_hashes`, `expected_manifest_sha256_mismatch`, `expected_checksums_sha256_mismatch` and `unexpected_file`. Packs use paths relative to the pack and carry no absolute path of the machine that wrote them. A run with a symbolic link, or with a file the hash manifest does not list where the product reads, reads `bundle_integrity_mismatch` and is refused.
 `stale_accepted_risk` means the bundle still marks a finding as accepted even though its waiver expiry date has passed.
 
 For targeted review, render single artifacts outside the verified pack. Changing pack files invalidates its recorded hashes:
@@ -317,7 +317,7 @@ auditex compare --run-dir outputs/baseline/client --run-dir outputs/current/clie
 auditex compare --run-dir outputs/baseline/client --run-dir outputs/current/client --format md
 ```
 
-JSON is the default. `--format md` prints a before/after summary of the first and last run: risk grade change, and new, resolved, not reassessed, and changed findings grouped by severity. A finding that is gone from the later run is resolved only if its collector, and every collector its rule reads, completed there; otherwise it is listed as not reassessed with the reason.
+JSON is the default. `--format md` prints a before/after summary of the first and last run: risk grade change, and new, resolved, not reassessed, and changed findings grouped by severity. A finding that is gone from the later run is resolved only if its collector, and every collector its rule reads, completed there, the inputs its rule needs were known there (Google Workspace rules included), and the run was judged with the same or a stricter window (`rule_parameters`); otherwise it is listed as not reassessed with the reason. When either run fails its hash manifest or recorded contract, no finding is called resolved and the header says `Run verification`.
 
 Use drift gates in CI or scheduled checks:
 
@@ -330,21 +330,22 @@ Both gates print JSON on stdout, warnings and the blocking reason on stderr, and
 
 ### Gates fail closed
 
-A gate never reads missing evidence as "nothing found". Every run it reads must have a readable `run-manifest.json`, a contract that is valid as recorded and when recomputed now (`validation.json` alone is not trusted), a readable findings list that agrees with the report pack, and at least one completed collector. A run with no findings has no `findings/findings.json`; that is a clean result, but an empty, unreadable or missing file when findings exist is not.
+A gate never reads missing evidence as "nothing found". Every run it reads must have a readable `run-manifest.json`, a contract that is valid as recorded and when recomputed now (`validation.json` alone is not trusted), artifacts that still match `bundle-hashes.json`, a readable findings list that agrees with the report pack on every finding's id, status, severity and rule, and at least one completed collector. A run with no findings has no `findings/findings.json`; that is a clean result, but an empty, unreadable or missing file when findings exist is not.
 
 | `code` | Meaning |
 | --- | --- |
 | `run_dir_missing`, `missing_manifest`, `unreadable_manifest` | The directory or `run-manifest.json` is missing, empty or not a JSON object. |
 | `contract_invalid` | `validation.json` or the manifest does not record a valid contract, or recomputing it fails. `contract.issue_codes` lists the errors. |
-| `unreadable_findings`, `missing_findings`, `findings_inconsistent` | The findings file is empty, unreadable or not a list; a declared file is missing; or the file, manifest and report pack disagree. |
+| `bundle_integrity_mismatch`, `bundle_integrity_invalid`, `bundle_integrity_absent` | An artifact no longer matches `bundle-hashes.json` (or a symbolic link or unexpected file sits in the run), the manifest cannot be read, or a bundle finalized under contract `2026-10-22` or later has none. `integrity` lists the paths. The manifest is unsigned: it stops accidental and naive edits, not someone who can re-hash. |
+| `unreadable_findings`, `missing_findings`, `findings_inconsistent` | The findings file is empty, unreadable or not a list; a declared file is missing; or the file, manifest and report pack disagree (in the set of findings, or in a finding's status, severity or rule). |
 | `incomplete_coverage` | A collector did not complete, or `overall_status` is not `ok`. Pass `--allow-partial` to accept known gaps; they are listed under `coverage` and in `warnings`. |
 | `no_completed_collectors` | No collector completed. `--allow-partial` does not override this. |
 | `collector_parity_lost` | (`gate-drift`) The current run completed fewer collectors than the baseline. |
 | `tenant_guard` | (`gate-drift`) The runs are not from the same tenant. |
 
-`auditex gate` counts findings with the same accepted-status rule as the drift gate: `accepted_risk`, `accepted` and `waived` findings do not fail the gate but are reported (`accepted_count`, `accepted_by_severity`, `accepted_risk_summary`) and never dropped from the counts. An accepted finding whose waiver has expired fails the gate at or above the threshold (`stale_accepted_risk_count_at_or_above_threshold`). Accepted risks without an owner, reason or expiry appear under `warnings`.
+A status counts only with a waiver behind it. The engine writes `accepted_risk` only together with the waiver that matched, so validation fails a run whose accepted finding has none (`contract_invalid`, `unwaived_accepted_status`), and a `closed` or `resolved` finding with no matching waiver stays open (`unbacked_status_count`, and a warning). `auditex gate` counts findings with the same accepted-status rule as the drift gate: `accepted_risk`, `accepted` and `waived` findings with their waiver do not fail the gate but are reported (`accepted_count`, `accepted_by_severity`, `accepted_risk_summary`) and never dropped from the counts. An accepted finding whose waiver has expired fails the gate at or above the threshold (`stale_accepted_risk_count_at_or_above_threshold`). Accepted risks without an owner, reason or expiry appear under `warnings`.
 
-`auditex gate-drift` reports a baseline finding that is absent from the current run as `resolved` only when that finding's collector and every other collector its rule reads (for example `identity` for the Global Administrator MFA rule) completed in the current run. Otherwise it is listed under `not_reassessed` with a `reason` (`collector_not_run`, `collector_blocked_permission`, `collector_unknown`, `rule_collector_blocked_permission:identity`, and so on): lost coverage is not remediation. `collector_parity` lists the collectors completed in each run and which were lost or gained. A new finding that is already accepted does not fail the drift gate; it is listed under `new_accepted`.
+`auditex gate-drift` reports a baseline finding that is absent from the current run as `resolved` only when that finding's collector and every other collector its rule reads (for example `identity` for the Global Administrator MFA rule) completed in the current run. Otherwise it is listed under `not_reassessed` with a `reason` (`collector_not_run`, `collector_blocked_permission`, `collector_unknown`, `rule_collector_blocked_permission:identity`, and so on): lost coverage is not remediation. `collector_parity` lists the collectors completed in each run and which were lost or gained. A finding is also not resolved when the later run used a larger rule window than the baseline (`rule_parameters_laxer:<name>`) or either run did not record it (`rule_parameters_unrecorded:<name>`); `rule_parameters` lists both runs' windows and the differences. A new finding that is already accepted does not fail the drift gate; it is listed under `new_accepted`.
 
 ### Waivers
 

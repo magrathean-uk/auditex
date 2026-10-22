@@ -43,11 +43,12 @@ _DIAGNOSTIC_RULES = {
 # docs/reference/framework-mappings.md and configs/framework-catalog.json too.
 _EXPECTED_CIS_V7 = {
     "app_consent.high_privilege",
-    "attack_path.no_mfa_to_tier0",
     "app_credentials.secret_long_validity",
+    "ca.admin_mfa_not_enforced",
     "ca.legacy_auth_not_blocked",
     "ca.mfa_not_enforced",
     "consent_policy.admin_consent_workflow_disabled",
+    "consent_policy.user_consent_limited",
     "consent_policy.user_consent_unrestricted",
     "dns_posture.dkim_missing",
     "dns_posture.dmarc_missing",
@@ -76,20 +77,19 @@ _EXPECTED_CIS_V7 = {
 }
 _EXPECTED_SECURE_SCORE = {
     "app_consent.high_privilege",
-    "attack_path.no_mfa_to_tier0",
+    "ca.admin_mfa_not_enforced",
     "ca.legacy_auth_not_blocked",
     "ca.mfa_not_enforced",
     "consent_policy.admin_consent_workflow_disabled",
+    "consent_policy.user_consent_limited",
     "consent_policy.user_consent_unrestricted",
     "dns_posture.spf_missing",
     "dns_posture.spf_multiple_records",
     "dns_posture.spf_passthrough",
     "exchange.remote_domain_auto_forward_enabled",
     "exchange.transport_external_redirect",
-    "identity.global_admin_mfa_not_registered",
     "identity.global_admin_singleton",
     "identity.global_admin_sprawl",
-    "identity.privileged_mfa_not_registered",
     "identity.user_mfa_not_registered",
     "mailbox_forwarding.external_inbox_rule",
     "sharepoint.broad_link",
@@ -261,7 +261,8 @@ def test_secure_score_at_or_above_half_emits_no_finding() -> None:
 def test_secure_score_reconciliation_from_synthetic_snapshot() -> None:
     snapshot = _secure_score_snapshot()
     findings = [
-        {"id": "identity:ga_mfa:1", "rule_id": "identity.global_admin_mfa_not_registered", "status": "open"},
+        # AdminMFAV2 is about MFA being required of administrators, which ca.admin_mfa_not_enforced judges.
+        {"id": "conditional_access:administrator_mfa_not_enforced", "rule_id": "ca.admin_mfa_not_enforced", "status": "open"},
         {"id": "identity:user_mfa:1", "rule_id": "identity.user_mfa_not_registered", "status": "open"},
     ]
     result = build_secure_score_reconciliation(findings, snapshot)

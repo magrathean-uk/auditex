@@ -342,6 +342,7 @@ def grade_anyone_links(settings: Mapping[str, Any]) -> tuple[str | None, list[st
 # Frameworks whose controls the SharePoint rules map to, and whether each is breached by a finding.
 _CIS = "cis_m365_v7"
 _SCUBA = "cisa_scuba"
+_CE = "cyber_essentials"
 
 
 def grade_external_sharing(settings: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -350,7 +351,9 @@ def grade_external_sharing(settings: Mapping[str, Any]) -> dict[str, Any] | None
     CIS 7.2.3 allows new and existing guests, so only anyone links breach it. ScubaGear's
     MS.SHAREPOINT.1.1v1 passes only for existing guests or sharing off, so new and existing guests
     already breach it. Anyone links are ``high`` (``medium`` when the anonymous-link settings were read
-    and mitigate); new and existing guests are ``low`` and breach SCuBA only.
+    and mitigate); new and existing guests are ``low`` and breach SCuBA only. For Cyber Essentials (users are
+    authenticated before access: ``ce.sc.user_authentication``, supporting evidence) only anyone links are anonymous
+    access; an authenticated guest is not.
     """
     rank = capability_rank(settings.get("sharing_capability"))
     if rank is None or rank < 2:
@@ -360,14 +363,14 @@ def grade_external_sharing(settings: Mapping[str, Any]) -> dict[str, Any] | None
         return {
             "severity": severity,
             "scope": "anyone_links",
-            "breaches": {_CIS: True, _SCUBA: True},
+            "breaches": {_CIS: True, _SCUBA: True, _CE: True},
             "mitigations": mitigations,
             "not_read": not_read,
         }
     return {
         "severity": "low",
         "scope": "new_and_existing_guests",
-        "breaches": {_CIS: False, _SCUBA: True},
+        "breaches": {_CIS: False, _SCUBA: True, _CE: False},
         "mitigations": [],
         "not_read": [],
     }

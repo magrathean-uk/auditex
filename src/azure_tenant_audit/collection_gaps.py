@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from typing import Any
 
 # Error class of the coverage row for a list cut at the operator's row limit.
@@ -23,6 +24,8 @@ TRUNCATION_ERROR_CLASS = "collection_limit"
 REASON_OPERATOR_LIMIT = "operator_limit"
 REASON_PAGINATION_FAILED = "pagination_failed"
 REASON_NEXT_LINK_REFUSED = "next_link_refused"
+# A response that should have been one page carried an @odata.nextLink the collector did not follow.
+REASON_PAGINATION_NOT_FOLLOWED = "pagination_not_followed"
 # A collector bounds how many objects it expands (members, owners, relationships); it hit that bound.
 REASON_FANOUT_LIMIT = "fanout_limit"
 # A derived result was built from a list that was itself cut short.
@@ -32,12 +35,23 @@ TRUNCATION_REASONS = (
     REASON_OPERATOR_LIMIT,
     REASON_PAGINATION_FAILED,
     REASON_NEXT_LINK_REFUSED,
+    REASON_PAGINATION_NOT_FOLLOWED,
     REASON_FANOUT_LIMIT,
     REASON_INPUT_LIMITED,
     REASON_UNKNOWN,
 )
 
 COLLECTION_GAP_SECTION = "collection_gaps"
+# A list a collector reads as a sample by design (the newest events of a log) and that was cut at that bound.
+# It is not a gap, but a rule whose "nothing found" reads that list cannot call its absence of a finding a pass.
+BOUNDED_SAMPLE_SECTION = "bounded_samples"
+BOUNDED_SAMPLE_GAP_PREFIX = "bounded_sample"
+# Rules that read an event log: rule id -> (collector, list). A finding raised from the sample is real evidence and
+# still fails the rule; with no finding the rule is not_assessed, because older events were never read.
+SAMPLE_JUDGED_RULES: dict[str, tuple[str, str]] = {
+    "security.risky_signin": ("security", "signIns"),
+    "security.privilege_change_event": ("security", "directoryAudits"),
+}
 
 _SAMPLE_ONLY: ContextVar[bool] = ContextVar("auditex_sample_only", default=False)
 
@@ -71,6 +85,11 @@ def truncation_message(list_name: str, rows: int, reason: str, limit: int | None
         return f"{list_name}: paging stopped after {rows} rows because the next-page link was refused; the list is incomplete."
     if reason == REASON_PAGINATION_FAILED:
         return f"{list_name}: paging stopped after {rows} rows because a later page could not be read; the list is incomplete."
+    if reason == REASON_PAGINATION_NOT_FOLLOWED:
+        return (
+            f"{list_name}: the response carried a next-page link that was not followed after {rows} rows; "
+            "the list is incomplete."
+        )
     return f"{list_name}: collection stopped after {rows} rows; the list is incomplete."
 
 
@@ -103,6 +122,18 @@ def fanout_gap_row(
         "fanout_limit": limit,
         "fanout_total": total,
     }
+
+
+def section_total(section: Any, rows: list[Any]) -> int:
+    """How many rows a list read collected: its ``item_count``, which counts the rows streamed to chunk files.
+
+    ``rows`` is the inline sample (the first 20 rows of a chunked list), so its length is only the answer for a list
+    that was kept whole.
+    """
+    count = section.get("item_count") if isinstance(section, Mapping) else None
+    if isinstance(count, int) and not isinstance(count, bool) and count >= len(rows):
+        return count
+    return len(rows)
 
 
 def section_was_cut(section: Any) -> bool:
@@ -234,3 +265,83 @@ def truncation_summary(truncations: Iterable[Mapping[str, Any]]) -> str:
         for item in truncations
     ]
     return ", ".join(parts)
+
+
+def _event_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def event_span(values: Iterable[Any]) -> dict[str, str]:
+    """The oldest and newest of ``values`` (ISO timestamps) as given, or ``{}`` when none parse."""
+    dated = [(parsed, value) for value in values if (parsed := _event_time(value)) is not None]
+    if not dated:
+        return {}
+    return {"oldest": min(dated, key=lambda item: item[0])[1], "newest": max(dated, key=lambda item: item[0])[1]}
+
+
+def bounded_sample_records(
+    coverage_rows: Iterable[Any],
+    collector_payloads: Mapping[str, Any],
+    spans: Mapping[tuple[str, str], Mapping[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Normalized ``bounded_samples`` records: lists cut at a bound the collector chose, from rows and raw sections.
+
+    A coverage row or raw section carries ``bounded_sample`` only when the list really continued past the bound.
+    The raw section is read too, so offline and resumed bundles that have no coverage row behave the same.
+    ``spans`` gives the oldest and newest event time of the rows kept, per (collector, list).
+    """
+    found: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in latest_coverage(coverage_rows):
+        if row.get("bounded_sample") is True:
+            key = (str(row.get("collector") or ""), str(row.get("name") or ""))
+            limit = _limit(row)
+            found[key] = {"rows_collected": _row_count(row), **({"sample_limit": limit} if limit is not None else {})}
+    for collector, payload in sorted(collector_payloads.items()):
+        if not isinstance(payload, Mapping):
+            continue
+        for name, section in sorted(payload.items()):
+            if isinstance(section, Mapping) and section.get("bounded_sample") is True and (str(collector), str(name)) not in found:
+                value = section.get("value")
+                count = section.get("item_count")
+                rows = count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else (
+                    len(value) if isinstance(value, list) else 0
+                )
+                limit = _limit(section)
+                found[(str(collector), str(name))] = {
+                    "rows_collected": rows,
+                    **({"sample_limit": limit} if limit is not None else {}),
+                }
+    records: list[dict[str, Any]] = []
+    for (collector, name), detail in sorted(found.items()):
+        source = f"{collector}.{name}"
+        record: dict[str, Any] = {
+            "kind": "bounded_sample",
+            "source": source,
+            "id": source,
+            "key": f"bounded_sample:{source}",
+            "collector": collector,
+            "list": name,
+            **detail,
+        }
+        record.update((spans or {}).get((collector, name)) or {})
+        records.append(record)
+    return records
+
+
+def bounded_sample_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
+    """``bounded_sample:<collector>.<list>`` when ``rule_id`` reads an event log that was cut at the sample bound."""
+    target = SAMPLE_JUDGED_RULES.get(rule_id)
+    if target is None or not isinstance(snapshot, Mapping):
+        return None
+    section = snapshot.get(BOUNDED_SAMPLE_SECTION)
+    rows = section.get("records") if isinstance(section, Mapping) else None
+    for record in rows if isinstance(rows, list) else []:
+        if isinstance(record, Mapping) and (record.get("collector"), record.get("list")) == target:
+            return f"{BOUNDED_SAMPLE_GAP_PREFIX}:{target[0]}.{target[1]}"
+    return None

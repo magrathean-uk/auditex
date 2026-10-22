@@ -110,12 +110,15 @@ def test_a_policy_that_names_an_account_is_judged_even_when_it_does_not_target_e
     assert finding["evidence"]["policies"][0]["reach"] == "names_account"
 
 
-def test_a_policy_aimed_at_administrator_roles_is_judged() -> None:
-    snapshot = _snapshot([_policy("admins", users={"includeRoles": [GLOBAL_ADMIN_ROLE]})], accounts=["bg1@example.com"])
+def test_a_policy_aimed_at_a_role_the_accounts_hold_is_judged() -> None:
+    snapshot = _snapshot(
+        [_policy("admins", users={"includeRoles": [GLOBAL_ADMIN_ROLE]})], accounts=["bg1@example.com"], admins=[BG1]
+    )
 
     finding = _finding(snapshot)
 
     assert finding is not None and finding["evidence"]["policies"][0]["reach"] == "administrator_roles"
+    assert finding["evidence"]["policies"][0]["broad"] is True and finding["severity"] == "high"
 
 
 def test_an_exclusion_by_user_or_group_satisfies_the_check() -> None:
@@ -375,3 +378,107 @@ def test_the_command_line_option_reaches_the_run_and_a_missing_file_stops_it(tmp
     assert finding["evidence"]["accounts"] == ["bg1@example.com", "bg2@example.com"]
     assert audit_main([*base, "--run-name", "b", "--break-glass-accounts", f"@{tmp_path / 'missing.txt'}"]) == 2
     assert not (tmp_path / "out" / "t-b").exists(), "the run stops before anything is written"
+
+
+# ---- reach: roles, user actions, group exclusions (CE+ review 2026-10-22) ---------------------------------
+
+HELPDESK_ROLE = "729827e3-9c14-49f7-bb1b-9608f156bbb8"
+
+
+def _role_payloads(policies: list[dict[str, Any]], *, held: dict[str, list[str]], groups_members: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    """Payloads where each listed user holds the given roles; ``groups_members`` are role-assignable groups and their members."""
+    payloads = _payloads(policies)
+    identity = payloads["identity"]
+    identity["roleDefinitions"] = {
+        "value": [
+            {"id": GLOBAL_ADMIN_ROLE, "displayName": "Global Administrator"},
+            {"id": HELPDESK_ROLE, "displayName": "Helpdesk Administrator"},
+        ]
+    }
+    identity["roleAssignments"] = {
+        "value": [
+            {"id": f"ra-{user}-{role}", "roleDefinitionId": role, "principalId": user}
+            for user, roles in held.items()
+            for role in roles
+        ]
+    }
+    if groups_members:
+        identity["groups"] = {"value": [{"id": group, "displayName": f"Group {group}"} for group in groups_members]}
+        identity["roleAssignableGroupMembers"] = {
+            "value": [
+                {"groupId": group, "displayName": f"Group {group}", "members": [{"id": member} for member in members]}
+                for group, members in groups_members.items()
+            ],
+            "fanout": {"fanout_complete": True},
+        }
+    return payloads
+
+
+def _role_snapshot(policies: list[dict[str, Any]], *, held: dict[str, list[str]], accounts: list[str], **kwargs: Any) -> dict[str, Any]:
+    return build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="r",
+        collector_payloads=_role_payloads(policies, held=held, **kwargs),
+        break_glass_accounts=accounts,
+    )
+
+
+def test_a_policy_for_a_role_none_of_the_accounts_holds_is_not_judged() -> None:
+    policy = _policy("helpdesk", users={"includeRoles": [HELPDESK_ROLE]})
+
+    snapshot = _role_snapshot([policy], held={BG1: [GLOBAL_ADMIN_ROLE]}, accounts=["bg1@example.com"])
+
+    assert _finding(snapshot) is None
+    assert snapshot["break_glass_assessment"]["records"][0]["policies_in_scope"] == 0
+
+
+def test_a_policy_for_another_administrator_role_the_account_holds_is_judged_but_never_high() -> None:
+    policy = _policy("helpdesk", users={"includeRoles": [HELPDESK_ROLE]})
+
+    finding = _finding(_role_snapshot([policy], held={BG1: [HELPDESK_ROLE]}, accounts=["bg1@example.com"]))
+
+    assert finding is not None
+    assert finding["evidence"]["policies"][0]["reach"] == "administrator_roles"
+    assert finding["evidence"]["policies"][0]["broad"] is False, "Helpdesk Administrator cannot lock a Global Administrator out"
+    assert finding["severity"] == "medium"
+
+
+def test_a_role_policy_is_judged_at_medium_when_the_roles_of_the_accounts_cannot_be_listed() -> None:
+    policy = _policy("helpdesk", users={"includeRoles": [HELPDESK_ROLE]})
+    group = [{"id": BG_GROUP, "displayName": "Break Glass Accounts"}]
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="r",
+        collector_payloads=_payloads([policy], groups=group),
+        break_glass_accounts=["Break Glass Accounts"],
+    )
+    finding = _finding(snapshot)
+
+    assert finding is not None, "a group has unknown roles, so the policy is judged rather than dropped"
+    assert finding["evidence"]["policies"][0]["reach"] == "administrator_roles_unverified"
+    assert finding["evidence"]["policies"][0]["broad"] is False and finding["severity"] == "medium"
+
+
+def test_policies_for_a_user_action_or_an_authentication_context_are_not_judged() -> None:
+    register = _policy("register-security-info")
+    register["conditions"]["applications"] = {"includeUserActions": ["urn:user:registersecurityinfo"]}
+    context = _policy("auth-context")
+    context["conditions"]["applications"] = {"includeAuthenticationContextClassReferences": ["c1"]}
+
+    snapshot = _snapshot([register, context], accounts=["bg1@example.com"])
+
+    assert _finding(snapshot) is None
+    assert snapshot["break_glass_assessment"]["records"][0]["policies_in_scope"] == 0
+
+
+def test_an_excluded_group_whose_members_the_run_read_covers_the_accounts_in_it() -> None:
+    members = {"g-members": [BG1, BG2]}
+    policy = _policy("mfa-all", users={"includeUsers": ["All"], "excludeGroups": ["g-members"]})
+
+    covered = _role_snapshot([policy], held={}, accounts=["bg1@example.com", "bg2@example.com"], groups_members=members)
+    other_group = _policy("mfa-all", users={"includeUsers": ["All"], "excludeGroups": ["g-other"]})
+    not_covered = _role_snapshot([other_group], held={}, accounts=["bg1@example.com"], groups_members=members)
+
+    assert _finding(covered) is None
+    assert _finding(not_covered) is not None

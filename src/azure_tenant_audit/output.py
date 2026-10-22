@@ -579,6 +579,7 @@ class AuditWriter:
             "top_limit",
             "sample_truncated",
             "truncated_sections",
+            "rule_parameters",
         ):
             value = metadata.get(key)
             if value is not None:

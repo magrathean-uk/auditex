@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ..graph import GraphClient
+from ..perf_runtime import EndpointAccumulator
+from ._endpoint_reads import input_rows
 from .base import Collector, CollectorResult, run_graph_endpoints
+
+# Rows per chunk file of a derived site list that is streamed to disk.
+DERIVED_CHUNK_ROWS = 500
 
 
 def _site_kind_from_web_url(web_url: Any) -> str:
@@ -22,6 +27,17 @@ class OneDrivePostureCollector(Collector):
         "Sites.Read.All",
     ]
 
+    def _derived_section(self, name: str, rows: list[dict[str, Any]], chunk_writer: Any) -> dict[str, Any]:
+        """A site list derived from ``sites``: inline when the source was kept whole, chunked when it was streamed."""
+        if chunk_writer is None or not rows:
+            return {"value": rows}
+        accumulator = EndpointAccumulator(sample_limit=20)
+        for page_number, start in enumerate(range(0, len(rows), DERIVED_CHUNK_ROWS), start=1):
+            page = rows[start : start + DERIVED_CHUNK_ROWS]
+            path = chunk_writer(self.name, name, page_number, page, {"derived_from": "sites", "page_number": page_number})
+            accumulator.add_page(page, chunk_file=path)
+        return accumulator.payload()
+
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient = context["client"]
         payload, coverage = run_graph_endpoints(
@@ -36,7 +52,13 @@ class OneDrivePostureCollector(Collector):
             chunk_writer=context.get("chunk_writer"),
             log_event=context.get("audit_logger"),
         )
-        sites = payload.get("sites", {}).get("value", [])
+        sites_section = payload.get("sites") if isinstance(payload.get("sites"), dict) else {}
+        # A live run streams the site list to chunk files and keeps only a 20-row sample inline: the kinds, the counts and
+        # the OneDrive finding must cover every site that was read, so the rows come from the chunk-aware reader.
+        chunked = bool(sites_section.get("chunk_files"))
+        sites, read_issues, _failed, _cut = input_rows(sites_section, context.get("run_dir")) if chunked else ([], [], False, False)
+        if not chunked or (read_issues and not sites):
+            sites = sites_section.get("value", [])
         if not isinstance(sites, list):
             sites = []
         sharepoint_settings = payload.get("sharePointSettings", {}) if isinstance(payload.get("sharePointSettings"), dict) else {}
@@ -58,14 +80,21 @@ class OneDrivePostureCollector(Collector):
             enriched_sites.append(enriched_site)
 
         if isinstance(payload.get("sites"), dict):
-            payload["sites"]["value"] = enriched_sites
+            inline = payload["sites"].get("value")
+            payload["sites"]["value"] = enriched_sites[: len(inline)] if chunked and isinstance(inline, list) else enriched_sites
         else:
             payload["sites"] = {"value": enriched_sites}
 
-        payload["oneDriveSites"] = {
-            "value": [item for item in enriched_sites if item.get("siteKind") == "personal"]
-        }
-        payload["teamSites"] = {"value": [item for item in enriched_sites if item.get("siteKind") != "personal"]}
+        chunk_writer = context.get("chunk_writer")
+        for name, rows in (
+            ("oneDriveSites", [item for item in enriched_sites if item.get("siteKind") == "personal"]),
+            ("teamSites", [item for item in enriched_sites if item.get("siteKind") != "personal"]),
+        ):
+            payload[name] = self._derived_section(name, rows, chunk_writer if chunked else None)
+            if read_issues:
+                payload[name].update(
+                    {"error": "The site list could not be read in full.", "error_class": "incomplete_evidence"}
+                )
         total = sum(item.get("item_count", 0) for item in coverage)
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(

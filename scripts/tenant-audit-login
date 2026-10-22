@@ -33,7 +33,7 @@ ensure_exchange_online_module() {
   fi
 
   echo "Installing ExchangeOnlineManagement for current user"
-  pwsh -NoLogo -NoProfile -Command "Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber"
+  pwsh -NoLogo -NoProfile -Command "Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber"
 }
 
 TENANT="organizations"

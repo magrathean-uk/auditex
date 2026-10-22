@@ -90,7 +90,7 @@ Install the test dependencies for development: `python -m pip install -e '.[test
 | --- | --- |
 | `make lint` | Compiles Python under `src` and `tests`; it does not check style or types. |
 | `make test` | Runs pytest with the interpreter selected by `scripts/select-python.sh`. |
-| `make contract-smoke` | Deletes and recreates `outputs/ci-contract`, validates an offline bundle and its evidence index. |
+| `make contract-smoke` | Deletes and recreates `outputs/ci-contract`, validates an offline bundle and its evidence index, and replays a generated sample with one blocked read and one cut list, which must come out partial (exit status 1). |
 | `./scripts/oss-taint-scan.sh` | Checks forbidden research/derived paths and taint markers. |
 | `python3 scripts/generate-rule-packs.py --check` | Fails when `configs/rule-packs.json` differs from the packs generated from the rule templates and mappings; without `--check` it rewrites the file. |
 | `gitleaks dir .` | Secret scan of the working tree. `.gitleaks.toml` skips the git-ignored local and generated directories (`.venv`, `.secrets`, `outputs` and similar). |

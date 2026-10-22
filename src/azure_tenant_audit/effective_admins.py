@@ -36,6 +36,7 @@ from .identity_controls import (
     EVIDENCE_ABSENT,
     EVIDENCE_BLOCKED,
     EVIDENCE_COLLECTED,
+    AdminScope,
     Evidence,
 )
 
@@ -64,6 +65,16 @@ _COUNTED_TYPES = frozenset({TYPE_USER, TYPE_UNRESOLVED})
 
 GLOBAL_ADMINISTRATOR_TEMPLATE_ID = "62e90394-69f5-4237-9190-012177145e10"
 GLOBAL_ADMINISTRATOR_NAME = "global administrator"
+# Privileged built-in roles whose name does not say administrator, by role template id (a built-in role's
+# definition id is its template id). Partner Tier2 Support can reset any administrator's credentials, which the
+# attack graph treats as tier 0; Partner Tier1 Support and Directory Writers are the same kind of role.
+PRIVILEGED_ROLE_TEMPLATE_IDS = frozenset(
+    {
+        "4ba39ca4-527c-499a-b93d-d9b492c50246",  # Partner Tier1 Support
+        "e00e864a-17c5-4a4b-9c06-f5b95a8d5bd8",  # Partner Tier2 Support
+        "9360feb5-f418-4baa-8175-e2a00bac4301",  # Directory Writers
+    }
+)
 
 SCHEDULE_KIND_ACTIVE = "role_assignment_schedule"
 SCHEDULE_KIND_ELIGIBLE = "role_eligibility_schedule"
@@ -185,7 +196,8 @@ def _privileged_roles(role_definitions: Iterable[Mapping[str, Any]]) -> dict[str
     """Role definition id (lower-case) -> (display name, is Global Administrator).
 
     A role is privileged when its name says administrator, the convention the privileged MFA and
-    stale-account rules already use, or when it is the Global Administrator template.
+    stale-account rules already use, when it is the Global Administrator template, or when it is one of
+    the privileged roles that do not say administrator (``PRIVILEGED_ROLE_TEMPLATE_IDS``).
     """
     roles: dict[str, tuple[str, bool]] = {}
     for item in role_definitions:
@@ -194,9 +206,35 @@ def _privileged_roles(role_definitions: Iterable[Mapping[str, Any]]) -> dict[str
         if not role_id:
             continue
         is_global = name.lower() == GLOBAL_ADMINISTRATOR_NAME or role_id == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
-        if is_global or "administrator" in name.lower():
+        if is_global or "administrator" in name.lower() or role_id in PRIVILEGED_ROLE_TEMPLATE_IDS:
             roles[role_id] = (name or "Global Administrator", is_global)
     return roles
+
+
+def admin_scope(records: Sequence[Mapping[str, Any]], role_definitions: Sequence[Mapping[str, Any]]) -> AdminScope | None:
+    """The administrator MFA verdict's view of the set (``build_effective_admin_set`` records), or ``None`` without one.
+
+    Only enabled, counted principals matter: a disabled account cannot sign in, so a policy that excludes it does not
+    leave an administrator without MFA. Service principals and groups are not counted (they are not people).
+    """
+    summary = next((row for row in records if row.get("kind") == SUMMARY_KIND), None)
+    if summary is None:
+        return None
+    rows = [
+        row
+        for row in records
+        if row.get("kind") == ROW_KIND and row.get("counted") and row.get("enabled") is not False
+    ]
+    guests = summary.get("guest_admin_count")
+    return AdminScope(
+        complete=summary.get("state") == STATE_COMPLETE,
+        privileged_role_ids=frozenset(_privileged_roles(role_definitions)),
+        held_role_ids=frozenset(
+            _key(role.get("role_definition_id")) for row in rows for role in row.get("roles") or [] if role.get("role_definition_id")
+        ),
+        admin_principal_ids=frozenset(_key(row.get("principal_id")) for row in rows if row.get("principal_id")),
+        guest_admin_count=guests if isinstance(guests, int) and not isinstance(guests, bool) else None,
+    )
 
 
 def _source_row(name: str, evidence: Evidence, *, state: str | None = None) -> dict[str, Any]:

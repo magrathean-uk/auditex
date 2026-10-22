@@ -12,11 +12,13 @@ from azure_tenant_audit.assurance import build_live_readiness_summary
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
+from azure_tenant_audit.offline_replay import replay_collector_status, replay_coverage_rows
 from azure_tenant_audit.output import AuditWriter
 from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.run import build_coverage_ledger
 from azure_tenant_audit.utils import parse_csv_list
+from azure_tenant_audit.rule_parameters import google_rule_parameters
 from azure_tenant_audit.waivers import WaiverFileError, apply_waivers, load_waivers
 
 from .auth import (
@@ -448,6 +450,9 @@ def _write_google_bundle(
                 "coverage_count": len(coverage_rows),
                 "waiver_path": str(config.waiver_file) if config.waiver_file else None,
                 "top_limit": config.top or None,
+                "rule_parameters": google_rule_parameters(
+                    stale_user_days=config.stale_user_days, stale_device_days=config.stale_device_days
+                ),
                 "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
                 "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
             },
@@ -509,25 +514,46 @@ def run_google_offline(
         if key not in _OFFLINE_SAMPLE_METADATA_KEYS and isinstance(value, dict)
     }
     result_rows: list[dict[str, Any]] = []
+    # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was,
+    # with the same blocker a live run raises, so the replay cannot read complete over it.
+    coverage_rows: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
     for name, payload in collector_payloads.items():
         item_count = 0
         for section in payload.values():
             if isinstance(section, dict) and isinstance(section.get("value"), list):
                 item_count += len(section["value"])
-        row = {"name": name, "status": "ok", "item_count": item_count, "message": "offline simulation", "coverage_rows": 0}
+        replayed = replay_coverage_rows(name, payload)
+        coverage_rows.extend(replayed)
+        diagnostics.extend(dict(row) for row in replayed if row.get("status") != "ok")
+        row = {
+            "name": name,
+            "status": replay_collector_status(replayed),
+            "item_count": item_count,
+            "message": "offline simulation"
+            if not replayed
+            else f"offline simulation; {len(replayed)} section(s) recorded as failed or cut short",
+            "coverage_rows": len(replayed),
+        }
         result_rows.append(row)
         writer.write_summary(row)
         writer.write_checkpoint(name, row)
         writer.write_raw(name, payload)
-    capability_rows = _capability_rows(list(collector_payloads), auth_mode="offline", dependency_status={"available": True})
+    writer.write_index_records(coverage_rows)
+    if diagnostics:
+        writer.write_diagnostics(diagnostics)
+        writer.write_blockers(diagnostics)
+    capability_rows = _capability_rows(
+        list(collector_payloads), auth_mode="offline", dependency_status={"available": True}, coverage_rows=coverage_rows
+    )
     return _write_google_bundle(
         writer=writer,
         config=config,
         collector_payloads=collector_payloads,
         result_rows=result_rows,
-        coverage_rows=[],
+        coverage_rows=coverage_rows,
         capability_rows=capability_rows,
-        diagnostics=[],
+        diagnostics=diagnostics,
         duration=0,
         mode="offline",
         command_line=[],

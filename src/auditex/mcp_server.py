@@ -644,10 +644,18 @@ def enterprise_handoff(run_dir: str) -> dict[str, Any]:
     return _enterprise_handoff(run_dir)
 
 
-def verify_customer_pack(pack_dir: str) -> dict[str, Any]:
+def verify_customer_pack(
+    pack_dir: str,
+    expect_manifest_sha256: str | None = None,
+    expect_checksums_sha256: str | None = None,
+) -> dict[str, Any]:
     from .reporting import verify_enterprise_handoff_pack
 
-    return verify_enterprise_handoff_pack(pack_dir)
+    return verify_enterprise_handoff_pack(
+        pack_dir,
+        expect_manifest_sha256=expect_manifest_sha256,
+        expect_checksums_sha256=expect_checksums_sha256,
+    )
 
 
 def list_available_exporters() -> dict[str, Any]:
@@ -1015,8 +1023,12 @@ def tool_handlers() -> dict[str, Any]:
     def auditex_enterprise_handoff(run_dir: str) -> dict[str, Any]:
         return enterprise_handoff(run_dir)
 
-    def auditex_verify_customer_pack(pack_dir: str) -> dict[str, Any]:
-        return verify_customer_pack(pack_dir)
+    def auditex_verify_customer_pack(
+        pack_dir: str,
+        expect_manifest_sha256: str | None = None,
+        expect_checksums_sha256: str | None = None,
+    ) -> dict[str, Any]:
+        return verify_customer_pack(pack_dir, expect_manifest_sha256, expect_checksums_sha256)
 
     def auditex_export_list() -> dict[str, Any]:
         return list_available_exporters()

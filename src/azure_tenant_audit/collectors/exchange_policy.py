@@ -34,10 +34,20 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ..adapters import get_adapter
+from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from .base import Collector, CollectorResult
 
 
 EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
+
+# Forwarding mailboxes kept per run. The command asks for LIMIT + 1 rows so that a longer list is detected, not guessed.
+FORWARDING_MAILBOX_LIMIT = 500
+MAILBOX_FORWARDING_COMMAND = (
+    f"Get-EXOMailbox -ResultSize {FORWARDING_MAILBOX_LIMIT + 1} "
+    "-Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward "
+    "-Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null' "
+    "| Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward"
+)
 
 
 def _exchange_session(client: Any, log_event: Any) -> dict[str, Any]:
@@ -77,9 +87,11 @@ class ExchangePolicyCollector(Collector):
             "remoteDomains",
             "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",
         ),
+        # The server filters to mailboxes that forward, so the answer does not depend on how many mailboxes the tenant has.
+        # One row past FORWARDING_MAILBOX_LIMIT is asked for: seeing it proves the list continued (a gap, never a clean read).
         (
             "mailboxForwarding",
-            "Get-EXOMailbox -ResultSize 50 | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward",
+            MAILBOX_FORWARDING_COMMAND,
         ),
         ("adminAuditLogConfig", "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled"),
         ("organizationAuditConfig", "Get-OrganizationConfig | Select-Object AuditDisabled"),
@@ -108,21 +120,46 @@ class ExchangePolicyCollector(Collector):
             response.setdefault("command", command)
             payload[name] = response
             values = response.get("value")
+            cut = (
+                name == "mailboxForwarding"
+                and not response.get("error")
+                and isinstance(values, list)
+                and len(values) > FORWARDING_MAILBOX_LIMIT
+            )
+            if cut:
+                values = values[:FORWARDING_MAILBOX_LIMIT]
+                response["value"] = values
             item_count = len(values) if isinstance(values, list) else 0
             total += item_count
-            coverage.append(
-                {
-                    "collector": self.name,
-                    "type": "command",
-                    "name": name,
-                    "command": command,
-                    "status": "failed" if response.get("error") else "ok",
-                    "item_count": item_count,
-                    "duration_ms": response.get("duration_ms", 0.0),
-                    "error_class": response.get("error_class"),
-                    "error": response.get("error"),
-                }
-            )
+            row: dict[str, Any] = {
+                "collector": self.name,
+                "type": "command",
+                "name": name,
+                "command": command,
+                "status": "failed" if response.get("error") else "ok",
+                "item_count": item_count,
+                "duration_ms": response.get("duration_ms", 0.0),
+                "error_class": response.get("error_class"),
+                "error": response.get("error"),
+            }
+            if cut:
+                # More forwarding mailboxes exist than were kept: a coverage gap, so the rule never reads this list as clean.
+                row.update(
+                    status="partial",
+                    error_class=TRUNCATION_ERROR_CLASS,
+                    error=f"{name}: collection stopped at {item_count} rows because of the collector's row bound; the list is incomplete.",
+                    collection_truncated=True,
+                    truncation_reason=REASON_FANOUT_LIMIT,
+                    result_limit=FORWARDING_MAILBOX_LIMIT,
+                    rows_collected=item_count,
+                )
+                response.update(
+                    collection_truncated=True,
+                    truncation_reason=REASON_FANOUT_LIMIT,
+                    result_limit=FORWARDING_MAILBOX_LIMIT,
+                    item_count=item_count,
+                )
+            coverage.append(row)
 
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(

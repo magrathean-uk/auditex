@@ -7,7 +7,16 @@ from pathlib import Path
 
 import pytest
 
-from gate_support import SAMPLE_COLLECTORS, finding, offline_run, read_json, set_admin_set, set_coverage, write_findings
+from gate_support import (
+    SAMPLE_COLLECTORS,
+    finding,
+    offline_run,
+    read_json,
+    rehash,
+    set_admin_set,
+    set_coverage,
+    write_findings,
+)
 
 
 def _gate(args: list[str]) -> tuple[int, str]:
@@ -304,6 +313,7 @@ def test_gate_drift_blocks_on_an_unreadable_findings_file(baseline_and_current: 
     target = baseline if side == "baseline" else current
     (target / "findings").mkdir(exist_ok=True)
     (target / "findings" / "findings.json").write_text("", encoding="utf-8")
+    rehash(target)  # isolate the findings check from the hash manifest check, which would block first
 
     rc, payload = _drift(baseline, current)
 

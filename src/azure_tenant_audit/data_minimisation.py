@@ -6,6 +6,13 @@ findings read only the booleans around them, so only whether a field is set and 
 leave the collectors: each dropped field ``f`` becomes ``fLength`` (an integer) and ``hasF`` (a
 boolean).
 
+The words an owner chose for an inbox rule (``subjectContains``, ``bodyContains`` and the like) or a
+Gmail filter (``query``, ``negatedQuery``, ``subject``) say what the owner expects to find in mail
+bodies and subjects. No rule reads them (broadness is decided where the rule is read), so each list
+becomes ``fCount`` and ``hasF``, each string ``fLength`` and ``hasF``. Address lists such as
+``fromAddresses`` stay: forwarding classification needs them. A responder who needs the keywords of
+a suspect rule goes back to the tenant for them.
+
 These functions run on live collection, on the offline replay path (the normalizers) and in the
 bundle writer, so the statement holds however a bundle was produced. They never mutate their
 input and are idempotent.
@@ -17,6 +24,16 @@ from typing import Any
 VACATION_TEXT_FIELDS = ("responseSubject", "responseBodyPlainText", "responseBodyHtml")
 SEND_AS_TEXT_FIELDS = ("signature",)
 AUTO_REPLY_TEXT_FIELDS = ("internalReplyMessage", "externalReplyMessage")
+# Graph messageRule predicates holding words the owner chose (arrays of strings); the address predicates stay.
+RULE_CONDITION_WORD_FIELDS = (
+    "subjectContains",
+    "bodyContains",
+    "bodyOrSubjectContains",
+    "headerContains",
+    "senderContains",
+    "recipientContains",
+)
+GMAIL_FILTER_TEXT_FIELDS = ("query", "negatedQuery", "subject")
 
 
 def strip_text_fields(item: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
@@ -32,6 +49,22 @@ def strip_text_fields(item: dict[str, Any], fields: tuple[str, ...]) -> dict[str
         length = len(value) if isinstance(value, str) else 0
         result.setdefault(f"{name}Length", length)
         result.setdefault(f"has{name[0].upper()}{name[1:]}", length > 0)
+    return result
+
+
+def strip_word_lists(item: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    """Copy of ``item`` with each list of owner-chosen words replaced by ``<field>Count`` and ``has<Field>``."""
+    result = dict(item)
+    for name in fields:
+        if name not in result:
+            continue
+        value = result.pop(name)
+        if isinstance(value, list):
+            count = sum(1 for word in value if isinstance(word, str) and word.strip())
+        else:
+            count = 1 if isinstance(value, str) and value.strip() else 0
+        result.setdefault(f"{name}Count", count)
+        result.setdefault(f"has{name[0].upper()}{name[1:]}", count > 0)
     return result
 
 
@@ -78,4 +111,10 @@ def minimise_user_text(value: Any) -> Any:
         result = strip_text_fields(result, SEND_AS_TEXT_FIELDS)
     if any(name in result for name in AUTO_REPLY_TEXT_FIELDS):
         result = strip_text_fields(result, AUTO_REPLY_TEXT_FIELDS)
+    if isinstance(result.get("conditions"), dict) and isinstance(result.get("actions"), dict):
+        # A Graph inbox rule: the words it matches on are the owner's, the actions and addresses are what is judged.
+        result["conditions"] = strip_word_lists(result["conditions"], RULE_CONDITION_WORD_FIELDS)
+    if isinstance(result.get("criteria"), dict) and isinstance(result.get("action"), dict):
+        # A Gmail filter: its search terms are the owner's; the forward target and labels are what is judged.
+        result["criteria"] = strip_text_fields(result["criteria"], GMAIL_FILTER_TEXT_FIELDS)
     return result

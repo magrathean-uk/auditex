@@ -39,15 +39,20 @@ class DefenderCollector(Collector):
                 "endpoint": "/security/incidents",
                 "params": query_params,
             },
+            # Reference lists: paged to the last row through the shared paging path (secureScoreControlProfiles
+            # answers 200 rows with a next-page link), kept whole inline, and without $top, which these
+            # endpoints do not need.
             "secureScores": {
                 "endpoint": "/security/secureScores",
                 "params": {},
-                "page": False,
+                "apply_top": False,
+                "inline": True,
             },
             "secureScoreControlProfiles": {
                 "endpoint": "/security/secureScoreControlProfiles",
                 "params": {},
-                "page": False,
+                "apply_top": False,
+                "inline": True,
             },
         }
 

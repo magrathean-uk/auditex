@@ -149,6 +149,17 @@ def is_accepted_status(status: Any) -> bool:
     return str(status or "").strip().lower() in _ACCEPTED_STATUSES
 
 
+def has_matching_waiver(finding: Mapping[str, Any]) -> bool:
+    """Whether a finding carries the waiver that accepted it.
+
+    ``apply_waivers`` is the only writer of an accepted status and always attaches the waiver it matched,
+    so an accepted finding without one was edited, not waived. The waiver must name the finding or its
+    rule and every match field it populates must equal the finding's, the same test ``apply_waivers`` ran.
+    """
+    waiver = finding.get("waiver")
+    return isinstance(waiver, Mapping) and _match_score(finding, waiver) > 0
+
+
 def accepted_risk_summary(
     findings: list[dict[str, Any]],
     *,

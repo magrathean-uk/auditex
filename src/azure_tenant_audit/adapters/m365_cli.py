@@ -56,6 +56,65 @@ class M365CLIAdapter(Adapter):
             return {}
         return {"value": [parsed]}
 
+    def _classify_output(
+        self,
+        return_code: int,
+        stdout: str,
+        stderr: str,
+        safe_command: str,
+        sensitive_values: Any,
+    ) -> dict[str, Any]:
+        """The adapter's response for one finished command: parsed rows, or an error class that says why not."""
+        combined = f"{stdout}\n{stderr}".lower()
+        if return_code != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
+            if self._looks_like_not_found(combined):
+                error_class = "command_not_found"
+            elif self._looks_like_auth_required(combined):
+                error_class = "command_not_authenticated"
+            else:
+                error_class = "command_error"
+            return {
+                "error": f"command_failed:{return_code}",
+                "error_class": error_class,
+                "command": safe_command,
+                "return_code": return_code,
+                "stdout": redact_text(stdout, sensitive_values),
+                "stderr": redact_text(stderr, sensitive_values),
+            }
+
+        if not stdout.strip():
+            return {
+                "command": safe_command,
+                "error": "command_output_empty",
+                "error_class": "command_output_empty",
+                "stdout": redact_text(stdout, sensitive_values),
+                "stderr": redact_text(stderr, sensitive_values),
+            }
+
+        if self._looks_like_help_output(stdout):
+            return {
+                "command": safe_command,
+                "error": "command_output_invalid_help",
+                "error_class": "command_parse_error",
+                "stdout": redact_text(stdout, sensitive_values),
+                "stderr": redact_text(stderr, sensitive_values),
+            }
+
+        try:
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError:
+            return {
+                "command": safe_command,
+                "error": "command_output_parse_error",
+                "error_class": "command_parse_error",
+                "stdout": redact_text(stdout, sensitive_values),
+                "stderr": redact_text(stderr, sensitive_values),
+            }
+
+        response = self._normalize_payload(parsed)
+        response["command"] = safe_command
+        return response
+
     def dependency_check(self) -> bool:
         return shutil.which("m365") is not None
 
@@ -110,7 +169,10 @@ class M365CLIAdapter(Adapter):
             duration_ms = round((time.time() - start) * 1000, 2)
             stdout = result.stdout or ""
             stderr = result.stderr or ""
-            status = "ok" if result.returncode == 0 else "error"
+            response = self._classify_output(result.returncode, stdout, stderr, safe_command, sensitive_values)
+            # The status is logged after the output was classified: a help dump, an empty answer or output that is not
+            # JSON exits 0 but is not a successful read, and the observed ledger must not record it as ok.
+            status = "error" if response.get("error") else "ok"
             if log_event:
                 log_event(
                     "command.completed",
@@ -124,58 +186,10 @@ class M365CLIAdapter(Adapter):
                         "status": status,
                         "stdout_bytes": len(stdout),
                         "stderr_bytes": len(stderr),
-                        "stdout_sample": redact_text(stdout[:500], sensitive_values),
+                        "stdout_sample": redact_text(stdout, sensitive_values)[:500],  # redact first: a secret cut at the sample edge is not recognised
                     },
                 )
 
-            combined = f"{stdout}\n{stderr}".lower()
-            if result.returncode != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
-                if self._looks_like_not_found(combined):
-                    error_class = "command_not_found"
-                elif self._looks_like_auth_required(combined):
-                    error_class = "command_not_authenticated"
-                else:
-                    error_class = "command_error"
-                return {
-                    "error": f"command_failed:{result.returncode}",
-                    "error_class": error_class,
-                    "command": safe_command,
-                    "return_code": result.returncode,
-                    "stdout": redact_text(stdout, sensitive_values),
-                    "stderr": redact_text(stderr, sensitive_values),
-                }
-
-            if not stdout.strip():
-                return {
-                    "command": safe_command,
-                    "error": "command_output_empty",
-                    "error_class": "command_output_empty",
-                    "stdout": redact_text(stdout, sensitive_values),
-                    "stderr": redact_text(stderr, sensitive_values),
-                }
-
-            if self._looks_like_help_output(stdout):
-                return {
-                    "command": safe_command,
-                    "error": "command_output_invalid_help",
-                    "error_class": "command_parse_error",
-                    "stdout": redact_text(stdout, sensitive_values),
-                    "stderr": redact_text(stderr, sensitive_values),
-                }
-
-            try:
-                parsed = json.loads(stdout)
-            except json.JSONDecodeError:
-                return {
-                    "command": safe_command,
-                    "error": "command_output_parse_error",
-                    "error_class": "command_parse_error",
-                    "stdout": redact_text(stdout, sensitive_values),
-                    "stderr": redact_text(stderr, sensitive_values),
-                }
-
-            response = self._normalize_payload(parsed)
-            response["command"] = safe_command
             return response
 
         except subprocess.CalledProcessError as exc:  # noqa: BLE001

@@ -29,11 +29,13 @@ from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient
 from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
+from .offline_replay import replay_collector_status, replay_coverage_rows
 from .output import AuditWriter
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .resources import resolve_resource_path
+from .rule_parameters import effective_rule_parameters
 from .utils import load_env_file
 from .versioning import package_version_line
 from .waivers import WaiverFileError, apply_waivers, load_waivers
@@ -238,6 +240,8 @@ def run_offline(
 
     collector_payloads: dict[str, dict[str, Any]] = {}
     result_rows: list[dict[str, Any]] = []
+    # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was.
+    coverage_rows: list[dict[str, Any]] = []
     # The replay input is copied into the bundle: mailbox text a live run would have dropped is dropped here too.
     (writer.raw_dir / "sample_input.json").write_text(
         json.dumps(minimise_user_text(sample), indent=2),
@@ -249,20 +253,29 @@ def run_offline(
             continue
         if isinstance(value, dict):
             collector_payloads[str(key)] = value
+        replayed = replay_coverage_rows(str(key), value) if isinstance(value, dict) else []
+        coverage_rows.extend(replayed)
         row: dict[str, Any] = {
             "name": str(key),
-            "status": "ok",
+            "status": replay_collector_status(replayed),
             "item_count": _offline_item_count(value),
-            "message": "offline simulation",
-            "coverage_rows": 0,
+            "message": (
+                "offline simulation"
+                if not replayed
+                else f"offline simulation; {len(replayed)} section(s) recorded as failed or cut short"
+            ),
+            "coverage_rows": len(replayed),
         }
         result_rows.append(row)
         writer.write_summary(row)
         writer.write_checkpoint(str(key), row)
         writer.log_event("collector.synthetic", "Offline collector simulated", {"name": key, "item_count": row["item_count"]})
 
-    diagnostics: list[dict[str, Any]] = []
-    coverage_rows: list[dict[str, Any]] = []
+    writer.write_index_records(coverage_rows)
+    # The same blockers a live run would raise for those rows: the ledger, manifest gaps and gate read them.
+    diagnostics: list[dict[str, Any]] = _build_diagnostics(
+        result_rows=result_rows, coverage_rows=coverage_rows, permission_hints={}, auditor_profile=auditor_profile
+    )
     capability_rows = [
         {
             "collector": row["name"],
@@ -315,6 +328,8 @@ def run_offline(
         "validation.json",
         "ai_safe/run_summary.json",
     ]
+    if coverage_rows:
+        evidence_paths.append("coverage.json")
     if findings:
         evidence_paths.append("findings/findings.json")
     if diagnostics:
@@ -345,13 +360,61 @@ def run_offline(
                 "since": since,
                 "until": until,
                 "command_line": [],
-                "coverage_count": 0,
+                "coverage_count": len(coverage_rows),
                 "platform": "m365",
+                "rule_parameters": effective_rule_parameters(stale_sync_days=stale_sync_days),
             },
         ),
     )
     LOG.info("Offline sample written to %s", writer.run_dir)
     return 1 if diagnostics else 0
+
+
+# A collector the preflight probe skipped as known blocked is not a collector that finished: it is recorded
+# with this error class so that a resumed run re-probes it instead of treating it as complete.
+_PREFLIGHT_BLOCKED = "preflight_blocked"
+_PREFLIGHT_SKIP_MESSAGE = "Collector skipped after preflight marked it as known blocked."
+
+
+def _is_preflight_skip(state: dict[str, Any]) -> bool:
+    return state.get("error_class") == _PREFLIGHT_BLOCKED or state.get("message") == _PREFLIGHT_SKIP_MESSAGE
+
+
+def _resume_carried_collectors(
+    writer: AuditWriter, checkpoint_state: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """The checkpointed collectors a resumed run keeps as they were: ``{name: raw payload}``.
+
+    Only a collector that finished is carried forward. That is ``ok`` (with its raw payload still on disk),
+    or ``skipped`` because the tenant cannot have the data (a licence or capability skip, which carries no
+    payload). A ``partial`` or ``failed`` collector, a collector the preflight skipped as blocked, and an
+    ``ok`` collector whose raw payload is gone are all re-run: carrying them forward as finished would let
+    the resumed run read ``ok`` over evidence that was never complete.
+    """
+    carried: dict[str, dict[str, Any]] = {}
+    for name, state in checkpoint_state.items():
+        status = state.get("status")
+        if status == "ok":
+            payload = writer._safe_load_json(writer.raw_dir / f"{name}.json")
+            if isinstance(payload, dict):
+                carried[name] = payload
+        elif status == "skipped" and not _is_preflight_skip(state):
+            carried[name] = {}
+    return carried
+
+
+def _resumed_row(name: str, state: dict[str, Any], coverage_rows: list[dict[str, Any]]) -> dict[str, object]:
+    """The result row of a collector carried over from the checkpoint, with the status it finished with."""
+    previous_message = str(state.get("message") or "").strip()
+    return {
+        "name": name,
+        "status": str(state.get("status")),
+        "item_count": state.get("item_count") or 0,
+        "message": f"Resumed from checkpoint ({state.get('status')})" + (f": {previous_message}" if previous_message else ""),
+        "error": state.get("error"),
+        "error_class": state.get("error_class"),
+        "coverage_rows": sum(1 for row in coverage_rows if row.get("collector") == name),
+    }
 
 
 def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None) -> int:
@@ -405,13 +468,12 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         event_listener=event_listener,
     )
     completed_state = writer.load_checkpoint_state() if resume_from else {}
-    completed_collectors = {
-        name
-        for name, state in completed_state.get("collectors", {}).items()
-        if state.get("status") in {"ok", "partial", "skipped"}
-    }
     collector_checkpoint_state = writer.load_collector_checkpoint_state() if resume_from else {}
     operation_checkpoint_state = writer.load_operation_checkpoint_state() if resume_from else {}
+    # Collectors that finished are carried forward with the status they finished with; every other
+    # checkpointed collector is re-run (see _resume_carried_collectors).
+    carried_payloads = _resume_carried_collectors(writer, collector_checkpoint_state) if resume_from else {}
+    completed_collectors = set(carried_payloads)
     if resume_from:
         writer.log_event(
             "run.resume",
@@ -420,6 +482,9 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
                 "resume_from": str(resume_from),
                 "checkpoint_entries": len(completed_state.get("collectors", {})),
                 "completed_collectors": sorted(completed_collectors),
+                "rerun_collectors": sorted(
+                    name for name in collector_checkpoint_state if name not in completed_collectors
+                ),
             },
         )
 
@@ -590,8 +655,9 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
             "name": name,
             "status": "skipped",
             "item_count": 0,
-            "message": "Collector skipped after preflight marked it as known blocked.",
+            "message": _PREFLIGHT_SKIP_MESSAGE,
             "error": skip.get("error"),
+            "error_class": _PREFLIGHT_BLOCKED,
             "coverage_rows": 0,
         }
         result_rows.append(skip_row)
@@ -614,21 +680,14 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
 
         if resume_from and name in completed_collectors:
             previous_state = collector_checkpoint_state.get(name, {})
-            skipped_row: dict[str, object] = {
-                "name": name,
-                "status": "skipped",
-                "item_count": previous_state.get("item_count", 0),
-                "message": "Collector skipped due to checkpoint resume.",
-                "error": None,
-                "coverage_rows": 0,
-            }
-            result_rows.append(skipped_row)
-            existing_payload = writer._safe_load_json(writer.raw_dir / f"{name}.json")
-            if isinstance(existing_payload, dict):
-                collector_payloads[name] = existing_payload
+            # The collector finished in the earlier session: keep its status, error and coverage rows. Marking
+            # it ``skipped`` here would read as "not applicable" in the ledger and hide a gap the checkpoint holds.
+            result_rows.append(_resumed_row(name, previous_state, coverage_rows))
+            if previous_state.get("status") == "ok":
+                collector_payloads[name] = carried_payloads[name]
             writer.log_event(
-                "collector.skipped",
-                "Collector skipped",
+                "collector.resumed",
+                "Collector carried forward from the checkpoint",
                 {
                     "collector": name,
                     "resume_from": str(resume_from),
@@ -637,6 +696,14 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
                 },
             )
             continue
+
+        if resume_from and name in collector_checkpoint_state:
+            # Re-run: this observation replaces the earlier partial or failed one everywhere it was recorded.
+            writer.summary["collectors"] = [
+                row for row in writer.summary.get("collectors", []) if not (isinstance(row, dict) and row.get("name") == name)
+            ]
+            writer.coverage = [row for row in writer.coverage if row.get("collector") != name]
+            coverage_rows = [row for row in coverage_rows if row.get("collector") != name]
 
         output = collector_runner.run(
             collector,
@@ -671,6 +738,20 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
             time.sleep(collector_pause_seconds)
 
     duration = round(time.time() - start, 2)
+    # A collector that was checkpointed incomplete and is not part of this session keeps the run partial:
+    # its gap is in the bundle's coverage rows and summary, so the headline status must not read ok over it.
+    selected_names = set(selected)
+    resumed_incomplete = sorted(
+        name
+        for name, state in collector_checkpoint_state.items()
+        if name not in selected_names and (state.get("status") not in {"ok", "skipped"} or _is_preflight_skip(state))
+    )
+    if resumed_incomplete:
+        writer.log_event(
+            "run.resume.incomplete",
+            "Earlier collectors outside this session did not finish",
+            {"collectors": resumed_incomplete},
+        )
     for row in summary_rows:
         writer.write_summary(row)
     # Intune Forbidden means "missing scope" or "no licence"; use subscribedSkus to tell them apart.
@@ -736,7 +817,9 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         evidence_paths.append("findings/findings.json")
     evidence_paths.extend(f"normalized/{name}.json" for name in normalized_snapshot)
     evidence_paths.extend(["ai_context.json", "validation.json"])
-    overall_status = "partial" if failures or preflight_skipped or normalization_diagnostics else "ok"
+    overall_status = (
+        "partial" if failures or preflight_skipped or resumed_incomplete or normalization_diagnostics else "ok"
+    )
     privacy = build_privacy_block(safe_for_external_llm=False)
     writer.log_event(
         "run.complete",
@@ -777,6 +860,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
                 "preflight_path": preflight_path,
                 "top_limit": normalize_collection_limit(run_cfg.top_items, default=None),
                 "platform": "m365",
+                "rule_parameters": effective_rule_parameters(stale_sync_days=getattr(args, "stale_sync_days", None)),
             },
         ),
     )

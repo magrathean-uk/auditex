@@ -25,6 +25,7 @@ from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.resources import load_json_resource, resolve_resource_path
 
 FORMAT_VERSION = 2
@@ -550,6 +551,48 @@ def _detection(coverage: dict[str, Any], run_dir: Path) -> dict[str, Any] | None
 # --------------------------------------------------------------------------- baselines
 
 
+def _not_evaluated_reasons(control: dict[str, Any], *, limit: int = 3) -> str:
+    """Why a control's rules were not evaluated, from the rule statuses (the reasons the report pack records)."""
+    reasons = [str(item) for item in control.get("not_assessed_reasons") or []]
+    if not reasons:
+        reasons = sorted(
+            {
+                str(row.get("reason"))
+                for row in control.get("rule_statuses") or []
+                if isinstance(row, dict) and not row.get("evaluated") and row.get("reason")
+            }
+        )
+    shown = reasons[:limit]
+    return ", ".join(shown) + (f" and {len(reasons) - limit} more" if len(reasons) > limit else "")
+
+
+def _control_note(control: dict[str, Any], status: str) -> str:
+    """The sentence under a baseline control: why it has no verdict, how far a failure can be trusted, what the rules cannot see."""
+    reason = _text(control.get("reason"))
+    requirement_status = _text(control.get("requirement_status"))
+    parts: list[str] = []
+    if status == "accepted":
+        parts.append("Accepted risk recorded in the run.")
+    elif status == "not_assessed":
+        if requirement_status and reason == f"requirement_status:{requirement_status}":
+            parts.append(f"CE requirement status is {requirement_status.replace('_', ' ')}; Auditex reports no verdict for it.")
+        elif reason == "partial_requirement_no_gap_found":
+            parts.append("Mapped rules found no gap, but they cover only part of this requirement, so Auditex reports no verdict.")
+        elif reason == "supporting_evidence_only":
+            parts.append("The mapped rules are supporting evidence only, so Auditex reports no verdict.")
+        elif reason == "no_mapped_rules":
+            parts.append("No rule maps to this requirement.")
+        else:
+            why = _not_evaluated_reasons(control)
+            parts.append(f"No mapped rule could be evaluated: {why}." if why else "No collector in this run evidences this control.")
+    elif status == "fail" and _text(control.get("confidence")) == "partial":
+        parts.append("The failing rules are a proxy or a subset of this requirement, so the failure is partial evidence.")
+    limits = _text(control.get("evidence_limits"))
+    if limits:
+        parts.append(limits)
+    return " ".join(parts)
+
+
 def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
     frameworks = alignment.get("frameworks") if isinstance(alignment.get("frameworks"), dict) else {}
     cards = []
@@ -562,7 +605,6 @@ def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
                 continue
             raw = _text(control.get("status"))
             status = {"accepted_risk": "accepted"}.get(raw, raw if raw in {"fail", "pass", "not_assessed"} else "not_assessed")
-            requirement_status = _text(control.get("requirement_status"))
             finding_ids = [str(item) for item in control.get("finding_ids") or []]
             controls.append(
                 {
@@ -570,17 +612,7 @@ def _baselines(alignment: dict[str, Any]) -> dict[str, Any] | None:
                     "title": _text(control.get("title")),
                     "status": status,
                     "linked": int(control.get("open_finding_count") or len(finding_ids)) if status == "fail" else len(finding_ids),
-                    "note": (
-                        "Accepted risk recorded in the run."
-                        if status == "accepted"
-                        else (
-                            f"CE requirement status is {requirement_status.replace('_', ' ')}; Auditex reports no verdict for it."
-                            if status == "not_assessed" and requirement_status and control.get("reason") == f"requirement_status:{requirement_status}"
-                            else "Mapped rules found no gap, but they cover only part of this requirement, so Auditex reports no verdict."
-                            if status == "not_assessed" and control.get("reason") == "partial_requirement_no_gap_found"
-                            else "No collector in this run evidences this control." if status == "not_assessed" else ""
-                        )
-                    ),
+                    "note": _control_note(control, status),
                 }
             )
         counts = {status: sum(1 for row in controls if row["status"] == status) for status in ("fail", "accepted", "pass", "not_assessed")}
@@ -777,7 +809,14 @@ def _banners(
                 "title": "Bundle changed since it was finalized",
                 "text": (
                     f"{integrity.get('modified_count') or 0} artifact(s) differ from the hashes recorded at finalization and "
-                    f"{integrity.get('missing_count') or 0} are missing. What this page shows may not be what the run produced."
+                    f"{integrity.get('missing_count') or 0} are missing"
+                    + (f"; {integrity.get('symlink_count')} symbolic link(s) sit in the run" if integrity.get("symlink_count") else "")
+                    + (
+                        f"; {integrity.get('unexpected_count')} unlisted file(s) sit where the product reads"
+                        if integrity.get("unexpected_count")
+                        else ""
+                    )
+                    + ". What this page shows may not be what the run produced."
                     if integrity.get("status") == "mismatch"
                     else "bundle-hashes.json cannot be read, so the artifacts behind this page cannot be checked."
                 ),
@@ -915,7 +954,7 @@ def build_explorer_data(run_dir: Path | str) -> dict[str, Any]:
             key: integrity.get(key)
             # No unlisted_count: the page itself is written into the run directory, and the same run must
             # give the same page every time.
-            for key in ("status", "checked_count", "modified_count", "missing_count")
+            for key in ("status", "checked_count", "modified_count", "missing_count", "symlink_count", "unexpected_count")
         },
         "risk": {"score": score, "grade": grade if grade in (*_SEVERITIES, "clean") else "info"},
         "verdict": verdict,
@@ -1147,6 +1186,6 @@ def write_explorer(run_dirs: Path | str | Sequence[Path | str], output_path: Pat
     """Write the explorer for one run, or several runs of one tenant, to ``output_path``."""
     bundle = build_explorer_bundle(run_dirs)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_explorer_html(bundle), encoding="utf-8", newline="\n")
+    # The page embeds the run's findings and evidence: 0600 in a 0700 directory whatever the umask.
+    write_private_text(output, render_explorer_html(bundle))
     return output

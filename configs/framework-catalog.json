@@ -240,7 +240,8 @@
       },
       "mapping_confidence": {
         "full": "The rule tests the condition the requirement names, for the audited tenant.",
-        "partial": "The rule tests a proxy or a subset of the condition, for example registration rather than enforcement."
+        "partial": "The rule tests a proxy or a subset of the condition, for example registration rather than enforcement.",
+        "supporting": "The rule is listed as supporting evidence only. It shows what Auditex saw, and it never decides the requirement's status: a failing supporting rule does not fail the requirement."
       },
       "disclaimer": "Auditex output is evidence for a Cyber Essentials assessor. It is not a Cyber Essentials assessment, certificate or CE+ result, and a pass here never replaces the applicant's own answers or the assessor's tests.",
       "controls": {
@@ -313,28 +314,28 @@
           "theme": "secure_configuration",
           "status": "manual",
           "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Computers and network devices",
-          "evidence_limits": "Anonymous or unauthenticated access to organisational services is not tested as a requirement. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+          "evidence_limits": "Anonymous or unauthenticated access to organisational services is not tested as a requirement. The rules that report anyone links and public sharing are listed as supporting evidence only. Evidence comes from the applicant's answers and the assessor."
         },
         "ce.sc.device_unlocking": {
           "title": "Device unlocking credentials in place and protected against brute force; PIN or password of at least 6 characters",
           "theme": "secure_configuration",
           "status": "manual",
           "citation": "E. Requirements by technical control theme > 2. Secure Configuration > Requirements > Device unlocking credentials",
-          "evidence_limits": "Intune compliance settings (lock, PIN length, encryption) are not normalised yet. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+          "evidence_limits": "Intune compliance settings (passcode, minimum passcode length, encryption) are collected into compliance_policy_objects.json but no Auditex rule judges them. Evidence comes from the applicant's answers and the assessor."
         },
         "ce.sc.saas_configuration": {
           "title": "SaaS cloud services configured securely and providing only the services required",
           "theme": "secure_configuration",
           "status": "partial",
           "citation": "D. Scope > (iv) Cloud services; E. Requirements by technical control theme > 2. Secure Configuration > Aim",
-          "evidence_limits": "Covers legacy authentication and user app consent only. Other SaaS settings are not tested against this requirement."
+          "evidence_limits": "Covers legacy authentication (the Conditional Access block and tenant-wide SMTP AUTH) and user app consent only. Other SaaS settings are not tested against this requirement."
         },
         "ce.sum.supported_software": {
           "title": "All in-scope software is licensed and supported, and removed when it becomes unsupported",
           "theme": "security_update_management",
           "status": "partial",
           "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
-          "evidence_limits": "Covers the operating system of devices enrolled in Intune, judged against the dated table in configs/os-end-of-life.json. Applications, firmware, Windows Server and devices that are not enrolled are not covered. A Windows build that Long-Term Servicing (LTSC, LTSB or IoT) editions share, or whose Home/Pro date has passed while Enterprise and Education is still supported, is unknown because osVersion does not show the edition; a release the table does not list is unknown too. A clean result is recorded as not assessed, never as a pass."
+          "evidence_limits": "Covers the operating system of devices enrolled in Intune, judged against the dated table in configs/os-end-of-life.json, and ChromeOS devices past their auto-update expiry in Google Workspace. Applications, firmware, Windows Server and devices managed by neither Intune nor Google Workspace are not covered. A Windows build that Long-Term Servicing (LTSC, LTSB or IoT) editions share, or whose Home/Pro date has passed while Enterprise and Education is still supported, is unknown because osVersion does not show the edition; a release the table does not list is unknown too. A clean result is recorded as not assessed, never as a pass."
         },
         "ce.sum.automatic_updates": {
           "title": "Automatic updates enabled where possible",
@@ -348,7 +349,7 @@
           "theme": "security_update_management",
           "status": "partial",
           "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
-          "evidence_limits": "Partial evidence only: update rings that delay quality updates beyond 14 days, devices that have not synced within the stale-sync window (14 days by default), operating systems past end of life, and Intune noncompliance. None of them measures the age of an installed update. The CE+ assessor decides this with an authenticated vulnerability scan of sampled devices.",
+          "evidence_limits": "Partial evidence only: update rings that delay quality updates beyond 14 days, devices that have not synced within the stale-sync window (14 days by default), and operating systems past end of life or auto-update expiry. Intune noncompliance is listed as supporting evidence only: the compliance state does not say which setting failed, so it never fails this requirement. None of them measures the age of an installed update. The CE+ assessor decides this with an authenticated vulnerability scan of sampled devices.",
           "ce_plus_test": "Test case 2: Check patching, by authenticated vulnerability scan of devices"
         },
         "ce.sum.saas_provider": {
@@ -377,14 +378,14 @@
           "theme": "user_access_control",
           "status": "partial",
           "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
-          "evidence_limits": "Covers inactive enabled tenant accounts only. Leavers still active within the inactivity window and third-party accounts are not detected."
+          "evidence_limits": "Covers inactive enabled tenant accounts only, judged against Auditex's own inactivity threshold (90 days for Microsoft 365 users and administrators, 365 for Google administrators), not the period the applicant has defined. Leavers still active within the window and third-party accounts are not detected."
         },
         "ce.uac.mfa_cloud_services": {
           "title": "MFA implemented where available; authentication to cloud services always uses MFA",
           "theme": "user_access_control",
           "status": "partial",
           "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements; E. Requirements by technical control theme > 4. User Access Control > Multi-factor authentication (MFA)",
-          "evidence_limits": "Covers the audited Microsoft 365 or Google Workspace tenant only. Every other cloud service the organisation uses needs separate evidence. Registration rules show capability, not enforcement.",
+          "evidence_limits": "Covers the audited Microsoft 365 or Google Workspace tenant only. Every other cloud service the organisation uses needs separate evidence. Per-user (legacy) MFA states are not read, so a Microsoft 365 tenant that enforces MFA only through per-user MFA, without security defaults or Conditional Access, can read fail here. A Conditional Access policy that excludes principals other than the emergency access accounts listed with --break-glass-accounts also fails the requirement. Registration rules show capability, not enforcement.",
           "ce_plus_test": "Test case 4: Check multi-factor authentication configuration"
         },
         "ce.uac.mfa_admin_accounts": {
@@ -392,7 +393,7 @@
           "theme": "user_access_control",
           "status": "partial",
           "citation": "E. Requirements by technical control theme > 4. User Access Control > Multi-factor authentication (MFA)",
-          "evidence_limits": "Covers administrator roles in the audited tenant only. PIM-eligible and group-based administrators depend on the identity collectors completing.",
+          "evidence_limits": "Covers administrator roles in the audited tenant only. Microsoft 365 enforcement is read from security defaults and Conditional Access against the effective administrator set (per-user MFA states are not read); PIM-eligible and group-based administrators depend on the identity collectors completing. Registration rules show capability, not enforcement.",
           "ce_plus_test": "Test case 4: Check multi-factor authentication configuration"
         },
         "ce.uac.separate_admin_accounts": {
@@ -408,7 +409,7 @@
           "theme": "user_access_control",
           "status": "partial",
           "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
-          "evidence_limits": "Covers privileged role assignments in the audited tenant: direct, PIM-eligible and inherited through a role-assignable group, as far as the membership fan-out reaches. Role changes when staff move are not observed."
+          "evidence_limits": "Covers privileged role assignments in the audited tenant: direct, PIM-eligible and inherited through a role-assignable group, as far as the membership fan-out reaches. Only an administrator who has not signed in within the inactivity threshold fails the requirement. The number of administrators, disabled administrators and guest administrators are listed as supporting evidence only: Cyber Essentials sets no count and asks for privileges to be removed or disabled when no longer required. Role changes when staff move are not observed."
         },
         "ce.uac.password_brute_force": {
           "title": "Password guessing limited by MFA, throttling or lock-out (no more than 10 guesses in 5 minutes)",

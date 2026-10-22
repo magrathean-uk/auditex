@@ -44,6 +44,9 @@ class _IdentityClient:
             yield page
 
     def get_all(self, path: str, params: Any = None) -> list[dict[str, Any]]:
+        if path == "/domains":
+            # A reference list read through the shared paging path; this tenant has none worth modelling.
+            return []
         assert path.startswith("/groups/") and path.endswith(("/members", "/owners"))
         self.relationship_calls.append(path)
         return self.relationships.get(path, [])
@@ -189,6 +192,8 @@ def test_consent_finds_tail_microsoft_graph_and_keeps_first_ten_bound(tmp_path: 
     assert fanout["input_record_count"] == 367
     assert fanout["input_complete"] is True
     assert fanout["fanout_target_count"] == 11
+    # The gap names how many principals were expanded: "11 rows", not "0 rows".
+    assert fanout["rows_collected"] == 11
     assert fanout["fanout_omitted_count"] == 356
     assert fanout["microsoft_graph_found"] is True
     assert fanout["fanout_scope"] == "first_10_service_principals_plus_microsoft_graph"

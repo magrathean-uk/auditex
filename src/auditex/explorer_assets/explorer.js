@@ -739,7 +739,7 @@
   function viewBaselines(sec) {
     var b = R().baselines, m = M();
     sec.className = 'ax-view';
-    sec.appendChild(vhead('h-baselines', 'Baselines', 'Baseline alignment', 'Each control is fail, accepted risk, pass or not assessed. Not assessed means no collector in this run evidences it.'));
+    sec.appendChild(vhead('h-baselines', 'Baselines', 'Baseline alignment', 'Each control is fail, accepted risk, pass or not assessed. Not assessed means Auditex reports no verdict: its evidence was missing in this run, or the control covers more than a tenant audit can see. The note on each row says which.'));
     if (!b || (!(b.frameworks || []).length && !b.secure)) {
       sec.appendChild(emptyFrame('not_assessed', null, 'Not enough coverage to assess any framework', 'Showing a percentage here would imply controls were checked that were not.'));
       return;

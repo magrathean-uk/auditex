@@ -148,7 +148,9 @@ def test_exclusions_are_listed_and_resolved_for_an_enforcing_policy() -> None:
 
     verdict = _mfa(policy)
 
-    assert verdict["verdict"] == "enforced"
+    # MFA is required, but not of the excluded role, group, guests and users: that is not "enforced".
+    assert verdict["verdict"] == "enforced_with_exclusions"
+    assert verdict["basis"] == ["conditional_access_policy"]
     excluded = {(row["type"], row["id"]): row for row in verdict["excluded_principals"]}
     assert excluded[("user", "user-bg")]["display_name"] == "breakglass@example.test"
     assert excluded[("user", "user-unknown")]["resolved"] is False
@@ -156,7 +158,10 @@ def test_exclusions_are_listed_and_resolved_for_an_enforcing_policy() -> None:
     assert excluded[("role", GLOBAL_ADMIN)]["display_name"] == "Global Administrator"
     assert ("guests_or_external_users", "b2bCollaborationGuest,internalGuest") in excluded
     assert verdict["excluded_principal_count"] == 5
+    assert verdict["unsanctioned_exclusion_count"] == 5
+    assert verdict["sanctioned_exclusion_source"] == "none"
     assert verdict["excluded_locations"] == ["AllTrusted"]
+    assert verdict["limitations"], "a verdict that is not plain enforced carries the per-user MFA limitation"
 
 
 def test_only_principals_excluded_from_every_qualifying_policy_are_reported() -> None:
@@ -480,8 +485,9 @@ def test_disabled_and_report_only_block_policies_do_not_block() -> None:
 def test_block_policy_lists_its_exclusions() -> None:
     verdict = _legacy(_block_policy(users={"includeUsers": ["All"], "excludeUsers": ["user-bg"]}))
 
-    assert verdict["verdict"] == "blocked"
+    assert verdict["verdict"] == "blocked_with_exclusions"
     assert verdict["excluded_principals"][0]["display_name"] == "breakglass@example.test"
+    assert verdict["excluded_principals"][0]["sanctioned"] is False
 
 
 @pytest.mark.parametrize("state", ["blocked", "truncated", "absent"])
@@ -520,17 +526,47 @@ def test_legacy_consent_policy_is_unrestricted() -> None:
 @pytest.mark.parametrize(
     ("assigned", "mode"),
     [
-        (["ManagePermissionGrantsForSelf.microsoft-user-default-low"], "verified_publishers_low_risk_permissions"),
-        (["ManagePermissionGrantsForSelf.microsoft-user-default-recommended"], "microsoft_managed"),
         ([], "none"),
         (["ManagePermissionGrantsForOwnedResource.microsoft-dynamically-managed-permissions-for-team"], "none"),
     ],
 )
-def test_limited_or_no_user_consent_is_restricted(assigned: list[str], mode: str) -> None:
+def test_no_user_consent_is_restricted(assigned: list[str], mode: str) -> None:
     verdict = _consent(_authorization(assigned))
 
     assert verdict["verdict"] == "restricted"
     assert verdict["consent_mode"] == mode
+
+
+@pytest.mark.parametrize(
+    ("assigned", "mode"),
+    [
+        (["ManagePermissionGrantsForSelf.microsoft-user-default-low"], "verified_publishers_low_risk_permissions"),
+        (["ManagePermissionGrantsForSelf.microsoft-user-default-recommended"], "microsoft_managed"),
+        (
+            [
+                "ManagePermissionGrantsForSelf.microsoft-user-default-recommended",
+                "ManagePermissionGrantsForSelf.microsoft-user-default-allow-consent-apps",
+            ],
+            "microsoft_managed",
+        ),
+    ],
+)
+def test_limited_user_consent_is_not_restricted(assigned: list[str], mode: str) -> None:
+    """CIS 5.1.5.1 asks for no user consent, and ScubaGear fails the Microsoft-managed assignment."""
+    verdict = _consent(_authorization(assigned))
+
+    assert verdict["verdict"] == "limited"
+    assert verdict["consent_mode"] == mode
+    assert verdict["reasons"] == []
+
+
+def test_an_unrecognised_microsoft_built_in_policy_is_not_called_custom() -> None:
+    verdict = _consent(_authorization(["ManagePermissionGrantsForSelf.microsoft-user-default-future"]))
+
+    assert verdict["verdict"] == "unknown"
+    assert verdict["consent_mode"] == "built_in"
+    assert verdict["reasons"] == ["built_in_permission_grant_policy_not_evaluated"]
+    assert verdict["built_in_policies"][0]["id"].endswith("microsoft-user-default-future")
 
 
 def test_unrestricted_policy_wins_over_a_limited_one() -> None:
@@ -572,8 +608,8 @@ def test_unreadable_authorization_policy_is_unknown(state: str) -> None:
 # --- normalization, collection state and records ----------------------------------------------
 
 
-def _snapshot(collector_payloads: dict[str, Any]) -> dict[str, Any]:
-    return build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads=collector_payloads)
+def _snapshot(collector_payloads: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    return build_normalized_snapshot(tenant_name="acme", run_id="run-1", collector_payloads=collector_payloads, **kwargs)
 
 
 def _verdicts(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -597,17 +633,22 @@ def test_verdicts_are_normalized_per_tenant_from_live_shaped_payloads() -> None:
                 "identitySecurityDefaultsEnforcementPolicy": {"id": "sd", "isEnabled": False},
                 "authenticationStrengthPolicies": {"value": []},
             },
-        }
+        },
+        break_glass_accounts=["breakglass@example.test"],
     )
 
     records = _verdicts(snapshot)
     mfa = records["effective_mfa"]
+    # The one excluded principal is the emergency access account the operator listed, so MFA still counts as enforced.
     assert mfa["verdict"] == "enforced"
     assert mfa["key"] == "identity_control_verdict:effective_mfa"
     assert mfa["excluded_principals"][0]["display_name"] == "breakglass@example.test"
+    assert mfa["excluded_principals"][0]["sanctioned"] is True
+    assert mfa["unsanctioned_exclusion_count"] == 0 and mfa["sanctioned_exclusion_source"] == "operator"
     assert records["legacy_authentication_block"]["verdict"] == "not_blocked"
+    assert records["administrator_mfa"]["verdict"] == "enforced", "an all-users policy reaches every administrator"
     assert "user_consent" not in records
-    assert snapshot["snapshot"]["object_counts"]["identity_control_verdicts"] == 2
+    assert snapshot["snapshot"]["object_counts"]["identity_control_verdicts"] == 3
 
 
 def test_wrapped_singleton_responses_are_read_too() -> None:
@@ -718,7 +759,7 @@ def test_authorization_policy_keeps_the_assigned_permission_grant_policies() -> 
     assert record["permission_grant_policies_assigned"] == ["ManagePermissionGrantsForSelf.microsoft-user-default-low"]
     assert record["allowed_to_create_apps"] is False
     assert record["guest_user_role_id"] == "guest-role"
-    assert _verdicts(snapshot)["user_consent"]["verdict"] == "restricted"
+    assert _verdicts(snapshot)["user_consent"]["verdict"] == "limited"
 
 
 # --- rules ------------------------------------------------------------------------------------
@@ -867,11 +908,14 @@ def test_unknown_outcomes_raise_the_unverified_rules_and_never_the_failure_rules
     rule_ids = [row.get("rule_id") for row in findings]
 
     assert "ca.mfa_not_enforced" not in rule_ids
+    assert "ca.admin_mfa_not_enforced" not in rule_ids
     assert "ca.legacy_auth_not_blocked" not in rule_ids
     assert "consent_policy.user_consent_unrestricted" not in rule_ids
+    assert "consent_policy.user_consent_limited" not in rule_ids
     unverified = {row["id"]: row for row in findings if row.get("rule_id") in {"ca.enforcement_unverified", "consent_policy.user_consent_unverified"}}
     assert set(unverified) == {
         "conditional_access:effective_mfa:unverified",
+        "conditional_access:administrator_mfa:unverified",
         "conditional_access:legacy_authentication_block:unverified",
         "consent_policy:user_consent:unverified",
     }
@@ -894,13 +938,16 @@ def test_new_rules_have_templates_mappings_and_catalog_entries() -> None:
     mappings = json.loads((REPO_ROOT / "configs" / "control-mappings.json").read_text(encoding="utf-8"))
     for rule_id in (
         "ca.mfa_not_enforced",
+        "ca.admin_mfa_not_enforced",
+        "ca.admin_phishing_resistant_mfa_not_enforced",
         "ca.legacy_auth_not_blocked",
         "ca.enforcement_unverified",
         "consent_policy.user_consent_unrestricted",
+        "consent_policy.user_consent_limited",
         "consent_policy.user_consent_unverified",
         "identity.privileged_mfa_not_registered",
     ):
-        assert templates[rule_id]["risk_rating"] in {"medium", "high"}
+        assert templates[rule_id]["risk_rating"] in {"low", "medium", "high"}
         assert mappings[rule_id]["nist_800_53"]
 
 
@@ -956,7 +1003,8 @@ def test_non_global_admin_role_holder_without_mfa_gets_the_privileged_rule() -> 
     assert finding["affected_objects"] == ["exo@example.test"]
     assert finding["evidence"]["privileged_roles"] == [{"role": "Exchange Administrator", "assignment": "active"}]
     assert finding["evidence"]["identified_by"] == ["directory_role"]
-    assert finding["framework_mappings"]["cis_m365_v7"] == ["5.2.2.1", "5.2.3.4"]
+    # Registration shows who could use MFA: CIS 5.2.2.1 (MFA required of administrators) is judged by ca.admin_mfa_not_enforced.
+    assert finding["framework_mappings"]["cis_m365_v7"] == ["5.2.3.4"]
     _assert_refs_resolve(snapshot, finding)
     assert {ref["record_key"] for ref in finding["evidence_refs"]} == {
         "auth_method_registration:u-exo",
@@ -1070,7 +1118,8 @@ def test_mfa_registration_findings_report_registration_not_enforcement() -> None
         description = template["description"].lower()
         assert "registered" in description and "registration only" in description, rule_id
         assert "not whether mfa is required" in description, rule_id
-        assert "ca.mfa_not_enforced" in template["remediation"], rule_id
+        enforcement_rule = "ca.mfa_not_enforced" if rule_id == "identity.user_mfa_not_registered" else "ca.admin_mfa_not_enforced"
+        assert enforcement_rule in template["remediation"], rule_id
         assert "enforced" not in template["expected_value"].lower(), rule_id
 
 
@@ -1129,12 +1178,14 @@ def test_identity_controls_sample_exercises_the_verdicts_and_rules_offline(tmp_p
     assert validation["valid"] is True, validation["issues"]
     assert {row["control"]: row["verdict"] for row in verdicts["records"]} == {
         "effective_mfa": "not_enforced",
+        "administrator_mfa": "not_enforced",
         "legacy_authentication_block": "not_blocked",
         "user_consent": "unrestricted",
     }
     rules = {row.get("rule_id") for row in findings}
     assert {
         "ca.mfa_not_enforced",
+        "ca.admin_mfa_not_enforced",
         "ca.legacy_auth_not_blocked",
         "consent_policy.user_consent_unrestricted",
         "identity.privileged_mfa_not_registered",

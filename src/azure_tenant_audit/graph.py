@@ -6,7 +6,7 @@ import time
 import importlib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, Optional
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
 from requests.exceptions import RequestException
@@ -25,6 +25,22 @@ GRAPH_API_ROOTS = {"v1.0": GRAPH_ROOT, "beta": GRAPH_BETA_ROOT}
 NEXT_LINK_REFUSED = "NextLinkRefused"
 # Error code of a request the client refused because it is not a read (see read_only_violation).
 READ_ONLY_VIOLATION = "ReadOnlyViolation"
+# Error code of a redirect the client refused to follow (a host that is not Microsoft, a loop, a downgrade).
+REDIRECT_REFUSED = "RedirectRefused"
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_MAX_REDIRECTS = 3
+# The usage-report functions answer 302 to a short-lived pre-authenticated download URL. Only Microsoft-owned
+# download hosts are followed, over HTTPS, and never with the bearer token.
+_DOWNLOAD_HOST_SUFFIXES = (
+    ".office.com",
+    ".office.net",
+    ".office365.com",
+    ".microsoft.com",
+    ".microsoftonline.com",
+    ".sharepoint.com",
+    ".azureedge.net",
+    ".windows.net",
+)
 # The only methods the audit plane may send: GET, and POST solely to /$batch with GET-only inner requests.
 READ_ONLY_METHODS = frozenset({"GET"})
 _BATCH_ENVELOPE_KEYS = frozenset({"requests"})
@@ -51,6 +67,19 @@ def graph_host_url(url: str) -> bool:
         return False
     parsed = urlparse(url)
     return parsed.scheme == "https" and parsed.hostname == urlparse(GRAPH_ROOT).hostname
+
+
+def redacted_url(url: str) -> str:
+    """``scheme://host/path`` of a URL: the query of a pre-authenticated download URL is a credential."""
+    parsed = urlparse(str(url))
+    return f"{parsed.scheme}://{parsed.hostname or ''}{parsed.path}" if parsed.scheme else str(url).split("?", 1)[0]
+
+
+def download_host_allowed(url: str) -> bool:
+    """Whether a redirect target is an HTTPS URL on a Microsoft-owned download host."""
+    parsed = urlparse(str(url))
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and any(host.endswith(suffix) for suffix in _DOWNLOAD_HOST_SUFFIXES)
 
 
 def graph_api_version(url: str) -> str:
@@ -299,6 +328,12 @@ class GraphClient:
         cache = self.__dict__.setdefault("_resource_tokens", {})
         if scope in cache:
             return cache[scope]
+        # Counted like the Graph token request, so token_requests matches token_succeeded and the ledger names the resource.
+        self._emit(
+            "graph.token.requested",
+            "Requesting resource token",
+            {"mode": "client_credentials", "token_url": self._token_url(), "scope": scope},
+        )
         try:
             response = self.session.post(
                 self._token_url(),
@@ -477,7 +512,11 @@ class GraphClient:
                 started["batch"] = _batch_summary(kwargs)
             self._emit("graph.request.started", "Graph request started", started)
             try:
-                response = self.session.request(method, url, headers=headers, timeout=self.auth.timeout_seconds, **kwargs)
+                # Redirects are followed by hand (see _follow_redirects): the host check and the audit log must
+                # see every hop, and the bearer token must never be sent to a host that is not Graph.
+                response = self.session.request(
+                    method, url, headers=headers, timeout=self.auth.timeout_seconds, allow_redirects=False, **kwargs
+                )
             except RequestException as exc:  # noqa: BLE001
                 self._emit(
                     "graph.request.exception",
@@ -498,6 +537,8 @@ class GraphClient:
                     "response_length": len(response.text),
                 },
             )
+            if response.status_code in _REDIRECT_STATUSES:
+                response = self._follow_redirects(response, method, url, headers)
             if response.status_code == 403 and permission_stop_after:
                 self._permission_failures[family] = self._permission_failures.get(family, 0) + 1
             elif response.status_code < 400:
@@ -545,6 +586,60 @@ class GraphClient:
             self._arm_next_request_delay()
             return response
 
+    def _follow_redirects(
+        self, response: requests.Response, method: str, url: str, headers: dict[str, str]
+    ) -> requests.Response:
+        """Follow a redirect a read was answered with, hop by hop, and record each hop without its query.
+
+        A hop on Graph keeps the bearer token. Any other hop must be an HTTPS URL on a Microsoft download host
+        and is fetched without the token. Anything else is refused, and the hop is logged as host and path only
+        because the query of a pre-authenticated download URL is a credential.
+        """
+        hops = 0
+        current_url = url
+        while response.status_code in _REDIRECT_STATUSES:
+            location = response.headers.get("Location")
+            if not location or method.upper() != "GET":
+                return response
+            hops += 1
+            target = urljoin(current_url, location)
+            parsed = urlparse(target)
+            event = {
+                "method": method,
+                "status": response.status_code,
+                "hop": hops,
+                "from_path": urlparse(current_url).path,
+                "host": parsed.hostname or "unknown",
+                "path": parsed.path,
+            }
+            graph_hop = graph_host_url(target)
+            if hops > _MAX_REDIRECTS or not (graph_hop or download_host_allowed(target)):
+                self._emit("graph.request.redirect_refused", "Refused a redirect", event)
+                raise GraphError(
+                    f"Refusing to follow a redirect to {event['host']}; it is not a Microsoft download host.",
+                    request=redacted_url(target),
+                    error_code=REDIRECT_REFUSED,
+                )
+            self._emit("graph.request.redirect", "Following a redirect", event)
+            hop_headers = (
+                headers
+                if graph_hop
+                else {name: value for name, value in headers.items() if name.lower() != "authorization"}
+            )
+            try:
+                response = self.session.request(
+                    "GET", target, headers=hop_headers, timeout=self.auth.timeout_seconds, allow_redirects=False
+                )
+            except RequestException as exc:  # noqa: BLE001
+                self._emit(
+                    "graph.request.exception",
+                    "Graph redirect hop raised exception",
+                    {"method": "GET", "url": redacted_url(target), "error": type(exc).__name__, "hop": hops},
+                )
+                raise
+            current_url = target
+        return response
+
     def get_json(self, path: str, params: Optional[Dict[str, Any]] = None, full_url: bool = False) -> Dict[str, Any]:
         url = path if full_url else f"{GRAPH_ROOT}{path}"
         if full_url:
@@ -565,16 +660,17 @@ class GraphClient:
                     reason = str(error.get("message") or reason)
                 elif isinstance(error, str):
                     reason = error
+            error_url = response.url if graph_host_url(response.url) else redacted_url(response.url)
             self._emit(
                 "graph.response.error",
                 "Graph endpoint returned error response",
                 {
-                    "url": response.url,
+                    "url": error_url,
                     "status": response.status_code,
                     "error_code": error_code,
                 },
             )
-            raise GraphError(reason, status=response.status_code, request=response.url, error_code=error_code)
+            raise GraphError(reason, status=response.status_code, request=error_url, error_code=error_code)
         return response.json()
 
     def get_content(self, path: str, params: Optional[Dict[str, Any]] = None, full_url: bool = False) -> str:
@@ -583,7 +679,8 @@ class GraphClient:
             self._require_graph_url(url)
         response = self._request("GET", url, params=params)
         if response.status_code >= 400:
-            raise GraphError(response.text, status=response.status_code, request=response.url)
+            error_url = response.url if graph_host_url(response.url) else redacted_url(response.url)
+            raise GraphError(response.text, status=response.status_code, request=error_url)
         return response.text
 
     def _require_graph_url(self, url: Any) -> None:

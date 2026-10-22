@@ -16,8 +16,13 @@ from .collection_gaps import list_truncations
 from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .resources import list_resource_files, resolve_resource_path
 from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
+from .waivers import has_matching_waiver, is_accepted_status
 
 CONTRACT_VERSION = "2026-10-22"
+# The contract version from which every evidence reference must resolve. It is fixed: a bundle finalized
+# under 2026-10-22 must keep failing on an unresolved reference after later contract bumps, so the legacy
+# cut-off is tied to the version a bundle was finalized under and never to the current CONTRACT_VERSION.
+REFS_MUST_RESOLVE_SINCE = "2026-10-22"
 
 ROOT_REQUIRED_ARTIFACTS = (
     "run-manifest.json",
@@ -152,18 +157,55 @@ def _load_findings(run_dir: Path, supplied: list[dict[str, Any]] | None) -> list
     return [dict(item) for item in payload if isinstance(item, Mapping)] if isinstance(payload, list) else []
 
 
+# Finding statuses the engine writes: ``open``, and ``accepted_risk`` (with the waiver that matched) only.
+# ``accepted`` and ``waived`` are read as accepted spellings; anything else is not a status the engine produces.
+_ENGINE_FINDING_STATUSES = frozenset({"open"})
+
+
+def _validate_finding_statuses(findings: list[dict[str, Any]], issues: list[dict[str, Any]]) -> None:
+    """A finding is accepted only by a matching waiver, and only known statuses are read as such.
+
+    An accepted status with no matching waiver (the engine always attaches the waiver it matched) is an
+    error: it is the one edit that turns a failing gate into a pass. A status the engine never writes
+    (``closed``, ``resolved``, anything else) is a warning; the gates count such a finding as open unless a
+    matching waiver stands behind it.
+    """
+    unwaived: list[str] = []
+    unknown: dict[str, list[str]] = {}
+    for position, finding in enumerate(findings):
+        finding_id = str(finding.get("id") or f"finding:{position}")
+        status = str(finding.get("status") or "open").strip().lower()
+        if is_accepted_status(status):
+            if not has_matching_waiver(finding):
+                unwaived.append(finding_id)
+        elif status not in _ENGINE_FINDING_STATUSES:
+            unknown.setdefault(status, []).append(finding_id)
+    if unwaived:
+        issues.append(_issue("unwaived_accepted_status", path="findings/findings.json", details=sorted(unwaived)[:20]))
+    for status, ids in sorted(unknown.items()):
+        issues.append(
+            _issue(
+                "unknown_finding_status",
+                path="findings/findings.json",
+                details={"status": status, "findings": sorted(ids)[:20]},
+                severity="warning",
+            )
+        )
+
+
 def _is_legacy_bundle(manifest: Any) -> bool:
-    """Whether the run was finalized under a contract older than this one.
+    """Whether the run was finalized under a contract older than ``REFS_MUST_RESOLVE_SINCE``.
 
     Such a bundle was written before references were required to resolve, so a citation that does
     not resolve in it is the old builders' pattern (for example a raw payload cited for a fan-out
     that has no row there), not a sign that the bundle was edited. The edit is what the hash
-    manifest and ``evidence_ref_hash_mismatch`` report.
+    manifest and ``evidence_ref_hash_mismatch`` report. The cut-off is a fixed version, not the
+    current ``CONTRACT_VERSION``, so a later contract bump never relabels an edited citation.
     """
     if not isinstance(manifest, Mapping) or not manifest:
         return False
     version = manifest.get("schema_contract_version")
-    return not isinstance(version, str) or version < CONTRACT_VERSION
+    return not isinstance(version, str) or version < REFS_MUST_RESOLVE_SINCE
 
 
 def _unresolved_code(reason: str | None, *, legacy: bool, proof_table: bool = False) -> str:
@@ -884,6 +926,7 @@ def build_validation_report(
     _validate_normalized_records(run_path, issues)
     _validate_record_key_uniqueness(run_path, issues)
     _validate_finding_collectors(loaded_findings, issues)
+    _validate_finding_statuses(loaded_findings, issues)
     _validate_finding_framework_mappings(loaded_findings, issues)
     _validate_ai_safe(run_path, issues)
     _validate_sensitive_contract_artifacts(run_path, issues)

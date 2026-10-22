@@ -58,6 +58,11 @@ def _admin_set(
     return {"effective_admin_set": _section(summary)}
 
 
+def _signed_in_users() -> dict[str, Any]:
+    """A normalized snapshot whose users all have sign-in data (a tenant with Microsoft Entra ID P1)."""
+    return {"users": _section({"id": "u1", "enabled": True, "user_type": "member", "signin_data_available": True})}
+
+
 def _domain(**fields: Any) -> dict[str, Any]:
     return {
         "domain": "contoso.com",
@@ -77,7 +82,7 @@ def _signal(name: str, status: str, reason: str = "test") -> dict[str, Any]:
 
 
 def test_a_rule_with_a_completed_collector_and_no_finding_passes_and_says_it_was_evaluated() -> None:
-    alignment = _alignment("identity.stale_enabled_account", ledger=_ledger("identity"))
+    alignment = _alignment("identity.stale_enabled_account", ledger=_ledger("identity"), snapshot=_signed_in_users())
 
     assert _rule(alignment, "identity.stale_enabled_account") == {
         "rule_id": "identity.stale_enabled_account",
@@ -116,7 +121,9 @@ def test_a_control_passes_only_when_every_mapped_rule_was_evaluated() -> None:
         "intune.policy_without_assignment": {FRAMEWORK: ["T.1"]},
     }
 
-    alignment = build_baseline_alignment([], coverage_ledger=_ledger("identity"), mappings=mappings)
+    alignment = build_baseline_alignment(
+        [], normalized_snapshot=_signed_in_users(), coverage_ledger=_ledger("identity"), mappings=mappings
+    )
 
     (control,) = alignment["frameworks"][FRAMEWORK]["controls"]
     assert control["status"] == "not_assessed"
@@ -147,14 +154,31 @@ def test_finding_statuses_are_read_with_the_accepted_status_helper_and_unknown_m
 
 
 @pytest.mark.parametrize("status", ["resolved", "closed"])
-def test_a_resolved_finding_neither_fails_nor_counts_as_accepted(status: str) -> None:
-    findings = [{"id": "f1", "rule_id": "identity.stale_enabled_account", "status": status}]
+def test_a_resolved_finding_with_its_waiver_neither_fails_nor_counts_as_accepted(status: str) -> None:
+    waiver = {"rule_id": "identity.stale_enabled_account", "reason": "approved", "owner": "ops", "expires_on": "2099-01-01"}
+    findings = [{"id": "f1", "rule_id": "identity.stale_enabled_account", "status": status, "waiver": waiver}]
 
-    passing = _alignment("identity.stale_enabled_account", findings=findings, ledger=_ledger("identity"))
+    passing = _alignment(
+        "identity.stale_enabled_account", findings=findings, ledger=_ledger("identity"), snapshot=_signed_in_users()
+    )
     unassessed = _alignment("identity.stale_enabled_account", findings=findings)
 
     assert _rule(passing, "identity.stale_enabled_account")["status"] == "pass"
     assert _rule(unassessed, "identity.stale_enabled_account")["status"] == "not_assessed"
+
+
+@pytest.mark.parametrize("status", ["resolved", "closed", "Closed"])
+def test_a_resolved_or_closed_finding_without_a_matching_waiver_stays_open_as_in_the_gate(status: str) -> None:
+    """The engine never writes these statuses, so one with no waiver behind it is an edit (``auditex.gate``)."""
+    unwaived = {"id": "f1", "rule_id": "identity.stale_enabled_account", "status": status}
+    other_rule = {**unwaived, "waiver": {"rule_id": "identity.stale_guest", "reason": "x", "owner": "o"}}
+
+    for finding in (unwaived, other_rule):
+        alignment = _alignment(
+            "identity.stale_enabled_account", findings=[finding], ledger=_ledger("identity"), snapshot=_signed_in_users()
+        )
+        assert _rule(alignment, "identity.stale_enabled_account")["status"] == "fail"
+    assert unmapped_findings([{"id": "x", "status": status}])["open_count"] == 1
 
 
 # ---- detection rules read their own collector ---------------------------------------------------------
@@ -295,7 +319,8 @@ def test_dns_rules_pass_when_every_domain_was_resolved() -> None:
 
 def test_a_dns_finding_still_fails_the_rule_when_another_domain_errored() -> None:
     rule = "dns_posture.dmarc_missing"
-    snapshot = {"dns_posture_objects": _section(_domain(resolver_error="SERVFAIL"))}
+    # a.com published no DMARC record; b.com could not be resolved. The finding on a.com is evidence and still fails.
+    snapshot = {"dns_posture_objects": _section(_domain(dmarc_present=False), _domain(domain="b.com", resolver_error="SERVFAIL"))}
     findings = [{"id": "dns_posture:a.com:dmarc_missing", "rule_id": rule, "status": "open"}]
 
     assert _rule(_alignment(rule, findings=findings, ledger=_ledger("dns_posture"), snapshot=snapshot), rule)["status"] == "fail"
@@ -326,7 +351,7 @@ def test_findings_without_a_rule_id_are_counted_in_the_unmapped_bucket() -> None
         {"id": "ca:1", "status": "open", "collector": "conditional_access"},
         {"id": "ca:2", "rule_id": "", "status": "open", "collector": "conditional_access"},
         {"id": "fwd:1", "rule_id": None, "status": "accepted_risk", "collector": "mailbox_forwarding"},
-        {"id": "old:1", "status": "resolved", "collector": "teams"},
+        {"id": "old:1", "status": "resolved", "collector": "teams", "waiver": {"finding_id": "old:1", "reason": "x", "owner": "o"}},
         {"id": "mapped:1", "rule_id": "identity.stale_enabled_account", "status": "open", "collector": "identity"},
     ]
 
@@ -406,12 +431,20 @@ def test_the_unmapped_bucket_never_uses_collector_names_as_object_keys() -> None
 _VERDICT_RULES = [
     # rule, controls whose verdict must be known, collector that feeds the verdict
     ("ca.mfa_not_enforced", ("effective_mfa",), "conditional_access"),
+    ("ca.admin_mfa_not_enforced", ("administrator_mfa",), "conditional_access"),
+    ("ca.admin_phishing_resistant_mfa_not_enforced", ("administrator_mfa",), "conditional_access"),
     ("ca.legacy_auth_not_blocked", ("legacy_authentication_block",), "conditional_access"),
-    ("ca.enforcement_unverified", ("effective_mfa", "legacy_authentication_block"), "conditional_access"),
+    ("ca.enforcement_unverified", ("effective_mfa", "administrator_mfa", "legacy_authentication_block"), "conditional_access"),
     ("consent_policy.user_consent_unrestricted", ("user_consent",), "consent_policy"),
+    ("consent_policy.user_consent_limited", ("user_consent",), "consent_policy"),
     ("consent_policy.user_consent_unverified", ("user_consent",), "consent_policy"),
 ]
-_KNOWN_VERDICT = {"effective_mfa": "enforced", "legacy_authentication_block": "blocked", "user_consent": "restricted"}
+_KNOWN_VERDICT = {
+    "effective_mfa": "enforced",
+    "administrator_mfa": "enforced",
+    "legacy_authentication_block": "blocked",
+    "user_consent": "restricted",
+}
 
 
 def _verdict_snapshot(**verdicts: str) -> dict[str, Any]:
@@ -448,7 +481,12 @@ def test_a_verdict_rule_is_evaluated_when_every_verdict_it_reads_is_known(rule, 
 
 @pytest.mark.parametrize(("rule", "controls", "collector"), _VERDICT_RULES)
 def test_a_verdict_rule_is_evaluated_for_a_negative_verdict_too(rule, controls, collector) -> None:
-    negative = {"effective_mfa": "not_enforced", "legacy_authentication_block": "not_blocked", "user_consent": "unrestricted"}
+    negative = {
+        "effective_mfa": "not_enforced",
+        "administrator_mfa": "not_enforced",
+        "legacy_authentication_block": "not_blocked",
+        "user_consent": "unrestricted",
+    }
     snapshot = _verdict_snapshot(**{control: negative[control] for control in controls})
 
     assert _rule(_alignment(rule, ledger=_ledger(collector), snapshot=snapshot), rule)["evaluated"] is True
@@ -540,7 +578,14 @@ def test_verdict_rule_controls_match_the_rules_the_findings_engine_raises() -> N
 
     for control, spec in _UNVERIFIED_CONTROL_RULES.items():
         assert control in baselines._RULE_VERDICT_CONTROLS[spec["rule_id"]], control
-    negative_rules = {"ca.mfa_not_enforced", "ca.legacy_auth_not_blocked", "consent_policy.user_consent_unrestricted"}
+    negative_rules = {
+        "ca.mfa_not_enforced",
+        "ca.admin_mfa_not_enforced",
+        "ca.admin_phishing_resistant_mfa_not_enforced",
+        "ca.legacy_auth_not_blocked",
+        "consent_policy.user_consent_unrestricted",
+        "consent_policy.user_consent_limited",
+    }
     assert set(baselines._RULE_VERDICT_CONTROLS) == negative_rules | {spec["rule_id"] for spec in _UNVERIFIED_CONTROL_RULES.values()}
 
 

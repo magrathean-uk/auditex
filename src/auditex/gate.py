@@ -6,10 +6,17 @@ continue, so a missing, empty, unreadable or invalid input must never read as
 
 * a readable ``run-manifest.json``;
 * a contract that is valid as recorded *and* when its structural validation is recomputed
-  now (this does not prove the bundle is unmodified);
-* a readable findings list that agrees with the report pack;
+  now;
+* a hash manifest (``bundle-hashes.json``) that still matches every artifact, so a bundle edited
+  after finalization is blocked. The manifest is unsigned: it stops accidental and naive edits, not
+  someone who can rewrite the bundle and re-hash it, and it is not a statement about who wrote the run;
+* a readable findings list that agrees with the report pack on every finding's id, status, severity
+  and rule;
 * collectors that completed (``--allow-partial`` accepts known gaps, but a run
   with no completed collector is never accepted).
+
+A finding counts as accepted (or closed) only when a matching waiver stands behind that status; the
+engine never writes one without it, so a bare ``accepted_risk`` or ``closed`` counts as open.
 
 Anything else returns ``status: "blocked"`` with a machine-readable ``code``
 and a human ``reason``. The CLI turns a blocked or failed result into a
@@ -23,7 +30,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.waivers import accepted_risk_summary, is_accepted_status
+from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_SCHEMA_VERSION, integrity_failed
+from azure_tenant_audit.rule_parameters import changed_rule_parameters, recorded_rule_parameters
+from azure_tenant_audit.waivers import accepted_risk_summary, has_matching_waiver, is_accepted_status
 
 from .compare import NormalizedSections, reassessment_gap, require_same_tenant_runs
 from .run_bundle import RunBundle
@@ -67,14 +76,44 @@ def _severity(row: Mapping[str, Any]) -> str:
     return str(row.get("severity") or "medium").lower()
 
 
-def _status_class(row: Mapping[str, Any]) -> str:
-    """``accepted``, ``closed`` or ``open``. Anything unrecognised stays open (fail closed)."""
+def _claimed_class(row: Mapping[str, Any]) -> str:
+    """The class a finding's status claims: ``accepted``, ``closed`` or ``open`` (anything unrecognised)."""
     status = str(row.get("status") or "open").strip().lower()
     if is_accepted_status(status):
         return "accepted"
     if status in _CLOSED_STATUSES:
         return "closed"
     return "open"
+
+
+def _status_class(row: Mapping[str, Any]) -> str:
+    """``accepted``, ``closed`` or ``open``. Anything unrecognised stays open (fail closed).
+
+    An accepted or closed status counts only when a matching waiver stands behind it. The engine writes
+    ``accepted_risk`` only together with the waiver it matched and never writes ``closed`` or ``resolved``,
+    so a status without a waiver is an edit and the finding stays open.
+    """
+    claimed = _claimed_class(row)
+    if claimed != "open" and not has_matching_waiver(row):
+        return "open"
+    return claimed
+
+
+def _unbacked_status_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Findings that claim an accepted or closed status with no matching waiver (counted as open)."""
+    return [row for row in rows if _claimed_class(row) != "open" and _status_class(row) == "open"]
+
+
+def _unbacked_status_warning(label: str, rows: list[dict[str, Any]]) -> str | None:
+    unbacked = _unbacked_status_rows(rows)
+    if not unbacked:
+        return None
+    ids = ", ".join(str(row.get("id")) for row in unbacked[:5])
+    more = f" and {len(unbacked) - 5} more" if len(unbacked) > 5 else ""
+    return (
+        f"{label}: {len(unbacked)} finding(s) claim an accepted or closed status without a matching waiver "
+        f"and are counted as open ({ids}{more})"
+    )
 
 
 def _brief(row: Mapping[str, Any], **extra: Any) -> dict[str, Any]:
@@ -174,8 +213,71 @@ def _verify_contract(bundle: RunBundle, label: str) -> dict[str, Any]:
     return summary
 
 
+def _verify_integrity(bundle: RunBundle, label: str) -> tuple[dict[str, Any], list[str]]:
+    """Require the hash manifest to match every artifact; return its summary and any warnings.
+
+    ``mismatch`` and ``invalid`` block. ``absent`` blocks for a bundle finalized under the contract that
+    writes the manifest (a bundle that lost it, or never listed it, is not trustworthy) and is a warning
+    for an older bundle that predates it. Files added after finalization are listed as a warning. The
+    manifest is unsigned: this stops accidental and naive edits, not a deliberate re-hash.
+    """
+    integrity = bundle.integrity()
+    status = str(integrity.get("status"))
+    summary = {
+        "status": status,
+        "checked_count": integrity.get("checked_count", 0),
+        "unlisted_count": integrity.get("unlisted_count", 0),
+        "manifest_sha256": integrity.get("manifest_sha256"),
+    }
+    if integrity_failed(integrity):
+        problem = integrity.get("message") or (
+            f"{integrity.get('modified_count', 0)} modified and {integrity.get('missing_count', 0)} missing "
+            "artifact(s) since finalization"
+        )
+        raise GateInputError(
+            f"bundle_integrity_{status}",
+            f"{label} does not match its hash manifest ({problem})",
+            integrity={
+                **summary,
+                "modified": [row.get("path") for row in integrity.get("modified") or []][:_ISSUE_CODE_LIMIT],
+                "missing": list(integrity.get("missing") or [])[:_ISSUE_CODE_LIMIT],
+            },
+        )
+    warnings: list[str] = []
+    if status == "absent":
+        version = bundle.manifest().get("schema_contract_version")
+        if isinstance(version, str) and version >= BUNDLE_HASHES_SCHEMA_VERSION:
+            raise GateInputError(
+                "bundle_integrity_absent",
+                f"{label} was finalized under contract {version} but has no bundle-hashes.json",
+                integrity=summary,
+            )
+        warnings.append(f"{label} predates the hash manifest, so its artifacts could not be checked for edits")
+    if summary["unlisted_count"]:
+        warnings.append(
+            f"{label} holds {summary['unlisted_count']} file(s) added after finalization that the hash manifest does not list"
+        )
+    return summary, warnings
+
+
 def _finding_ids(rows: list[dict[str, Any]]) -> set[str]:
     return {str(row.get("id")) for row in rows}
+
+
+# What the findings file and the report pack must agree on for a finding: the gate counts the pack's rows.
+_FINDING_COMPARED_FIELDS = ("status", "severity", "rule_id")
+
+
+def _disagreeing_findings(file_rows: list[dict[str, Any]], pack_rows: list[dict[str, Any]]) -> list[str]:
+    by_id = {str(row.get("id")): row for row in pack_rows}
+    differing: list[str] = []
+    for row in file_rows:
+        other = by_id.get(str(row.get("id")))
+        if other is None:
+            continue
+        if any(str(row.get(field) or "").strip().lower() != str(other.get(field) or "").strip().lower() for field in _FINDING_COMPARED_FIELDS):
+            differing.append(str(row.get("id")))
+    return sorted(differing)
 
 
 def _verify_findings(bundle: RunBundle, label: str) -> list[dict[str, Any]]:
@@ -237,6 +339,14 @@ def _verify_findings(bundle: RunBundle, label: str) -> list[dict[str, Any]]:
             f"{label} {relative} ({len(file_rows)} findings) disagrees with the manifest or the report pack "
             f"({len(pack_rows)} findings)",
         )
+    differing = _disagreeing_findings(file_rows, pack_rows)
+    if differing:
+        raise GateInputError(
+            "findings_inconsistent",
+            f"{label} {relative} and the report pack disagree on the status, severity or rule of "
+            f"{len(differing)} finding(s): {', '.join(differing[:5])}",
+            disagreeing_findings=differing[:_ISSUE_CODE_LIMIT],
+        )
     return bundle.finding_rows()
 
 
@@ -288,22 +398,30 @@ def _require_coverage(coverage: dict[str, Any], label: str, *, allow_partial: bo
 
 def _verified_run(
     run_dir: str | Path, label: str, *, bundle: RunBundle | None = None
-) -> tuple[RunBundle, dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
-    """Contract, findings and coverage for one run, raising ``GateInputError`` on the first problem."""
+) -> tuple[RunBundle, dict[str, Any], list[dict[str, Any]], dict[str, Any], list[str]]:
+    """Contract, hash manifest, findings and coverage for one run, raising ``GateInputError`` on the first problem.
+
+    The contract carries the recomputed validation and, under ``integrity``, the hash manifest check. The
+    last element is the warnings the checks accept (a legacy bundle without a manifest, files added later).
+    """
     bundle = bundle or _open_run(run_dir, label)
     contract = _verify_contract(bundle, label)
+    integrity, warnings = _verify_integrity(bundle, label)
     rows = _verify_findings(bundle, label)
-    return bundle, contract, rows, _assess_coverage(bundle)
+    return bundle, {**contract, "integrity": integrity}, rows, _assess_coverage(bundle), warnings
 
 
 def gate_findings(*, run_dir: str, fail_on: str, allow_partial: bool = False) -> dict[str, object]:
     threshold, threshold_rank = _threshold(fail_on)
     context = {"fail_on": threshold, "run_dir": str(run_dir)}
     try:
-        _, contract, rows, coverage = _verified_run(run_dir, "run")
-        warnings = _require_coverage(coverage, "run", allow_partial=allow_partial)
+        bundle, contract, rows, coverage, run_warnings = _verified_run(run_dir, "run")
+        warnings = [*run_warnings, *_require_coverage(coverage, "run", allow_partial=allow_partial)]
     except GateInputError as error:
         return _blocked(error, **context)
+    status_warning = _unbacked_status_warning("run", rows)
+    if status_warning:
+        warnings.append(status_warning)
 
     counts_by_severity = {key: 0 for key in SEVERITY_RANKS}
     accepted_by_severity = {key: 0 for key in SEVERITY_RANKS}
@@ -345,8 +463,11 @@ def gate_findings(*, run_dir: str, fail_on: str, allow_partial: bool = False) ->
         "accepted_by_severity": accepted_by_severity,
         "stale_accepted_risk_count_at_or_above_threshold": len(stale_accepted),
         "closed_count": closed_count,
+        "unbacked_status_count": len(_unbacked_status_rows(rows)),
         "accepted_risk_summary": accepted_summary,
         "contract": contract,
+        # The windows the run's rules were judged with, so a later run with a laxer one is visible.
+        "rule_parameters": recorded_rule_parameters(bundle.manifest()),
         "coverage": coverage,
         "warnings": warnings,
     }
@@ -376,13 +497,21 @@ def gate_drift(
     except ValueError as exc:
         return {"pass": False, "status": "blocked", "code": "tenant_guard", "reason": str(exc)}
     try:
-        _, baseline_contract, baseline_rows, baseline_coverage = _verified_run(
+        _, baseline_contract, baseline_rows, baseline_coverage, baseline_warnings = _verified_run(
             baseline_run_dir, "baseline run", bundle=baseline_bundle
         )
-        _, current_contract, current_rows, current_coverage = _verified_run(
+        _, current_contract, current_rows, current_coverage, current_warnings = _verified_run(
             current_run_dir, "current run", bundle=current_bundle
         )
-        warnings = _require_coverage(current_coverage, "current run", allow_partial=allow_partial)
+        warnings = [
+            *baseline_warnings,
+            *current_warnings,
+            *_require_coverage(current_coverage, "current run", allow_partial=allow_partial),
+        ]
+        for label, rows in (("baseline run", baseline_rows), ("current run", current_rows)):
+            status_warning = _unbacked_status_warning(label, rows)
+            if status_warning:
+                warnings.append(status_warning)
         baseline_done = set(baseline_coverage["completed_collectors"])
         current_done = set(current_coverage["completed_collectors"])
         parity = {
@@ -404,6 +533,16 @@ def gate_drift(
 
     current_collectors = current_bundle.collector_coverage()
     current_sections = NormalizedSections(current_bundle)
+    # The windows each run's rules were judged with. A vanished finding is only resolved when the later
+    # run used the same or a stricter window; a laxer window (or one nobody recorded) hides the same object.
+    parameters = (recorded_rule_parameters(baseline_bundle.manifest()), recorded_rule_parameters(current_bundle.manifest()))
+    parameter_changes = changed_rule_parameters(*parameters)
+    if parameter_changes:
+        warnings.append(
+            "rule parameters differ between the runs ("
+            + ", ".join(f"{row['parameter']} {row['baseline']} -> {row['current']}" for row in parameter_changes)
+            + "); findings that vanished under a larger window are not resolved"
+        )
     baseline_index = _index(baseline_rows)
     current_index = _index(current_rows)
 
@@ -414,7 +553,7 @@ def gate_drift(
     for key in baseline_index:
         if key in current_index:
             continue
-        reason = reassessment_gap(baseline_index[key], current_collectors, current_sections)
+        reason = reassessment_gap(baseline_index[key], current_collectors, current_sections, parameters=parameters)
         if reason is None:
             resolved_keys.append(key)
         else:
@@ -448,7 +587,7 @@ def gate_drift(
                     "to_status": to_status,
                 }
             )
-        if is_accepted_status(from_status) and not is_accepted_status(to_status):
+        if _status_class(baseline_row) == "accepted" and _status_class(current_row) != "accepted":
             if SEVERITY_RANKS.get(_severity(current_row), 0) >= threshold_rank:
                 reactivated_above_threshold.append(
                     {
@@ -481,6 +620,11 @@ def gate_drift(
         "compare_context": tenant_context,
         "contract": {"baseline": baseline_contract, "current": current_contract},
         "coverage": {"baseline": baseline_coverage, "current": current_coverage},
+        "rule_parameters": {
+            "baseline": parameters[0],
+            "current": parameters[1],
+            "changed": parameter_changes,
+        },
         "collector_parity": parity,
         "new": [{"id": key, **_summary_fields(current_index[key])} for key in new_keys],
         "resolved": [{"id": key, **_summary_fields(baseline_index[key])} for key in resolved_keys],

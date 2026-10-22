@@ -166,6 +166,17 @@ def jailbreak_state(device: Mapping[str, Any]) -> str:
     return STATE_JAILBROKEN if value else STATE_CLEAN
 
 
+# Compliance states Intune has decided. ``unknown``, ``inGracePeriod`` (not compliant, but access is still granted),
+# ``configManager`` (decided outside Intune) and a missing value say nothing about whether the device is compliant.
+COMPLIANCE_DECIDED_STATES = frozenset({"compliant", "noncompliant", "error", "conflict"})
+COMPLIANCE_IN_GRACE_PERIOD = "ingraceperiod"
+
+
+def compliance_state(device: Mapping[str, Any]) -> str:
+    """The device's Intune compliance state, lower-case; empty when the payload carries none."""
+    return str(device.get("compliance_state") or "").strip().lower()
+
+
 def sync_state(device: Mapping[str, Any], days: int, now: datetime) -> str:
     last = parse_timestamp(device.get("last_sync_at"))
     if last is None:
@@ -196,6 +207,8 @@ def device_posture_summary(
     jailbreak = Counter(jailbreak_state(device) for device in devices)
     platforms = Counter(str(_family(device) or "other") for device in devices)
     sync_unknown = sum(1 for device in devices if parse_timestamp(device.get("last_sync_at")) is None)
+    compliance_unknown = sum(1 for device in devices if compliance_state(device) not in COMPLIANCE_DECIDED_STATES)
+    in_grace_period = sum(1 for device in devices if compliance_state(device) == COMPLIANCE_IN_GRACE_PERIOD)
     lifecycle_reasons: Counter[str] = Counter()
     edition_dependent = 0
     for device in devices:
@@ -217,6 +230,8 @@ def device_posture_summary(
         "jailbreak_unknown": jailbreak[STATE_UNKNOWN],
         "jailbreak_not_applicable": jailbreak[STATE_NOT_APPLICABLE],
         "last_sync_unknown": sync_unknown,
+        "compliance_unknown": compliance_unknown,
+        "compliance_in_grace_period": in_grace_period,
         "os_lifecycle_unknown": sum(lifecycle_reasons.values()),
         "os_lifecycle_unknown_reasons": [{"reason": name, "count": lifecycle_reasons[name]} for name in sorted(lifecycle_reasons)],
         "os_lifecycle_edition_dependent": edition_dependent,

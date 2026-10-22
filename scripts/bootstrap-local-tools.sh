@@ -172,7 +172,7 @@ ensure_exchange_online_module() {
     return 0
   fi
   echo "Plan: pwsh Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber"
-  pwsh -NoLogo -NoProfile -Command "Set-PSRepository PSGallery -InstallationPolicy Trusted; Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber"
+  pwsh -NoLogo -NoProfile -Command "Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber"
 }
 
 while [[ $# -gt 0 ]]; do

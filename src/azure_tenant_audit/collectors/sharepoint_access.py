@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ..collection_gaps import FANOUT_OBJECT_LIMIT, fanout_gap_row
+from ..collection_gaps import FANOUT_OBJECT_LIMIT, fanout_gap_row, section_total
 from ..graph import GraphClient, GraphError
 from ..normalize import _iter_permission_targets
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
@@ -275,10 +275,11 @@ class SharePointAccessCollector(Collector):
                         }
                     )
 
-        if len(site_rows) > FANOUT_OBJECT_LIMIT:
+        site_total = section_total(payload.get("sites"), site_rows)
+        if site_total > FANOUT_OBJECT_LIMIT:
             # Orphaned and weak-ownership findings read these permissions, so the rest of the sites are a gap.
             coverage.append(
-                fanout_gap_row(self.name, "sitePermissionsFanout", total=len(site_rows), expanded=FANOUT_OBJECT_LIMIT, scope="Site permissions")
+                fanout_gap_row(self.name, "sitePermissionsFanout", total=site_total, expanded=FANOUT_OBJECT_LIMIT, scope="Site permissions")
             )
         payload["sitePermissionsBySite"] = {"value": sampled_permissions}
         total = sum(item.get("item_count", 0) for item in coverage)

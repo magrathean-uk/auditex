@@ -17,6 +17,7 @@ from ..dns_lookup import (
     DohError,
     DnsResolver,
     collect_domain_posture,
+    unknown_posture,
 )
 from ..exposure_lookup import (
     HttpsFetcher,
@@ -126,6 +127,12 @@ class DnsPostureCollector(Collector):
                 status = "ok"
                 error_class: str | None = None
                 error: str | None = None
+                if posture.get("resolver_error"):
+                    # collect_domain_posture reports a resolver that did not answer on the record; the coverage row says
+                    # so too, which makes the collector partial and raises a diagnostic with the resolver error.
+                    status = "failed"
+                    error_class = "dns_resolver_error"
+                    error = str(posture["resolver_error"])
             except DohError as exc:
                 attempted_selectors = list(dkim_selectors) + [
                     s for s in dkim_fallback_selectors if s not in dkim_selectors
@@ -134,12 +141,7 @@ class DnsPostureCollector(Collector):
                     "domain": domain_name,
                     "managed_by_microsoft": domain_name.lower().endswith(".onmicrosoft.com"),
                     "resolver_error": str(exc),
-                    "spf": {"present": False},
-                    "dmarc": {"present": False},
-                    "dkim": {"selectors_present": [], "selectors_missing": attempted_selectors},
-                    "mta_sts": {"dns_present": False},
-                    "tls_rpt": {"present": False},
-                    "bimi": {"present": False},
+                    **unknown_posture(attempted_selectors),
                 }
                 status = "failed"
                 error_class = "dns_resolver_error"

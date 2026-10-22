@@ -28,8 +28,11 @@ SENSITIVE_KEY_RE = re.compile(
 
 BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+# ``key=value``, ``key: value`` and the JSON forms ``"key": "value"`` / ``'key':'value'``: the closing quote of the
+# key and a quoted value (which may hold spaces) are part of the match, so a JSON-keyed secret is not left behind.
 INLINE_SECRET_RE = re.compile(
-    r"(?P<prefix>(?:access[_-]?token|client[_-]?secret|secret|password|authorization)\s*[=:]\s*)(?P<value>[^\s,;]+)",
+    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key)"
+    r"[\"']?\s*[=:]\s*)(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
     re.IGNORECASE,
 )
 

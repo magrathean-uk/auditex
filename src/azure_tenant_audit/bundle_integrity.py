@@ -5,13 +5,20 @@ and customer-pack creation recompute the hashes and compare them, so a bundle ed
 finalized is reported (and a customer pack is refused) instead of being passed on as it was.
 
 The manifest lists every file under the run directory except itself, the append-only logs (they
-grow after finalization by design) and SQLite sidecar files. Files added later, such as an
-explorer page written into ``reports/``, are reported as ``unlisted`` and do not fail the check.
+grow after finalization by design) and SQLite sidecar files. Files added later are reported as
+``unlisted``. Two kinds of added file fail the check, because consumers (handoff, the customer pack,
+the gates, the explorer) would read them as if the run had produced them:
+
+* a symbolic link anywhere in the run, which is neither hashed nor followed; and
+* an unlisted file at a path consumers read (the run root, ``normalized/``, ``findings/``,
+  ``blockers/``, ``reports/``, ``ai_safe/``), unless it is a named post-finalization output such as the
+  explorer page or a rendered report.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -26,6 +33,24 @@ _APPEND_ONLY_LOGS = frozenset({"audit-log.jsonl", "audit-command-log.jsonl", "au
 _SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 _IGNORED_NAMES = frozenset({".DS_Store"})
 _LIST_LIMIT = 100
+
+# Outputs the tooling writes into a finalized run on request. They are not evidence, and nothing reads them back.
+_POST_FINALIZATION_OUTPUT = re.compile(
+    r"^reports/(?:explorer\.html"
+    r"|rendered-report\.(?:json|md|csv|html|sarif\.json|oscal\.json)"
+    r"|(?:api-calls|permissions|proof-table|handoff)\.(?:json|md))$"
+)
+# Directories whose files consumers open by name. A file at the root counts too.
+_CONSUMED_DIRECTORIES = ("normalized/", "findings/", "blockers/", "reports/", "ai_safe/")
+
+
+def is_post_finalization_output(relative: str) -> bool:
+    """Whether ``relative`` is a named output written into a run after it was finalized."""
+    return bool(_POST_FINALIZATION_OUTPUT.match(relative))
+
+
+def _read_by_consumers(relative: str) -> bool:
+    return "/" not in relative or relative.startswith(_CONSUMED_DIRECTORIES)
 
 
 def _excluded_reason(relative: str) -> str | None:
@@ -63,6 +88,19 @@ def _bundle_files(run_dir: Path) -> list[str]:
     return sorted(found)
 
 
+def _bundle_symlinks(run_dir: Path) -> list[str]:
+    """Relative POSIX paths of every symbolic link below ``run_dir`` (to files or directories), found by lstat."""
+    found: list[str] = []
+    for current, directories, names in os.walk(str(run_dir), followlinks=False):
+        directories.sort()
+        for name in sorted([*directories, *names]):
+            path = Path(current) / name
+            if name in _IGNORED_NAMES or not path.is_symlink():
+                continue
+            found.append(path.relative_to(run_dir).as_posix())
+    return sorted(found)
+
+
 def build_bundle_hash_manifest(
     run_dir: str | Path, *, run_id: str | None = None, created_utc: str | None = None
 ) -> dict[str, Any]:
@@ -93,10 +131,13 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
     """Recompute the hashes of ``run_dir`` and compare them with ``bundle-hashes.json``.
 
     ``status`` is ``verified`` (every listed file matches), ``mismatch`` (a listed file changed
-    or is gone), ``invalid`` (the manifest cannot be read as a hash manifest, or
-    ``run-manifest.json`` lists it and it is gone) or ``absent`` (a bundle finalized before the
-    manifest existed). Only ``mismatch`` and ``invalid`` say the bundle cannot be trusted as
-    written; ``absent`` says it cannot be checked.
+    or is gone, a symbolic link sits in the run, or an unlisted file sits at a path consumers read),
+    ``invalid`` (the manifest cannot be read as a hash manifest, or ``run-manifest.json`` lists it
+    and it is gone) or ``absent`` (a bundle finalized before the manifest existed). Only
+    ``mismatch`` and ``invalid`` say the bundle cannot be trusted as written; ``absent`` says it
+    cannot be checked. ``symlinks`` names every link, ``unexpected`` the unlisted files that fail
+    the check, and ``unlisted`` every file the manifest does not name (including named
+    post-finalization outputs such as the explorer page).
     """
     root = Path(run_dir)
     manifest_path = root / BUNDLE_HASHES_PATH
@@ -108,10 +149,17 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
         "modified": [],
         "missing": [],
         "unlisted": [],
+        "symlinks": [],
+        "unexpected": [],
         "modified_count": 0,
         "missing_count": 0,
         "unlisted_count": 0,
+        "symlink_count": 0,
+        "unexpected_count": 0,
     }
+    symlinks = _bundle_symlinks(root)
+    result["symlinks"] = symlinks[:_LIST_LIMIT]
+    result["symlink_count"] = len(symlinks)
     if not manifest_path.is_file():
         if _run_manifest_lists_hashes(root):
             # Finalization registers the manifest in run-manifest.json before it writes it, so a
@@ -122,6 +170,9 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
             )
             return result
         result["message"] = "No bundle hash manifest; this bundle was finalized before one was written."
+        if symlinks:
+            # A link needs no manifest to be wrong: consumers would follow it out of the run.
+            result.update(status="mismatch", message="The run contains symbolic links, which are never followed or trusted.")
         return result
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -164,16 +215,21 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
         for relative in _bundle_files(root)
         if relative not in listed and _excluded_reason(relative) is None
     ]
+    unexpected = [
+        relative for relative in unlisted if _read_by_consumers(relative) and not is_post_finalization_output(relative)
+    ]
     result.update(
         {
-            "status": "mismatch" if modified or missing else "verified",
+            "status": "mismatch" if modified or missing or symlinks or unexpected else "verified",
             "checked_count": len(rows),
             "modified": modified[:_LIST_LIMIT],
             "missing": missing[:_LIST_LIMIT],
             "unlisted": unlisted[:_LIST_LIMIT],
+            "unexpected": unexpected[:_LIST_LIMIT],
             "modified_count": len(modified),
             "missing_count": len(missing),
             "unlisted_count": len(unlisted),
+            "unexpected_count": len(unexpected),
             "manifest_sha256": file_sha256(manifest_path),
         }
     )

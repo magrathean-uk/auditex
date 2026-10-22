@@ -39,7 +39,9 @@ Commands are classified from the command words each adapter recorded, using the 
 
 `observation_basis` says what the safety flags rest on. Microsoft 365 bundles say `transport_audit_log`. Google Workspace bundles say `coverage_ledger_only`: the Google API client is not instrumented, so for those the flags rest on the collectors' declared rows and the read-only scopes. A run with no Graph traffic (offline, sample) records zero requests, which is an observed fact for the Microsoft 365 transport.
 
-Token requests to the OAuth endpoint are counted under `auth`, not under `graph`. Collectors that start local tools outside the adapters (the `probe` toolchain checks, `dns_posture` lookups) are not in this ledger.
+Endpoint templates replace only identifiers with `{id}` (a GUID, a segment with `@`, an all-digit segment, or an opaque identifier of 24 or more characters that contains a digit or `_`, `=` or `-`); a long letters-only segment such as `deviceCompliancePolicies` is a resource name and stays, so an undeclared sibling endpoint is listed under `outside_declared`. The declared command set includes every spelling in a row's `command_variants`; the eDiscovery rows carry all the spellings the collector may try. `graph.redirects` lists the redirect hops `GraphClient` followed (host and path only; the usage-report functions answer 302 to a pre-authenticated download URL fetched without the bearer token) and `graph.redirects_refused` counts those it refused. Mailbox forwarding is read with `Get-EXOMailbox -ResultSize 501 -Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward -Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null'`, so the answer does not depend on tenant size.
+
+Token requests to the OAuth endpoint (for Graph and for another resource such as Exchange Online) are counted under `auth`, not under `graph`. Collectors that start local tools outside the adapters (the `probe` toolchain checks, `dns_posture` lookups) are not in this ledger.
 
 ## Removed command variants
 

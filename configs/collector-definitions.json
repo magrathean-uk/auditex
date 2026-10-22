@@ -513,7 +513,6 @@
           "name": "caseOverview",
           "category": "inventory",
           "commands": [
-            "m365 purview ediscoverycase list --output json",
             "m365 purview ediscovery case list --output json"
           ]
         },
@@ -521,8 +520,8 @@
           "name": "searchList",
           "category": "inventory",
           "commands": [
-            "m365 purview ediscoverysearch list --output json",
-            "m365 purview ediscovery search list --output json"
+            "m365 purview ediscovery search list --output json",
+            "m365 purview ediscovery case search list --output json"
           ]
         },
         {
@@ -695,7 +694,7 @@
           "name": "mailboxForwarding",
           "category": "policy",
           "commands": [
-            "Get-EXOMailbox -ResultSize 50 | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,DeliverToMailboxAndForward"
+            "Get-EXOMailbox -ResultSize 501 -Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward -Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null' | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward"
           ]
         },
         {

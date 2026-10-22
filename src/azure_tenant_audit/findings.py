@@ -219,6 +219,9 @@ def _category_for(error_class: str | None) -> str:
 def _severity_for(error_class: str | None, status: str | None) -> str:
     if error_class in _PERMISSION_CLASSES:
         return "high"
+    if error_class == "license_required":
+        # A licence the tenant does not hold limits the evidence; it is not a gap in the audit identity's access.
+        return "medium"
     if status == "failed":
         return "high"
     return "medium"
@@ -1463,6 +1466,13 @@ _UNVERIFIED_CONTROL_RULES: dict[str, dict[str, str]] = {
         "title": "MFA enforcement could not be verified",
         "affected": "Tenant MFA enforcement",
     },
+    "administrator_mfa": {
+        "rule_id": "ca.enforcement_unverified",
+        "id": "conditional_access:administrator_mfa:unverified",
+        "collector": "conditional_access",
+        "title": "Administrator MFA enforcement could not be verified",
+        "affected": "Administrator MFA enforcement",
+    },
     "legacy_authentication_block": {
         "rule_id": "ca.enforcement_unverified",
         "id": "conditional_access:legacy_authentication_block:unverified",
@@ -1480,10 +1490,25 @@ _UNVERIFIED_CONTROL_RULES: dict[str, dict[str, str]] = {
 }
 
 
+def _exclusion_rows(verdict: dict[str, Any], key: str = "unsanctioned_exclusions", *, limit: int = 10) -> list[dict[str, Any]]:
+    """The excluded principals a verdict lists as a gap, trimmed to what a reader needs."""
+    return [
+        {name: row[name] for name in ("type", "id", "display_name") if row.get(name)}
+        for row in (verdict.get(key) or [])[:limit]
+    ]
+
+
+def _exclusion_text(rows: list[dict[str, Any]], total: int) -> str:
+    names = [str(row.get("display_name") or f"{row['type']} {row['id']}") for row in rows[:5]]
+    return ", ".join(names) + (f" and {total - len(names)} more" if total > len(names) else "")
+
+
 def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     """Findings from the tenant-level identity control verdicts.
 
-    A negative verdict (``not_enforced``, ``not_blocked``, ``unrestricted``) raises its rule. An
+    A negative verdict (``not_enforced``, ``not_blocked``, ``unrestricted``) raises its rule, and so does one that
+    holds only with exclusions (``enforced_with_exclusions``, ``blocked_with_exclusions``) or only in part
+    (``limited`` user consent): the rule's control must not pass on a policy that leaves principals out. An
     ``unknown`` verdict never raises that rule and never passes: it raises the matching
     ``*_unverified`` rule so the gap is visible instead of silent.
     """
@@ -1494,65 +1519,218 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
         return _normalized_evidence_refs(_IDENTITY_CONTROL_SECTION, verdicts[control], collector)
 
     mfa = verdicts.get("effective_mfa")
-    if mfa and mfa.get("verdict") == "not_enforced":
+    if mfa and mfa.get("verdict") in {"not_enforced", "enforced_with_exclusions"}:
+        with_exclusions = mfa["verdict"] == "enforced_with_exclusions"
+        gap = _exclusion_rows(mfa)
+        metadata = _metadata_for("ca.mfa_not_enforced")
+        if with_exclusions:
+            metadata["description"] = (
+                "An enabled Conditional Access policy requires MFA of all users on all cloud apps, but every qualifying "
+                f"policy excludes {_exclusion_text(gap, int(mfa.get('unsanctioned_exclusion_count') or len(gap)))}, "
+                "which is not an emergency access account listed with --break-glass-accounts. Excluded roles, guest "
+                "types and groups are not required to use MFA, so the control is not met for them."
+            )
         findings.append(
             _finalize_finding(
                 {
                     "id": "conditional_access:mfa_not_enforced",
                     "rule_id": "ca.mfa_not_enforced",
-                    "severity": "high",
+                    "severity": "medium" if with_exclusions else "high",
                     "category": "identity",
-                    "title": "Neither security defaults nor Conditional Access enforce MFA for all users",
+                    "title": (
+                        "Conditional Access requires MFA of all users but excludes principals other than emergency access accounts"
+                        if with_exclusions
+                        else "Neither security defaults nor Conditional Access enforce MFA for all users"
+                    ),
                     "status": "open",
                     "collector": "conditional_access",
                     "affected_objects": ["Tenant MFA enforcement"],
                     "evidence": mfa,
                     "returned_value": {
-                        "verdict": "not_enforced",
+                        "verdict": mfa["verdict"],
                         "basis": mfa.get("basis") or [],
                         "basis_summary": mfa.get("basis_summary"),
                         "non_qualifying_policy_count": len(mfa.get("non_qualifying_mfa_policies") or []),
                         "report_only_policy_count": len(mfa.get("report_only_mfa_policies") or []),
+                        **({"unsanctioned_exclusions": gap} if with_exclusions else {}),
                     },
                     "evidence_refs": [
                         *_verdict_ref("effective_mfa", "conditional_access"),
-                        *_policy_refs(mfa, "non_qualifying_mfa_policies", "report_only_mfa_policies"),
+                        *_policy_refs(
+                            mfa,
+                            *(("qualifying_policies",) if with_exclusions else ()),
+                            "non_qualifying_mfa_policies",
+                            "report_only_mfa_policies",
+                        ),
                     ],
-                    **_metadata_for("ca.mfa_not_enforced"),
+                    **metadata,
+                }
+            )
+        )
+
+    admin_mfa = verdicts.get("administrator_mfa")
+    if admin_mfa and admin_mfa.get("verdict") in {"not_enforced", "enforced_with_exclusions"}:
+        with_exclusions = admin_mfa["verdict"] == "enforced_with_exclusions"
+        gap = _exclusion_rows(admin_mfa, "administrator_exclusions")
+        metadata = _metadata_for("ca.admin_mfa_not_enforced")
+        if with_exclusions:
+            metadata["description"] = (
+                "An enabled Conditional Access policy requires MFA of administrators, but every qualifying policy excludes "
+                f"{_exclusion_text(gap, len(admin_mfa.get('administrator_exclusions') or gap))}, which may include "
+                "administrators and is not an emergency access account listed with --break-glass-accounts."
+            )
+        elif gap:
+            metadata["description"] = (
+                "Every Conditional Access policy that requires MFA of administrators excludes an administrator role or "
+                f"administrator ({_exclusion_text(gap, len(admin_mfa.get('administrator_exclusions') or gap))}), so those "
+                "administrators are not required to use MFA, and security defaults are off."
+            )
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "conditional_access:administrator_mfa_not_enforced",
+                    "rule_id": "ca.admin_mfa_not_enforced",
+                    "severity": "medium" if with_exclusions else "high",
+                    "category": "identity",
+                    "title": (
+                        "Administrator MFA is enforced with exclusions"
+                        if with_exclusions
+                        else "MFA is not required of every administrator"
+                    ),
+                    "status": "open",
+                    "collector": "conditional_access",
+                    "affected_objects": ["Administrator MFA enforcement"],
+                    "evidence": admin_mfa,
+                    "returned_value": {
+                        "verdict": admin_mfa["verdict"],
+                        "basis": admin_mfa.get("basis") or [],
+                        "basis_summary": admin_mfa.get("basis_summary"),
+                        "administrator_set": admin_mfa.get("administrator_set"),
+                        "non_qualifying_policy_count": len(admin_mfa.get("non_qualifying_mfa_policies") or []),
+                        "report_only_policy_count": len(admin_mfa.get("report_only_mfa_policies") or []),
+                        **({"administrator_exclusions": gap} if gap else {}),
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("administrator_mfa", "conditional_access"),
+                        *_policy_refs(admin_mfa, "qualifying_policies", "non_qualifying_mfa_policies", "report_only_mfa_policies"),
+                    ],
+                    **metadata,
+                }
+            )
+        )
+    if (
+        admin_mfa
+        and admin_mfa.get("verdict") in {"enforced", "enforced_with_exclusions"}
+        and admin_mfa.get("phishing_resistant_verdict") in {"not_enforced", "enforced_with_exclusions"}
+    ):
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "conditional_access:administrator_phishing_resistant_mfa_not_enforced",
+                    "rule_id": "ca.admin_phishing_resistant_mfa_not_enforced",
+                    "severity": "low",
+                    "category": "identity",
+                    "title": "Administrators are not required to use phishing-resistant MFA",
+                    "status": "open",
+                    "collector": "conditional_access",
+                    "affected_objects": ["Administrator MFA enforcement"],
+                    "evidence": admin_mfa,
+                    "returned_value": {
+                        "verdict": admin_mfa["verdict"],
+                        "phishing_resistant_verdict": admin_mfa["phishing_resistant_verdict"],
+                        "basis": admin_mfa.get("basis") or [],
+                        "phishing_resistant_policy_ids": admin_mfa.get("phishing_resistant_policy_ids") or [],
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("administrator_mfa", "conditional_access"),
+                        *_policy_refs(admin_mfa, "qualifying_policies"),
+                    ],
+                    **_metadata_for("ca.admin_phishing_resistant_mfa_not_enforced"),
                 }
             )
         )
 
     legacy = verdicts.get("legacy_authentication_block")
-    if legacy and legacy.get("verdict") == "not_blocked":
+    if legacy and legacy.get("verdict") in {"not_blocked", "blocked_with_exclusions"}:
+        with_exclusions = legacy["verdict"] == "blocked_with_exclusions"
+        gap = _exclusion_rows(legacy)
+        metadata = _metadata_for("ca.legacy_auth_not_blocked")
+        if with_exclusions:
+            metadata["description"] = (
+                "An enabled Conditional Access policy blocks legacy authentication clients for all users on all cloud apps, "
+                f"but every qualifying policy excludes {_exclusion_text(gap, int(legacy.get('unsanctioned_exclusion_count') or len(gap)))}, "
+                "which is not an emergency access account listed with --break-glass-accounts. Legacy protocols cannot "
+                "perform MFA, so the excluded principals can still sign in with a password alone."
+            )
         findings.append(
             _finalize_finding(
                 {
                     "id": "conditional_access:legacy_auth_not_blocked",
                     "rule_id": "ca.legacy_auth_not_blocked",
-                    "severity": "high",
+                    "severity": "medium" if with_exclusions else "high",
                     "category": "identity",
-                    "title": "Legacy authentication is not blocked",
+                    "title": (
+                        "Legacy authentication is blocked, but the block policy excludes principals other than emergency access accounts"
+                        if with_exclusions
+                        else "Legacy authentication is not blocked"
+                    ),
                     "status": "open",
                     "collector": "conditional_access",
                     "affected_objects": ["Tenant legacy authentication"],
                     "evidence": legacy,
                     "returned_value": {
-                        "verdict": "not_blocked",
+                        "verdict": legacy["verdict"],
                         "basis_summary": legacy.get("basis_summary"),
                         "non_qualifying_policy_count": len(legacy.get("non_qualifying_block_policies") or []),
                         "report_only_policy_count": len(legacy.get("report_only_block_policies") or []),
+                        **({"unsanctioned_exclusions": gap} if with_exclusions else {}),
                     },
                     "evidence_refs": [
                         *_verdict_ref("legacy_authentication_block", "conditional_access"),
-                        *_policy_refs(legacy, "non_qualifying_block_policies", "report_only_block_policies"),
+                        *_policy_refs(
+                            legacy,
+                            *(("blocking_policies",) if with_exclusions else ()),
+                            "non_qualifying_block_policies",
+                            "report_only_block_policies",
+                        ),
                     ],
-                    **_metadata_for("ca.legacy_auth_not_blocked"),
+                    **metadata,
                 }
             )
         )
 
     consent = verdicts.get("user_consent")
+    if consent and consent.get("verdict") == "limited":
+        policy_objects = [
+            item
+            for item in ((normalized_snapshot.get("consent_policy_objects") or {}).get("records") or [])
+            if item.get("source_name") == "authorizationPolicy"
+        ]
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "consent_policy:user_consent_limited",
+                    "rule_id": "consent_policy.user_consent_limited",
+                    "severity": "medium",
+                    "category": "application",
+                    "title": "Users can consent to applications under a limited consent policy",
+                    "status": "open",
+                    "collector": "consent_policy",
+                    "affected_objects": ["Tenant user consent"],
+                    "evidence": consent,
+                    "returned_value": {
+                        "verdict": "limited",
+                        "consent_mode": consent.get("consent_mode"),
+                        "limited_policies": consent.get("limited_policies") or [],
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("user_consent", "consent_policy"),
+                        *(ref for item in policy_objects[:1] for ref in _normalized_evidence_refs("consent_policy_objects", item, "consent_policy")),
+                    ],
+                    **_metadata_for("consent_policy.user_consent_limited"),
+                }
+            )
+        )
     if consent and consent.get("verdict") == "unrestricted":
         policy_objects = [
             item
@@ -2383,6 +2561,7 @@ def _build_sharepoint_tenant_sharing_findings(normalized_snapshot: dict[str, Any
                     {
                         "cis_m365_v7": "New and existing guests, or less permissive",
                         "cisa_scuba": "Existing guests, or only people in the organisation",
+                        "cyber_essentials": "No anyone (anonymous) links; authenticated guests are not anonymous access",
                     },
                 ),
             }
@@ -2708,6 +2887,8 @@ def _build_update_management_findings(normalized_snapshot: dict[str, Any], *, no
         # An assigned update profile or a co-managed device means updates are managed some other way: not a gap.
         and not summary.get("profiles_assigned")
         and not summary.get("windows_comanaged_device_count")
+        # A refused or cut profile list (a beta read) is "not read", never "no profile".
+        and not summary.get("update_profiles_gap")
     ):
         findings.append(
             _finalize_finding(
@@ -3051,7 +3232,10 @@ def _normalized_findings(
 
     exchange_records = ((normalized_snapshot.get("exchange_policy_objects") or {}).get("records") or [])
     for item in exchange_records:
-        if item.get("source_name") != "mailboxForwarding" or not item.get("forwarding_smtp_address"):
+        # Forwarding to an external SMTP address and forwarding to a mail contact (ForwardingAddress) are both forwarding.
+        if item.get("source_name") != "mailboxForwarding" or not (
+            item.get("forwarding_smtp_address") or item.get("forwarding_address")
+        ):
             continue
         findings.append(
             _finalize_finding(
@@ -3065,6 +3249,9 @@ def _normalized_findings(
                 "collector": "exchange_policy",
                 "affected_objects": [item.get("display_name") or item.get("primary_smtp_address")],
                 "evidence": item,
+                "returned_value": {
+                    key: item.get(key) for key in ("forwarding_smtp_address", "forwarding_address") if item.get(key)
+                },
                 "evidence_refs": _normalized_evidence_refs("exchange_policy_objects", item, "exchange_policy"),
                 **_metadata_for("exchange.mailbox_forwarding_configured"),
             }
@@ -3213,6 +3400,10 @@ def _normalized_findings(
             continue
         domain = str(item.get("domain") or item.get("id") or "")
         if not domain:
+            continue
+        if item.get("resolver_error"):
+            # The resolver did not answer for this domain (SERVFAIL, REFUSED, timeout), so nothing it published is known:
+            # no record is called missing. Baseline alignment reads the rules not_assessed with reason resolver_error.
             continue
         evidence_refs = _normalized_evidence_refs("dns_posture_objects", item, "dns_posture")
         if not item.get("spf_present"):

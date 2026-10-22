@@ -422,7 +422,9 @@ def test_baselines_pass_a_complete_collection_and_not_assess_a_cut_one(collector
 
     def status(top: int | None) -> dict[str, Any]:
         ledger, _row = _ledger_and_status(collector, name, {"top": top})
-        alignment = build_baseline_alignment([], coverage_ledger=ledger, mappings=mappings)
+        # A user with sign-in data: the stale-account rule also needs the inputs it reads, not only its collector.
+        snapshot = {"users": {"records": [{"id": "u1", "enabled": True, "signin_data_available": True}]}}
+        alignment = build_baseline_alignment([], normalized_snapshot=snapshot, coverage_ledger=ledger, mappings=mappings)
         (control,) = alignment["frameworks"]["cis_m365_v7"]["controls"]
         (rule,) = control["rule_statuses"]
         return rule

@@ -187,7 +187,7 @@ def test_every_mapping_declares_its_confidence_and_no_orphan_confidence_exists()
     mapped = {(rule, requirement) for rule, requirements in _ce_mappings().items() for requirement in requirements}
     declared = {(rule, requirement) for rule, requirements in _CONFIDENCE.items() for requirement in requirements}
     assert mapped == declared
-    assert {value for requirements in _CONFIDENCE.values() for value in requirements.values()} <= {"full", "partial"}
+    assert {value for requirements in _CONFIDENCE.values() for value in requirements.values()} <= {"full", "partial", "supporting"}
 
 
 def test_a_requirement_the_tenant_can_judge_has_a_rule_behind_it() -> None:
@@ -208,9 +208,14 @@ def test_the_requested_rule_families_are_mapped() -> None:
     assert "ce.sc.saas_configuration" in mapped["consent_policy.user_consent_unrestricted"]
     assert "ce.sum.vulnerability_fixes_14_days" in mapped["intune.device_noncompliant"]
     assert mfa in mapped["google.admin_2sv_not_enforced"] and mfa in mapped["google.user_2sv_not_enrolled"]
-    # The enforcement verdict tests the named condition; a registration rule only shows capability.
-    assert _CONFIDENCE["ca.mfa_not_enforced"][mfa] == "full"
+    # Neither the enforcement verdict nor a registration rule tests the whole condition: the verdict reads security
+    # defaults and Conditional Access, never per-user MFA, and a registration rule only shows capability.
+    assert _CONFIDENCE["ca.mfa_not_enforced"][mfa] == "partial"
+    assert _CONFIDENCE["ca.admin_mfa_not_enforced"]["ce.uac.mfa_admin_accounts"] == "partial"
     assert _CONFIDENCE["identity.user_mfa_not_registered"][mfa] == "partial"
+    # A count of administrators or a compliance state is a signal the requirement does not set.
+    assert _CONFIDENCE["identity.global_admin_sprawl"]["ce.uac.special_access_privileges"] == "supporting"
+    assert _CONFIDENCE["intune.device_noncompliant"]["ce.sum.vulnerability_fixes_14_days"] == "supporting"
 
 
 def test_shipped_findings_carry_the_key_through_the_contract_and_the_rule_packs() -> None:
@@ -231,6 +236,12 @@ def test_the_confidence_table_never_leaks_into_a_finding() -> None:
 
 
 # ---- the baseline section ------------------------------------------------------------------------------
+
+
+def _every_microsoft_collector() -> set[str]:
+    """Every collector a Microsoft 365 rule reads (the Google collectors would make the run a Google bundle)."""
+    names = set(baselines._NAMESPACE_COLLECTORS.values()) | {c for cs in baselines._RULE_COLLECTORS.values() for c in cs}
+    return {name for name in names if not name.startswith("google_")}
 
 
 def _ledger(*collectors: str) -> list[dict[str, str]]:
@@ -265,19 +276,24 @@ def test_a_requirement_row_has_the_documented_shape() -> None:
     assert set(row) == {
         "control_id", "title", "theme", "requirement_status", "status", "citation", "evidence_limits",
         "rule_ids", "rule_statuses", "evidence", "open_finding_count", "finding_ids", "ce_plus_test",
+        "reason", "not_assessed_reasons",
     }
     assert row["requirement_status"] == "partial" and row["status"] == "not_assessed"
+    # No collector ran, so no rule was evaluated, and the row says why instead of showing an empty reason.
+    assert row["reason"] == "rules_not_evaluated"
+    assert any(reason.startswith("collector_not_complete:") for reason in row["not_assessed_reasons"])
     assert row["citation"] == _REQUIREMENTS["ce.uac.mfa_cloud_services"]["citation"]
     assert {"ca.mfa_not_enforced", "identity.user_mfa_not_registered", "identity.privileged_mfa_not_registered"} <= set(row["rule_ids"])
     assert set(row["evidence"]) == {
-        "rules_mapped", "rules_evaluated", "rules_passed", "rules_failed", "rules_accepted_risk", "rules_not_assessed", "open_findings",
+        "rules_mapped", "rules_evaluated", "rules_passed", "rules_failed", "rules_accepted_risk", "rules_not_assessed",
+        "rules_supporting", "open_findings",
     }
     assert row["evidence"]["rules_mapped"] == len(row["rule_ids"]) == len(row["rule_statuses"])
-    assert {status["confidence"] for status in row["rule_statuses"]} == {"full", "partial"}
+    assert {status["confidence"] for status in row["rule_statuses"]} == {"partial"}
 
 
 def test_no_manual_assessor_or_provider_requirement_ever_reads_pass() -> None:
-    every_collector = set(baselines._NAMESPACE_COLLECTORS.values()) | {c for cs in baselines._RULE_COLLECTORS.values() for c in cs}
+    every_collector = _every_microsoft_collector()
     alignment = build_baseline_alignment(
         [], normalized_snapshot=_CLEAN_IDENTITY_SNAPSHOT, coverage_ledger=_ledger(*sorted(every_collector))
     )
@@ -295,7 +311,7 @@ def test_no_manual_assessor_or_provider_requirement_ever_reads_pass() -> None:
 
 
 def test_a_partial_requirement_never_reads_pass_on_a_clean_fully_evaluated_run() -> None:
-    every_collector = set(baselines._NAMESPACE_COLLECTORS.values()) | {c for cs in baselines._RULE_COLLECTORS.values() for c in cs}
+    every_collector = _every_microsoft_collector()
     alignment = build_baseline_alignment(
         [], normalized_snapshot=_CLEAN_IDENTITY_SNAPSHOT, coverage_ledger=_ledger(*sorted(every_collector))
     )
@@ -426,10 +442,11 @@ def test_an_accepted_risk_keeps_its_status_on_a_partial_requirement() -> None:
     assert rows["ce.test.automated"]["status"] == rows["ce.test.partial"]["status"] == "accepted_risk"
 
 
-def test_a_partial_requirement_with_a_rule_not_evaluated_is_plain_not_assessed() -> None:
+def test_a_partial_requirement_with_a_rule_not_evaluated_says_so() -> None:
     rows = {row["control_id"]: row for row in _build({"rule.a": "not_assessed"})["controls"]}
 
-    assert rows["ce.test.partial"]["status"] == "not_assessed" and "reason" not in rows["ce.test.partial"]
+    assert rows["ce.test.partial"]["status"] == "not_assessed"
+    assert rows["ce.test.partial"]["reason"] == "rules_not_evaluated"
 
 
 def test_an_automated_requirement_with_no_rule_is_not_assessed_with_a_reason() -> None:
@@ -460,7 +477,7 @@ def test_the_report_pack_carries_the_section_without_sensitive_looking_keys() ->
 
 
 def test_the_markdown_report_lists_each_requirement_with_its_status_and_the_disclaimer() -> None:
-    every_collector = set(baselines._NAMESPACE_COLLECTORS.values()) | {c for cs in baselines._RULE_COLLECTORS.values() for c in cs}
+    every_collector = _every_microsoft_collector()
     alignment = build_baseline_alignment(
         [], normalized_snapshot=_CLEAN_IDENTITY_SNAPSHOT, coverage_ledger=_ledger(*sorted(every_collector))
     )

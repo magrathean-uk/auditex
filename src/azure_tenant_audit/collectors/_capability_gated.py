@@ -13,8 +13,9 @@ import time
 from io import StringIO
 from typing import Any, Callable, Iterable, Optional
 
+from ..collection_gaps import REASON_PAGINATION_NOT_FOLLOWED
 from ..graph import GraphError
-from .base import Collector, CollectorResult, _classify_graph_error
+from .base import Collector, CollectorResult, _classify_graph_error, record_truncation
 
 
 def _coverage_row(
@@ -83,12 +84,21 @@ def run_capability_gated_endpoints(
         status = "ok"
         error_class: str | None = None
         error: str | None = None
+        link_dropped = False
         try:
             if csv_rows and name in csv_rows:
                 rows = csv_rows[name](_parse_csv(client.get_content(endpoint)))
                 response = None
             else:
                 response = client.get_json(endpoint)
+                next_link = response.get("@odata.nextLink") if isinstance(response, dict) else None
+                if next_link and isinstance(response.get("value"), list):
+                    if hasattr(client, "iter_items"):
+                        # The shared paging path follows the rest of the list (and refuses a link off Graph).
+                        response = {"value": [*response["value"], *client.iter_items(next_link)]}
+                    else:
+                        # Without paging the rows after this page were not read: a gap, never a clean read.
+                        link_dropped = True
             if isinstance(response, dict):
                 values = response.get("value") if "value" in response else response
                 if isinstance(values, list):
@@ -105,18 +115,20 @@ def run_capability_gated_endpoints(
             error_class, error = _classify_graph_error(exc)
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
         payload[name] = {"value": rows}
-        coverage.append(
-            _coverage_row(
-                collector_name,
-                name,
-                endpoint,
-                status,
-                len(rows),
-                duration_ms,
-                error_class=error_class,
-                error=error,
-            )
+        row = _coverage_row(
+            collector_name,
+            name,
+            endpoint,
+            status,
+            len(rows),
+            duration_ms,
+            error_class=error_class,
+            error=error,
         )
+        if link_dropped:
+            record_truncation(row, list_name=name, rows=len(rows), limit=None, reason=REASON_PAGINATION_NOT_FOLLOWED)
+            payload[name].update({"collection_truncated": True, "truncation_reason": REASON_PAGINATION_NOT_FOLLOWED})
+        coverage.append(row)
         if log_event:
             log_event(
                 "collector.endpoint.finished",

@@ -481,6 +481,7 @@ def build_google_normalized_snapshot(
             "google_dns_posture.domainPosture",
             str(item.get("domain")),
             domain=item.get("domain"),
+            resolver_error=item.get("resolver_error"),
             spf=item.get("spf"),
             dmarc=item.get("dmarc"),
             dkim=item.get("dkim"),

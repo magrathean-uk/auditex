@@ -57,12 +57,12 @@ _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.gmail_vacation_external_reply": {"nist_800_53": ["SC-7"], "iso_27001": ["A.8.12"], "soc2": ["CC6.7"]},
     "google.gmail_external_send_as": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.gmail_external_delegate": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
-    "google.drive_anyone_with_link": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
-    "google.drive_public_discoverable": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.drive_anyone_with_link": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"], "cyber_essentials": ["ce.sc.user_authentication"]},
+    "google.drive_public_discoverable": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"], "cyber_essentials": ["ce.sc.user_authentication"]},
     "google.drive_domain_permission": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.drive_external_permission": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.shared_drive_external_members_allowed": {"nist_800_53": ["AC-2", "AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
-    "google.calendar_public_acl": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.calendar_public_acl": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"], "cyber_essentials": ["ce.sc.user_authentication"]},
     "google.calendar_external_acl": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.calendar_domain_acl": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.group_anyone_can_join": {"nist_800_53": ["AC-2", "AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
@@ -73,7 +73,7 @@ _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.group_anyone_can_post_unmoderated": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.group_domain_can_post": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.group_domain_can_post_unmoderated": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
-    "google.group_public_view": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
+    "google.group_public_view": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"], "cyber_essentials": ["ce.sc.user_authentication"]},
     "google.group_public_membership": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.group_domain_view": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
     "google.group_domain_membership": {"nist_800_53": ["AC-3"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
@@ -2166,6 +2166,9 @@ def build_google_findings(
             )
 
     for posture in _records(normalized_snapshot, "google_dns_posture"):
+        if posture.get("resolver_error"):
+            # The resolver did not answer for this domain, so no record is known to be missing.
+            continue
         spf = posture.get("spf") if isinstance(posture.get("spf"), dict) else {}
         dmarc = posture.get("dmarc") if isinstance(posture.get("dmarc"), dict) else {}
         dkim = posture.get("dkim") if isinstance(posture.get("dkim"), dict) else {}

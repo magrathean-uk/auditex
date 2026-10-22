@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from . import break_glass, endpoint_posture, exchange_protection
+from .collection_gaps import bounded_sample_gap
 from .cyber_essentials import CE_FRAMEWORK_KEY, build_cyber_essentials_section
 from .effective_admins import (
     SECTION as _ADMIN_SET_SECTION,
@@ -30,6 +31,7 @@ from .effective_admins import (
     SUMMARY_KIND as _ADMIN_SUMMARY_KIND,
 )
 from .identity_controls import (
+    CONTROL_ADMIN_MFA,
     CONTROL_EFFECTIVE_MFA,
     CONTROL_LEGACY_AUTH,
     CONTROL_USER_CONSENT,
@@ -37,7 +39,7 @@ from .identity_controls import (
 )
 from .external_sharing import FEDERATION_UNKNOWN, SETTING_RULES, setting_inputs_gap
 from .resources import resolve_resource_path
-from .waivers import is_accepted_status
+from .waivers import has_matching_waiver, is_accepted_status
 
 BASELINE_ALIGNMENT_SCHEMA_VERSION = "2026-10-20"
 BASELINE_FRAMEWORK_KEYS = ("cis_m365_v7", "cisa_scuba", "ms_secure_score", "ms_zero_trust", "mcsb", CE_FRAMEWORK_KEY)
@@ -52,7 +54,33 @@ _CONTROL_MAPPINGS_PATH = Path("configs/control-mappings.json")
 # new rule family ships; unknown namespaces report ``not_assessed`` unless a
 # finding fails. Rules that read evidence from a different collector than their
 # namespace suggests (detection signals, attack paths) are listed by id.
+# Google Workspace rules that reach a Cyber Essentials requirement, and the collector each reads. Google rules have no
+# namespace in ``_NAMESPACE_COLLECTORS`` (the Microsoft collector map), so each is listed by id.
+_GOOGLE_RULE_COLLECTORS = {
+    "google.admin_2sv_not_enforced": ("google_directory",),
+    "google.admin_2sv_not_enrolled": ("google_directory",),
+    "google.user_2sv_not_enforced": ("google_directory",),
+    "google.user_2sv_not_enrolled": ("google_directory",),
+    "google.org_2sv_policy_not_enforced": ("google_policies",),
+    "google.stale_user": ("google_directory",),
+    "google.never_logged_in_user": ("google_directory",),
+    "google.admin_stale_login": ("google_directory",),
+    "google.suspended_admin": ("google_directory",),
+    "google.super_admin_sprawl": ("google_directory",),
+    "google.chromeos_device_past_aue": ("google_devices",),
+    "google.drive_anyone_with_link": ("google_drive_posture",),
+    "google.drive_public_discoverable": ("google_drive_posture",),
+    "google.calendar_public_acl": ("google_calendar_posture",),
+    "google.group_public_view": ("google_groups_settings",),
+}
+# The coverage list each Google rule reads, so a clean result over a list that was cut short is not a pass.
+_GOOGLE_RULE_LISTS = {
+    "google_directory": "google_directory.users",
+    "google_devices": "google_devices.chromeosDevices",
+}
+GOOGLE_PLATFORM = "google_workspace"
 _RULE_COLLECTORS = {
+    **_GOOGLE_RULE_COLLECTORS,
     # Registration comes from auth_methods; who is a Global Administrator or holds an
     # administrator role comes from the identity collector's role assignments.
     "identity.global_admin_mfa_not_registered": ("auth_methods", "identity"),
@@ -115,9 +143,12 @@ _DETECTION_RULE_SIGNALS = {
 # both verdicts are known. Mirrors ``_UNVERIFIED_CONTROL_RULES`` in findings.py (a test keeps them in step).
 _RULE_VERDICT_CONTROLS = {
     "ca.mfa_not_enforced": (CONTROL_EFFECTIVE_MFA,),
+    "ca.admin_mfa_not_enforced": (CONTROL_ADMIN_MFA,),
+    "ca.admin_phishing_resistant_mfa_not_enforced": (CONTROL_ADMIN_MFA,),
     "ca.legacy_auth_not_blocked": (CONTROL_LEGACY_AUTH,),
-    "ca.enforcement_unverified": (CONTROL_EFFECTIVE_MFA, CONTROL_LEGACY_AUTH),
+    "ca.enforcement_unverified": (CONTROL_EFFECTIVE_MFA, CONTROL_ADMIN_MFA, CONTROL_LEGACY_AUTH),
     "consent_policy.user_consent_unrestricted": (CONTROL_USER_CONSENT,),
+    "consent_policy.user_consent_limited": (CONTROL_USER_CONSENT,),
     "consent_policy.user_consent_unverified": (CONTROL_USER_CONSENT,),
 }
 # Rules that read the effective administrator set (``normalized/effective_admin_set.json``). Each is
@@ -142,6 +173,18 @@ _ADMIN_SET_RULES = frozenset(
 )
 _ADMIN_LICENCE_RULE = "identity.admin_holds_productivity_licence"
 _STALE_GUEST_RULE = "identity.stale_guest"
+# Rules that read user sign-in activity, which needs Microsoft Entra ID P1 or P2 (``userSignInActivity``).
+_SIGNIN_ACTIVITY_RULES = frozenset(
+    {"identity.stale_enabled_account", "identity.privileged_stale_account", _STALE_GUEST_RULE}
+)
+# Sections a licence can refuse (error class ``license_required``) without the rest of the collector failing.
+# A collector that is partial for no other reason still evidences every rule that does not read the section:
+# ``identity`` for everything but the sign-in rules, ``identity_governance`` (PIM schedules, which the
+# effective administrator set already reads as "no PIM") for the rules that tolerate it.
+_LICENCE_GATED_SECTIONS = {
+    "identity": frozenset({"userSignInActivity"}),
+    "identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"}),
+}
 _MTA_STS_POLICY_RULES = frozenset({"dns_posture.mta_sts_policy_invalid", "dns_posture.mta_sts_testing_mode"})
 # Rules judged on the rows they read, not on whether their whole collector completed. ``exchange_policy`` runs a dozen
 # commands and is partial whenever one of them is not available (``Get-ProtectionAlert`` needs a Security & Compliance
@@ -289,12 +332,16 @@ def latest_secure_score(normalized_snapshot: Mapping[str, Any] | None) -> dict[s
 
 
 def _finding_state(finding: Mapping[str, Any]) -> str:
-    """``open``, ``accepted`` or ``closed``. An unknown status counts as open (fail closed)."""
+    """``open``, ``accepted`` or ``closed``. An unknown status counts as open (fail closed).
+
+    ``closed`` and ``resolved`` are never written by the engine, so one without the waiver that stands behind it
+    is an edit and the finding stays open, as in the gate (``auditex.gate``).
+    """
     status = str(finding.get("status") or "open").strip().lower()
     if is_accepted_status(status):
         return "accepted"
     if status in {"resolved", "closed"}:
-        return "closed"
+        return "closed" if has_matching_waiver(finding) else "open"
     return "open"
 
 
@@ -473,6 +520,26 @@ def _complete_collectors(coverage_ledger: list[dict[str, Any]] | None) -> set[st
     return _collectors_with_status(coverage_ledger, lambda status: status.startswith("complete"))
 
 
+def _licence_limited_collectors(coverage_ledger: list[dict[str, Any]] | None) -> set[str]:
+    """Collectors that are partial only because a licence-gated section was refused with ``license_required``.
+
+    Every diagnostic of the collector must be such a refusal of one of its licence-gated sections; any other
+    diagnostic (a failed users read, a truncated list, incomplete evidence) leaves the collector partial.
+    """
+    limited: set[str] = set()
+    for row in coverage_ledger or []:
+        if not isinstance(row, Mapping) or str(row.get("coverage_status") or "") != "partial_success":
+            continue
+        collector = str(row.get("collector") or "")
+        gated = _LICENCE_GATED_SECTIONS.get(collector)
+        diagnostics = [item for item in row.get("diagnostics") or [] if isinstance(item, Mapping)]
+        if gated and diagnostics and all(
+            item.get("error_class") == "license_required" and item.get("item") in gated for item in diagnostics
+        ):
+            limited.add(collector)
+    return limited
+
+
 def _not_applicable_collectors(coverage_ledger: list[dict[str, Any]] | None) -> set[str]:
     return _collectors_with_status(coverage_ledger, lambda status: status == "not_applicable")
 
@@ -537,14 +604,52 @@ def _admin_set_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> s
     return None
 
 
-def _stale_guest_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
-    """A guest can only be called stale when the sign-in activity read covered it."""
+def _signin_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
+    """An account can only be called stale when the sign-in activity read covered it.
+
+    ``identity.stale_guest`` judges guests, ``identity.privileged_stale_account`` the administrators (and needs the
+    administrator set), ``identity.stale_enabled_account`` every enabled member. Without sign-in data (the read needs
+    Microsoft Entra ID P1 or P2) the rules find nothing, which is not a pass.
+    """
     if snapshot is None:
         return "inputs_not_available"
+    administrators: set[str] | None = None
+    if rule_id == "identity.privileged_stale_account":
+        gap = _admin_set_inputs_gap(snapshot, rule_id)
+        if gap:
+            return gap
+        administrators = {
+            str(row.get("principal_id") or "").lower()
+            for row in _records(snapshot, _ADMIN_SET_SECTION)
+            if row.get("kind") == "effective_admin" and row.get("counted")
+        }
     for user in _records(snapshot, "users"):
+        if user.get("enabled") is False or user.get("signin_data_available") is True:
+            continue
         is_guest = str(user.get("user_type") or "").strip().lower() == "guest"
-        if is_guest and user.get("enabled") is not False and user.get("signin_data_available") is not True:
+        if rule_id == _STALE_GUEST_RULE:
+            relevant = is_guest
+        elif administrators is not None:
+            relevant = str(user.get("id") or "").lower() in administrators
+        else:
+            # Members: a guest is judged by identity.stale_guest, and a guest administrator by the privileged rule.
+            relevant = not is_guest
+        if relevant:
             return "signin_activity_unavailable"
+    return None
+
+
+def _google_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
+    """A clean Google rule is a pass only when the list it reads was read in full (and, for the organisation 2-step policy, known)."""
+    if snapshot is None:
+        return "inputs_not_available"
+    state = snapshot.get("snapshot") if isinstance(snapshot.get("snapshot"), Mapping) else {}
+    if rule_id == "google.org_2sv_policy_not_enforced":
+        status = str(state.get("two_step_policy_status") or "unknown")
+        return None if status in {"enforcing", "not_enforced", "partial"} else f"two_step_policy_{status}"
+    list_name = _GOOGLE_RULE_LISTS.get((_GOOGLE_RULE_COLLECTORS.get(rule_id) or ("",))[0])
+    if list_name and list_name in (state.get("truncated_sections") or []):
+        return f"{list_name.split('.', 1)[1]}_truncated"
     return None
 
 
@@ -599,6 +704,8 @@ _BREAK_GLASS_RULE = "ca.break_glass_exclusion_missing"
 # only when the device list was read in full, there is at least one device and no device is unknown for
 # the check; a clean result over a partly unknown fleet is not a pass.
 _DEVICE_UNKNOWN_FIELDS = {
+    # Compliance never evaluated (unknown, missing, Configuration Manager) or still within the grace period.
+    "intune.device_noncompliant": "compliance_unknown",
     "intune.device_encryption_off": "encryption_unknown",
     "intune.device_jailbroken": "jailbreak_unknown",
     "intune.device_stale_sync": "last_sync_unknown",
@@ -698,6 +805,9 @@ def _update_ring_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) ->
     if summary.get("rings_with_unknown_assignments"):
         return "ring_assignments_not_read_for_every_ring"
     if rule_id == "intune_depth.update_ring_not_assigned":
+        if not summary.get("rings_assigned") and summary.get("update_profiles_gap"):
+            # The beta update profile lists were refused or cut, so "no profile is assigned" was not established.
+            return str(summary["update_profiles_gap"])
         if summary.get("devices_read_state") != "collected":
             return f"device_list_{summary.get('devices_read_state')}"
         if not summary.get("windows_device_count"):
@@ -771,10 +881,12 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         return exchange_protection.inputs_gap(rule_id, snapshot)
     if rule_id in _RULE_VERDICT_CONTROLS:
         return _verdict_inputs_gap(snapshot, rule_id)
+    if rule_id in _SIGNIN_ACTIVITY_RULES:
+        return _signin_inputs_gap(snapshot, rule_id)
     if rule_id in _ADMIN_SET_RULES:
         return _admin_set_inputs_gap(snapshot, rule_id)
-    if rule_id == _STALE_GUEST_RULE:
-        return _stale_guest_inputs_gap(snapshot)
+    if rule_id in _GOOGLE_RULE_COLLECTORS:
+        return _google_inputs_gap(snapshot, rule_id)
     if rule_id in _DETECTION_RULE_SIGNALS:
         return _detection_inputs_gap(snapshot, rule_id)
     if namespace == "dns_posture":
@@ -783,7 +895,8 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         if snapshot is None:
             return "inputs_not_available"
         return None if _records(snapshot, "public_footprint_objects") else "public_footprint_not_collected"
-    return None
+    # Event-log rules (security.*) judge the newest events only; a log cut at its sample bound is not_assessed.
+    return bounded_sample_gap(rule_id, snapshot)
 
 
 def rule_inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
@@ -804,22 +917,37 @@ def _rule_evaluation(
     complete_collectors: set[str],
     snapshot: Mapping[str, Any] | None = None,
     not_applicable_collectors: set[str] | None = None,
+    licence_limited_collectors: Collection[str] = (),
+    unevaluated: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Status of one rule. ``pass`` needs the rule to have been evaluated, not just no finding."""
+    """Status of one rule. ``pass`` needs the rule to have been evaluated, not just no finding.
+
+    ``licence_limited_collectors`` are collectors that are partial only because a licence refused a gated section
+    (see ``_licence_limited_collectors``): ``identity`` then counts as complete for every rule except the sign-in
+    rules, which read the refused section, and ``identity_governance`` as not applicable. ``unevaluated`` maps a
+    rule to a reason it could not be judged that the findings themselves give (a Google check whose evidence
+    Google did not return).
+    """
     if open_by_rule.get(rule_id):
         return {"rule_id": rule_id, "status": "fail", "evaluated": True}
     if accepted_by_rule.get(rule_id):
         return {"rule_id": rule_id, "status": "accepted_risk", "evaluated": True}
     collectors = rule_evidence_collectors(rule_id)
+    complete_for_rule = set(complete_collectors)
+    not_applicable_for_rule = set(not_applicable_collectors or ())
+    if "identity" in licence_limited_collectors and rule_id not in _SIGNIN_ACTIVITY_RULES:
+        complete_for_rule.add("identity")
+    if "identity_governance" in licence_limited_collectors:
+        not_applicable_for_rule.add("identity_governance")
     if rule_id in INPUT_JUDGED_RULES:
         reason = _inputs_gap(rule_id, snapshot)
     elif not collectors:
         reason = "no_collector_mapping"
     else:
-        incomplete = unmet_rule_collectors(
-            rule_id, complete=complete_collectors, not_applicable=not_applicable_collectors or ()
-        )
+        incomplete = unmet_rule_collectors(rule_id, complete=complete_for_rule, not_applicable=not_applicable_for_rule)
         reason = f"collector_not_complete:{','.join(incomplete)}" if incomplete else _inputs_gap(rule_id, snapshot)
+    if reason is None and unevaluated:
+        reason = unevaluated.get(rule_id)
     if reason is not None:
         return {"rule_id": rule_id, "status": _NOT_ASSESSED, "evaluated": False, "reason": reason}
     return {"rule_id": rule_id, "status": "pass", "evaluated": True}
@@ -833,6 +961,63 @@ def _control_status(rule_statuses: list[str]) -> str:
     if rule_statuses and all(status == "pass" for status in rule_statuses):
         return "pass"
     return _NOT_ASSESSED
+
+
+def _bundle_platform(
+    snapshot: Mapping[str, Any] | None,
+    findings: list[dict[str, Any]] | None = None,
+    coverage_ledger: list[dict[str, Any]] | None = None,
+) -> str:
+    """``google_workspace`` for a Google Workspace bundle, else ``""`` (Microsoft 365).
+
+    The snapshot says which platform it is; failing that, a Google collector in the coverage ledger or a Google
+    finding does.
+    """
+    state = snapshot.get("snapshot") if isinstance(snapshot, Mapping) else None
+    if isinstance(state, Mapping) and state.get("platform"):
+        return str(state["platform"])
+    if any(str(row.get("collector") or "").startswith("google_") for row in coverage_ledger or [] if isinstance(row, Mapping)):
+        return GOOGLE_PLATFORM
+    if any(str(row.get("rule_id") or "").startswith("google.") for row in findings or [] if isinstance(row, Mapping)):
+        return GOOGLE_PLATFORM
+    return ""
+
+
+def _platform_rules(
+    rules_by_requirement: Mapping[str, Collection[str]], platform: str, shipped: bool
+) -> dict[str, set[str]]:
+    """The rules a Cyber Essentials section may list for this bundle's platform.
+
+    A Google Workspace bundle lists only Google rules and a Microsoft 365 bundle only Microsoft ones: a Microsoft rule
+    on a Google tenant reads ``not_assessed`` for a collector the run never had, and counts as a mapped rule that
+    could never be evaluated. Google rules carry no mapping of their own in ``configs/control-mappings.json`` (they
+    are mapped in ``auditex.google_workspace.findings``); their requirements come from
+    ``_cyber_essentials_confidence``, so a Google rule that ran clean still appears, as evaluated.
+    """
+    google = platform == GOOGLE_PLATFORM
+    rows: dict[str, set[str]] = {
+        requirement: {rule for rule in rules if rule.startswith("google.") == google}
+        for requirement, rules in rules_by_requirement.items()
+    }
+    if google and shipped:
+        for rule_id, requirements in _shipped_cyber_essentials_confidence().items():
+            if rule_id in _GOOGLE_RULE_COLLECTORS:
+                for requirement in requirements:
+                    rows.setdefault(requirement, set()).add(rule_id)
+    return {requirement: rules for requirement, rules in rows.items() if rules}
+
+
+def _findings_unevaluated_rules(findings: list[dict[str, Any]]) -> dict[str, str]:
+    """Rules an open ``google.evidence_unknown`` finding says Google returned no usable evidence for."""
+    reasons: dict[str, str] = {}
+    for finding in findings:
+        if finding.get("rule_id") != "google.evidence_unknown" or _finding_state(finding) != "open":
+            continue
+        returned = finding.get("returned_value")
+        returned = returned if isinstance(returned, Mapping) else {}
+        for rule_id in returned.get("rules_not_evaluated") or []:
+            reasons.setdefault(str(rule_id), f"evidence_not_returned:{returned.get('check') or returned.get('field') or 'unknown'}")
+    return reasons
 
 
 def build_baseline_alignment(
@@ -857,6 +1042,9 @@ def build_baseline_alignment(
     exemptions = _threshold_exemptions(findings)
     complete = _complete_collectors(coverage_ledger)
     not_applicable = _not_applicable_collectors(coverage_ledger)
+    licence_limited = _licence_limited_collectors(coverage_ledger)
+    platform = _bundle_platform(normalized_snapshot, findings, coverage_ledger)
+    unevaluated = _findings_unevaluated_rules(findings)
 
     frameworks: dict[str, Any] = {}
     for framework in BASELINE_FRAMEWORK_KEYS:
@@ -877,12 +1065,20 @@ def build_baseline_alignment(
                 for control_id in framework_mappings.get(framework) or []:
                     rules_by_control[str(control_id)].add(rule_id)
         if framework == CE_FRAMEWORK_KEY:
+            rules_by_control = _platform_rules(rules_by_control, platform, mappings is None)
             # Requirement rows come from the catalog, so requirements no rule maps to still appear.
             frameworks[framework] = build_cyber_essentials_section(
                 framework_entry(framework),
                 rules_by_control,
                 evaluate=lambda rule_id: _rule_evaluation(
-                    rule_id, open_by_rule, accepted_by_rule, complete, normalized_snapshot, not_applicable
+                    rule_id,
+                    open_by_rule,
+                    accepted_by_rule,
+                    complete,
+                    normalized_snapshot,
+                    not_applicable,
+                    licence_limited,
+                    unevaluated,
                 ),
                 open_by_rule=open_by_rule,
                 control_status=_control_status,
@@ -895,7 +1091,14 @@ def build_baseline_alignment(
             rule_ids = sorted(rules_by_control[control_id])
             evaluations = [
                 _rule_evaluation(
-                    rule_id, open_by_rule, accepted_by_rule, complete, normalized_snapshot, not_applicable
+                    rule_id,
+                    open_by_rule,
+                    accepted_by_rule,
+                    complete,
+                    normalized_snapshot,
+                    not_applicable,
+                    licence_limited,
+                    unevaluated,
                 )
                 for rule_id in rule_ids
             ]

@@ -1317,7 +1317,8 @@ def test_new_cyber_essentials_mappings_match_the_shipped_confidence_table() -> N
 
     assert mappings["google.user_2sv_not_enforced"] == {"ce.uac.mfa_cloud_services": "full"}
     assert mappings["google.org_2sv_policy_not_enforced"] == {"ce.uac.mfa_admin_accounts": "partial", "ce.uac.mfa_cloud_services": "full"}
-    assert mappings["google.stale_user"]["ce.uac.remove_unused_accounts"] == "full"
+    # Inactivity is judged against Auditex's own threshold, not the period the applicant defined: a subset of the condition.
+    assert mappings["google.stale_user"]["ce.uac.remove_unused_accounts"] == "partial"
     assert mappings["google.never_logged_in_user"]["ce.uac.remove_unused_accounts"] == "partial"
     assert mappings["google.chromeos_device_past_aue"] == {"ce.sum.supported_software": "full", "ce.sum.vulnerability_fixes_14_days": "partial"}
     for rule_id in NEW_RULES:

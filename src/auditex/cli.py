@@ -13,6 +13,7 @@ from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
 from azure_tenant_audit.versioning import package_version_line
@@ -120,10 +121,19 @@ def write_customer_pack(run_dir: str, output_dir: str) -> dict[str, object]:
     return write_enterprise_handoff_pack(run_dir, output_dir)
 
 
-def verify_customer_pack(pack_dir: str) -> dict[str, object]:
+def verify_customer_pack(
+    pack_dir: str,
+    *,
+    expect_manifest_sha256: str | None = None,
+    expect_checksums_sha256: str | None = None,
+) -> dict[str, object]:
     from .reporting import verify_enterprise_handoff_pack
 
-    return verify_enterprise_handoff_pack(pack_dir)
+    return verify_enterprise_handoff_pack(
+        pack_dir,
+        expect_manifest_sha256=expect_manifest_sha256,
+        expect_checksums_sha256=expect_checksums_sha256,
+    )
 
 
 def list_exporters() -> list[dict[str, object]]:
@@ -496,6 +506,16 @@ def _build_report_parser() -> argparse.ArgumentParser:
     customer_pack.add_argument("--output-dir", required=True, help="Directory where customer handoff files will be written.")
     verify_pack = subparsers.add_parser("verify-pack", help="Verify a customer handoff pack manifest and checksums.")
     verify_pack.add_argument("pack_dir", help="Customer handoff pack directory.")
+    verify_pack.add_argument(
+        "--expect-manifest-sha256",
+        default=None,
+        help="SHA-256 of the run's bundle-hashes.json, received separately (the handoff reports it as integrity.manifest_sha256).",
+    )
+    verify_pack.add_argument(
+        "--expect-checksums-sha256",
+        default=None,
+        help="SHA-256 of the pack's checksums.sha256, received separately.",
+    )
     explorer = subparsers.add_parser(
         "explorer",
         help="Write a self-contained interactive HTML explorer for a completed run, optionally with earlier runs for before/after.",
@@ -517,8 +537,8 @@ def _emit_report_payload(*, content: str, format_name: str, output_path: str | N
         print(content, end="")
         return
     target = Path(output_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    # Report payloads hold tenant metadata: 0600 in a 0700 directory whatever the umask.
+    write_private_text(target, content)
     print(json.dumps({"format": format_name, "output_path": str(target)}, indent=2))
 
 
@@ -895,11 +915,11 @@ def main(argv: list[str] | None = None) -> int:
             _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
             return 0
         if args.report_command == "customer-pack":
-            from .reporting import BundleIntegrityError
+            from .reporting import BundleIntegrityError, PackOutputError
 
             try:
                 print(json.dumps(write_customer_pack(args.run_dir, args.output_dir), indent=2))
-            except BundleIntegrityError as exc:
+            except (BundleIntegrityError, PackOutputError) as exc:
                 print(f"auditex report customer-pack: {exc}", file=sys.stderr)
                 return 2
             return 0
@@ -914,7 +934,11 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             return 0
         if args.report_command == "verify-pack":
-            result = verify_customer_pack(args.pack_dir)
+            result = verify_customer_pack(
+                args.pack_dir,
+                expect_manifest_sha256=args.expect_manifest_sha256,
+                expect_checksums_sha256=args.expect_checksums_sha256,
+            )
             print(json.dumps(result, indent=2))
             return 0 if result.get("valid") else 1
         if args.report_command != "render":

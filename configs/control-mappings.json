@@ -1,7 +1,7 @@
 {
   "_documentation": "ATT&CK mapping policy (auditex 2026-05-09): every rule_id maps to at least one MITRE ATT&CK technique where the threat is real (collector.issue.* diagnostics are exempt — they're operational, not adversarial). Email-auth controls (SPF/DKIM/DMARC/BIMI) anchor to T1566 (Phishing) parent and T1566.002 (Spearphishing Link) sub-technique because spoofed-domain phishing campaigns most commonly use links — attachment-based delivery (T1566.001) does not lean on SPF/DMARC alignment as heavily. Application-credential rules (expired/expiring/long-validity/dormant) anchor to T1078.004 (Valid Accounts: Cloud Accounts) for the credential-abuse vector and T1098.001 (Account Manipulation: Additional Cloud Credentials) when the rule directly enables credential creation/persistence. Cross-tenant access rules anchor to T1199 (Trusted Relationship) for inbound and T1567 (Exfiltration Over Web Service) for outbound; rogue-consent surfaces anchor to T1528 (Steal Application Access Token). Mailbox forwarding anchors to T1114.003 (Email Collection: Email Forwarding Rule) plus T1098 (Account Manipulation) and T1567 for external recipients; hide-from-user rules anchor to T1564.008 (Hide Artifacts: Email Hiding Rules). SharePoint broad-link sharing anchors to T1530 (Data from Cloud Storage). When in doubt, prefer the parent technique over a too-specific sub-technique.",
   "_documentation_baselines": "Baseline mapping policy (auditex 2026-10-02): cis_m365_v7, cisa_scuba, ms_secure_score, ms_zero_trust, mcsb and cyber_essentials values must be listed in configs/framework-catalog.json, which records the verified source version, date and URLs. Diagnostic and coverage rules (collector.issue.*, coverage.gap, service_health.*) do not claim benchmark controls. cis_m365_v3 is a deprecated legacy key and is no longer emitted. Leave a framework out rather than guess.",
-  "_documentation_cyber_essentials": "Cyber Essentials mapping policy (auditex 2026-10-20): the cyber_essentials key lists requirement ids from configs/framework-catalog.json (Requirements for IT Infrastructure v3.3). A rule is mapped only when its evidence tests the condition a requirement names, or part of it. _cyber_essentials_confidence records, per rule and requirement, whether the rule tests the named condition for the audited tenant ('full') or a proxy or subset ('partial'); every cyber_essentials mapping must have an entry. Google Workspace rules are mapped in src/auditex/google_workspace/findings.py and listed here for confidence only. Requirements whose catalog status is manual, ce_plus_assessor_test or provider_responsibility never report a verdict, so rules mapped to them are supporting evidence only. Diagnostic rules do not claim Cyber Essentials requirements.",
+  "_documentation_cyber_essentials": "Cyber Essentials mapping policy (auditex 2026-10-22): the cyber_essentials key lists requirement ids from configs/framework-catalog.json (Requirements for IT Infrastructure v3.3). A rule is mapped only when its evidence tests the condition a requirement names, or part of it. _cyber_essentials_confidence records, per rule and requirement, whether the rule tests the named condition for the audited tenant ('full'), a proxy or subset ('partial'), or is listed as 'supporting' evidence only: a supporting rule shows an assessor what Auditex saw (a failing supporting rule is listed, never decides the status). Use 'supporting' where a finding is a signal the requirement does not itself set, for example a count of administrators or a compliance state that does not say which setting failed. Every cyber_essentials mapping must have an entry. Google Workspace rules are mapped in src/auditex/google_workspace/findings.py and listed here for confidence only. Requirements whose catalog status is manual, ce_plus_assessor_test or provider_responsibility never report a verdict, so rules mapped to them are supporting evidence only. Diagnostic rules do not claim Cyber Essentials requirements.",
   "_documentation_thresholds": "Count thresholds (auditex 2026-10-22): a rule that counts something against a published range records the range per framework here, so the finding can say which framework's bound it breaches and baseline alignment reads each framework's controls against that framework's own bound. global_administrator_count: CIS Microsoft 365 Foundations v7.0.0 1.1.3 allows two to four Global Administrators and CISA SCuBA MS.AAD.7.1v1 two to eight. controls lists the controls of that framework the rule maps, and a test keeps it equal to the rule's mapping. A framework that is not listed (Zero Trust, MCSB, Secure Score) has no count of its own and fails when any bound is breached. MS.AAD.7.2v1 is a ratio of Global Administrators to other highly privileged users, which a count cannot establish, so no count rule maps to it.",
   "sharepoint.site_orphaned": {
     "ms_zero_trust": [
@@ -485,6 +485,9 @@
     ],
     "mitre_attack": [
       "T1530"
+    ],
+    "cyber_essentials": [
+      "ce.sc.user_authentication"
     ]
   },
   "sharepoint.sharing_domains_unrestricted": {
@@ -610,15 +613,6 @@
     "mitre_attack": [
       "T1078.004",
       "T1098.003"
-    ],
-    "cis_m365_v7": [
-      "5.2.2.1"
-    ],
-    "cisa_scuba": [
-      "MS.AAD.3.6v1"
-    ],
-    "ms_secure_score": [
-      "AdminMFAV2"
     ],
     "mcsb": [
       "IM-6",
@@ -1878,6 +1872,44 @@
       "ce.sc.saas_configuration"
     ]
   },
+  "consent_policy.user_consent_limited": {
+    "cis_m365_v7": [
+      "5.1.5.1"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.5.2v1"
+    ],
+    "ms_secure_score": [
+      "IntegratedApps"
+    ],
+    "ms_zero_trust": [
+      "apps"
+    ],
+    "mcsb": [
+      "AM-2"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.3"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1528"
+    ]
+  },
   "consent_policy.user_consent_unverified": {
     "nist_800_53": [
       "AU-2",
@@ -2045,14 +2077,7 @@
   },
   "identity.global_admin_mfa_not_registered": {
     "cis_m365_v7": [
-      "5.2.2.1",
       "5.2.3.4"
-    ],
-    "cisa_scuba": [
-      "MS.AAD.3.6v1"
-    ],
-    "ms_secure_score": [
-      "AdminMFAV2"
     ],
     "ms_zero_trust": [
       "identities"
@@ -2090,14 +2115,7 @@
   },
   "identity.privileged_mfa_not_registered": {
     "cis_m365_v7": [
-      "5.2.2.1",
       "5.2.3.4"
-    ],
-    "cisa_scuba": [
-      "MS.AAD.3.6v1"
-    ],
-    "ms_secure_score": [
-      "AdminMFAV2"
     ],
     "ms_zero_trust": [
       "identities"
@@ -2175,6 +2193,80 @@
       "ce.uac.mfa_cloud_services"
     ]
   },
+  "ca.admin_mfa_not_enforced": {
+    "cis_m365_v7": [
+      "5.2.2.1"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.6v1"
+    ],
+    "ms_secure_score": [
+      "AdminMFAV2"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6",
+      "PA-1"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ],
+    "cyber_essentials": [
+      "ce.uac.mfa_admin_accounts"
+    ]
+  },
+  "ca.admin_phishing_resistant_mfa_not_enforced": {
+    "cisa_scuba": [
+      "MS.AAD.3.6v1"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6",
+      "PA-1"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)"
+    ],
+    "iso_27001": [
+      "A.5.17"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
   "ca.legacy_auth_not_blocked": {
     "cis_m365_v7": [
       "5.2.2.3"
@@ -2242,12 +2334,7 @@
   },
   "identity.user_mfa_not_registered": {
     "cis_m365_v7": [
-      "5.2.2.2",
       "5.2.3.4"
-    ],
-    "cisa_scuba": [
-      "MS.AAD.3.1v1",
-      "MS.AAD.3.2v1"
     ],
     "ms_secure_score": [
       "MFARegistrationV2"
@@ -3148,12 +3235,15 @@
     "attack_path.no_mfa_to_tier0": {
       "ce.uac.mfa_admin_accounts": "partial"
     },
+    "ca.admin_mfa_not_enforced": {
+      "ce.uac.mfa_admin_accounts": "partial"
+    },
     "ca.legacy_auth_not_blocked": {
       "ce.sc.saas_configuration": "partial",
       "ce.uac.mfa_cloud_services": "partial"
     },
     "ca.mfa_not_enforced": {
-      "ce.uac.mfa_cloud_services": "full"
+      "ce.uac.mfa_cloud_services": "partial"
     },
     "consent_policy.user_consent_unrestricted": {
       "ce.sc.saas_configuration": "partial"
@@ -3175,12 +3265,24 @@
     },
     "google.admin_stale_login": {
       "ce.sc.unnecessary_accounts": "partial",
-      "ce.uac.remove_unused_accounts": "full",
+      "ce.uac.remove_unused_accounts": "partial",
       "ce.uac.special_access_privileges": "partial"
+    },
+    "google.calendar_public_acl": {
+      "ce.sc.user_authentication": "supporting"
     },
     "google.chromeos_device_past_aue": {
       "ce.sum.supported_software": "full",
       "ce.sum.vulnerability_fixes_14_days": "partial"
+    },
+    "google.drive_anyone_with_link": {
+      "ce.sc.user_authentication": "supporting"
+    },
+    "google.drive_public_discoverable": {
+      "ce.sc.user_authentication": "supporting"
+    },
+    "google.group_public_view": {
+      "ce.sc.user_authentication": "supporting"
     },
     "google.never_logged_in_user": {
       "ce.sc.unnecessary_accounts": "partial",
@@ -3192,13 +3294,13 @@
     },
     "google.stale_user": {
       "ce.sc.unnecessary_accounts": "partial",
-      "ce.uac.remove_unused_accounts": "full"
+      "ce.uac.remove_unused_accounts": "partial"
     },
     "google.super_admin_sprawl": {
-      "ce.uac.special_access_privileges": "partial"
+      "ce.uac.special_access_privileges": "supporting"
     },
     "google.suspended_admin": {
-      "ce.uac.special_access_privileges": "full"
+      "ce.uac.special_access_privileges": "supporting"
     },
     "google.user_2sv_not_enforced": {
       "ce.uac.mfa_cloud_services": "full"
@@ -3210,17 +3312,17 @@
       "ce.uac.separate_admin_accounts": "partial"
     },
     "identity.global_admin_disabled": {
-      "ce.uac.special_access_privileges": "full"
+      "ce.uac.special_access_privileges": "supporting"
     },
     "identity.global_admin_mfa_not_registered": {
       "ce.uac.mfa_admin_accounts": "partial",
       "ce.uac.mfa_cloud_services": "partial"
     },
     "identity.global_admin_sprawl": {
-      "ce.uac.special_access_privileges": "partial"
+      "ce.uac.special_access_privileges": "supporting"
     },
     "identity.guest_with_privileged_role": {
-      "ce.uac.special_access_privileges": "partial"
+      "ce.uac.special_access_privileges": "supporting"
     },
     "identity.privileged_mfa_not_registered": {
       "ce.uac.mfa_admin_accounts": "partial",
@@ -3228,12 +3330,12 @@
     },
     "identity.privileged_stale_account": {
       "ce.sc.unnecessary_accounts": "partial",
-      "ce.uac.remove_unused_accounts": "full",
+      "ce.uac.remove_unused_accounts": "partial",
       "ce.uac.special_access_privileges": "partial"
     },
     "identity.stale_enabled_account": {
       "ce.sc.unnecessary_accounts": "partial",
-      "ce.uac.remove_unused_accounts": "full"
+      "ce.uac.remove_unused_accounts": "partial"
     },
     "identity.stale_guest": {
       "ce.uac.remove_unused_accounts": "partial"
@@ -3251,7 +3353,7 @@
       "ce.mp.antimalware": "partial"
     },
     "intune.device_noncompliant": {
-      "ce.sum.vulnerability_fixes_14_days": "partial"
+      "ce.sum.vulnerability_fixes_14_days": "supporting"
     },
     "intune.device_os_end_of_life": {
       "ce.sum.supported_software": "partial",
@@ -3266,6 +3368,9 @@
     "intune_depth.update_ring_not_assigned": {
       "ce.sum.automatic_updates": "partial",
       "ce.sum.vulnerability_fixes_14_days": "partial"
+    },
+    "sharepoint.external_sharing_broad": {
+      "ce.sc.user_authentication": "supporting"
     }
   },
   "_rule_thresholds": {

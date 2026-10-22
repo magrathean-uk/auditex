@@ -57,11 +57,11 @@ The pack includes:
 - `reports/report-pack.json` inside `source-artifacts/` now carries both raw `citations` and typed `citation_summary`. Pack verify checks that those stay aligned with proof rows.
 - `reports/report-pack.json` also carries `reviewer_index` with `start_here`, `prove_this`, and `known_limits` so customer reviewers can jump from posture to proof fast.
 - Generated helper JSON files like `handoff.json`, `api-calls.json`, `permissions.json`, and `proof-table.json` also keep `citations` and `citation_summary`. Pack verify checks those too.
-- `api-calls.md` and `api-calls.json` - API call ledger.
+- `api-calls.md` and `api-calls.json` - API call ledger: the declared calls and, for runs with a transport ledger, every Graph request and command the audit log recorded and any call outside the declared set. For Google Workspace it says the list is declared, not observed.
 - `permissions.md` and `permissions.json` - required, observed, and missing permission ledger.
 - `proof-table.md` and `proof-table.json` - finding-to-evidence proof rows.
-- `source-artifacts/` - selected customer-safe source artifacts copied from the run, including `bundle-hashes.json`, the SHA-256 of every artifact of the run as it was finalized.
-- `checksums.sha256` - SHA-256 list of the pack's files. It is stored inside the pack and is not signed, so `verify-pack` detects corruption and edits that were not also re-hashed; it does not authenticate who produced the pack. When origin matters, send the SHA-256 of this file to the customer through a separate channel.
+- `source-artifacts/` - selected customer-safe source artifacts copied from the run, including `bundle-hashes.json`, the SHA-256 of every artifact of the run as it was finalized. `verify-pack` checks every copied source artifact against it and its own SHA-256 against `integrity.manifest_sha256`.
+- `checksums.sha256` - SHA-256 list of the pack's files. It is stored inside the pack and is not signed, so `verify-pack` detects corruption and edits that were not also re-hashed; it does not authenticate who produced the pack. When origin matters, send the SHA-256 of this file and the SHA-256 of `bundle-hashes.json` (the handoff's `integrity.manifest_sha256`) to the customer through a separate channel; `verify-pack` prints both as `digests` and takes the values received back with `--expect-checksums-sha256` and `--expect-manifest-sha256`.
 - `pack-manifest.json` - pack manifest with generated and source artifact hashes, plus `validation_summary`, `reviewer_summary` and `integrity` copied from handoff truth.
 
 ## Reviewer Order
@@ -71,9 +71,9 @@ The pack includes:
 3. Read `source-artifacts/data-handling.json` to confirm read-only and no-content-read assertions.
 4. Read `report.md`, especially the reviewer index and executive summary.
 5. Read `proof-table.md` for evidence behind each finding.
-6. Read `api-calls.md` to see exactly which APIs were attempted.
+6. Read `api-calls.md`: the declared calls, then the calls the audit log recorded (and any outside the declared set). Google Workspace runs are declared, not observed.
 7. Read `permissions.md` to see missing scopes, roles, or licenses.
-8. Use `checksums.sha256` or `auditex report verify-pack` to verify integrity.
+8. Use `checksums.sha256` or `auditex report verify-pack` to verify integrity, and check that `verify-pack` reports no `unexpected_file`.
 
 ## Explaining Partial Runs
 

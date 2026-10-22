@@ -219,6 +219,73 @@ New bundle fields (within contract `2026-10-22`): the sections `sharepoint_tenan
 `break_glass_*` fields on Conditional Access policy records. A consumer that keyed on the old per-site OneDrive
 or per-policy break-glass finding ids must read the tenant-level ones.
 
+### Identity controls and Cyber Essentials rows (CE+ review of 2026-10-22)
+
+- **Exclusions are judged.** A Conditional Access policy that targets all users but excludes the Global
+  Administrator role, a staff group or every guest used to read `enforced` (MFA) or `blocked` (legacy
+  authentication) and pass CIS `5.2.2.2`/`5.2.2.3` and SCuBA `MS.AAD.3.2v1`/`MS.AAD.1.1v1`. The verdicts gain
+  `enforced_with_exclusions` and `blocked_with_exclusions`: `enforced` and `blocked` now need every principal
+  excluded from all of the qualifying policies to be an emergency access account the operator listed with
+  `--break-glass-accounts` (a role or a guest type is never acceptable). The two rules are raised for the new
+  values at medium. Verdict records gain `unsanctioned_exclusions`, `unsanctioned_exclusion_count`,
+  `sanctioned_exclusion_source`, `limitations` and `sanctioned` on each excluded principal. **List your
+  emergency access accounts**, or a policy that excludes them reads "with exclusions".
+- **Administrator MFA is judged.** New `administrator_mfa` verdict (`identity_control_verdicts.json`), read
+  against the effective administrator set: security defaults, or a policy for all users or for every role an
+  administrator holds, with no administrator role or administrator excluded (an excluded group or guest type
+  reads `enforced_with_exclusions`). New rules `ca.admin_mfa_not_enforced` (CIS `5.2.2.1`, SCuBA `MS.AAD.3.6v1`,
+  Secure Score `AdminMFAV2`, Cyber Essentials `ce.uac.mfa_admin_accounts`) and
+  `ca.admin_phishing_resistant_mfa_not_enforced` (SCuBA `MS.AAD.3.6v1`; low). The registration rules
+  (`identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered`,
+  `identity.user_mfa_not_registered`, `attack_path.no_mfa_to_tier0`) no longer map to CIS `5.2.2.1`/`5.2.2.2`, SCuBA
+  `MS.AAD.3.1v1`/`3.2v1`/`3.6v1` or `AdminMFAV2`: they showed capability, and passed those controls in a
+  tenant where nothing required MFA. `MS.AAD.3.1v1` has no rule until an all-users phishing-resistant
+  verdict exists.
+- **User consent.** `microsoft-user-default-recommended` and `-low` no longer read `restricted`: the verdict is
+  `limited` and the new rule `consent_policy.user_consent_limited` fails CIS `5.1.5.1` and SCuBA
+  `MS.AAD.5.2v1`. The companion policy `microsoft-user-default-allow-consent-apps` is recognised as Microsoft
+  managed (it read `custom`); an unrecognised `microsoft-` policy reads `unknown` with
+  `built_in_permission_grant_policy_not_evaluated`.
+- **Cyber Essentials.** `ca.mfa_not_enforced` and the four stale-account rules are `partial` confidence (the
+  verdict never reads per-user MFA; the inactivity threshold is Auditex's, not the applicant's), and the
+  `ce.uac.mfa_cloud_services` limits say so. A new confidence, `supporting`, lists a rule in a row without letting it
+  decide the row: `identity.global_admin_sprawl`, `identity.global_admin_disabled`,
+  `identity.guest_with_privileged_role`, `google.super_admin_sprawl`, `google.suspended_admin` (Cyber Essentials
+  sets no administrator count, and a disabled account has its privileges disabled) and `intune.device_noncompliant`
+  (a compliance state does not say which setting failed) no longer fail `ce.uac.special_access_privileges` or
+  `ce.sum.vulnerability_fixes_14_days`. A failing row gains `confidence`; a row whose rules were not evaluated says
+  `rules_not_evaluated` with `not_assessed_reasons`. The Markdown report and the explorer show the title, reason,
+  confidence and evidence limits of each Cyber Essentials row (the explorer no longer says "no collector in this run
+  evidences this control" for a collector that ran).
+- **Google Workspace bundles.** The Cyber Essentials section lists only Google rules for a Google bundle (and
+  only Microsoft rules for a Microsoft one), and a Google rule that ran clean appears as evaluated.
+- **Licence-gated reads.** An identity collector that is partial only because `userSignInActivity` was refused
+  (`license_required`, no Microsoft Entra ID P1) no longer makes every identity rule `not_assessed`: the
+  administrator rules are evaluated, and the sign-in rules (`identity.stale_enabled_account`,
+  `identity.privileged_stale_account`, `identity.stale_guest`) read `not_assessed` with
+  `signin_activity_unavailable`; the first two used to pass with no sign-in data at all. An
+  `identity_governance` collector that is partial only because the PIM schedules were refused no longer blocks
+  `identity.privileged_mfa_not_registered`.
+- **Emergency access check.** A role-targeted policy is judged only when an account holds the role (and is
+  never `high` unless it covers Global Administrator); a policy for a user action or an authentication context is
+  not judged; an excluded group counts when the run read its members (role-assignable groups).
+- **Administrator set.** Partner Tier1 Support, Partner Tier2 Support and Directory Writers count as
+  administrator roles (matched by template id).
+- **Handed over from the coverage and integrity work.** `intune_depth.update_ring_not_assigned` is quiet and reads
+  `not_assessed` (with the `update_profiles_gap` reason: `update_profiles_blocked`, `update_profiles_truncated`,
+  `profile_assignments_blocked`, `profile_assignments_truncated`, `profile_assignments_absent` or
+  `profile_assignments_unknown`) when the beta update-profile lists were refused or cut and no ring is assigned: "no
+  profile" was not established. `exchange.mailbox_forwarding_configured` also fires for forwarding to a mail contact
+  (`ForwardingAddress`), not only to an SMTP address. `intune.device_noncompliant` reads `not_assessed` while any
+  device's compliance was never evaluated (`unknown`, no value, `configManager`) or is in its grace period
+  (`inGracePeriod`), where it used to pass; `device_posture_summary` gains `compliance_unknown` and
+  `compliance_in_grace_period`. Baseline alignment reads a `closed` or `resolved` finding as closed only when a
+  matching waiver stands behind it, as the gate does; without one it stays open (a bare `accepted_risk` is still
+  accepted in the baseline rows, where the gate counts it open: the engine writes that status only with its waiver).
+- **Demo.** The remediated demo tenant turns user consent off (it limited it, which no longer reads
+  restricted), and its emergency-group exclusions read "with exclusions" because the demo lists no
+  `--break-glass-accounts`.
+
 ### Google Workspace
 
 Upgrade notes (all in `auditex google`):
@@ -252,6 +319,85 @@ Upgrade notes (all in `auditex google`):
   that treated any text containing "compromise" as compromised is gone.
 - **`--stale-device-days`** (default 90, was fixed) sets the sync age for `google.mobile_device_stale_sync` and
   `google.chromeos_device_stale_sync`.
+
+### Collection coverage, run integrity and transport
+
+Contract notes. These are additive to `2026-10-22`, which is unreleased, so the contract version is unchanged:
+the validation codes `unwaived_accepted_status` (error) and `unknown_finding_status` (warning), the manifest key
+`rule_parameters`, the gate codes `bundle_integrity_mismatch`, `bundle_integrity_invalid` and
+`bundle_integrity_absent`, the truncation reason `pagination_not_followed`, the rule input reason
+`bounded_sample:<collector>.<list>`, the normalized section `bounded_samples`, the `update_management_summary`
+fields `update_profiles_gap` and `profiles_with_unknown_assignments`, the `forwarding_address` field of mailbox
+forwarding records, `graph.redirects` and `graph.redirects_refused` in the observed ledger, coverage rows of an
+offline replay, and the `verify-pack` issue codes and options listed below. Changed behaviour a pipeline may
+notice: the legacy cut-off for unresolved references is the fixed version `2026-10-22` and not the current
+`CONTRACT_VERSION`; an operator `--top` below the list length now also cuts `secureScoreControlProfiles`,
+`secureScores`, `subscribedSkus` and `domains` (below about 250 it makes `defender` partial); a DNS resolver failure
+makes the `dns_posture` collector and the run partial; the mailbox forwarding command text and the eDiscovery
+command spellings in `configs/collector-definitions.json` changed; packs use pack-relative paths.
+
+- **Fixed: a resumed run read `ok` over earlier gaps.** `--resume-from` turned a `partial` collector into `skipped`
+  (`not_applicable` in the ledger), so the run read `ok`, exited 0 and passed the gate. A finished collector now keeps
+  the status it finished with; a `partial` or `failed` collector, a collector the preflight skipped as blocked and an
+  `ok` collector whose raw payload is gone are run again and replace their earlier summary and coverage rows; a
+  checkpointed collector outside the resumed session that did not finish keeps the run `partial`.
+- **Fixed: `gate` and `gate-drift` did not check the hash manifest and compared only finding ids.** Both verify
+  `bundle-hashes.json` (a mismatch, an invalid manifest, or a missing one in a bundle finalized under `2026-10-22`
+  blocks), compare each finding's status, severity and rule between the findings file and the report pack, and count
+  an accepted or closed status only when a matching waiver stands behind it. `gate-drift` and `compare` record and
+  compare the rule windows the runs were judged with (`rule_parameters`: `stale_sync_days`, `stale_guest_days`,
+  `stale_account_days`, `stale_user_days`, `stale_device_days`), so a laxer later window, or one nobody recorded, is
+  `not_reassessed` and not `resolved`. `compare` verifies each run's hash manifest and recorded contract.
+- **Fixed: Google Workspace findings read `resolved` when their inputs went unknown.** Reassessment now checks the
+  `google_directory` and `google_policies` collectors and the 2-step policy and internal-domain status.
+- **Fixed: offline replay ignored error and truncation markers.** A sample section that records a blocked read or a
+  cut list replays as a partial collector with a coverage row and blocker (Microsoft 365 and Google Workspace), so
+  blocked MFA evidence no longer reads `pass` in a valid bundle.
+- **Fixed: unpaged list reads dropped `@odata.nextLink`.** `secureScoreControlProfiles` was cut at 200 rows with
+  `collection_truncated: false`. Every list is paged, an unpaged response that carries a next link is a gap
+  (`pagination_not_followed`), and a test fails the build when a collector reads a list with a direct `get_json`.
+- **Fixed: bounded sign-in and audit samples let `security.*` rules read `pass`.** `security.risky_signin` and
+  `security.privilege_change_event` read `not_assessed` (`bounded_sample:security.signIns`,
+  `bounded_sample:security.directoryAudits`) when no finding was raised and the newest-500 log was cut.
+- **Fixed: mailbox forwarding read the first 50 mailboxes and recorded no gap.** It reads the mailboxes that forward,
+  server-side, with a 500-row bound recorded as a `fanout_limit` gap.
+- **Fixed: a DNS resolver failure raised high SPF, DMARC and DKIM "missing" findings.** A resolver failure is
+  unknown: the record flags are `null`, no such finding is raised (Microsoft 365 and Google Workspace), and it no
+  longer mutes `exchange.dkim_signing_disabled`.
+- **Fixed: a blocked beta update-profile list could read as "no update ring".** The update summary now says why
+  (`update_profiles_gap`); the rule and baseline checks that read it belong to the findings change (see the report).
+- **Fixed: the API ledger collapsed long resource names into `{id}`.** Only identifiers are templated, so
+  `deviceCompliancePolicies` and its siblings stay distinct and an undeclared one is listed. Content-read detection
+  also covers `calendarView`, calendars by id, group threads, conversations and posts, `getAllMessages`, list items
+  and To Do tasks, an `$expand` of content, and a query left inside a next-page or `$batch` inner URL. The four
+  eDiscovery `purview ... list` commands seen "outside the declared set" are declared (`command_variants` on every
+  eDiscovery row), the m365 CLI adapter logs `command.completed` after classifying the output, and resource-token
+  requests emit `graph.token.requested`.
+- **Fixed: unlisted and symlinked files were read by handoff and copied into the customer pack while integrity read
+  `verified`.** A symbolic link anywhere in a run, and an unlisted file where the product reads (except named
+  post-finalization outputs), is an integrity mismatch; the pack copies only regular files the hash manifest lists.
+- **Fixed: `verify-pack` ignored the copied `bundle-hashes.json`.** It checks the digest against
+  `integrity.manifest_sha256` and every copied source artifact against its row, reports unexpected files and symbolic
+  links, prints `digests`, and takes `--expect-manifest-sha256` and `--expect-checksums-sha256` (also on the MCP
+  tool). Packs carry pack-relative paths and no absolute path of the operator's machine, and a non-empty output
+  directory with no earlier pack is refused.
+- **Fixed: handoff, report and pack presented the declared call rows as "Observed calls" and an unqualified
+  "Read-only: True".** They render the transport ledger ("Observed calls (transport ledger)"), label the declared
+  figure "Declared calls", print the observation basis next to Read-only and No content reads, and never claim
+  "stayed read-only" without an observed ledger. Handoff counts gain `declared_calls`, `observed_graph_requests`,
+  `observed_commands` and `observed_outside_declared`. Drive readonly is classified `content_capable`.
+- **Fixed: packs, rendered reports, the explorer and `--output` payloads took the caller's umask.** They are `0600` in
+  `0700` directories through one private writer, including `reports/explorer.html` inside the bundle.
+- **Fixed: the legacy cut-off followed `CONTRACT_VERSION`.** It is now the fixed version `2026-10-22`, so a later
+  contract bump never labels an edited citation "not a sign of editing".
+- **Fixed: fan-out totals and OneDrive sites came from the 20-row inline sample.** Gap rows state the real total, the
+  OneDrive finding counts every site read, and the `app_consent` fan-out row carries `rows_collected`.
+- **Changed: transport hygiene.** `GraphClient` no longer lets the HTTP library follow redirects: it follows them by
+  hand, keeps the bearer token only for a hop on Graph, fetches a Microsoft download host over HTTPS without the
+  token, refuses anything else, and logs each hop as host and path only. Command-output samples are redacted before
+  they are cut, and JSON-keyed secrets (`"client_secret": "..."`) are redacted. Inbox-rule keyword lists and Gmail
+  filter `query`, `negatedQuery` and `subject` are kept as counts and lengths. The guided Exchange module install no
+  longer marks PSGallery as trusted.
 
 ### Added
 

@@ -9,12 +9,13 @@ class _FakeClient:
         if path == "/organization":
             assert params == {"$select": "id,displayName,tenantType,city,country"}
             return {"value": [{"id": "org-1"}]}
-        if path == "/domains":
-            assert params == {"$select": "id,authenticationType,isDefault,isVerified,isRoot"}
-            return {"value": [{"id": "domain-1"}, {"id": "domain-2"}]}
         raise AssertionError(f"unexpected path: {path}")
 
     def get_all(self, path, params=None):  # noqa: ANN001
+        if path == "/domains":
+            # A list read: paged through the shared path, without $top.
+            assert params == {"$select": "id,authenticationType,isDefault,isVerified,isRoot"}
+            return [{"id": "domain-1"}, {"id": "domain-2"}]
         if path == "/users":
             assert params["$top"] == "500"
             return [{"id": "user-1"}]

@@ -107,8 +107,9 @@ Corrections compared with the old `cis_m365_v3` values:
 | `mailbox_forwarding.hide_from_user` | `1.2.2`, `6.2.1` | none |
 | `identity.global_admin_singleton`, `identity.global_admin_sprawl` | `1.1.2`, `1.1.3` | `1.1.3` |
 | `identity.admin_holds_productivity_licence` | none | `1.1.4` |
-| `identity.global_admin_mfa_not_registered` | `1.1.2`, `1.1.3`, `5.2.2` | `5.2.2.1`, `5.2.3.4` |
-| `identity.user_mfa_not_registered` | `1.1.2`, `1.1.3` | `5.2.2.2`, `5.2.3.4` |
+| `identity.global_admin_mfa_not_registered` | `1.1.2`, `1.1.3`, `5.2.2` | `5.2.3.4` |
+| `identity.user_mfa_not_registered` | `1.1.2`, `1.1.3` | `5.2.3.4` |
+| `ca.admin_mfa_not_enforced` | none | `5.2.2.1` |
 | `app_credentials.secret_long_validity` | `5.1.5` | `5.1.5.4` |
 | Other `app_credentials.*`, `cross_tenant_access.*`, `identity.global_admin_disabled`, `identity.global_admin_stale_password`, `identity.admin_set_unverified`, `identity.stale_guest`, `identity.guest_with_privileged_role`, `security.*`, `intune.*` | various | none (no matching v7 control) |
 
@@ -144,11 +145,24 @@ was not evaluated also has a `reason`:
 - `collector_not_complete:<collectors>`: a collector that feeds the rule did not complete. Most
   rules need `complete_*`; `identity.privileged_mfa_not_registered` also accepts a
   `not_applicable` `identity_governance` (no PIM data can exist), but not a blocked, partial,
-  failed or missing one.
+  failed or missing one. A collector that is partial only because a licence refused one section
+  (`license_required`: `identity` without `userSignInActivity`, which needs Microsoft Entra ID P1 or P2;
+  `identity_governance` without its PIM schedules, which need P2) still evidences every rule that does not read
+  that section: `identity` counts as complete for everything except the sign-in rules
+  (`identity.stale_enabled_account`, `identity.privileged_stale_account`, `identity.stale_guest`), and a
+  refused-PIM `identity_governance` as not applicable. Any other diagnostic on the collector (a failed users read,
+  a cut list) leaves it partial for every rule.
+- `signin_activity_unavailable`: a stale-account rule judges an account only when the sign-in activity read
+  covered it (guests for `identity.stale_guest`, administrators for `identity.privileged_stale_account`, every
+  enabled member for `identity.stale_enabled_account`). Without it the rule finds nothing, which is not a pass.
+- `users_truncated`, `chromeosDevices_truncated`, `two_step_policy_<status>`, `evidence_not_returned:<check>`: a
+  Google rule needs the list it reads read in full, the organisation 2-step policy status to be known, and
+  Google to have returned the field it checks (`google.evidence_unknown`).
 - `no_collector_mapping`: the rule's namespace is not in the collector map.
 - `inputs_not_available`: the report was built without the normalized snapshot, so the rule's
   inputs could not be checked.
-- `no_domain_records`, `resolver_error`: DNS rules need every verified domain resolved.
+- `no_domain_records`, `resolver_error`: DNS rules need every verified domain resolved. A resolver failure (SERVFAIL, REFUSED) is unknown, never a missing record: the `dns_posture` collector is `partial` and the rules read `collector_not_complete:dns_posture` (`resolver_error` for an offline bundle whose collector is complete).
+- `bounded_sample:<collector>.<list>`: a rule whose question cannot be answered from a sample (`security.risky_signin` reads the newest 500 sign-ins, `security.privilege_change_event` the newest 500 directory audit events) reads `not_assessed` when no finding was raised and the list was cut at the bound. A finding raised from the sample still reads `fail`.
 - `mta_sts_policy_not_fetched`: the MTA-STS policy rules need the policy file fetched (public
   lookups off, or the fetch skipped).
 - `tls_rpt_not_collected`: the bundle predates TLS-RPT collection.
@@ -157,7 +171,7 @@ was not evaluated also has a `reason`:
   to be `on` or `off`, not `unknown`.
 - `verdict_unknown:<control>`, `verdict_not_collected:<control>`: a rule decided by an identity
   control verdict (`ca.*`, `consent_policy.user_consent_*`) needs that verdict record to exist and
-  not be `unknown`. `ca.enforcement_unverified` needs both the `effective_mfa` and
+  not be `unknown`. `ca.enforcement_unverified` needs the `effective_mfa`, `administrator_mfa` and
   `legacy_authentication_block` verdicts.
 
 `baseline_alignment.frameworks.cyber_essentials` has a different shape: one row per catalogued
@@ -230,16 +244,46 @@ Suggested starting points for rule families being added:
 
 ## Identity control verdicts
 
-`ca.mfa_not_enforced`, `ca.legacy_auth_not_blocked` and `consent_policy.user_consent_unrestricted`
-read `normalized/identity_control_verdicts.json` (see `docs/reference/output-contract.md`), not a
-collector's raw rows. Each verdict is three-valued. A negative verdict raises the rule. An `unknown`
+`ca.mfa_not_enforced`, `ca.admin_mfa_not_enforced`, `ca.admin_phishing_resistant_mfa_not_enforced`,
+`ca.legacy_auth_not_blocked`, `consent_policy.user_consent_limited` and
+`consent_policy.user_consent_unrestricted` read `normalized/identity_control_verdicts.json` (see
+`docs/reference/output-contract.md`), not a collector's raw rows. A negative verdict raises the rule, and
+so does a verdict that holds only in part: `enforced_with_exclusions` and `blocked_with_exclusions` (a
+policy that targets everyone but excludes a role, a guest type or any user or group other than the
+emergency access accounts the operator listed with `--break-glass-accounts`) and `limited` user consent.
+An `unknown`
 verdict, caused by a blocked, truncated or missing policy read, raises the matching diagnostic rule
 (`ca.enforcement_unverified`, `consent_policy.user_consent_unverified`) instead. Those two rules
 claim no benchmark control, so an unreadable policy list is neither a pass nor a failure.
 
 - `ca.mfa_not_enforced` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v1` (MFA for all users).
-  It does not map to `5.2.2.1`: an administrator-only policy satisfies that control while the
-  rule still fires. `identity.privileged_mfa_not_registered` carries the same mapping as
+  ScubaGear requires every user, group and guest exclusion to be on an allow-list and no role to be
+  excluded; the shipped rule reads the operator's break-glass list as that allow-list, so a policy that
+  excludes the Global Administrator role, an all-staff group or all guests does not pass either control.
+  It does not map to `5.2.2.1`: that control is MFA for administrators, which is judged by its own
+  verdict.
+- `ca.admin_mfa_not_enforced` maps to CIS v7 `5.2.2.1`, SCuBA `MS.AAD.3.6v1` and Secure Score
+  `AdminMFAV2`. It reads the `administrator_mfa` verdict: MFA required of every administrator in the
+  effective administrator set, by security defaults or by an enabled policy for all users or for every
+  role an administrator holds, with no administrator role or administrator excluded.
+  `ca.admin_phishing_resistant_mfa_not_enforced` also maps to `MS.AAD.3.6v1` (phishing-resistant MFA for
+  highly privileged roles): it is raised when administrator MFA is enforced but no policy requires a
+  phishing-resistant authentication strength of every administrator, so security defaults and plain MFA do
+  not satisfy that control. `MS.AAD.3.1v1` (phishing-resistant MFA for all users) has no verdict of its
+  own yet and is not mapped.
+- The registration rules (`identity.global_admin_mfa_not_registered`,
+  `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered`,
+  `attack_path.no_mfa_to_tier0`) say who could use MFA, never whether it is required, so they map only to
+  controls about registration (CIS `5.2.3.4`, Secure Score `MFARegistrationV2`) and to the
+  framework anchors that name no enforcement condition (MCSB, Zero Trust). They used to satisfy
+  `5.2.2.1`, `MS.AAD.3.6v1` and `AdminMFAV2` in a tenant where nothing required MFA, which a test now rules out
+  for every MFA-titled control that is not about registration.
+- `consent_policy.user_consent_limited` maps to the controls `consent_policy.user_consent_unrestricted` maps
+  to (CIS `5.1.5.1` and SCuBA `MS.AAD.5.2v1`, no Cyber Essentials requirement). CIS asks for no user consent;
+  ScubaGear fails the Microsoft-managed assignment and accepts the low-risk one only when risky permissions
+  are not classified low, which the run does not read, so `microsoft-user-default-low` is judged
+  conservatively and also fails `MS.AAD.5.2v1`. Only a tenant that assigns no self-service policy reads
+  `restricted`. `identity.privileged_mfa_not_registered` carries the same registration mappings as
   `identity.global_admin_mfa_not_registered`.
 - `ca.legacy_auth_not_blocked` maps to CIS v7 `5.2.2.3`, SCuBA `MS.AAD.1.1v1` and Secure Score
   `BlockLegacyAuthentication`. The catalog entries were verified on 2026-10-20 against the Tenable
@@ -247,8 +291,9 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   sample already listed as sources.
 - `ca.*` maps to the `conditional_access` collector and `consent_policy.*` to `consent_policy`
   (`_NAMESPACE_COLLECTORS`). Baseline alignment also reads the verdict records, so a rule passes
-  only when its verdict is known: `enforced` or `not_enforced`, `blocked` or `not_blocked`,
-  `restricted` or `unrestricted`. An `unknown` or missing verdict reports `not_assessed` with
+  only when its verdict is known: `enforced`, `enforced_with_exclusions` or `not_enforced`,
+  `blocked`, `blocked_with_exclusions` or `not_blocked`, `restricted`, `limited` or `unrestricted`. An
+  `unknown` or missing verdict reports `not_assessed` with
   `verdict_unknown:<control>` or `verdict_not_collected:<control>`, never `pass`.
 
 ## Administrator set and count thresholds
@@ -286,8 +331,15 @@ bound in `framework_thresholds`, with `breached` set per framework. Five to eigh
 Administrators therefore raise a `low` finding that fails CIS `1.1.3` while SCuBA `MS.AAD.7.1v1` still
 reads `pass`; nine or more raise a `medium` finding that fails both. Baseline alignment reads each
 framework against its own entry, and a framework with no entry (Zero Trust, MCSB, Secure Score,
-Cyber Essentials) takes the finding as it is. `identity.global_admin_singleton` carries the same list
+Cyber Essentials) takes the finding as it is, which is why the count rules are `supporting` evidence for
+Cyber Essentials (see below), not rules that can fail a requirement: Cyber Essentials sets no count.
+`identity.global_admin_singleton` carries the same list
 for the minimum of two. A test keeps the bounds, the catalog titles and each rule's mapping in step.
+
+The administrator set also includes privileged built-in roles whose name does not say administrator, matched
+by role template id: Partner Tier1 Support, Partner Tier2 Support and Directory Writers. `directoryScopeId` is
+not selected on the role assignment read, so a role's `scope` is `unknown` except for the Global Administrator
+(`tenant`) and PIM schedules.
 
 `MS.AAD.7.2v1` is a ratio (Global Administrators to other highly privileged users), which a count
 cannot establish, so no count rule maps to it any more.
@@ -359,6 +411,7 @@ where the catalog has no verified control.
 | --- | --- |
 | `intune.device_os_end_of_life` | `ce.sum.supported_software` (partial), `ce.sum.vulnerability_fixes_14_days` (partial) |
 | `intune.device_stale_sync` | `ce.sum.vulnerability_fixes_14_days` (partial) |
+| `intune.device_noncompliant` | `ce.sum.vulnerability_fixes_14_days` (supporting) |
 | `intune_depth.update_ring_not_assigned` | `ce.sum.automatic_updates` (partial), `ce.sum.vulnerability_fixes_14_days` (partial) |
 | `intune_depth.update_ring_deferral_excessive` | `ce.sum.vulnerability_fixes_14_days` (partial) |
 | `intune.defender_av_off`, `intune.defender_realtime_protection_off`, `intune.defender_signatures_stale` | `ce.mp.antimalware` (partial) |
@@ -366,7 +419,10 @@ where the catalog has no verified control.
 | `exchange.smtp_auth_enabled_tenant_wide` | `ce.sc.saas_configuration` (partial), `ce.uac.mfa_cloud_services` (partial) |
 | `intune.device_encryption_off`, `intune.device_jailbroken`, `intune.compliance_policy_missing_platform`, `exchange.dkim_signing_disabled` | none (no Cyber Essentials requirement names them) |
 
-Every mapping is `partial`: the rules cover enrolled devices and one Exchange policy, not every device or
+Every mapping is `partial` except `intune.device_noncompliant`, which is `supporting`: the compliance state
+says a device is noncompliant, not which setting failed (a password, encryption or a policy conflict, as often as a missing
+update), and no compliance-setting-level state is collected, so it is listed for the assessor and never fails the
+14-day patching requirement. The rules cover enrolled devices and one Exchange policy, not every device or
 every recipient. See "Microsoft 365 device, update and malware evidence" in the
 [output contract](output-contract.md) for the evidence each rule reads and when it reads `not_assessed`.
 
@@ -420,20 +476,20 @@ existed; they are `partial` now, so a rule can fail them and a clean result is `
 | `ce.sc.default_passwords` | manual | none |
 | `ce.sc.unnecessary_software` | manual | none |
 | `ce.sc.autorun_disabled` | manual | none |
-| `ce.sc.user_authentication` | manual | none |
+| `ce.sc.user_authentication` | manual | `google.calendar_public_acl` (supporting), `google.drive_anyone_with_link` (supporting), `google.drive_public_discoverable` (supporting), `google.group_public_view` (supporting), `sharepoint.external_sharing_broad` (supporting; only the anyone-links variant, new and existing guests are authenticated) |
 | `ce.sc.device_unlocking` | manual | none |
 | `ce.sc.saas_configuration` | partial | `ca.legacy_auth_not_blocked`, `consent_policy.user_consent_unrestricted`, `exchange.smtp_auth_enabled_tenant_wide` |
 | `ce.sum.supported_software` | partial | `google.chromeos_device_past_aue`, `intune.device_os_end_of_life` |
 | `ce.sum.automatic_updates` | partial | `intune_depth.update_ring_not_assigned` |
-| `ce.sum.vulnerability_fixes_14_days` | partial | `google.chromeos_device_past_aue`, `intune.device_noncompliant`, `intune.device_os_end_of_life`, `intune.device_stale_sync`, `intune_depth.update_ring_deferral_excessive`, `intune_depth.update_ring_not_assigned` |
+| `ce.sum.vulnerability_fixes_14_days` | partial | `google.chromeos_device_past_aue`, `intune.device_noncompliant` (supporting), `intune.device_os_end_of_life`, `intune.device_stale_sync`, `intune_depth.update_ring_deferral_excessive`, `intune_depth.update_ring_not_assigned` |
 | `ce.sum.saas_provider` | provider responsibility | none |
 | `ce.uac.account_approval` | manual | none |
 | `ce.uac.unique_credentials` | manual | none |
 | `ce.uac.remove_unused_accounts` | partial | `google.admin_stale_login`, `google.never_logged_in_user`, `google.stale_user`, `identity.privileged_stale_account`, `identity.stale_enabled_account`, `identity.stale_guest` |
 | `ce.uac.mfa_cloud_services` | partial | `ca.legacy_auth_not_blocked`, `ca.mfa_not_enforced`, `exchange.smtp_auth_enabled_tenant_wide`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `google.user_2sv_not_enforced`, `google.user_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered` |
-| `ce.uac.mfa_admin_accounts` | partial | `attack_path.no_mfa_to_tier0`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered` |
+| `ce.uac.mfa_admin_accounts` | partial | `attack_path.no_mfa_to_tier0`, `ca.admin_mfa_not_enforced`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered` |
 | `ce.uac.separate_admin_accounts` | CE+ assessor test | `identity.admin_holds_productivity_licence` (supporting evidence only) |
-| `ce.uac.special_access_privileges` | partial | `google.admin_stale_login`, `google.super_admin_sprawl`, `google.suspended_admin`, `identity.global_admin_disabled`, `identity.global_admin_sprawl`, `identity.guest_with_privileged_role`, `identity.privileged_stale_account` |
+| `ce.uac.special_access_privileges` | partial | `google.admin_stale_login`, `google.super_admin_sprawl` (supporting), `google.suspended_admin` (supporting), `identity.global_admin_disabled` (supporting), `identity.global_admin_sprawl` (supporting), `identity.guest_with_privileged_role` (supporting), `identity.privileged_stale_account` |
 | `ce.uac.password_brute_force` | manual | none |
 | `ce.uac.password_quality` | manual | none |
 | `ce.uac.password_guidance` | manual | none |
@@ -444,16 +500,26 @@ existed; they are `partial` now, so a rule can fail them and a clean result is `
 
 **Mapping confidence.** `_cyber_essentials_confidence` in `configs/control-mappings.json` records, for
 each rule and requirement, whether the rule tests the named condition for the audited tenant (`full`,
-for example `ca.mfa_not_enforced` for MFA on cloud services) or a proxy or subset (`partial`, for
-example MFA registration, or Intune noncompliance for update management). A mapping with no declared
-confidence is read as `partial`, and a test requires every shipped mapping to declare one.
+for example `google.user_2sv_not_enforced` for MFA on cloud services, which reads the enforcement flag of
+every user), a proxy or subset (`partial`: MFA registration; `ca.mfa_not_enforced`, which reads security
+defaults and Conditional Access but never per-user MFA, so a tenant that enforces MFA only per user can read `fail`;
+the stale-account rules, which test Auditex's own inactivity threshold and not the period the applicant
+defined), or supporting evidence only (`supporting`). A supporting rule is listed in the row with its status, and
+an open finding of it is linked, but it never decides the row: use it for a signal the requirement does not
+itself set, such as the number of Global Administrators (the requirement asks that special access privileges are
+removed or disabled when no longer required, and sets no count), a disabled or guest administrator, or an Intune
+compliance state that does not say which setting failed. A mapping with no declared confidence is read as `partial`,
+and a test requires every shipped mapping to declare one.
 
 **Report section.** `baseline_alignment.frameworks.cyber_essentials` lists every catalogued
 requirement in catalog order, including those no rule maps to, so none is omitted. Each row has
 `control_id`, `title`, `theme`, `requirement_status`, `status`, `citation`, `evidence_limits`,
 `rule_ids`, `rule_statuses` (each with the rule's `confidence`), `evidence` (counts of rules mapped,
-evaluated, passed, failed, accepted and not assessed, plus open findings), `open_finding_count`,
-`finding_ids`, and `ce_plus_test` where the document or test specification names one.
+evaluated, passed, failed, accepted, not assessed and supporting, plus open findings), `open_finding_count`,
+`finding_ids`, and `ce_plus_test` where the document or test specification names one. A failing row adds a
+`confidence`: `full` when a failing rule tests the condition the requirement names, `partial` when every failing
+rule is a proxy or a subset. The Markdown report and the explorer show the requirement title, the reason, the
+confidence and `evidence_limits` for every row.
 
 - `status` keeps the four baseline values. `automated` rows take `pass`, `fail`, `accepted_risk` or
   `not_assessed` from their rules, by the same rules as the other frameworks. No requirement is
@@ -461,15 +527,24 @@ evaluated, passed, failed, accepted and not assessed, plus open findings), `open
 - `partial` rows can read `fail` or `accepted_risk`. When every mapped rule was evaluated and is clean,
   the row reads `not_assessed` with `reason` `partial_requirement_no_gap_found`, and `evidence` shows
   how many rules were evaluated and passed. A partial requirement never reads `pass`. A row whose rules
-  were not all evaluated is `not_assessed` too, and the per-rule `reason` says why.
+  were not all evaluated is `not_assessed` too, with `reason` `rules_not_evaluated` and the per-rule reasons in
+  `not_assessed_reasons` (for example `collector_not_complete:identity`). A row mapped only to `supporting` rules is
+  `not_assessed` with `reason` `supporting_evidence_only`.
 - `manual`, `ce_plus_assessor_test` and `provider_responsibility` rows are always `not_assessed`, with
   `reason` set to `requirement_status:<status>`, whatever their mapped rules report. An unknown
   catalog status is treated the same way. Their `rule_statuses` and `evidence` are supporting detail.
 - Requirement ids named by a finding or mapping but missing from the catalog are listed in
   `uncatalogued_requirement_ids`.
-- Google Workspace rules reach the section through their findings' `framework_mappings` only. They are
-  not in the Microsoft collector map, so a Google requirement shows a rule only when a finding exists,
-  and a clean Google run leaves those requirements `not_assessed`.
+- A Google Workspace bundle lists only Google rules in the section, and a Microsoft 365 bundle only
+  Microsoft ones: a Microsoft rule on a Google tenant would read `not_assessed` for a collector the run never had
+  and count as a mapped rule that could never be evaluated. The bundle is Google when its snapshot says
+  `platform: google_workspace` (or its ledger has a Google collector). Google rules are mapped in
+  `auditex.google_workspace.findings`; their requirements for a rule that ran clean come from
+  `_cyber_essentials_confidence`, and each has a collector in `baselines._GOOGLE_RULE_COLLECTORS`, so a clean
+  Google rule appears as evaluated (`pass`) and the row reads `partial_requirement_no_gap_found`. A Google rule
+  is not evaluated when its collector did not complete, the list it reads was cut short (`users_truncated`), the
+  organisation 2-step policy status is not known, or Google returned no usable field for it
+  (`evidence_not_returned:<check>`, from `google.evidence_unknown`).
 
 **Caveat.** Auditex output is evidence for a Cyber Essentials assessor. It is not a Cyber Essentials
 assessment, a certificate or a CE+ result. `not_assessed` with `partial_requirement_no_gap_found` means
@@ -482,7 +557,8 @@ met. The applicant's own answers and the assessor's tests decide that.
   its evidence tests the condition directly. A `pass` status means every mapped rule was evaluated (its
   collectors completed and its inputs were present) and raised no finding, not a full CIS audit
   result.
-- `consent_policy.user_consent_unrestricted` fires only when users can consent to any app. CIS v7 `5.1.5.1` and SCuBA `MS.AAD.5.2v1` ask for no user consent, so a clean result against them means no unrestricted user consent, not that consent is off.
+- `consent_policy.user_consent_unrestricted` fires only when users can consent to any app; `consent_policy.user_consent_limited` fires when they can consent under the Microsoft-managed or low-risk policy. CIS v7 `5.1.5.1` and SCuBA `MS.AAD.5.2v1` read both rules, so they pass only when no self-service consent policy is assigned. A tenant-defined permission grant policy is not evaluated and reads `unknown`.
+- Microsoft 365 MFA enforcement is read from security defaults and Conditional Access. Per-user (legacy) MFA states are not read: a tenant that enforces MFA only per user, with security defaults off and no Conditional Access, reads `not_enforced` (CIS `5.2.2.2` and `5.2.2.1` require Conditional Access, so that is right for them, but `ce.uac.mfa_cloud_services` and `ce.uac.mfa_admin_accounts` carry the caveat in `evidence_limits` and fail with `partial` confidence). Group membership is resolved only for role-assignable groups, so an excluded group may overlap another policy without the verdict knowing.
 - Cyber Essentials coverage is partial by design. Ten of 30 requirements have tenant evidence behind
   them and none is `automated`, so no Cyber Essentials row can read `pass`. The update and malware
   evidence covers devices Intune manages (Defender antivirus on Windows only, operating systems in the

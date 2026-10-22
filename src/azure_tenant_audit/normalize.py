@@ -14,10 +14,13 @@ from . import exchange_protection
 from . import external_sharing
 from .chunk_reader import iter_endpoint_records
 from .collection_gaps import (
+    BOUNDED_SAMPLE_SECTION,
     COLLECTION_GAP_SECTION,
     REASON_OPERATOR_LIMIT,
     REASON_UNKNOWN,
+    bounded_sample_records,
     collection_gap_records,
+    event_span,
     list_truncations,
     truncations_from_payloads,
 )
@@ -27,6 +30,7 @@ from .directory_relationships import normalize_directory_relationships
 from .effective_admins import (
     SECTION as EFFECTIVE_ADMIN_SECTION,
     AdminSetEvidence,
+    admin_scope as build_admin_scope,
     build_effective_admin_set,
 )
 from .friendly_names import build_friendly_name_catalog
@@ -39,6 +43,7 @@ from .identity_controls import (
     SECTION as IDENTITY_CONTROL_SECTION,
     Evidence,
     compact_targeting,
+    evaluate_administrator_mfa,
     evaluate_effective_mfa,
     evaluate_legacy_authentication_block,
     evaluate_user_consent,
@@ -664,6 +669,8 @@ def _build_conditional_access_graph(
     auth_methods_payload: dict[str, Any],
     values: Callable[[dict[str, Any], str], list[dict[str, Any]]] = _values,
     break_glass_accounts: Sequence[str] = (),
+    admin_rows: Sequence[dict[str, Any]] = (),
+    membership_edges: Sequence[dict[str, Any]] = (),
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
     users = values(identity_payload, "users")
     groups = values(identity_payload, "groups")
@@ -691,6 +698,8 @@ def _build_conditional_access_graph(
         groups=groups,
         role_assignments=role_assignments,
         role_definitions=role_definitions,
+        admin_rows=admin_rows,
+        membership_edges=membership_edges,
     )
     break_glass_flagged: list[dict[str, Any]] = []
     break_glass_in_scope = 0
@@ -1185,8 +1194,16 @@ def _build_identity_control_verdicts(
     users: list[dict[str, Any]],
     groups: list[dict[str, Any]],
     role_definitions: list[dict[str, Any]],
+    admin_records: Sequence[dict[str, Any]] = (),
+    break_glass_accounts: Sequence[str] = (),
+    membership_edges: Sequence[dict[str, Any]] = (),
 ) -> list[dict[str, Any]]:
-    """Tenant-level verdicts, one record per control, for every collector that was part of the run."""
+    """Tenant-level verdicts, one record per control, for every collector that was part of the run.
+
+    The principals the operator lists as emergency-access accounts (``--break-glass-accounts``) may be excluded from
+    a policy without it counting against the verdicts; any other exclusion is a gap. The administrator MFA verdict
+    reads the effective administrator set (``admin_records``).
+    """
     lookups = {
         "user": {str(item["id"]): str(item.get("principal_name") or item.get("display_name") or "") for item in users},
         "group": {str(item["id"]): str(item.get("display_name") or "") for item in groups},
@@ -1196,6 +1213,18 @@ def _build_identity_control_verdicts(
     verdicts: list[dict[str, Any]] = []
     access_payload = collector_payloads.get("conditional_access")
     if isinstance(access_payload, dict):
+        # The same inputs as the Conditional Access graph, so the accounts match the break-glass check.
+        identity_payload = collector_payloads.get("identity", {})
+        operator_accounts = break_glass.resolve_accounts(
+            break_glass_accounts,
+            users=_values(identity_payload, "users"),
+            groups=_values(identity_payload, "groups"),
+            role_assignments=_values(identity_payload, "roleAssignments"),
+            role_definitions=_values(identity_payload, "roleDefinitions"),
+            admin_rows=admin_records,
+            membership_edges=membership_edges,
+        )
+        sanctioned = frozenset(operator_accounts.ids) if operator_accounts.source == break_glass.SOURCE_OPERATOR else frozenset()
         policies = sources.endpoint_evidence(access_payload, "conditionalAccessPolicies")
         security_defaults = sources.endpoint_evidence(
             access_payload, "identitySecurityDefaultsEnforcementPolicy", singleton=True
@@ -1210,10 +1239,23 @@ def _build_identity_control_verdicts(
                 authentication_strengths=strengths,
                 lookups=lookups,
                 registration=registration if registration["sampled_users"] else None,
+                sanctioned=sanctioned,
             )
         )
         verdicts.append(
-            evaluate_legacy_authentication_block(policies=policies, security_defaults=security_defaults, lookups=lookups)
+            evaluate_administrator_mfa(
+                policies=policies,
+                security_defaults=security_defaults,
+                authentication_strengths=strengths,
+                lookups=lookups,
+                admin_scope=build_admin_scope(admin_records, _values(identity_payload, "roleDefinitions")),
+                sanctioned=sanctioned,
+            )
+        )
+        verdicts.append(
+            evaluate_legacy_authentication_block(
+                policies=policies, security_defaults=security_defaults, lookups=lookups, sanctioned=sanctioned
+            )
         )
     consent_payload = collector_payloads.get("consent_policy")
     if isinstance(consent_payload, dict):
@@ -1402,11 +1444,13 @@ def _build_endpoint_records(
         ]
         profiles: list[dict[str, Any]] = []
         profile_states: dict[str, Any] = {}
+        profile_counts: dict[str, int] = {}
         for profile_type, (evidence, list_name, assignments_name) in profile_inputs.items():
             assignment_evidence = sources.endpoint_evidence(depth, assignments_name)
             by_profile = _assignments_by_policy(assignment_evidence)
             profile_states[f"{profile_type}_profiles_read_state"] = evidence.state
             profile_states[f"{profile_type}_profile_assignments_read_state"] = assignment_evidence.state
+            profile_counts[profile_type] = sum(1 for item in evidence.rows if item.get("id"))
             profiles.extend(
                 _record(
                     endpoint_posture.UPDATE_PROFILE_KIND,
@@ -1447,6 +1491,11 @@ def _build_endpoint_records(
                 ),
                 profile_count=len(profiles),
                 profiles_assigned=sum(1 for profile in profiles if profile.get("assigned") is True),
+                profiles_with_unknown_assignments=sum(1 for profile in profiles if profile.get("assignments_known") is not True),
+                # Why "no profile is assigned" cannot be trusted (a beta list that was blocked or cut, or assignments that
+                # were not read); absent when the profile reads are complete. A rule that exempts tenants managing
+                # updates through a profile must read this before it treats "no profile assigned" as a fact.
+                update_profiles_gap=_update_profiles_gap(profile_states, profile_counts, profiles),
                 windows_comanaged_device_count=comanaged,
                 devices_read_state=device_evidence.state,
                 windows_device_count=sum(1 for device in devices if device.get("os_family") == "windows"),
@@ -1490,6 +1539,36 @@ def _build_endpoint_records(
             ),
         ]
     return sections
+
+
+def _update_profiles_gap(
+    profile_states: dict[str, Any], profile_counts: dict[str, int], profiles: list[dict[str, Any]]
+) -> str | None:
+    """Why the Windows quality and feature update profiles cannot say "no profile is assigned", or ``None``.
+
+    The profiles are beta lists, so a refused or cut read is common; it is "not read", never "no profile".
+    ``absent`` (a bundle from before the lists were collected) is not reported as a gap.
+    """
+    for profile_type in ("quality", "feature"):
+        state = profile_states.get(f"{profile_type}_profiles_read_state")
+        if state in {EVIDENCE_BLOCKED, EVIDENCE_TRUNCATED}:
+            return f"update_profiles_{state}"
+    for profile_type in ("quality", "feature"):
+        if not profile_counts.get(profile_type):
+            continue
+        state = profile_states.get(f"{profile_type}_profile_assignments_read_state")
+        if state != EVIDENCE_COLLECTED:
+            return f"profile_assignments_{state}"
+    if any(profile.get("assignments_known") is not True for profile in profiles):
+        return "profile_assignments_unknown"
+    return None
+
+
+def _dns_presence(item: dict[str, Any], section: str) -> bool | None:
+    """Whether a DNS record section is published; ``None`` (unknown) when the resolver could not answer for the domain."""
+    if item.get("resolver_error"):
+        return None
+    return bool((item.get(section) or {}).get("present"))
 
 
 def build_normalized_snapshot(
@@ -1990,6 +2069,7 @@ def build_normalized_snapshot(
                     auto_forward_enabled=item.get("AutoForwardEnabled"),
                     primary_smtp_address=item.get("PrimarySmtpAddress"),
                     forwarding_smtp_address=item.get("ForwardingSmtpAddress"),
+                    forwarding_address=item.get("ForwardingAddress"),
                     deliver_to_mailbox_and_forward=item.get("DeliverToMailboxAndForward"),
                     redirect_message_to=_to_str_list(item.get("RedirectMessageTo")),
                     blind_copy_to=_to_str_list(item.get("BlindCopyTo")),
@@ -2464,11 +2544,11 @@ def build_normalized_snapshot(
             authentication_type=item.get("authentication_type") or item.get("authenticationType"),
             is_default=item.get("isDefault"),
             resolver_error=item.get("resolver_error"),
-            spf_present=bool((item.get("spf") or {}).get("present")),
+            spf_present=_dns_presence(item, "spf"),
             spf_all_qualifier=(item.get("spf") or {}).get("all_qualifier"),
             spf_mechanisms=(item.get("spf") or {}).get("mechanisms"),
             spf_multiple_records=bool((item.get("spf") or {}).get("multiple_records")),
-            dmarc_present=bool((item.get("dmarc") or {}).get("present")),
+            dmarc_present=_dns_presence(item, "dmarc"),
             dmarc_policy=(item.get("dmarc") or {}).get("policy"),
             dmarc_subdomain_policy=(item.get("dmarc") or {}).get("subdomain_policy"),
             dmarc_pct=(item.get("dmarc") or {}).get("pct"),
@@ -2477,17 +2557,20 @@ def build_normalized_snapshot(
             dmarc_aggregate_invalid=(item.get("dmarc") or {}).get("aggregate_addresses_invalid") or [],
             dkim_selectors_present=(item.get("dkim") or {}).get("selectors_present") or [],
             dkim_selectors_missing=(item.get("dkim") or {}).get("selectors_missing") or [],
-            mta_sts_dns_present=bool((item.get("mta_sts") or {}).get("dns_present")),
+            dkim_selectors_unresolved=(item.get("dkim") or {}).get("selectors_unresolved") or [],
+            mta_sts_dns_present=(
+                None if item.get("resolver_error") else bool((item.get("mta_sts") or {}).get("dns_present"))
+            ),
             mta_sts_id=(item.get("mta_sts") or {}).get("id"),
             mta_sts_policy_fetch_status=((item.get("mta_sts") or {}).get("policy") or {}).get("fetch_status"),
             mta_sts_policy_mode=((item.get("mta_sts") or {}).get("policy") or {}).get("mode"),
             mta_sts_policy_http_status=((item.get("mta_sts") or {}).get("policy") or {}).get("http_status"),
             # None when the bundle predates TLS-RPT collection, so absence is never inferred.
             tls_rpt_present=(
-                bool((item.get("tls_rpt") or {}).get("present")) if isinstance(item.get("tls_rpt"), dict) else None
+                _dns_presence(item, "tls_rpt") if isinstance(item.get("tls_rpt"), dict) else None
             ),
             tls_rpt_rua=(item.get("tls_rpt") or {}).get("rua") if isinstance(item.get("tls_rpt"), dict) else None,
-            bimi_present=bool((item.get("bimi") or {}).get("present")),
+            bimi_present=_dns_presence(item, "bimi"),
             bimi_logo_https=(item.get("bimi") or {}).get("logo_url_is_https"),
         )
         for item in _values(collector_payloads.get("dns_posture", {}), "domainPosture")
@@ -2763,6 +2846,21 @@ def build_normalized_snapshot(
         for section, payload in normalize_directory_relationships(directory_payload).items():
             records_by_section[section] = payload["records"]
 
+    # The effective administrator set comes first: the break-glass check reads the roles each account holds and the
+    # administrator MFA verdict reads who the administrators are.
+    effective_admin_records = _build_effective_admin_records(
+        sources,
+        collector_payloads,
+        result_rows,
+        users=users,
+        groups=groups,
+        service_principals=service_principals,
+        role_definitions=role_definitions,
+        role_assignments=role_assignments,
+        governance_objects=governance_objects,
+        group_membership_edges=group_membership_edges,
+    )
+    configured_break_glass = break_glass.configured_accounts(break_glass_accounts)
     (
         conditional_access_graph_records,
         relationships,
@@ -2777,7 +2875,9 @@ def build_normalized_snapshot(
         auth_contexts=_values(collector_payloads.get("conditional_access", {}), "authenticationContextClassReferences"),
         auth_methods_payload=collector_payloads.get("auth_methods", {}),
         values=_values,
-        break_glass_accounts=break_glass.configured_accounts(break_glass_accounts),
+        break_glass_accounts=configured_break_glass,
+        admin_rows=effective_admin_records,
+        membership_edges=group_membership_edges,
     )
     if break_glass_record:
         records_by_section[break_glass.SECTION] = [break_glass_record]
@@ -2793,21 +2893,12 @@ def build_normalized_snapshot(
         users=users,
         groups=groups,
         role_definitions=role_definitions,
+        admin_records=effective_admin_records,
+        break_glass_accounts=configured_break_glass,
+        membership_edges=group_membership_edges,
     )
     if identity_control_verdicts:
         records_by_section[IDENTITY_CONTROL_SECTION] = identity_control_verdicts
-    effective_admin_records = _build_effective_admin_records(
-        sources,
-        collector_payloads,
-        result_rows,
-        users=users,
-        groups=groups,
-        service_principals=service_principals,
-        role_definitions=role_definitions,
-        role_assignments=role_assignments,
-        governance_objects=governance_objects,
-        group_membership_edges=group_membership_edges,
-    )
     if effective_admin_records:
         records_by_section[EFFECTIVE_ADMIN_SECTION] = effective_admin_records
 
@@ -2845,6 +2936,18 @@ def build_normalized_snapshot(
     collection_gaps = collection_gap_records(sorted(gap_truncations, key=lambda item: (item["collector"], item["list"])))
     if collection_gaps:
         records_by_section[COLLECTION_GAP_SECTION] = collection_gaps
+    # Event logs read as a sample by design (the newest events), cut at that bound: not a gap, but the rules that read
+    # them cannot call "no finding" a pass. The time span says how far back the sample reaches.
+    bounded_samples = bounded_sample_records(
+        coverage_rows,
+        collector_payloads,
+        spans={
+            ("security", "signIns"): event_span(row.get("created") for row in security_signin_events),
+            ("security", "directoryAudits"): event_span(row.get("activity_time") for row in security_directory_audit_events),
+        },
+    )
+    if bounded_samples:
+        records_by_section[BOUNDED_SAMPLE_SECTION] = bounded_samples
 
     object_counts = {name: len(records) for name, records in records_by_section.items() if records}
     full_counts, sample_counts, chunk_counts, truncated_sections, chunk_paths = _collector_count_summaries(

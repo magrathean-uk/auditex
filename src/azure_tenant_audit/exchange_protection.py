@@ -147,6 +147,8 @@ def custom_domains(snapshot: Mapping[str, Any] | None) -> list[str]:
 
 def dns_reports_dkim_missing(record: Mapping[str, Any]) -> bool:
     """Whether ``dns_posture.dkim_missing`` fires for this DNS posture record (kept in step with findings.py)."""
+    if record.get("resolver_error"):
+        return False
     return not record.get("managed_by_microsoft") and not record.get("dkim_selectors_present")
 
 

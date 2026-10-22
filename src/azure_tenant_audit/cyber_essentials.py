@@ -13,7 +13,13 @@ verdict at all:
   they have, but never ``pass``: rules that cover only part of a requirement
   finding no gap say nothing about the rest. A clean result is recorded as
   ``not_assessed`` with the reason ``partial_requirement_no_gap_found``, and the
-  ``evidence`` counts show what was evaluated.
+  ``evidence`` counts show what was evaluated. A row whose deciding rules were not
+  all evaluated is ``not_assessed`` with the reason ``rules_not_evaluated`` and the
+  per-rule reasons in ``not_assessed_reasons``.
+* A rule mapped with the confidence ``supporting`` is listed with its status but
+  never decides the row: it is a signal the requirement does not itself set (an
+  administrator count, a compliance state). A row mapped only to supporting rules
+  reads ``not_assessed`` with the reason ``supporting_evidence_only``.
 * ``manual``, ``ce_plus_assessor_test`` and ``provider_responsibility``
   requirements are always ``not_assessed``. Rules mapped to them are listed as
   supporting evidence and never produce a ``pass`` for the requirement. An
@@ -34,9 +40,12 @@ VERDICT_REQUIREMENT_STATUSES = frozenset({"automated", "partial"})
 # A partial requirement can fail on the part it covers but a clean result is not a pass.
 PARTIAL_REQUIREMENT_STATUS = "partial"
 PARTIAL_NO_GAP_REASON = "partial_requirement_no_gap_found"
-MAPPING_CONFIDENCE_VALUES = ("full", "partial")
-# A mapping without a declared confidence is read as the weaker claim.
+SUPPORTING_CONFIDENCE = "supporting"
+MAPPING_CONFIDENCE_VALUES = ("full", "partial", SUPPORTING_CONFIDENCE)
+# A mapping without a declared confidence is read as the weaker claim that can still decide a row.
 DEFAULT_MAPPING_CONFIDENCE = "partial"
+RULES_NOT_EVALUATED_REASON = "rules_not_evaluated"
+SUPPORTING_ONLY_REASON = "supporting_evidence_only"
 NOT_ASSESSED = "not_assessed"
 _FINDING_ID_LIMIT = 20
 
@@ -58,6 +67,7 @@ def _evidence_counts(evaluations: list[dict[str, Any]], open_finding_count: int)
         "rules_failed": statuses.count("fail"),
         "rules_accepted_risk": statuses.count("accepted_risk"),
         "rules_not_assessed": statuses.count(NOT_ASSESSED),
+        "rules_supporting": sum(1 for item in evaluations if item.get("confidence") == SUPPORTING_CONFIDENCE),
         "open_findings": open_finding_count,
     }
 
@@ -80,13 +90,23 @@ def _requirement_row(
         evaluations.append(evaluation)
     finding_ids = sorted({finding_id for rule_id in rule_ids for finding_id in open_by_rule.get(rule_id, [])})
     reason: str | None = None
+    # A supporting rule is shown but never decides the row.
+    deciding = [item for item in evaluations if item["confidence"] != SUPPORTING_CONFIDENCE]
+    not_assessed_reasons: list[str] = []
     if requirement_status in VERDICT_REQUIREMENT_STATUSES:
-        status = control_status([str(item["status"]) for item in evaluations])
+        status = control_status([str(item["status"]) for item in deciding])
         if not rule_ids:
             reason = "no_mapped_rules"
+        elif not deciding:
+            reason = SUPPORTING_ONLY_REASON
         elif status == "pass" and requirement_status == PARTIAL_REQUIREMENT_STATUS:
             status = NOT_ASSESSED
             reason = PARTIAL_NO_GAP_REASON
+        elif status == NOT_ASSESSED:
+            reason = RULES_NOT_EVALUATED_REASON
+            not_assessed_reasons = sorted(
+                {str(item["reason"]) for item in deciding if not item.get("evaluated") and item.get("reason")}
+            )
     else:
         # No verdict is allowed here whatever the mapped rules say.
         status = NOT_ASSESSED
@@ -110,6 +130,12 @@ def _requirement_row(
         row["ce_plus_test"] = spec["ce_plus_test"]
     if reason:
         row["reason"] = reason
+    if not_assessed_reasons:
+        row["not_assessed_reasons"] = not_assessed_reasons
+    if status == "fail":
+        # A failure rests on full confidence only when a failing rule tests the condition the requirement names.
+        failing = [item for item in deciding if item["status"] == "fail"]
+        row["confidence"] = "full" if any(item["confidence"] == "full" for item in failing) else "partial"
     return row
 
 

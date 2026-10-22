@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from azure_tenant_audit.baselines import rule_inputs_gap, rule_judged_on_inputs, unmet_rule_collectors
+from azure_tenant_audit.bundle_integrity import integrity_failed
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.rule_parameters import recorded_rule_parameters, rule_parameter_gap
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
 from .run_bundle import RunBundle
@@ -31,8 +33,10 @@ def _parse_utc(value: Any) -> datetime | None:
 
 
 def _run_metadata(run_dir: Path) -> dict[str, Any]:
-    metadata = RunBundle(run_dir).metadata()
+    bundle = RunBundle(run_dir)
+    metadata = bundle.metadata()
     metadata["_created_at"] = _parse_utc(metadata.get("created_utc"))
+    metadata["verification"] = run_verification(bundle)
     return metadata
 
 
@@ -152,6 +156,11 @@ def _compare_pair(
     same_tenant = context["same_tenant"]
     if not same_tenant and not allow_cross_tenant:
         return _blocked_diff(left_run, right_run, "same_tenant_required")
+    for side, run in (("baseline", left_run), ("current", right_run)):
+        problem = (run.get("verification") or {}).get("problem")
+        if problem:
+            # A run whose hash manifest or recorded contract fails is not the bundle that was finalized.
+            return _blocked_diff(left_run, right_run, f"run_unverified:{side}:{problem}")
     diff = diff_run_directories(left_run["path"], right_run["path"], classic=classic)
     diff["left_run"] = _public_run(left_run)
     diff["right_run"] = _public_run(right_run)
@@ -296,10 +305,79 @@ class NormalizedSections(Mapping[str, Any]):
         return sum(1 for _ in self)
 
 
+# Google Workspace rules whose verdict also needs collectors beyond the finding's own, and the snapshot
+# status that decides whether the evidence was there. The Microsoft 365 rule maps in baselines.py know no
+# ``google.*`` rule, so a Google finding that vanished because its inputs went unknown would read resolved.
+_GOOGLE_TWO_STEP_COLLECTORS = ("google_directory", "google_policies")
+_GOOGLE_EXTERNAL_PRINCIPAL_RULES = frozenset(
+    {
+        "google.group_external_member",
+        "google.gmail_external_forwarding",
+        "google.gmail_external_forwarding_address_ready",
+        "google.gmail_filter_external_forwarding",
+        "google.gmail_hidden_forwarding_filter",
+        "google.gmail_external_send_as",
+        "google.gmail_external_delegate",
+        "google.drive_external_permission",
+        "google.drive_domain_permission",
+        "google.calendar_external_acl",
+        "google.calendar_domain_acl",
+    }
+)
+
+
+def _snapshot_value(snapshot: Mapping[str, Any] | None, key: str) -> Any:
+    if snapshot is None:
+        return None
+    try:
+        section = snapshot["snapshot"]
+    except KeyError:
+        return None
+    return section.get(key) if isinstance(section, Mapping) else None
+
+
+def google_reassessment_gap(
+    rule_id: str, coverage: Mapping[str, Mapping[str, Any]], snapshot: Mapping[str, Any] | None
+) -> str | None:
+    """Why a vanished Google Workspace finding cannot be called resolved, or ``None``.
+
+    The 2-step verification rules read the organisation policy (``google_policies`` placed with the
+    ``google_directory`` org units): both collectors must have completed and the policy status must be
+    known. The external-principal rules do not run when the internal domains are unknown. Without the
+    later run's snapshot a rule with an input check is not reassessed.
+    """
+    if "_2sv_" in rule_id:
+        for name in _GOOGLE_TWO_STEP_COLLECTORS:
+            row = coverage.get(name)
+            if row is None:
+                return f"rule_collector_not_run:{name}"
+            if not row["complete"]:
+                return f"rule_collector_{row['status']}:{name}"
+        status = _snapshot_value(snapshot, "two_step_policy_status")
+        if status is None:
+            return "rule_inputs:two_step_policy_not_collected"
+        if str(status) == "unknown":
+            return "rule_inputs:two_step_policy_unknown"
+    elif rule_id in _GOOGLE_EXTERNAL_PRINCIPAL_RULES:
+        row = coverage.get("google_directory")
+        if row is None:
+            return "rule_collector_not_run:google_directory"
+        if not row["complete"]:
+            return f"rule_collector_{row['status']}:google_directory"
+        status = _snapshot_value(snapshot, "internal_domains_status")
+        if status is None:
+            return "rule_inputs:internal_domains_not_collected"
+        if str(status) == "unknown":
+            return "rule_inputs:internal_domains_unknown"
+    return None
+
+
 def reassessment_gap(
     finding: dict[str, Any],
     coverage: dict[str, dict[str, Any]],
     snapshot: Mapping[str, Any] | None = None,
+    *,
+    parameters: tuple[Mapping[str, Any] | None, Mapping[str, Any] | None] | None = None,
 ) -> str | None:
     """Why a finding that is gone from a later run cannot be called resolved, or ``None``.
 
@@ -310,7 +388,9 @@ def reassessment_gap(
     unknown in the later run (an administrator set or an MFA verdict that could not be established):
     its finding vanished because the evidence did, not because the problem was fixed. ``snapshot``
     is the later run's normalized sections; without it, a rule that has an input check is not
-    reassessed.
+    reassessed. ``parameters`` is the (baseline, later) pair of ``rule_parameters`` the two runs
+    recorded: a rule judged with a larger window in the later run, or whose window one of the runs did
+    not record, cannot be called resolved.
     """
     collector = str(finding.get("collector") or "")
     if not collector:
@@ -336,18 +416,57 @@ def reassessment_gap(
     inputs = rule_inputs_gap(rule_id, snapshot)
     if inputs:
         return f"rule_inputs:{inputs}"
+    if rule_id.startswith("google."):
+        google_gap = google_reassessment_gap(rule_id, coverage, snapshot)
+        if google_gap:
+            return google_gap
+    if parameters is not None:
+        return rule_parameter_gap(rule_id, parameters[0], parameters[1])
     return None
+
+
+def run_verification(bundle: RunBundle) -> dict[str, Any]:
+    """Whether a run is the bundle that was finalized: its hash manifest and its recorded contract.
+
+    ``problem`` is ``bundle_integrity_mismatch``, ``bundle_integrity_invalid`` or ``contract_invalid``
+    when the run cannot be trusted as written, else ``None``. A bundle finalized before the hash
+    manifest existed reads ``absent`` (unverified, not a problem). Comparison does not recompute the
+    structural validation; ``auditex gate-drift`` does.
+    """
+    integrity = bundle.integrity()
+    _, validation = bundle.validation()
+    recorded_invalid = isinstance(validation, Mapping) and validation.get("valid") is False
+    problem: str | None = None
+    if integrity_failed(integrity):
+        problem = f"bundle_integrity_{integrity.get('status')}"
+    elif recorded_invalid or bundle.manifest().get("contract_status") == "invalid":
+        problem = "contract_invalid"
+    return {"integrity": integrity.get("status"), "problem": problem}
 
 
 def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
     """Summarise findings that are new, resolved, not reassessed, or changed between two runs.
 
     A finding that is absent from the later run is ``resolved`` only if its collector
-    completed there; otherwise it is ``not_reassessed`` with a ``reason``.
+    completed there, its rule's inputs were known and it was judged with the same or a stricter
+    window; otherwise it is ``not_reassessed`` with a ``reason``. When either run fails
+    ``run_verification`` (its hash manifest or recorded contract), no finding is called resolved.
     """
-    left_rows = RunBundle(Path(str(left_run.get("path")))).finding_rows() if left_run.get("path") else []
+    left_bundle = RunBundle(Path(str(left_run.get("path")))) if left_run.get("path") else None
+    left_rows = left_bundle.finding_rows() if left_bundle else []
     right_bundle = RunBundle(Path(str(right_run.get("path")))) if right_run.get("path") else None
     right_rows = right_bundle.finding_rows() if right_bundle else []
+    verification = {
+        "baseline": run_verification(left_bundle) if left_bundle else {"integrity": None, "problem": None},
+        "current": run_verification(right_bundle) if right_bundle else {"integrity": None, "problem": None},
+    }
+    unverified = next(
+        (f"run_unverified:{side}:{item['problem']}" for side, item in verification.items() if item["problem"]), None
+    )
+    parameters = (
+        recorded_rule_parameters(left_bundle.manifest()) if left_bundle else None,
+        recorded_rule_parameters(right_bundle.manifest()) if right_bundle else None,
+    )
     right_coverage = right_bundle.collector_coverage() if right_bundle else {}
     right_sections = NormalizedSections(right_bundle) if right_bundle else None
     left = {_finding_key(row): row for row in left_rows}
@@ -366,7 +485,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
     resolved: list[dict[str, Any]] = []
     not_reassessed: list[dict[str, Any]] = []
     for key in sorted(set(left) - set(right)):
-        gap = reassessment_gap(left[key], right_coverage, right_sections)
+        gap = unverified or reassessment_gap(left[key], right_coverage, right_sections, parameters=parameters)
         if gap is None:
             resolved.append(_summary(left[key]))
         else:
@@ -387,6 +506,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
         "resolved": resolved,
         "not_reassessed": not_reassessed,
         "changed": changed,
+        "verification": verification,
         "risk_before": _risk_snapshot(left_run, left_rows),
         "risk_after": _risk_snapshot(right_run, right_rows),
     }
@@ -429,6 +549,18 @@ def _finding_table(title: str, rows: list[dict[str, Any]], *, changed: bool = Fa
     return lines + [""]
 
 
+def _verification_text(verification: Mapping[str, Mapping[str, Any]]) -> str:
+    parts = []
+    for side in ("baseline", "current"):
+        item = verification.get(side) or {}
+        state = item.get("problem") or f"hash manifest {item.get('integrity') or 'unknown'}"
+        parts.append(f"{side} {state}")
+    text = "; ".join(parts)
+    if any((verification.get(side) or {}).get("problem") for side in ("baseline", "current")):
+        text += " (no finding is called resolved)"
+    return text
+
+
 def render_compare_markdown(result: dict[str, Any]) -> str:
     """Render a readable before/after summary of the baseline (first vs last) comparison."""
     runs = [row for row in result.get("runs") or [] if isinstance(row, dict)]
@@ -460,6 +592,7 @@ def render_compare_markdown(result: dict[str, Any]) -> str:
         f"- Not reassessed findings: {len(delta['not_reassessed'])} ({_severity_counts(delta['not_reassessed'])})",
         f"- Changed findings: {len(delta['changed'])} ({_severity_counts(delta['changed'])})",
         f"- Object changes: {_md(summary.get('added', 0))} added, {_md(summary.get('removed', 0))} removed, {_md(summary.get('changed', 0))} changed",
+        "- Run verification: " + _md(_verification_text(delta["verification"])),
         "",
     ]
     lines += _finding_table("New findings", delta["new"])

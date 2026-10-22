@@ -8,8 +8,13 @@ The check here is narrow on purpose:
   out, and a policy whose grant is a session control or a password change is not a lock-out risk. A
   policy that requires a compliant or hybrid-joined device with no MFA alternative is judged, at
   medium: an emergency account used from an unmanaged device would be refused.
-* A policy is judged only when it can reach the accounts: it targets all users, targets administrator
-  roles, or names one of the accounts or groups itself.
+* A policy is judged only when it can reach the accounts: it targets all users, targets a role the
+  accounts hold, or names one of the accounts or groups itself. A policy aimed at a role none of the
+  accounts holds, or at a user action or an authentication context (which cannot block a sign-in), is
+  not judged. When the roles of the accounts cannot be established (the operator listed a group, or an
+  object ID the run did not collect) a role-targeted policy is judged, but never graded high.
+* An account counts as excluded when the policy excludes it, a group it belongs to (as far as the run read
+  the group's members: role-assignable groups), or, for inferred accounts, the Global Administrator role.
 * The accounts come from the operator when they supply them (``--break-glass-accounts`` or
   ``AUDITEX_BREAK_GLASS_ACCOUNTS``: object IDs, user principal names, or the group the policies
   exclude). Without a list the accounts are inferred, and an inference is weaker evidence: users and
@@ -116,6 +121,10 @@ class BreakGlassAccounts:
         label_of: Mapping[str, str],
         role_ids: set[str] | None = None,
         unresolved: list[str] | None = None,
+        roles_held: Mapping[str, set[str]] | None = None,
+        roles_unknown: bool = False,
+        global_admin_role_ids: set[str] | None = None,
+        group_members: Mapping[str, set[str]] | None = None,
     ) -> None:
         self.source = source
         self.state = state
@@ -125,11 +134,30 @@ class BreakGlassAccounts:
         self.labels = [self.label_of[identifier] for identifier in sorted(self.label_of)]
         self.role_ids = role_ids or set()
         self.unresolved = unresolved or []
+        # Lower-case user ID -> lower-case ids of the directory roles the user holds (any route the run read).
+        self.roles_held = {key: set(value) for key, value in (roles_held or {}).items()}
+        # True when an account is a group or an object the run did not collect: its roles cannot be listed.
+        self.roles_unknown = roles_unknown
+        self.global_admin_role_ids = global_admin_role_ids or set()
+        # Lower-case group ID -> lower-case ids of the members the run read.
+        self.group_members = {key: set(value) for key, value in (group_members or {}).items()}
+
+    def held_roles(self) -> set[str]:
+        """Every directory role one of the accounts holds."""
+        return {role for roles in self.roles_held.values() for role in roles}
 
     def covers(self, targeting: Mapping[str, Any]) -> list[str]:
-        """Labels of the accounts a policy excludes, by user or group (or, for inferred accounts, role)."""
-        excluded = set(_lower([*targeting.get("exclude_users", []), *targeting.get("exclude_groups", [])]))
-        hits = [self.label_of[identifier] for identifier in sorted(self.label_of) if identifier in excluded]
+        """Labels of the accounts a policy excludes: by user or group, by a group the run read the members of, or (inferred accounts) by role."""
+        excluded_groups = set(_lower(targeting.get("exclude_groups", [])))
+        excluded = set(_lower(targeting.get("exclude_users", []))) | excluded_groups
+        member_of_excluded = {
+            member for group in excluded_groups for member in self.group_members.get(group, ())
+        }
+        hits = [
+            self.label_of[identifier]
+            for identifier in sorted(self.label_of)
+            if identifier in excluded or identifier in member_of_excluded
+        ]
         if self.role_ids & set(_lower(targeting.get("exclude_roles", []))):
             hits.append("a role the policy excludes")
         return hits
@@ -142,12 +170,18 @@ def resolve_accounts(
     groups: Sequence[Mapping[str, Any]],
     role_assignments: Sequence[Mapping[str, Any]],
     role_definitions: Sequence[Mapping[str, Any]],
+    admin_rows: Sequence[Mapping[str, Any]] = (),
+    membership_edges: Sequence[Mapping[str, Any]] = (),
 ) -> BreakGlassAccounts:
     """Resolve the operator's list against the collected identity data, or infer the accounts.
 
     An entry resolves to a user (object ID, user principal name or mail) or a group (object ID or
     display name). An object ID that is not in the collected users or groups is still matched against
     the policies' exclusions as given.
+
+    ``admin_rows`` (the effective administrator set's rows) and ``role_assignments`` give the roles each
+    user holds, so a role-targeted policy is judged only when it can reach an account. ``membership_edges``
+    (members of role-assignable groups) let a group the policy excludes cover the accounts in it.
     """
     user_by_key: dict[str, Mapping[str, Any]] = {}
     for user in users:
@@ -159,6 +193,34 @@ def resolve_accounts(
         for key in (group.get("id"), group.get("displayName")):
             if key:
                 group_by_key.setdefault(str(key).lower(), group)
+
+    role_by_id = {str(role.get("id")): role for role in role_definitions if role.get("id")}
+    global_admin_role_ids = {
+        str(role["id"]).lower() for role in role_definitions if str(role.get("displayName") or "").lower() == _GLOBAL_ADMINISTRATOR
+    }
+    roles_by_principal: dict[str, set[str]] = {}
+    for assignment in role_assignments:
+        principal, role_id = assignment.get("principalId"), assignment.get("roleDefinitionId")
+        if isinstance(principal, str) and principal and role_id:
+            roles_by_principal.setdefault(principal.lower(), set()).add(str(role_id).lower())
+    for row in admin_rows:
+        principal = row.get("principal_id")
+        if not principal:
+            continue
+        for role in row.get("roles") or []:
+            if role.get("role_definition_id"):
+                roles_by_principal.setdefault(str(principal).lower(), set()).add(str(role["role_definition_id"]).lower())
+            if role.get("global_administrator") and role.get("role_definition_id"):
+                global_admin_role_ids.add(str(role["role_definition_id"]).lower())
+    group_members: dict[str, set[str]] = {}
+    for edge in membership_edges:
+        if edge.get("relationship") == "member" and edge.get("group_id") and edge.get("member_id"):
+            group_members.setdefault(str(edge["group_id"]).lower(), set()).add(str(edge["member_id"]).lower())
+
+    def role_view(label_of: Mapping[str, str]) -> tuple[dict[str, set[str]], bool]:
+        user_ids = {str(user["id"]).lower() for user in users if user.get("id")}
+        held = {key: roles_by_principal.get(key, set()) for key in label_of if key in user_ids}
+        return held, any(key not in user_ids for key in label_of)
 
     label_of: dict[str, str] = {}
     if configured:
@@ -175,11 +237,16 @@ def resolve_accounts(
                 label_of[key] = entry
             else:
                 unresolved.append(entry)
+        held, unknown = role_view(label_of)
         return BreakGlassAccounts(
             source=SOURCE_OPERATOR,
             state=STATE_ASSESSED if label_of else STATE_UNRESOLVED,
             label_of=label_of,
             unresolved=unresolved,
+            roles_held=held,
+            roles_unknown=unknown,
+            global_admin_role_ids=global_admin_role_ids,
+            group_members=group_members,
         )
 
     for user in users:
@@ -190,7 +257,6 @@ def resolve_accounts(
         name = str(group.get("displayName") or "").lower()
         if group.get("id") and any(signal in name for signal in _NAME_SIGNALS):
             label_of[str(group["id"]).lower()] = str(group.get("displayName") or group["id"])
-    role_by_id = {str(role.get("id")): role for role in role_definitions if role.get("id")}
     role_ids: set[str] = set()
     for assignment in role_assignments:
         role = role_by_id.get(str(assignment.get("roleDefinitionId")))
@@ -202,11 +268,16 @@ def resolve_accounts(
             role_ids.add(str(role["id"]).lower())
             user = user_by_key.get(identifier)
             label_of.setdefault(identifier, str((user or {}).get("userPrincipalName") or principal))
+    held, unknown = role_view(label_of)
     return BreakGlassAccounts(
         source=SOURCE_INFERRED if label_of else SOURCE_NONE,
         state=STATE_ASSESSED if label_of else STATE_NO_ACCOUNTS,
         label_of=label_of,
         role_ids=role_ids,
+        roles_held=held,
+        roles_unknown=unknown,
+        global_admin_role_ids=global_admin_role_ids,
+        group_members=group_members,
     )
 
 
@@ -231,15 +302,22 @@ def enforcement(targeting: Mapping[str, Any]) -> str | None:
 def applies_to_accounts(targeting: Mapping[str, Any], accounts: BreakGlassAccounts) -> str | None:
     """Why a policy can reach the break-glass accounts, or ``None`` when it cannot be shown to.
 
-    ``all_users`` and ``administrator_roles`` are certain reaches; ``names_account`` is a policy whose
-    include list names an account or group directly. A policy aimed at other groups or users is not
-    judged: the membership of a group the run did not read cannot be assumed.
+    ``all_users`` and ``administrator_roles`` are certain reaches (the latter only when the policy includes
+    a role one of the accounts holds); ``administrator_roles_unverified`` is a role-targeted policy when the
+    roles of the accounts cannot be listed (a group, or an object the run did not collect); ``names_account``
+    is a policy whose include list names an account or group directly. A policy aimed at other groups or
+    users, or at roles none of the accounts holds, is not judged: the membership of a group the run did not
+    read cannot be assumed.
     """
     include_users = _lower(targeting.get("include_users") or [])
     if "all" in include_users:
         return "all_users"
-    if targeting.get("include_roles"):
-        return "administrator_roles"
+    include_roles = set(_lower(targeting.get("include_roles") or []))
+    if include_roles:
+        if include_roles & accounts.held_roles():
+            return "administrator_roles"
+        if accounts.roles_unknown:
+            return "administrator_roles_unverified"
     named = set(include_users) | set(_lower(targeting.get("include_groups") or []))
     return "names_account" if named & accounts.ids else None
 
@@ -254,13 +332,20 @@ def _legacy_clients_only(targeting: Mapping[str, Any]) -> bool:
     return bool(client_types) and client_types <= _LEGACY_CLIENT_TYPES
 
 
-def is_broad(targeting: Mapping[str, Any], enforces: str, reach: str) -> bool:
+def is_broad(targeting: Mapping[str, Any], enforces: str, reach: str, accounts: BreakGlassAccounts | None = None) -> bool:
     """A lock-out of every administrator is possible: MFA, or a block that is not legacy-protocol only,
-    over all users or the administrator roles and over all applications. A device requirement can be met
-    by enrolling a device, so it is judged but never broad."""
+    over all users or over Global Administrator, and over all applications. A device requirement can be met
+    by enrolling a device, so it is judged but never broad. A policy for another administrator role (Helpdesk
+    Administrator, say) cannot lock a Global Administrator out, so it is judged but not broad."""
     if enforces == ENFORCES_DEVICE:
         return False
     if reach not in {"all_users", "administrator_roles"} or not _applies_to_all_applications(targeting):
+        return False
+    if (
+        reach == "administrator_roles"
+        and accounts is not None
+        and not set(_lower(targeting.get("include_roles") or [])) & accounts.global_admin_role_ids
+    ):
         return False
     return enforces == ENFORCES_MFA or not _legacy_clients_only(targeting)
 
@@ -269,11 +354,14 @@ def assess_policy(targeting: Mapping[str, Any], state: str, accounts: BreakGlass
     """Whether one policy is in scope for the check, and whether it excludes the accounts.
 
     ``in_scope`` needs an enabled policy that enforces MFA or blocks and can reach the accounts.
-    ``missing`` is an in-scope policy that excludes none of them.
+    ``missing`` is an in-scope policy that excludes none of them. A policy aimed at a user action or an
+    authentication context is not a sign-in control and is never in scope.
     """
     result: dict[str, Any] = {"in_scope": False, "missing": False}
     enforces = enforcement(targeting)
     if state != "enabled" or enforces is None or accounts.state != STATE_ASSESSED:
+        return result
+    if targeting.get("include_user_actions") or targeting.get("include_authentication_contexts"):
         return result
     reach = applies_to_accounts(targeting, accounts)
     if reach is None:
@@ -284,7 +372,7 @@ def assess_policy(targeting: Mapping[str, Any], state: str, accounts: BreakGlass
             "in_scope": True,
             "enforces": enforces,
             "reach": reach,
-            "broad": is_broad(targeting, enforces, reach),
+            "broad": is_broad(targeting, enforces, reach, accounts),
             "excluded_accounts": excluded,
             "missing": not excluded,
         }

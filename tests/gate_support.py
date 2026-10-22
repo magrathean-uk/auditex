@@ -54,6 +54,9 @@ def finding(
         ],
     }
     if waiver is not None:
+        # apply_waivers attaches the waiver row it matched, which always names the finding or its rule.
+        if not (waiver.get("finding_id") or waiver.get("rule_id")):
+            waiver = {**waiver, "rule_id": row["rule_id"]}
         row["waiver"] = waiver
         row["waiver_applied"] = True
     return row
@@ -62,6 +65,19 @@ def finding(
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def rehash(run_dir: Path) -> None:
+    """Rewrite bundle-hashes.json for the files as they stand, as finalization would.
+
+    The helpers below edit a finalized bundle to set up a scenario; the gate checks the hash manifest, so
+    each helper re-hashes afterwards. Tests that exercise tampering edit files directly and do not call it.
+    """
+    from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, build_bundle_hash_manifest
+
+    manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    payload = build_bundle_hash_manifest(run_dir, run_id=manifest.get("run_id"), created_utc=manifest.get("created_utc"))
+    (run_dir / BUNDLE_HASHES_PATH).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def read_json(path: Path) -> Any:
@@ -77,6 +93,7 @@ def _update_manifest(run_dir: Path, **changes: Any) -> None:
         else:
             manifest[key] = value
     _write_json(manifest_path, manifest)
+    rehash(run_dir)
 
 
 def set_findings_file(run_dir: Path, findings: list[dict[str, Any]] | None) -> None:
@@ -98,6 +115,7 @@ def set_pack_findings(run_dir: Path, findings: list[dict[str, Any]]) -> None:
     kept = {row.get("id") for row in findings}
     report["proof_table"] = [row for row in report.get("proof_table") or [] if row.get("finding_id") in kept]
     _write_json(report_path, report)
+    rehash(run_dir)
 
 
 def write_findings(run_dir: Path, findings: list[dict[str, Any]], *, pack: bool = True, file: bool = True) -> None:
@@ -123,6 +141,7 @@ def set_admin_set(run_dir: Path, state: str = "complete", reasons: tuple[str, ..
         "licence_state": "known",
     }
     _write_json(run_dir / "normalized" / "effective_admin_set.json", {"kind": "effective_admin_set", "records": [summary]})
+    rehash(run_dir)
 
 
 def set_coverage(run_dir: Path, statuses: dict[str, str], *, overall_status: str | None = None) -> None:
@@ -138,3 +157,4 @@ def set_coverage(run_dir: Path, statuses: dict[str, str], *, overall_status: str
         manifest = read_json(manifest_path)
         manifest["overall_status"] = overall_status
         _write_json(manifest_path, manifest)
+    rehash(run_dir)

@@ -8,7 +8,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qsl, unquote, urlparse
 
 from .adapters.read_guard import CommandRefused, check_m365_command, m365_command_words, words_are_read
 
@@ -231,6 +231,10 @@ def _collector_plan(
 
 _GUID = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
 _OPAQUE_ID = re.compile(r"^[0-9A-Za-z_=\-]{24,}$")
+# Graph resource names are letters-only camelCase (``deviceCompliancePolicies``); an opaque identifier almost
+# always carries a digit or base64 punctuation. A long letters-only segment is therefore a name, and templating
+# it would merge sibling endpoints and blind the outside-declared check.
+_OPAQUE_ID_MARKS = re.compile(r"[0-9_=\-]")
 _CONTENT_PATHS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -238,15 +242,32 @@ _CONTENT_PATHS = tuple(
         r"(?:^|/)attachments(?:/|$)",
         r"/\$value$",
         r"/content$",  # driveItem and OneNote page content
-        r"^/(?:users/\{id\}|me|groups/\{id\})/(?:calendar/)?events(?:/|$)",  # calendar event bodies
+        # calendar event bodies, whichever way the calendar is reached (default, by id, or inside a group)
+        r"^/(?:users/\{id\}|me|groups/\{id\})/(?:calendar/|calendars/\{id\}/|calendarGroups/\{id\}/calendars/\{id\}/)?(?:events|calendarView)(?:/|$)",
         r"(?:^|/)onenote(?:/|$)",
         r"^/search/query$",
+        r"(?:^|/)(?:threads|conversations|posts)(?:/|$)",  # group conversation posts
+        r"(?:^|/)getAllMessages(?:\(|/|$)",  # tenant-wide chat messages
+        r"(?:^|/)lists/\{id\}/items(?:/|$)",  # SharePoint list item fields
+        r"(?:^|/)todo/lists/\{id\}/tasks(?:/|$)",  # To Do task titles and bodies
     )
 )
 # Microsoft service-health posts, not user content.
 _CONTENT_EXEMPT_PREFIXES = ("/admin/serviceAnnouncement",)
 _CONTENT_SELECT_FIELDS = frozenset({"body", "bodypreview", "uniquebody", "content"})
+# ``$expand`` names a related collection to inline; these carry user content.
+_CONTENT_EXPAND_FIELDS = frozenset(
+    {"body", "uniquebody", "content", "messages", "attachments", "events", "posts", "threads", "conversations", "items"}
+)
+_EXPAND_NAME = re.compile(r"[A-Za-z_]+")
 _CMDLET = re.compile(r"^[A-Za-z]+-[A-Za-z0-9]+$")
+
+
+def _is_identifier(segment: str) -> bool:
+    """Whether a path segment is an object identifier rather than a resource name."""
+    if _GUID.match(segment) or "@" in segment or segment.isdigit():
+        return True
+    return bool(_OPAQUE_ID.match(segment) and _OPAQUE_ID_MARKS.search(segment))
 
 
 def endpoint_template(url: str, *, default_version: str | None = "v1.0") -> tuple[str, str | None]:
@@ -268,7 +289,7 @@ def endpoint_template(url: str, *, default_version: str | None = "v1.0") -> tupl
         name, paren, _ = segment.partition("(")
         if paren:
             parts.append(f"{name}(...)")
-        elif _GUID.match(segment) or _OPAQUE_ID.match(segment) or "@" in segment or segment.isdigit():
+        elif _is_identifier(segment):
             parts.append("{id}")
         else:
             parts.append(segment)
@@ -290,7 +311,25 @@ def _content_reason(template: str, params: Any) -> str | None:
         fields = {item.strip().lower() for item in selected.split(",") if item.strip()}
         if fields & _CONTENT_SELECT_FIELDS:
             return "$select requests a body field"
+        expanded = {name.lower() for name in _EXPAND_NAME.findall(str(params.get("$expand") or ""))}
+        if expanded & _CONTENT_EXPAND_FIELDS:
+            return "$expand requests content"
     return None
+
+
+def _request_params(url: str, params: Any) -> dict[str, Any]:
+    """The query a request carried: its logged parameters plus any query string left inside the URL.
+
+    A next-page link or a ``$batch`` inner URL carries ``$select`` and ``$expand`` in the URL itself, so a
+    body request inside it must be judged the same as one passed as a parameter.
+    """
+    merged: dict[str, Any] = dict(params) if isinstance(params, Mapping) else {}
+    for key, value in parse_qsl(urlparse(url).query, keep_blank_values=True):
+        if key in {"$select", "$expand"} and merged.get(key):
+            merged[key] = f"{merged[key]},{value}"
+        else:
+            merged.setdefault(key, value)
+    return merged
 
 
 class AuditEvents(list):
@@ -443,6 +482,9 @@ def observe_audit_events(
     graph_writes: list[dict[str, Any]] = []
     graph_content: dict[tuple[str, str], dict[str, Any]] = {}
     graph_refused: list[dict[str, Any]] = []
+    # Redirect hops the client followed (host and path only; the query of a download URL is a credential).
+    graph_redirects: dict[tuple[str, str, str], dict[str, Any]] = {}
+    redirects_refused = 0
     commands: dict[tuple[str, str], dict[str, Any]] = {}
     command_pending: dict[str, list[dict[str, Any]]] = {}
     command_writes: dict[tuple[str, str], dict[str, Any]] = {}
@@ -495,17 +537,17 @@ def observe_audit_events(
                     for inner_url in inner_urls if isinstance(inner_urls, list) else []:
                         batch_inner += 1
                         inner_template, _ = endpoint_template(_text(inner_url), default_version=version)
-                        record_graph("UNVERIFIED", inner_template, version, None)
+                        record_graph("UNVERIFIED", inner_template, version, _request_params(_text(inner_url), None))
                     continue
                 for inner_url in inner_urls:
                     batch_inner += 1
                     inner_template, _ = endpoint_template(_text(inner_url), default_version=version)
-                    record_graph("GET", inner_template, version, None)
+                    record_graph("GET", inner_template, version, _request_params(_text(inner_url), None))
                 for inner_method in sorted(inner_methods - {"GET"}):
                     graph_writes.append({"method": inner_method, "endpoint": "/$batch", "via": "$batch"})
                 continue
             template, version = endpoint_template(url)
-            entry = record_graph(method, template, version, details.get("params"))
+            entry = record_graph(method, template, version, _request_params(url, details.get("params")))
             graph_pending.setdefault((method, url, details.get("attempt")), []).append(entry)
             if method != "GET":
                 graph_writes.append({"method": method, "endpoint": template})
@@ -519,6 +561,15 @@ def observe_audit_events(
             graph_refused.append(
                 {"method": _text(details.get("method")).upper(), "endpoint": template, "reason": _text(details.get("reason"))}
             )
+        elif name == "graph.request.redirect":
+            origin, _ = endpoint_template(_text(details.get("from_path")))
+            hop = graph_redirects.setdefault(
+                (origin, _text(details.get("host")), _text(details.get("path"))),
+                {"from": origin, "host": _text(details.get("host")), "path": _text(details.get("path")), "count": 0},
+            )
+            hop["count"] += 1
+        elif name == "graph.request.redirect_refused":
+            redirects_refused += 1
         elif name in {"graph.token.requested", "graph.token.interactive"}:
             auth["token_requests"] += 1
         elif name == "graph.token.succeeded":
@@ -598,6 +649,8 @@ def observe_audit_events(
             "content_read_calls": [graph_content[key] for key in sorted(graph_content)],
             "refused": graph_refused[:_MAX_LISTED],
             "refused_count": len(graph_refused),
+            "redirects": [graph_redirects[key] for key in sorted(graph_redirects)][:_MAX_LISTED],
+            "redirects_refused": redirects_refused,
         },
         "commands": {
             "executed": _sorted_entries(commands),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 import sys
 import types
@@ -1360,13 +1361,22 @@ def test_report_verify_pack_accepts_relative_output_dir_paths(tmp_path: Path, mo
     capsys.readouterr()
 
     manifest = json.loads((workspace / output_dir / "pack-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["output_dir"] == "customer-pack"
-    assert manifest["generated_files"][0]["path"] == "customer-pack/handoff.md"
+    # The pack carries pack-relative paths, not the writer's working directory.
+    assert manifest["output_dir"] == "." and manifest["path_style"] == "pack_relative"
+    assert manifest["generated_files"][0]["path"] == "handoff.md"
+    assert manifest["pack_manifest_path"] == "pack-manifest.json"
+    assert manifest["run_dir"] == run_dir.name
 
     assert auditex_cli.main(["report", "verify-pack", str(output_dir)]) == 0
     verification = json.loads(capsys.readouterr().out)
     assert verification["valid"] is True
     assert verification["issue_count"] == 0
+
+    # A pack that was moved elsewhere still verifies.
+    moved = tmp_path / "elsewhere" / "received-pack"
+    shutil.copytree(workspace / output_dir, moved)
+    assert auditex_cli.main(["report", "verify-pack", str(moved)]) == 0
+    assert json.loads(capsys.readouterr().out)["valid"] is True
 
 
 def test_report_verify_pack_detects_tampered_file(tmp_path: Path, capsys) -> None:

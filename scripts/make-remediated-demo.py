@@ -164,18 +164,19 @@ def remediate(source: dict) -> tuple[dict, list[str]]:
             changes.append("Enabled the 'Block legacy authentication' policy, excluding the emergency access group.")
 
     legacy_consent = "ManagePermissionGrantsForSelf.microsoft-user-default-legacy"
-    limited_consent = "ManagePermissionGrantsForSelf.microsoft-user-default-low"
     consent_changed = False
     for collector in ("consent_policy", "external_identity"):
         for policy in _values(data, collector, "authorizationPolicy"):
             assigned = (policy.get("defaultUserRolePermissions") or {}).get("permissionGrantPoliciesAssigned")
             if isinstance(assigned, list) and legacy_consent in assigned:
+                # CIS 5.1.5.1 asks for no user consent at all: limited consent (verified publishers, low-risk
+                # permissions) still lets users grant access, so the twin assigns no self-service policy.
                 policy["defaultUserRolePermissions"]["permissionGrantPoliciesAssigned"] = [
-                    limited_consent if item == legacy_consent else item for item in assigned
+                    item for item in assigned if item != legacy_consent
                 ]
                 consent_changed = True
     if consent_changed:
-        changes.append("Limited user consent to verified publishers and low-risk permissions.")
+        changes.append("Turned user consent off, so applications need administrator consent.")
 
     provenance = data.setdefault("_fixture_provenance", {})
     provenance.update(
