@@ -250,6 +250,26 @@ def test_finalize_bundle_contract_is_idempotent_for_byte_stable_artifacts(
     )
 
 
+def test_finalize_writes_a_hash_manifest_that_survives_a_second_finalize(tmp_path: Path) -> None:
+    from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundle_hashes
+
+    writer, kwargs = _prepare_bundle_for_finalize(tmp_path)
+
+    finalize_bundle_contract(**kwargs)
+    first = verify_bundle_hashes(writer.run_dir)
+    finalize_bundle_contract(**kwargs)
+    second = verify_bundle_hashes(writer.run_dir)
+
+    assert first["status"] == second["status"] == "verified"
+    assert first["checked_count"] == second["checked_count"] > 10
+    manifest = json.loads((writer.run_dir / BUNDLE_HASHES_PATH).read_text(encoding="utf-8"))
+    assert manifest["run_id"] == writer.run_id
+    # The manifest hashes the evidence index as a whole file, not a stub with its data in a -wal sidecar.
+    (index_row,) = [row for row in manifest["artifacts"] if row["path"] == "index/evidence.sqlite"]
+    assert index_row["bytes"] == (writer.run_dir / "index" / "evidence.sqlite").stat().st_size > 4096
+    assert BUNDLE_HASHES_PATH in json.loads((writer.run_dir / "ai_context.json").read_text(encoding="utf-8"))["artifacts"]["root"]
+
+
 def test_finalize_evidence_db_is_logically_idempotent(tmp_path: Path) -> None:
     writer, kwargs = _prepare_bundle_for_finalize(tmp_path)
 

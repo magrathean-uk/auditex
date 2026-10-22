@@ -4,6 +4,7 @@ import csv
 import hashlib
 import html
 import json
+import re
 import shutil
 from collections.abc import Iterable, Mapping
 from io import StringIO
@@ -11,11 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.autopilot import build_basic_license_intelligence
+from azure_tenant_audit.bundle_integrity import integrity_failed
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.waivers import accepted_risk_summary
 
-from .run_bundle import RunBundle
+from .run_bundle import RunBundle, summarize_recomputed_validation
 
 DEFAULT_SECTION_REGISTRY_PATH = Path("configs/report-sections.json")
 FORMAT_EXTENSIONS = {
@@ -35,6 +37,18 @@ _SARIF_LEVELS = {
     "info": "none",
     "informational": "none",
 }
+class BundleIntegrityError(RuntimeError):
+    """A customer pack was requested for a bundle that changed since it was finalized or no longer validates.
+
+    ``integrity`` is the hash check; ``validation`` is the recomputed validation (empty when it passed).
+    """
+
+    def __init__(self, message: str, integrity: Mapping[str, Any], validation: Mapping[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.integrity = dict(integrity)
+        self.validation = dict(validation or {})
+
+
 AUDITEX_SARIF_TOOL_URI = "https://github.com/magrathean-uk/auditex"
 AUDITEX_OSCAL_NS = "https://magrathean.uk/auditex/oscal"
 
@@ -759,6 +773,38 @@ def _reviewer_summary(
     }
 
 
+def _integrity_summary(result: Mapping[str, Any]) -> dict[str, Any]:
+    """The hash check as the handoff and the customer pack carry it."""
+    status = str(result.get("status") or "absent")
+    modified = [str(row.get("path")) for row in result.get("modified") or [] if isinstance(row, Mapping)]
+    missing = [str(item) for item in result.get("missing") or []]
+    if status == "verified":
+        text = f"{result.get('checked_count')} artifact(s) match the hashes recorded when the run was finalized."
+    elif status == "mismatch":
+        text = (
+            f"{result.get('modified_count')} artifact(s) changed and {result.get('missing_count')} are missing "
+            "since the run was finalized."
+        )
+    elif status == "invalid":
+        text = str(result.get("message") or "The bundle hash manifest cannot be read.")
+    else:
+        text = "No bundle hash manifest: this run was finalized before one was written, so its artifacts cannot be checked."
+    return {
+        "status": status,
+        "summary": text,
+        "path": result.get("path"),
+        "algorithm": result.get("algorithm"),
+        "checked_count": result.get("checked_count"),
+        "modified_count": result.get("modified_count"),
+        "missing_count": result.get("missing_count"),
+        "unlisted_count": result.get("unlisted_count"),
+        "modified_paths": modified,
+        "missing_paths": missing,
+        "unlisted_paths": [str(item) for item in result.get("unlisted") or []],
+        "manifest_sha256": result.get("manifest_sha256"),
+    }
+
+
 def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     bundle = RunBundle(run_path)
@@ -805,13 +851,51 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
         limitations.append(blocked_collectors_limitation)
     limitations.extend(_collector_issue_limitations(bundle.finding_rows()))
 
+    integrity = _integrity_summary(bundle.integrity())
+    if integrity_failed(integrity):
+        limitations.append(
+            {
+                "surface": "bundle_integrity",
+                "status": integrity["status"],
+                "message": integrity["summary"],
+                "paths": [*integrity["modified_paths"], *integrity["missing_paths"]][:10],
+            }
+        )
+    recomputed = _mapping(bundle.recomputed_validation())
+    recomputed_summary = summarize_recomputed_validation(recomputed, validation)
+    recomputed_failed = recomputed.get("valid") is False
+    if recomputed_failed:
+        limitations.append(
+            {
+                "surface": "contract_validation",
+                "status": "legacy_unresolved_refs" if recomputed_summary["only_legacy_unresolved_refs"] else "recomputed_invalid",
+                "message": recomputed_summary["summary"],
+                "error_count": recomputed_summary["error_count"],
+                "legacy_unresolved_ref_count": recomputed_summary["legacy_unresolved_ref_count"],
+            }
+        )
     validation_valid = validation.get("valid") if validation else None
     read_only = data_handling.get("read_only") is not False and api_safety.get("read_only") is not False
     no_content_reads = data_handling.get("content_reads") is not True and api_safety.get("no_content_reads") is not False
     write_actions = data_handling.get("write_actions") is True or api_safety.get("write_actions") is True
     unsupported_claims = [str(item) for item in proof.get("unsupported_claims") or [] if str(item)]
 
-    if validation_valid is False or not read_only or not no_content_reads or write_actions:
+    status_reasons = [
+        reason
+        for reason, failed in (
+            ("validation_invalid", validation_valid is False),
+            (
+                "legacy_unresolved_refs" if recomputed_summary["only_legacy_unresolved_refs"] else "recomputed_validation_failed",
+                recomputed_failed,
+            ),
+            (f"bundle_integrity_{integrity['status']}", integrity_failed(integrity)),
+            ("not_read_only", not read_only),
+            ("content_reads", not no_content_reads),
+            ("write_actions", write_actions),
+        )
+        if failed
+    ]
+    if status_reasons:
         status = "unusable"
     elif validation_valid is None or not api.get("present") or not proof.get("present"):
         status = "incomplete"
@@ -873,6 +957,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
     return {
         "run_dir": str(run_path),
         "handoff_status": status,
+        "status_reasons": status_reasons,
         "citations": citations,
         "citation_summary": build_citation_summary(citations),
         "tenant": {
@@ -888,7 +973,9 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "error_count": validation.get("error_count"),
             "warning_count": validation.get("warning_count"),
             "path": str(validation_path) if validation_path is not None else str(run_path / validation_relative),
+            "recomputed": recomputed_summary,
         },
+        "integrity": integrity,
         "validation_summary": validation_summary,
         "safety": {
             "read_only": read_only,
@@ -1018,11 +1105,14 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
         "# Auditex Enterprise Handoff",
         "",
         f"- Run: {_markdown_cell(payload.get('run_dir'))}",
-        f"- Status: {_markdown_cell(payload.get('handoff_status'))}",
+        f"- Status: {_markdown_cell(payload.get('handoff_status'))}"
+        + (f" ({_markdown_cell(', '.join(payload.get('status_reasons') or []))})" if payload.get("status_reasons") else ""),
         f"- Tenant: {_markdown_cell(tenant.get('name'))}",
         f"- Platform: {_markdown_cell(tenant.get('platform'))}",
         f"- Contract valid: {_markdown_cell(contract.get('valid'))}",
         f"- Validation: {_markdown_cell(validation_summary.get('status'))} / {_markdown_cell(validation_summary.get('issue_count'))} issues",
+        f"- Recomputed validation: {_markdown_cell(_mapping(contract.get('recomputed')).get('valid'))}",
+        f"- Bundle integrity: {_markdown_cell(_mapping(payload.get('integrity')).get('status'))}",
         f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
         f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
@@ -1167,6 +1257,7 @@ _CUSTOMER_SAFE_SOURCE_ARTIFACTS: tuple[tuple[str, str], ...] = (
     ("reports/report-pack.json", "Executive report pack, findings, proof table, limitations, and QA."),
     ("validation.json", "Bundle contract validation result."),
     ("ai_context.json", "AI-safe bundle context and artifact index."),
+    ("bundle-hashes.json", "SHA-256 of every run artifact as it was when the run was finalized."),
 )
 
 
@@ -1233,6 +1324,7 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         f"- Tenant: {_markdown_cell(tenant.get('name'))}",
         f"- Platform: {_markdown_cell(tenant.get('platform'))}",
         f"- Validation: {_markdown_cell(validation_summary.get('status'))}",
+        f"- Bundle integrity: {_markdown_cell(_mapping(source.get('integrity')).get('status'))}",
         f"- Read-only: {_markdown_cell(safety.get('read_only'))}",
         f"- No content reads: {_markdown_cell(safety.get('no_content_reads'))}",
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
@@ -1290,9 +1382,25 @@ def _write_checksums(pack_dir: Path, rows: list[dict[str, Any]]) -> dict[str, An
 def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     target_dir = Path(output_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
 
     handoff_payload = enterprise_handoff(run_path)
+    integrity = _mapping(handoff_payload.get("integrity"))
+    recomputed = _mapping(_mapping(handoff_payload.get("contract")).get("recomputed"))
+    # A pack vouches for the bundle it was built from: refuse one that changed since it was finalized,
+    # and one that does not validate as it stands (whatever validation.json recorded).
+    if integrity_failed(integrity):
+        raise BundleIntegrityError(
+            f"refusing to create a customer pack from {run_path}: {integrity.get('summary')}",
+            integrity,
+            recomputed if recomputed.get("valid") is False else None,
+        )
+    if recomputed.get("valid") is False:
+        raise BundleIntegrityError(
+            f"refusing to create a customer pack from {run_path}: {recomputed.get('summary')}",
+            integrity,
+            recomputed,
+        )
+    target_dir.mkdir(parents=True, exist_ok=True)
     api_payload = api_call_inventory(run_path)
     permissions_payload = permissions_ledger(run_path)
     proof_payload = proof_table(run_path)
@@ -1323,6 +1431,7 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         "source": {
             "tenant": handoff_payload.get("tenant"),
             "contract": handoff_payload.get("contract"),
+            "integrity": integrity,
             "validation_summary": handoff_payload.get("validation_summary"),
             "safety": handoff_payload.get("safety"),
             "quality": handoff_payload.get("quality"),
@@ -1472,6 +1581,13 @@ def verify_enterprise_handoff_pack(pack_dir: str | Path) -> dict[str, Any]:
         add_issue(
             "invalid_manifest_validation_summary",
             "pack-manifest.json validation_summary does not match handoff.json.",
+            path=str(manifest_path),
+        )
+    manifest_integrity = _mapping(source_payload.get("integrity"))
+    if manifest_integrity and manifest_integrity != _mapping(handoff_payload.get("integrity")):
+        add_issue(
+            "invalid_manifest_integrity",
+            "pack-manifest.json integrity does not match handoff.json.",
             path=str(manifest_path),
         )
     if not manifest_reviewer_summary:
@@ -2497,6 +2613,20 @@ def render_sarif(
         }
         if partial_fingerprints:
             result_entry["partialFingerprints"] = partial_fingerprints
+        confidence = _text(finding.get("confidence"))
+        if confidence:
+            result_entry["properties"]["auditex.confidence"] = confidence
+        evidence = [
+            {
+                key: ref[key]
+                for key in ("artifact_path", "record_key", "json_pointer", "content_hash", "resolved")
+                if ref.get(key) not in (None, "")
+            }
+            for ref in (finding.get("evidence_refs") or [])[:10]
+            if isinstance(ref, Mapping)
+        ]
+        if evidence:
+            result_entry["properties"]["auditex.evidence"] = evidence
         results.append(result_entry)
 
     return {
@@ -2525,14 +2655,79 @@ def render_sarif(
     }
 
 
+def _oscal_timestamp(value: Any) -> str | None:
+    """An ISO 8601 time as the OSCAL ``date-time-with-timezone`` the schema expects, or ``None``."""
+    from datetime import datetime, timezone
+
+    text = _text(value).strip()
+    if not text:
+        return None
+    try:
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _oscal_token(value: str) -> str:
+    """An OSCAL token (an XML NCName): letters, digits, ``.``, ``-`` and ``_``, not starting with a digit."""
+    token = re.sub(r"[^\w.\-]", "_", value.strip(), flags=re.UNICODE)
+    if not token or not (token[0].isalpha() or token[0] == "_"):
+        token = f"_{token}"
+    return token
+
+
+def _oscal_props(*pairs: tuple[str, str], **extra: str) -> list[dict[str, str]]:
+    """OSCAL properties, leaving out any with an empty value (the schema allows none)."""
+    return [{"name": name, "value": value, **extra} for name, value in pairs if value and value.strip()]
+
+
+def _oscal_evidence(refs: Any) -> list[dict[str, Any]]:
+    """``relevant-evidence`` for an observation: where in the bundle the finding's records are."""
+    from urllib.parse import quote
+
+    evidence: list[dict[str, Any]] = []
+    for ref in refs if isinstance(refs, list) else []:
+        if not isinstance(ref, Mapping) or not _text(ref.get("artifact_path")).strip():
+            continue
+        href = quote(_text(ref.get("artifact_path")).strip(), safe="/")
+        pointer = _text(ref.get("json_pointer")).strip()
+        if pointer.startswith("/"):
+            href = f"{href}#{quote(pointer, safe='/')}"
+        resolved = ref.get("resolved")
+        props = _oscal_props(
+            ("record-key", _text(ref.get("record_key"))),
+            ("sha256", _text(ref.get("content_hash"))),
+            ("resolved", "true" if resolved is True else "false" if resolved is False else ""),
+        )
+        row: dict[str, Any] = {
+            "href": href,
+            "description": f"{_text(ref.get('artifact_kind'), 'artifact')} {_text(ref.get('record_key'))}".strip(),
+        }
+        if props:
+            row["props"] = props
+        evidence.append(row)
+        if len(evidence) >= 10:
+            break
+    return evidence
+
+
 def render_oscal(
     *,
     findings: list[dict[str, Any]] | None,
     summary: Mapping[str, Any] | None,
     manifest: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    """OSCAL Assessment Results 1.1.2 for the findings of a run.
+
+    The collection time is the run manifest's ``created_utc`` (an observation takes the earliest
+    ``collected_at`` of its own evidence); only a bundle with no usable ``created_utc`` falls back
+    to the export time, and says so in the result's ``auditex.collection_time_basis`` property.
+    """
     import uuid as _uuid
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     findings_rows = [dict(item) for item in (findings or []) if isinstance(item, Mapping)]
     summary_dict = _mapping(summary)
@@ -2541,6 +2736,15 @@ def render_oscal(
     platform_label = _provider_label(platform)
 
     now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    collected = _oscal_timestamp(manifest_dict.get("created_utc") or summary_dict.get("created_utc"))
+    time_basis = "run_manifest_created_utc" if collected else "export_time"
+    collected = collected or now
+    ended = collected
+    duration = manifest_dict.get("duration_seconds")
+    if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+        ended = (
+            datetime.strptime(collected, "%Y-%m-%dT%H:%M:%SZ") + timedelta(seconds=float(duration))
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
     assessment_uuid = _text(manifest_dict.get("run_id") or summary_dict.get("run_id"))
     if not assessment_uuid:
         assessment_uuid = str(_uuid.uuid4())
@@ -2548,54 +2752,110 @@ def render_oscal(
     observations: list[dict[str, Any]] = []
     findings_oscal: list[dict[str, Any]] = []
     for finding in findings_rows:
+        finding_key = _text(finding.get("id")) or _text(finding.get("rule_id"))
         observation_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/observation/{_text(finding.get('id'))}"))
         finding_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/finding/{_text(finding.get('id'))}"))
         framework_mappings = finding.get("framework_mappings") if isinstance(finding.get("framework_mappings"), Mapping) else {}
-        target_ids: list[str] = []
+        control_props: list[dict[str, str]] = []
         for framework in sorted(framework_mappings):
             controls = framework_mappings.get(framework)
             if not isinstance(controls, list):
                 continue
-            for control in controls:
-                control_text = _text(control).strip()
-                if not control_text:
-                    continue
-                target_ids.append(control_text)
-                target_ids.append(f"{framework}:{control_text}")
-        observations.append(
-            {
-                "uuid": observation_uuid,
-                "title": _text(finding.get("title")) or _text(finding.get("rule_id")) or _text(finding.get("id")),
-                "description": _text(finding.get("description")) or _text(finding.get("title")) or "",
-                "methods": ["EXAMINE"],
-                "collected": now,
-                "subjects": [
-                    {"uuid-ref": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/subject/{_text(item)}")), "title": _text(item)}
-                    for item in (finding.get("affected_objects") or [])
-                ],
-                "props": [
-                    {"name": "auditex.finding_id", "value": _text(finding.get("id"))},
-                    {"name": "auditex.severity", "value": _text(finding.get("severity"))},
-                    {"name": "auditex.collector", "value": _text(finding.get("collector"))},
-                ],
-            }
+            for control in sorted({_text(item).strip() for item in controls if _text(item).strip()}):
+                control_props.append(
+                    {"name": "framework-control", "class": _oscal_token(_text(framework)), "value": control}
+                )
+        evidence_times = sorted(
+            stamp
+            for stamp in (
+                _oscal_timestamp(ref.get("collected_at"))
+                for ref in (finding.get("evidence_refs") or [])
+                if isinstance(ref, Mapping)
+            )
+            if stamp
         )
-        findings_oscal.append(
+        title = _text(finding.get("title")) or _text(finding.get("rule_id")) or _text(finding.get("id")) or "Auditex finding"
+        description = _text(finding.get("description")) or title
+        observation: dict[str, Any] = {
+            "uuid": observation_uuid,
+            "title": title,
+            "description": description,
+            "methods": ["EXAMINE"],
+            "collected": evidence_times[0] if evidence_times else collected,
+            "props": _oscal_props(
+                ("auditex.finding_id", _text(finding.get("id"))),
+                ("auditex.severity", _text(finding.get("severity"))),
+                ("auditex.collector", _text(finding.get("collector"))),
+                ("auditex.confidence", _text(finding.get("confidence"))),
+            ),
+        }
+        subjects = [
             {
-                "uuid": finding_uuid,
-                "title": _text(finding.get("title")) or _text(finding.get("rule_id")) or _text(finding.get("id")),
-                "description": _text(finding.get("description")) or _text(finding.get("title")) or "",
-                "target-ids": sorted(set(target_ids)),
-                "remediation": _text(finding.get("remediation")) or "",
-                "related-observations": [{"observation-uuid": observation_uuid}],
-                "props": [
-                    {"name": "auditex.finding_id", "value": _text(finding.get("id"))},
-                    {"name": "auditex.severity", "value": _text(finding.get("severity"))},
-                    {"name": "auditex.rule_id", "value": _text(finding.get("rule_id"))},
-                ],
+                "subject-uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/subject/{_text(item)}")),
+                "type": "inventory-item",
+                "title": _text(item),
             }
-        )
+            for item in (finding.get("affected_objects") or [])
+            if _text(item).strip()
+        ]
+        if subjects:
+            observation["subjects"] = subjects
+        evidence = _oscal_evidence(finding.get("evidence_refs"))
+        if evidence:
+            observation["relevant-evidence"] = evidence
+        observations.append(observation)
+        finding_entry: dict[str, Any] = {
+            "uuid": finding_uuid,
+            "title": title,
+            "description": description,
+            "props": [
+                *_oscal_props(
+                    ("auditex.finding_id", _text(finding.get("id"))),
+                    ("auditex.severity", _text(finding.get("severity"))),
+                    ("auditex.rule_id", _text(finding.get("rule_id"))),
+                ),
+                *control_props,
+            ],
+            # OSCAL ties a finding to one objective: the Auditex rule. The framework controls the rule
+            # maps to are the ``framework-control`` properties above.
+            "target": {
+                "type": "objective-id",
+                "target-id": _oscal_token(_text(finding.get("rule_id")) or finding_key or "auditex"),
+                "title": title,
+                "status": {"state": "not-satisfied", "reason": "fail"},
+            },
+            "related-observations": [{"observation-uuid": observation_uuid}],
+        }
+        remediation = _text(finding.get("remediation")).strip()
+        if remediation:
+            finding_entry["remarks"] = remediation
+        findings_oscal.append(finding_entry)
 
+    result: dict[str, Any] = {
+        "uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/result/{assessment_uuid}")),
+        "title": "Auditex audit findings",
+        "description": "Findings produced by Auditex collectors and rules.",
+        "start": collected,
+        "end": ended,
+        "props": _oscal_props(("auditex.collection_time_basis", time_basis)),
+        # OSCAL Assessment Results 1.1.2 requires ``reviewed-controls``
+        # on each result. ``include-all: {}`` is the canonical "all
+        # controls in scope" selector: auditex's findings are not
+        # scoped per-control at the result level, the framework
+        # mappings on each finding handle that.
+        "reviewed-controls": {
+            "control-selections": [
+                {
+                    "description": "Controls reviewed by Auditex collectors and rules",
+                    "include-all": {},
+                }
+            ]
+        },
+    }
+    if observations:
+        result["observations"] = observations
+    if findings_oscal:
+        result["findings"] = findings_oscal
     return {
         "assessment-results": {
             "uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/assessment/{assessment_uuid}")),
@@ -2607,30 +2867,7 @@ def render_oscal(
                 "props": [{"name": "auditex.platform", "value": platform}],
             },
             "import-ap": {"href": "#auditex-assessment-plan"},
-            "results": [
-                {
-                    "uuid": str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{AUDITEX_OSCAL_NS}/result/{assessment_uuid}")),
-                    "title": "Auditex audit findings",
-                    "description": "Findings produced by Auditex collectors and rules.",
-                    "start": now,
-                    "end": now,
-                    # OSCAL Assessment Results 1.1.2 requires ``reviewed-controls``
-                    # on each result. ``include-all: {}`` is the canonical "all
-                    # controls in scope" selector — auditex's findings are not
-                    # scoped per-control at the result level, the framework
-                    # mappings on each finding handle that.
-                    "reviewed-controls": {
-                        "control-selections": [
-                            {
-                                "description": "Controls reviewed by Auditex collectors and rules",
-                                "include-all": {},
-                            }
-                        ]
-                    },
-                    "observations": observations,
-                    "findings": findings_oscal,
-                }
-            ],
+            "results": [result],
         }
     }
 

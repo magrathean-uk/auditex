@@ -23,12 +23,14 @@ repos:
       entry: "python3 -c 'import pathlib,sys; bad=[];\nfor f in sys.argv[1:]:\n p=pathlib.Path(f);\n if not p.is_file(): continue\n try: data=p.read_bytes()\n except Exception: continue\n if b'\"'\"'\\0'\"'\"' in data: continue\n if any(line.rstrip(b'\"'\"'\\r\\n'\"'\"').endswith((b'\"'\"' '\"'\"',b'\"'\"'\\t'\"'\"')) for line in data.splitlines(True)): bad.append(f)\nprint('\"'\"'trailing whitespace in:\\n'\"'\"'+'\"'\"'\\n'\"'\"'.join(bad) if bad else '\"'\"''\"'\"', end='\"'\"''\"'\"'); sys.exit(1 if bad else 0)'"
       language: system
       types: [text]
-      exclude: ^src/auditex/explorer_assets/fonts/OFL\.txt$
+      # Vendored files stay byte for byte as published.
+      exclude: ^(src/auditex/explorer_assets/fonts/OFL\.txt|tests/schemas/)
     - id: check-final-newline-local
       name: final newline check-only
       entry: "python3 -c 'import pathlib,sys; bad=[];\nfor f in sys.argv[1:]:\n p=pathlib.Path(f);\n if not p.is_file(): continue\n try: data=p.read_bytes()\n except Exception: continue\n if data and not data.endswith((b'\"'\"'\\n'\"'\"', b'\"'\"'\\r\\n'\"'\"')): bad.append(f)\nprint('\"'\"'missing final newline in:\\n'\"'\"'+'\"'\"'\\n'\"'\"'.join(bad) if bad else '\"'\"''\"'\"', end='\"'\"''\"'\"'); sys.exit(1 if bad else 0)'"
       language: system
       types: [text]
+      exclude: ^tests/schemas/
     - id: gitleaks-local
       name: gitleaks staged secret scan
       entry: gitleaks git --pre-commit --redact --staged --verbose

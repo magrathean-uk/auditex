@@ -7,7 +7,7 @@ from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT
 from azure_tenant_audit.collectors.base import CollectorResult, context_limit, record_truncation
 from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT, DohClient, DohError, collect_domain_posture
 
-from .client import classify_google_error
+from .client import classify_google_error, minimise_gmail_settings
 
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
@@ -399,7 +399,7 @@ class GoogleGmailSettingsCollector:
                 continue
             start = time.perf_counter()
             try:
-                rows.append(client.get_gmail_settings_for_user(user_email))
+                rows.append(minimise_gmail_settings(client.get_gmail_settings_for_user(user_email)))
                 status = "ok"
                 error_class = None
                 error = None

@@ -14,7 +14,7 @@ auditex doctor --json
 auditex --help
 ```
 
-`make install` does the same in `.venv` (or the folder named by `VENV=`), creating it when missing, and never installs into a system Python. Google Workspace needs `python -m pip install -e '.[google]'`; MCP needs `python -m pip install -e '.[mcp]'`. `auditex setup` installs local tools. Its `--mcp`, `--exchange`, and `--pwsh` options install optional tooling, so use them only for the intended scope.
+`make install` does the same in `.venv` (or the folder named by `VENV=`), creating it when missing, and never installs into a system Python. It installs the `test` extra too (pytest and jsonschema), so a fresh `make test` has what the export-schema tests need. Google Workspace needs `python -m pip install -e '.[google]'`; MCP needs `python -m pip install -e '.[mcp]'`. `auditex setup` installs local tools. Its `--mcp`, `--exchange`, and `--pwsh` options install optional tooling, so use them only for the intended scope.
 
 ## Plan access and probe
 
@@ -84,7 +84,7 @@ Comparison suppresses selected volatile timestamp changes by default; `--classic
 
 ## Development and release checks
 
-Install pytest for development: `python -m pip install -e . pytest`.
+Install the test dependencies for development: `python -m pip install -e '.[test]'` (pytest, and jsonschema, which the SARIF and OSCAL export tests use to validate against the official schemas in `tests/schemas/`).
 
 | Check | What it exercises |
 | --- | --- |

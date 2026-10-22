@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from azure_tenant_audit.data_minimisation import minimise_gmail_settings
+
 
 class GoogleWorkspaceError(RuntimeError):
     def __init__(self, message: str, *, surface: str | None = None) -> None:
@@ -227,7 +229,7 @@ class GoogleWorkspaceClient:
         _capture("pop", lambda: settings.getPop(userId=user_email).execute(), default={})
         _capture("vacation", lambda: settings.getVacation(userId=user_email).execute(), default={})
         _capture("delegates", lambda: settings.delegates().list(userId=user_email).execute(), list_key="delegates", default=[])
-        return payload
+        return minimise_gmail_settings(payload)
 
     def list_drive_files(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("drive", "v3")

@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 
 from ..secret_hygiene import redact_command_string, redact_text
 from .base import Adapter, AdapterMetadata
+from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
 
 
 _ORGANIZATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.onmicrosoft\.(?:com|us|de|cn)")
@@ -80,13 +81,13 @@ class PowerShellGraphAdapter(Adapter):
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
         session: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        safe_command = redact_command_string(command)
-        exe = shutil.which("pwsh")
-        if exe is None:
-            if log_event:
-                log_event("command.failed", "PowerShell executable not found", {"command": safe_command})
-            return {"error": "command_not_found:pwsh", "error_class": "command_not_found", "command": safe_command}
-
+        # An adapter that already checked the caller's command (Microsoft365DSC) passes the wrapped
+        # text as VettedCommand; the audit log then records the command that was checked.
+        vetted = isinstance(command, VettedCommand)
+        logged_command = command.vetted_text if vetted else command
+        adapter_label = command.source_adapter if vetted else self.name
+        command_words: tuple[str, ...] = command.command_words if vetted else ()
+        safe_command = redact_command_string(logged_command)
         script = command.strip()
         if script.startswith("pwsh"):
             parts = shlex.split(script)
@@ -95,12 +96,39 @@ class PowerShellGraphAdapter(Adapter):
         if not script:
             return {"error": "command_empty", "error_class": "command_parse_error", "command": safe_command}
 
+        if not vetted:
+            try:
+                command_words = check_command(self.name, script)
+            except CommandRefused as exc:
+                if log_event:
+                    log_event(
+                        "command.refused",
+                        "Command refused before execution: not on the read allowlist",
+                        {"adapter": adapter_label, "command": safe_command, "reason": exc.reason},
+                    )
+                return refusal_response(safe_command, exc)
+
+        exe = shutil.which("pwsh")
+        if exe is None:
+            if log_event:
+                log_event("command.failed", "PowerShell executable not found", {"command": safe_command})
+            return {"error": "command_not_found:pwsh", "error_class": "command_not_found", "command": safe_command}
+
         env = dict(os.environ)
         prelude = self._session_prelude(session, env)
         prepared = f"{prelude}{script} | ConvertTo-Json -Depth 20 -Compress"
         try:
             if log_event:
-                log_event("command.started", "PowerShell command started", {"command": safe_command, "executable": exe})
+                log_event(
+                    "command.started",
+                    "PowerShell command started",
+                    {
+                        "adapter": adapter_label,
+                        "command": safe_command,
+                        "command_words": list(command_words),
+                        "executable": exe,
+                    },
+                )
 
             start = time.time()
             result = subprocess.run(
@@ -120,7 +148,9 @@ class PowerShellGraphAdapter(Adapter):
                     "command.completed",
                     "PowerShell command completed",
                     {
+                        "adapter": adapter_label,
                         "command": safe_command,
+                        "command_words": list(command_words),
                         "return_code": result.returncode,
                         "duration_ms": duration_ms,
                         "stdout_bytes": len(stdout),

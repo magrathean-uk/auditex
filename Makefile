@@ -30,7 +30,7 @@ audit-full:
 .PHONY: install
 install:
 	@test -x "$(VENV)/bin/python" || $(PYTHON) -m venv "$(VENV)"
-	"$(VENV)/bin/python" -m pip install -e .
+	"$(VENV)/bin/python" -m pip install -e ".[test]"
 
 .PHONY: bootstrap
 bootstrap:

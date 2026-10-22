@@ -4,13 +4,15 @@ Targets the #1 BEC indicator: rules that forward to external recipients or
 hide messages from the user (move to RSS Feeds, Junk, or Deleted Items with a
 broad subject filter). Reads via Microsoft Graph so a Global Reader / Global
 Admin with `MailboxSettings.Read` can audit a tenant without Exchange Online
-PowerShell. Message content is never read, so `Mail.Read` is not requested.
+PowerShell. Message content is never read, so `Mail.Read` is not requested. Auto-reply message
+bodies come back with mailboxSettings and are dropped before they reach raw or normalized output.
 """
 from __future__ import annotations
 
 import time
 from typing import Any, Callable, Iterable, Optional
 
+from ..data_minimisation import minimise_mailbox_settings
 from ..graph import GraphClient, GraphError
 from .base import Collector, CollectorResult, _classify_graph_error
 
@@ -268,7 +270,7 @@ class MailboxForwardingCollector(Collector):
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
         if not isinstance(response, dict):
             response = {}
-        return response, {
+        return minimise_mailbox_settings(response), {
             "collector": self.name,
             "type": "graph",
             "name": f"mailboxSettings:{user_id}",

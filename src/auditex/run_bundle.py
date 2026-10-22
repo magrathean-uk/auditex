@@ -70,9 +70,47 @@ def _path_text(path: Path) -> str:
     return str(path)
 
 
+def summarize_recomputed_validation(recomputed: Mapping[str, Any], recorded: Mapping[str, Any]) -> dict[str, Any]:
+    """The recomputed validation as the handoff carries it, with legacy citations told apart.
+
+    A ``legacy_unresolved_ref`` is a citation written by a version older than the contract that
+    required references to resolve; it fails validation but is not evidence the bundle was edited.
+    """
+    errors = [
+        issue
+        for issue in recomputed.get("issues") or []
+        if isinstance(issue, Mapping) and issue.get("severity") == "error"
+    ]
+    legacy = [issue for issue in errors if issue.get("code") == "legacy_unresolved_ref"]
+    only_legacy = bool(errors) and len(legacy) == len(errors)
+    if recomputed.get("valid") is not False:
+        text = "The bundle validates as it stands."
+    elif only_legacy:
+        text = (
+            f"{len(legacy)} evidence reference(s) do not resolve; they were written by a version older than the "
+            "contract that requires references to resolve, so this is a legacy bundle, not a sign of editing."
+        )
+    else:
+        text = f"The bundle does not validate as it stands ({len(errors)} error(s))."
+    return {
+        "valid": recomputed.get("valid"),
+        "issue_count": recomputed.get("issue_count"),
+        "error_count": recomputed.get("error_count"),
+        "warning_count": recomputed.get("warning_count"),
+        # False when validation.json records a different verdict than the bundle gives now.
+        "matches_validation_json": (recomputed.get("valid") == recorded.get("valid")) if recomputed and recorded else None,
+        "legacy_unresolved_ref_count": len(legacy),
+        "only_legacy_unresolved_refs": only_legacy,
+        "issue_codes": sorted({str(issue.get("code")) for issue in errors})[:20],
+        "summary": text,
+    }
+
+
 class RunBundle:
     def __init__(self, run_dir: str | Path) -> None:
         self.run_dir = Path(run_dir)
+        self._integrity: dict[str, Any] | None = None
+        self._recomputed_validation: dict[str, Any] | None = None
 
     def path(self, relative: str) -> Path:
         return self.run_dir / relative
@@ -184,6 +222,22 @@ class RunBundle:
 
     def action_plan(self) -> tuple[Path | None, Any]:
         return self._artifact_json("action_plan_path", "reports/action-plan.json", [])
+
+    def integrity(self) -> dict[str, Any]:
+        """Recompute the artifact hashes and compare them with ``bundle-hashes.json``."""
+        from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
+
+        if self._integrity is None:
+            self._integrity = verify_bundle_hashes(self.run_dir)
+        return self._integrity
+
+    def recomputed_validation(self) -> dict[str, Any]:
+        """Validate the bundle as it stands now, whatever ``validation.json`` recorded at finalization."""
+        from azure_tenant_audit.contracts import build_validation_report
+
+        if self._recomputed_validation is None:
+            self._recomputed_validation = build_validation_report(run_dir=self.run_dir, read_only=True)
+        return self._recomputed_validation
 
     def evidence_db_path(self) -> Path | None:
         path = self._artifact_path("evidence_db_path", "index/evidence.sqlite")

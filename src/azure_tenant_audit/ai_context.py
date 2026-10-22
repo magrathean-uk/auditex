@@ -86,7 +86,7 @@ def build_ai_context(
     }
     artifact_map = _artifact_map(run_dir)
     artifact_map.setdefault("root", [])
-    for item in ("ai_context.json", "validation.json"):
+    for item in ("ai_context.json", "validation.json", "bundle-hashes.json"):
         if item not in artifact_map["root"]:
             artifact_map["root"].append(item)
     artifact_map["root"] = sorted(artifact_map["root"])

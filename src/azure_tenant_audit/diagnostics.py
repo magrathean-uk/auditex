@@ -84,24 +84,6 @@ def build_diagnostics(
                 "error": item.get("error"),
                 "top": item.get("top"),
                 "command_type": item.get("type"),
-                "evidence_refs": [
-                    {
-                        "artifact_path": f"raw/{collector_name}.json",
-                        "artifact_kind": "raw_json",
-                        "collector": collector_name,
-                        "record_key": f"{collector_name}:{item.get('name') or collector_name}",
-                        "source_name": item.get("name"),
-                        "json_pointer": f"/{item.get('name')}" if item.get("name") else None,
-                        "endpoint": item.get("endpoint"),
-                        "response_status": status,
-                        "query_params": {
-                            key: item.get(key)
-                            for key in ("top", "page", "result_limit")
-                            if item.get(key) is not None
-                        }
-                        or None,
-                    }
-                ],
             }
             if item.get("type") == "command":
                 failure["commands_required"] = optional_commands or [str(item.get("command"))] if item.get("command") else []

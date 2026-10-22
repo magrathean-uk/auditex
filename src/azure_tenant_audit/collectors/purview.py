@@ -13,13 +13,17 @@ class PurviewCollector(Collector):
     required_permissions = [
         "AuditLog.Read.All",
     ]
+    # Every command here passes the shared read allowlist (adapters/read_guard.py): the m365 command
+    # must end in list, get or status. Removed because they were guesses at CLI spellings, not reads
+    # the CLI documents: "m365 purview audit-log search", "m365 purview auditlog search" (a search
+    # submits an audit-log query job on the tenant), "m365 purview auditlog export create" (creates
+    # an export; it was only ever probed with --help) and the bare "m365 purview" group probe.
     command_collectors = [
         {
             "name": "purviewReadiness",
             "category": "readiness",
             "commands": [
                 "m365 purview auditlog list --output json --help",
-                "m365 purview",
             ],
             "optional": True,
         },
@@ -51,8 +55,6 @@ class PurviewCollector(Collector):
             "name": "auditLogJobs",
             "category": "export",
             "commands": [
-                "m365 purview audit-log search --output json",
-                "m365 purview auditlog search --output json",
                 "m365 purview auditlog list --output json",
             ],
             "plane": "export",
@@ -61,7 +63,6 @@ class PurviewCollector(Collector):
             "name": "auditLogExports",
             "category": "export",
             "commands": [
-                "m365 purview auditlog export create --output json --help",
                 "m365 purview auditlog list --output json --top 100",
             ],
             "plane": "export",

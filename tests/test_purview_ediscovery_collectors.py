@@ -67,8 +67,6 @@ def test_purview_collector_export_plane_adds_export_family(monkeypatch) -> None:
             "m365 purview retentionlabel list": {"value": [{"name": "Confidential"}]},
             "m365 purview retention policy list": {"value": [{"name": "General Retention"}]},
             "m365 purview dlp policy list": {"value": [{"name": "PII"}]},
-            "m365 purview audit-log search": {"value": [{"id": "log-job-1"}]},
-            "m365 purview auditlog export create": {"value": [{"id": "export-1"}]},
         }
     )
     monkeypatch.setattr("azure_tenant_audit.collectors.purview.get_adapter", lambda _name: adapter)
@@ -89,8 +87,28 @@ def test_purview_collector_export_plane_adds_export_family(monkeypatch) -> None:
     assert "auditLogExports" in result.payload
     assert len(result.payload["auditLogJobs"]["value"]) == 1
     assert len(result.payload["auditLogExports"]["value"]) == 1
-    assert any("audit-log search" in command for command in adapter.calls)
-    assert any("auditlog export create" in command for command in adapter.calls)
+    # Only the documented read-only listing runs. The speculative "audit-log search" / "auditlog search"
+    # variants (a search submits a query job) and "auditlog export create" (creates an export) were removed.
+    assert any("purview auditlog list --output json --top 100" in command for command in adapter.calls)
+    assert not any("search" in command for command in adapter.calls if "ediscovery" not in command)
+    assert not any("export create" in command for command in adapter.calls)
+    assert all(command.rstrip().split(" --")[0].split()[-1] in {"list", "get", "status"} for command in adapter.calls)
+
+
+def test_purview_commands_are_all_read_only_and_drop_speculative_variants() -> None:
+    from azure_tenant_audit.adapters.read_guard import check_command
+
+    commands = [command for entry in PurviewCollector.command_collectors for command in entry["commands"]]
+
+    for command in commands:
+        check_command("m365_cli", command)  # raises CommandRefused for anything that is not a read
+    for removed in (
+        "m365 purview audit-log search --output json",
+        "m365 purview auditlog search --output json",
+        "m365 purview auditlog export create --output json --help",
+        "m365 purview",
+    ):
+        assert removed not in commands
 
 
 def test_purview_optional_readiness_command_failure_isolated(monkeypatch) -> None:
@@ -127,8 +145,6 @@ def test_purview_export_operations_respect_checkpoint_state(monkeypatch) -> None
             "m365 purview retentionlabel list": {"value": [{"name": "Confidential"}]},
             "m365 purview retention policy list": {"value": [{"name": "General Retention"}]},
             "m365 purview dlp policy list": {"value": [{"name": "PII"}]},
-            "m365 purview audit-log search": {"value": [{"id": "log-job-1"}]},
-            "m365 purview auditlog export create": {"value": [{"id": "export-1"}]},
         }
     )
     monkeypatch.setattr("azure_tenant_audit.collectors.purview.get_adapter", lambda _name: adapter)
@@ -178,12 +194,10 @@ def test_purview_export_operations_respect_checkpoint_state(monkeypatch) -> None
 def test_purview_export_operations_invoke_export_callbacks(monkeypatch) -> None:
     adapter = _FakeM365Adapter(
         responses={
-            "m365 purview auditlog list --output json --help": {"value": [{"status": "ready"}]},
+            "m365 purview auditlog list": {"value": [{"status": "ready"}]},
             "m365 purview retentionlabel list": {"value": [{"name": "Confidential"}]},
             "m365 purview retention policy list": {"value": [{"name": "General Retention"}]},
             "m365 purview dlp policy list": {"value": [{"name": "PII"}]},
-            "m365 purview audit-log search": {"value": [{"id": "log-job-1"}]},
-            "m365 purview auditlog export create": {"value": [{"id": "export-1"}]},
         }
     )
     monkeypatch.setattr("azure_tenant_audit.collectors.purview.get_adapter", lambda _name: adapter)

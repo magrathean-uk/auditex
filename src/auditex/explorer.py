@@ -371,7 +371,13 @@ def _finding_rows(findings: list[dict[str, Any]], proof_rows: list[dict[str, Any
         "id", "rule_id", "category", "title", "collector", "affected_objects", "description", "impact",
         "remediation", "references", "framework_mappings", "evidence_refs", "waiver",
     )
-    proof = {_text(row.get("finding_id")): _text(row.get("proof_status") or "supported") for row in proof_rows}
+    proof: dict[str, str] = {}
+    for row in proof_rows:
+        status = _text(row.get("proof_status") or "supported")
+        key = _text(row.get("finding_id"))
+        # One row that is not supported keeps the whole finding from reading as fully proven.
+        if proof.get(key, "supported") == "supported":
+            proof[key] = status
     rows = []
     for finding in findings:
         if not isinstance(finding, dict):
@@ -733,8 +739,47 @@ def _verdict(
     return verdict, "Keep the quarterly re-audit."
 
 
-def _banners(synthetic: bool, provenance: dict[str, Any], mode: str, coverage: dict[str, Any], preset: str) -> list[dict[str, str]]:
+def _banners(
+    synthetic: bool,
+    provenance: dict[str, Any],
+    mode: str,
+    coverage: dict[str, Any],
+    preset: str,
+    integrity: dict[str, Any] | None = None,
+    revalidation: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
     banners = []
+    if revalidation and revalidation.get("valid") is False:
+        legacy = bool(revalidation.get("only_legacy_unresolved_refs"))
+        banners.append(
+            {
+                "kind": "integrity",
+                "title": "Legacy evidence references do not resolve" if legacy else "Bundle does not validate",
+                "text": (
+                    f"{revalidation.get('legacy_unresolved_ref_count')} evidence reference(s) cite records that are not in the "
+                    "bundle. They were written by a version older than the contract that requires references to resolve; "
+                    "this is not a sign that the bundle was edited. Findings that rest on them are not proven by this bundle."
+                    if legacy
+                    else f"Validating this bundle now gives {revalidation.get('error_count') or 0} error(s), whatever "
+                    "validation.json recorded when the run finished. Codes: "
+                    + (", ".join(revalidation.get("issue_codes") or []) or "none listed")
+                    + "."
+                ),
+            }
+        )
+    if integrity and integrity.get("status") in {"mismatch", "invalid"}:
+        banners.append(
+            {
+                "kind": "integrity",
+                "title": "Bundle changed since it was finalized",
+                "text": (
+                    f"{integrity.get('modified_count') or 0} artifact(s) differ from the hashes recorded at finalization and "
+                    f"{integrity.get('missing_count') or 0} are missing. What this page shows may not be what the run produced."
+                    if integrity.get("status") == "mismatch"
+                    else "bundle-hashes.json cannot be read, so the artifacts behind this page cannot be checked."
+                ),
+            }
+        )
     if synthetic:
         banners.append(
             {
@@ -794,6 +839,13 @@ def build_explorer_data(run_dir: Path | str) -> dict[str, Any]:
     data_handling = data_handling if isinstance(data_handling, dict) else {}
     validation = _read_json(run_dir / "validation.json", {})
     validation = validation if isinstance(validation, dict) else {}
+    from .run_bundle import RunBundle, summarize_recomputed_validation
+
+    bundle = RunBundle(run_dir)
+    integrity = bundle.integrity()
+    # Recomputed, not read back: validation.json is only what the finalizer saw.
+    recomputed = bundle.recomputed_validation() if validation else {}
+    revalidation = summarize_recomputed_validation(recomputed, validation) if recomputed else {}
     summary = report_pack.get("summary") if isinstance(report_pack.get("summary"), dict) else {}
     risk = summary.get("risk") if isinstance(summary.get("risk"), dict) else {}
     provenance = manifest.get("fixture_provenance") or report_pack.get("fixture_provenance") or {}
@@ -855,7 +907,13 @@ def build_explorer_data(run_dir: Path | str) -> dict[str, Any]:
         "meta": _tenant_meta(run_dir, manifest),
         "synthetic": synthetic,
         "provenance": provenance,
-        "contract_valid": bool(validation.get("valid")),
+        "contract_valid": bool(validation.get("valid")) and recomputed.get("valid") is not False,
+        "integrity": {
+            key: integrity.get(key)
+            # No unlisted_count: the page itself is written into the run directory, and the same run must
+            # give the same page every time.
+            for key in ("status", "checked_count", "modified_count", "missing_count")
+        },
         "risk": {"score": score, "grade": grade if grade in (*_SEVERITIES, "clean") else "info"},
         "verdict": verdict,
         "action": action,
@@ -878,7 +936,7 @@ def build_explorer_data(run_dir: Path | str) -> dict[str, Any]:
         "collectors": collectors,
         "coverage": coverage,
         "nv_areas": nv_areas,
-        "banners": _banners(synthetic, provenance, mode, coverage, preset),
+        "banners": _banners(synthetic, provenance, mode, coverage, preset, integrity, revalidation),
         "public_footprint": report_pack.get("public_footprint"),
     }
 

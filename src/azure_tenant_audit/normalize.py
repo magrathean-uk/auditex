@@ -16,6 +16,7 @@ from .collection_gaps import (
     list_truncations,
     truncations_from_payloads,
 )
+from .data_minimisation import minimise_mailbox_settings
 from .detection_coverage import build_detection_signals
 from .directory_relationships import normalize_directory_relationships
 from .friendly_names import build_friendly_name_catalog
@@ -1731,6 +1732,9 @@ def build_normalized_snapshot(
                 )
             )
     intune_assignment_objects: list[dict[str, Any]] = []
+    # One row per policy the assignment read returned, with how many assignments it has. A policy with
+    # none has no row in ``intune_assignment_objects``, so these rows are what shows it was read and empty.
+    intune_policy_assignment_objects: list[dict[str, Any]] = []
     # "No assignments" is evidence only when the policy inventory and the assignment reads both
     # succeeded, so the inventory gets a normalization coverage report too (its rows are not kept).
     _values(collector_payloads.get("intune_depth", {}), "deviceConfigurations")
@@ -1739,6 +1743,15 @@ def build_normalized_snapshot(
         assignments = item.get("assignments")
         if not policy_id or not isinstance(assignments, list):
             continue
+        intune_policy_assignment_objects.append(
+            _record(
+                "intune_policy_assignment",
+                "intune_depth.deviceConfigurationAssignments",
+                policy_id,
+                policy_name=item.get("displayName"),
+                assignment_count=len([entry for entry in assignments if isinstance(entry, dict)]),
+            )
+        )
         for assignment in assignments:
             if not isinstance(assignment, dict):
                 continue
@@ -2050,7 +2063,8 @@ def build_normalized_snapshot(
             "mailbox_forwarding.mailboxSettings",
             str(item.get("user_id")),
             user_principal_name=item.get("user_principal_name"),
-            settings=item.get("settings") or {},
+            # Replay fixtures can carry auto-reply bodies that live collection would have dropped.
+            settings=minimise_mailbox_settings(item["settings"]) if isinstance(item.get("settings"), dict) else {},
         )
         for item in _values(collector_payloads.get("mailbox_forwarding", {}), "mailboxSettings")
         if item.get("user_id")
@@ -2364,6 +2378,7 @@ def build_normalized_snapshot(
         "exchange_policy_objects": _disambiguate_keys(exchange_policy_objects),
         "governance_objects": governance_objects,
         "intune_assignment_objects": intune_assignment_objects,
+        "intune_policy_assignment_objects": _disambiguate_keys(intune_policy_assignment_objects),
         "teams_policy_objects": _disambiguate_keys(teams_policy_objects),
         "service_health_objects": service_health_objects,
         "usage_report_objects": usage_report_objects,

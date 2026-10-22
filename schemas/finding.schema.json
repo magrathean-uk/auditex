@@ -110,6 +110,32 @@
               "string",
               "null"
             ]
+          },
+          "collected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the cited record was collected: the record's own collected_at or observed_at, otherwise the run's created_utc."
+          },
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the cited artifact's bytes when the references were sealed."
+          },
+          "resolved": {
+            "type": "boolean",
+            "description": "Whether the artifact is inside the run directory and the record or JSON pointer exists in it."
+          },
+          "unresolved_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the reference did not resolve: artifact_missing, artifact_outside_run_dir, artifact_unreadable, artifact_not_addressable, record_not_found, json_pointer_not_found or jsonl_line_not_found."
           }
         }
       }

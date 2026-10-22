@@ -492,8 +492,10 @@ def test_oscal_includes_google_workspace_baseline_targets() -> None:
     )
 
     finding = document["assessment-results"]["results"][0]["findings"][0]
-    assert "identity.2sv" in finding["target-ids"]
-    assert "google_workspace_baseline:identity.2sv" in finding["target-ids"]
+    controls = {(prop["class"], prop["value"]) for prop in finding["props"] if prop["name"] == "framework-control"}
+    assert ("google_workspace_baseline", "identity.2sv") in controls
+    assert finding["target"]["type"] == "objective-id"
+    assert finding["target"]["target-id"] == "google.admin_2sv_not_enforced"
 
 
 def test_oscal_assessment_results_passes_validator_with_zero_findings() -> None:
@@ -566,10 +568,294 @@ def test_oscal_findings_include_related_observations() -> None:
     assert result["findings"][0]["title"] == "Alpha"
     related = result["findings"][0]["related-observations"]
     assert related and related[0]["observation-uuid"]
-    # control IDs surface via target.target-id
-    targets = [
-        target_id
+    # The mapped controls are ``framework-control`` properties, classed by framework.
+    controls = {
+        (prop["class"], prop["value"])
         for finding in result["findings"]
-        for target_id in finding.get("target-ids", [])
+        for prop in finding["props"]
+        if prop["name"] == "framework-control"
+    }
+    assert {("nist_800_53", "AC-3"), ("nist_800_53", "AC-6")} <= controls
+
+
+# --- Validation against the official schemas -------------------------------------------------
+#
+# The schemas are vendored under tests/schemas (see the README there), so the run needs no network.
+
+SCHEMA_DIR = REPO_ROOT / "tests" / "schemas"
+
+
+def _load_jsonschema():
+    try:
+        import jsonschema
+    except ImportError:  # pragma: no cover - a missing dev dependency must fail, not skip
+        pytest.fail(
+            "jsonschema is required to validate exports against the official schemas: "
+            "python -m pip install -e '.[test]'",
+            pytrace=False,
+        )
+    return jsonschema
+
+
+def _python_patterns(node):
+    """The OSCAL token pattern uses Unicode property escapes that Python's ``re`` lacks.
+
+    Only ``\\p{L}`` and ``\\p{N}`` are translated, in memory; every other rule is the published one.
+    """
+    if isinstance(node, dict):
+        return {
+            key: (
+                value.replace("\\p{L}", "[^\\W\\d_]").replace("\\p{N}", "\\d")
+                if key == "pattern" and isinstance(value, str)
+                else _python_patterns(value)
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_python_patterns(item) for item in node]
+    return node
+
+
+@pytest.fixture(scope="module")
+def oscal_validator():
+    jsonschema = _load_jsonschema()
+    schema = _python_patterns(
+        json.loads((SCHEMA_DIR / "oscal_assessment-results_schema-1.1.2.json").read_text(encoding="utf-8"))
+    )
+    jsonschema.Draft7Validator.check_schema(schema)
+    return jsonschema.Draft7Validator(schema)
+
+
+@pytest.fixture(scope="module")
+def sarif_validator():
+    jsonschema = _load_jsonschema()
+    schema = json.loads((SCHEMA_DIR / "sarif-schema-2.1.0.json").read_text(encoding="utf-8"))
+    jsonschema.Draft4Validator.check_schema(schema)
+    return jsonschema.Draft4Validator(schema)
+
+
+def _schema_errors(validator, document) -> list[str]:
+    return [
+        f"{'/'.join(str(part) for part in error.absolute_path) or '<root>'}: {error.message[:160]}"
+        for error in sorted(validator.iter_errors(document), key=lambda item: list(item.absolute_path))
     ]
-    assert "AC-3" in targets or "nist_800_53:AC-3" in targets
+
+
+def _offline_bundle(root: Path, sample: str, label: str) -> Path:
+    from azure_tenant_audit.cli import run_offline
+
+    assert run_offline(
+        REPO_ROOT / "examples" / sample, root, "halcyon", label, auditor_profile="global-reader", plane="inventory"
+    ) in (0, 1)
+    return root / f"halcyon-{label}"
+
+
+@pytest.fixture(scope="module")
+def demo_bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return _offline_bundle(tmp_path_factory.mktemp("demo-bundle"), "demo_tenant/demo_tenant.json", "demo")
+
+
+@pytest.fixture(scope="module")
+def google_bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    from auditex.google_workspace.run import run_google_offline
+
+    out = tmp_path_factory.mktemp("google-bundle")
+    rc = run_google_offline(
+        sample_path=REPO_ROOT / "examples" / "google_workspace_sample.json",
+        out=out,
+        tenant_name="acme",
+        run_name="google",
+        domain="example.com",
+        customer_id=None,
+    )
+    assert rc in (0, 1)
+    return out / "acme-google"
+
+
+def _export(run_dir: Path, name: str) -> dict:
+    preview = preview_report(run_dir=str(run_dir), format_name=name)
+    return json.loads(preview["content"])
+
+
+def test_oscal_export_of_the_demo_bundle_is_valid_assessment_results(oscal_validator, demo_bundle: Path) -> None:
+    document = _export(demo_bundle, "oscal")
+
+    assert len(document["assessment-results"]["results"][0]["findings"]) > 10
+    assert _schema_errors(oscal_validator, document) == []
+
+
+def test_oscal_export_of_the_google_bundle_is_valid_assessment_results(oscal_validator, google_bundle: Path) -> None:
+    document = _export(google_bundle, "oscal")
+
+    assert document["assessment-results"]["results"][0]["findings"]
+    assert _schema_errors(oscal_validator, document) == []
+
+
+def test_oscal_export_with_no_findings_is_valid_assessment_results(oscal_validator) -> None:
+    from auditex.reporting import render_oscal
+
+    document = render_oscal(findings=[], summary={"tenant_name": "acme"}, manifest={"run_id": "run-1"})
+
+    assert _schema_errors(oscal_validator, document) == []
+
+
+def test_oscal_export_of_awkward_findings_is_valid_assessment_results(oscal_validator) -> None:
+    """Rule ids that are not tokens, empty fields and unusual objects still give a schema-valid document."""
+    from auditex.reporting import render_oscal
+
+    findings = [
+        {"id": "9 odd id/with:chars", "rule_id": "9.odd rule", "severity": "high", "title": "T", "affected_objects": ["a", "", "b c"]},
+        {"id": "bare", "severity": "low"},
+        {
+            "id": "rich",
+            "rule_id": "rule.rich",
+            "title": "Rich",
+            "description": "d",
+            "remediation": "fix it",
+            "framework_mappings": {"nist_800_53": ["AC-3", " ", "AC-3"], "cis_m365_v7": ["1.1.1"]},
+            "evidence_refs": [
+                {
+                    "artifact_path": "normalized/users.json",
+                    "artifact_kind": "normalized_json",
+                    "record_key": "user:1",
+                    "json_pointer": "/records/0",
+                    "content_hash": "ab" * 32,
+                    "collected_at": "2026-10-22T10:00:00Z",
+                    "resolved": True,
+                },
+                {"artifact_path": "raw/a b.json", "record_key": "k", "resolved": False},
+            ],
+        },
+    ]
+    document = render_oscal(
+        findings=findings,
+        summary={"tenant_name": "acme"},
+        manifest={"run_id": "run-1", "created_utc": "2026-10-22T09:00:00.123456Z", "duration_seconds": 12.5},
+    )
+
+    assert _schema_errors(oscal_validator, document) == []
+    rich = next(obs for obs in document["assessment-results"]["results"][0]["observations"] if obs["title"] == "Rich")
+    assert rich["collected"] == "2026-10-22T10:00:00Z"
+    assert rich["relevant-evidence"][0]["href"] == "normalized/users.json#/records/0"
+    assert {"name": "sha256", "value": "ab" * 32} in rich["relevant-evidence"][0]["props"]
+    assert rich["relevant-evidence"][1]["href"] == "raw/a%20b.json"
+
+
+def test_oscal_validator_rejects_a_document_that_breaks_the_schema(oscal_validator, demo_bundle: Path) -> None:
+    """The check is live: a finding without its required target is reported."""
+    document = _export(demo_bundle, "oscal")
+    del document["assessment-results"]["results"][0]["findings"][0]["target"]
+
+    errors = _schema_errors(oscal_validator, document)
+
+    assert errors and any("target" in error for error in errors)
+
+    # Patterns are checked too, including the token pattern that needed translating for Python.
+    document = _export(demo_bundle, "oscal")
+    document["assessment-results"]["results"][0]["observations"][0]["uuid"] = "not-a-uuid"
+    document["assessment-results"]["results"][0]["findings"][0]["target"]["target-id"] = "9 not a token"
+
+    errors = _schema_errors(oscal_validator, document)
+
+    assert any("uuid" in error for error in errors)
+    assert any("target-id" in error for error in errors)
+
+
+def test_oscal_collection_time_is_the_manifest_created_utc(demo_bundle: Path) -> None:
+    from auditex.reporting import render_oscal
+
+    manifest = json.loads((demo_bundle / "run-manifest.json").read_text(encoding="utf-8"))
+    findings = json.loads((demo_bundle / "findings" / "findings.json").read_text(encoding="utf-8"))
+    expected = manifest["created_utc"][:19] + "Z"
+
+    document = render_oscal(findings=findings, summary={}, manifest=manifest)
+
+    result = document["assessment-results"]["results"][0]
+    assert result["start"] == expected
+    assert result["end"] == expected  # an offline replay has no duration
+    assert {"name": "auditex.collection_time_basis", "value": "run_manifest_created_utc"} in result["props"]
+    # Every observation's evidence was collected in that run, so each carries the run's time.
+    assert {item["collected"] for item in result["observations"]} == {expected}
+
+
+def test_oscal_collection_time_falls_back_to_export_time_and_says_so() -> None:
+    from auditex.reporting import render_oscal
+
+    document = render_oscal(
+        findings=[{"id": "f", "rule_id": "r", "title": "t"}],
+        summary={},
+        manifest={"run_id": "run-1", "created_utc": "not a time"},
+    )
+
+    result = document["assessment-results"]["results"][0]
+    assert {"name": "auditex.collection_time_basis", "value": "export_time"} in result["props"]
+    assert result["start"] == document["assessment-results"]["metadata"]["last-modified"]
+
+
+def test_oscal_end_is_start_plus_run_duration() -> None:
+    from auditex.reporting import render_oscal
+
+    document = render_oscal(
+        findings=[],
+        summary={},
+        manifest={"run_id": "run-1", "created_utc": "2026-10-22T09:00:00.000000Z", "duration_seconds": 90},
+    )
+
+    result = document["assessment-results"]["results"][0]
+    assert (result["start"], result["end"]) == ("2026-10-22T09:00:00Z", "2026-10-22T09:01:30Z")
+
+
+def test_sarif_export_of_the_demo_bundle_is_valid_sarif(sarif_validator, demo_bundle: Path) -> None:
+    document = _export(demo_bundle, "sarif")
+
+    assert len(document["runs"][0]["results"]) > 10
+    assert _schema_errors(sarif_validator, document) == []
+
+
+def test_sarif_export_of_the_google_bundle_is_valid_sarif(sarif_validator, google_bundle: Path) -> None:
+    document = _export(google_bundle, "sarif")
+
+    assert document["runs"][0]["results"]
+    assert _schema_errors(sarif_validator, document) == []
+
+
+def test_sarif_export_of_synthetic_findings_is_valid_sarif(sarif_validator) -> None:
+    from auditex.reporting import render_sarif
+
+    findings = [
+        {"id": "f1", "rule_id": "rule.alpha", "severity": "critical", "title": "Alpha", "affected_objects": ["x", "y"]},
+        {"id": "f2", "rule_id": "rule.bare", "severity": "info"},
+        {
+            "id": "f3",
+            "rule_id": "rule.evidence",
+            "severity": "medium",
+            "confidence": "high",
+            "framework_mappings": {"nist_800_53": ["AC-3"]},
+            "evidence_refs": [
+                {"artifact_path": "normalized/users.json", "record_key": "user:1", "content_hash": "cd" * 32, "resolved": True}
+            ],
+        },
+    ]
+
+    document = render_sarif(findings=findings, summary={"tenant_name": "acme"}, manifest={"run_id": "run-1"})
+
+    assert _schema_errors(sarif_validator, document) == []
+    evidence = document["runs"][0]["results"][2]["properties"]["auditex.evidence"]
+    assert evidence == [
+        {"artifact_path": "normalized/users.json", "record_key": "user:1", "content_hash": "cd" * 32, "resolved": True}
+    ]
+
+
+def test_sarif_export_with_no_findings_is_valid_sarif(sarif_validator) -> None:
+    from auditex.reporting import render_sarif
+
+    assert _schema_errors(sarif_validator, render_sarif(findings=[], summary={}, manifest={})) == []
+
+
+def test_sarif_validator_rejects_a_document_that_breaks_the_schema(sarif_validator, demo_bundle: Path) -> None:
+    document = _export(demo_bundle, "sarif")
+    document["runs"][0]["results"][0]["level"] = "catastrophic"
+
+    errors = _schema_errors(sarif_validator, document)
+
+    assert errors and any("level" in error for error in errors)

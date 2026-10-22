@@ -39,8 +39,7 @@ The package is Python 3.11 or newer. Its required runtime dependencies are `requ
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
-python -m pip install pytest
+python -m pip install -e '.[test]'
 auditex doctor --json
 ```
 
@@ -159,7 +158,7 @@ Run the local MCP server after installing the `mcp` extra:
 auditex-mcp
 ```
 
-The MCP registry exposes inventory and contract inspection, offline validation, Microsoft 365 and Google Workspace audit/probe operations, run summaries and comparisons, reports and proof tables, customer-pack verification, exports, notifications, rules, auth status, and setup guides. Audit operations retain the same read-only and no-content-read boundary as the CLI.
+The MCP registry exposes inventory and contract inspection, offline validation, Microsoft 365 and Google Workspace audit/probe operations, run summaries and comparisons, reports and proof tables, customer-pack verification, exports, notifications, rules, auth status, and setup guides. Audit operations retain the same read-only and no-content-read boundary as the CLI. No MCP tool takes a bearer token or client secret; app credentials come from the server's environment. Every path argument is confined to `AUDITEX_MCP_ROOT` (default: the server's working directory).
 
 ## Documentation
 

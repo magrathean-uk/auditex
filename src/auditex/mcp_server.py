@@ -26,6 +26,7 @@ from .command_builders import (
     build_probe_command as build_probe_tool_command,
     build_response_command as build_response_tool_command,
 )
+from .mcp_paths import McpPathError, mcp_root
 from .mcp_registry import iter_tool_specs, register_fastmcp_tools
 from .run_bundle import RunBundle
 from .setup_guide import build_setup_guide
@@ -323,18 +324,6 @@ def auth_list() -> dict[str, Any]:
     )
 
 
-def auth_inspect_token(token: str) -> dict[str, Any]:
-    payload = auditex_auth.inspect_token_claims(token)
-    return _with_static_citations(
-        payload,
-        [
-            {"artifact_path": "src/auditex/auth.py", "reason": "Product token-inspection entrypoint and token-input resolution path."},
-            {"artifact_path": "src/auditex/auth_runtime.py", "reason": "JWT claim decoding and safe token-claim shaping used for this helper."},
-            {"artifact_path": "token_input", "reason": "Caller-supplied JWT decoded for this inspection result."},
-        ],
-    )
-
-
 def contract_schema_inventory(schema_dir: str = "schemas") -> dict[str, Any]:
     payload = contract_schema_manifest(schema_dir=schema_dir)
     path = Path(schema_dir)
@@ -354,9 +343,7 @@ def build_cli_command(
     auditor_profile: str = "global-reader",
     plane: str = "inventory",
     use_azure_cli_token: bool = True,
-    access_token: str | None = None,
     client_id: str | None = None,
-    client_secret: str | None = None,
     include_exchange: bool = False,
     collectors: str | list[str] | None = None,
     since: str | None = None,
@@ -364,6 +351,7 @@ def build_cli_command(
     offline: bool = False,
     sample_path: str = "examples/sample_audit_bundle/sample_result.json",
 ) -> list[str]:
+    """Audit command for the MCP tools. It takes no token or client secret: the CLI reads app credentials from the environment."""
     return build_audit_run_command(
         AuditRunCommandSpec(
             tenant_name=tenant_name,
@@ -372,9 +360,7 @@ def build_cli_command(
             auditor_profile=auditor_profile,
             plane=plane,
             use_azure_cli_token=use_azure_cli_token,
-            access_token=access_token,
             client_id=client_id,
-            client_secret=client_secret,
             include_exchange=include_exchange,
             collectors=collectors,
             since=since,
@@ -450,11 +436,10 @@ def build_probe_command(
     until: str | None = None,
     allow_lab_response: bool = False,
     use_azure_cli_token: bool = True,
-    access_token: str | None = None,
     auth_context: str | None = None,
     client_id: str | None = None,
-    client_secret: str | None = None,
 ) -> list[str]:
+    """Probe command for the MCP tools. It takes no token or client secret: use a saved auth context or the server environment."""
     return build_probe_tool_command(
         ProbeCommandSpec(
             tenant_name=tenant_name,
@@ -467,10 +452,8 @@ def build_probe_command(
             until=until,
             allow_lab_response=allow_lab_response,
             use_azure_cli_token=use_azure_cli_token,
-            access_token=access_token,
             auth_context=auth_context,
             client_id=client_id,
-            client_secret=client_secret,
             python_executable=sys.executable,
         )
     )
@@ -725,13 +708,29 @@ def main(argv: list[str] | None = None) -> int:
         _build_mcp_parser().parse_args(argv)
 
     try:
+        mcp_root()
+    except McpPathError as exc:
+        print(f"auditex-mcp: {exc}", file=sys.stderr)
+        return 2
+
+    try:
         from mcp.server.fastmcp import FastMCP
     except ImportError:
         print("Install Auditex with the MCP extra: pip install -e '.[mcp]'", file=sys.stderr)
         return 2
 
     server = FastMCP("auditex")
+    register_fastmcp_tools(server, tool_handlers())
+    server.run()
+    return 0
 
+
+def tool_handlers() -> dict[str, Any]:
+    """The MCP tool handlers by name.
+
+    Tools take no bearer token or client secret; filesystem arguments are confined to the MCP root
+    by ``register_fastmcp_tools`` (see ``mcp_registry`` and ``mcp_paths``).
+    """
     def auditex_list_profiles() -> dict[str, Any]:
         return list_profiles()
 
@@ -752,12 +751,6 @@ def main(argv: list[str] | None = None) -> int:
 
     def auditex_auth_use(connection_name: str) -> dict[str, Any]:
         return auditex_auth.use_connection(connection_name)
-
-    def auditex_auth_import_token(name: str, token: str, tenant_id: str = "") -> dict[str, Any]:
-        return auditex_auth.import_token_context(name=name, token=token, tenant_id=tenant_id or None)
-
-    def auditex_auth_inspect_token(token: str) -> dict[str, Any]:
-        return auth_inspect_token(token)
 
     def auditex_auth_capability(name: str = "", collectors: str = "", auditor_profile: str = "auto") -> dict[str, Any]:
         return auth_capability(name=name, collectors=collectors, auditor_profile=auditor_profile)
@@ -972,7 +965,6 @@ def main(argv: list[str] | None = None) -> int:
         allow_lab_response: bool = False,
         auth_context: str = "",
         client_id: str = "",
-        client_secret: str = "",
     ) -> dict[str, Any]:
         command = build_probe_command(
             tenant_name=tenant_name,
@@ -986,7 +978,6 @@ def main(argv: list[str] | None = None) -> int:
             allow_lab_response=allow_lab_response,
             auth_context=auth_context or None,
             client_id=client_id or None,
-            client_secret=client_secret or None,
         )
         return run_cli_command(command)
 
@@ -1090,10 +1081,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return run_cli_command(command)
 
-    handlers = {name: value for name, value in locals().items() if name.startswith("auditex_") and callable(value)}
-    register_fastmcp_tools(server, handlers)
-    server.run()
-    return 0
+    return {name: value for name, value in locals().items() if name.startswith("auditex_") and callable(value)}
 
 
 if __name__ == "__main__":

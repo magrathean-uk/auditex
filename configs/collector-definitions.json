@@ -437,8 +437,7 @@
           "name": "purviewReadiness",
           "category": "readiness",
           "commands": [
-            "m365 purview auditlog list --output json --help",
-            "m365 purview"
+            "m365 purview auditlog list --output json --help"
           ]
         },
         {
@@ -470,8 +469,7 @@
           "category": "export",
           "plane": "export",
           "commands": [
-            "m365 purview auditlog list --output json",
-            "m365 purview audit-log search --output json"
+            "m365 purview auditlog list --output json"
           ]
         },
         {
@@ -479,7 +477,6 @@
           "category": "export",
           "plane": "export",
           "commands": [
-            "m365 purview auditlog export create --output json --help",
             "m365 purview auditlog list --output json --top 100"
           ]
         }

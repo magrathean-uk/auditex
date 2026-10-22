@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 from ..m365_home import m365_subprocess_kwargs
 from ..secret_hygiene import collect_sensitive_argv_values, redact_command_string, redact_text
 from .base import Adapter, AdapterMetadata
+from .read_guard import CommandRefused, check_command, refusal_response
 
 
 class M365CLIAdapter(Adapter):
@@ -64,6 +65,16 @@ class M365CLIAdapter(Adapter):
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
     ) -> dict[str, Any]:
         safe_command = redact_command_string(command)
+        try:
+            command_words = check_command(self.name, command)
+        except CommandRefused as exc:
+            if log_event:
+                log_event(
+                    "command.refused",
+                    "Command refused before execution: not on the read allowlist",
+                    {"adapter": self.name, "command": safe_command, "reason": exc.reason},
+                )
+            return refusal_response(safe_command, exc)
         cmd_parts = shlex.split(command)
         sensitive_values = collect_sensitive_argv_values(cmd_parts)
         exe = shutil.which(cmd_parts[0]) if cmd_parts else None
@@ -82,7 +93,11 @@ class M365CLIAdapter(Adapter):
 
         try:
             if log_event:
-                log_event("command.started", "Exchange command started", {"command": safe_command, "executable": exe})
+                log_event(
+                    "command.started",
+                    "Exchange command started",
+                    {"adapter": self.name, "command": safe_command, "command_words": list(command_words), "executable": exe},
+                )
             start = time.time()
             result = subprocess.run(
                 cmd_parts,
@@ -101,7 +116,9 @@ class M365CLIAdapter(Adapter):
                     "command.completed",
                     "Exchange command completed",
                     {
+                        "adapter": self.name,
                         "command": safe_command,
+                        "command_words": list(command_words),
                         "return_code": result.returncode,
                         "duration_ms": duration_ms,
                         "status": status,

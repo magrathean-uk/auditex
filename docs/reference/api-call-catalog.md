@@ -7,9 +7,52 @@ Auditex writes `api-inventory.json` into every finalized bundle. This artifact i
 `api-inventory.json` contains:
 
 - `declared_collectors`: planned collector coverage, status, required permissions, observed permissions, and missing permissions.
-- `observed_calls`: endpoint-level calls observed during live runs and probes.
-- `counts`: declared collector count, observed call count, mutating call count, content-read call count, and beta call count (`beta_calls`).
-- `safety`: read-only status, no-content-read status, write-capable scopes, and any mutating/content-read exceptions.
+- `observed_calls`: the declared call rows: endpoint-level calls the collectors recorded in their coverage rows (and, for command rows, the command text). This is the expected set, not proof of what was sent.
+- `observed_ledger`: what was sent, read back from the run's own `audit-log.jsonl` (see below).
+- `counts`: declared collector count, declared call count, mutating call count, content-read call count, beta call count (`beta_calls`), and from the observed ledger `observed_graph_requests`, `observed_graph_endpoints`, `observed_commands`, `refused_calls` and `observed_outside_declared`.
+- `safety`: read-only status, no-content-read status, write-capable scopes, any mutating/content-read exceptions, and from the observed ledger `observation_basis`, `observed_methods`, `observed_write_calls`, `observed_content_read_calls`, `refused_calls` and `observed_outside_declared`.
+
+## Observed ledger
+
+`AuditWriter` builds `observed_ledger` from the `graph.request.*`, `graph.token.*` and `command.*` events in `audit-log.jsonl` every time it writes `api-inventory.json`, so a caller cannot write the ledger from declarations alone. The declared rows above stay as the expected set the observed calls are compared with.
+
+```
+observed_ledger
+  source, basis ("transport_audit_log" or "not_instrumented"), instrumentation
+  graph
+    request_attempts, methods_seen (HTTP methods on the wire, e.g. GET and POST),
+    data_methods_seen (after unpacking $batch: GET only in a read-only run),
+    batch_requests, batch_inner_requests, unverified_batch_requests,
+    endpoints[]  method, endpoint (ids templated as {id}), api_version, count, statuses
+    write_calls[], content_read_calls[], refused[], refused_count
+  commands
+    executed[]   adapter, command (the command words), family, read_only, count, statuses
+    write_calls[], refused[], refused_count
+  log            readable, malformed_lines
+  auth           token_requests, token_succeeded, token_failed
+  outside_declared  graph[], commands[], count
+```
+
+How `safety` is derived: `read_only` is false when any non-`GET` data call was observed, any executed command is not a read, any call was refused (`refused_calls`), or the log cannot be fully read: a `$batch` request whose inner calls, inner methods or call count were not all recorded (`unverified_batch_requests`), a malformed line (`malformed_log_lines`, counted and never silently skipped) or a log that could not be opened. `observed_log_complete` says whether everything in the log could be read and verified. `no_content_reads` is false when an observed endpoint reads content (messages, attachments, `/content`, `/$value`, calendar events, OneNote, `/search/query`) or a `$select` asks for `body`, `bodyPreview`, `uniqueBody` or `content`. Microsoft service-health posts (`/admin/serviceAnnouncement/messages`) are not user content. A refused call is counted in `refused_calls` and makes `read_only` false, because the run tried something that is not a read; it is not a write (`write_actions` stays as observed), because nothing reached the tenant. A call outside the declared set is listed in `outside_declared` for review and does not by itself change `read_only`.
+
+Commands are classified from the command words each adapter recorded, using the same read rules the adapters enforce, so a log written by a build that did not enforce them is still flagged. The words are cross-checked against the logged command text: an m365 command's words must equal the words before its first option, and a PowerShell command's text must contain no cmdlet-shaped token outside the read allowlist and must contain every recorded word. A disagreement is treated as not read-only. Older events without recorded words are classified from the logged text.
+
+`observation_basis` says what the safety flags rest on. Microsoft 365 bundles say `transport_audit_log`. Google Workspace bundles say `coverage_ledger_only`: the Google API client is not instrumented, so for those the flags rest on the collectors' declared rows and the read-only scopes. A run with no Graph traffic (offline, sample) records zero requests, which is an observed fact for the Microsoft 365 transport.
+
+Token requests to the OAuth endpoint are counted under `auth`, not under `graph`. Collectors that start local tools outside the adapters (the `probe` toolchain checks, `dns_posture` lookups) are not in this ledger.
+
+## Removed command variants
+
+The Purview collector no longer tries these `m365` commands. They were guesses at CLI spellings, not reads the CLI documents, and the first three are not read commands at all, so they fail the shared read allowlist:
+
+| Removed | Collector operation | Why |
+| --- | --- | --- |
+| `m365 purview audit-log search` | `auditLogJobs` | A search submits an audit-log query job on the tenant. |
+| `m365 purview auditlog search` | `auditLogJobs` | Same. |
+| `m365 purview auditlog export create` (probed with `--help`) | `auditLogExports` | Creates an export; only ever probed with `--help`. |
+| `m365 purview` | `purviewReadiness` | A bare command-group probe that prints help and reads nothing. |
+
+`auditLogJobs` and `auditLogExports` now run only `m365 purview auditlog list` (the latter with `--top 100`), and `purviewReadiness` runs only `m365 purview auditlog list --output json --help`. The read-only spelling variants (`retentionlabel list` and `retention label list`, and so on) stay.
 
 Each observed Graph call records `api_version` (`v1.0` or `beta`). Auditex calls Microsoft Graph v1.0 by default. A collector endpoint uses beta only when the surface has no v1.0 equivalent, and the call then shows the full `https://graph.microsoft.com/beta/...` endpoint with `api_version: "beta"`. Current beta reads:
 
@@ -48,7 +91,7 @@ Other v1.0 reads with gating worth knowing:
 
 Declared collector access metadata comes from the same shipped scope catalog used by `auditex setup-guide`, so reviewer-facing permission rows and operator-facing setup rows stay aligned.
 
-The bundle validator fails audit-plane bundles when this artifact reports tenant writes or body/file content reads.
+The bundle validator fails audit-plane bundles when this artifact reports tenant writes or body/file content reads. Because the observed ledger feeds those flags, a write method, a non-read command or a body-reading endpoint seen in the audit log fails validation even when a collector declared a clean run.
 
 ## Read-Only Rules
 

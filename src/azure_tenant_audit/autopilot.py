@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .evidence_gates import build_evidence_gate_summary
+from .evidence_refs import confidence_for, ref_proof_status, refs_checked
 
 
 SCHEMA_VERSION = "2026-04-21"
@@ -160,7 +161,10 @@ def enrich_findings_for_autopilot(findings: list[dict[str, Any]]) -> list[dict[s
         affected = _strings(finding.get("affected_objects"))
         severity = str(finding.get("severity") or "unknown")
         category = str(finding.get("category") or "general")
-        if "confidence" not in finding:
+        if refs_checked(refs):
+            # Sealed references say which citations resolve; the builder's own value does not count.
+            finding["confidence"] = confidence_for(refs)
+        elif "confidence" not in finding:
             finding["confidence"] = "high" if refs else "low"
         if "blast_radius" not in finding:
             if len(affected) == 1:
@@ -182,6 +186,7 @@ def enrich_findings_for_autopilot(findings: list[dict[str, Any]]) -> list[dict[s
             )
         finding["proof"] = {
             "evidence_count": len(refs),
+            "supported_count": sum(1 for ref in refs if ref_proof_status(ref) == "supported"),
             "artifacts": sorted({str(ref.get("artifact_path")) for ref in refs if ref.get("artifact_path")}),
             "record_keys": [str(ref.get("record_key")) for ref in refs if ref.get("record_key")][:25],
         }
@@ -238,7 +243,7 @@ def build_auditor_score(
 ) -> dict[str, Any]:
     rows = enrich_findings_for_autopilot(findings)
     total = len(rows)
-    evidenced = sum(1 for item in rows if _rows(item.get("evidence_refs")))
+    evidenced = sum(1 for item in rows if _has_supported_ref(item))
     high_confidence = sum(1 for item in rows if item.get("confidence") == "high")
     unsupported = total - evidenced
     gaps = _rows(coverage_gaps)
@@ -368,9 +373,14 @@ def build_control_simulator(findings: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _has_supported_ref(finding: Mapping[str, Any]) -> bool:
+    """Whether the finding cites at least one reference that resolves (or has not been checked)."""
+    return any(ref_proof_status(ref) == "supported" for ref in _rows(finding.get("evidence_refs")))
+
+
 def build_report_qa(findings: list[dict[str, Any]], coverage_gaps: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     rows = enrich_findings_for_autopilot(findings)
-    unsupported = [str(item.get("id")) for item in rows if not _rows(item.get("evidence_refs"))]
+    unsupported = [str(item.get("id")) for item in rows if not _has_supported_ref(item)]
     low_confidence = [str(item.get("id")) for item in rows if item.get("confidence") != "high"]
     gaps = _rows(coverage_gaps)
     status = "pass"
@@ -415,7 +425,8 @@ def build_proof_table(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             rows.append(
                 {
                     **common,
-                    "proof_status": "supported",
+                    # Resolved citation -> supported; a citation that does not resolve -> unsupported.
+                    "proof_status": ref_proof_status(ref),
                     "evidence_ref_index": index,
                     "collector": ref.get("collector") or item.get("collector"),
                     "artifact_path": ref.get("artifact_path"),
@@ -425,9 +436,24 @@ def build_proof_table(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "source_name": ref.get("source_name"),
                     "endpoint": ref.get("endpoint"),
                     "response_status": ref.get("response_status"),
+                    "collected_at": ref.get("collected_at"),
+                    "content_hash": ref.get("content_hash"),
+                    "unresolved_reason": ref.get("unresolved_reason"),
                 }
             )
     return rows
+
+
+def _finding_proof_status(statuses: list[str]) -> str:
+    """One status for a finding from its proof rows: every row supported, some, or none."""
+    if not statuses:
+        return "missing_evidence"
+    supported = sum(1 for status in statuses if status == "supported")
+    if supported == len(statuses):
+        return "supported"
+    if supported:
+        return "partially_supported"
+    return statuses[0] if statuses[0] in {"missing_evidence", "unsupported"} else "unsupported"
 
 
 def _build_reviewer_index(
@@ -439,11 +465,14 @@ def _build_reviewer_index(
     blocker_count: int,
 ) -> dict[str, Any]:
     proof_by_finding: dict[str, dict[str, Any]] = {}
+    statuses_by_finding: dict[str, list[str]] = {}
     for row in proof_table:
         finding_id = str(row.get("finding_id") or row.get("id") or "").strip()
-        if not finding_id or finding_id in proof_by_finding:
+        if not finding_id:
             continue
-        proof_by_finding[finding_id] = row
+        statuses_by_finding.setdefault(finding_id, []).append(str(row.get("proof_status") or "missing_evidence"))
+        if finding_id not in proof_by_finding:
+            proof_by_finding[finding_id] = row
 
     prove_this = []
     for finding in top_findings:
@@ -457,7 +486,7 @@ def _build_reviewer_index(
                 "title": finding.get("title"),
                 "severity": finding.get("severity"),
                 "collector": proof.get("collector") or finding.get("collector"),
-                "proof_status": proof.get("proof_status") or "missing_evidence",
+                "proof_status": _finding_proof_status(statuses_by_finding.get(finding_id, [])),
                 "artifact_path": proof.get("artifact_path"),
                 "record_key": proof.get("record_key"),
                 "json_pointer": proof.get("json_pointer"),

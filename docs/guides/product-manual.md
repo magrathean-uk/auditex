@@ -263,6 +263,8 @@ auditex report render <run-dir> --format sarif --output reports/findings.sarif.j
 auditex report render <run-dir> --format oscal --output reports/oscal.json
 ```
 
+The SARIF export is SARIF 2.1.0 and the OSCAL export is OSCAL 1.1.2 Assessment Results; both are validated against the official JSON Schemas in the test suite. The OSCAL collection time is the run's `created_utc`, not the time of the export. See the [output contract](../reference/output-contract.md#sarif-and-oscal-exports).
+
 ## Run Explorer
 
 ```bash
@@ -371,6 +373,8 @@ Start the MCP server:
 ```bash
 auditex-mcp
 ```
+
+MCP tools never accept a bearer token or client secret: sign in through `auditex auth ...` and a saved auth context, and export `AZURE_CLIENT_SECRET` in the server's environment for app mode. Every path argument (run directories, output directories, credential files, assessment files) is confined to `AUDITEX_MCP_ROOT`, which defaults to the server's working directory; paths with `..` or outside it are refused.
 
 Use MCP tools for bundle-backed answers only. Every answer should cite bundle evidence or say evidence is missing. Key read-only review tools:
 

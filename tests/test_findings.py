@@ -43,7 +43,10 @@ def test_build_findings_classifies_permission_and_partial_failures() -> None:
     assert permission_finding["risk_rating"] == "high"
     assert permission_finding["category"] == "permission"
     assert permission_finding["recommendations"]["required_graph_scopes"] == ["SecurityEvents.Read.All"]
-    assert permission_finding["evidence_refs"][0]["artifact_path"] == "raw/security.json"
+    # A collector issue cites the row of blockers/blockers.json that records the failed read.
+    assert permission_finding["evidence_refs"][0]["artifact_path"] == "blockers/blockers.json"
+    assert permission_finding["evidence_refs"][0]["json_pointer"] == "/0"
+    assert findings[1]["evidence_refs"][0]["json_pointer"] == "/1"
 
     service_finding = findings[1]
     assert service_finding["severity"] == "medium"

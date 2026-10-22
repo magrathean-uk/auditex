@@ -22,6 +22,12 @@ dependencies = [
 mcp = [
     "mcp>=1.30.0,<2",
 ]
+# Test dependencies: pytest, and jsonschema to validate the SARIF and OSCAL exports against the
+# official schemas vendored under tests/schemas.
+test = [
+    "pytest>=8",
+    "jsonschema>=4.18,<5",
+]
 google = [
     "google-auth>=2.58.1,<3",
     "google-auth-oauthlib>=1.4.1,<2",

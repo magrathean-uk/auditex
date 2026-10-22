@@ -9,6 +9,7 @@ from azure_tenant_audit.collection_gaps import (
     list_truncations,
     truncations_from_payloads,
 )
+from azure_tenant_audit.data_minimisation import minimise_gmail_settings
 
 
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
@@ -180,7 +181,7 @@ def build_google_normalized_snapshot(
             filters_error=item.get("filters_error") or {},
             forwarding_addresses=item.get("forwardingAddresses") or [],
             forwarding_addresses_error=item.get("forwardingAddresses_error") or {},
-            send_as=item.get("sendAs") or [],
+            send_as=minimise_gmail_settings(item).get("sendAs") or [],
             send_as_error=item.get("sendAs_error") or {},
             delegates=item.get("delegates") or [],
             delegates_error=item.get("delegates_error") or {},
@@ -188,7 +189,7 @@ def build_google_normalized_snapshot(
             imap_error=item.get("imap_error") or {},
             pop=item.get("pop") or {},
             pop_error=item.get("pop_error") or {},
-            vacation=item.get("vacation") or {},
+            vacation=minimise_gmail_settings(item).get("vacation") or {},
             vacation_error=item.get("vacation_error") or {},
         )
         for item in _values(collector_payloads.get("google_gmail_settings", {}), "mailboxSettings")

@@ -9,7 +9,7 @@ Use Python 3.11 or newer from a source checkout:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e . pytest
+python -m pip install -e '.[test]'
 ```
 
 Install `.[google]` or `.[mcp]` only when working on those integrations. Local tooling and optional adapters are described in [the runbook](../docs/development/runbook.md).

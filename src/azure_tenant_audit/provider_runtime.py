@@ -6,7 +6,7 @@ from typing import Any
 from .attack_graph import analyze_attack_graph
 from .detection_coverage import SECTION as DETECTION_SECTION, summarize_detection_coverage
 from .exposure_lookup import summarize_public_footprint
-from .finalize import finalize_bundle_contract
+from .finalize import finalize_bundle_contract, seal_run_findings
 from .findings import build_report_pack
 
 
@@ -56,10 +56,12 @@ class ProviderFinalizePlan:
 
 
 def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
+    # Every artifact the findings cite is on disk by now; seal the citations before the report is built.
+    findings = seal_run_findings(writer, plan.findings)
     report_pack = build_report_pack(
         tenant_name=plan.tenant_name,
         overall_status=plan.overall_status,
-        findings=plan.findings,
+        findings=findings,
         evidence_paths=plan.evidence_paths,
         blocker_count=len(plan.blockers),
         privacy=plan.privacy,
@@ -109,5 +111,5 @@ def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
         capability_rows=plan.capability_rows,
         coverage_ledger=plan.coverage_ledger,
         blockers=plan.blockers,
-        findings=plan.findings,
+        findings=findings,
     )

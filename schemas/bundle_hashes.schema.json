@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auditex Bundle Hash Manifest",
+  "description": "bundle-hashes.json: the SHA-256 of every artifact of a run as it was when the run was finalized.",
+  "type": "object",
+  "required": ["schema_version", "algorithm", "artifact_count", "artifacts"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "algorithm": { "const": "sha256" },
+    "run_id": { "type": ["string", "null"] },
+    "created_utc": { "type": ["string", "null"] },
+    "artifact_count": { "type": "integer", "minimum": 0 },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "bytes"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "excluded": {
+      "type": "array",
+      "description": "Files that change after finalization by design and are therefore named but not hashed.",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason"],
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "enum": ["append_only_log", "sqlite_sidecar", "os_metadata"] }
+        }
+      }
+    }
+  }
+}

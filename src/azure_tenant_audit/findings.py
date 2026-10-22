@@ -404,6 +404,10 @@ def _evidence_ref(
     return ref
 
 
+# A finding about a set of objects cites at most this many of their records.
+_AGGREGATE_REF_LIMIT = 25
+
+
 def _normalized_evidence_refs(section: str, record: dict[str, Any], collector: str) -> list[dict[str, Any]]:
     record_key = str(record.get("key") or record.get("id") or f"{section}:record")
     return [
@@ -441,13 +445,15 @@ def _finalize_finding(finding: dict[str, Any]) -> dict[str, Any]:
     normalized_refs = [dict(item) for item in evidence_refs if isinstance(item, dict)] if isinstance(evidence_refs, list) else []
     if not normalized_refs:
         collector = str(result.get("collector") or "unknown")
+        # A builder that cites nothing gets the collector's coverage ledger row, which shows what the
+        # collector did; ``evidence_ref_generated`` marks the reference as a stand-in, not a citation.
         normalized_refs = [
             _evidence_ref(
-                artifact_path="normalized/snapshot.json",
+                artifact_path="normalized/coverage_ledger.json",
                 artifact_kind="normalized_json",
                 collector=collector,
-                record_key=str(result.get("id") or collector),
-                source_name="snapshot",
+                record_key=f"coverage_ledger:{collector}",
+                source_name="coverage_ledger",
             )
         ]
         result["evidence_ref_generated"] = True
@@ -998,15 +1004,19 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
     if not principal_ids:
         return []
 
-    evidence_refs = [
-        _evidence_ref(
-            artifact_path="normalized/role_assignments.json",
-            artifact_kind="normalized_json",
-            collector="identity",
-            record_key="identity:global_admin_resilience",
-            source_name="role_assignments",
-        )
-    ]
+    assignments_by_principal: dict[str, list[dict[str, Any]]] = {}
+    for item in role_assignments:
+        if item.get("role_definition_id") in global_admin_role_ids and item.get("principal_id"):
+            assignments_by_principal.setdefault(str(item.get("principal_id")), []).append(item)
+
+    def assignment_refs(for_principals: list[str]) -> list[dict[str, Any]]:
+        """References to the Global Administrator assignment records of these principals."""
+        refs: list[dict[str, Any]] = []
+        for principal in for_principals:
+            for assignment in assignments_by_principal.get(principal, []):
+                refs.extend(_normalized_evidence_refs("role_assignments", assignment, "identity"))
+        return refs[:_AGGREGATE_REF_LIMIT]
+
     findings: list[dict[str, Any]] = []
     for principal_id in principal_ids:
         user = users.get(principal_id)
@@ -1029,7 +1039,10 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "remediation": "Remove Global Administrator from disabled users and keep emergency access accounts explicitly documented.",
                     "expected_value": "Disabled accounts have no Global Administrator assignments.",
                     "returned_value": {"principal_id": principal_id, "enabled": user.get("enabled")},
-                    "evidence_refs": evidence_refs,
+                    "evidence_refs": [
+                        *assignment_refs([principal_id]),
+                        *_normalized_evidence_refs("users", user, "identity"),
+                    ],
                     **_metadata_for("identity.global_admin_disabled"),
                 }
             )
@@ -1062,7 +1075,10 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "remediation": "Rotate or validate the privileged credential and move routine administration to phishing-resistant, least-privileged access.",
                     "expected_value": "Privileged administrator credentials are rotated or governed through approved emergency-access procedure.",
                     "returned_value": user.get("last_password_change_at"),
-                    "evidence_refs": evidence_refs,
+                    "evidence_refs": [
+                        *assignment_refs([principal_id]),
+                        *_normalized_evidence_refs("users", user, "identity"),
+                    ],
                     **_metadata_for("identity.global_admin_stale_password"),
                 }
             )
@@ -1098,14 +1114,8 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "expected_value": "Every Global Administrator is registered for MFA.",
                     "returned_value": registration,
                     "evidence_refs": [
-                        *evidence_refs,
-                        _evidence_ref(
-                            artifact_path="normalized/auth_method_registration_objects.json",
-                            artifact_kind="normalized_json",
-                            collector="auth_methods",
-                            record_key=str(registration.get("key") or registration.get("id") or affected),
-                            source_name="auth_method_registration_objects",
-                        ),
+                        *assignment_refs([principal_id]),
+                        *_normalized_evidence_refs("auth_method_registration_objects", registration, "auth_methods"),
                     ],
                     **_metadata_for("identity.global_admin_mfa_not_registered"),
                 }
@@ -1128,7 +1138,7 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "remediation": "Maintain at least two protected emergency-capable admins and use narrower roles for routine work.",
                     "expected_value": "Two to five protected Global Administrator principals are present.",
                     "returned_value": {"global_admin_count": len(principal_ids), "principal_ids": principal_ids},
-                    "evidence_refs": evidence_refs,
+                    "evidence_refs": assignment_refs(principal_ids),
                     **_metadata_for("identity.global_admin_singleton"),
                 }
             )
@@ -1150,7 +1160,7 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "remediation": "Reduce Global Administrator assignments and move routine administration to least-privileged roles or eligible activation.",
                     "expected_value": "Two to five protected Global Administrator principals are present.",
                     "returned_value": {"global_admin_count": len(principal_ids), "principal_ids": principal_ids},
-                    "evidence_refs": evidence_refs,
+                    "evidence_refs": assignment_refs(principal_ids),
                     **_metadata_for("identity.global_admin_sprawl"),
                 }
             )
@@ -2583,14 +2593,20 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                     "role_assignment_schedule_count": assignment_count,
                     "role_eligibility_schedule_count": eligibility_count,
                 },
+                # The standing assignments themselves, and the read that found no eligibility schedule.
                 "evidence_refs": [
-                    _evidence_ref(
-                        artifact_path="normalized/governance_objects.json",
-                        artifact_kind="normalized_json",
-                        collector="identity_governance",
-                        record_key="identity_governance:standing_privilege_only",
-                        source_name="role_assignment_schedule",
-                    )
+                    *(
+                        ref
+                        for item in [
+                            record for record in governance_records if record.get("kind") == "role_assignment_schedule"
+                        ][:_AGGREGATE_REF_LIMIT]
+                        for ref in _normalized_evidence_refs("governance_objects", item, "identity_governance")
+                    ),
+                    *_normalized_evidence_refs(
+                        "normalization_coverage",
+                        _normalization_report(normalized_snapshot, "identity_governance.roleEligibilitySchedules"),
+                        "identity_governance",
+                    ),
                 ],
                 **_metadata_for("identity_governance.standing_privilege_only"),
             }
@@ -2598,6 +2614,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
         )
 
     intune_assignments = ((normalized_snapshot.get("intune_assignment_objects") or {}).get("records") or [])
+    intune_policy_rows = ((normalized_snapshot.get("intune_policy_assignment_objects") or {}).get("records") or [])
     # Policies and assignments both come from intune_depth: policies counted from other collectors say
     # nothing about this one, and an unread assignment list is not an empty one.
     configuration_report = _normalization_report(normalized_snapshot, "intune_depth.deviceConfigurations")
@@ -2616,14 +2633,26 @@ def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, 
                 "collector": "intune_depth",
                 "affected_objects": ["intune_policies"],
                 "returned_value": {"policy_count": policy_count, "assignment_count": 0},
+                # Policy rows are counted, not kept, so the policy count is cited from the read that counted
+                # them. The empty assignments are cited from the per-policy assignment rows (each with
+                # ``assignment_count`` 0). The assignment read's own coverage row counts those rows (it
+                # reads two for two policies), so it stands in only when the snapshot has no per-policy rows.
                 "evidence_refs": [
-                    _evidence_ref(
-                        artifact_path="normalized/snapshot.json",
-                        artifact_kind="normalized_json",
-                        collector="intune_depth",
-                        record_key="intune:intune_policies_without_assignments",
-                        source_name="snapshot",
-                    )
+                    *_normalized_evidence_refs("normalization_coverage", configuration_report, "intune_depth"),
+                    *(
+                        ref
+                        for row in intune_policy_rows[:_AGGREGATE_REF_LIMIT]
+                        for ref in _normalized_evidence_refs("intune_policy_assignment_objects", row, "intune_depth")
+                    ),
+                    *(
+                        _normalized_evidence_refs(
+                            "normalization_coverage",
+                            _normalization_report(normalized_snapshot, "intune_depth.deviceConfigurationAssignments"),
+                            "intune_depth",
+                        )
+                        if not intune_policy_rows
+                        else []
+                    ),
                 ],
                 **_metadata_for("intune_depth.policies_without_assignments"),
             }
@@ -2806,19 +2835,20 @@ def build_findings(
     # Live audit on 2026-05-09 surfaced 5 ``sharepoint_access:sitePermissions``
     # findings collapsing to a single id and tripping the C3 duplicate-id
     # validator.
-    diagnostic_groups: dict[str, list[dict[str, Any]]] = {}
+    diagnostic_groups: dict[str, list[tuple[int, dict[str, Any]]]] = {}
     diagnostic_order: list[str] = []
-    for item in diagnostics:
+    for position, item in enumerate(diagnostics):
         collector = str(item.get("collector") or "unknown")
         target = item.get("item") or item.get("endpoint") or collector
         finding_id = f"{collector}:{target}"
         if finding_id not in diagnostic_groups:
             diagnostic_order.append(finding_id)
             diagnostic_groups[finding_id] = []
-        diagnostic_groups[finding_id].append(item)
+        diagnostic_groups[finding_id].append((position, item))
 
     for finding_id in diagnostic_order:
-        group = diagnostic_groups[finding_id]
+        group_rows = diagnostic_groups[finding_id]
+        group = [entry for _position, entry in group_rows]
         primary = group[0]
         collector = str(primary.get("collector") or "unknown")
         target = primary.get("item") or primary.get("endpoint") or collector
@@ -2847,23 +2877,27 @@ def build_findings(
             if isinstance(entry_refs, list):
                 evidence_refs.extend(dict(ref) for ref in entry_refs if isinstance(ref, dict))
         if not evidence_refs:
+            # A diagnostic is a row of blockers/blockers.json, which every run writes from this same
+            # list. That row is the record of the failed read (raw payloads hold no row for a
+            # derived fan-out, and a crashed collector writes none), so it is what a finding cites.
             evidence_refs = [
                 _evidence_ref(
-                    artifact_path=f"raw/{collector}.json",
-                    artifact_kind="raw_json",
+                    artifact_path="blockers/blockers.json",
+                    artifact_kind="blockers_json",
                     collector=collector,
-                    record_key=f"{collector}:{target}",
-                    source_name=str(primary.get("item") or target),
-                    json_pointer=f"/{primary.get('item') or ''}" if primary.get("item") else None,
-                    endpoint=str(primary.get("endpoint")) if primary.get("endpoint") else None,
-                    response_status=str(primary.get("status")) if primary.get("status") else None,
+                    record_key=f"{collector}:{entry.get('item') or entry.get('endpoint') or collector}",
+                    source_name=str(entry.get("item") or entry.get("endpoint") or collector),
+                    json_pointer=f"/{position}",
+                    endpoint=str(entry.get("endpoint")) if entry.get("endpoint") else None,
+                    response_status=str(entry.get("status")) if entry.get("status") else None,
                     query_params={
-                        key: primary.get(key)
+                        key: entry.get(key)
                         for key in ("top", "page", "result_limit")
-                        if primary.get(key) is not None
+                        if entry.get(key) is not None
                     }
                     or None,
                 )
+                for position, entry in group_rows[:_AGGREGATE_REF_LIMIT]
             ]
         body: dict[str, Any] = {
             "id": finding_id,

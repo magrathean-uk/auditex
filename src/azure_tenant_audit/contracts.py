@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any
 
 from .collection_gaps import list_truncations
+from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .resources import list_resource_files, resolve_resource_path
 from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
 
-CONTRACT_VERSION = "2026-10-20"
+CONTRACT_VERSION = "2026-10-22"
 
 ROOT_REQUIRED_ARTIFACTS = (
     "run-manifest.json",
@@ -47,6 +48,8 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 _EVIDENCE_REF_REQUIRED = ("artifact_path", "artifact_kind", "collector", "record_key")
+# A reference that does not resolve in a bundle finalized before references had to resolve.
+LEGACY_UNRESOLVED_REF = "legacy_unresolved_ref"
 _AI_SAFE_SENSITIVE_KEYS = re.compile(
     r"(access[_-]?token|refresh[_-]?token|client[_-]?secret|secret|password|credential|authorization|raw_claims)",
     re.IGNORECASE,
@@ -149,14 +152,51 @@ def _load_findings(run_dir: Path, supplied: list[dict[str, Any]] | None) -> list
     return [dict(item) for item in payload if isinstance(item, Mapping)] if isinstance(payload, list) else []
 
 
-def _validate_evidence_refs(run_dir: Path, findings: list[dict[str, Any]], issues: list[dict[str, Any]]) -> None:
+def _is_legacy_bundle(manifest: Any) -> bool:
+    """Whether the run was finalized under a contract older than this one.
+
+    Such a bundle was written before references were required to resolve, so a citation that does
+    not resolve in it is the old builders' pattern (for example a raw payload cited for a fan-out
+    that has no row there), not a sign that the bundle was edited. The edit is what the hash
+    manifest and ``evidence_ref_hash_mismatch`` report.
+    """
+    if not isinstance(manifest, Mapping) or not manifest:
+        return False
+    version = manifest.get("schema_contract_version")
+    return not isinstance(version, str) or version < CONTRACT_VERSION
+
+
+def _unresolved_code(reason: str | None, *, legacy: bool, proof_table: bool = False) -> str:
+    """The issue code for a reference that does not resolve."""
+    if reason in ARTIFACT_REASONS:
+        return "broken_report_proof_table_ref" if proof_table else "broken_evidence_ref"
+    if legacy:
+        return LEGACY_UNRESOLVED_REF
+    return "unresolved_report_proof_table_ref" if proof_table else "unresolved_evidence_ref"
+
+
+def _validate_evidence_refs(
+    run_dir: Path,
+    findings: list[dict[str, Any]],
+    issues: list[dict[str, Any]],
+    index: EvidenceIndex,
+    *,
+    legacy: bool = False,
+) -> None:
+    """Every finding cites evidence, and every citation resolves inside the run directory.
+
+    A reference resolves when its artifact is a file inside ``run_dir`` and its ``json_pointer`` (or,
+    without one, its ``record_key``) exists in that artifact. ``content_hash``, when the reference
+    carries one, must still match the artifact bytes.
+    """
     ids = [str(item.get("id")) for item in findings if item.get("id")]
     duplicate_ids = sorted(key for key, count in Counter(ids).items() if count > 1)
     if duplicate_ids:
         issues.append(_issue("duplicate_finding_ids", path="findings/findings.json", details=duplicate_ids))
 
-    for index, finding in enumerate(findings):
-        finding_id = str(finding.get("id") or f"finding:{index}")
+    to_resolve: list[tuple[str, int, Mapping[str, Any]]] = []
+    for position, finding in enumerate(findings):
+        finding_id = str(finding.get("id") or f"finding:{position}")
         refs = finding.get("evidence_refs")
         if not isinstance(refs, list) or not refs:
             issues.append(_issue("missing_evidence_refs", path="findings/findings.json", details=finding_id))
@@ -180,15 +220,41 @@ def _validate_evidence_refs(run_dir: Path, findings: list[dict[str, Any]], issue
                         details={"finding_id": finding_id, "ref_index": ref_index, "missing": missing},
                     )
                 )
-            artifact_path = str(ref.get("artifact_path") or "")
-            if artifact_path and not (run_dir / artifact_path).exists():
-                issues.append(
-                    _issue(
-                        "broken_evidence_ref",
-                        path="findings/findings.json",
-                        details={"finding_id": finding_id, "artifact_path": artifact_path},
-                    )
+            if str(ref.get("artifact_path") or ""):
+                to_resolve.append((finding_id, ref_index, ref))
+
+    index.prime(ref for _finding, _position, ref in to_resolve)
+    for finding_id, ref_index, ref in to_resolve:
+        result = index.resolve(ref)
+        artifact_path = str(ref.get("artifact_path") or "")
+        if not result.resolved:
+            code = _unresolved_code(result.reason, legacy=legacy)
+            details: dict[str, Any] = {
+                "finding_id": finding_id,
+                "ref_index": ref_index,
+                "artifact_path": artifact_path,
+                "reason": result.reason,
+            }
+            for field in ("record_key", "json_pointer", "jsonl_line"):
+                if ref.get(field) not in (None, ""):
+                    details[field] = ref.get(field)
+            issues.append(_issue(code, path="findings/findings.json", details=details))
+            continue
+        recorded = str(ref.get("content_hash") or "").strip()
+        if recorded and result.content_hash and recorded.lower() != result.content_hash:
+            issues.append(
+                _issue(
+                    "evidence_ref_hash_mismatch",
+                    path="findings/findings.json",
+                    details={
+                        "finding_id": finding_id,
+                        "ref_index": ref_index,
+                        "artifact_path": artifact_path,
+                        "expected": recorded,
+                        "actual": result.content_hash,
+                    },
                 )
+            )
 
 
 def _record_key_for_check(record: Mapping[str, Any], section_name: str, index: int) -> str:
@@ -622,11 +688,67 @@ def _validate_api_inventory(run_dir: Path, manifest: Mapping[str, Any], issues: 
             )
 
 
-def _validate_report_pack(run_dir: Path, issues: list[dict[str, Any]]) -> None:
+def _proof_row_ref(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        field: row.get(field)
+        for field in ("artifact_path", "record_key", "json_pointer", "jsonl_line")
+        if row.get(field) not in (None, "")
+    }
+
+
+def _proof_rows(payload: Any) -> list[Any]:
+    rows = payload.get("proof_table") if isinstance(payload, Mapping) else None
+    return rows if isinstance(rows, list) else []
+
+
+def _report_pack_refs(payload: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
+    """References the report pack carries outside the findings: attack-path hops and report sections."""
+    refs: list[tuple[str, Mapping[str, Any]]] = []
+    if not isinstance(payload, Mapping):
+        return refs
+    attack_paths = payload.get("attack_paths")
+    for path_index, path in enumerate(attack_paths if isinstance(attack_paths, list) else []):
+        if not isinstance(path, Mapping):
+            continue
+        hops = path.get("hops")
+        for hop_index, hop in enumerate(hops if isinstance(hops, list) else []):
+            ref = hop.get("evidence_ref") if isinstance(hop, Mapping) else None
+            if isinstance(ref, Mapping):
+                refs.append((f"attack_paths[{path_index}].hops[{hop_index}]", ref))
+    for section, rows_key in (("detection_coverage", "signals"), ("public_footprint", "domains")):
+        block = payload.get(section)
+        rows = block.get(rows_key) if isinstance(block, Mapping) else None
+        for row_index, row in enumerate(rows if isinstance(rows, list) else []):
+            ref = row.get("evidence_ref") if isinstance(row, Mapping) else None
+            if isinstance(ref, Mapping):
+                refs.append((f"{section}.{rows_key}[{row_index}]", ref))
+    return [(where, ref) for where, ref in refs if str(ref.get("artifact_path") or "").strip()]
+
+
+def _validate_report_pack(
+    run_dir: Path, issues: list[dict[str, Any]], index: EvidenceIndex, payload: Any, *, legacy: bool = False
+) -> None:
     relative = "reports/report-pack.json"
-    payload = _read_json(run_dir / relative, fallback=None)
     if not isinstance(payload, Mapping):
         return
+    for where, ref in _report_pack_refs(payload):
+        result = index.resolve(ref)
+        if not result.resolved:
+            issues.append(
+                _issue(
+                    LEGACY_UNRESOLVED_REF
+                    if legacy and result.reason not in ARTIFACT_REASONS
+                    else "unresolved_report_evidence_ref",
+                    path=relative,
+                    details={
+                        "location": where,
+                        "artifact_path": str(ref.get("artifact_path") or ""),
+                        "record_key": ref.get("record_key"),
+                        "json_pointer": ref.get("json_pointer"),
+                        "reason": result.reason,
+                    },
+                )
+            )
     proof_table = payload.get("proof_table")
     if proof_table is None:
         return
@@ -637,9 +759,9 @@ def _validate_report_pack(run_dir: Path, issues: list[dict[str, Any]]) -> None:
     findings = [dict(item) for item in payload.get("findings") or [] if isinstance(item, Mapping)]
     finding_ids = {str(item.get("id")) for item in findings if item.get("id")}
     covered_ids: set[str] = set()
-    for index, row in enumerate(proof_table):
+    for row_index, row in enumerate(proof_table):
         if not isinstance(row, Mapping):
-            issues.append(_issue("invalid_report_proof_table", path=relative, details={"row_index": index}))
+            issues.append(_issue("invalid_report_proof_table", path=relative, details={"row_index": row_index}))
             continue
         if "proof_status" not in row and "evidence_count" in row and (row.get("finding_id") or row.get("id")):
             covered_ids.add(str(row.get("finding_id") or row.get("id")))
@@ -658,22 +780,48 @@ def _validate_report_pack(run_dir: Path, issues: list[dict[str, Any]]) -> None:
                 if not str(row.get(field) or "").strip()
             )
             artifact_path = str(row.get("artifact_path") or "")
-            if artifact_path and not (run_dir / artifact_path).exists():
-                issues.append(
-                    _issue(
-                        "broken_report_proof_table_ref",
-                        path=relative,
-                        details={"row_index": index, "finding_id": finding_id, "artifact_path": artifact_path},
+            if artifact_path:
+                result = index.resolve(_proof_row_ref(row))
+                if not result.resolved:
+                    code = _unresolved_code(result.reason, legacy=legacy, proof_table=True)
+                    issues.append(
+                        _issue(
+                            code,
+                            path=relative,
+                            details={
+                                "row_index": row_index,
+                                "finding_id": finding_id,
+                                "artifact_path": artifact_path,
+                                "record_key": row.get("record_key"),
+                                "reason": result.reason,
+                            },
+                        )
                     )
-                )
         elif proof_status not in {"missing_evidence", "unsupported"}:
             missing.append("proof_status:supported|missing_evidence|unsupported")
+        recorded_hash = str(row.get("content_hash") or "").strip()
+        if recorded_hash and str(row.get("artifact_path") or ""):
+            actual_hash = index.resolve(_proof_row_ref(row)).content_hash
+            if actual_hash and recorded_hash.lower() != actual_hash:
+                issues.append(
+                    _issue(
+                        "evidence_ref_hash_mismatch",
+                        path=relative,
+                        details={
+                            "row_index": row_index,
+                            "finding_id": finding_id,
+                            "artifact_path": str(row.get("artifact_path")),
+                            "expected": recorded_hash,
+                            "actual": actual_hash,
+                        },
+                    )
+                )
         if missing:
             issues.append(
                 _issue(
                     "invalid_report_proof_table",
                     path=relative,
-                    details={"row_index": index, "finding_id": finding_id, "missing": missing},
+                    details={"row_index": row_index, "finding_id": finding_id, "missing": missing},
                 )
             )
         if finding_id:
@@ -711,7 +859,28 @@ def build_validation_report(
 
     _validate_required_json_fields(run_path, issues)
     loaded_findings = _load_findings(run_path, findings)
-    _validate_evidence_refs(run_path, loaded_findings, issues)
+    # Each cited artifact is read once for the findings, the proof table and the report sections.
+    report_pack = _read_json(run_path / "reports" / "report-pack.json", fallback=None)
+    legacy = _is_legacy_bundle(_read_json(run_path / "run-manifest.json", fallback=None))
+    evidence_index = EvidenceIndex(run_path)
+    evidence_index.prime(
+        [
+            *(
+                ref
+                for item in loaded_findings
+                for ref in (item["evidence_refs"] if isinstance(item.get("evidence_refs"), list) else [])
+            ),
+            *(
+                _proof_row_ref(row)
+                for row in _proof_rows(report_pack)
+                if isinstance(row, Mapping)
+                and row.get("artifact_path")
+                and (row.get("proof_status") == "supported" or row.get("content_hash"))
+            ),
+            *(ref for _where, ref in _report_pack_refs(report_pack)),
+        ]
+    )
+    _validate_evidence_refs(run_path, loaded_findings, issues, evidence_index, legacy=legacy)
     _validate_normalized_records(run_path, issues)
     _validate_record_key_uniqueness(run_path, issues)
     _validate_finding_collectors(loaded_findings, issues)
@@ -725,7 +894,7 @@ def build_validation_report(
     _validate_live_readiness(run_path, manifest, issues)
     _validate_audit_plan(run_path, manifest, issues)
     _validate_api_inventory(run_path, manifest, issues)
-    _validate_report_pack(run_path, issues)
+    _validate_report_pack(run_path, issues, evidence_index, report_pack, legacy=legacy)
 
     context = ai_context if isinstance(ai_context, Mapping) else _read_json(run_path / "ai_context.json", fallback={})
     _validate_tenant_identity(run_path, manifest, context, indexed_identity, issues)

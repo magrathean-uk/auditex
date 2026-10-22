@@ -131,6 +131,7 @@ Open `validation.json` and fix the specific issue. Common causes:
 
 - missing required artifact,
 - malformed finding evidence reference,
+- evidence reference that does not resolve (`unresolved_evidence_ref`, `broken_evidence_ref`, `evidence_ref_hash_mismatch`),
 - missing normalized artifact,
 - API inventory reports a write or content read,
 - AI-safe artifact contains sensitive auth material.
@@ -140,6 +141,14 @@ Do not hand-edit generated output. Fix the collector, normalizer, or report gene
 ### Finding has no proof row
 
 The finding is unsupported for customer handoff. Add or fix `evidence_refs` in the finding source and rerun finalization.
+
+### Evidence reference does not resolve
+
+`validation.json` names the finding (`details.finding_id`), the reference and the reason. `record_not_found` and `json_pointer_not_found` mean the artifact exists but the record is not in it: the finding builder cites a key that the normalized artifact does not contain, which is a bug in the builder. `artifact_missing` means the file is gone; `artifact_outside_run_dir` means the path leaves the run directory. `evidence_ref_hash_mismatch` means the artifact changed after the finding was sealed (a proof row's `content_hash` is checked too). `legacy_unresolved_ref` is the same failure as `unresolved_evidence_ref` in a bundle finalized under an earlier contract version: the old builders cited records that were not there, and the bundle was not edited. A finding whose references do not resolve shows `unsupported` proof rows and lower `confidence`. Fix the builder and rerun; do not edit the bundle.
+
+### Customer pack refused: the run changed since it was finalized
+
+`auditex report customer-pack` exits with status 2 when files in the run directory no longer match `bundle-hashes.json` (or the file was deleted), or when the bundle no longer validates. `auditex report handoff <run-dir> --format json` shows `handoff_status: unusable` with `status_reasons`, and lists the files under `integrity.modified_paths` and `integrity.missing_paths`. Restore the original files or rerun the audit; see the [customer handoff guide](customer-handoff-guide.md).
 
 ### Customer pack verification fails
 

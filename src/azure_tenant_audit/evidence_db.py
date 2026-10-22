@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Iterable, Mapping
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -159,13 +161,17 @@ def build_run_evidence_index(run_dir: str | Path, db_path: str | Path | None = N
     for suffix in ("", "-wal", "-shm", "-journal"):
         sidecar = target.with_name(target.name + suffix)
         sidecar.unlink(missing_ok=True)
+    # Create the file 0600 before SQLite opens it; its journal and WAL sidecars inherit the mode.
+    os.close(os.open(target, os.O_CREAT | os.O_WRONLY, 0o600))
 
     manifest = _read_json(run_path / "run-manifest.json", {})
     summary = _read_json(run_path / "summary.json", {})
     manifest = manifest if isinstance(manifest, Mapping) else {}
     summary = summary if isinstance(summary, Mapping) else {}
 
-    with sqlite3.connect(target) as conn:
+    # Close the connection (``with`` only ends the transaction): in WAL mode the index stays in the
+    # ``-wal`` sidecar until the last connection closes, and the bundle hash manifest hashes the file.
+    with closing(sqlite3.connect(target)) as conn:
         for pragma in sqlite_bulk_pragmas():
             conn.execute(pragma)
         _create_schema(conn)

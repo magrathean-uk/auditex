@@ -7,6 +7,7 @@ from typing import Any, Callable, Optional
 from ..secret_hygiene import redact_command_string
 from .base import Adapter, AdapterMetadata
 from .powershell_graph import PowerShellGraphAdapter
+from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
 
 
 # October's resource schema refresh replaces a PIM API that stops returning
@@ -14,6 +15,14 @@ from .powershell_graph import PowerShellGraphAdapter
 # a claim that every resource in a newer module has been validated.
 MINIMUM_MODULE_VERSION = "2.26.1007.1"
 _MINIMUM_VERSION_PARTS = tuple(int(part) for part in MINIMUM_MODULE_VERSION.split("."))
+
+# Read-only module metadata probe; it goes through the same read allowlist as any other command.
+COMPATIBILITY_SCRIPT = (
+    "& { $module = Get-Module -ListAvailable Microsoft365DSC | "
+    "Sort-Object Version -Descending | Select-Object -First 1; "
+    "[pscustomobject]@{ module_version = $(if ($module) { $module.Version.ToString() } else { $null }); "
+    "powershell_version = $PSVersionTable.PSVersion.ToString() } }"
+)
 
 
 class M365DSCAdapter(Adapter):
@@ -43,13 +52,7 @@ class M365DSCAdapter(Adapter):
     ) -> dict[str, Any]:
         """Read local module metadata without importing or connecting to a tenant."""
         powershell = powershell or PowerShellGraphAdapter()
-        response = powershell.run(
-            "& { $module = Get-Module -ListAvailable Microsoft365DSC | "
-            "Sort-Object Version -Descending | Select-Object -First 1; "
-            "[pscustomobject]@{ module_version = $(if ($module) { $module.Version.ToString() } else { $null }); "
-            "powershell_version = $PSVersionTable.PSVersion.ToString() } }",
-            log_event=log_event,
-        )
+        response = powershell.run(COMPATIBILITY_SCRIPT, log_event=log_event)
         result: dict[str, Any] = {
             "source": "m365dsc",
             "minimum_module_version": MINIMUM_MODULE_VERSION,
@@ -90,15 +93,32 @@ class M365DSCAdapter(Adapter):
         command: str,
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None,
     ) -> dict[str, Any]:
+        safe_command = redact_command_string(command)
+        try:
+            command_words = check_command(self.name, command)
+        except CommandRefused as exc:
+            if log_event:
+                log_event(
+                    "command.refused",
+                    "Command refused before execution: not on the read allowlist",
+                    {"adapter": self.name, "command": safe_command, "reason": exc.reason},
+                )
+            return refusal_response(safe_command, exc)
         powershell = PowerShellGraphAdapter()
         compatibility = self.compatibility_check(powershell=powershell, log_event=log_event)
         if compatibility.get("error"):
-            return {**compatibility, "command": redact_command_string(command)}
+            return {**compatibility, "command": safe_command}
         script = command.replace("'", "''")
         module_guard = (
             f"Import-Module Microsoft365DSC -RequiredVersion '{compatibility['module_version']}' -ErrorAction Stop"
         )
-        wrapped = f"{module_guard}; Invoke-Expression '{script}'"
+        # The caller's command was checked above; the wrapper is ours and is marked as vetted.
+        wrapped = VettedCommand(
+            f"{module_guard}; Invoke-Expression '{script}'",
+            vetted_text=command,
+            source_adapter=self.name,
+            command_words=command_words,
+        )
         response = powershell.run(wrapped, log_event=log_event)
         if response.get("error"):
             stderr = str(response.get("stderr") or response.get("error") or "")

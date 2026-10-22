@@ -167,6 +167,104 @@ class RunBundleBuilder:
         return self.run_dir
 
 
+def make_contract_valid(run_dir: Path) -> Path:
+    """Complete a hand-built bundle so that it passes a real validation, and leave what it states alone.
+
+    Handoff, the customer pack and the explorer recompute validation instead of trusting a
+    ``validation.json`` that only says ``valid``. A bundle built from ``RunBundleBuilder`` has the
+    artifacts a test cares about; this adds what the contract also needs (the root artifacts'
+    required fields, an evidence index, an ``ai_context.json``) and a record for every evidence
+    reference to land on. It does not touch ``validation.json`` if the test wrote one, and it raises
+    with the validation issues if the bundle is still not valid.
+    """
+    from azure_tenant_audit.contracts import CONTRACT_VERSION, build_validation_report
+    from azure_tenant_audit.evidence_db import build_run_evidence_index
+
+    def load(relative: str, default: Any) -> Any:
+        path = run_dir / relative
+        if not path.is_file():
+            return default
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            return default
+
+    manifest = load("run-manifest.json", {})
+    summary = load("summary.json", {})
+    tenant = manifest.get("tenant_name") or "acme"
+    run_id = manifest.get("run_id") or "run-1"
+    for key, value in {
+        "schema_version": "2026-04-21",
+        "tenant_name": tenant,
+        "run_id": run_id,
+        "overall_status": "ok",
+        "mode": "offline",
+        "auditor_profile": "global-reader",
+        "selected_collectors": [],
+        "artifacts": [],
+        "evidence_db_path": "index/evidence.sqlite",
+        "ai_context_path": "ai_context.json",
+        "validation_path": "validation.json",
+        "schema_contract_version": CONTRACT_VERSION,
+    }.items():
+        manifest.setdefault(key, value)
+    for key, value in {"schema_version": "2026-04-21", "tenant_name": tenant, "run_id": run_id, "collectors": []}.items():
+        summary.setdefault(key, value)
+
+    pack_path = run_dir / str(manifest.get("report_pack_path") or "reports/report-pack.json")
+    pack = load(str(pack_path.relative_to(run_dir)), {})
+    pack.setdefault("schema_version", "2026-04-21")
+    pack.setdefault("summary", {"tenant_name": tenant, "overall_status": manifest["overall_status"]})
+    pack.setdefault("findings", [])
+    pack.setdefault("evidence_paths", [])
+
+    write_json(run_dir / "run-manifest.json", manifest)
+    write_json(run_dir / "summary.json", summary)
+    write_json(pack_path, pack)
+    # Every evidence reference needs a record to land on: give each cited artifact a row for its key.
+    cited: dict[str, list[str]] = {}
+    findings_file = load("findings/findings.json", [])
+    rows = [*pack["findings"], *(findings_file if isinstance(findings_file, list) else [])]
+    refs = [ref for finding in rows for ref in finding.get("evidence_refs") or []]
+    refs += [row for row in pack.get("proof_table") or [] if isinstance(row, dict)]
+    for ref in refs:
+        if isinstance(ref, dict) and ref.get("artifact_path"):
+            keys = cited.setdefault(str(ref["artifact_path"]), [])
+            if ref.get("record_key") and ref["record_key"] not in keys:
+                keys.append(str(ref["record_key"]))
+    for relative, keys in cited.items():
+        document = load(relative, {})
+        if isinstance(document, list):
+            document.extend({"key": key} for key in keys)
+        else:
+            document.setdefault("records", [])
+            document["records"].extend({"key": key} for key in keys)
+        write_json(run_dir / relative, document)
+
+    (run_dir / "normalized").mkdir(parents=True, exist_ok=True)
+    if not (run_dir / "ai_context.json").is_file():
+        write_json(
+            run_dir / "ai_context.json",
+            {
+                "schema_version": "2026-04-21",
+                "run": {"tenant_name": tenant, "run_id": run_id, "platform": manifest.get("platform", "m365")},
+                "privacy": {"safe_for_external_llm": False},
+                "counts": {"normalized_counts": {}},
+                "coverage": {},
+                "findings": {"count": len(rows)},
+                "artifacts": {"root": []},
+                "read_order": [],
+            },
+        )
+    build_run_evidence_index(run_dir)
+    if not (run_dir / "validation.json").is_file():
+        write_json(run_dir / "validation.json", build_validation_report(run_dir=run_dir, read_only=True))
+    report = build_validation_report(run_dir=run_dir, read_only=True)
+    if not report["valid"]:
+        raise AssertionError(f"hand-built bundle still fails validation: {json.dumps(report['issues'], indent=2)}")
+    return run_dir
+
+
 @dataclass(frozen=True)
 class FakeDoctorToolchain:
     blocked_tools: set[str] = field(default_factory=set)

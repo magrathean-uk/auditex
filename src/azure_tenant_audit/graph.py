@@ -23,6 +23,15 @@ GRAPH_BETA_ROOT = "https://graph.microsoft.com/beta"
 GRAPH_API_ROOTS = {"v1.0": GRAPH_ROOT, "beta": GRAPH_BETA_ROOT}
 # Error code of a refused @odata.nextLink; the paging that stopped is recorded as a coverage gap.
 NEXT_LINK_REFUSED = "NextLinkRefused"
+# Error code of a request the client refused because it is not a read (see read_only_violation).
+READ_ONLY_VIOLATION = "ReadOnlyViolation"
+# The only methods the audit plane may send: GET, and POST solely to /$batch with GET-only inner requests.
+READ_ONLY_METHODS = frozenset({"GET"})
+_BATCH_ENVELOPE_KEYS = frozenset({"requests"})
+_BATCH_INNER_KEYS = frozenset({"id", "method", "url", "headers", "dependsOn"})
+_BODY_KWARGS = frozenset({"json", "data", "files"})
+# Headers that make a server treat a GET or POST as another method; a read never needs them.
+_METHOD_OVERRIDE_HEADERS = frozenset({"x-http-method-override", "x-http-method", "x-method-override"})
 
 
 def graph_url(path: str, api_version: str = "v1.0") -> str:
@@ -38,6 +47,8 @@ def graph_url(path: str, api_version: str = "v1.0") -> str:
 
 def graph_host_url(url: str) -> bool:
     """Whether url is an HTTPS URL on the Microsoft Graph host the client talks to."""
+    if not isinstance(url, str):
+        return False
     parsed = urlparse(url)
     return parsed.scheme == "https" and parsed.hostname == urlparse(GRAPH_ROOT).hostname
 
@@ -49,6 +60,83 @@ def graph_api_version(url: str) -> str:
     return "v1.0"
 GRAPH_BATCH_CHUNK_SIZE = 20
 TOKEN_URL_TEMPLATE = "{authority}{tenant_id}/oauth2/v2.0/token"
+
+
+def graph_batch_url(url: Any) -> bool:
+    """Whether url is exactly the Microsoft Graph ``/$batch`` endpoint (v1.0 or beta), with no query."""
+    if not isinstance(url, str) or not graph_host_url(url):
+        return False
+    parsed = urlparse(url)
+    return parsed.path in {"/v1.0/$batch", "/beta/$batch"} and not parsed.query and not parsed.params
+
+
+def batch_inner_requests(kwargs: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The inner requests of a ``$batch`` call, or None when the body is not a plain ``{"requests": [...]}``."""
+    if set(kwargs) != {"json"}:
+        return None
+    body = kwargs.get("json")
+    if not isinstance(body, dict) or set(body) != _BATCH_ENVELOPE_KEYS:
+        return None
+    inner = body.get("requests")
+    if not isinstance(inner, list) or not all(isinstance(item, dict) for item in inner):
+        return None
+    return inner
+
+
+def _override_header(headers: Any) -> str | None:
+    if isinstance(headers, dict):
+        for name in headers:
+            if str(name).strip().lower() in _METHOD_OVERRIDE_HEADERS:
+                return str(name)
+    return None
+
+
+def read_only_violation(method: Any, url: Any, kwargs: dict[str, Any]) -> str | None:
+    """Why a request is not a read, or None when it may be sent.
+
+    Allowed: ``GET`` without a body, and ``POST`` to ``/$batch`` whose inner requests are all
+    relative ``GET`` calls without a body. Requests go only to https://graph.microsoft.com, so the
+    bearer token never leaves it, and no method-override header may be set. Everything else is
+    refused before any network call.
+    """
+    if not graph_host_url(url):
+        return "requests may only go to https://graph.microsoft.com"
+    override = _override_header(kwargs.get("headers"))
+    if override:
+        return f"the {override} header could turn a read into a write"
+    verb = method.upper() if isinstance(method, str) else ""
+    if verb in READ_ONLY_METHODS:
+        if _BODY_KWARGS & set(kwargs):
+            return "a GET request must not carry a body"
+        return None
+    if verb == "POST":
+        if not graph_batch_url(url):
+            return "POST is only allowed to the Microsoft Graph /$batch endpoint"
+        inner = batch_inner_requests(kwargs)
+        if inner is None:
+            return "a $batch request must be a plain JSON body with a requests list"
+        for item in inner:
+            inner_method = item.get("method")
+            if not isinstance(inner_method, str) or inner_method.upper() not in READ_ONLY_METHODS:
+                return f"a $batch request contains a non-GET inner request ({inner_method!r})"
+            inner_url = item.get("url")
+            if not isinstance(inner_url, str) or not inner_url.startswith("/") or inner_url.startswith("//"):
+                return "a $batch inner request must use a relative Graph path"
+            if "body" in item or set(item) - _BATCH_INNER_KEYS:
+                return "a $batch inner request must not carry a body"
+            if _override_header(item.get("headers")):
+                return "a $batch inner request must not set a method-override header"
+        return None
+    return f"{verb or repr(method)} is not a read method"
+
+
+def _batch_summary(kwargs: dict[str, Any]) -> dict[str, Any]:
+    inner = batch_inner_requests(kwargs) or []
+    return {
+        "size": len(inner),
+        "methods": sorted({str(item.get("method", "")).upper() for item in inner}),
+        "urls": [str(item.get("url", "")) for item in inner],
+    }
 
 
 @dataclass(frozen=True)
@@ -332,7 +420,24 @@ class GraphClient:
             self._token_claims = {}
         return dict(self._token_claims)
 
+    def _enforce_read_only(self, method: str, url: str, kwargs: dict[str, Any]) -> None:
+        """Refuse any request that is not a read, before a token is acquired or the network is touched."""
+        reason = read_only_violation(method, url, kwargs)
+        if reason is None:
+            return
+        self._emit(
+            "graph.request.refused",
+            "Refused a Graph request that is not a read",
+            {"method": str(method), "url": str(url), "reason": reason},
+        )
+        raise GraphError(
+            f"Refusing {method} {url}: {reason}.",
+            request=str(url),
+            error_code=READ_ONLY_VIOLATION,
+        )
+
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        self._enforce_read_only(method, url, kwargs)
         token = self.ensure_token()
         headers = kwargs.pop("headers", {})
         headers.update(
@@ -361,16 +466,16 @@ class GraphClient:
                 )
             self._apply_pacing(method=method, url=url, attempt=attempt)
             request_start = time.time()
-            self._emit(
-                "graph.request.started",
-                "Graph request started",
-                {
-                    "method": method,
-                    "url": url,
-                    "attempt": attempt,
-                    "params": self._params_overview(kwargs.get("params")),
-                },
-            )
+            started: dict[str, Any] = {
+                "method": method,
+                "url": url,
+                "attempt": attempt,
+                "params": self._params_overview(kwargs.get("params")),
+            }
+            if graph_batch_url(url):
+                # The inner calls are what the API ledger reports, so they are recorded here (paths only, no bodies).
+                started["batch"] = _batch_summary(kwargs)
+            self._emit("graph.request.started", "Graph request started", started)
             try:
                 response = self.session.request(method, url, headers=headers, timeout=self.auth.timeout_seconds, **kwargs)
             except RequestException as exc:  # noqa: BLE001
@@ -442,6 +547,8 @@ class GraphClient:
 
     def get_json(self, path: str, params: Optional[Dict[str, Any]] = None, full_url: bool = False) -> Dict[str, Any]:
         url = path if full_url else f"{GRAPH_ROOT}{path}"
+        if full_url:
+            self._require_graph_url(url)
         response = self._request("GET", url, params=params)
         if response.status_code >= 400:
             payload: dict[str, Any]
@@ -472,6 +579,8 @@ class GraphClient:
 
     def get_content(self, path: str, params: Optional[Dict[str, Any]] = None, full_url: bool = False) -> str:
         url = path if full_url else f"{GRAPH_ROOT}{path}"
+        if full_url:
+            self._require_graph_url(url)
         response = self._request("GET", url, params=params)
         if response.status_code >= 400:
             raise GraphError(response.text, status=response.status_code, request=response.url)

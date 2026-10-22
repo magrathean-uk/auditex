@@ -691,7 +691,8 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
         collector = str(row.get("collector") or "google_workspace")
         error_class = str(row.get("error_class") or "client_error")
         target = str(row.get("name") or row.get("endpoint") or collector)
-        record = {"id": f"{collector}:{target}", "key": f"diagnostic:{collector}:{target}"}
+        # The coverage ledger row of the collector is what exists to cite; the finding id keeps the target.
+        record = {"id": f"{collector}:{target}", "key": f"coverage_ledger:{collector}"}
         findings.append(
             _finding(
                 rule_id="google.collector_issue",

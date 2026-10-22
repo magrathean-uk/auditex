@@ -27,7 +27,6 @@ from auditex.mcp_server import (
     main as mcp_main,
     analyze_report,
     auth_capability,
-    auth_inspect_token,
     auth_list,
     auth_status,
     api_inventory,
@@ -42,7 +41,7 @@ from auditex.mcp_server import (
 from azure_tenant_audit.contracts import contract_schema_manifest
 from azure_tenant_audit.cli import build_parser, run_offline
 from azure_tenant_audit.profiles import get_profile, profile_choices
-from support import RunBundleBuilder, write_json
+from support import RunBundleBuilder, make_contract_valid, write_json
 
 
 def test_profile_choices_include_global_reader() -> None:
@@ -141,7 +140,8 @@ def test_mcp_tool_specs_present(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "auditex_list_response_actions" not in names
     assert "auditex_run_response_action" not in names
     assert "auditex_auth_status" in names
-    assert "auditex_auth_inspect_token" in names
+    assert "auditex_auth_inspect_token" not in names  # bearer tokens never travel through MCP arguments
+    assert "auditex_auth_import_token" not in names
     assert "auditex_auth_capability" in names
     assert "auditex_contract_schema_manifest" in names
 
@@ -181,7 +181,7 @@ def test_root_cli_can_show_lab_response_when_enabled(monkeypatch: pytest.MonkeyP
 def test_contract_schema_manifest_lists_shipped_schemas() -> None:
     manifest = contract_schema_manifest("schemas")
 
-    assert manifest["contract_version"] == "2026-10-20"
+    assert manifest["contract_version"] == "2026-10-22"
     assert "run_manifest.schema.json" in manifest["schemas"]
     assert "validation.schema.json" in manifest["schemas"]
 
@@ -278,7 +278,7 @@ def test_list_profiles_helper_returns_citations() -> None:
 def test_contract_schema_inventory_returns_citations() -> None:
     result = contract_schema_inventory("schemas")
 
-    assert result["contract_version"] == "2026-10-20"
+    assert result["contract_version"] == "2026-10-22"
     assert any(row["artifact_path"] == "src/azure_tenant_audit/contracts.py" for row in result["citations"])
     assert any(row["artifact_path"] == "schemas" for row in result["citations"])
     assert result["evidence_missing"] == []
@@ -379,23 +379,6 @@ def test_auth_list_helper_returns_citations(monkeypatch: pytest.MonkeyPatch, tmp
     assert result["connections"][1]["name"] == "tenant-user"
 
 
-def test_auth_inspect_token_helper_returns_citations(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "auditex.auth.inspect_token_claims",
-        lambda token: {"tenant_id": "tenant-1", "audience": "https://graph.microsoft.com", "token_preview": token[:4]},
-    )
-
-    result = auth_inspect_token("eyJ.example")
-
-    artifact_paths = {row["artifact_path"] for row in result["citations"]}
-    assert "src/auditex/auth.py" in artifact_paths
-    assert "src/auditex/auth_runtime.py" in artifact_paths
-    assert "token_input" in artifact_paths
-    assert result["citation_summary"]["artifact_count"] == 3
-    assert result["evidence_missing"] == []
-    assert result["tenant_id"] == "tenant-1"
-
-
 def test_list_adapters_tool_shape() -> None:
     result = list_adapters()
     assert result["count"] >= 1
@@ -469,19 +452,21 @@ def test_build_probe_command_uses_mode_surface_and_lab_guard(monkeypatch: pytest
     assert "--until" in command
 
 
-def test_build_probe_command_includes_app_credentials() -> None:
+def test_build_probe_command_never_carries_a_client_secret() -> None:
     command = build_probe_command(
         tenant_name="ACME",
         out_dir="outputs/probes",
         tenant_id="contoso.onmicrosoft.com",
         mode="app",
         client_id="app-id",
-        client_secret="app-secret",
     )
     assert "--client-id" in command
     assert "app-id" in command
-    assert "--client-secret" in command
-    assert "app-secret" in command
+    assert "--client-secret" not in command
+    with pytest.raises(TypeError):
+        build_probe_command(tenant_name="ACME", out_dir="o", mode="app", client_secret="app-secret")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        build_probe_command(tenant_name="ACME", out_dir="o", access_token="eyJ")  # type: ignore[call-arg]
 
 
 def test_build_google_command_uses_workspace_path() -> None:
@@ -502,20 +487,23 @@ def test_build_google_command_uses_workspace_path() -> None:
     assert command[command.index("--service-account-key") + 1] == "/creds/key.json"
 
 
-def test_build_cli_command_can_use_app_credentials() -> None:
+def test_build_cli_command_app_mode_takes_the_secret_from_the_environment_only() -> None:
     command = build_cli_command(
         tenant_name="ACME",
         tenant_id="contoso.onmicrosoft.com",
         out_dir="outputs/live",
         use_azure_cli_token=False,
         client_id="app-id",
-        client_secret="app-secret",
     )
     assert "--use-azure-cli-token" not in command
     assert "--client-id" in command
     assert "app-id" in command
-    assert "--client-secret" in command
-    assert "app-secret" in command
+    assert "--client-secret" not in command
+    assert "--access-token" not in command
+    with pytest.raises(TypeError):
+        build_cli_command(tenant_name="ACME", out_dir="o", client_secret="app-secret")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        build_cli_command(tenant_name="ACME", out_dir="o", access_token="eyJ")  # type: ignore[call-arg]
 
 
 def test_build_probe_command_supports_saved_auth_context() -> None:
@@ -860,6 +848,7 @@ def test_enterprise_handoff_indexes_customer_review_artifacts(tmp_path: Path) ->
         },
     )
 
+    make_contract_valid(run_dir)
     result = enterprise_handoff(str(run_dir))
 
     assert result["handoff_status"] == "ready_with_limitations"
@@ -955,6 +944,7 @@ def test_report_handoff_marks_collector_issue_findings_as_limitations(tmp_path: 
         },
     )
 
+    make_contract_valid(run_dir)
     result = enterprise_handoff(str(run_dir))
 
     assert result["handoff_status"] == "ready_with_limitations"
@@ -1102,6 +1092,7 @@ def test_report_handoff_command_prints_markdown(tmp_path: Path, capsys) -> None:
         },
     )
 
+    make_contract_valid(run_dir)
     rc = auditex_cli.main(["report", "handoff", str(run_dir), "--format", "md"])
     output = capsys.readouterr().out
 
@@ -1184,6 +1175,7 @@ def test_report_handoff_marks_missing_permissions_and_blocked_collectors_as_limi
         },
     )
 
+    make_contract_valid(run_dir)
     rc = auditex_cli.main(["report", "handoff", str(run_dir), "--format", "md"])
     output = capsys.readouterr().out
 
@@ -1236,6 +1228,7 @@ def test_report_customer_docs_can_write_output_files(tmp_path: Path, capsys) -> 
     permissions_path = tmp_path / "permissions.md"
     proof_path = tmp_path / "proof-table.md"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "handoff", str(run_dir), "--format", "md", "--output", str(handoff_path)]) == 0
     assert auditex_cli.main(["report", "api-calls", str(run_dir), "--format", "json", "--output", str(api_path)]) == 0
     assert auditex_cli.main(["report", "permissions", str(run_dir), "--format", "md", "--output", str(permissions_path)]) == 0
@@ -1299,7 +1292,7 @@ def _build_customer_pack_run(tmp_path: Path) -> Path:
             "warning_count": 0,
         },
     )
-    return run_dir
+    return make_contract_valid(run_dir)
 
 
 def test_report_customer_pack_writes_complete_handoff_folder(tmp_path: Path, capsys) -> None:
@@ -1469,6 +1462,7 @@ def test_enterprise_handoff_flags_stale_accepted_risk(tmp_path: Path) -> None:
         },
     )
 
+    make_contract_valid(run_dir)
     result = enterprise_handoff(str(run_dir))
 
     assert result["handoff_status"] == "ready_with_limitations"
@@ -1524,6 +1518,7 @@ def test_enterprise_handoff_exposes_reviewer_and_validation_summaries(tmp_path: 
         },
     )
 
+    make_contract_valid(run_dir)
     result = enterprise_handoff(str(run_dir))
 
     assert result["validation_summary"]["status"] == "pass"
@@ -1593,6 +1588,7 @@ def test_report_verify_pack_fails_for_stale_accepted_risk(tmp_path: Path, capsys
     )
     output_dir = tmp_path / "customer-pack"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
     capsys.readouterr()
 
@@ -1647,6 +1643,7 @@ def test_report_verify_pack_fails_for_missing_report_pack_citations(tmp_path: Pa
     )
     output_dir = tmp_path / "customer-pack"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
     capsys.readouterr()
 
@@ -1702,6 +1699,7 @@ def test_report_verify_pack_fails_for_missing_report_pack_citation_summary(tmp_p
     )
     output_dir = tmp_path / "customer-pack"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
     capsys.readouterr()
 
@@ -1796,6 +1794,7 @@ def test_report_verify_pack_fails_when_generated_helper_proof_record_key_missing
     )
     output_dir = tmp_path / "customer-pack"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
     capsys.readouterr()
 
@@ -1889,6 +1888,7 @@ def test_report_verify_pack_fails_when_proof_artifact_missing_from_citations(tmp
     )
     output_dir = tmp_path / "customer-pack"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
     capsys.readouterr()
 
@@ -1962,6 +1962,7 @@ def test_report_verify_pack_fails_when_proof_record_key_missing_from_citations(t
     )
     output_dir = tmp_path / "customer-pack"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
     capsys.readouterr()
 
@@ -2042,6 +2043,7 @@ def test_report_verify_pack_fails_when_proof_json_pointer_missing_from_citations
     )
     output_dir = tmp_path / "customer-pack"
 
+    make_contract_valid(run_dir)
     assert auditex_cli.main(["report", "customer-pack", str(run_dir), "--output-dir", str(output_dir)]) == 0
     capsys.readouterr()
 

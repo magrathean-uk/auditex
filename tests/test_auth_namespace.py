@@ -13,9 +13,10 @@ def test_mcp_tool_specs_include_auth_tools() -> None:
     assert "auditex_auth_status" in names
     assert "auditex_auth_list" in names
     assert "auditex_auth_use" in names
-    assert "auditex_auth_import_token" in names
-    assert "auditex_auth_inspect_token" in names
     assert "auditex_auth_capability" in names
+    # Bearer tokens are imported and inspected through the local CLI (`auditex auth ...`), never as MCP arguments.
+    assert "auditex_auth_import_token" not in names
+    assert "auditex_auth_inspect_token" not in names
 
 
 def test_auth_status_command_prints_json(monkeypatch, capsys) -> None:

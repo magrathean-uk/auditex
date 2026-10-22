@@ -39,6 +39,27 @@ in every page that `auditex report explorer` writes.
 - Notice: the licence is copied at `src/auditex/explorer_assets/fonts/OFL.txt`. The font
   files are unmodified and keep their reserved name.
 
+## Vendored test fixtures
+
+These are used only by the test suite and live under `tests/schemas/`. They are in the public
+repository but not in the wheel. They are kept byte for byte as published, so the exports are
+validated against the official text. `tests/schemas/README.md` records the source URL, retrieval date
+and SHA-256 of each file.
+
+### OSCAL Assessment Results JSON Schema
+
+- Location: `tests/schemas/oscal_assessment-results_schema-1.1.2.json` (renamed to carry the version)
+- Upstream: NIST OSCAL 1.1.2 release, `oscal_assessment-results_schema.json`
+- License: public domain as a work of the United States government, dedicated worldwide under CC0 1.0 Universal
+- Notice: NIST asks to be acknowledged as the source; the licence is copied at `tests/schemas/LICENSE-OSCAL.md`. The file is in the public repository but not in the wheel.
+
+### SARIF 2.1.0 JSON Schema
+
+- Location: `tests/schemas/sarif-schema-2.1.0.json`
+- Upstream: OASIS SARIF Technical Committee, SARIF Version 2.1.0 Errata 01
+- License: governed by the OASIS Intellectual Property Rights Policy (RF on RAND Terms mode); the file carries no licence text of its own
+- Notice: the OASIS copyright notice and Notices section that must accompany copies are reproduced word for word at `tests/schemas/LICENSE-SARIF.md`. The file is used unmodified as a test fixture, in the public repository but not in the wheel.
+
 ## Declared Python dependencies
 
 These dependencies are declared in `pyproject.toml` / `requirements.txt`. They are not vendored in this source package.
@@ -51,6 +72,7 @@ These dependencies are declared in `pyproject.toml` / `requirements.txt`. They a
 | `google-auth` | Optional `google` group: Google Workspace authentication | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
 | `google-auth-oauthlib` | Optional `google` group: OAuth flow for Google Workspace | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
 | `google-api-python-client` | Optional `google` group: Google Workspace API client | Apache-2.0 | Keep license notice when redistributing the optional dependency or bundled wheels. |
+| `jsonschema` | Optional `test` group: validates the SARIF and OSCAL exports against the official schemas in tests | MIT | Development and test use only; not needed to run Auditex. |
 
 The licences recorded are those stated in PyPI metadata for the minimum declared
 versions: `requests` 2.34.2, `msal` 1.39.0, `mcp` 1.30.0, `google-auth` 2.58.1,

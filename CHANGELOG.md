@@ -5,6 +5,54 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
+## [Unreleased]
+
+### Bundle compatibility
+
+- **Contract version.** `CONTRACT_VERSION` is `2026-10-22` (was `2026-10-20`). Evidence is now
+  traceable: the validator resolves every evidence reference, and five new validation codes report one
+  that does not (`unresolved_evidence_ref`, `evidence_ref_hash_mismatch`,
+  `unresolved_report_proof_table_ref`, `unresolved_report_evidence_ref`, `legacy_unresolved_ref`;
+  `broken_evidence_ref` also covers an artifact outside the run directory). Older bundles whose
+  references name records that do not exist now fail validation when it is recomputed (handoff, the
+  explorer, the gates, the customer pack); their files are not rewritten. In a bundle finalized under an
+  earlier contract version the failure is reported as `legacy_unresolved_ref`, so that it reads as the old
+  builders' citations and not as tampering. It is still an error and the gate still fails closed.
+- **New fields.** Evidence references gain `resolved`, `unresolved_reason`, `content_hash` and
+  `collected_at`; proof rows gain `collected_at`, `content_hash` and `unresolved_reason`; each finding's
+  `proof` summary gains `supported_count`. `proof_status` is `supported` only for a reference that
+  resolved, and a finding's `confidence` follows from how many of its references resolved. A new
+  normalized section, `intune_policy_assignment_objects`, holds one row per Intune policy the assignment
+  read returned.
+- **Removed.** The collector-failure rows in `diagnostics.json` and `blockers/blockers.json` no longer
+  carry `evidence_refs` (the incomplete-evidence rows from normalization still do); a collector issue cites its row of `blockers/blockers.json` instead (Google Workspace
+  collector issues cite the collector's `normalized/coverage_ledger.json` row, not `blockers.json`).
+  Consumers that read `evidence_refs` from those rows must read them from the finding.
+- **New artifact.** Finalization writes `bundle-hashes.json`, the SHA-256 of every artifact. Handoff,
+  the explorer and customer-pack creation recompute it. A bundle whose hash manifest is missing but still
+  listed in `run-manifest.json` is `invalid`, not `absent`. A changed or invalid bundle makes the handoff
+  `unusable` (see `status_reasons`) and `auditex report customer-pack` refuses to build a pack from one, or
+  from a bundle that no longer validates (exit status 2).
+- **Breaking for consumers of the OSCAL export.** The export now validates against the OSCAL 1.1.2
+  Assessment Results schema, which the earlier shape did not. A finding has a `target` instead of
+  `target-ids` and `remediation`; mapped controls are `framework-control` properties; observation
+  subjects use `subject-uuid`; the collection time is the run's `created_utc`, not the export time.
+- **Citations.** The Global Administrator, standing-privilege and Intune assignment findings cite
+  records that exist; they used to cite invented keys.
+
+### Added
+
+- The SARIF and OSCAL exports are validated in the tests against the official schemas, vendored under
+  `tests/schemas/` with the NIST and OASIS notices. `pip install -e '.[test]'` (which `make install` now
+  runs) installs `jsonschema` for that.
+- The explorer shows a banner when the bundle changed since it was finalized, when it does not validate
+  now, or when the only failures are legacy citations.
+
+### Fixed
+
+- `build_run_evidence_index` closes its SQLite connection, so `index/evidence.sqlite` holds the whole
+  index as soon as the run is finalized instead of leaving it in a `-wal` sidecar.
+
 ## [1.1.0] - 2026-10-22
 
 Everything below is new since the `v1.0.0` tag of 2026-04-18. The package and the bundle contract

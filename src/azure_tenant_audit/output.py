@@ -9,7 +9,9 @@ from typing import Any, Optional
 
 import time
 
+from .api_inventory import API_INVENTORY_ARTIFACT, read_audit_events, with_observed_ledger
 from .assurance import build_assurance_summary, build_coverage_gap_summary, build_provider_scorecard, build_surface_coverage_map
+from .data_minimisation import minimise_user_text
 from .findings import apply_coverage_gaps_to_report_pack
 from .tenant_identity import IDENTITY_FIELDS
 
@@ -18,8 +20,57 @@ RUN_MANIFEST_SCHEMA_VERSION = "2026-04-21"
 SUMMARY_SCHEMA_VERSION = "2026-04-21"
 
 
+BUNDLE_DIR_MODE = 0o700
+BUNDLE_FILE_MODE = 0o600
+
+
+def validate_bundle_name(value: str | None, label: str) -> str | None:
+    """Refuse a tenant or run name that could place a bundle outside its output directory.
+
+    A name becomes part of the run directory, so path separators, ``..``, NUL and control characters
+    are rejected. ``None`` (no name given) passes.
+    """
+    if value is None:
+        return None
+    text = str(value)
+    if "/" in text or "\\" in text or ".." in text or any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ValueError(f"{label} {text!r} must not contain a path separator, '..' or a control character")
+    return text
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _open_private(path: Path, mode: str = "w"):
+    """Open a bundle file for text writing, created 0600 whatever the umask, and tighten one that already exists."""
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if "a" in mode else os.O_TRUNC)
+    fd = os.open(path, flags, BUNDLE_FILE_MODE)
+    try:
+        os.fchmod(fd, BUNDLE_FILE_MODE)
+    except (AttributeError, OSError):
+        pass
+    return os.fdopen(fd, mode, encoding="utf-8")
+
+
+def harden_bundle(run_dir: Path) -> None:
+    """Set every directory under ``run_dir`` (and ``run_dir``) to 0700 and every file to 0600.
+
+    Bundles hold tenant metadata and personal data; they must not depend on the caller's umask.
+    Symbolic links are left alone.
+    """
+    run_dir = Path(run_dir)
+    for root, directories, files in os.walk(run_dir, followlinks=False):
+        for name in (".", *directories, *files):
+            target = Path(root) / name if name != "." else Path(root)
+            try:
+                if target.is_symlink():
+                    continue
+                wanted = BUNDLE_DIR_MODE if target.is_dir() else BUNDLE_FILE_MODE
+                if (target.stat().st_mode & 0o777) != wanted:
+                    os.chmod(target, wanted)
+            except OSError:
+                LOG.debug("Could not restrict %s", target)
 
 
 class AuditLogger:
@@ -32,9 +83,8 @@ class AuditLogger:
         self.command_log_path = run_dir / "audit-command-log.jsonl"
         self.debug_path = run_dir / "audit-debug.log"
         self.listener = listener
-        self.jsonl_path.touch(exist_ok=True)
-        self.command_log_path.touch(exist_ok=True)
-        self.debug_path.touch(exist_ok=True)
+        for path in (self.jsonl_path, self.command_log_path, self.debug_path):
+            _open_private(path, "a").close()
 
     def log(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
         payload = {
@@ -44,12 +94,12 @@ class AuditLogger:
             "details": details or {},
         }
         line = json.dumps(payload, default=str, ensure_ascii=False)
-        with self.jsonl_path.open("a", encoding="utf-8") as handle:
+        with _open_private(self.jsonl_path, "a") as handle:
             handle.write(line + "\n")
         if event in self._command_events:
-            with self.command_log_path.open("a", encoding="utf-8") as handle:
+            with _open_private(self.command_log_path, "a") as handle:
                 handle.write(line + "\n")
-        with self.debug_path.open("a", encoding="utf-8") as handle:
+        with _open_private(self.debug_path, "a") as handle:
             handle.write(f"[{payload['ts_utc']}] {payload['event']}: {payload['message']} {payload['details']}\n")
         LOG.debug("%s: %s", payload["event"], payload["message"])
         if self.listener is not None:
@@ -73,6 +123,8 @@ class AuditWriter:
         ts = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
         created_utc = _now_iso()
         if run_dir is None:
+            tenant_name = validate_bundle_name(tenant_name, "tenant name") or ""
+            run_name = validate_bundle_name(run_name, "run name")
             self.run_id = run_name or f"run_{ts}"
             self.run_dir = base_dir / f"{tenant_name}-{self.run_id}"
         else:
@@ -83,29 +135,30 @@ class AuditWriter:
                 self.run_id = normalized[len(prefix) :] if len(normalized) > len(prefix) else f"run_{ts}"
             else:
                 self.run_id = normalized
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_dir.parent.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.run_dir)
 
         self.resume_from_path = None
         self.raw_dir = self.run_dir / "raw"
-        self.raw_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.raw_dir)
         self.chunks_dir = self.run_dir / "chunks"
-        self.chunks_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.chunks_dir)
         self.index_dir = self.run_dir / "index"
-        self.index_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.index_dir)
         self.logs_dir = self.run_dir / "logs"
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.logs_dir)
         self.blockers_dir = self.run_dir / "blockers"
-        self.blockers_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.blockers_dir)
         self.normalized_dir = self.run_dir / "normalized"
-        self.normalized_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.normalized_dir)
         self.ai_safe_dir = self.run_dir / "ai_safe"
-        self.ai_safe_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.ai_safe_dir)
         self.findings_dir = self.run_dir / "findings"
-        self.findings_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.findings_dir)
         self.reports_dir = self.run_dir / "reports"
-        self.reports_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.reports_dir)
         self.checkpoints_dir = self.run_dir / "checkpoints"
-        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(self.checkpoints_dir)
         self.checkpoint_state_path = self.checkpoints_dir / "checkpoint-state.json"
         existing_manifest_path = self.run_dir / "run-manifest.json"
         existing_manifest = self._safe_load_json(existing_manifest_path)
@@ -145,6 +198,27 @@ class AuditWriter:
             if existing_manifest.get("tenant_name"):
                 self._manifest["tenant_name"] = existing_manifest["tenant_name"]
 
+    def _mkdir_private(self, path: Path) -> None:
+        """Create ``path`` and every missing directory between the run directory and it as 0700."""
+        path = Path(path)
+        try:
+            parts = path.relative_to(self.run_dir).parts
+        except ValueError:
+            path.mkdir(parents=True, exist_ok=True)
+            return
+        current = self.run_dir
+        for part in ("", *parts):
+            current = current / part if part else current
+            current.mkdir(mode=BUNDLE_DIR_MODE, exist_ok=True)
+            try:
+                os.chmod(current, BUNDLE_DIR_MODE)
+            except OSError:
+                LOG.debug("Could not restrict %s", current)
+
+    def harden(self) -> None:
+        """Restrict the whole bundle to 0700 directories and 0600 files (see harden_bundle)."""
+        harden_bundle(self.run_dir)
+
     def _safe_load_json(self, path: Path) -> Any:
         if not path.exists():
             return None
@@ -154,9 +228,10 @@ class AuditWriter:
             return None
 
     def _write_text_atomic(self, path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(path.parent)
         tmp_path = path.with_name(f".{path.name}.tmp")
-        tmp_path.write_text(content, encoding="utf-8")
+        with _open_private(tmp_path, "w") as handle:
+            handle.write(content)
         os.replace(tmp_path, path)
 
     def _write_json_atomic(self, path: Path, payload: Any) -> None:
@@ -314,16 +389,21 @@ class AuditWriter:
         return path
 
     def write_json_artifact(self, relative_path: str, payload: Any) -> Path:
+        if relative_path == API_INVENTORY_ARTIFACT and isinstance(payload, dict):
+            # The ledger is derived from this run's audit log here, the one place every inventory is written,
+            # so "read-only" and "no content read" are observed facts and not the caller's declaration. A
+            # ledger the caller supplied is replaced, never trusted.
+            payload = with_observed_ledger(payload, read_audit_events(self.audit.jsonl_path))
         target = self.run_dir / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(target.parent)
         self._write_json_atomic(target, payload)
         self._record_artifact(target)
         return target
 
     def write_raw(self, name: str, payload: dict[str, Any]) -> Path:
         target = self.raw_dir / f"{name}.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        self._write_json_atomic(target, payload)
+        self._mkdir_private(target.parent)
+        self._write_json_atomic(target, minimise_user_text(payload))
         self._record_artifact(target)
         return target
 
@@ -336,11 +416,11 @@ class AuditWriter:
         metadata: Optional[dict[str, Any]] = None,
     ) -> Path:
         collector_dir = self.chunks_dir / collector
-        collector_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(collector_dir)
         target = collector_dir / f"{name}-{page_number:05d}.jsonl"
-        with target.open("w", encoding="utf-8") as handle:
+        with _open_private(target, "w") as handle:
             for record in records:
-                handle.write(json.dumps(record, default=str) + "\n")
+                handle.write(json.dumps(minimise_user_text(record), default=str) + "\n")
         if metadata:
             meta_path = collector_dir / f"{name}-{page_number:05d}.meta.json"
             self._write_json_atomic(meta_path, metadata)
@@ -357,11 +437,11 @@ class AuditWriter:
         metadata: Optional[dict[str, Any]] = None,
     ) -> Path:
         section_dir = self.raw_dir / collector / operation
-        section_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(section_dir)
         target = section_dir / f"part-{page_number:05d}.jsonl"
-        with target.open("w", encoding="utf-8") as handle:
+        with _open_private(target, "w") as handle:
             for record in records:
-                handle.write(json.dumps(record, default=str) + "\n")
+                handle.write(json.dumps(minimise_user_text(record), default=str) + "\n")
         if metadata:
             meta_path = section_dir / f"part-{page_number:05d}.meta.json"
             self._write_json_atomic(meta_path, metadata)
@@ -371,7 +451,7 @@ class AuditWriter:
 
     def write_export_summary(self, collector: str, operation: str, payload: dict[str, Any]) -> Path:
         section_dir = self.raw_dir / collector / operation
-        section_dir.mkdir(parents=True, exist_ok=True)
+        self._mkdir_private(section_dir)
         target = section_dir / "summary.json"
         self._write_json_atomic(target, payload)
         self._record_artifact(target)
@@ -381,7 +461,7 @@ class AuditWriter:
         if not records:
             return
         index_path = self.index_dir / filename
-        with index_path.open("a", encoding="utf-8") as handle:
+        with _open_private(index_path, "a") as handle:
             for record in records:
                 self.coverage.append(record)
                 handle.write(json.dumps(record, default=str) + "\n")
@@ -408,13 +488,13 @@ class AuditWriter:
 
     def write_normalized(self, name: str, payload: dict[str, Any]) -> Path:
         path = self.normalized_dir / f"{name}.json"
-        self._write_json_atomic(path, payload)
+        self._write_json_atomic(path, minimise_user_text(payload))
         self._record_artifact(path)
         return path
 
     def write_ai_safe(self, name: str, payload: dict[str, Any]) -> Path:
         path = self.ai_safe_dir / f"{name}.json"
-        self._write_json_atomic(path, payload)
+        self._write_json_atomic(path, minimise_user_text(payload))
         self._record_artifact(path)
         return path
 
@@ -597,6 +677,7 @@ class AuditWriter:
 
         manifest_path = self.run_dir / "run-manifest.json"
         self._write_json_atomic(manifest_path, self._manifest)
+        self.harden()
 
         if not metadata.get("_suppress_completion_log"):
             self.log_event(

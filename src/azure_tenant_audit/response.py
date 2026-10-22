@@ -10,7 +10,7 @@ from datetime import datetime
 from .adapters import get_adapter
 from .adapters import ADAPTERS
 from .ai_context import build_privacy_block
-from .finalize import finalize_bundle_contract
+from .finalize import finalize_bundle_contract, seal_run_findings
 from .findings import build_report_pack
 from .output import AuditWriter
 from .profiles import get_profile
@@ -529,6 +529,8 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
                         "collector": "response",
                         "record_key": str(item.get("item") or config.action or "response"),
                         "source_name": "blockers",
+                        # The blocker is row ``index`` of the list just written to blockers.json.
+                        "json_pointer": f"/{index - 1}",
                     }
                 ],
             }
@@ -637,6 +639,7 @@ def run_response(config: ResponseConfig, command_line: list[str] | None = None) 
         evidence_paths.append("blockers/blockers.json")
     if findings:
         evidence_paths.append("findings/findings.json")
+    findings = seal_run_findings(writer, findings)
     writer.write_report_pack(
         build_report_pack(
             tenant_name=config.tenant_name,

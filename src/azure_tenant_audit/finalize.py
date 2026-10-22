@@ -7,13 +7,45 @@ from .ai_context import build_ai_context, build_privacy_block, build_validation_
 from .api_inventory import build_api_call_inventory
 from .assurance import build_coverage_gap_summary, build_live_readiness_summary, build_surface_coverage_map
 from .autopilot import build_audit_autopilot_plan
+from .bundle_integrity import BUNDLE_HASHES_PATH, build_bundle_hash_manifest
 from .citations import build_citation_summary, dedupe_citations
 from .contracts import CONTRACT_VERSION
 from .data_handling import build_data_handling_summary
 from .evidence_db import build_run_evidence_index
+from .evidence_refs import seal_findings
 from .output import AuditWriter
 from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
 from .tenant_identity import canonical_tenant_uuid, resolve_tenant_identity
+
+
+def seal_run_findings(writer: AuditWriter, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Resolve and hash every evidence reference of ``findings`` against the run directory.
+
+    Call it once the artifacts the findings cite are written and before the report pack is built,
+    so the proof table and the confidence of each finding come from what resolved. The sealed
+    findings replace ``findings/findings.json``.
+    """
+    if not findings:
+        return findings
+    manifest = getattr(writer, "_manifest", None)
+    created_utc = manifest.get("created_utc") if isinstance(manifest, dict) else None
+    sealed = seal_findings(writer.run_dir, findings, created_utc=created_utc)
+    writer.write_findings(sealed)
+    return sealed
+
+
+def _write_bundle_hash_manifest(writer: AuditWriter) -> None:
+    """Last step of finalization: the SHA-256 of every artifact as it now stands."""
+    manifest = writer._safe_load_json(writer.run_dir / "run-manifest.json")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    writer.write_json_artifact(
+        BUNDLE_HASHES_PATH,
+        build_bundle_hash_manifest(
+            writer.run_dir,
+            run_id=str(manifest.get("run_id") or writer.run_id),
+            created_utc=manifest.get("created_utc"),
+        ),
+    )
 
 
 def _append_report_evidence_path(writer: AuditWriter, relative_path: str) -> None:
@@ -247,7 +279,7 @@ def finalize_bundle_contract(
     # artifacts list on the first finalize call as it does on a re-finalize of
     # the same bundle. Without this the first call writes 22 artifacts and the
     # second writes 25, breaking idempotent re-finalize.
-    for relative in ("index/evidence.sqlite", "ai_context.json", "validation.json"):
+    for relative in ("index/evidence.sqlite", "ai_context.json", "validation.json", BUNDLE_HASHES_PATH):
         writer.record_artifact(writer.run_dir / relative)
 
     writer.write_bundle({**metadata, "_suppress_completion_log": True})
@@ -289,6 +321,7 @@ def finalize_bundle_contract(
     # build_run_evidence_index is idempotent (DROP TABLE / CREATE TABLE on each
     # call) so this second pass is safe and keeps re-finalise byte-stable.
     build_run_evidence_index(writer.run_dir)
+    _write_bundle_hash_manifest(writer)
 
     return {
         "evidence_db_path": str(Path(evidence_db_path).relative_to(writer.run_dir)),

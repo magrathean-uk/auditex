@@ -841,7 +841,13 @@ def main(argv: list[str] | None = None) -> int:
             _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
             return 0
         if args.report_command == "customer-pack":
-            print(json.dumps(write_customer_pack(args.run_dir, args.output_dir), indent=2))
+            from .reporting import BundleIntegrityError
+
+            try:
+                print(json.dumps(write_customer_pack(args.run_dir, args.output_dir), indent=2))
+            except BundleIntegrityError as exc:
+                print(f"auditex report customer-pack: {exc}", file=sys.stderr)
+                return 2
             return 0
         if args.report_command == "explorer":
             from .explorer import ExplorerCompareError, write_explorer

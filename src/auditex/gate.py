@@ -143,6 +143,7 @@ def _verify_contract(bundle: RunBundle, label: str) -> dict[str, Any]:
             "contract_invalid", f"{label} contract could not be recomputed: {type(exc).__name__}: {exc}"
         ) from exc
     errors = [issue for issue in report.get("issues") or [] if isinstance(issue, Mapping) and issue.get("severity") == "error"]
+    legacy_refs = sum(1 for issue in errors if issue.get("code") == "legacy_unresolved_ref")
     summary = {
         "valid": bool(report.get("valid")),
         "contract_version": report.get("contract_version"),
@@ -151,10 +152,24 @@ def _verify_contract(bundle: RunBundle, label: str) -> dict[str, Any]:
     }
     if not summary["valid"]:
         codes = sorted({str(issue.get("code")) for issue in errors})[:_ISSUE_CODE_LIMIT]
+        # The gate fails closed either way. A legacy citation is named so that it reads as what it is:
+        # a bundle written before references had to resolve, not one that was edited.
+        legacy_note = (
+            f"; {legacy_refs} legacy_unresolved_ref (citations written before references had to resolve, "
+            "not evidence of editing)"
+            if legacy_refs
+            else ""
+        )
         raise GateInputError(
             "contract_invalid",
-            f"{label} fails contract validation when recomputed ({summary['error_count']} errors: {', '.join(codes)})",
-            contract={**summary, "issue_codes": codes},
+            f"{label} fails contract validation when recomputed "
+            f"({summary['error_count']} errors: {', '.join(codes)}{legacy_note})",
+            contract={
+                **summary,
+                "issue_codes": codes,
+                "legacy_unresolved_ref_count": legacy_refs,
+                "only_legacy_unresolved_refs": legacy_refs == len(errors),
+            },
         )
     return summary
 

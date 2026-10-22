@@ -21,6 +21,7 @@ from .collectors import REGISTRY
 from .collectors.base import normalize_collection_limit
 from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
 from .config import AuthConfig, CollectorConfig
+from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
 from .findings import build_findings
 from .graph import GraphClient
@@ -199,8 +200,9 @@ def run_offline(
 
     collector_payloads: dict[str, dict[str, Any]] = {}
     result_rows: list[dict[str, Any]] = []
+    # The replay input is copied into the bundle: mailbox text a live run would have dropped is dropped here too.
     (writer.raw_dir / "sample_input.json").write_text(
-        json.dumps(sample, indent=2),
+        json.dumps(minimise_user_text(sample), indent=2),
         encoding="utf-8",
     )
     writer.record_artifact(writer.raw_dir / "sample_input.json")

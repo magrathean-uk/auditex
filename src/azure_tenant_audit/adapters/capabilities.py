@@ -8,7 +8,7 @@ ADAPTER_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
         "required_tools": ["m365"],
         "supported_profiles": ["exchange-reader", "global-reader", "security-reader", "auto"],
         "supported_actions": ["probe", "exchange_inventory", "response_readiness"],
-        "write_risk": "read_by_default",
+        "write_risk": "read_verb_allowlist",
         "expected_commands": ["m365 status --output json", "m365 connection list --output json"],
     },
     "m365dsc": {
@@ -16,7 +16,7 @@ ADAPTER_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
         "required_tools": ["pwsh", "Microsoft365DSC"],
         "supported_profiles": ["app-readonly-full", "global-reader", "auto"],
         "supported_actions": ["configuration_export"],
-        "write_risk": "read_only_export",
+        "write_risk": "read_verb_allowlist_export_only",
         "expected_commands": ["Export-M365DSCConfiguration"],
     },
     "powershell_graph": {
@@ -24,8 +24,8 @@ ADAPTER_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
         "required_tools": ["pwsh", "Microsoft.Graph"],
         "supported_profiles": ["security-reader", "global-reader", "app-readonly-full", "auto"],
         "supported_actions": ["graph_command", "exchange_probe"],
-        "write_risk": "command_template_defined",
-        "expected_commands": ["Connect-MgGraph", "Invoke-MgGraphRequest"],
+        "write_risk": "read_verb_allowlist",
+        "expected_commands": ["Get-*", "Search-UnifiedAuditLog"],
     },
 }
 

@@ -35,7 +35,7 @@ def finding(
     collector: str = "identity",
     waiver: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """A finding that satisfies the bundle contract (collector, evidence reference to an existing file)."""
+    """A finding that satisfies the bundle contract (collector, evidence reference that resolves)."""
     row: dict[str, Any] = {
         "id": finding_id,
         "rule_id": rule_id or f"rule.{finding_id}",
@@ -45,10 +45,11 @@ def finding(
         "collector": collector,
         "evidence_refs": [
             {
-                "artifact_path": "normalized/snapshot.json",
-                "artifact_kind": "normalized_json",
+                "artifact_path": "run-manifest.json",
+                "artifact_kind": "run_manifest",
                 "collector": collector,
                 "record_key": finding_id,
+                "json_pointer": "/run_id",
             }
         ],
     }
