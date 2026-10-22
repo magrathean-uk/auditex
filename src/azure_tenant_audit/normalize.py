@@ -19,6 +19,11 @@ from .collection_gaps import (
 from .data_minimisation import minimise_mailbox_settings
 from .detection_coverage import build_detection_signals
 from .directory_relationships import normalize_directory_relationships
+from .effective_admins import (
+    SECTION as EFFECTIVE_ADMIN_SECTION,
+    AdminSetEvidence,
+    build_effective_admin_set,
+)
 from .friendly_names import build_friendly_name_catalog
 from .identity_controls import (
     EVIDENCE_ABSENT,
@@ -1200,6 +1205,71 @@ def _build_identity_control_verdicts(
     ]
 
 
+def _build_effective_admin_records(
+    sources: "_NormalizationSources",
+    collector_payloads: dict[str, dict[str, Any]],
+    result_rows: list[dict[str, Any]],
+    *,
+    users: list[dict[str, Any]],
+    groups: list[dict[str, Any]],
+    service_principals: list[dict[str, Any]],
+    role_definitions: list[dict[str, Any]],
+    role_assignments: list[dict[str, Any]],
+    governance_objects: list[dict[str, Any]],
+    group_membership_edges: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The effective administrator set, or nothing when the run read neither identity nor governance.
+
+    Completeness comes from how each source was collected: the endpoint states (blocked, truncated,
+    absent), the group fan-out's own ``fanout_complete`` and, for PIM, a skipped collector (blocked:
+    nothing says why it was skipped).
+    """
+    identity_payload = collector_payloads.get("identity")
+    governance_payload = collector_payloads.get("identity_governance")
+    if not isinstance(identity_payload, dict) and not isinstance(governance_payload, dict):
+        return []
+    identity_payload = identity_payload if isinstance(identity_payload, dict) else {}
+    governance_payload = governance_payload if isinstance(governance_payload, dict) else {}
+    governance_skipped = any(
+        row.get("name") == "identity_governance" and row.get("status") == "skipped" for row in result_rows
+    )
+
+    def schedules(name: str) -> Evidence:
+        if not governance_payload and governance_skipped:
+            # The run skips a collector on a permission block, an exception or a missing raw file as well as
+            # on a missing licence, and a skipped collector leaves no payload to tell them apart. Only a
+            # ``license_required`` refusal on the schedule read itself proves the tenant has no PIM.
+            return Evidence(EVIDENCE_BLOCKED, detail="collector_skipped")
+        return sources.endpoint_evidence(governance_payload, name)
+
+    fanout = sources.endpoint_evidence(identity_payload, "roleAssignableGroupMembers")
+    fanout_section = identity_payload.get("roleAssignableGroupMembers")
+    fanout_meta = fanout_section.get("fanout") if isinstance(fanout_section, dict) else None
+    if fanout.state == EVIDENCE_COLLECTED and isinstance(fanout_meta, dict) and fanout_meta.get("fanout_complete") is not True:
+        fanout = Evidence(EVIDENCE_TRUNCATED, fanout.rows, "fanout_incomplete")
+    licensing_payload = collector_payloads.get("licensing")
+    licensing_payload = licensing_payload if isinstance(licensing_payload, dict) else {}
+    evidence = AdminSetEvidence(
+        role_definitions=sources.endpoint_evidence(identity_payload, "roleDefinitions"),
+        role_assignments=sources.endpoint_evidence(identity_payload, "roleAssignments"),
+        assignment_schedules=schedules("roleAssignmentSchedules"),
+        eligibility_schedules=schedules("roleEligibilitySchedules"),
+        group_fanout=fanout,
+        licence_skus=sources.endpoint_evidence(licensing_payload, "subscribedSkus"),
+        licensed_users=sources.endpoint_evidence(licensing_payload, "licensedUsers"),
+    )
+    return build_effective_admin_set(
+        users=users,
+        groups=groups,
+        service_principals=service_principals,
+        role_definitions=role_definitions,
+        role_assignments=role_assignments,
+        governance_objects=governance_objects,
+        membership_edges=group_membership_edges,
+        evidence=evidence,
+    )
+
+
 def build_normalized_snapshot(
     *,
     tenant_name: str,
@@ -1306,6 +1376,7 @@ def build_normalized_snapshot(
             str(item.get("id")),
             principal_id=item.get("principalId"),
             role_definition_id=item.get("roleDefinitionId"),
+            directory_scope_id=item.get("directoryScopeId"),
         )
         for item in _values(collector_payloads.get("identity", {}), "roleAssignments")
         if item.get("id")
@@ -2447,6 +2518,20 @@ def build_normalized_snapshot(
     )
     if identity_control_verdicts:
         records_by_section[IDENTITY_CONTROL_SECTION] = identity_control_verdicts
+    effective_admin_records = _build_effective_admin_records(
+        sources,
+        collector_payloads,
+        result_rows,
+        users=users,
+        groups=groups,
+        service_principals=service_principals,
+        role_definitions=role_definitions,
+        role_assignments=role_assignments,
+        governance_objects=governance_objects,
+        group_membership_edges=group_membership_edges,
+    )
+    if effective_admin_records:
+        records_by_section[EFFECTIVE_ADMIN_SECTION] = effective_admin_records
 
     for key, value in graph_summary.items():
         if value:

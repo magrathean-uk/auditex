@@ -56,7 +56,8 @@ Typical Microsoft Graph application permissions depend on selected collectors, b
 - `Directory.Read.All`
 - `User.Read.All`
 - `Group.Read.All`
-- `RoleManagement.Read.Directory`
+- `RoleManagement.Read.Directory` (also reads the PIM assignment and eligibility schedules, which the administrator set needs)
+- `AccessReview.Read.All` and `EntitlementManagement.Read.All` (the rest of the `identity_governance` collector, which the `auto`, `global-reader` and `full` and `config-only` presets now include)
 - `Policy.Read.All`
 - `AuditLog.Read.All` (also enables user `signInActivity` for stale-account findings, which needs Microsoft Entra ID P1 or P2, and the Graph beta `servicePrincipalSignInActivities` report for dormant-application findings)
 - `Reports.Read.All`
@@ -80,7 +81,7 @@ Detection coverage reads `Get-AdminAuditLogConfig`, `Get-OrganizationConfig`, an
 
 ### Domain-Wide Delegation
 
-Domain-wide delegation is the preferred path for full-domain Google Workspace coverage. It uses:
+Domain-wide delegation is the preferred path for Google Workspace coverage, and the only one that can read each user's own Gmail settings. It uses:
 
 - a Google Cloud service account,
 - the service account OAuth client ID,
@@ -98,8 +99,10 @@ In Google Admin Console:
 Core scopes:
 
 ```text
-https://www.googleapis.com/auth/admin.directory.user.readonly,https://www.googleapis.com/auth/admin.directory.group.readonly,https://www.googleapis.com/auth/admin.directory.domain.readonly,https://www.googleapis.com/auth/admin.directory.orgunit.readonly,https://www.googleapis.com/auth/admin.directory.rolemanagement.readonly,https://www.googleapis.com/auth/admin.directory.device.mobile.readonly,https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly,https://www.googleapis.com/auth/admin.directory.user.security,https://www.googleapis.com/auth/admin.reports.audit.readonly,https://www.googleapis.com/auth/admin.reports.usage.readonly,https://www.googleapis.com/auth/apps.alerts,https://www.googleapis.com/auth/gmail.settings.basic,https://www.googleapis.com/auth/gmail.settings.sharing
+https://www.googleapis.com/auth/admin.directory.user.readonly,https://www.googleapis.com/auth/admin.directory.group.readonly,https://www.googleapis.com/auth/admin.directory.domain.readonly,https://www.googleapis.com/auth/admin.directory.orgunit.readonly,https://www.googleapis.com/auth/admin.directory.rolemanagement.readonly,https://www.googleapis.com/auth/admin.directory.user.security,https://www.googleapis.com/auth/admin.reports.audit.readonly,https://www.googleapis.com/auth/admin.reports.usage.readonly,https://www.googleapis.com/auth/apps.alerts,https://www.googleapis.com/auth/cloud-identity.policies.readonly,https://www.googleapis.com/auth/gmail.settings.basic,https://www.googleapis.com/auth/gmail.settings.sharing,https://www.googleapis.com/auth/admin.directory.device.mobile.readonly,https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly
 ```
+
+`cloud-identity.policies.readonly` reads the organisation's 2-step verification policy (Cloud Identity Policy API). Enable the **Cloud Identity API** in the Google Cloud project, and add the scope to the delegation entry. Auditex requests it on its own token, separate from the other scopes, so a tenant that has not added it yet loses only the policy read: the run is partial, `google.collector_issue` names the surface, and the organisation policy is reported as unknown rather than as not enforced.
 
 Everything preset additional scopes:
 
@@ -108,6 +111,19 @@ https://www.googleapis.com/auth/drive.metadata.readonly,https://www.googleapis.c
 ```
 
 `drive.readonly` is broad. Auditex does not read Drive file content, but Google may require broad scope for some metadata or permission surfaces. The data-handling and API inventory artifacts declare the scope risk and no-content-read claim.
+
+#### What each collector's evidence covers
+
+Delegation uses one admin subject (`--subject`) for the Directory, Reports, Alert Center and Cloud Identity reads, which are tenant-wide whoever asks. The three collaboration surfaces are per user, and Auditex treats them as follows. Each coverage row, capability row and finding carries a `subject_scoped` label, and the normalized snapshot lists the scope of each collector (`subject_scope`).
+
+| Collector | Subject scope | What the evidence is |
+| --- | --- | --- |
+| `google_gmail_settings` | `user` with delegation | Each active user's own settings (auto-forwarding, filters, forwarding addresses, send-as, IMAP, POP, vacation, delegates), read by acting as that user. The reads are bounded: 500 mailboxes without `--top`, the `--top` value otherwise. A longer user list records a `mailboxSettingsFanout` coverage gap and the run is partial. Suspended and archived accounts are not read (`mailboxSettingsSkipped` records how many). |
+| `google_gmail_settings` | `admin` without delegation | OAuth cannot act as another user, so only the signed-in mailbox is read (`mailboxSettings:me`) and a `mailboxSettingsScope` gap states how many users were not read. |
+| `google_drive_posture` | `admin` | Files and shared drives the delegated admin can see. The Admin SDK has no cheap tenant-wide Drive permission read, so this is not a statement about the domain; the Reports `driveActivities` log is the tenant-wide signal. |
+| `google_calendar_posture` | `admin` for calendars and ACLs | The admin's calendar list and the ACLs the admin can read. `calendarResources` is a tenant-wide Directory inventory and is not labelled. |
+
+A finding built from `admin`-scoped evidence says so in its description and in `subject_scoped: admin`; do not present it as an organisation-wide result. The per-user token is narrowed to `gmail.settings.basic` and `gmail.settings.sharing`, so the token that can act as any user does not carry the other scopes in the delegation entry. The service account must be allowed to impersonate every user for the Gmail settings; a refused impersonation is a failed `mailboxSettings:<user>` row, and all of them together raise one `google.collector_issue` for the surface with the count of mailboxes.
 
 Probe after adding scopes:
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from gate_support import SAMPLE_COLLECTORS, finding, offline_run, read_json, set_coverage, write_findings
+from gate_support import SAMPLE_COLLECTORS, finding, offline_run, read_json, set_admin_set, set_coverage, write_findings
 
 
 def _gate(args: list[str]) -> tuple[int, str]:
@@ -360,12 +360,33 @@ def test_gate_drift_resolves_the_same_finding_when_every_collector_its_rule_read
     both = {"auth_methods": "complete_exact_scope", "identity": "complete_exact_scope"}
     set_coverage(baseline, both)
     set_coverage(current, both)
+    set_admin_set(current)
 
     rc, payload = _drift(baseline, current)
 
     assert rc == 0
     assert payload["resolved_count"] == 1
     assert payload["not_reassessed"] == []
+
+
+def test_gate_drift_does_not_resolve_a_finding_when_the_administrator_set_became_unknown(
+    baseline_and_current: tuple[Path, Path],
+) -> None:
+    baseline, current = baseline_and_current
+    singleton = finding("identity:global_admin_singleton", "high", rule_id="identity.global_admin_singleton")
+    write_findings(baseline, [singleton])
+    write_findings(current, [])
+    both = {"auth_methods": "complete_exact_scope", "identity": "complete_exact_scope"}
+    set_coverage(baseline, both)
+    set_coverage(current, both)
+    set_admin_set(current, "unknown", ("role_eligibility_schedules_absent",))
+
+    rc, payload = _drift(baseline, current)
+
+    assert rc == 0
+    assert payload["resolved_count"] == 0
+    assert [row["id"] for row in payload["not_reassessed"]] == ["identity:global_admin_singleton"]
+    assert payload["not_reassessed"][0]["reason"] == "rule_inputs:admin_set_unknown:role_eligibility_schedules_absent"
 
 
 def test_gate_drift_reports_a_rule_collector_that_was_not_run_at_all(baseline_and_current: tuple[Path, Path]) -> None:

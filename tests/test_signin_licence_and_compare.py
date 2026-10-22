@@ -391,6 +391,91 @@ def test_live_handoff_keeps_trust_level(tmp_path: Path) -> None:
     assert "- Live readiness: partial" in render_enterprise_handoff_markdown(enterprise_handoff(run_dir))
 
 
+def _write_normalized(run_dir: Path, name: str, payload: dict[str, Any]) -> None:
+    import json
+
+    path = run_dir / "normalized" / f"{name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _admin_set_section(state: str, *reasons: str) -> dict[str, Any]:
+    summary = {"kind": "effective_admin_set_summary", "key": "effective_admin_set_summary:summary", "state": state, "reasons": list(reasons)}
+    return {"kind": "effective_admin_set", "records": [summary]}
+
+
+def _verdict_section(verdict: str) -> dict[str, Any]:
+    record = {"kind": "identity_control_verdict", "key": "identity_control_verdict:effective_mfa", "control": "effective_mfa", "verdict": verdict}
+    return {"kind": "identity_control_verdicts", "records": [record]}
+
+
+def test_a_finding_that_vanished_because_the_administrator_set_became_unknown_is_not_resolved(tmp_path: Path) -> None:
+    from auditex.compare import build_finding_delta
+
+    singleton = {
+        "id": "identity:global_admin_singleton",
+        "rule_id": "identity.global_admin_singleton",
+        "severity": "high",
+        "status": "open",
+        "title": "Only one Global Administrator observed",
+        "collector": "identity",
+    }
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [singleton], "high")
+    unknown = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean")
+    complete = _run_with_findings(tmp_path, "run-c", "2026-09-21T00:00:00Z", [], "clean")
+    missing = _run_with_findings(tmp_path, "run-d", "2026-09-22T00:00:00Z", [], "clean")
+    _write_normalized(unknown, "effective_admin_set", _admin_set_section("unknown", "role_eligibility_schedules_absent"))
+    _write_normalized(complete, "effective_admin_set", _admin_set_section("complete"))
+
+    gone_unknown = build_finding_delta({"path": str(before)}, {"path": str(unknown)})
+    gone_complete = build_finding_delta({"path": str(before)}, {"path": str(complete)})
+    gone_missing = build_finding_delta({"path": str(before)}, {"path": str(missing)})
+
+    assert gone_unknown["resolved"] == []
+    assert gone_unknown["not_reassessed"][0]["reason"] == "rule_inputs:admin_set_unknown:role_eligibility_schedules_absent"
+    assert [row["id"] for row in gone_complete["resolved"]] == [singleton["id"]]
+    # A later run that wrote no administrator set cannot say the finding was fixed either.
+    assert gone_missing["resolved"] == []
+    assert gone_missing["not_reassessed"][0]["reason"] == "rule_inputs:admin_set_not_collected"
+
+
+def test_a_conditional_access_finding_is_not_resolved_when_the_mfa_verdict_became_unknown(tmp_path: Path) -> None:
+    from auditex.compare import build_finding_delta
+
+    finding_row = {
+        "id": "conditional_access:mfa_not_enforced",
+        "rule_id": "ca.mfa_not_enforced",
+        "severity": "high",
+        "status": "open",
+        "title": "MFA is not enforced",
+        "collector": "conditional_access",
+    }
+    collectors = {"identity": "ok", "conditional_access": "ok"}
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [finding_row], "high", collectors)
+    unknown = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean", collectors)
+    enforced = _run_with_findings(tmp_path, "run-c", "2026-09-21T00:00:00Z", [], "clean", collectors)
+    _write_normalized(unknown, "identity_control_verdicts", _verdict_section("unknown"))
+    _write_normalized(enforced, "identity_control_verdicts", _verdict_section("enforced"))
+
+    gone_unknown = build_finding_delta({"path": str(before)}, {"path": str(unknown)})
+    gone_enforced = build_finding_delta({"path": str(before)}, {"path": str(enforced)})
+
+    assert gone_unknown["resolved"] == []
+    assert gone_unknown["not_reassessed"][0]["reason"] == "rule_inputs:verdict_unknown:effective_mfa"
+    assert [row["id"] for row in gone_enforced["resolved"]] == [finding_row["id"]]
+
+
+def test_reassessment_gap_without_the_later_snapshot_is_not_reassessed_for_a_rule_with_an_input_check() -> None:
+    from auditex.compare import reassessment_gap
+
+    coverage = {"identity": {"complete": True, "status": "complete_exact_scope"}}
+    guarded = {"rule_id": "identity.global_admin_singleton", "collector": "identity"}
+    plain = {"rule_id": "x.plain", "collector": "identity"}
+
+    assert reassessment_gap(guarded, coverage) == "rule_inputs:inputs_not_available"
+    assert reassessment_gap(plain, coverage) is None
+
+
 def test_finding_delta_needs_every_collector_the_rule_reads_to_have_completed(tmp_path: Path) -> None:
     from auditex.compare import build_finding_delta
 
@@ -405,6 +490,7 @@ def test_finding_delta_needs_every_collector_the_rule_reads_to_have_completed(tm
     before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [mfa], "critical", {"auth_methods": "ok", "identity": "ok"})
     blocked = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean", {"auth_methods": "ok", "identity": "failed"})
     complete = _run_with_findings(tmp_path, "run-c", "2026-09-21T00:00:00Z", [], "clean", {"auth_methods": "ok", "identity": "ok"})
+    _write_normalized(complete, "effective_admin_set", _admin_set_section("complete"))
 
     lost = build_finding_delta({"path": str(before)}, {"path": str(blocked)})
     fixed = build_finding_delta({"path": str(before)}, {"path": str(complete)})

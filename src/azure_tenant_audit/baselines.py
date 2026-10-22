@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from .cyber_essentials import CE_FRAMEWORK_KEY, build_cyber_essentials_section
+from .effective_admins import (
+    SECTION as _ADMIN_SET_SECTION,
+    STATE_COMPLETE as _ADMIN_SET_COMPLETE,
+    SUMMARY_KIND as _ADMIN_SUMMARY_KIND,
+)
 from .identity_controls import (
     CONTROL_EFFECTIVE_MFA,
     CONTROL_LEGACY_AUTH,
@@ -52,6 +57,8 @@ _RULE_COLLECTORS = {
     "identity.privileged_mfa_not_registered": ("auth_methods", "identity"),
     "identity.user_mfa_not_registered": ("auth_methods",),
     "attack_path.no_mfa_to_tier0": ("identity", "auth_methods"),
+    # The licence flags of an administrator come from the licensing collector.
+    "identity.admin_holds_productivity_licence": ("identity", "licensing"),
     "detection.unified_audit_log_disabled": ("exchange_policy",),
     "detection.mailbox_audit_disabled": ("exchange_policy",),
     "detection.mailbox_audit_bypass": ("exchange_policy",),
@@ -111,6 +118,28 @@ _RULE_VERDICT_CONTROLS = {
     "consent_policy.user_consent_unrestricted": (CONTROL_USER_CONSENT,),
     "consent_policy.user_consent_unverified": (CONTROL_USER_CONSENT,),
 }
+# Rules that read the effective administrator set (``normalized/effective_admin_set.json``). Each is
+# evaluated only when the set is ``complete``: a role-assignment, PIM-schedule or group-membership read
+# that was blocked, truncated or not run can hide an administrator, so a clean result is not a pass.
+# ``identity.admin_set_unverified`` is the diagnostic an ``unknown`` set raises. Mirrors the rules in
+# findings.py that call ``_effective_admins`` (a test keeps them in step).
+_ADMIN_SET_RULES = frozenset(
+    {
+        "identity.global_admin_singleton",
+        "identity.global_admin_sprawl",
+        "identity.global_admin_disabled",
+        "identity.global_admin_stale_password",
+        "identity.global_admin_mfa_not_registered",
+        "identity.privileged_mfa_not_registered",
+        "identity.privileged_stale_account",
+        "identity.admin_holds_productivity_licence",
+        "identity.guest_with_privileged_role",
+        "identity.admin_set_unverified",
+        "attack_path.no_mfa_to_tier0",
+    }
+)
+_ADMIN_LICENCE_RULE = "identity.admin_holds_productivity_licence"
+_STALE_GUEST_RULE = "identity.stale_guest"
 _MTA_STS_POLICY_RULES = frozenset({"dns_posture.mta_sts_policy_invalid", "dns_posture.mta_sts_testing_mode"})
 _NOT_ASSESSED = "not_assessed"
 _STATUS_ORDER = ("fail", "accepted_risk", "pass", _NOT_ASSESSED)
@@ -255,12 +284,33 @@ def _finding_state(finding: Mapping[str, Any]) -> str:
     return "open"
 
 
-def _open_findings_by_rule(findings: list[dict[str, Any]]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+def _threshold_exemptions(findings: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Framework -> ids of findings whose bound for that framework was not breached.
+
+    A count rule states, per framework, the bound it tested (``framework_thresholds``). A finding
+    raised for CIS's two-to-four Global Administrators while SCuBA allows up to eight must fail only
+    the CIS controls. A framework the finding does not list has no bound of its own and takes the
+    finding as it is.
+    """
+    exempt: dict[str, set[str]] = defaultdict(set)
+    for finding in findings:
+        thresholds = finding.get("framework_thresholds")
+        if not isinstance(thresholds, list):
+            continue
+        for entry in thresholds:
+            if isinstance(entry, Mapping) and entry.get("framework") and entry.get("breached") is False:
+                exempt[str(entry["framework"])].add(str(finding.get("id") or ""))
+    return exempt
+
+
+def _open_findings_by_rule(
+    findings: list[dict[str, Any]], *, exempt_ids: Collection[str] = ()
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     open_by_rule: dict[str, list[str]] = defaultdict(list)
     accepted_by_rule: dict[str, list[str]] = defaultdict(list)
     for finding in findings:
         rule_id = str(finding.get("rule_id") or "")
-        if not rule_id:
+        if not rule_id or str(finding.get("id") or "") in exempt_ids:
             continue
         state = _finding_state(finding)
         if state == "closed":
@@ -459,6 +509,31 @@ def _verdict_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str
     return None
 
 
+def _admin_set_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
+    """The effective administrator set must be ``complete`` (and, for the licence rule, its licences read)."""
+    if snapshot is None:
+        return "inputs_not_available"
+    summary = next((row for row in _records(snapshot, _ADMIN_SET_SECTION) if row.get("kind") == _ADMIN_SUMMARY_KIND), None)
+    if summary is None:
+        return "admin_set_not_collected"
+    if summary.get("state") != _ADMIN_SET_COMPLETE:
+        return f"admin_set_unknown:{','.join(str(item) for item in summary.get('reasons') or ['unspecified'])}"
+    if rule_id == _ADMIN_LICENCE_RULE and summary.get("licence_state") != "known":
+        return f"licence_data_unavailable:{','.join(str(item) for item in summary.get('licence_reasons') or ['unspecified'])}"
+    return None
+
+
+def _stale_guest_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    """A guest can only be called stale when the sign-in activity read covered it."""
+    if snapshot is None:
+        return "inputs_not_available"
+    for user in _records(snapshot, "users"):
+        is_guest = str(user.get("user_type") or "").strip().lower() == "guest"
+        if is_guest and user.get("enabled") is not False and user.get("signin_data_available") is not True:
+            return "signin_activity_unavailable"
+    return None
+
+
 def _intune_assignment_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
     """The unassigned-policy rule reads intune_depth's own policy inventory and assignment reads."""
     if snapshot is None:
@@ -484,6 +559,10 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         return _intune_assignment_inputs_gap(snapshot)
     if rule_id in _RULE_VERDICT_CONTROLS:
         return _verdict_inputs_gap(snapshot, rule_id)
+    if rule_id in _ADMIN_SET_RULES:
+        return _admin_set_inputs_gap(snapshot, rule_id)
+    if rule_id == _STALE_GUEST_RULE:
+        return _stale_guest_inputs_gap(snapshot)
     if rule_id in _DETECTION_RULE_SIGNALS:
         return _detection_inputs_gap(snapshot, rule_id)
     if namespace == "dns_posture":
@@ -493,6 +572,17 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
             return "inputs_not_available"
         return None if _records(snapshot, "public_footprint_objects") else "public_footprint_not_collected"
     return None
+
+
+def rule_inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
+    """Why ``rule_id`` cannot be judged from ``snapshot`` (a run's normalized sections), or ``None``.
+
+    This is the input check baseline alignment applies before it lets a rule read ``pass``: a verdict
+    that is ``unknown``, an administrator set that is not ``complete``, sign-in data that was not
+    collected. Run comparison and the gates use it so that a finding that vanished because its inputs
+    went missing is never called resolved.
+    """
+    return _inputs_gap(rule_id, snapshot)
 
 
 def _rule_evaluation(
@@ -549,12 +639,19 @@ def build_baseline_alignment(
     ``unmapped_findings``.
     """
     mapping_rows = mappings if mappings is not None else _shipped_control_mappings()
-    open_by_rule, accepted_by_rule = _open_findings_by_rule(findings)
+    all_open_by_rule, all_accepted_by_rule = _open_findings_by_rule(findings)
+    exemptions = _threshold_exemptions(findings)
     complete = _complete_collectors(coverage_ledger)
     not_applicable = _not_applicable_collectors(coverage_ledger)
 
     frameworks: dict[str, Any] = {}
     for framework in BASELINE_FRAMEWORK_KEYS:
+        # A finding that did not breach this framework's own bound is not an open finding for it.
+        open_by_rule, accepted_by_rule = (
+            _open_findings_by_rule(findings, exempt_ids=exemptions[framework])
+            if exemptions.get(framework)
+            else (all_open_by_rule, all_accepted_by_rule)
+        )
         rules_by_control: dict[str, set[str]] = defaultdict(set)
         for rule_id, mapping in mapping_rows.items():
             for control_id in mapping.get(framework) or []:

@@ -1,9 +1,34 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from azure_tenant_audit.data_minimisation import minimise_gmail_settings
+
+from .auth import GMAIL_SETTINGS_SCOPES, POLICIES_SCOPE, user_delegated_credentials
+
+# Per-user services kept at once. The Gmail collector reads one user at a time, so a few are enough;
+# the bound keeps a 10,000-user run from holding 10,000 discovery clients.
+SUBJECT_SERVICE_CACHE_SIZE = 8
+
+# Cloud Identity Policy API filter for the 2-step verification settings. It is a CEL string, and CEL needs
+# the regex escape written as two backslashes (the API's own examples read ``gmail\\..*``), so this raw
+# string holds two backslashes. Every ``security.two_step_verification_*`` policy matches.
+_TWO_STEP_POLICY_FILTER = r"setting.type.matches('^settings/security\\.two_step_verification_.*$')"
+
+# Fields read from the device lists. Naming them keeps the telemetry the FULL projection also returns
+# (installed apps, recent users, active time ranges, disk and CPU reports) out of the bundle.
+_MOBILE_DEVICE_FIELDS = (
+    "nextPageToken,mobiledevices("
+    "resourceId,deviceId,email,model,os,type,status,lastSync,"
+    "deviceCompromisedStatus,encryptionStatus,devicePasswordStatus,securityPatchLevel,releaseVersion)"
+)
+_CHROMEOS_DEVICE_FIELDS = (
+    "nextPageToken,chromeosdevices("
+    "deviceId,serialNumber,status,lastSync,annotatedUser,model,osVersion,platformVersion,bootMode,"
+    "orgUnitPath,autoUpdateThrough,autoUpdateExpiration,supportEndDate,lastEnrollmentTime)"
+)
 
 
 class GoogleWorkspaceError(RuntimeError):
@@ -54,28 +79,70 @@ def _cut(values: list[dict[str, Any]], limit: int | None) -> CollectedRows:
 
 @dataclass
 class GoogleWorkspaceClient:
+    """Read-only Google Workspace client.
+
+    ``delegated`` says the credentials are a domain-wide delegation service account, so a user's own
+    mailbox settings can be read by acting as that user. Directory lists always use the customer
+    (``my_customer`` unless a customer id is given): ``--domain`` is a label, never a filter.
+    """
+
     credentials: Any
     customer_id: str | None = None
-    domain: str | None = None
     page_size: int = 100
+    delegated: bool = False
     _services: dict[tuple[str, str], Any] | None = None
+    _subject_services: OrderedDict[tuple[str, str, str], Any] | None = None
 
     def __post_init__(self) -> None:
         if self._services is None:
             self._services = {}
+        if self._subject_services is None:
+            self._subject_services = OrderedDict()
 
     @property
     def customer(self) -> str:
         return self.customer_id or "my_customer"
 
-    def _service(self, api: str, version: str) -> Any:
+    @property
+    def per_user_delegation(self) -> bool:
+        """Whether per-user settings can be read as each user (domain-wide delegation)."""
+        return bool(self.delegated) and hasattr(self.credentials, "with_subject")
+
+    def _service(self, api: str, version: str, *, scopes: tuple[str, ...] | None = None) -> Any:
         key = (api, version)
         assert self._services is not None
         if key not in self._services:
             from googleapiclient.discovery import build
 
-            self._services[key] = build(api, version, credentials=self.credentials, cache_discovery=False)
+            credentials = self._scoped_credentials(scopes) if scopes else self.credentials
+            self._services[key] = build(api, version, credentials=credentials, cache_discovery=False)
         return self._services[key]
+
+    def _scoped_credentials(self, scopes: tuple[str, ...]) -> Any:
+        """Credentials narrowed to ``scopes``, so a scope the tenant has not authorised fails only its own calls."""
+        with_scopes = getattr(self.credentials, "with_scopes", None)
+        if with_scopes is None:
+            return self.credentials
+        try:
+            return with_scopes(list(scopes))
+        except Exception:  # noqa: BLE001 - fall back to the shared token rather than skip the read
+            return self.credentials
+
+    def _subject_service(self, subject: str, api: str, version: str, scopes: tuple[str, ...]) -> Any:
+        """A service that acts as ``subject`` with only ``scopes``; the last few are cached, never one per user."""
+        cache = self._subject_services
+        assert cache is not None
+        key = (subject, api, version)
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        from googleapiclient.discovery import build
+
+        credentials = user_delegated_credentials(self.credentials, subject, scopes=scopes)
+        cache[key] = build(api, version, credentials=credentials, cache_discovery=False)
+        while len(cache) > SUBJECT_SERVICE_CACHE_SIZE:
+            cache.popitem(last=False)
+        return cache[key]
 
     def _collect_pages(
         self,
@@ -99,29 +166,24 @@ class GoogleWorkspaceClient:
             if not token:
                 return CollectedRows(rows, result_limit=limit)
 
-    def list_directory(self, resource: str, *, top: int | None = None, domain: str | None = None) -> list[dict[str, Any]]:
+    def list_directory(self, resource: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         page_size = min(self.page_size, top or self.page_size)
         if resource == "users":
-            def request(page_token: str | None) -> Any:
-                kwargs = {"customer": self.customer, "maxResults": page_size, "pageToken": page_token, "orderBy": "email"}
-                effective_domain = domain or self.domain
-                if effective_domain:
-                    kwargs["domain"] = effective_domain
-                    kwargs.pop("customer", None)
-                return service.users().list(**kwargs)
-
-            return self._collect_pages(request, "users", limit=top)
+            # customer=my_customer lists every domain of the tenant, secondary and alias domains included.
+            return self._collect_pages(
+                lambda page_token: service.users().list(
+                    customer=self.customer, maxResults=page_size, pageToken=page_token, orderBy="email"
+                ),
+                "users",
+                limit=top,
+            )
         if resource == "groups":
-            def request(page_token: str | None) -> Any:
-                kwargs = {"customer": self.customer, "maxResults": page_size, "pageToken": page_token}
-                effective_domain = domain or self.domain
-                if effective_domain:
-                    kwargs["domain"] = effective_domain
-                    kwargs.pop("customer", None)
-                return service.groups().list(**kwargs)
-
-            return self._collect_pages(request, "groups", limit=top)
+            return self._collect_pages(
+                lambda page_token: service.groups().list(customer=self.customer, maxResults=page_size, pageToken=page_token),
+                "groups",
+                limit=top,
+            )
         if resource == "orgUnits":
             payload = service.orgunits().list(customerId=self.customer, type="all").execute()
             return _cut(payload.get("organizationUnits") or [], top)
@@ -201,7 +263,15 @@ class GoogleWorkspaceClient:
         )
 
     def get_gmail_settings_for_user(self, user_email: str) -> dict[str, Any]:
-        service = self._service("gmail", "v1")
+        """Settings of one mailbox, read as that user when the credentials are delegated.
+
+        With a single admin subject the settings calls for another user's mailbox are refused, so a
+        delegated client acts as each user. Without delegation only ``me`` (the signed-in user) is readable.
+        """
+        if self.per_user_delegation and user_email != "me":
+            service = self._subject_service(user_email, "gmail", "v1", GMAIL_SETTINGS_SCOPES)
+        else:
+            service = self._service("gmail", "v1")
         settings = service.users().settings()
         payload: dict[str, Any] = {"userEmail": user_email}
 
@@ -300,15 +370,36 @@ class GoogleWorkspaceClient:
             limit=top,
         )
 
+    def list_policies(self, *, top: int | None = None) -> list[dict[str, Any]]:
+        """Cloud Identity policies for the 2-step verification settings (read-only policies scope)."""
+        service = self._service("cloudidentity", "v1", scopes=(POLICIES_SCOPE,))
+        policies = getattr(service, "policies", None)
+        if policies is None:
+            raise GoogleWorkspaceError(
+                "the installed google-api-python-client has no cloudidentity v1 policies resource; upgrade it",
+                surface="policies",
+            )
+        page_size = min(self.page_size, top or self.page_size, 100)
+        policy_filter = f'customer == "customers/{self.customer}" && {_TWO_STEP_POLICY_FILTER}'
+        return self._collect_pages(
+            lambda page_token: policies().list(pageSize=page_size, pageToken=page_token, filter=policy_filter),
+            "policies",
+            limit=top,
+        )
+
     def list_devices(self, resource: str, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
         page_size = min(self.page_size, top or self.page_size)
+        # FULL projection carries the posture fields (encryption, password, patch level, auto-update
+        # expiration); ``fields`` keeps the response to the ones the audit reads.
         if resource == "mobile":
             return self._collect_pages(
                 lambda page_token: service.mobiledevices().list(
                     customerId=self.customer,
                     maxResults=page_size,
                     pageToken=page_token,
+                    projection="FULL",
+                    fields=_MOBILE_DEVICE_FIELDS,
                 ),
                 "mobiledevices",
                 limit=top,
@@ -319,6 +410,8 @@ class GoogleWorkspaceClient:
                     customerId=self.customer,
                     maxResults=page_size,
                     pageToken=page_token,
+                    projection="FULL",
+                    fields=_CHROMEOS_DEVICE_FIELDS,
                 ),
                 "chromeosdevices",
                 limit=top,

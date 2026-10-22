@@ -27,7 +27,36 @@
           },
           "isAdmin": false,
           "isEnrolledIn2Sv": false,
-          "suspended": false
+          "suspended": false,
+          "isEnforcedIn2Sv": false,
+          "lastLoginTime": "2021-03-04T10:00:00.000Z",
+          "creationTime": "2020-09-01T09:00:00.000Z"
+        },
+        {
+          "id": "u-delegated",
+          "primaryEmail": "delegated@example.com",
+          "name": {
+            "fullName": "Delegated Admin"
+          },
+          "isAdmin": false,
+          "isDelegatedAdmin": true,
+          "isEnrolledIn2Sv": false,
+          "isEnforcedIn2Sv": false,
+          "suspended": false,
+          "lastLoginTime": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "u-never",
+          "primaryEmail": "never@example.com",
+          "name": {
+            "fullName": "Never Signed In"
+          },
+          "isAdmin": false,
+          "isEnrolledIn2Sv": true,
+          "isEnforcedIn2Sv": true,
+          "suspended": false,
+          "lastLoginTime": "1970-01-01T00:00:00.000Z",
+          "creationTime": "2024-02-01T09:00:00.000Z"
         }
       ]
     },
@@ -47,6 +76,18 @@
           "domainName": "example.com",
           "verified": true,
           "isPrimary": true
+        },
+        {
+          "domainName": "example.org",
+          "verified": true,
+          "isPrimary": false,
+          "domainAliases": [
+            {
+              "domainAliasName": "example.net",
+              "parentDomainName": "example.org",
+              "verified": true
+            }
+          ]
         }
       ]
     },
@@ -95,6 +136,17 @@
           "scopes": [
             "https://www.googleapis.com/auth/gmail.modify"
           ]
+        }
+      ]
+    },
+    "orgUnits": {
+      "value": [
+        {
+          "orgUnitId": "id:sales-ou",
+          "name": "Sales",
+          "orgUnitPath": "/Sales",
+          "parentOrgUnitPath": "/",
+          "parentOrgUnitId": "id:root-ou"
         }
       ]
     }
@@ -210,6 +262,58 @@
       "value": []
     }
   },
+  "google_policies": {
+    "twoStepVerificationPolicies": {
+      "value": [
+        {
+          "name": "policies/two-step-enforcement-root",
+          "customer": "customers/C123",
+          "policyQuery": {
+            "query": "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root'))",
+            "orgUnit": "orgUnits/root-ou",
+            "sortOrder": 1
+          },
+          "setting": {
+            "type": "settings/security.two_step_verification_enforcement",
+            "value": {}
+          },
+          "type": "ADMIN"
+        },
+        {
+          "name": "policies/two-step-enforcement-sales",
+          "customer": "customers/C123",
+          "policyQuery": {
+            "query": "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('sales-ou'))",
+            "orgUnit": "orgUnits/sales-ou",
+            "sortOrder": 2
+          },
+          "setting": {
+            "type": "settings/security.two_step_verification_enforcement",
+            "value": {
+              "enforcedFrom": "2020-01-01T00:00:00Z"
+            }
+          },
+          "type": "ADMIN"
+        },
+        {
+          "name": "policies/two-step-enrollment-root",
+          "customer": "customers/C123",
+          "policyQuery": {
+            "query": "entity.org_units.exists(org_unit, org_unit.org_unit_id == orgUnitId('root'))",
+            "orgUnit": "orgUnits/root-ou",
+            "sortOrder": 1
+          },
+          "setting": {
+            "type": "settings/security.two_step_verification_enrollment",
+            "value": {
+              "allowEnrollment": true
+            }
+          },
+          "type": "SYSTEM"
+        }
+      ]
+    }
+  },
   "google_devices": {
     "mobileDevices": {
       "value": [
@@ -221,8 +325,36 @@
           "model": "iPhone",
           "os": "iOS",
           "status": "APPROVED",
-          "compromisedStatus": "Compromised",
-          "lastSync": "2020-01-01T00:00:00.000Z"
+          "lastSync": "2020-01-01T00:00:00.000Z",
+          "deviceCompromisedStatus": "Compromised",
+          "encryptionStatus": "Not encrypted",
+          "devicePasswordStatus": "Off",
+          "securityPatchLevel": "1577836800",
+          "releaseVersion": "10"
+        },
+        {
+          "resourceId": "mobile-2",
+          "email": [
+            "user@example.com"
+          ],
+          "model": "Pixel",
+          "os": "Android",
+          "status": "APPROVED",
+          "deviceCompromisedStatus": "No compromise detected",
+          "encryptionStatus": "Encrypted",
+          "devicePasswordStatus": "On",
+          "securityPatchLevel": "1760000000",
+          "lastSync": "2026-10-20T08:00:00.000Z"
+        },
+        {
+          "resourceId": "mobile-3",
+          "email": [
+            "delegated@example.com"
+          ],
+          "model": "Handset",
+          "os": "Android",
+          "status": "APPROVED",
+          "lastSync": "2026-10-20T08:00:00.000Z"
         }
       ]
     },
@@ -234,6 +366,25 @@
           "annotatedUser": "student@example.com",
           "status": "DEPROVISIONED",
           "lastSync": "2020-01-01T00:00:00.000Z"
+        },
+        {
+          "deviceId": "chrome-2",
+          "serialNumber": "CHROME-002",
+          "annotatedUser": "teacher@example.com",
+          "status": "ACTIVE",
+          "model": "Chromebook 11",
+          "osVersion": "114.0.5735.0",
+          "autoUpdateThrough": "2023-06-01T00:00:00.000Z",
+          "lastSync": "2026-10-20T08:00:00.000Z"
+        },
+        {
+          "deviceId": "chrome-3",
+          "serialNumber": "CHROME-003",
+          "annotatedUser": "staff@example.com",
+          "status": "ACTIVE",
+          "model": "Chromebook Plus",
+          "osVersion": "130.0.6723.0",
+          "lastSync": "2026-10-20T08:00:00.000Z"
         }
       ]
     }
@@ -298,6 +449,26 @@
               "type": "domain",
               "role": "reader",
               "domain": "example.com"
+            }
+          ]
+        },
+        {
+          "id": "file-3",
+          "name": "Partner Roadmap",
+          "mimeType": "application/vnd.google-apps.presentation",
+          "shared": true,
+          "permissions": [
+            {
+              "id": "p-alias-user",
+              "type": "user",
+              "role": "reader",
+              "emailAddress": "colleague@example.net"
+            },
+            {
+              "id": "p-secondary-domain",
+              "type": "domain",
+              "role": "reader",
+              "domain": "example.org"
             }
           ]
         }

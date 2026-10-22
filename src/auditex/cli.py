@@ -234,9 +234,23 @@ def _build_auth_parser() -> argparse.ArgumentParser:
 
 
 def _add_google_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--domain", default=None, help="Google Workspace primary domain.")
+    parser.add_argument(
+        "--domain",
+        default=None,
+        help=(
+            "Google Workspace primary domain, used as a label. It never filters users or groups (they are listed for the whole "
+            "customer); the internal domain set comes from the Directory domains list."
+        ),
+    )
     parser.add_argument("--customer-id", default=None, help="Google Workspace customer ID. Defaults to my_customer at runtime.")
-    parser.add_argument("--subject", default=None, help="Admin subject to impersonate for domain-wide delegation.")
+    parser.add_argument(
+        "--subject",
+        default=None,
+        help=(
+            "Admin subject to impersonate for domain-wide delegation. Gmail settings are read by acting as each user "
+            "through the same delegation; Drive and Calendar evidence is this admin's view and is labelled subject_scoped: admin."
+        ),
+    )
     parser.add_argument("--service-account-key", default=None, help="Service account JSON key for domain-wide delegation.")
     parser.add_argument("--oauth-client", default=None, help="OAuth desktop client JSON for browser auth.")
     parser.add_argument("--token-cache", default=None, help="OAuth authorized-user token cache path.")
@@ -271,6 +285,33 @@ def _add_google_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sample", default="examples/google_workspace_sample.json")
 
 
+def _google_positive_days(value: str) -> int:
+    try:
+        days = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number of days") from exc
+    if days < 1:
+        raise argparse.ArgumentTypeError("days must be at least 1")
+    return days
+
+
+def _add_google_findings_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--waiver-file",
+        default=None,
+        help=(
+            "JSON waiver file for accepted risk (same format as the Microsoft 365 run). Each waiver needs finding_id or rule_id; "
+            "expired waivers are ignored. An invalid file stops the run before any API call."
+        ),
+    )
+    parser.add_argument(
+        "--stale-user-days",
+        type=_google_positive_days,
+        default=90,
+        help="Days without a sign-in before an active account raises google.stale_user (default 90).",
+    )
+
+
 def _build_google_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="auditex google", description="Run Google Workspace audit flows.")
     subparsers = parser.add_subparsers(dest="google_command", required=True)
@@ -282,6 +323,7 @@ def _build_google_parser() -> argparse.ArgumentParser:
     _add_google_run_args(probe)
     run = subparsers.add_parser("run", help="Run a Google Workspace audit.")
     _add_google_run_args(run)
+    _add_google_findings_args(run)
     return parser
 
 
@@ -306,6 +348,8 @@ def _google_config_from_args(args: argparse.Namespace) -> GoogleRunConfig:
         until=getattr(args, "until", None),
         offline=getattr(args, "offline", False),
         sample=Path(getattr(args, "sample", "examples/google_workspace_sample.json")),
+        waiver_file=Path(args.waiver_file).expanduser() if getattr(args, "waiver_file", None) else None,
+        stale_user_days=getattr(args, "stale_user_days", 90),
     )
 
 
@@ -1019,6 +1063,8 @@ def main(argv: list[str] | None = None) -> int:
                     run_name=cfg.run_name,
                     domain=cfg.domain,
                     customer_id=cfg.customer_id,
+                    waiver_file=cfg.waiver_file,
+                    stale_user_days=cfg.stale_user_days,
                 )
             return run_google_live(cfg, command_line=["auditex", *argv])
         return 2

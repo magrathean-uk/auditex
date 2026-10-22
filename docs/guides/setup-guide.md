@@ -27,7 +27,7 @@ auditex setup-guide m365 --collector-preset full --format json
 
 ## Google Workspace
 
-Preferred full-domain path:
+Preferred path (domain-wide delegation reads each user's Gmail settings as that user; Drive and Calendar evidence is the delegated admin's view and is labelled `subject_scoped: admin`, see the admin permission guide):
 
 ```bash
 auditex setup-guide google --auth domain-delegation --collector-preset everything --domain example.com --subject admin@example.com
@@ -39,8 +39,17 @@ Admin flow:
 2. Create a delegated service identity in Google Cloud.
 3. Copy its OAuth app ID.
 4. In Admin Console, open Security > Access and data control > API controls > Domain-wide delegation.
-5. Add the OAuth app ID and paste the generated comma-separated scopes.
+5. Add the OAuth app ID and paste the generated comma-separated scopes. The 2-step verification policy needs `cloud-identity.policies.readonly` and the Cloud Identity API.
 6. Run the generated doctor and probe commands.
+
+`--domain` is a label. Users and groups are listed for the whole customer, and the internal domains (primary, secondary and alias) come from the Directory domains list.
+
+Accepted risks go in a waiver file, the same JSON format as the Microsoft 365 run. Each waiver names a `finding_id` or a `rule_id` (a `collector` or `category` only narrows it), and an expired waiver is ignored. An invalid file stops the run before any API call:
+
+```bash
+auditex google run --auth domain-delegation --service-account-key key.json --subject admin@example.com \
+  --domain example.com --waiver-file waivers.json --stale-user-days 90
+```
 
 OAuth mode is available for development or partial review:
 
@@ -48,7 +57,7 @@ OAuth mode is available for development or partial review:
 auditex setup-guide google --auth oauth --collector-preset core-security
 ```
 
-Treat OAuth output as partial if domain-wide admin surfaces are blocked.
+Treat OAuth output as partial if domain-wide admin surfaces are blocked. OAuth cannot act as another user, so Gmail settings cover the signed-in mailbox only and the run says so.
 
 ## Microsoft 365
 

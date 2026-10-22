@@ -14,7 +14,10 @@ The mapping data lives in three files:
 
 ## Benchmark sources
 
-Sources were checked on 2026-10-02; the Cyber Essentials entry was checked on 2026-10-20.
+Sources were checked on 2026-10-02; the Cyber Essentials entry was checked on 2026-10-20. CIS `1.1.4`
+was added on 2026-10-22 from the Tenable v7.0.0 L1 E3 audit list ("Ensure administrative accounts use
+licenses with a reduced application footprint"), and the SCuBA `MS.AAD.7.1v1` and `MS.AAD.7.2v1`
+wording was re-read in the ScubaGear v1.8.0 `aad.md` baseline on the same date.
 Auditex stores control ids and short paraphrased titles only. Read the source benchmarks for the
 authoritative wording.
 
@@ -103,10 +106,11 @@ Corrections compared with the old `cis_m365_v3` values:
 | `mailbox_forwarding.external_inbox_rule` | `1.2.2`, `6.2.1` | `6.2.1` |
 | `mailbox_forwarding.hide_from_user` | `1.2.2`, `6.2.1` | none |
 | `identity.global_admin_singleton`, `identity.global_admin_sprawl` | `1.1.2`, `1.1.3` | `1.1.3` |
+| `identity.admin_holds_productivity_licence` | none | `1.1.4` |
 | `identity.global_admin_mfa_not_registered` | `1.1.2`, `1.1.3`, `5.2.2` | `5.2.2.1`, `5.2.3.4` |
 | `identity.user_mfa_not_registered` | `1.1.2`, `1.1.3` | `5.2.2.2`, `5.2.3.4` |
 | `app_credentials.secret_long_validity` | `5.1.5` | `5.1.5.4` |
-| Other `app_credentials.*`, `cross_tenant_access.*`, `identity.global_admin_disabled`, `identity.global_admin_stale_password`, `security.*`, `intune.*` | various | none (no matching v7 control) |
+| Other `app_credentials.*`, `cross_tenant_access.*`, `identity.global_admin_disabled`, `identity.global_admin_stale_password`, `identity.admin_set_unverified`, `identity.stale_guest`, `identity.guest_with_privileged_role`, `security.*`, `intune.*` | various | none (no matching v7 control) |
 
 ## Mapping method
 
@@ -247,6 +251,65 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   `restricted` or `unrestricted`. An `unknown` or missing verdict reports `not_assessed` with
   `verdict_unknown:<control>` or `verdict_not_collected:<control>`, never `pass`.
 
+## Administrator set and count thresholds
+
+Every `identity.global_admin_*` rule, `identity.privileged_mfa_not_registered`,
+`identity.privileged_stale_account`, `identity.guest_with_privileged_role`,
+`identity.admin_holds_productivity_licence` and the `attack_path.no_mfa_to_tier0` check read the
+effective administrator set (`normalized/effective_admin_set.json`, see
+`docs/reference/output-contract.md`), not the raw role assignments. The set counts each user once,
+whether the role is direct, PIM-eligible or inherited through a role-assignable group, which is the
+way the SCuBA `MS.AAD.7.1v1` instructions say to count, with one gap: PIM for Groups eligible
+membership of a role-assignable group is not read, so a user who is only eligible to join such a
+group is not in the set (ScubaGear counts them; the follow-up is in the changelog). Groups and service
+principals that hold a role are listed but not counted.
+
+When a source of the set was blocked, truncated or not run, the set is `unknown`. A skipped
+`identity_governance` collector counts as blocked: the run cannot tell a missing licence from a
+permission block or a failure, so only a `license_required` refusal on the PIM schedule read itself
+means the tenant has no schedules. The rules that
+depend on it then report `not_assessed` with `admin_set_unknown:<reasons>` when they find nothing,
+`identity.global_admin_singleton` is not raised (a count of one proves nothing), and the diagnostic
+`identity.admin_set_unverified` is raised. That rule claims no benchmark control. A finding the rules
+can already make from what was read, such as a disabled administrator, still fails its rule.
+
+CIS `1.1.3` and SCuBA `MS.AAD.7.1v1` give different ranges, so the rules compare the count with
+each framework's own bound, kept in `_rule_thresholds` in `configs/control-mappings.json`:
+
+| Framework | Control | Allowed Global Administrators |
+| --- | --- | --- |
+| `cis_m365_v7` | `1.1.3` | 2 to 4 |
+| `cisa_scuba` | `MS.AAD.7.1v1` | 2 to 8 |
+
+`identity.global_admin_sprawl` is raised above the strictest bound (more than 4) and states each
+bound in `framework_thresholds`, with `breached` set per framework. Five to eight Global
+Administrators therefore raise a `low` finding that fails CIS `1.1.3` while SCuBA `MS.AAD.7.1v1` still
+reads `pass`; nine or more raise a `medium` finding that fails both. Baseline alignment reads each
+framework against its own entry, and a framework with no entry (Zero Trust, MCSB, Secure Score,
+Cyber Essentials) takes the finding as it is. `identity.global_admin_singleton` carries the same list
+for the minimum of two. A test keeps the bounds, the catalog titles and each rule's mapping in step.
+
+`MS.AAD.7.2v1` is a ratio (Global Administrators to other highly privileged users), which a count
+cannot establish, so no count rule maps to it any more.
+
+New rules:
+
+- `identity.admin_holds_productivity_licence`: an administrator user whose licences, read by the
+  licensing collector, include an Exchange Online mailbox or a productivity plan (Microsoft 365
+  Apps, SharePoint, Teams). It maps to CIS `1.1.4` and, as partial evidence only, to the Cyber
+  Essentials requirement `ce.uac.separate_admin_accounts`, whose status stays `ce_plus_assessor_test`.
+  It needs the `licensing` collector and a licence list read in full, otherwise it reads
+  `not_assessed`.
+- `identity.stale_guest`: an enabled guest with no successful sign-in for `AUDITEX_STALE_GUEST_DAYS`
+  days (default 90) while `signInActivity` was collected; `build_findings(stale_guest_days=...)`
+  overrides it. A tenant without sign-in data reads `not_assessed` (`signin_activity_unavailable`). It
+  maps to the Zero Trust `identities` pillar, MCSB `PA-3` and, as partial evidence, `ce.uac.remove_unused_accounts`;
+  CIS v7 and SCuBA have no stale-guest control. A stale guest is reported by this rule only, not also
+  by `identity.stale_enabled_account`; a guest that is also an administrator is reported by
+  `identity.privileged_stale_account`.
+- `identity.guest_with_privileged_role`: a guest that holds an administrator role by any route. It maps
+  to MCSB `PA-1` and `PA-7`, Zero Trust `identities` and `ce.uac.special_access_privileges` (partial).
+
 ## Cyber Essentials
 
 The `cyber_essentials` key follows **Cyber Essentials: Requirements for IT Infrastructure v3.3**
@@ -290,24 +353,24 @@ evidence.
 | `ce.fw.inbound_rules` | manual | none |
 | `ce.fw.internet_exposure` | CE+ assessor test | none |
 | `ce.fw.saas_provider` | provider responsibility | none |
-| `ce.sc.unnecessary_accounts` | partial | `google.admin_stale_login`, `identity.privileged_stale_account`, `identity.stale_enabled_account` |
+| `ce.sc.unnecessary_accounts` | partial | `google.admin_stale_login`, `google.never_logged_in_user`, `google.stale_user`, `identity.privileged_stale_account`, `identity.stale_enabled_account` |
 | `ce.sc.default_passwords` | manual | none |
 | `ce.sc.unnecessary_software` | manual | none |
 | `ce.sc.autorun_disabled` | manual | none |
 | `ce.sc.user_authentication` | manual | none |
 | `ce.sc.device_unlocking` | manual | none |
 | `ce.sc.saas_configuration` | partial | `ca.legacy_auth_not_blocked`, `consent_policy.user_consent_unrestricted` |
-| `ce.sum.supported_software` | manual | none |
+| `ce.sum.supported_software` | manual | `google.chromeos_device_past_aue` (supporting evidence only) |
 | `ce.sum.automatic_updates` | manual | none |
-| `ce.sum.vulnerability_fixes_14_days` | CE+ assessor test | `intune.device_noncompliant` |
+| `ce.sum.vulnerability_fixes_14_days` | CE+ assessor test | `google.chromeos_device_past_aue`, `intune.device_noncompliant` (supporting evidence only) |
 | `ce.sum.saas_provider` | provider responsibility | none |
 | `ce.uac.account_approval` | manual | none |
 | `ce.uac.unique_credentials` | manual | none |
-| `ce.uac.remove_unused_accounts` | partial | `google.admin_stale_login`, `identity.privileged_stale_account`, `identity.stale_enabled_account` |
-| `ce.uac.mfa_cloud_services` | partial | `ca.legacy_auth_not_blocked`, `ca.mfa_not_enforced`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.user_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered` |
-| `ce.uac.mfa_admin_accounts` | partial | `attack_path.no_mfa_to_tier0`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered` |
-| `ce.uac.separate_admin_accounts` | CE+ assessor test | none |
-| `ce.uac.special_access_privileges` | partial | `google.admin_stale_login`, `google.super_admin_sprawl`, `google.suspended_admin`, `identity.global_admin_disabled`, `identity.global_admin_sprawl`, `identity.privileged_stale_account` |
+| `ce.uac.remove_unused_accounts` | partial | `google.admin_stale_login`, `google.never_logged_in_user`, `google.stale_user`, `identity.privileged_stale_account`, `identity.stale_enabled_account`, `identity.stale_guest` |
+| `ce.uac.mfa_cloud_services` | partial | `ca.legacy_auth_not_blocked`, `ca.mfa_not_enforced`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `google.user_2sv_not_enforced`, `google.user_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered` |
+| `ce.uac.mfa_admin_accounts` | partial | `attack_path.no_mfa_to_tier0`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered` |
+| `ce.uac.separate_admin_accounts` | CE+ assessor test | `identity.admin_holds_productivity_licence` (supporting evidence only) |
+| `ce.uac.special_access_privileges` | partial | `google.admin_stale_login`, `google.super_admin_sprawl`, `google.suspended_admin`, `identity.global_admin_disabled`, `identity.global_admin_sprawl`, `identity.guest_with_privileged_role`, `identity.privileged_stale_account` |
 | `ce.uac.password_brute_force` | manual | none |
 | `ce.uac.password_quality` | manual | none |
 | `ce.uac.password_guidance` | manual | none |

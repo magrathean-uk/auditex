@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,15 @@ from typing import Any
 from .attack_graph import analyze_attack_graph
 from .autopilot import build_board_report_sections
 from .baselines import SECURE_SCORE_LOW_THRESHOLD_PERCENT, build_baseline_alignment, latest_secure_score
+from .effective_admins import (
+    ROUTE_DIRECT as _ADMIN_ROUTE_DIRECT,
+    ROUTE_ELIGIBLE as _ADMIN_ROUTE_ELIGIBLE,
+    ROUTE_GROUP as _ADMIN_ROUTE_GROUP,
+    ROW_KIND as _ADMIN_ROW_KIND,
+    SECTION as _ADMIN_SET_SECTION,
+    STATE_COMPLETE as _ADMIN_SET_COMPLETE,
+    SUMMARY_KIND as _ADMIN_SUMMARY_KIND,
+)
 from .identity_controls import SECTION as _IDENTITY_CONTROL_SECTION
 from .resources import resolve_resource_path
 from .waivers import apply_waivers, load_waivers
@@ -964,9 +974,102 @@ def _build_cross_tenant_partner_findings(item: dict[str, Any]) -> list[dict[str,
     return findings
 
 
+def _effective_admins(normalized_snapshot: dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """The effective administrator set's summary record and its principal rows (see ``effective_admins``)."""
+    records = (normalized_snapshot.get(_ADMIN_SET_SECTION) or {}).get("records") or []
+    summary = next((item for item in records if item.get("kind") == _ADMIN_SUMMARY_KIND), None)
+    return summary, [item for item in records if item.get("kind") == _ADMIN_ROW_KIND]
+
+
+def _counted_admin_rows(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Administrators that count as admins: users (and principals no inventory resolves), not groups or service principals."""
+    return [row for row in _effective_admins(normalized_snapshot)[1] if row.get("counted") and row.get("principal_id")]
+
+
+_ADMIN_RECORD_COLLECTORS = {
+    "role_assignments": "identity",
+    "governance_objects": "identity_governance",
+    "group_membership_edges": "identity",
+}
+
+
+def _admin_record_refs(roles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """References to the records (assignments, schedules, memberships) these roles come from."""
+    refs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in roles:
+        for record in entry.get("records") or []:
+            section, key = str(record.get("section") or ""), str(record.get("key") or "")
+            if section and key and (section, key) not in seen:
+                seen.add((section, key))
+                refs.extend(_normalized_evidence_refs(section, {"key": key}, _ADMIN_RECORD_COLLECTORS.get(section, "identity")))
+    return refs
+
+
+def _admin_row_refs(row: dict[str, Any], roles: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """The administrator row and the records behind its roles (all of them, or just ``roles``)."""
+    return [
+        *_normalized_evidence_refs(_ADMIN_SET_SECTION, row, "identity"),
+        *_admin_record_refs(row.get("roles") or [] if roles is None else roles),
+    ]
+
+
+def _global_admin_bounds(rule_id: str) -> list[dict[str, Any]]:
+    """The Global Administrator count bound of each framework control the rule maps to.
+
+    ``configs/control-mappings.json`` (``_rule_thresholds``) holds one bound per framework: CIS
+    allows two to four, SCuBA two to eight. A bound is kept only for a framework the rule maps, and
+    only with the controls the rule maps for it.
+    """
+    mapped = _framework_mappings_for(rule_id)
+    thresholds = (_CONTROL_MAPPING_REGISTRY.get("_rule_thresholds") or {}).get("global_administrator_count") or []
+    bounds: list[dict[str, Any]] = []
+    for item in thresholds:
+        if not isinstance(item, dict):
+            continue
+        framework = str(item.get("framework") or "")
+        controls = [control for control in item.get("controls") or [] if control in (mapped.get(framework) or [])]
+        if framework and controls:
+            bounds.append({**item, "controls": controls})
+    return bounds
+
+
+def _framework_thresholds(bounds: list[dict[str, Any]], observed: int, breached: Any) -> list[dict[str, Any]]:
+    """One row per framework bound: the bound, what was observed and whether this finding breaches it."""
+    return [
+        {
+            "framework": bound["framework"],
+            "control_ids": list(bound["controls"]),
+            "metric": "global_administrator_count",
+            "observed": observed,
+            "minimum": bound.get("minimum"),
+            "maximum": bound.get("maximum"),
+            "breached": bool(breached(bound)),
+        }
+        for bound in bounds
+    ]
+
+
+def _bounds_text(bounds: list[dict[str, Any]]) -> str:
+    return "; ".join(
+        f"{bound.get('minimum')} to {bound.get('maximum')} ({bound.get('label') or bound['framework']})" for bound in bounds
+    )
+
+
 def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Global Administrator findings over the effective administrator set.
+
+    The set (``normalized/effective_admin_set.json``) holds users only, by every route: direct,
+    PIM-eligible and through a role-assignable group. When it is ``unknown`` (a source was blocked,
+    truncated or not run) a count of one proves nothing, so the singleton rule stays silent and the
+    diagnostic ``identity.admin_set_unverified`` is raised; a breach already visible in what was
+    read (a disabled admin, too many admins) is still reported.
+    """
+    summary, _rows = _effective_admins(normalized_snapshot)
+    if summary is None:
+        return []
     users = {
-        str(item.get("id")): item
+        str(item.get("id")).lower(): item
         for item in ((normalized_snapshot.get("users") or {}).get("records") or [])
         if item.get("id")
     }
@@ -981,45 +1084,24 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
             registrations[str(item.get("id")).lower()] = item
         if item.get("user_principal_name"):
             registrations[str(item.get("user_principal_name")).lower()] = item
-    role_definitions = (
-        (normalized_snapshot.get("role_definitions") or {}).get("records") or []
-    )
-    role_assignments = (
-        (normalized_snapshot.get("role_assignments") or {}).get("records") or []
-    )
-    global_admin_role_ids = {
-        str(item.get("id"))
-        for item in role_definitions
-        if str(item.get("display_name") or "").strip().lower() == "global administrator"
+    ga_rows = {
+        str(row["principal_id"]): row
+        for row in _counted_admin_rows(normalized_snapshot)
+        if row.get("global_administrator")
     }
-    if not global_admin_role_ids:
-        return []
-    principal_ids = sorted(
-        {
-            str(item.get("principal_id"))
-            for item in role_assignments
-            if item.get("role_definition_id") in global_admin_role_ids and item.get("principal_id")
-        }
-    )
-    if not principal_ids:
-        return []
-
-    assignments_by_principal: dict[str, list[dict[str, Any]]] = {}
-    for item in role_assignments:
-        if item.get("role_definition_id") in global_admin_role_ids and item.get("principal_id"):
-            assignments_by_principal.setdefault(str(item.get("principal_id")), []).append(item)
+    principal_ids = sorted(ga_rows)
 
     def assignment_refs(for_principals: list[str]) -> list[dict[str, Any]]:
-        """References to the Global Administrator assignment records of these principals."""
+        """References to the Global Administrator rows, and the records behind them, of these principals."""
         refs: list[dict[str, Any]] = []
         for principal in for_principals:
-            for assignment in assignments_by_principal.get(principal, []):
-                refs.extend(_normalized_evidence_refs("role_assignments", assignment, "identity"))
+            row = ga_rows[principal]
+            refs.extend(_admin_row_refs(row, [role for role in row.get("roles") or [] if role.get("global_administrator")]))
         return refs[:_AGGREGATE_REF_LIMIT]
 
     findings: list[dict[str, Any]] = []
     for principal_id in principal_ids:
-        user = users.get(principal_id)
+        user = users.get(principal_id.lower())
         if not user or user.get("enabled") is not False:
             continue
         affected = user.get("principal_name") or user.get("display_name") or principal_id
@@ -1038,7 +1120,11 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "impact": "Dormant privileged assignments create confusing recovery paths and can be reactivated with tenant-wide privilege.",
                     "remediation": "Remove Global Administrator from disabled users and keep emergency access accounts explicitly documented.",
                     "expected_value": "Disabled accounts have no Global Administrator assignments.",
-                    "returned_value": {"principal_id": principal_id, "enabled": user.get("enabled")},
+                    "returned_value": {
+                        "principal_id": principal_id,
+                        "enabled": user.get("enabled"),
+                        "routes": ga_rows[principal_id].get("routes") or [],
+                    },
                     "evidence_refs": [
                         *assignment_refs([principal_id]),
                         *_normalized_evidence_refs("users", user, "identity"),
@@ -1048,7 +1134,7 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
             )
         )
     for principal_id in principal_ids:
-        user = users.get(principal_id)
+        user = users.get(principal_id.lower())
         if not user:
             continue
         last_password_change = _parse_iso_datetime(user.get("last_password_change_at"))
@@ -1084,7 +1170,7 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
             )
         )
     for principal_id in principal_ids:
-        user = users.get(principal_id)
+        user = users.get(principal_id.lower())
         registration = registrations.get(principal_id.lower())
         if registration is None and user and user.get("principal_name"):
             registration = registrations.get(str(user.get("principal_name")).lower())
@@ -1121,7 +1207,17 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                 }
             )
         )
-    if len(principal_ids) == 1:
+
+    count = len(principal_ids)
+    complete = summary.get("state") == _ADMIN_SET_COMPLETE
+    count_evidence = {
+        "global_admin_count": count,
+        "principal_ids": principal_ids,
+        "admin_set_state": summary.get("state"),
+        "routes": sorted({route for row in ga_rows.values() for route in row.get("routes") or []}),
+    }
+    singleton_bounds = _global_admin_bounds("identity.global_admin_singleton")
+    if complete and singleton_bounds and 0 < count < min(int(bound.get("minimum") or 0) for bound in singleton_bounds):
         findings.append(
             _finalize_finding(
                 {
@@ -1133,92 +1229,101 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "status": "open",
                     "collector": "identity",
                     "affected_objects": principal_ids,
-                    "description": "The tenant has a single observed Global Administrator assignment, creating emergency access fragility.",
-                    "impact": "Loss or compromise of that principal can block recovery or concentrate tenant-wide privilege.",
-                    "remediation": "Maintain at least two protected emergency-capable admins and use narrower roles for routine work.",
-                    "expected_value": "Two to five protected Global Administrator principals are present.",
-                    "returned_value": {"global_admin_count": len(principal_ids), "principal_ids": principal_ids},
+                    "returned_value": count_evidence,
+                    "framework_thresholds": _framework_thresholds(
+                        singleton_bounds, count, lambda bound: count < int(bound.get("minimum") or 0)
+                    ),
                     "evidence_refs": assignment_refs(principal_ids),
-                    **_metadata_for("identity.global_admin_singleton"),
+                    **{
+                        **_metadata_for("identity.global_admin_singleton"),
+                        "expected_value": f"Global Administrator users: {_bounds_text(singleton_bounds)}.",
+                    },
                 }
             )
         )
-    elif len(principal_ids) > 5:
+    sprawl_bounds = _global_admin_bounds("identity.global_admin_sprawl")
+    breached = [bound for bound in sprawl_bounds if bound.get("maximum") is not None and count > int(bound["maximum"])]
+    if breached:
         findings.append(
             _finalize_finding(
                 {
                     "id": "identity:global_admin_sprawl",
                     "rule_id": "identity.global_admin_sprawl",
-                    "severity": "medium",
+                    # Above every framework bound it is medium; above the strictest only, low.
+                    "severity": "medium" if len(breached) == len(sprawl_bounds) else "low",
                     "category": "identity",
                     "title": "Too many Global Administrators observed",
                     "status": "open",
                     "collector": "identity",
                     "affected_objects": principal_ids,
-                    "description": "The tenant has a broad Global Administrator set, increasing blast radius if one principal is compromised.",
-                    "impact": "Excess tenant-wide privilege makes containment and accountability harder.",
-                    "remediation": "Reduce Global Administrator assignments and move routine administration to least-privileged roles or eligible activation.",
-                    "expected_value": "Two to five protected Global Administrator principals are present.",
-                    "returned_value": {"global_admin_count": len(principal_ids), "principal_ids": principal_ids},
+                    "returned_value": {**count_evidence, **({} if complete else {"lower_bound": True})},
+                    "framework_thresholds": _framework_thresholds(
+                        sprawl_bounds, count, lambda bound: bound.get("maximum") is not None and count > int(bound["maximum"])
+                    ),
                     "evidence_refs": assignment_refs(principal_ids),
-                    **_metadata_for("identity.global_admin_sprawl"),
+                    **{
+                        **_metadata_for("identity.global_admin_sprawl"),
+                        "description": (
+                            f"{count if complete else f'At least {count}'} Global Administrator users were observed, more than "
+                            + " and more than ".join(f"{bound['maximum']} ({bound.get('label') or bound['framework']})" for bound in breached)
+                            + ". Groups and service principals are not counted."
+                        ),
+                        "expected_value": f"Global Administrator users: {_bounds_text(sprawl_bounds)}.",
+                    },
+                }
+            )
+        )
+    if not complete:
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "identity:admin_set:unverified",
+                    "rule_id": "identity.admin_set_unverified",
+                    "severity": "medium",
+                    "category": "identity",
+                    "title": "The administrator set could not be verified",
+                    "status": "open",
+                    "collector": "identity",
+                    "affected_objects": ["Tenant administrator set"],
+                    "evidence": {
+                        "state": summary.get("state"),
+                        "reasons": summary.get("reasons") or [],
+                        "sources": summary.get("sources") or [],
+                        "observed_admin_count": summary.get("admin_count"),
+                        "observed_global_admin_count": summary.get("global_admin_count"),
+                    },
+                    "returned_value": {"state": summary.get("state"), "reasons": summary.get("reasons") or []},
+                    "evidence_refs": _normalized_evidence_refs(_ADMIN_SET_SECTION, summary, "identity"),
+                    **_metadata_for("identity.admin_set_unverified"),
                 }
             )
         )
     return findings
 
 
-def _global_admin_principal_ids(normalized_snapshot: dict[str, Any]) -> set[str]:
-    role_definitions = (normalized_snapshot.get("role_definitions") or {}).get("records") or []
-    role_assignments = (normalized_snapshot.get("role_assignments") or {}).get("records") or []
-    global_admin_role_ids = {
-        str(item.get("id"))
-        for item in role_definitions
-        if str(item.get("display_name") or "").strip().lower() == "global administrator"
-    }
-    return {
-        str(item.get("principal_id"))
-        for item in role_assignments
-        if item.get("role_definition_id") in global_admin_role_ids and item.get("principal_id")
-    }
+_ADMIN_ASSIGNMENT_LABELS = {_ADMIN_ROUTE_DIRECT: "active", _ADMIN_ROUTE_ELIGIBLE: "eligible", _ADMIN_ROUTE_GROUP: "group"}
 
 
 def _privileged_roles_for_mfa(normalized_snapshot: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    """Administrator roles per principal id (lower-case): active assignments plus PIM-eligible schedules.
+    """Administrator roles per principal id (lower-case) from the effective administrator set.
 
-    Each entry keeps its normalized record so a finding can cite the assignment that makes the
-    account privileged.
+    Direct active assignments, PIM-eligible schedules and roles inherited through a role-assignable
+    group are all here (``assignment`` is ``active``, ``eligible`` or ``group``). Each entry keeps
+    the references to the records that make the account privileged.
     """
-    role_names = {
-        str(item.get("id")): str(item.get("display_name") or "")
-        for item in ((normalized_snapshot.get("role_definitions") or {}).get("records") or [])
-        if "administrator" in str(item.get("display_name") or "").strip().lower()
-    }
-    sources = (
-        ("active", "role_assignments", "identity", (normalized_snapshot.get("role_assignments") or {}).get("records") or []),
-        (
-            "eligible",
-            "governance_objects",
-            "identity_governance",
-            [
-                item
-                for item in ((normalized_snapshot.get("governance_objects") or {}).get("records") or [])
-                if item.get("kind") == "role_eligibility_schedule"
-            ],
-        ),
-    )
     by_principal: dict[str, list[dict[str, Any]]] = {}
-    for assignment, section, collector, records in sources:
-        for item in records:
-            role_name = role_names.get(str(item.get("role_definition_id")))
-            principal = str(item.get("principal_id") or "").lower()
-            if not role_name or not principal:
-                continue
-            entries = by_principal.setdefault(principal, [])
-            if not any(entry["role"] == role_name and entry["assignment"] == assignment for entry in entries):
-                entries.append(
-                    {"role": role_name, "assignment": assignment, "section": section, "collector": collector, "record": item}
-                )
+    for row in _counted_admin_rows(normalized_snapshot):
+        entries = []
+        for role in row.get("roles") or []:
+            entry: dict[str, Any] = {
+                "role": role.get("role"),
+                "assignment": _ADMIN_ASSIGNMENT_LABELS.get(str(role.get("route")), str(role.get("route"))),
+                "refs": _admin_record_refs([role]),
+            }
+            if role.get("group_id"):
+                entry["group_id"] = role.get("group_id")
+            entries.append(entry)
+        by_principal[str(row["principal_id"]).lower()] = entries
     return by_principal
 
 
@@ -1240,8 +1345,13 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
         for item in users_by_id.values()
         if item.get("principal_name")
     }
-    admin_principal_ids = {item.lower() for item in _global_admin_principal_ids(normalized_snapshot)}
+    admin_principal_ids = {
+        str(row["principal_id"]).lower()
+        for row in _counted_admin_rows(normalized_snapshot)
+        if row.get("global_administrator")
+    }
     privileged_roles = _privileged_roles_for_mfa(normalized_snapshot)
+    admin_rows = {str(row["principal_id"]).lower(): row for row in _counted_admin_rows(normalized_snapshot)}
     findings: list[dict[str, Any]] = []
     for registration in ((normalized_snapshot.get("auth_method_registration_objects") or {}).get("records") or []):
         if registration.get("is_mfa_registered") is not False:
@@ -1255,6 +1365,7 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
             continue
         affected = (user or {}).get("principal_name") or registration.get("user_principal_name") or registration.get("id")
         roles = privileged_roles.get(str((user or {}).get("id") or reg_id).lower()) or privileged_roles.get(reg_id) or []
+        admin_row = admin_rows.get(str((user or {}).get("id") or reg_id).lower()) or admin_rows.get(reg_id)
         registration_refs = _normalized_evidence_refs("auth_method_registration_objects", registration, "auth_methods")
         # Privileged accounts are reported whatever their user type. A guest administrator's MFA may be
         # satisfied in the home tenant, but that is for the reviewer to confirm, not for the rule to assume.
@@ -1263,7 +1374,9 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
                 ("directory_role", bool(roles)),
                 ("registration_report_is_admin", registration.get("is_admin") is True),
             ) if present]
-            role_rows = [{"role": entry["role"], "assignment": entry["assignment"]} for entry in roles]
+            role_rows = [
+                {key: entry[key] for key in ("role", "assignment", "group_id") if entry.get(key)} for entry in roles
+            ]
             findings.append(
                 _finalize_finding(
                     {
@@ -1279,11 +1392,8 @@ def _build_user_mfa_findings(normalized_snapshot: dict[str, Any]) -> list[dict[s
                         "returned_value": {"is_mfa_registered": False, "privileged_roles": role_rows},
                         "evidence_refs": [
                             *registration_refs,
-                            *(
-                                ref
-                                for entry in roles
-                                for ref in _normalized_evidence_refs(entry["section"], entry["record"], entry["collector"])
-                            ),
+                            *(_normalized_evidence_refs(_ADMIN_SET_SECTION, admin_row, "identity") if admin_row else []),
+                            *(ref for entry in roles for ref in entry["refs"]),
                         ],
                         **_metadata_for("identity.privileged_mfa_not_registered"),
                     }
@@ -1496,23 +1606,11 @@ _STALE_ACCOUNT_DAYS = 90
 
 
 def _privileged_role_names_by_principal(normalized_snapshot: dict[str, Any]) -> dict[str, list[str]]:
-    """Map principal id (lower-case) to the directory roles it holds whose name marks them as administrative."""
-    role_definitions = (normalized_snapshot.get("role_definitions") or {}).get("records") or []
-    role_assignments = (normalized_snapshot.get("role_assignments") or {}).get("records") or []
-    privileged_roles = {
-        str(item.get("id")): str(item.get("display_name") or "")
-        for item in role_definitions
-        if "administrator" in str(item.get("display_name") or "").strip().lower()
+    """Map principal id (lower-case) to the administrator roles it holds by any route (see ``effective_admins``)."""
+    return {
+        str(row["principal_id"]).lower(): list(row.get("role_names") or [])
+        for row in _counted_admin_rows(normalized_snapshot)
     }
-    by_principal: dict[str, list[str]] = {}
-    for item in role_assignments:
-        role_name = privileged_roles.get(str(item.get("role_definition_id")))
-        principal = str(item.get("principal_id") or "").lower()
-        if role_name and principal:
-            names = by_principal.setdefault(principal, [])
-            if role_name not in names:
-                names.append(role_name)
-    return by_principal
 
 
 def _is_stale_enabled_user(user: dict[str, Any], *, days: int = _STALE_ACCOUNT_DAYS) -> bool:
@@ -1536,11 +1634,15 @@ def _is_stale_enabled_user(user: dict[str, Any], *, days: int = _STALE_ACCOUNT_D
 def _build_stale_account_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     users = (normalized_snapshot.get("users") or {}).get("records") or []
     privileged = _privileged_role_names_by_principal(normalized_snapshot)
+    admin_rows = {str(row["principal_id"]).lower(): row for row in _counted_admin_rows(normalized_snapshot)}
     findings: list[dict[str, Any]] = []
     for user in users:
         if not isinstance(user, dict) or not _is_stale_enabled_user(user):
             continue
         user_id = str(user.get("id") or "")
+        if _is_guest(user) and user_id.lower() not in privileged:
+            # A stale guest is reported once, by identity.stale_guest, against its own threshold.
+            continue
         affected = user.get("principal_name") or user_id
         evidence = {
             "enabled": user.get("enabled"),
@@ -1553,6 +1655,7 @@ def _build_stale_account_findings(normalized_snapshot: dict[str, Any]) -> list[d
         evidence_refs = _normalized_evidence_refs("users", user, "identity")
         roles = privileged.get(user_id.lower())
         if roles:
+            evidence_refs = [*evidence_refs, *_admin_row_refs(admin_rows[user_id.lower()])]
             findings.append(
                 _finalize_finding(
                     {
@@ -1587,6 +1690,158 @@ def _build_stale_account_findings(normalized_snapshot: dict[str, Any]) -> list[d
                     "returned_value": user.get("last_successful_signin_at"),
                     "evidence_refs": evidence_refs,
                     **_metadata_for("identity.stale_enabled_account"),
+                }
+            )
+        )
+    return findings
+
+
+_STALE_GUEST_DAYS_ENV = "AUDITEX_STALE_GUEST_DAYS"
+_STALE_GUEST_DAYS_MAX = 3650
+
+
+def stale_guest_days(days: int | None = None) -> int:
+    """Days without a successful sign-in after which a guest is stale.
+
+    The argument wins, then ``AUDITEX_STALE_GUEST_DAYS``, then the 90 days the stale-account rules
+    use. A value that is not a whole number from 1 to 3650 is ignored, never half-applied.
+    """
+    for candidate in (days, os.environ.get(_STALE_GUEST_DAYS_ENV)):
+        if candidate is None or isinstance(candidate, bool):
+            continue
+        try:
+            value = int(str(candidate).strip())
+        except ValueError:
+            continue
+        if 1 <= value <= _STALE_GUEST_DAYS_MAX:
+            return value
+    return _STALE_ACCOUNT_DAYS
+
+
+def _is_guest(user: dict[str, Any]) -> bool:
+    return str(user.get("user_type") or "").strip().lower() == "guest"
+
+
+def _build_guest_findings(normalized_snapshot: dict[str, Any], *, stale_days: int) -> list[dict[str, Any]]:
+    """Stale guests, and guests that hold an administrator role by any route.
+
+    A guest is stale on the same evidence as any other account (``signin_data_available`` and no
+    successful sign-in for ``stale_days``); without sign-in data nothing is raised and baseline
+    alignment reports the rule ``not_assessed``. A guest administrator is reported even when the
+    administrator set is incomplete, because what was read is already a breach.
+    """
+    findings: list[dict[str, Any]] = []
+    admin_rows = {str(row["principal_id"]).lower(): row for row in _counted_admin_rows(normalized_snapshot)}
+    for user in ((normalized_snapshot.get("users") or {}).get("records") or []):
+        if not isinstance(user, dict) or not _is_guest(user) or str(user.get("id") or "").lower() in admin_rows:
+            # A guest that is also privileged is reported by identity.privileged_stale_account.
+            continue
+        if not _is_stale_enabled_user(user, days=stale_days):
+            continue
+        user_id = str(user.get("id") or "")
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"identity:stale_guest:{user_id}",
+                    "rule_id": "identity.stale_guest",
+                    "severity": "medium",
+                    "category": "identity",
+                    "title": f"Guest account has not signed in successfully for over {stale_days} days",
+                    "status": "open",
+                    "collector": "identity",
+                    "affected_objects": [user.get("principal_name") or user.get("display_name") or user_id],
+                    "evidence": {
+                        "enabled": user.get("enabled"),
+                        "created_at": user.get("created_at"),
+                        "last_successful_signin_at": user.get("last_successful_signin_at"),
+                        "last_signin_at": user.get("last_signin_at"),
+                        "user_type": user.get("user_type"),
+                        "threshold_days": stale_days,
+                    },
+                    "returned_value": user.get("last_successful_signin_at"),
+                    "evidence_refs": _normalized_evidence_refs("users", user, "identity"),
+                    **{
+                        **_metadata_for("identity.stale_guest"),
+                        "expected_value": f"Guest accounts have signed in within {stale_days} days or are removed.",
+                    },
+                }
+            )
+        )
+    users = {
+        str(item.get("id")).lower(): item
+        for item in ((normalized_snapshot.get("users") or {}).get("records") or [])
+        if item.get("id")
+    }
+    for principal, row in sorted(admin_rows.items()):
+        if row.get("is_guest") is not True:
+            continue
+        user = users.get(principal) or {}
+        roles = [
+            {key: role[key] for key in ("role", "route", "group_id") if role.get(key)} for role in row.get("roles") or []
+        ]
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"identity:guest_with_privileged_role:{row['principal_id']}",
+                    "rule_id": "identity.guest_with_privileged_role",
+                    "severity": "high",
+                    "category": "identity",
+                    "title": "Guest account holds an administrator role",
+                    "status": "open",
+                    "collector": "identity",
+                    "affected_objects": [row.get("principal_name") or row.get("display_name") or row["principal_id"]],
+                    "evidence": {
+                        "user_type": row.get("user_type"),
+                        "enabled": row.get("enabled"),
+                        "roles": roles,
+                        "routes": row.get("routes") or [],
+                        "global_administrator": bool(row.get("global_administrator")),
+                    },
+                    "returned_value": {"principal_id": row["principal_id"], "roles": roles},
+                    "evidence_refs": [*_admin_row_refs(row), *(_normalized_evidence_refs("users", user, "identity") if user else [])],
+                    **_metadata_for("identity.guest_with_privileged_role"),
+                }
+            )
+        )
+    return findings
+
+
+def _build_admin_licence_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Administrators whose account also holds an Exchange Online mailbox or a productivity licence.
+
+    Cyber Essentials expects separate accounts for administrative work, and an admin account that
+    can read mail and edit documents is the account a phishing message reaches. Only a principal
+    whose licences were read in full is judged (``licence_state: known``), so an unlicensed
+    reading never passes by default.
+    """
+    findings: list[dict[str, Any]] = []
+    for row in _counted_admin_rows(normalized_snapshot):
+        if row.get("licence_state") != "known" or not (row.get("mailbox_licence") or row.get("productivity_licence")):
+            continue
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"identity:admin_holds_productivity_licence:{row['principal_id']}",
+                    "rule_id": "identity.admin_holds_productivity_licence",
+                    "severity": "medium",
+                    "category": "identity",
+                    "title": "Administrator account holds a mailbox or productivity licence",
+                    "status": "open",
+                    "collector": "identity",
+                    "affected_objects": [row.get("principal_name") or row.get("display_name") or row["principal_id"]],
+                    "evidence": {
+                        "mailbox_licence": bool(row.get("mailbox_licence")),
+                        "productivity_licence": bool(row.get("productivity_licence")),
+                        "licence_sku_part_numbers": row.get("licence_sku_part_numbers") or [],
+                        "role_names": row.get("role_names") or [],
+                        "routes": row.get("routes") or [],
+                    },
+                    "returned_value": {
+                        "mailbox_licence": bool(row.get("mailbox_licence")),
+                        "productivity_licence": bool(row.get("productivity_licence")),
+                    },
+                    "evidence_refs": _admin_row_refs(row),
+                    **_metadata_for("identity.admin_holds_productivity_licence"),
                 }
             )
         )
@@ -1851,8 +2106,14 @@ def _attack_path_rule_id(path: dict[str, Any]) -> str:
 
 
 def _build_attack_path_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    """One finding per high or critical privilege-escalation graph path."""
+    """One finding per high or critical privilege-escalation graph path.
+
+    A no-MFA path records the state of the effective administrator set: a route found is real
+    evidence whatever that state, but baseline alignment reads the rule ``not_assessed`` rather than
+    ``pass`` when no path was found and the set is ``unknown``.
+    """
     findings: list[dict[str, Any]] = []
+    admin_set_summary, _admin_rows = _effective_admins(normalized_snapshot)
     for path in analyze_attack_graph(normalized_snapshot).get("paths") or []:
         if not path.get("finding_id"):
             continue
@@ -1895,6 +2156,11 @@ def _build_attack_path_findings(normalized_snapshot: dict[str, Any]) -> list[dic
                         "classification": path.get("classification", "conditional_hypothesis"),
                         "execution_verified": False,
                         "unmet_preconditions": path.get("unmet_preconditions", []),
+                        **(
+                            {"effective_admin_set_state": admin_set_summary.get("state")}
+                            if admin_set_summary and rule_id == "attack_path.no_mfa_to_tier0"
+                            else {}
+                        ),
                     },
                     "evidence_refs": evidence_refs,
                 }
@@ -1955,13 +2221,15 @@ def _read_in_full(report: dict[str, Any]) -> bool:
     return bool(report) and report.get("collection_status") == "collected" and report.get("complete") is True
 
 
-def _normalized_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int | None = None) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     findings.extend(_build_admin_resilience_findings(normalized_snapshot))
     findings.extend(_build_secure_score_findings(normalized_snapshot))
     findings.extend(_build_user_mfa_findings(normalized_snapshot))
     findings.extend(_build_identity_control_findings(normalized_snapshot))
     findings.extend(_build_stale_account_findings(normalized_snapshot))
+    findings.extend(_build_guest_findings(normalized_snapshot, stale_days=stale_guest_days(stale_days)))
+    findings.extend(_build_admin_licence_findings(normalized_snapshot))
     findings.extend(_build_reports_concealed_names_findings(normalized_snapshot))
     findings.extend(_build_risky_signin_findings(normalized_snapshot))
     findings.extend(_build_privilege_event_findings(normalized_snapshot))
@@ -2826,6 +3094,7 @@ def build_findings(
     *,
     normalized_snapshot: dict[str, Any] | None = None,
     waiver_file: str | Path | None = None,
+    stale_guest_days: int | None = None,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -2921,7 +3190,7 @@ def build_findings(
             body["aggregated_count"] = len(group)
         findings.append(_finalize_finding(body))
     if normalized_snapshot:
-        findings.extend(_normalized_findings(normalized_snapshot))
+        findings.extend(_normalized_findings(normalized_snapshot, stale_days=stale_guest_days))
         findings.extend(_build_detection_findings(normalized_snapshot))
     waiver_rows = load_waivers(Path(waiver_file)) if waiver_file else []
     return apply_waivers(findings, waiver_rows) if waiver_rows else findings

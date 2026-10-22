@@ -25,7 +25,7 @@ from typing import Any
 
 from azure_tenant_audit.waivers import accepted_risk_summary, is_accepted_status
 
-from .compare import reassessment_gap, require_same_tenant_runs
+from .compare import NormalizedSections, reassessment_gap, require_same_tenant_runs
 from .run_bundle import RunBundle
 
 SEVERITY_RANKS = {"low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -403,6 +403,7 @@ def gate_drift(
         return _blocked(error, **context)
 
     current_collectors = current_bundle.collector_coverage()
+    current_sections = NormalizedSections(current_bundle)
     baseline_index = _index(baseline_rows)
     current_index = _index(current_rows)
 
@@ -413,7 +414,7 @@ def gate_drift(
     for key in baseline_index:
         if key in current_index:
             continue
-        reason = reassessment_gap(baseline_index[key], current_collectors)
+        reason = reassessment_gap(baseline_index[key], current_collectors, current_sections)
         if reason is None:
             resolved_keys.append(key)
         else:

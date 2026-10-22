@@ -11,6 +11,7 @@
         "consent_policy",
         "domains_hybrid",
         "licensing",
+        "identity_governance",
         "sharepoint",
         "teams"
       ],
@@ -32,6 +33,7 @@
         "consent_policy",
         "domains_hybrid",
         "licensing",
+        "identity_governance",
         "intune",
         "sharepoint",
         "sharepoint_access",

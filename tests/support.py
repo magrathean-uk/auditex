@@ -6,6 +6,47 @@ from pathlib import Path
 from typing import Any
 
 
+def complete_admin_set_evidence(**overrides: Any) -> Any:
+    """Evidence that every source of the effective administrator set was read in full."""
+    from azure_tenant_audit.effective_admins import AdminSetEvidence
+    from azure_tenant_audit.identity_controls import Evidence
+
+    collected = Evidence("collected")
+    values: dict[str, Any] = {
+        "role_definitions": collected,
+        "role_assignments": collected,
+        "assignment_schedules": collected,
+        "eligibility_schedules": collected,
+        "group_fanout": collected,
+    }
+    values.update(overrides)
+    return AdminSetEvidence(**values)
+
+
+def with_effective_admin_set(snapshot: dict[str, Any], evidence: Any = None) -> dict[str, Any]:
+    """A hand-built normalized snapshot plus its ``effective_admin_set`` section.
+
+    Normalization derives the section from the snapshot's own users, groups, role and membership
+    records; ``evidence`` says how completely the sources were read (all of them, by default).
+    """
+    from azure_tenant_audit.effective_admins import SECTION, build_effective_admin_set
+
+    def records(name: str) -> list[dict[str, Any]]:
+        return list((snapshot.get(name) or {}).get("records") or [])
+
+    section = build_effective_admin_set(
+        users=records("users"),
+        groups=records("groups"),
+        service_principals=records("service_principals"),
+        role_definitions=records("role_definitions"),
+        role_assignments=records("role_assignments"),
+        governance_objects=records("governance_objects"),
+        membership_edges=records("group_membership_edges"),
+        evidence=evidence or complete_admin_set_evidence(),
+    )
+    return {**snapshot, SECTION: {"kind": SECTION, "records": section}}
+
+
 def write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")

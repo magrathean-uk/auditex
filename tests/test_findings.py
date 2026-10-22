@@ -8,6 +8,7 @@ import pytest
 
 import azure_tenant_audit.findings as findings_module
 from azure_tenant_audit.findings import build_findings, build_report_pack
+from support import with_effective_admin_set
 
 
 def _utc_days_ago(days: int) -> str:
@@ -566,8 +567,8 @@ def test_build_findings_flags_m365_global_admin_resilience() -> None:
         },
     }
 
-    too_few_ids = {item["rule_id"] for item in build_findings([], normalized_snapshot=too_few)}
-    sprawl_ids = {item["rule_id"] for item in build_findings([], normalized_snapshot=sprawl)}
+    too_few_ids = {item["rule_id"] for item in build_findings([], normalized_snapshot=with_effective_admin_set(too_few))}
+    sprawl_ids = {item["rule_id"] for item in build_findings([], normalized_snapshot=with_effective_admin_set(sprawl))}
 
     assert "identity.global_admin_singleton" in too_few_ids
     assert "identity.global_admin_sprawl" in sprawl_ids
@@ -608,7 +609,7 @@ def test_build_findings_flags_disabled_global_admin_assignment() -> None:
         },
     }
 
-    findings = build_findings([], normalized_snapshot=normalized)
+    findings = build_findings([], normalized_snapshot=with_effective_admin_set(normalized))
     disabled = next(item for item in findings if item["rule_id"] == "identity.global_admin_disabled")
 
     assert disabled["severity"] == "high"
@@ -657,7 +658,7 @@ def test_build_findings_flags_global_admin_stale_password() -> None:
         },
     }
 
-    findings = build_findings([], normalized_snapshot=normalized)
+    findings = build_findings([], normalized_snapshot=with_effective_admin_set(normalized))
     stale = next(item for item in findings if item["rule_id"] == "identity.global_admin_stale_password")
 
     assert stale["severity"] == "medium"
@@ -718,7 +719,7 @@ def test_build_findings_flags_global_admin_without_mfa_registration() -> None:
         },
     }
 
-    findings = build_findings([], normalized_snapshot=normalized)
+    findings = build_findings([], normalized_snapshot=with_effective_admin_set(normalized))
     mfa = next(item for item in findings if item["rule_id"] == "identity.global_admin_mfa_not_registered")
 
     assert mfa["severity"] == "critical"

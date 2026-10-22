@@ -94,6 +94,9 @@ def set_pack_findings(run_dir: Path, findings: list[dict[str, Any]]) -> None:
     report_path = run_dir / "reports" / "report-pack.json"
     report = read_json(report_path)
     report["findings"] = findings
+    # The proof table cites each finding's records by content hash; rows of a replaced finding would go stale.
+    kept = {row.get("id") for row in findings}
+    report["proof_table"] = [row for row in report.get("proof_table") or [] if row.get("finding_id") in kept]
     _write_json(report_path, report)
 
 
@@ -107,6 +110,19 @@ def write_findings(run_dir: Path, findings: list[dict[str, Any]], *, pack: bool 
 def completed_in_summary(run_dir: Path) -> list[str]:
     """The collectors the run's summary lists as ok."""
     return [row["name"] for row in read_json(run_dir / "summary.json")["collectors"] if row.get("status") == "ok"]
+
+
+def set_admin_set(run_dir: Path, state: str = "complete", reasons: tuple[str, ...] = ()) -> None:
+    """Write the run's effective administrator set summary: ``complete``, or ``unknown`` with reasons."""
+    summary = {
+        "kind": "effective_admin_set_summary",
+        "key": "effective_admin_set_summary:summary",
+        "id": "summary",
+        "state": state,
+        "reasons": list(reasons),
+        "licence_state": "known",
+    }
+    _write_json(run_dir / "normalized" / "effective_admin_set.json", {"kind": "effective_admin_set", "records": [summary]})
 
 
 def set_coverage(run_dir: Path, statuses: dict[str, str], *, overall_status: str | None = None) -> None:

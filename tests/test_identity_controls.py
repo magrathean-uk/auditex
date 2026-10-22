@@ -960,6 +960,7 @@ def test_non_global_admin_role_holder_without_mfa_gets_the_privileged_rule() -> 
     _assert_refs_resolve(snapshot, finding)
     assert {ref["record_key"] for ref in finding["evidence_refs"]} == {
         "auth_method_registration:u-exo",
+        "effective_admin:u-exo",
         "role_assignment:a1",
     }
 

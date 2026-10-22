@@ -63,6 +63,17 @@ _TEMPLATES = json.loads((_REPO / "configs" / "finding-templates.json").read_text
 _GOOGLE_MAPPINGS = google_findings._GOOGLE_FRAMEWORK_MAPPINGS
 
 
+# A tenant with a complete administrator set, licences read in full and no guests: the identity rules that
+# read normalized evidence have what they need, so an absent finding means they ran clean.
+_CLEAN_IDENTITY_SNAPSHOT: dict[str, Any] = {
+    "effective_admin_set": {
+        "records": [
+            {"kind": "effective_admin_set_summary", "key": "effective_admin_set_summary:summary", "state": "complete", "licence_state": "known"}
+        ]
+    }
+}
+
+
 def _ce_mappings() -> dict[str, list[str]]:
     """Every rule that maps to a Cyber Essentials requirement, Microsoft 365 and Google Workspace."""
     shipped = {rule: list(mapping["cyber_essentials"]) for rule, mapping in _MAPPINGS.items() if mapping.get("cyber_essentials")}
@@ -267,7 +278,9 @@ def test_no_manual_assessor_or_provider_requirement_ever_reads_pass() -> None:
 
 def test_a_partial_requirement_never_reads_pass_on_a_clean_fully_evaluated_run() -> None:
     every_collector = set(baselines._NAMESPACE_COLLECTORS.values()) | {c for cs in baselines._RULE_COLLECTORS.values() for c in cs}
-    alignment = build_baseline_alignment([], coverage_ledger=_ledger(*sorted(every_collector)))
+    alignment = build_baseline_alignment(
+        [], normalized_snapshot=_CLEAN_IDENTITY_SNAPSHOT, coverage_ledger=_ledger(*sorted(every_collector))
+    )
     section = _section(alignment)
 
     # No shipped Cyber Essentials requirement is automated, so nothing in the section can read pass.
@@ -430,7 +443,9 @@ def test_the_report_pack_carries_the_section_without_sensitive_looking_keys() ->
 
 def test_the_markdown_report_lists_each_requirement_with_its_status_and_the_disclaimer() -> None:
     every_collector = set(baselines._NAMESPACE_COLLECTORS.values()) | {c for cs in baselines._RULE_COLLECTORS.values() for c in cs}
-    alignment = build_baseline_alignment([], coverage_ledger=_ledger(*sorted(every_collector)))
+    alignment = build_baseline_alignment(
+        [], normalized_snapshot=_CLEAN_IDENTITY_SNAPSHOT, coverage_ledger=_ledger(*sorted(every_collector))
+    )
     lines: list[str] = []
 
     reporting._append_baseline_alignment_markdown(lines, alignment)
@@ -454,7 +469,7 @@ def test_the_explorer_says_why_a_manual_requirement_has_no_verdict() -> None:
     manual = next(control for control in card["controls"] if control["id"] == "ce.fw.device_firewall")
     assert card["short"] == "Cyber Essentials" and card["total"] == len(_REQUIREMENTS)
     assert manual["status"] == "not_assessed" and "manual" in manual["note"] and "no verdict" in manual["note"]
-    clean = build_baseline_alignment([], coverage_ledger=_ledger("identity"))
+    clean = build_baseline_alignment([], normalized_snapshot=_CLEAN_IDENTITY_SNAPSHOT, coverage_ledger=_ledger("identity"))
     clean_card = next(card for card in explorer_baselines(clean)["frameworks"] if card["key"] == CE_FRAMEWORK_KEY)
     partial = next(control for control in clean_card["controls"] if control["id"] == "ce.uac.remove_unused_accounts")
     assert partial["status"] == "not_assessed" and "only part of this requirement" in partial["note"]

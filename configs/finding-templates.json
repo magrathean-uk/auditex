@@ -607,35 +607,37 @@
   },
   "identity.global_admin_singleton": {
     "risk_rating": "high",
-    "description": "Only one Microsoft Entra Global Administrator assignment was observed.",
+    "description": "Only one Microsoft Entra Global Administrator user was observed, counting direct, PIM-eligible and group-inherited assignments once per user. Groups and service principals are not counted.",
     "impact": "Loss or compromise of the single Global Administrator can block recovery or concentrate tenant-wide privilege.",
     "remediation": "Maintain at least two protected emergency-capable admins and use narrower roles for routine administration.",
     "references": [
       "Microsoft Entra emergency access account guidance",
-      "CIS Microsoft 365 Foundations v7.0.0 1.1.3"
+      "CIS Microsoft 365 Foundations v7.0.0 1.1.3",
+      "CISA SCuBA MS.AAD.7.1v1"
     ],
     "control_ids": [
       "AUDITEX-ID-GA-SINGLETON"
     ],
-    "expected_value": "Two to five protected Global Administrator principals are present."
+    "expected_value": "Two to four Global Administrator users (CIS 1.1.3); two to eight (CISA SCuBA MS.AAD.7.1v1)."
   },
   "identity.global_admin_sprawl": {
     "risk_rating": "medium",
-    "description": "More than five Microsoft Entra Global Administrator assignments were observed.",
+    "description": "More Microsoft Entra Global Administrator users were observed than a mapped benchmark allows: CIS 1.1.3 allows two to four and CISA SCuBA MS.AAD.7.1v1 two to eight. Users are counted once whether the role is direct, PIM-eligible or inherited through a group; groups and service principals are not counted. The finding's framework_thresholds say which bound it breaches.",
     "impact": "A broad Global Administrator set increases tenant-wide blast radius if any privileged principal is compromised.",
     "remediation": "Reduce Global Administrator assignments and move routine administration to least-privileged roles or eligible activation.",
     "references": [
       "Microsoft Entra least-privileged roles",
-      "CIS Microsoft 365 Foundations v7.0.0 1.1.3"
+      "CIS Microsoft 365 Foundations v7.0.0 1.1.3",
+      "CISA SCuBA MS.AAD.7.1v1"
     ],
     "control_ids": [
       "AUDITEX-ID-GA-SPRAWL"
     ],
-    "expected_value": "Two to five protected Global Administrator principals are present."
+    "expected_value": "Two to four Global Administrator users (CIS 1.1.3); two to eight (CISA SCuBA MS.AAD.7.1v1)."
   },
   "identity.global_admin_disabled": {
     "risk_rating": "high",
-    "description": "A disabled Microsoft Entra user still has a Global Administrator assignment.",
+    "description": "A disabled Microsoft Entra user still holds Global Administrator, as a direct, PIM-eligible or group-inherited assignment.",
     "impact": "Dormant privileged assignments create confusing recovery paths and can be reactivated with tenant-wide privilege.",
     "remediation": "Remove Global Administrator from disabled users and keep emergency access accounts explicitly documented.",
     "references": [
@@ -649,7 +651,7 @@
   },
   "identity.global_admin_stale_password": {
     "risk_rating": "medium",
-    "description": "A Microsoft Entra Global Administrator has not changed password in over 365 days.",
+    "description": "A Microsoft Entra Global Administrator, by any route (direct, PIM-eligible or through a group), has not changed password in over 365 days.",
     "impact": "Long-lived privileged passwords raise credential-theft and recovery risk, especially for accounts without documented emergency controls.",
     "remediation": "Rotate or validate the privileged credential and move routine administration to phishing-resistant, least-privileged access.",
     "references": [
@@ -663,7 +665,7 @@
   },
   "identity.global_admin_mfa_not_registered": {
     "risk_rating": "critical",
-    "description": "A Microsoft Entra Global Administrator has not registered an MFA method in the authentication method registration report. This reports registration only, not whether MFA is required at sign-in.",
+    "description": "A Microsoft Entra Global Administrator, by any route (direct, PIM-eligible or through a group), has not registered an MFA method in the authentication method registration report. This reports registration only, not whether MFA is required at sign-in.",
     "impact": "A tenant-wide privileged account with no registered MFA method cannot meet an MFA requirement and is exposed to password-only compromise.",
     "remediation": "Register phishing-resistant MFA for every Global Administrator and confirm it in the authentication method registration report. Whether MFA is required at sign-in is assessed by the ca.mfa_not_enforced rule.",
     "references": [
@@ -677,7 +679,7 @@
   },
   "identity.privileged_mfa_not_registered": {
     "risk_rating": "high",
-    "description": "An enabled account that holds an administrator directory role (active or PIM-eligible), or that the registration report flags as an administrator, has not registered an MFA method. Global Administrators are reported separately as critical. Guest accounts are included, because a guest administrator's MFA may be satisfied in its home tenant through cross-tenant trust; confirm that before accepting the finding. This reports registration only, not whether MFA is required at sign-in.",
+    "description": "An enabled account that holds an administrator directory role (active, PIM-eligible or inherited through a role-assignable group), or that the registration report flags as an administrator, has not registered an MFA method. Global Administrators are reported separately as critical. Guest accounts are included, because a guest administrator's MFA may be satisfied in its home tenant through cross-tenant trust; confirm that before accepting the finding. This reports registration only, not whether MFA is required at sign-in.",
     "impact": "Administrator accounts are the highest-value sign-in targets. One with no registered MFA method cannot meet an MFA requirement, so a stolen or guessed password can grant administrative control.",
     "remediation": "Register phishing-resistant MFA for the account and require MFA for administrator roles in Conditional Access. The ca.mfa_not_enforced rule reports whether MFA is required at sign-in.",
     "references": [
@@ -1114,5 +1116,62 @@
       "AUDITEX-CA-BREAK-GLASS-EXCLUSION"
     ],
     "expected_value": "Emergency-access accounts are excluded from every enforcing Conditional Access policy and monitored."
+  },
+  "identity.admin_set_unverified": {
+    "risk_rating": "medium",
+    "description": "Auditex could not establish who holds an administrator role, because the role definitions, the role assignments, the PIM schedules or the membership fan-out of role-assignable groups was blocked, truncated or not collected.",
+    "impact": "The Global Administrator count and the checks on each administrator rest on part of the set. The run reports neither a pass nor a failure for the count rules; an administrator reached only through a source that was not read can be missing from every administrator check.",
+    "remediation": "Grant the audit identity RoleManagement.Read.Directory, Group.Read.All and Directory.Read.All, rerun the identity and identity_governance collectors, and raise the per-endpoint limit if a list was truncated. The finding's evidence lists each source and why it is incomplete.",
+    "references": [
+      "Microsoft Graph unifiedRoleAssignment, unifiedRoleEligibilitySchedule and group members",
+      "Auditex collector permission matrix"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-ADMIN-SET-UNVERIFIED"
+    ],
+    "expected_value": "Role definitions, role assignments, PIM schedules and role-assignable group memberships are collected completely."
+  },
+  "identity.admin_holds_productivity_licence": {
+    "risk_rating": "medium",
+    "description": "A user who holds an administrator directory role (direct, PIM-eligible or inherited through a group) also holds an Exchange Online mailbox licence or a productivity licence (Microsoft 365 Apps, SharePoint, Teams), taken from the licensing collector. This is partial evidence that the account is used for daily work as well as administration.",
+    "impact": "An administrator account that reads mail and opens documents is the account a phishing message or a stolen browser session reaches, and it carries administrative rights. Cyber Essentials expects separate accounts for administrative activities only.",
+    "remediation": "Give administrators a separate cloud-only account for administration with no mailbox or productivity licence, and keep the daily-use account unprivileged. Use PIM for the roles an individual only needs occasionally.",
+    "references": [
+      "CIS Microsoft 365 Foundations v7.0.0 1.1.4",
+      "Microsoft Entra privileged access best practices",
+      "NCSC Cyber Essentials Requirements for IT Infrastructure v3.3, user access control"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-ADMIN-PRODUCTIVITY-LICENCE"
+    ],
+    "expected_value": "Administrator accounts hold no mailbox or productivity licence."
+  },
+  "identity.stale_guest": {
+    "risk_rating": "medium",
+    "description": "An enabled guest account has no successful sign-in within the staleness threshold (90 days by default, set with AUDITEX_STALE_GUEST_DAYS), with signInActivity observed. A guest that is also an administrator is reported by identity.privileged_stale_account instead.",
+    "impact": "A guest that is no longer used keeps its access to shared teams, sites and apps, and nobody notices if the external identity is compromised or the partner relationship has ended.",
+    "remediation": "Remove the guest, or review its access with an access review. Use an access package or access review with automatic expiry for guests that are meant to stay.",
+    "references": [
+      "Microsoft Entra manage inactive user accounts",
+      "Microsoft Entra access reviews for guests"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-STALE-GUEST"
+    ],
+    "expected_value": "Guest accounts have signed in within the threshold or are removed."
+  },
+  "identity.guest_with_privileged_role": {
+    "risk_rating": "high",
+    "description": "A guest account holds an administrator directory role, directly, as a PIM-eligible assignment or through a role-assignable group. Whether the guest's own tenant enforces MFA is not visible from here.",
+    "impact": "Administrative rights held by an identity that another organisation controls depend on that organisation's account security and joiner-mover-leaver process, and sit outside this tenant's lifecycle controls.",
+    "remediation": "Remove the role from the guest, or replace it with a member account in this tenant. If the assignment is a deliberate partner arrangement, document it, keep it PIM-eligible and require phishing-resistant MFA through cross-tenant trust or Conditional Access.",
+    "references": [
+      "Microsoft Entra privileged access best practices",
+      "Microsoft Entra B2B collaboration guest access"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-GUEST-PRIVILEGED-ROLE"
+    ],
+    "expected_value": "Administrator roles are held by member accounts of this tenant."
   }
 }

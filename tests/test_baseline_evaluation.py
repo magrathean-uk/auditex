@@ -42,6 +42,22 @@ def _control_status(alignment: dict[str, Any]) -> str:
     return control["status"]
 
 
+def _admin_set(
+    state: str = "complete", reasons: tuple[str, ...] = (), licence_state: str = "known", licence_reasons: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    """A normalized snapshot holding only the effective administrator set summary."""
+    summary = {
+        "kind": "effective_admin_set_summary",
+        "id": "summary",
+        "key": "effective_admin_set_summary:summary",
+        "state": state,
+        "reasons": list(reasons),
+        "licence_state": licence_state,
+        "licence_reasons": list(licence_reasons),
+    }
+    return {"effective_admin_set": _section(summary)}
+
+
 def _domain(**fields: Any) -> dict[str, Any]:
     return {
         "domain": "contoso.com",
@@ -221,7 +237,7 @@ def test_the_attack_path_mfa_rule_needs_identity_and_auth_methods() -> None:
 
     assert rule_evidence_collectors(rule) == ("identity", "auth_methods")
     assert _rule(_alignment(rule, ledger=_ledger("identity")), rule)["reason"] == "collector_not_complete:auth_methods"
-    assert _rule(_alignment(rule, ledger=_ledger("identity", "auth_methods")), rule)["status"] == "pass"
+    assert _rule(_alignment(rule, ledger=_ledger("identity", "auth_methods"), snapshot=_admin_set()), rule)["status"] == "pass"
 
 
 def test_rule_evidence_collector_keeps_returning_the_first_collector() -> None:
@@ -563,7 +579,7 @@ def test_the_global_admin_mfa_rule_needs_registration_and_role_assignments() -> 
 
     registration_only = _rule(_alignment(rule, ledger=_ledger("auth_methods")), rule)
     roles_only = _rule(_alignment(rule, ledger=_ledger("identity")), rule)
-    both = _alignment(rule, ledger=_ledger("auth_methods", "identity"))
+    both = _alignment(rule, ledger=_ledger("auth_methods", "identity"), snapshot=_admin_set())
 
     assert registration_only["reason"] == "collector_not_complete:identity"
     assert roles_only["reason"] == "collector_not_complete:auth_methods"
@@ -577,7 +593,7 @@ def test_the_privileged_mfa_rule_also_needs_identity_governance_for_pim_eligible
     assert rule_evidence_collectors(PRIVILEGED) == ("auth_methods", "identity", "identity_governance")
 
     without_governance = _rule(_alignment(PRIVILEGED, ledger=_ledger("auth_methods", "identity")), PRIVILEGED)
-    complete = _alignment(PRIVILEGED, ledger=_ledger("auth_methods", "identity", "identity_governance"))
+    complete = _alignment(PRIVILEGED, ledger=_ledger("auth_methods", "identity", "identity_governance"), snapshot=_admin_set())
 
     assert without_governance == {
         "rule_id": PRIVILEGED,
@@ -597,7 +613,9 @@ def test_the_privileged_mfa_rule_names_every_missing_collector() -> None:
 def test_identity_governance_may_be_not_applicable_but_not_blocked_partial_or_failed() -> None:
     base = _ledger("auth_methods", "identity")
 
-    not_applicable = _alignment(PRIVILEGED, ledger=[*base, *_ledger("identity_governance", status="not_applicable")])
+    not_applicable = _alignment(
+        PRIVILEGED, ledger=[*base, *_ledger("identity_governance", status="not_applicable")], snapshot=_admin_set()
+    )
     assert _rule(not_applicable, PRIVILEGED)["status"] == "pass"
     for status in ("blocked_permission", "partial_success", "failed_runtime", "not_run"):
         gap = _alignment(PRIVILEGED, ledger=[*base, *_ledger("identity_governance", status=status)])

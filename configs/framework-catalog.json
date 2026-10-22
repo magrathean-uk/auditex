@@ -16,6 +16,7 @@
       ],
       "controls": {
         "1.1.3": "Two to four Global Administrators",
+        "1.1.4": "Administrative accounts use licences with a reduced application footprint",
         "2.1.8": "SPF published for Exchange domains",
         "2.1.9": "DKIM enabled for Exchange domains",
         "2.1.10": "DMARC published for Exchange domains",
@@ -399,7 +400,7 @@
           "theme": "user_access_control",
           "status": "ce_plus_assessor_test",
           "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
-          "evidence_limits": "No Auditex rule yet checks whether administrators also hold a mailbox or licence for daily work. The CE+ assessor tests account separation on sampled devices and cloud environments.",
+          "evidence_limits": "identity.admin_holds_productivity_licence reports administrator accounts that also hold an Exchange Online mailbox or a productivity licence, which is partial evidence only: it does not show whether the administrator uses a different account for daily work. The CE+ assessor tests account separation on sampled devices and cloud environments.",
           "ce_plus_test": "Test case 5: Check account separation"
         },
         "ce.uac.special_access_privileges": {
@@ -407,7 +408,7 @@
           "theme": "user_access_control",
           "status": "partial",
           "citation": "E. Requirements by technical control theme > 4. User Access Control > Requirements",
-          "evidence_limits": "Covers privileged role assignments in the audited tenant. Role changes when staff move are not observed, and PIM-eligible or group-based assignments may be missed."
+          "evidence_limits": "Covers privileged role assignments in the audited tenant: direct, PIM-eligible and inherited through a role-assignable group, as far as the membership fan-out reaches. Role changes when staff move are not observed."
         },
         "ce.uac.password_brute_force": {
           "title": "Password guessing limited by MFA, throttling or lock-out (no more than 10 guesses in 5 minutes)",

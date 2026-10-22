@@ -40,8 +40,92 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - **Citations.** The Global Administrator, standing-privilege and Intune assignment findings cite
   records that exist; they used to cite invented keys.
 
+### Microsoft 365 administrators
+
+- **Effective administrator set.** A new normalized section, `effective_admin_set`, resolves who holds an
+  administrator role once for every rule: one row per principal, by every route (direct active, PIM-eligible,
+  and inherited through a role-assignable group, nested groups included), with the roles and where each comes
+  from, the scope, a guest flag and licence flags (an Exchange Online mailbox or a productivity licence).
+  Only users are counted; groups and service principals that hold a role are listed with `counted: false`.
+  The set is `complete` only when role definitions, role assignments, both PIM schedule lists and the group
+  fan-out were read in full, otherwise `unknown` with the reasons. A PIM schedule read refused with
+  `license_required` counts as no schedules; a skipped `identity_governance` collector does not. Every
+  `identity.global_admin_*` rule, `identity.privileged_mfa_not_registered`,
+  `identity.privileged_stale_account` and the `attack_path.no_mfa_to_tier0` check read it. These rules used to
+  see only direct active assignments, so a PIM tenant with one permanent and three eligible Global
+  Administrators got a false "only one Global Administrator", and eligible or group-inherited administrators
+  were never checked for MFA, a disabled account or a stale password.
+- **Unknown set.** When the set is `unknown`, `identity.global_admin_singleton` stays silent (a count of one
+  proves nothing), the new diagnostic `identity.admin_set_unverified` is raised, and baseline alignment reads
+  every rule that depends on the set as `not_assessed` (`admin_set_unknown:<reasons>`), never `pass`.
+- **Global Administrator count.** `identity.global_admin_sprawl` is now raised above four (it was above five,
+  against text that said two to five), and each finding carries `framework_thresholds`: CIS `1.1.3` allows two
+  to four, SCuBA `MS.AAD.7.1v1` two to eight. Five to eight Global Administrators give a `low` finding that fails
+  CIS `1.1.3` while SCuBA `MS.AAD.7.1v1` still reads `pass`; nine or more give a `medium` finding that fails
+  both. `identity.global_admin_singleton` carries the same list for the minimum. Groups and service principals
+  no longer count towards either rule. The bounds are in `_rule_thresholds` in `configs/control-mappings.json`.
+- **Mappings.** `MS.AAD.7.2v1` is no longer mapped to `identity.global_admin_sprawl`: it is a ratio of Global
+  Administrators to other highly privileged users, which a count cannot establish. CIS `1.1.4` ("administrative
+  accounts use licenses with a reduced application footprint") is added to the framework catalog.
+- **New rules.** `identity.admin_holds_productivity_licence` (an administrator with a mailbox or productivity
+  licence; CIS `1.1.4`, and partial evidence for the Cyber Essentials requirement `ce.uac.separate_admin_accounts`),
+  `identity.stale_guest` (no successful sign-in for 90 days, or `AUDITEX_STALE_GUEST_DAYS`; a stale guest is no
+  longer also reported by `identity.stale_enabled_account`), `identity.guest_with_privileged_role`, and the
+  diagnostic `identity.admin_set_unverified`. The licence and stale-guest rules read `not_assessed` when licences
+  or sign-in activity were not collected.
+- **Default profiles.** `identity_governance` is added to the `auto` and `global-reader` profiles and to the
+  `full` and `config-only` presets, so PIM schedules are read by default. The `global-reader` application
+  permission hints gain `AccessReview.Read.All`, `EntitlementManagement.Read.All` and
+  `RoleManagement.Read.Directory`. A profile or preset that collects `identity` without `identity_governance`
+  (`identity-only`, `reports-reader`, `exchange-reader`) is unchanged and reports the set as `unknown`.
+- **Comparison and gates.** `auditex compare` and the gates no longer call a finding resolved when its rule's
+  inputs went unknown in the later run (an administrator set or an MFA verdict that could not be established):
+  it is `not_reassessed` with `rule_inputs:<reason>`, as is a finding whose rule needs a normalized section the
+  later run did not write.
+- **Bundle fields.** `role_assignments` records gain `directory_scope_id` when the source returns it. The
+  remediated demo twin now also removes the disabled administrator's PIM schedule.
+- **Known gap and follow-up.** PIM for Groups eligible membership of a role-assignable group is not read, so a
+  user who is only eligible to join such a group is not in the set. ScubaGear's `MS.AAD.7.1v1` instructions
+  count them. Collecting those schedules is a follow-up.
+
+### Google Workspace
+
+Upgrade notes (all in `auditex google`):
+
+- **New scope and API.** The `core-security` and `identity` presets add the `google_policies` collector, which
+  reads the 2-step verification policy through the Cloud Identity Policy API. Enable the Cloud Identity API
+  and add `https://www.googleapis.com/auth/cloud-identity.policies.readonly` to the delegation entry.
+  The scope is requested on its own token, so a tenant that has not added it yet loses only that read
+  (the run is partial and the policy is reported as unknown); the other collectors are unaffected.
+- **OAuth token caches must be re-consented.** The new scope is part of the OAuth consent set, so an existing
+  `--token-cache` does not hold it: the policy read fails until the browser flow is run again (delete the cache
+  or let it refresh). Domain-wide delegation needs no re-consent, only the delegation entry.
+- **DNS posture checks every verified domain.** It used to assess the `--domain` label only; it now reads the
+  Directory domains list, so secondary domains raise their own `google.dns_*` findings. The label stands in
+  only when the list cannot be read.
+- **`--domain` is a label.** Users and groups are listed for the whole customer (`customer=my_customer`),
+  so secondary and alias domains are no longer left out. The internal domain set comes from the Directory
+  domains list; without it, or when the list was cut short, the external-principal rules report
+  `google.internal_domains_unknown` (status `unknown`, `label_only` or `partial`) instead of returning nothing.
+- **Gmail settings are read per user** under domain-wide delegation, on a token narrowed to the two Gmail
+  settings scopes (bounded: 500 mailboxes without `--top`, the cut recorded as a coverage gap). With OAuth
+  only the signed-in mailbox is read, and the run says so. Drive and Calendar evidence is the delegated admin's view and is labelled `subject_scoped: admin` on its
+  coverage rows, capability rows and findings.
+- **One `google.collector_issue` per surface** with the object count, replacing one per user, group or
+  calendar. Finding ids for per-object failures change to `google.collector_issue:<collector>:<surface>`.
+- **Device lists use the `FULL` projection with a field mask**, and `google.mobile_device_compromised` reads
+  the API's `deviceCompromisedStatus` (the old `compromisedStatus` key never appeared in real responses).
+
 ### Added
 
+- Google Workspace rules `google.user_2sv_not_enforced`, `google.org_2sv_policy_not_enforced` (high when no
+  policy enforces, medium when only some organisational units or groups do), `google.stale_user` (`--stale-user-days`, default 90), `google.never_logged_in_user`,
+  `google.chromeos_device_past_aue` and `google.mobile_device_encryption_off`, with the diagnostics
+  `google.internal_domains_unknown` and `google.evidence_unknown` (an absent field is unknown, never a pass).
+  Delegated admins now get the admin rules (`is_privileged`). Mobile and ChromeOS posture fields (encryption,
+  lock, patch level, auto-update expiration) are normalized.
+- `auditex google run --waiver-file`, with the Microsoft 365 waiver semantics; an invalid file stops the run
+  before any API call. `make contract-smoke` also runs and validates the Google offline sample.
 - The SARIF and OSCAL exports are validated in the tests against the official schemas, vendored under
   `tests/schemas/` with the NIST and OASIS notices. `pip install -e '.[test]'` (which `make install` now
   runs) installs `jsonschema` for that.

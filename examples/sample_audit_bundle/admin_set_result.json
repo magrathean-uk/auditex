@@ -1,0 +1,382 @@
+{
+  "_fixture_provenance": {
+    "fixture_id": "m365-effective-admin-set",
+    "fixture_version": "2026-10-22",
+    "provider": "m365",
+    "seed_kind": "known_bad",
+    "synthetic": true,
+    "source_path": "examples/sample_audit_bundle/admin_set_result.json",
+    "description": "Synthetic tenant whose administrators are reached by every route: two direct Global Administrators, one PIM-eligible, two through a role-assignable group (one of them through a nested group), a service principal that holds the role, a guest that holds Exchange Administrator and a stale guest. Licences are read for the administrators. Every identifier is fictional; domains use the reserved .example TLD."
+  },
+  "identity": {
+    "users": {
+      "value": [
+        {
+          "id": "effadm-user-01",
+          "displayName": "Alex Direct",
+          "userPrincipalName": "alex.direct@fabrikam.example",
+          "accountEnabled": true,
+          "userType": "Member",
+          "createdDateTime": "2024-03-01T09:00:00Z",
+          "lastPasswordChangeDateTime": "2026-08-01T09:00:00Z"
+        },
+        {
+          "id": "effadm-user-02",
+          "displayName": "Blair Direct",
+          "userPrincipalName": "blair.direct@fabrikam.example",
+          "accountEnabled": true,
+          "userType": "Member",
+          "createdDateTime": "2024-03-01T09:00:00Z",
+          "lastPasswordChangeDateTime": "2026-08-01T09:00:00Z"
+        },
+        {
+          "id": "effadm-user-03",
+          "displayName": "Cam Eligible",
+          "userPrincipalName": "cam.eligible@fabrikam.example",
+          "accountEnabled": true,
+          "userType": "Member",
+          "createdDateTime": "2024-03-01T09:00:00Z",
+          "lastPasswordChangeDateTime": "2026-08-01T09:00:00Z"
+        },
+        {
+          "id": "effadm-user-04",
+          "displayName": "Drew Grouped",
+          "userPrincipalName": "drew.grouped@fabrikam.example",
+          "accountEnabled": true,
+          "userType": "Member",
+          "createdDateTime": "2024-03-01T09:00:00Z",
+          "lastPasswordChangeDateTime": "2026-08-01T09:00:00Z"
+        },
+        {
+          "id": "effadm-user-05",
+          "displayName": "Eden Nested",
+          "userPrincipalName": "eden.nested@fabrikam.example",
+          "accountEnabled": true,
+          "userType": "Member",
+          "createdDateTime": "2024-03-01T09:00:00Z",
+          "lastPasswordChangeDateTime": "2026-08-01T09:00:00Z"
+        },
+        {
+          "id": "effadm-guest-01",
+          "displayName": "Fran Partner",
+          "userPrincipalName": "fran.partner_partner.example#EXT#@fabrikam.example",
+          "accountEnabled": true,
+          "userType": "Guest",
+          "createdDateTime": "2024-03-01T09:00:00Z",
+          "lastPasswordChangeDateTime": "2026-08-01T09:00:00Z"
+        },
+        {
+          "id": "effadm-guest-02",
+          "displayName": "Gale Contractor",
+          "userPrincipalName": "gale.contractor_contractor.example#EXT#@fabrikam.example",
+          "accountEnabled": true,
+          "userType": "Guest",
+          "createdDateTime": "2024-03-01T09:00:00Z",
+          "lastPasswordChangeDateTime": "2026-08-01T09:00:00Z"
+        }
+      ]
+    },
+    "userSignInActivity": {
+      "value": [
+        {
+          "id": "effadm-guest-01",
+          "signInActivity": {
+            "lastSuccessfulSignInDateTime": "2026-09-30T08:00:00Z"
+          }
+        },
+        {
+          "id": "effadm-guest-02",
+          "signInActivity": {
+            "lastSuccessfulSignInDateTime": "2025-11-04T10:00:00Z"
+          }
+        }
+      ]
+    },
+    "groups": {
+      "value": [
+        {
+          "id": "effadm-group-admins",
+          "displayName": "Tier 0 administrators",
+          "groupTypes": [],
+          "isAssignableToRole": true
+        },
+        {
+          "id": "effadm-group-nested",
+          "displayName": "Platform engineers",
+          "groupTypes": [],
+          "isAssignableToRole": true
+        }
+      ]
+    },
+    "servicePrincipals": {
+      "value": [
+        {
+          "id": "effadm-sp-01",
+          "displayName": "Provisioning Automation",
+          "appId": "11111111-1111-1111-1111-111111111111",
+          "servicePrincipalType": "Application",
+          "accountEnabled": true
+        }
+      ]
+    },
+    "roleDefinitions": {
+      "value": [
+        {
+          "id": "62e90394-69f5-4237-9190-012177145e10",
+          "displayName": "Global Administrator"
+        },
+        {
+          "id": "29232cdf-9323-42fd-ade2-1d097af3e4de",
+          "displayName": "Exchange Administrator"
+        }
+      ]
+    },
+    "roleAssignments": {
+      "value": [
+        {
+          "id": "effadm-ra-1",
+          "principalId": "effadm-user-01",
+          "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10",
+          "directoryScopeId": "/"
+        },
+        {
+          "id": "effadm-ra-2",
+          "principalId": "effadm-user-02",
+          "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10",
+          "directoryScopeId": "/"
+        },
+        {
+          "id": "effadm-ra-3",
+          "principalId": "effadm-group-admins",
+          "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10",
+          "directoryScopeId": "/"
+        },
+        {
+          "id": "effadm-ra-4",
+          "principalId": "effadm-sp-01",
+          "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10",
+          "directoryScopeId": "/"
+        }
+      ]
+    },
+    "roleAssignableGroupMembers": {
+      "value": [
+        {
+          "groupId": "effadm-group-admins",
+          "displayName": "Tier 0 administrators",
+          "members": [
+            {
+              "id": "effadm-user-04",
+              "displayName": "Drew Grouped",
+              "userPrincipalName": "drew.grouped@fabrikam.example",
+              "@odata.type": "#microsoft.graph.user"
+            },
+            {
+              "id": "effadm-group-nested",
+              "displayName": "Platform engineers",
+              "@odata.type": "#microsoft.graph.group"
+            }
+          ]
+        },
+        {
+          "groupId": "effadm-group-nested",
+          "displayName": "Platform engineers",
+          "members": [
+            {
+              "id": "effadm-user-05",
+              "displayName": "Eden Nested",
+              "userPrincipalName": "eden.nested@fabrikam.example",
+              "@odata.type": "#microsoft.graph.user"
+            }
+          ]
+        }
+      ],
+      "fanout": {
+        "fanout_scope": "role_assignable_or_role_holding_groups_and_nested_groups",
+        "fanout_limit": 50,
+        "candidate_group_count": 2,
+        "discovered_group_count": 2,
+        "expanded_group_count": 2,
+        "unexpanded_group_count": 0,
+        "failed_relationship_count": 0,
+        "input_complete": true,
+        "collection_truncated": false,
+        "fanout_complete": true
+      }
+    },
+    "roleAssignableGroupOwners": {
+      "value": [
+        {
+          "groupId": "effadm-group-admins",
+          "displayName": "Tier 0 administrators",
+          "owners": []
+        },
+        {
+          "groupId": "effadm-group-nested",
+          "displayName": "Platform engineers",
+          "owners": []
+        }
+      ]
+    }
+  },
+  "identity_governance": {
+    "roleAssignmentSchedules": {
+      "value": []
+    },
+    "roleEligibilitySchedules": {
+      "value": [
+        {
+          "id": "effadm-elig-1",
+          "principalId": "effadm-user-03",
+          "roleDefinitionId": "62e90394-69f5-4237-9190-012177145e10",
+          "directoryScopeId": "/",
+          "memberType": "Direct",
+          "assignmentType": "Assigned",
+          "status": "Provisioned"
+        },
+        {
+          "id": "effadm-elig-2",
+          "principalId": "effadm-guest-01",
+          "roleDefinitionId": "29232cdf-9323-42fd-ade2-1d097af3e4de",
+          "directoryScopeId": "/",
+          "memberType": "Direct",
+          "assignmentType": "Assigned",
+          "status": "Provisioned"
+        }
+      ]
+    }
+  },
+  "auth_methods": {
+    "userRegistrationDetails": {
+      "value": [
+        {
+          "id": "effadm-user-01",
+          "userPrincipalName": "alex.direct@fabrikam.example",
+          "isMfaRegistered": true,
+          "isAdmin": true
+        },
+        {
+          "id": "effadm-user-02",
+          "userPrincipalName": "blair.direct@fabrikam.example",
+          "isMfaRegistered": true,
+          "isAdmin": true
+        },
+        {
+          "id": "effadm-user-03",
+          "userPrincipalName": "cam.eligible@fabrikam.example",
+          "isMfaRegistered": false,
+          "isAdmin": false
+        },
+        {
+          "id": "effadm-user-04",
+          "userPrincipalName": "drew.grouped@fabrikam.example",
+          "isMfaRegistered": true,
+          "isAdmin": false
+        },
+        {
+          "id": "effadm-user-05",
+          "userPrincipalName": "eden.nested@fabrikam.example",
+          "isMfaRegistered": true,
+          "isAdmin": false
+        }
+      ]
+    }
+  },
+  "licensing": {
+    "subscribedSkus": {
+      "value": [
+        {
+          "skuId": "effadm-sku-business",
+          "skuPartNumber": "SPB",
+          "capabilityStatus": "Enabled",
+          "consumedUnits": 3,
+          "prepaidUnits": {
+            "enabled": 10
+          },
+          "servicePlans": [
+            {
+              "servicePlanId": "effadm-plan-exo",
+              "servicePlanName": "EXCHANGE_S_STANDARD",
+              "provisioningStatus": "Success"
+            },
+            {
+              "servicePlanId": "effadm-plan-apps",
+              "servicePlanName": "OFFICESUBSCRIPTION",
+              "provisioningStatus": "Success"
+            },
+            {
+              "servicePlanId": "effadm-plan-aad",
+              "servicePlanName": "AAD_PREMIUM",
+              "provisioningStatus": "Success"
+            }
+          ]
+        },
+        {
+          "skuId": "effadm-sku-entra",
+          "skuPartNumber": "AAD_PREMIUM_P1",
+          "capabilityStatus": "Enabled",
+          "consumedUnits": 2,
+          "prepaidUnits": {
+            "enabled": 5
+          },
+          "servicePlans": [
+            {
+              "servicePlanId": "effadm-plan-aad2",
+              "servicePlanName": "AAD_PREMIUM",
+              "provisioningStatus": "Success"
+            }
+          ]
+        }
+      ]
+    },
+    "licensedUsers": {
+      "value": [
+        {
+          "id": "effadm-user-01",
+          "assignedLicenses": [
+            {
+              "skuId": "effadm-sku-business",
+              "disabledPlans": []
+            }
+          ]
+        },
+        {
+          "id": "effadm-user-02",
+          "assignedLicenses": [
+            {
+              "skuId": "effadm-sku-entra",
+              "disabledPlans": []
+            }
+          ]
+        },
+        {
+          "id": "effadm-user-03",
+          "assignedLicenses": [
+            {
+              "skuId": "effadm-sku-business",
+              "disabledPlans": [
+                "effadm-plan-exo"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "effadm-user-04",
+          "assignedLicenses": []
+        },
+        {
+          "id": "effadm-user-05",
+          "assignedLicenses": [
+            {
+              "skuId": "effadm-sku-business",
+              "disabledPlans": []
+            }
+          ]
+        }
+      ]
+    },
+    "licensedGroups": {
+      "value": []
+    }
+  }
+}

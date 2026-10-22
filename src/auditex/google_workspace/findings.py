@@ -1,14 +1,46 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from .collectors import SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPED_COLLECTORS
+
+# Days without a login before an active account is reported by google.stale_user. Admin accounts keep the
+# 365-day google.admin_stale_login threshold; this one is the default for everyone and is configurable.
+DEFAULT_STALE_USER_DAYS = 90
+# An account younger than this has not had time to sign in, so google.never_logged_in_user leaves it alone.
+NEVER_LOGGED_IN_GRACE_DAYS = 30
+_ADMIN_STALE_LOGIN_DAYS = 365
+_EXTERNAL_PRINCIPAL_RULES = (
+    "google.group_external_member",
+    "google.gmail_external_forwarding",
+    "google.gmail_external_forwarding_address_ready",
+    "google.gmail_filter_external_forwarding",
+    "google.gmail_hidden_forwarding_filter",
+    "google.gmail_external_send_as",
+    "google.gmail_external_delegate",
+    "google.drive_external_permission",
+    "google.drive_domain_permission",
+    "google.calendar_external_acl",
+    "google.calendar_domain_acl",
+)
+_ADMIN_SCOPE_NOTE = (
+    "Evidence is limited to what the delegated admin subject can see; it is not a tenant-wide statement."
+)
 
 
 _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.collector_issue": {"nist_800_53": ["AU-2", "CA-7"], "iso_27001": ["A.8.16"], "soc2": ["CC7.2"]},
+    "google.internal_domains_unknown": {"nist_800_53": ["AU-2", "CA-7"], "iso_27001": ["A.8.16"], "soc2": ["CC7.2"]},
+    "google.evidence_unknown": {"nist_800_53": ["AU-2", "CA-7"], "iso_27001": ["A.8.16"], "soc2": ["CC7.2"]},
     "google.admin_2sv_not_enforced": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_admin_accounts", "ce.uac.mfa_cloud_services"]},
     "google.admin_2sv_not_enrolled": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_admin_accounts", "ce.uac.mfa_cloud_services"]},
     "google.user_2sv_not_enrolled": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_cloud_services"]},
+    "google.user_2sv_not_enforced": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_cloud_services"]},
+    "google.org_2sv_policy_not_enforced": {"nist_800_53": ["IA-2"], "iso_27001": ["A.5.17"], "soc2": ["CC6.1"], "cyber_essentials": ["ce.uac.mfa_admin_accounts", "ce.uac.mfa_cloud_services"]},
+    "google.stale_user": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"], "cyber_essentials": ["ce.sc.unnecessary_accounts", "ce.uac.remove_unused_accounts"]},
+    "google.never_logged_in_user": {"nist_800_53": ["AC-2"], "iso_27001": ["A.5.18"], "soc2": ["CC6.2"], "cyber_essentials": ["ce.sc.unnecessary_accounts", "ce.uac.remove_unused_accounts"]},
     "google.login_suspicious_event": {"nist_800_53": ["AU-6", "IR-4"], "iso_27001": ["A.8.15", "A.8.16"], "soc2": ["CC7.2"]},
     "google.admin_privilege_event": {"nist_800_53": ["AC-2", "AC-6", "AU-6"], "iso_27001": ["A.5.15", "A.5.18"], "soc2": ["CC6.1", "CC7.2"]},
     "google.oauth_high_risk_scope": {"nist_800_53": ["AC-3", "AC-6"], "iso_27001": ["A.5.15"], "soc2": ["CC6.6"]},
@@ -50,6 +82,8 @@ _GOOGLE_FRAMEWORK_MAPPINGS: dict[str, dict[str, list[str]]] = {
     "google.mobile_device_stale_sync": {"nist_800_53": ["CM-8", "SI-4"], "iso_27001": ["A.5.9", "A.8.1"], "soc2": ["CC7.1"]},
     "google.chromeos_device_stale_sync": {"nist_800_53": ["CM-8", "SI-4"], "iso_27001": ["A.5.9", "A.8.1"], "soc2": ["CC7.1"]},
     "google.chromeos_device_inactive_assignment": {"nist_800_53": ["CM-8"], "iso_27001": ["A.5.9"], "soc2": ["CC7.1"]},
+    "google.chromeos_device_past_aue": {"nist_800_53": ["SI-2", "CM-8"], "iso_27001": ["A.8.8", "A.8.1"], "soc2": ["CC7.1"], "cyber_essentials": ["ce.sum.supported_software", "ce.sum.vulnerability_fixes_14_days"]},
+    "google.mobile_device_encryption_off": {"nist_800_53": ["SC-28"], "iso_27001": ["A.8.1", "A.8.24"], "soc2": ["CC6.7"]},
     "google.dns_spf_missing": {"nist_800_53": ["SC-7", "SC-8"], "iso_27001": ["A.5.14", "A.8.20"], "soc2": ["CC6.6"], "mitre_attack": ["T1566"]},
     "google.dns_dmarc_monitor_only": {"nist_800_53": ["SC-7", "SC-8"], "iso_27001": ["A.5.14", "A.8.20"], "soc2": ["CC6.6"], "mitre_attack": ["T1566"]},
     "google.dns_dkim_missing": {"nist_800_53": ["SC-7", "SC-8"], "iso_27001": ["A.5.14", "A.8.20"], "soc2": ["CC6.6"], "mitre_attack": ["T1566"]},
@@ -59,6 +93,10 @@ _GOOGLE_BASELINE_CONTROLS: dict[str, str] = {
     "google.admin_2sv_not_enforced": "identity.2sv",
     "google.admin_2sv_not_enrolled": "identity.2sv",
     "google.user_2sv_not_enrolled": "identity.2sv",
+    "google.user_2sv_not_enforced": "identity.2sv_enforcement",
+    "google.org_2sv_policy_not_enforced": "identity.2sv_enforcement",
+    "google.stale_user": "identity.account_lifecycle",
+    "google.never_logged_in_user": "identity.account_lifecycle",
     "google.super_admin_singleton": "identity.admin_resilience",
     "google.super_admin_sprawl": "identity.admin_resilience",
     "google.suspended_admin": "identity.admin_hygiene",
@@ -100,10 +138,14 @@ _GOOGLE_BASELINE_CONTROLS: dict[str, str] = {
     "google.mobile_device_stale_sync": "devices.mobile",
     "google.chromeos_device_stale_sync": "devices.chromeos",
     "google.chromeos_device_inactive_assignment": "devices.chromeos",
+    "google.chromeos_device_past_aue": "devices.chromeos",
+    "google.mobile_device_encryption_off": "devices.mobile",
     "google.dns_spf_missing": "domains.email_auth",
     "google.dns_dmarc_monitor_only": "domains.email_auth",
     "google.dns_dkim_missing": "domains.email_auth",
     "google.collector_issue": "audit.coverage",
+    "google.internal_domains_unknown": "audit.coverage",
+    "google.evidence_unknown": "audit.coverage",
 }
 
 for _rule_id, _mapping in _GOOGLE_FRAMEWORK_MAPPINGS.items():
@@ -142,6 +184,38 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "impact": "Password-only users are easier to compromise and can expose mail, Drive, and group data.",
         "remediation": "Enroll active users in 2-step verification and enforce the Workspace 2SV baseline.",
         "expected_value": "Active user accounts are enrolled in 2-step verification.",
+    },
+    "google.user_2sv_not_enforced": {
+        "title": "User account is not forced to use 2-step verification",
+        "risk_rating": "medium",
+        "description": "An active Google Workspace user account is not forced through 2-step verification, whatever the account has enrolled.",
+        "impact": "Enrolment is the user's choice; without enforcement the account can still sign in with a password alone, which leaves mail, Drive and group data exposed.",
+        "remediation": "Enforce 2-step verification for the organisation (Admin console, Security, Authentication, 2-step verification) and set the enforcement date.",
+        "expected_value": "2-step verification is enforced for every active user account.",
+    },
+    "google.org_2sv_policy_not_enforced": {
+        "title": "No organisation policy enforces 2-step verification",
+        "risk_rating": "high",
+        "description": "The Cloud Identity policies read for the organisation contain no organisation-level 2-step verification enforcement that is in force (none at all, or only for some organisational units or groups).",
+        "impact": "Without an organisation-level enforcement policy, accounts outside any enforced unit or group can sign in with a password alone, so multi-factor authentication depends on each user's own choice.",
+        "remediation": "Create a 2-step verification enforcement policy for the root organisational unit with an enforcement date, then confirm it in Admin console, Security, Authentication.",
+        "expected_value": "An enforcement policy is in force for the organisation, with any exception documented.",
+    },
+    "google.stale_user": {
+        "title": "Active user has not signed in recently",
+        "risk_rating": "medium",
+        "description": "An active Google Workspace account has not signed in for longer than the inactivity threshold (90 days by default).",
+        "impact": "Unused accounts keep their access and credentials while nobody watches them, and are a common route in after a leaver or a contractor has moved on.",
+        "remediation": "Confirm the account is still needed, then suspend or delete it, or document why it must stay active.",
+        "expected_value": "Active accounts have signed in within the inactivity threshold, or are documented exceptions.",
+    },
+    "google.never_logged_in_user": {
+        "title": "Active user has never signed in",
+        "risk_rating": "low",
+        "description": "An active Google Workspace account has never signed in and is older than the onboarding grace period.",
+        "impact": "An account that was created and never used holds an initial credential and licence that nobody is using.",
+        "remediation": "Confirm the account is still expected to be used, then suspend or delete it, or complete the onboarding.",
+        "expected_value": "Every active account has signed in, or is within its onboarding period.",
     },
     "google.suspended_admin": {
         "title": "Suspended user still has admin status",
@@ -447,6 +521,38 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
         "remediation": "Review inactive ChromeOS inventory, clear stale user assignments, and confirm the device lifecycle state is accurate.",
         "expected_value": "Inactive ChromeOS devices do not retain stale user assignments.",
     },
+    "google.chromeos_device_past_aue": {
+        "title": "ChromeOS device is past its auto-update expiration",
+        "risk_rating": "high",
+        "description": "An active managed ChromeOS device is past the date Google stops providing it with security updates.",
+        "impact": "A device that no longer receives updates keeps known vulnerabilities for good, and is software that is no longer supported.",
+        "remediation": "Replace the device or retire it from managed use before expiry; re-enrol only hardware that still receives updates.",
+        "expected_value": "Every active ChromeOS device is within its auto-update period.",
+    },
+    "google.mobile_device_encryption_off": {
+        "title": "Mobile device storage is not encrypted",
+        "risk_rating": "medium",
+        "description": "Google Workspace reports a managed mobile device whose storage encryption is off.",
+        "impact": "Data synchronised to an unencrypted device can be read by whoever finds or steals it.",
+        "remediation": "Require device encryption in the mobile management policy and block or wipe devices that do not meet it.",
+        "expected_value": "Managed mobile devices have storage encryption on.",
+    },
+    "google.internal_domains_unknown": {
+        "title": "Internal domains could not be determined",
+        "risk_rating": "medium",
+        "description": "The Directory domains list was not read, so the set of internal domains is unknown or limited to the --domain label.",
+        "impact": "External forwarding, delegate, send-as, group member, Drive and Calendar sharing checks cannot tell an outside address from an internal secondary or alias domain, so they are unknown or may over-report.",
+        "remediation": "Grant the admin.directory.domain.readonly scope, rerun, and confirm the Directory domains list is collected.",
+        "expected_value": "The Directory domains list is collected and every primary, secondary and alias domain is treated as internal.",
+    },
+    "google.evidence_unknown": {
+        "title": "Evidence needed for a check was not returned",
+        "risk_rating": "medium",
+        "description": "Google returned no value for a field a check needs, so the check could not be evaluated for those objects.",
+        "impact": "The affected objects are neither passed nor failed; a gap here must not be read as a clean result.",
+        "remediation": "Confirm the account or device data is readable with the granted scopes and rerun; collect the missing evidence by hand if the field does not exist for these objects.",
+        "expected_value": "Every field the checks use is present for every object they evaluate.",
+    },
     "google.alert_active": {
         "title": "Google Workspace Alert Center alert is active",
         "risk_rating": "high",
@@ -511,6 +617,16 @@ def google_rule_metadata() -> dict[str, dict[str, Any]]:
     return metadata
 
 
+# The registry does not change while the process runs, and ``_finding`` looks a rule up per finding.
+_METADATA_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _rule_metadata(rule_id: str) -> dict[str, Any]:
+    if not _METADATA_CACHE:
+        _METADATA_CACHE.update(google_rule_metadata())
+    return _METADATA_CACHE.get(rule_id, {})
+
+
 def _evidence_ref(section: str, collector: str, record: dict[str, Any]) -> dict[str, Any]:
     return {
         "artifact_path": f"normalized/{section}.json",
@@ -544,9 +660,12 @@ def _finding(
     description: str,
     remediation: str,
     returned_value: Any,
+    finding_id: str | None = None,
+    affected_objects: list[str] | None = None,
+    extra_refs: Iterable[tuple[str, str, dict[str, Any]]] = (),
 ) -> dict[str, Any]:
-    metadata = google_rule_metadata().get(rule_id, {})
-    finding_id = f"{rule_id}:{record.get('id') or record.get('key')}"
+    metadata = _rule_metadata(rule_id)
+    finding_id = finding_id or f"{rule_id}:{record.get('id') or record.get('key')}"
     payload = {
         "id": finding_id,
         "rule_id": rule_id,
@@ -563,8 +682,9 @@ def _finding(
         "returned_value": returned_value,
         "references": metadata.get("references") or ["Google Workspace Admin audit evidence", "Auditex Google Workspace rules"],
         "control_ids": metadata.get("control_ids") or [rule_id.upper().replace(".", "-")],
-        "affected_objects": [_affected_object(record)],
-        "evidence_refs": [_evidence_ref(section, collector, record)],
+        "affected_objects": affected_objects if affected_objects is not None else [_affected_object(record)],
+        "evidence_refs": [_evidence_ref(section, collector, record)]
+        + [_evidence_ref(extra_section, extra_collector, extra_record) for extra_section, extra_collector, extra_record in extra_refs],
     }
     mappings = _GOOGLE_FRAMEWORK_MAPPINGS.get(rule_id)
     if mappings:
@@ -578,18 +698,36 @@ def _records(snapshot: dict[str, Any], section: str) -> list[dict[str, Any]]:
     return [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
 
 
-def _external_email(value: Any, workspace_domain: str | None) -> bool:
-    text = str(value or "").strip().lower()
-    if "@" not in text or not workspace_domain:
-        return False
-    return not text.endswith(f"@{workspace_domain.lower()}")
+def _domain_set(domains: Any) -> frozenset[str]:
+    """Lower-cased internal domains from a collection of names, or a single name."""
+    if isinstance(domains, str):
+        domains = [domains]
+    if not isinstance(domains, Iterable):
+        return frozenset()
+    return frozenset(str(item).strip().lower() for item in domains if str(item or "").strip())
 
 
-def _external_domain(value: Any, workspace_domain: str | None) -> bool:
+def _external_email(value: Any, internal_domains: Any) -> bool:
+    """True for an address outside every internal domain. Without a domain set nothing is called external;
+    the caller reports that as unknown (``google.internal_domains_unknown``) instead of skipping silently."""
     text = str(value or "").strip().lower()
-    if not text or not workspace_domain:
+    domains = _domain_set(internal_domains)
+    if "@" not in text or not domains:
         return False
-    return text != workspace_domain.lower()
+    return text.rsplit("@", 1)[1] not in domains
+
+
+def _external_domain(value: Any, internal_domains: Any) -> bool:
+    text = str(value or "").strip().lower()
+    domains = _domain_set(internal_domains)
+    if not text or not domains:
+        return False
+    return text not in domains
+
+
+def _internal_domain(value: Any, internal_domains: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text) and text in _domain_set(internal_domains)
 
 
 def _drive_permission_record(drive_file: dict[str, Any], permission: dict[str, Any]) -> dict[str, Any]:
@@ -636,84 +774,290 @@ def _mailbox_vacation_returned_value(vacation: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def _mailbox_surface_error(
-    mailbox: dict[str, Any],
-    *,
-    surface: str,
-    error_key: str,
-) -> dict[str, Any] | None:
-    payload = mailbox.get(error_key)
-    if not isinstance(payload, dict) or not payload:
-        return None
-    error_class = str(payload.get("error_class") or "client_error")
-    return _finding(
-        rule_id="google.collector_issue",
-        title="Google Workspace collector issue",
-        severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
-        category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
-        collector="google_gmail_settings",
-        section="google_mailbox_settings",
-        record=mailbox,
-        description=f"Google Workspace evidence is incomplete for this Gmail {surface} surface.",
-        remediation=f"Fix the Gmail {surface}-read permission or service availability, then rerun the collector.",
-        returned_value={"surface": surface, **payload},
-    )
-
-
 def _truthy_google_setting(value: Any) -> bool:
     return str(value).strip().lower() in {"true", "yes", "enabled", "allow"}
 
 
-def _stale_google_login(value: Any, *, days: int = 365) -> bool:
+def _parse_google_time(value: Any) -> datetime | None:
     text = str(value or "").strip()
-    if not text or text.startswith("1970-01-01"):
-        return bool(text)
+    if not text:
+        return None
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _stale_google_login(value: Any, *, days: int = 365, now: datetime | None = None) -> bool:
+    text = str(value or "").strip()
+    if not text or text.startswith("1970-01-01"):
+        return bool(text)
+    parsed = _parse_google_time(text)
+    if parsed is None:
         return False
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed < datetime.now(tz=timezone.utc) - timedelta(days=days)
+    return parsed < (now or datetime.now(tz=timezone.utc)) - timedelta(days=days)
 
 
-def _stale_google_timestamp(value: Any, *, days: int = 90) -> bool:
-    return _stale_google_login(value, days=days)
+def _stale_google_timestamp(value: Any, *, days: int = 90, now: datetime | None = None) -> bool:
+    return _stale_google_login(value, days=days, now=now)
 
 
-def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def _device_compromised(value: Any) -> bool:
+    """True when Google reports a compromised device. The API says "No compromise detected" for a clean one,
+    so the match is on the word and excludes the negated forms."""
+    text = " ".join(str(value or "").replace("_", " ").lower().split())
+    if "compromise" not in text:
+        return False
+    return not (text.startswith(("no ", "not ")) or "no compromise" in text or "not compromised" in text or "uncompromised" in text)
+
+
+def _is_privileged(user: dict[str, Any]) -> bool:
+    """Super admin or delegated admin: the accounts the admin-severity rules apply to."""
+    return bool(user.get("is_admin") or user.get("is_delegated_admin"))
+
+
+def _is_active(user: dict[str, Any]) -> bool:
+    return not user.get("suspended") and not user.get("archived")
+
+
+def _login_state(value: Any, *, days: int, now: datetime) -> str:
+    """``unknown`` (no usable value), ``never`` (the 1970 epoch Google uses), ``stale`` or ``recent``."""
+    text = str(value or "").strip()
+    if not text:
+        return "unknown"
+    if text.startswith("1970-01-01"):
+        return "never"
+    parsed = _parse_google_time(text)
+    if parsed is None:
+        return "unknown"
+    return "stale" if parsed < now - timedelta(days=days) else "recent"
+
+
+def _past_onboarding_grace(user: dict[str, Any], now: datetime) -> bool:
+    """False only for an account known to be younger than the grace period; an unknown age counts as old."""
+    created = _parse_google_time(user.get("creation_time"))
+    return created is None or created < now - timedelta(days=NEVER_LOGGED_IN_GRACE_DAYS)
+
+
+def _internal_domain_state(snapshot: dict[str, Any]) -> tuple[frozenset[str], str]:
+    """Internal domains and how they were learned: ``known`` (the whole Directory domains list),
+    ``partial`` (a list cut short or partly read), ``label_only`` (the --domain flag alone) or ``unknown``.
+    ``partial`` and ``label_only`` run the external-principal rules against what is known and say it may
+    over-report; ``unknown`` does not run them. A snapshot written before the Directory list was
+    normalised carries only the label, which is read as known."""
+    declared = snapshot.get("internal_domains")
+    status = str(snapshot.get("internal_domains_status") or "")
+    if isinstance(declared, list) and status:
+        return _domain_set(declared), status
+    label = _domain_set(snapshot.get("workspace_domain"))
+    return label, "known" if label else "unknown"
+
+
+_SURFACE_LABELS = {
+    "groupMembers": "group-members",
+    "aliases": "aliases",
+    "oauthGrants": "oauth-grants",
+    "groupSettings": "group-settings",
+    "calendarAcls": "calendar-acls",
+    "mailboxSettings": "mailbox-settings",
+}
+_PERMISSION_CLASSES = frozenset({"insufficient_permissions", "unauthenticated"})
+# Objects named on a collapsed finding and in its affected list; the full count is always stated.
+_ISSUE_OBJECT_LIMIT = 50
+
+
+class _SurfaceIssues:
+    """Collector failures grouped one per (collector, surface).
+
+    A scope problem on a 300-user domain would otherwise raise a finding per user and per group. The
+    per-object detail stays in the coverage rows (``blockers/blockers.json``) and the normalized error
+    sections; the finding states the count, names the objects and groups the errors.
+    """
+
+    def __init__(self) -> None:
+        self._groups: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def add(
+        self,
+        collector: str,
+        surface: str,
+        *,
+        obj: str | None,
+        error_class: str,
+        error: Any,
+        section: str | None = None,
+        record: dict[str, Any] | None = None,
+        from_ledger: bool = False,
+        reason: str | None = None,
+    ) -> None:
+        group = self._groups.setdefault(
+            (collector, surface),
+            {"objects": {}, "first": None, "ledger": False, "reasons": set(), "classes": {}, "singles": []},
+        )
+        classes: dict[str, int] = group["classes"]
+        group["ledger"] = group["ledger"] or from_ledger
+        if reason:
+            group["reasons"].add(reason)
+        if section and record and group["first"] is None:
+            group["first"] = (section, record)
+        if obj is None:
+            group["singles"].append((error_class, error))
+            classes[error_class] = classes.get(error_class, 0) + 1
+            return
+        if obj in group["objects"]:
+            return
+        group["objects"][obj] = (error_class, error)
+        classes[error_class] = classes.get(error_class, 0) + 1
+
+    def findings(self) -> list[dict[str, Any]]:
+        findings: list[dict[str, Any]] = []
+        for (collector, surface), group in self._groups.items():
+            classes: dict[str, int] = dict(group["classes"])
+            permission = bool(set(classes) & _PERMISSION_CLASSES)
+            objects = sorted(group["objects"])
+            count = len(objects)
+            reasons = group["reasons"]
+            if set(classes) == {"collection_limit"}:
+                remediation = (
+                    "Rerun with --top set above the number of users in the domain so every mailbox is read."
+                    if reasons == {"fanout_limit"}
+                    else "Rerun without --top, or with a higher limit, so the list is paged to its last row."
+                )
+            elif set(classes) == {"subject_scope"}:
+                remediation = (
+                    "Use domain-wide delegation (--auth domain-delegation with --subject and a service account key) so "
+                    "Gmail settings are read for every user, or treat this run as covering the signed-in mailbox only."
+                )
+            elif count:
+                remediation = f"Fix the Google {surface} read permission or service availability, then rerun the collector."
+            else:
+                remediation = "Fix the Google Workspace auth scope or service availability, then rerun the collector."
+            if count:
+                errors: dict[tuple[str, str], int] = {}
+                for error_class, error in group["objects"].values():
+                    key = (error_class, str(error or ""))
+                    errors[key] = errors.get(key, 0) + 1
+                top_errors = sorted(errors.items(), key=lambda item: (-item[1], item[0]))[:3]
+                returned_value: Any = {
+                    "surface": surface,
+                    "object_count": count,
+                    "objects": objects[:_ISSUE_OBJECT_LIMIT],
+                    "objects_truncated": count > _ISSUE_OBJECT_LIMIT,
+                    "error_classes": dict(sorted(classes.items())),
+                    "errors": [{"error_class": key[0], "error": key[1], "count": total} for key, total in top_errors],
+                }
+                affected = [f"{collector}:{surface}:{name}" for name in objects[:_ISSUE_OBJECT_LIMIT]]
+                description = f"Google Workspace evidence is incomplete for {count} object(s) on the {surface} surface."
+            else:
+                error_class, error = group["singles"][0]
+                returned_value = error or error_class
+                affected = [f"{collector}:{surface}"]
+                description = "Google Workspace evidence is incomplete for this surface."
+            ledger = {"id": f"{collector}:{surface}", "key": f"coverage_ledger:{collector}"}
+            first = group["first"]
+            if first is not None:
+                section, record = first
+                extra = [("coverage_ledger", collector, ledger)] if group["ledger"] else []
+            else:
+                section, record, extra = "coverage_ledger", ledger, []
+            findings.append(
+                _finding(
+                    rule_id="google.collector_issue",
+                    title="Google Workspace collector issue",
+                    severity="high" if permission else "medium",
+                    category="permission" if permission else "collector",
+                    collector=collector,
+                    section=section,
+                    record=record,
+                    description=description,
+                    remediation=remediation,
+                    returned_value=returned_value,
+                    finding_id=f"google.collector_issue:{collector}:{surface}",
+                    affected_objects=affected,
+                    extra_refs=extra,
+                )
+            )
+        return findings
+
+
+def _issue_surface(name: str) -> tuple[str, str | None]:
+    """Surface label and object of a coverage row name (``groupMembers:all@example.com``)."""
+    prefix, separator, rest = name.partition(":")
+    if not separator:
+        return name, None
+    return _SURFACE_LABELS.get(prefix, prefix), rest or None
+
+
+def _evidence_unknown_finding(
+    *,
+    check: str,
+    rule_ids: list[str],
+    field: str,
+    section: str,
+    collector: str,
+    missing: list[dict[str, Any]],
+    total: int,
+) -> dict[str, Any]:
+    first = missing[0]
+    return _finding(
+        rule_id="google.evidence_unknown",
+        title="Evidence needed for a check was not returned",
+        severity="medium",
+        category="coverage",
+        collector=collector,
+        section=section,
+        record=first,
+        description=f"Google returned no {field} for {len(missing)} of {total} objects, so {', '.join(rule_ids)} could not be evaluated for them.",
+        remediation="",  # the registry text applies to every check
+        returned_value={
+            "check": check,
+            "rules_not_evaluated": rule_ids,
+            "field": field,
+            "objects_total": total,
+            "objects_without_field": len(missing),
+            "examples": [_affected_object(item) for item in missing[:5]],
+        },
+        finding_id=f"google.evidence_unknown:{check}",
+        affected_objects=[_affected_object(item) for item in missing[:_ISSUE_OBJECT_LIMIT]],
+        extra_refs=[(section, collector, item) for item in missing[1:3]],
+    )
+
+
+def build_google_findings(
+    normalized_snapshot: dict[str, Any],
+    diagnostics: list[dict[str, Any]] | None = None,
+    *,
+    stale_user_days: int = DEFAULT_STALE_USER_DAYS,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
     diagnostics = diagnostics or []
     snapshot = normalized_snapshot.get("snapshot") or {}
-    workspace_domain = snapshot.get("workspace_domain")
+    now = now or datetime.now(tz=timezone.utc)
+    internal_domains, internal_domains_status = _internal_domain_state(snapshot)
+    issues = _SurfaceIssues()
     findings: list[dict[str, Any]] = []
 
     for row in diagnostics:
         collector = str(row.get("collector") or "google_workspace")
-        error_class = str(row.get("error_class") or "client_error")
-        target = str(row.get("name") or row.get("endpoint") or collector)
-        # The coverage ledger row of the collector is what exists to cite; the finding id keeps the target.
-        record = {"id": f"{collector}:{target}", "key": f"coverage_ledger:{collector}"}
-        findings.append(
-            _finding(
-                rule_id="google.collector_issue",
-                title="Google Workspace collector issue",
-                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
-                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
-                collector=collector,
-                section="coverage_ledger",
-                record=record,
-                description="Google Workspace evidence is incomplete for this surface.",
-                remediation=(
-                    "Rerun without --top, or with a higher limit, so the list is paged to its last row."
-                    if error_class == "collection_limit"
-                    else "Fix the Google Workspace auth scope or service availability, then rerun the collector."
-                ),
-                returned_value=row.get("error") or error_class,
-            )
+        surface, obj = _issue_surface(str(row.get("name") or row.get("endpoint") or collector))
+        issues.add(
+            collector,
+            surface,
+            obj=obj,
+            error_class=str(row.get("error_class") or "client_error"),
+            error=row.get("error"),
+            from_ledger=True,
+            reason=str(row.get("truncation_reason") or "") or None,
         )
 
-    for user in _records(normalized_snapshot, "google_users"):
-        if user.get("is_admin") and user.get("is_enforced_in_2sv") is False:
+    users = _records(normalized_snapshot, "google_users")
+    unknown_login: list[dict[str, Any]] = []
+    unknown_enforcement: list[dict[str, Any]] = []
+    for user in users:
+        privileged = _is_privileged(user)
+        active = _is_active(user)
+        if privileged and user.get("is_enforced_in_2sv") is False:
             findings.append(
                 _finding(
                     rule_id="google.admin_2sv_not_enforced",
@@ -728,7 +1072,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=user.get("primary_email"),
                 )
             )
-        if user.get("is_admin") and user.get("is_enrolled_in_2sv") is False:
+        if privileged and user.get("is_enrolled_in_2sv") is False:
             findings.append(
                 _finding(
                     rule_id="google.admin_2sv_not_enrolled",
@@ -743,7 +1087,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=user.get("primary_email"),
                 )
             )
-        if not user.get("is_admin") and not user.get("suspended") and user.get("is_enrolled_in_2sv") is False:
+        if not privileged and active and user.get("is_enrolled_in_2sv") is False:
             findings.append(
                 _finding(
                     rule_id="google.user_2sv_not_enrolled",
@@ -758,7 +1102,30 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=user.get("primary_email"),
                 )
             )
-        if user.get("is_admin") and user.get("suspended"):
+        if not privileged and active:
+            if user.get("is_enforced_in_2sv") is False:
+                findings.append(
+                    _finding(
+                        rule_id="google.user_2sv_not_enforced",
+                        title="User account is not forced to use 2-step verification",
+                        severity="medium",
+                        category="identity",
+                        collector="google_directory",
+                        section="google_users",
+                        record=user,
+                        description="An active Google Workspace user account is not forced through 2-step verification, whatever the account has enrolled.",
+                        remediation="Enforce 2-step verification for the organisation (Admin console, Security, Authentication, 2-step verification) and set the enforcement date.",
+                        returned_value={
+                            "user": user.get("primary_email"),
+                            "enrolled": user.get("is_enrolled_in_2sv"),
+                            "enforced": False,
+                            "org_policy": snapshot.get("two_step_policy_status") or "unknown",
+                        },
+                    )
+                )
+            elif user.get("is_enforced_in_2sv") is None:
+                unknown_enforcement.append(user)
+        if privileged and user.get("suspended"):
             findings.append(
                 _finding(
                     rule_id="google.suspended_admin",
@@ -773,7 +1140,8 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=user.get("primary_email"),
                 )
             )
-        if user.get("is_admin") and _stale_google_login(user.get("last_login_time")):
+        admin_stale = privileged and _stale_google_login(user.get("last_login_time"), days=_ADMIN_STALE_LOGIN_DAYS, now=now)
+        if admin_stale:
             findings.append(
                 _finding(
                     rule_id="google.admin_stale_login",
@@ -788,6 +1156,127 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=user.get("last_login_time"),
                 )
             )
+        if not active:
+            continue
+        login = _login_state(user.get("last_login_time"), days=stale_user_days, now=now)
+        if login == "unknown":
+            unknown_login.append(user)
+            continue
+        if login == "never" and not privileged and _past_onboarding_grace(user, now):
+            findings.append(
+                _finding(
+                    rule_id="google.never_logged_in_user",
+                    title="Active user has never signed in",
+                    severity="low",
+                    category="identity",
+                    collector="google_directory",
+                    section="google_users",
+                    record=user,
+                    description="An active Google Workspace account has never signed in and is older than the onboarding grace period.",
+                    remediation="Confirm the account is still expected to be used, then suspend or delete it, or complete the onboarding.",
+                    returned_value={"user": user.get("primary_email"), "created": user.get("creation_time")},
+                )
+            )
+        elif login == "stale" and not admin_stale:
+            findings.append(
+                _finding(
+                    rule_id="google.stale_user",
+                    title="Active user has not signed in recently",
+                    severity="high" if privileged else "medium",
+                    category="identity",
+                    collector="google_directory",
+                    section="google_users",
+                    record=user,
+                    description=f"An active Google Workspace account has not signed in for more than {stale_user_days} days.",
+                    remediation="Confirm the account is still needed, then suspend or delete it, or document why it must stay active.",
+                    returned_value={
+                        "user": user.get("primary_email"),
+                        "last_login_time": user.get("last_login_time"),
+                        "threshold_days": stale_user_days,
+                        "privileged": privileged,
+                    },
+                )
+            )
+    active_users = [user for user in users if _is_active(user)]
+    if unknown_login:
+        findings.append(
+            _evidence_unknown_finding(
+                check="user_login_time",
+                rule_ids=["google.stale_user", "google.never_logged_in_user"],
+                field="lastLoginTime",
+                section="google_users",
+                collector="google_directory",
+                missing=unknown_login,
+                total=len(active_users),
+            )
+        )
+    if unknown_enforcement:
+        findings.append(
+            _evidence_unknown_finding(
+                check="user_2sv_enforcement",
+                rule_ids=["google.user_2sv_not_enforced"],
+                field="isEnforcedIn2Sv",
+                section="google_users",
+                collector="google_directory",
+                missing=unknown_enforcement,
+                total=len([user for user in active_users if not _is_privileged(user)]),
+            )
+        )
+
+    policy_status = snapshot.get("two_step_policy_status")
+    if policy_status in {"not_enforced", "partial"}:
+        policy_records = _records(normalized_snapshot, "google_two_step_policies")
+        if policy_records:
+            policy_section, policy_collector, policy_record = "google_two_step_policies", "google_policies", policy_records[0]
+        else:
+            policy_section, policy_collector = "coverage_ledger", "google_policies"
+            policy_record = {"id": "google_policies:twoStepVerificationPolicies", "key": "coverage_ledger:google_policies"}
+        enforcing = [
+            record
+            for record in policy_records
+            if record.get("setting_type") == "security.two_step_verification_enforcement"
+            and (_parse_google_time(record.get("enforced_from")) or now + timedelta(days=1)) <= now
+        ]
+        partial = policy_status == "partial"
+        findings.append(
+            _finding(
+                rule_id="google.org_2sv_policy_not_enforced",
+                title="No organisation policy enforces 2-step verification",
+                severity="medium" if partial else "high",
+                category="identity",
+                collector=policy_collector,
+                section=policy_section,
+                record=policy_record,
+                description=(
+                    "The organisation-level 2-step verification policy is not in force; only some organisational units or groups "
+                    "are enforced, so every other account can sign in with a password alone."
+                    if partial
+                    else "The Cloud Identity policies read for the organisation contain no 2-step verification enforcement that is in force."
+                ),
+                remediation="Create a 2-step verification enforcement policy for the root organisational unit with an enforcement date, then confirm it in Admin console, Security, Authentication.",
+                returned_value={
+                    "status": policy_status,
+                    "policies_read": len(policy_records),
+                    "organisation_level": "not in force",
+                    "enforced_scopes": [
+                        {
+                            key: value
+                            for key, value in (
+                                ("scope", record.get("policy_scope")),
+                                ("org_unit", record.get("org_unit")),
+                                ("group", record.get("group")),
+                                ("enforced_from", record.get("enforced_from")),
+                            )
+                            if value is not None
+                        }
+                        for record in enforcing[:10]
+                    ],
+                },
+                finding_id="google.org_2sv_policy_not_enforced:organisation",
+                affected_objects=["organisation"],
+                extra_refs=[("google_two_step_policies", "google_policies", record) for record in enforcing[:3]],
+            )
+        )
 
     super_admins = [user for user in _records(normalized_snapshot, "google_users") if user.get("is_admin")]
     if len(super_admins) == 1:
@@ -885,7 +1374,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             )
 
     for member in _records(normalized_snapshot, "google_group_members"):
-        if _external_email(member.get("email"), workspace_domain):
+        if _external_email(member.get("email"), internal_domains):
             findings.append(
                 _finding(
                     rule_id="google.group_external_member",
@@ -902,47 +1391,25 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             )
 
     for member_error in _records(normalized_snapshot, "google_group_member_errors"):
-        error_class = str(member_error.get("error_class") or "client_error")
-        findings.append(
-            _finding(
-                rule_id="google.collector_issue",
-                title="Google Workspace collector issue",
-                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
-                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
-                collector="google_directory",
-                section="google_group_member_errors",
-                record=member_error,
-                description="Google Workspace evidence is incomplete for this group membership surface.",
-                remediation="Fix the Google group member-read permission or service availability, then rerun the collector.",
-                returned_value={
-                    "surface": "group-members",
-                    "group": member_error.get("group_email"),
-                    "error_class": member_error.get("error_class"),
-                    "error": member_error.get("error"),
-                },
-            )
+        issues.add(
+            "google_directory",
+            "group-members",
+            obj=str(member_error.get("group_email")),
+            error_class=str(member_error.get("error_class") or "client_error"),
+            error=member_error.get("error"),
+            section="google_group_member_errors",
+            record=member_error,
         )
 
     for alias_error in _records(normalized_snapshot, "google_alias_errors"):
-        error_class = str(alias_error.get("error_class") or "client_error")
-        findings.append(
-            _finding(
-                rule_id="google.collector_issue",
-                title="Google Workspace collector issue",
-                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
-                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
-                collector="google_directory",
-                section="google_alias_errors",
-                record=alias_error,
-                description="Google Workspace evidence is incomplete for this user alias surface.",
-                remediation="Fix the Google user alias-read permission or service availability, then rerun the collector.",
-                returned_value={
-                    "surface": "aliases",
-                    "user_email": alias_error.get("user_email"),
-                    "error_class": alias_error.get("error_class"),
-                    "error": alias_error.get("error"),
-                },
-            )
+        issues.add(
+            "google_directory",
+            "aliases",
+            obj=str(alias_error.get("user_email")),
+            error_class=str(alias_error.get("error_class") or "client_error"),
+            error=alias_error.get("error"),
+            section="google_alias_errors",
+            record=alias_error,
         )
 
     high_risk_scope_terms = ("gmail.modify", "gmail.settings.sharing", "/auth/drive", "admin.directory", "cloud-platform")
@@ -965,25 +1432,14 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             )
 
     for grant_error in _records(normalized_snapshot, "google_oauth_grant_errors"):
-        error_class = str(grant_error.get("error_class") or "client_error")
-        findings.append(
-            _finding(
-                rule_id="google.collector_issue",
-                title="Google Workspace collector issue",
-                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
-                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
-                collector="google_directory",
-                section="google_oauth_grant_errors",
-                record=grant_error,
-                description="Google Workspace evidence is incomplete for this OAuth grant surface.",
-                remediation="Fix the Google token-read permission or service availability, then rerun the collector.",
-                returned_value={
-                    "surface": "oauth-grants",
-                    "user_email": grant_error.get("user_email"),
-                    "error_class": grant_error.get("error_class"),
-                    "error": grant_error.get("error"),
-                },
-            )
+        issues.add(
+            "google_directory",
+            "oauth-grants",
+            obj=str(grant_error.get("user_email")),
+            error_class=str(grant_error.get("error_class") or "client_error"),
+            error=grant_error.get("error"),
+            section="google_oauth_grant_errors",
+            record=grant_error,
         )
 
     for mailbox in _records(normalized_snapshot, "google_mailbox_settings"):
@@ -997,9 +1453,17 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             ("pop", "pop_error"),
             ("vacation", "vacation_error"),
         ):
-            issue = _mailbox_surface_error(mailbox, surface=surface, error_key=error_key)
-            if issue is not None:
-                findings.append(issue)
+            payload = mailbox.get(error_key)
+            if isinstance(payload, dict) and payload:
+                issues.add(
+                    "google_gmail_settings",
+                    surface,
+                    obj=str(mailbox.get("user_email") or mailbox.get("id")),
+                    error_class=str(payload.get("error_class") or "client_error"),
+                    error=payload.get("error"),
+                    section="google_mailbox_settings",
+                    record=mailbox,
+                )
         auto_forwarding = mailbox.get("auto_forwarding") if isinstance(mailbox.get("auto_forwarding"), dict) else {}
         imap = mailbox.get("imap") if isinstance(mailbox.get("imap"), dict) else {}
         pop = mailbox.get("pop") if isinstance(mailbox.get("pop"), dict) else {}
@@ -1049,7 +1513,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=_mailbox_vacation_returned_value(vacation),
                 )
             )
-        if auto_forwarding.get("enabled") and _external_email(auto_forwarding.get("emailAddress"), workspace_domain):
+        if auto_forwarding.get("enabled") and _external_email(auto_forwarding.get("emailAddress"), internal_domains):
             findings.append(
                 _finding(
                     rule_id="google.gmail_external_forwarding",
@@ -1072,7 +1536,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             status = str(forwarding_address.get("verificationStatus") or "").strip().lower()
             if status not in {"accepted", "verified"}:
                 continue
-            if not _external_email(forwarding_email, workspace_domain):
+            if not _external_email(forwarding_email, internal_domains):
                 continue
             if str(forwarding_email or "").strip().lower() == active_forward_to:
                 continue
@@ -1096,7 +1560,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             remove_labels = action.get("removeLabelIds") if isinstance(action, dict) else []
             if not isinstance(remove_labels, list):
                 remove_labels = []
-            if _external_email(forward_to, workspace_domain):
+            if _external_email(forward_to, internal_domains):
                 rule_id = "google.gmail_hidden_forwarding_filter" if "INBOX" in remove_labels else "google.gmail_filter_external_forwarding"
                 rule_metadata = google_rule_metadata().get(rule_id, {})
                 findings.append(
@@ -1117,7 +1581,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             if not isinstance(send_as, dict):
                 continue
             send_as_email = send_as.get("sendAsEmail")
-            if _external_email(send_as_email, workspace_domain) and str(send_as.get("verificationStatus") or "").lower() in {"accepted", "verified"}:
+            if _external_email(send_as_email, internal_domains) and str(send_as.get("verificationStatus") or "").lower() in {"accepted", "verified"}:
                 findings.append(
                     _finding(
                         rule_id="google.gmail_external_send_as",
@@ -1137,7 +1601,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                 continue
             delegate_email = delegate.get("delegateEmail") or delegate.get("email")
             verification_status = str(delegate.get("verificationStatus") or "").lower()
-            if _external_email(delegate_email, workspace_domain) and verification_status in {"accepted", "verified"}:
+            if _external_email(delegate_email, internal_domains) and verification_status in {"accepted", "verified"}:
                 findings.append(
                     _finding(
                         rule_id="google.gmail_external_delegate",
@@ -1183,7 +1647,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                         returned_value={"name": drive_file.get("name"), "permission": permission},
                     )
                 )
-            if permission_type in {"user", "group"} and _external_email(permission.get("emailAddress"), workspace_domain):
+            if permission_type in {"user", "group"} and _external_email(permission.get("emailAddress"), internal_domains):
                 findings.append(
                     _finding(
                         rule_id="google.drive_external_permission",
@@ -1198,7 +1662,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                         returned_value={"name": drive_file.get("name"), "permission": permission},
                     )
                 )
-            elif permission_type == "domain" and _external_domain(permission.get("domain"), workspace_domain):
+            elif permission_type == "domain" and _external_domain(permission.get("domain"), internal_domains):
                 findings.append(
                     _finding(
                         rule_id="google.drive_external_permission",
@@ -1213,7 +1677,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                         returned_value={"name": drive_file.get("name"), "permission": permission},
                     )
                 )
-            elif permission_type == "domain" and workspace_domain and str(permission.get("domain") or "").lower() == str(workspace_domain).lower():
+            elif permission_type == "domain" and _internal_domain(permission.get("domain"), internal_domains):
                 findings.append(
                     _finding(
                         rule_id="google.drive_domain_permission",
@@ -1269,7 +1733,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value={"calendar": calendar_acl.get("calendar_id"), "role": role, "scope": scope},
                 )
             )
-        elif scope_type in {"user", "group"} and _external_email(scope_value, workspace_domain):
+        elif scope_type in {"user", "group"} and _external_email(scope_value, internal_domains):
             findings.append(
                 _finding(
                     rule_id="google.calendar_external_acl",
@@ -1284,7 +1748,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value={"calendar": calendar_acl.get("calendar_id"), "role": role, "scope": scope},
                 )
             )
-        elif scope_type == "domain" and workspace_domain and str(scope_value or "").lower() != str(workspace_domain).lower():
+        elif scope_type == "domain" and _external_domain(scope_value, internal_domains):
             findings.append(
                 _finding(
                     rule_id="google.calendar_external_acl",
@@ -1299,7 +1763,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value={"calendar": calendar_acl.get("calendar_id"), "role": role, "scope": scope},
                 )
             )
-        elif scope_type == "domain" and workspace_domain and str(scope_value or "").lower() == str(workspace_domain).lower():
+        elif scope_type == "domain" and _internal_domain(scope_value, internal_domains):
             findings.append(
                 _finding(
                     rule_id="google.calendar_domain_acl",
@@ -1316,25 +1780,14 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
             )
 
     for calendar_acl_error in _records(normalized_snapshot, "google_calendar_acl_errors"):
-        error_class = str(calendar_acl_error.get("error_class") or "client_error")
-        findings.append(
-            _finding(
-                rule_id="google.collector_issue",
-                title="Google Workspace collector issue",
-                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
-                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
-                collector="google_calendar_posture",
-                section="google_calendar_acl_errors",
-                record=calendar_acl_error,
-                description="Google Workspace evidence is incomplete for this calendar ACL surface.",
-                remediation="Fix the Google Calendar ACL-read permission or service availability, then rerun the collector.",
-                returned_value={
-                    "surface": "calendar-acls",
-                    "calendar": calendar_acl_error.get("calendar_id"),
-                    "error_class": calendar_acl_error.get("error_class"),
-                    "error": calendar_acl_error.get("error"),
-                },
-            )
+        issues.add(
+            "google_calendar_posture",
+            "calendar-acls",
+            obj=str(calendar_acl_error.get("calendar_id")),
+            error_class=str(calendar_acl_error.get("error_class") or "client_error"),
+            error=calendar_acl_error.get("error"),
+            section="google_calendar_acl_errors",
+            record=calendar_acl_error,
         )
 
     for group_setting in _records(normalized_snapshot, "google_group_settings"):
@@ -1485,29 +1938,22 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                 )
 
     for group_setting_error in _records(normalized_snapshot, "google_group_setting_errors"):
-        error_class = str(group_setting_error.get("error_class") or "client_error")
-        findings.append(
-            _finding(
-                rule_id="google.collector_issue",
-                title="Google Workspace collector issue",
-                severity="high" if error_class in {"insufficient_permissions", "unauthenticated"} else "medium",
-                category="permission" if error_class in {"insufficient_permissions", "unauthenticated"} else "collector",
-                collector="google_groups_settings",
-                section="google_group_setting_errors",
-                record=group_setting_error,
-                description="Google Workspace evidence is incomplete for this group settings surface.",
-                remediation="Fix the Google Groups settings-read permission or service availability, then rerun the collector.",
-                returned_value={
-                    "surface": "group-settings",
-                    "email": group_setting_error.get("email"),
-                    "error_class": group_setting_error.get("error_class"),
-                    "error": group_setting_error.get("error"),
-                },
-            )
+        issues.add(
+            "google_groups_settings",
+            "group-settings",
+            obj=str(group_setting_error.get("email")),
+            error_class=str(group_setting_error.get("error_class") or "client_error"),
+            error=group_setting_error.get("error"),
+            section="google_group_setting_errors",
+            record=group_setting_error,
         )
 
-    for mobile_device in _records(normalized_snapshot, "google_mobile_devices"):
-        if str(mobile_device.get("compromised_status") or "").strip().lower() in {"compromised", "compromised_status_compromised"}:
+    unknown_encryption: list[dict[str, Any]] = []
+    unknown_aue: list[dict[str, Any]] = []
+    mobile_devices = _records(normalized_snapshot, "google_mobile_devices")
+    chrome_devices = _records(normalized_snapshot, "google_chromeos_devices")
+    for mobile_device in mobile_devices:
+        if _device_compromised(mobile_device.get("compromised_status")):
             findings.append(
                 _finding(
                     rule_id="google.mobile_device_compromised",
@@ -1522,7 +1968,7 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=mobile_device.get("compromised_status"),
                 )
             )
-        if _stale_google_timestamp(mobile_device.get("last_sync")):
+        if _stale_google_timestamp(mobile_device.get("last_sync"), now=now):
             findings.append(
                 _finding(
                     rule_id="google.mobile_device_stale_sync",
@@ -1537,9 +1983,33 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=mobile_device.get("last_sync"),
                 )
             )
+        encryption = mobile_device.get("encryption")
+        if str(mobile_device.get("status") or "").strip().upper() == "BLOCKED":
+            continue
+        if encryption == "not_encrypted":
+            findings.append(
+                _finding(
+                    rule_id="google.mobile_device_encryption_off",
+                    title="Mobile device storage is not encrypted",
+                    severity="medium",
+                    category="device",
+                    collector="google_devices",
+                    section="google_mobile_devices",
+                    record=mobile_device,
+                    description="Google Workspace reports a managed mobile device whose storage encryption is off.",
+                    remediation="Require device encryption in the mobile management policy and block or wipe devices that do not meet it.",
+                    returned_value={
+                        key: mobile_device.get(key)
+                        for key in ("encryption_status", "device_lock_status", "security_patch_date")
+                        if mobile_device.get(key) is not None
+                    },
+                )
+            )
+        elif encryption is None:
+            unknown_encryption.append(mobile_device)
 
-    for chrome_device in _records(normalized_snapshot, "google_chromeos_devices"):
-        if _stale_google_timestamp(chrome_device.get("last_sync")):
+    for chrome_device in chrome_devices:
+        if _stale_google_timestamp(chrome_device.get("last_sync"), now=now):
             findings.append(
                 _finding(
                     rule_id="google.chromeos_device_stale_sync",
@@ -1569,6 +2039,55 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value={"status": chrome_device.get("status"), "annotated_user": chrome_device.get("annotated_user")},
                 )
             )
+        chrome_status = str(chrome_device.get("status") or "").strip().lower()
+        if chrome_status in {"deprovisioned", "disabled", "inactive"}:
+            continue
+        expiry = _parse_google_time(chrome_device.get("auto_update_expiration"))
+        if expiry is None:
+            unknown_aue.append(chrome_device)
+        elif expiry < now:
+            findings.append(
+                _finding(
+                    rule_id="google.chromeos_device_past_aue",
+                    title="ChromeOS device is past its auto-update expiration",
+                    severity="high",
+                    category="device",
+                    collector="google_devices",
+                    section="google_chromeos_devices",
+                    record=chrome_device,
+                    description="An active managed ChromeOS device is past the date Google stops providing it with security updates.",
+                    remediation="Replace the device or retire it from managed use before expiry; re-enrol only hardware that still receives updates.",
+                    returned_value={
+                        "auto_update_expiration": chrome_device.get("auto_update_expiration"),
+                        "os_version": chrome_device.get("os_version"),
+                        "model": chrome_device.get("model"),
+                    },
+                )
+            )
+    if unknown_encryption:
+        findings.append(
+            _evidence_unknown_finding(
+                check="mobile_encryption",
+                rule_ids=["google.mobile_device_encryption_off"],
+                field="encryptionStatus",
+                section="google_mobile_devices",
+                collector="google_devices",
+                missing=unknown_encryption,
+                total=len(mobile_devices),
+            )
+        )
+    if unknown_aue:
+        findings.append(
+            _evidence_unknown_finding(
+                check="chromeos_auto_update_expiration",
+                rule_ids=["google.chromeos_device_past_aue"],
+                field="autoUpdateThrough",
+                section="google_chromeos_devices",
+                collector="google_devices",
+                missing=unknown_aue,
+                total=len(chrome_devices),
+            )
+        )
 
     for alert in _records(normalized_snapshot, "google_alerts"):
         findings.append(
@@ -1677,4 +2196,64 @@ def build_google_findings(normalized_snapshot: dict[str, Any], diagnostics: list
                     returned_value=posture.get("domain"),
                 )
             )
+
+    # The external-principal rules need the set of internal domains. When it is missing or limited to the
+    # --domain label that is reported, never a silent clean result.
+    external_inputs = [
+        (section, collector, records[0])
+        for section, collector in (
+            ("google_group_members", "google_directory"),
+            ("google_mailbox_settings", "google_gmail_settings"),
+            ("google_drive_files", "google_drive_posture"),
+            ("google_calendar_acls", "google_calendar_posture"),
+        )
+        if (records := _records(normalized_snapshot, section))
+    ]
+    if external_inputs and internal_domains_status in {"unknown", "label_only", "partial"}:
+        section, input_collector, record = external_inputs[0]
+        limited = internal_domains_status in {"label_only", "partial"}
+        findings.append(
+            _finding(
+                rule_id="google.internal_domains_unknown",
+                title="Internal domains could not be determined",
+                severity="medium",
+                category="coverage",
+                # The domains list is the Directory collector's read; the cited records are the evidence
+                # that could not be classified.
+                collector="google_directory",
+                section=section,
+                record=record,
+                description=(
+                    "The Directory domains list was cut short or only partly read, so a secondary or alias domain may be missing "
+                    "from the internal set and an internal address on it may be reported as external."
+                    if internal_domains_status == "partial"
+                    else "The Directory domains list was not read; only the --domain label is treated as internal, so an internal "
+                    "secondary or alias domain address may be reported as external."
+                    if limited
+                    else "The Directory domains list was not read and no --domain label was given, so the external-principal checks were not evaluated."
+                ),
+                remediation="Grant the admin.directory.domain.readonly scope, rerun, and confirm the Directory domains list is collected.",
+                returned_value={
+                    "status": internal_domains_status,
+                    "internal_domains": sorted(internal_domains),
+                    "source": snapshot.get("internal_domains_source") or ("label" if limited else "none"),
+                    "rules_affected": list(_EXTERNAL_PRINCIPAL_RULES),
+                },
+                finding_id="google.internal_domains_unknown:organisation",
+                affected_objects=["organisation"],
+                extra_refs=external_inputs[1:3],
+            )
+        )
+        findings[-1]["evidence_refs"][0]["collector"] = input_collector
+
+    findings.extend(issues.findings())
+
+    # Evidence whose subject is one admin, not the tenant, says so on every finding built from it.
+    scope_map = snapshot.get("subject_scope") if isinstance(snapshot.get("subject_scope"), dict) else {}
+    for finding in findings:
+        collector = str(finding.get("collector") or "")
+        if (scope_map.get(collector) or SUBJECT_SCOPED_COLLECTORS.get(collector)) == SUBJECT_SCOPE_ADMIN:
+            finding["subject_scoped"] = SUBJECT_SCOPE_ADMIN
+            finding["evidence_scope"] = _ADMIN_SCOPE_NOTE
+            finding["description"] = f"{finding.get('description') or ''} {_ADMIN_SCOPE_NOTE}".strip()
     return findings

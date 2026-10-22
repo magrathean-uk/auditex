@@ -3,10 +3,11 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT
+from azure_tenant_audit.collection_gaps import REASON_OPERATOR_LIMIT, fanout_gap_row
 from azure_tenant_audit.collectors.base import CollectorResult, context_limit, record_truncation
 from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT, DohClient, DohError, collect_domain_posture
 
+from .auth import POLICIES_SCOPE
 from .client import classify_google_error, minimise_gmail_settings
 
 
@@ -17,6 +18,24 @@ AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 # since an unbounded read of a large domain's audit events or Drive files is not practical.
 # Narrow the logs with --since/--until. An explicit --top below this is recorded as a coverage gap.
 STREAM_SAMPLE_LIMIT = 500
+
+# Subject scope of a collector's evidence, recorded as ``subject_scoped`` on its coverage rows,
+# capability row and findings so evidence is never read as tenant-wide when it is not.
+#   "admin": every call acts as the one delegated admin (or the signed-in user), so the data is what
+#            that subject can see. Drive files and calendar ACLs have no cheap tenant-wide read in the
+#            Admin SDK, so they stay admin-scoped and say so.
+#   "user":  every user's own settings were read by acting as that user (domain-wide delegation).
+SUBJECT_SCOPE_ADMIN = "admin"
+SUBJECT_SCOPE_USER = "user"
+SUBJECT_SCOPED_COLLECTORS: dict[str, str] = {
+    "google_drive_posture": SUBJECT_SCOPE_ADMIN,
+    "google_calendar_posture": SUBJECT_SCOPE_ADMIN,
+}
+
+# Mailboxes read per run when the operator sets no ``--top``. Each is eight settings calls plus a
+# delegated token, so an unbounded default would be 160,000 calls for 20,000 users. A domain larger
+# than this records a fan-out coverage gap; ``--top`` above the user count raises the bound.
+MAILBOX_FANOUT_LIMIT = 500
 
 
 def _context_limit(context: dict[str, Any]) -> int | None:
@@ -46,6 +65,7 @@ def _coverage(
     endpoint: str | None = None,
     error_class: str | None = None,
     error: str | None = None,
+    subject_scoped: str | None = None,
 ) -> dict[str, Any]:
     row = {
         "collector": collector,
@@ -60,6 +80,8 @@ def _coverage(
         row["error_class"] = error_class
     if error:
         row["error"] = error
+    if subject_scoped:
+        row["subject_scoped"] = subject_scoped
     return row
 
 
@@ -72,6 +94,7 @@ def _call(
     func: Callable[[], list[dict[str, Any]]],
     endpoint: str | None = None,
     bounded_sample: bool = False,
+    subject_scoped: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run one list read and record it on the coverage ledger.
 
@@ -103,6 +126,7 @@ def _call(
         endpoint=endpoint,
         error_class=error_class,
         error=error,
+        subject_scoped=subject_scoped,
     )
     if result_limit:
         row["result_limit"] = result_limit
@@ -146,20 +170,21 @@ class GoogleDirectoryCollector:
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
         top = _context_limit(context)
-        domain = context.get("domain")
         log_event: AuditLogger | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         if client is None:
             row = _coverage(self.name, "client", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {}, 0, "Google client unavailable", coverage=[row])
 
+        # Users and groups are listed for the whole customer (my_customer): the domain flag is a label,
+        # so secondary and alias domains are never left out of the lists.
         users = _call(
             collector=self.name,
             name="users",
             coverage=coverage,
             log_event=log_event,
             endpoint="admin.directory.users.list",
-            func=lambda: client.list_directory("users", top=top, domain=domain),
+            func=lambda: client.list_directory("users", top=top),
         )
         groups = _call(
             collector=self.name,
@@ -167,7 +192,7 @@ class GoogleDirectoryCollector:
             coverage=coverage,
             log_event=log_event,
             endpoint="admin.directory.groups.list",
-            func=lambda: client.list_directory("groups", top=top, domain=domain),
+            func=lambda: client.list_directory("groups", top=top),
         )
         domains = _call(
             collector=self.name,
@@ -366,7 +391,10 @@ class GoogleAlertCenterCollector:
 
 class GoogleGmailSettingsCollector:
     name = "google_gmail_settings"
-    description = "Gmail forwarding, filters, aliases, send-as, and delegates."
+    description = (
+        "Gmail forwarding, filters, aliases, send-as, and delegates, read per mailbox "
+        "(as each user under domain-wide delegation; the signed-in mailbox only otherwise)."
+    )
     required_scopes = (
         "https://www.googleapis.com/auth/gmail.settings.basic",
         "https://www.googleapis.com/auth/gmail.settings.sharing",
@@ -376,7 +404,6 @@ class GoogleGmailSettingsCollector:
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
         top = _context_limit(context)
-        domain = context.get("domain")
         coverage: list[dict[str, Any]] = []
         log_event: AuditLogger | None = context.get("audit_logger")
         if client is None:
@@ -390,13 +417,76 @@ class GoogleGmailSettingsCollector:
                 coverage=coverage,
                 log_event=log_event,
                 endpoint="admin.directory.users.list",
-                func=lambda: client.list_directory("users", top=top, domain=domain),
+                func=lambda: client.list_directory("users", top=top),
             )
-        rows: list[dict[str, Any]] = []
-        for user in users[:top]:
+        # A client that cannot act as other users (OAuth) reads only the signed-in mailbox; a fake or a
+        # delegated client reads every user's own settings.
+        per_user = bool(getattr(client, "per_user_delegation", True))
+        subject_scope = SUBJECT_SCOPE_USER if per_user else SUBJECT_SCOPE_ADMIN
+
+        emails: list[str] = []
+        skipped_inactive = 0
+        for user in users:
             user_email = str(user.get("primaryEmail") or user.get("email") or "")
             if not user_email:
                 continue
+            if user.get("suspended") or user.get("archived"):
+                skipped_inactive += 1
+                continue
+            emails.append(user_email)
+
+        if per_user:
+            limit = top or MAILBOX_FANOUT_LIMIT
+            targets = emails[:limit]
+            if len(emails) > len(targets):
+                coverage.append(
+                    fanout_gap_row(
+                        self.name,
+                        "mailboxSettingsFanout",
+                        total=len(emails),
+                        expanded=len(targets),
+                        limit=limit,
+                        scope="Gmail settings, one delegated read per user",
+                    )
+                )
+        else:
+            targets = ["me"]
+            if emails:
+                coverage.append(
+                    _coverage(
+                        self.name,
+                        "mailboxSettingsScope",
+                        status="partial",
+                        item_count=0,
+                        duration_ms=0,
+                        endpoint="gmail.users.settings",
+                        error_class="subject_scope",
+                        error=(
+                            f"Gmail settings were read for the signed-in mailbox only; the other {len(emails)} users were "
+                            "not read because these credentials cannot act as another user. Use domain-wide delegation "
+                            "for per-user evidence."
+                        ),
+                        subject_scoped=SUBJECT_SCOPE_ADMIN,
+                    )
+                )
+        if skipped_inactive:
+            skipped_row = _coverage(
+                self.name,
+                "mailboxSettingsSkipped",
+                status="ok",
+                item_count=0,
+                duration_ms=0,
+                endpoint="gmail.users.settings",
+                subject_scoped=subject_scope,
+            )
+            skipped_row["skipped_suspended"] = skipped_inactive
+            skipped_row["note"] = (
+                f"{skipped_inactive} suspended or archived mailboxes were not read: delegation does not act as an inactive account."
+            )
+            coverage.append(skipped_row)
+
+        rows: list[dict[str, Any]] = []
+        for user_email in targets:
             start = time.perf_counter()
             try:
                 rows.append(minimise_gmail_settings(client.get_gmail_settings_for_user(user_email)))
@@ -417,6 +507,7 @@ class GoogleGmailSettingsCollector:
                     endpoint="gmail.users.settings",
                     error_class=error_class,
                     error=error,
+                    subject_scoped=subject_scope,
                 )
             )
         partial = any(row.get("status") != "ok" for row in coverage)
@@ -465,6 +556,37 @@ class GoogleDevicesCollector:
         )
 
 
+class GooglePoliciesCollector:
+    name = "google_policies"
+    description = "Google Workspace Cloud Identity policies: the organisation's 2-step verification enforcement."
+    required_scopes = (POLICIES_SCOPE,)
+
+    def run(self, context: dict[str, Any]) -> CollectorResult:
+        client = context.get("client")
+        top = _context_limit(context)
+        log_event: AuditLogger | None = context.get("audit_logger")
+        coverage: list[dict[str, Any]] = []
+        if client is None:
+            row = _coverage(self.name, "client", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
+            return CollectorResult(self.name, "partial", {}, 0, "Google client unavailable", coverage=[row])
+        policies = _call(
+            collector=self.name,
+            name="twoStepVerificationPolicies",
+            coverage=coverage,
+            log_event=log_event,
+            endpoint="cloudidentity.policies.list",
+            func=lambda: client.list_policies(top=top),
+        )
+        partial = any(row.get("status") != "ok" for row in coverage)
+        return CollectorResult(
+            self.name,
+            "partial" if partial else "ok",
+            {"twoStepVerificationPolicies": {"value": policies}},
+            len(policies),
+            coverage=coverage,
+        )
+
+
 class GoogleDnsPostureCollector:
     name = "google_dns_posture"
     description = "Google Workspace DNS and email authentication posture."
@@ -478,9 +600,7 @@ class GoogleDnsPostureCollector:
         log_event: AuditLogger | None = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
         domains: list[dict[str, Any]] = []
-        if domain:
-            domains.append({"domainName": domain, "verified": True, "isPrimary": True})
-        elif client is not None:
+        if client is not None:
             domains = _call(
                 collector=self.name,
                 name="domains",
@@ -489,9 +609,14 @@ class GoogleDnsPostureCollector:
                 endpoint="admin.directory.domains.list",
                 func=lambda: client.list_directory("domains", top=top),
             )
-        else:
+        elif not domain:
             row = _coverage(self.name, "domains", status="failed", item_count=0, duration_ms=0, error_class="unauthenticated", error="google client unavailable")
             return CollectorResult(self.name, "partial", {"domains": {"value": []}, "domainPosture": {"value": []}}, 0, "Google client unavailable", coverage=[row])
+        # Every verified domain of the customer is assessed. The --domain label stands in only when the
+        # directory list could not be read, so a secondary domain is not skipped when it can be listed.
+        domains = [entry for entry in domains if entry.get("verified") is not False]
+        if domain and not domains:
+            domains.append({"domainName": domain, "verified": True, "isPrimary": True})
 
         assessments: list[dict[str, Any]] = []
         for entry in domains[:top]:
@@ -548,7 +673,10 @@ class GoogleDnsPostureCollector:
 
 class GoogleDrivePostureCollector:
     name = "google_drive_posture"
-    description = "Google Drive metadata, shared drive inventory, and sharing exposure. Does not read file content."
+    description = (
+        "Google Drive metadata, shared drive inventory, and sharing exposure as the delegated admin subject "
+        "sees it (not tenant-wide). Does not read file content."
+    )
     required_scopes = (
         "https://www.googleapis.com/auth/drive.metadata.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
@@ -571,6 +699,7 @@ class GoogleDrivePostureCollector:
             endpoint="drive.files.list",
             func=lambda: client.list_drive_files(top=file_limit),
             bounded_sample=sampled,
+            subject_scoped=SUBJECT_SCOPE_ADMIN,
         )
         shared_drives = _call(
             collector=self.name,
@@ -579,6 +708,7 @@ class GoogleDrivePostureCollector:
             log_event=log_event,
             endpoint="drive.drives.list",
             func=lambda: client.list_shared_drives(top=top),
+            subject_scoped=SUBJECT_SCOPE_ADMIN,
         )
         partial = any(row.get("status") != "ok" for row in coverage)
         return CollectorResult(
@@ -601,7 +731,6 @@ class GoogleGroupsSettingsCollector:
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client = context.get("client")
         top = _context_limit(context)
-        domain = context.get("domain")
         coverage: list[dict[str, Any]] = []
         log_event: AuditLogger | None = context.get("audit_logger")
         if client is None:
@@ -615,7 +744,7 @@ class GoogleGroupsSettingsCollector:
                 coverage=coverage,
                 log_event=log_event,
                 endpoint="admin.directory.groups.list",
-                func=lambda: client.list_directory("groups", top=top, domain=domain),
+                func=lambda: client.list_directory("groups", top=top),
             )
         settings_rows: list[dict[str, Any]] = []
         settings_errors: list[dict[str, Any]] = []
@@ -654,7 +783,10 @@ class GoogleGroupsSettingsCollector:
 
 class GoogleCalendarPostureCollector:
     name = "google_calendar_posture"
-    description = "Google Calendar resource inventory and ACL sharing posture. Does not read event content."
+    description = (
+        "Google Calendar resource inventory (tenant-wide) and calendar ACL sharing posture as the delegated admin "
+        "subject sees it (not tenant-wide). Does not read event content."
+    )
     required_scopes = (
         "https://www.googleapis.com/auth/admin.directory.resource.calendar.readonly",
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
@@ -685,6 +817,7 @@ class GoogleCalendarPostureCollector:
             log_event=log_event,
             endpoint="calendar.calendarList.list",
             func=lambda: client.list_calendar_list(top=top),
+            subject_scoped=SUBJECT_SCOPE_ADMIN,
         )
         calendar_ids: list[str] = []
         for calendar in calendars[:top]:
@@ -706,6 +839,7 @@ class GoogleCalendarPostureCollector:
                 log_event=log_event,
                 endpoint="calendar.acl.list",
                 func=lambda calendar_id=calendar_id: client.list_calendar_acl(calendar_id, top=top),
+                subject_scoped=SUBJECT_SCOPE_ADMIN,
             )
             coverage_row = next((row for row in reversed(coverage) if row.get("name") == f"calendarAcls:{calendar_id}"), None)
             if isinstance(coverage_row, dict) and coverage_row.get("status") != "ok":
@@ -738,6 +872,7 @@ REGISTRY = {
     "google_directory": GoogleDirectoryCollector(),
     "google_reports": GoogleReportsCollector(),
     "google_alert_center": GoogleAlertCenterCollector(),
+    "google_policies": GooglePoliciesCollector(),
     "google_gmail_settings": GoogleGmailSettingsCollector(),
     "google_devices": GoogleDevicesCollector(),
     "google_dns_posture": GoogleDnsPostureCollector(),
@@ -753,12 +888,13 @@ PRESETS = {
         "google_directory",
         "google_reports",
         "google_alert_center",
+        "google_policies",
         "google_gmail_settings",
         "google_devices",
         "google_dns_posture",
     ),
     "everything": tuple(REGISTRY.keys()),
-    "identity": ("google_directory", "google_reports", "google_alert_center"),
+    "identity": ("google_directory", "google_reports", "google_alert_center", "google_policies"),
     "mail": ("google_directory", "google_gmail_settings", "google_dns_posture"),
     "collaboration": ("google_directory", "google_drive_posture", "google_groups_settings", "google_calendar_posture"),
 }

@@ -443,7 +443,7 @@ def test_google_collector_selection_accepts_empty_exclude() -> None:
         exclude=None,
     )
 
-    assert _selected_collectors(config) == ["google_directory", "google_reports", "google_alert_center"]
+    assert _selected_collectors(config) == ["google_directory", "google_reports", "google_alert_center", "google_policies"]
 
 
 def test_google_command_line_scrubs_local_secret_paths() -> None:
@@ -1138,9 +1138,11 @@ def test_google_group_member_visibility_gap_emits_collector_issue() -> None:
     assert findings[0]["severity"] == "high"
     assert findings[0]["returned_value"] == {
         "surface": "group-members",
-        "group": "all@example.com",
-        "error_class": "insufficient_permissions",
-        "error": "member scope missing",
+        "object_count": 1,
+        "objects": ["all@example.com"],
+        "objects_truncated": False,
+        "error_classes": {"insufficient_permissions": 1},
+        "errors": [{"error_class": "insufficient_permissions", "error": "member scope missing", "count": 1}],
     }
     assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_group_member_errors.json"
 
@@ -1246,9 +1248,11 @@ def test_google_group_settings_visibility_gap_emits_collector_issue() -> None:
     assert findings[0]["severity"] == "high"
     assert findings[0]["returned_value"] == {
         "surface": "group-settings",
-        "email": "staff@example.com",
-        "error_class": "insufficient_permissions",
-        "error": "group settings scope missing",
+        "object_count": 1,
+        "objects": ["staff@example.com"],
+        "objects_truncated": False,
+        "error_classes": {"insufficient_permissions": 1},
+        "errors": [{"error_class": "insufficient_permissions", "error": "group settings scope missing", "count": 1}],
     }
     assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_group_setting_errors.json"
 
@@ -1334,9 +1338,11 @@ def test_google_oauth_grant_visibility_gap_emits_collector_issue() -> None:
     assert findings[0]["severity"] == "high"
     assert findings[0]["returned_value"] == {
         "surface": "oauth-grants",
-        "user_email": "admin@example.com",
-        "error_class": "insufficient_permissions",
-        "error": "token scope missing",
+        "object_count": 1,
+        "objects": ["admin@example.com"],
+        "objects_truncated": False,
+        "error_classes": {"insufficient_permissions": 1},
+        "errors": [{"error_class": "insufficient_permissions", "error": "token scope missing", "count": 1}],
     }
     assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_oauth_grant_errors.json"
 
@@ -1375,9 +1381,11 @@ def test_google_alias_visibility_gap_emits_collector_issue() -> None:
     assert findings[0]["severity"] == "high"
     assert findings[0]["returned_value"] == {
         "surface": "aliases",
-        "user_email": "admin@example.com",
-        "error_class": "insufficient_permissions",
-        "error": "alias scope missing",
+        "object_count": 1,
+        "objects": ["admin@example.com"],
+        "objects_truncated": False,
+        "error_classes": {"insufficient_permissions": 1},
+        "errors": [{"error_class": "insufficient_permissions", "error": "alias scope missing", "count": 1}],
     }
     assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_alias_errors.json"
 
@@ -1489,8 +1497,11 @@ def test_google_gmail_delegate_visibility_gap_emits_collector_issue() -> None:
     assert findings[0]["severity"] == "high"
     assert findings[0]["returned_value"] == {
         "surface": "delegates",
-        "error_class": "insufficient_permissions",
-        "error": "delegates scope missing",
+        "object_count": 1,
+        "objects": ["alice@example.com"],
+        "objects_truncated": False,
+        "error_classes": {"insufficient_permissions": 1},
+        "errors": [{"error_class": "insufficient_permissions", "error": "delegates scope missing", "count": 1}],
     }
     assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_mailbox_settings.json"
 
@@ -1533,8 +1544,11 @@ def test_google_gmail_send_as_visibility_gap_emits_collector_issue() -> None:
     assert findings[0]["severity"] == "high"
     assert findings[0]["returned_value"] == {
         "surface": "send-as",
-        "error_class": "insufficient_permissions",
-        "error": "sendAs scope missing",
+        "object_count": 1,
+        "objects": ["alice@example.com"],
+        "objects_truncated": False,
+        "error_classes": {"insufficient_permissions": 1},
+        "errors": [{"error_class": "insufficient_permissions", "error": "sendAs scope missing", "count": 1}],
     }
     assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_mailbox_settings.json"
     assert imap["returned_value"] == {"enabled": True}
@@ -1846,9 +1860,11 @@ def test_google_calendar_acl_visibility_gap_emits_collector_issue() -> None:
     assert findings[0]["severity"] == "high"
     assert findings[0]["returned_value"] == {
         "surface": "calendar-acls",
-        "calendar": "team@example.com",
-        "error_class": "insufficient_permissions",
-        "error": "calendar acl scope missing",
+        "object_count": 1,
+        "objects": ["team@example.com"],
+        "objects_truncated": False,
+        "error_classes": {"insufficient_permissions": 1},
+        "errors": [{"error_class": "insufficient_permissions", "error": "calendar acl scope missing", "count": 1}],
     }
     assert findings[0]["evidence_refs"][0]["artifact_path"] == "normalized/google_calendar_acl_errors.json"
 

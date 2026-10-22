@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from azure_tenant_audit.baselines import unmet_rule_collectors
+from azure_tenant_audit.baselines import rule_inputs_gap, unmet_rule_collectors
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
@@ -260,12 +262,55 @@ def _risk_snapshot(run: dict[str, Any], findings: list[dict[str, Any]]) -> dict[
     return {"grade": rollup.get("grade"), "score": rollup.get("score")}
 
 
-def reassessment_gap(finding: dict[str, Any], coverage: dict[str, dict[str, Any]]) -> str | None:
+class NormalizedSections(Mapping[str, Any]):
+    """The sections of a run's ``normalized/`` folder, each read the first time it is asked for.
+
+    Baseline alignment judges a rule from these sections (verdicts, the administrator set, sign-in
+    data), so comparing two runs reads the later run the same way. A section the run did not write
+    is absent, which a rule that needs it reports as an input gap.
+    """
+
+    def __init__(self, bundle: RunBundle) -> None:
+        self._bundle = bundle
+        self._cache: dict[str, Any] = {}
+
+    def __getitem__(self, name: str) -> Any:
+        if name not in self._cache:
+            value: Any = None
+            path = self._bundle.path(f"normalized/{name}.json")
+            if path.is_file():
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    value = None
+            self._cache[name] = value
+        if self._cache[name] is None:
+            raise KeyError(name)
+        return self._cache[name]
+
+    def __iter__(self) -> Iterator[str]:
+        folder = self._bundle.path("normalized")
+        return iter(sorted(path.stem for path in folder.glob("*.json"))) if folder.is_dir() else iter(())
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+def reassessment_gap(
+    finding: dict[str, Any],
+    coverage: dict[str, dict[str, Any]],
+    snapshot: Mapping[str, Any] | None = None,
+) -> str | None:
     """Why a finding that is gone from a later run cannot be called resolved, or ``None``.
 
     A finding is only resolved when its own collector and every collector its rule reads
-    completed in the later run. If any was blocked, partial, not run, or unknown, the finding
-    was not reassessed: a rule that reads role assignments cannot be judged without them.
+    completed in the later run, and the inputs its rule needs were known there. If any collector
+    was blocked, partial, not run, or unknown, the finding was not reassessed: a rule that reads
+    role assignments cannot be judged without them. The same goes for a rule whose inputs went
+    unknown in the later run (an administrator set or an MFA verdict that could not be established):
+    its finding vanished because the evidence did, not because the problem was fixed. ``snapshot``
+    is the later run's normalized sections; without it, a rule that has an input check is not
+    reassessed.
     """
     collector = str(finding.get("collector") or "")
     if not collector:
@@ -286,6 +331,9 @@ def reassessment_gap(finding: dict[str, Any], coverage: dict[str, dict[str, Any]
     if unmet:
         status = coverage[unmet[0]]["status"] if unmet[0] in coverage else "not_run"
         return f"rule_collector_{status}:{unmet[0]}"
+    inputs = rule_inputs_gap(rule_id, snapshot)
+    if inputs:
+        return f"rule_inputs:{inputs}"
     return None
 
 
@@ -299,6 +347,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
     right_bundle = RunBundle(Path(str(right_run.get("path")))) if right_run.get("path") else None
     right_rows = right_bundle.finding_rows() if right_bundle else []
     right_coverage = right_bundle.collector_coverage() if right_bundle else {}
+    right_sections = NormalizedSections(right_bundle) if right_bundle else None
     left = {_finding_key(row): row for row in left_rows}
     right = {_finding_key(row): row for row in right_rows}
 
@@ -315,7 +364,7 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
     resolved: list[dict[str, Any]] = []
     not_reassessed: list[dict[str, Any]] = []
     for key in sorted(set(left) - set(right)):
-        gap = reassessment_gap(left[key], right_coverage)
+        gap = reassessment_gap(left[key], right_coverage, right_sections)
         if gap is None:
             resolved.append(_summary(left[key]))
         else:

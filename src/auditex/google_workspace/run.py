@@ -17,12 +17,20 @@ from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_prov
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.run import build_coverage_ledger
 from azure_tenant_audit.utils import parse_csv_list
+from azure_tenant_audit.waivers import WaiverFileError, apply_waivers, load_waivers
 
-from .auth import GoogleAuthConfig, build_google_credentials, google_dependency_status, read_service_account_summary, safe_auth_summary
+from .auth import (
+    ISOLATED_GOOGLE_SCOPES,
+    GoogleAuthConfig,
+    build_google_credentials,
+    google_dependency_status,
+    read_service_account_summary,
+    safe_auth_summary,
+)
 from .client import GoogleWorkspaceClient
 from .client import classify_google_error
-from .collectors import DEFAULT_ORDER, PRESETS, REGISTRY
-from .findings import build_google_findings
+from .collectors import DEFAULT_ORDER, PRESETS, REGISTRY, SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPE_USER, SUBJECT_SCOPED_COLLECTORS
+from .findings import DEFAULT_STALE_USER_DAYS, build_google_findings
 from .normalize import build_google_normalized_snapshot
 
 
@@ -69,6 +77,9 @@ class GoogleRunConfig:
     offline: bool = False
     sample: Path | None = None
     fixture_provenance: dict[str, Any] | None = None
+    # Accepted-risk waivers, read before any API call (see azure_tenant_audit.waivers).
+    waiver_file: Path | None = None
+    stale_user_days: int = DEFAULT_STALE_USER_DAYS
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
@@ -109,12 +120,28 @@ def scopes_for_collectors(selected: list[str]) -> tuple[str, ...]:
     return tuple(scopes)
 
 
+def subject_scope_for_collectors(selected: list[str], *, per_user_delegation: bool) -> dict[str, str]:
+    """``subject_scoped`` of each selected collector whose evidence is one subject's view, not the tenant's.
+
+    Drive and Calendar are always the delegated admin's view. Gmail settings are each user's own when
+    domain-wide delegation lets the run act as that user, and the signed-in mailbox's otherwise.
+    """
+    scope = {name: label for name, label in SUBJECT_SCOPED_COLLECTORS.items() if name in selected}
+    if "google_gmail_settings" in selected:
+        scope["google_gmail_settings"] = SUBJECT_SCOPE_USER if per_user_delegation else SUBJECT_SCOPE_ADMIN
+    return scope
+
+
 def build_google_auth_context_payload(config: GoogleRunConfig, auth_config: GoogleAuthConfig) -> dict[str, Any]:
     auth_summary = safe_auth_summary(auth_config)
     return {
         "platform": "google_workspace",
         "auth_mode": auth_config.auth_mode,
         "auth_type": auth_config.auth_mode,
+        "per_user_delegation": auth_summary["per_user_delegation"],
+        "subject_scope": subject_scope_for_collectors(
+            _selected_collectors(config), per_user_delegation=auth_summary["per_user_delegation"]
+        ),
         "subject": auth_config.subject,
         "workspace_domain": config.domain,
         "customer_id": config.customer_id,
@@ -142,6 +169,13 @@ def build_google_capability_rows(
             failures_by_collector.setdefault(str(row.get("collector") or ""), []).append(row)
     status = "supported" if dependency_status.get("available") else "blocked"
     reason = "google_dependencies_available" if status == "supported" else "missing_google_dependencies"
+    scope_by_collector = {name: label for name, label in SUBJECT_SCOPED_COLLECTORS.items() if name in selected}
+    for row in coverage_rows:
+        label = row.get("subject_scoped")
+        if label in {SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPE_USER} and row.get("collector") in selected:
+            # Admin wins over user: one admin-scoped read makes the collector's evidence admin-scoped.
+            if scope_by_collector.get(str(row["collector"])) != SUBJECT_SCOPE_ADMIN:
+                scope_by_collector[str(row["collector"])] = str(label)
     rows: list[dict[str, Any]] = []
     for name in selected:
         required = list(getattr(REGISTRY.get(name), "required_scopes", ()))
@@ -161,30 +195,38 @@ def build_google_capability_rows(
             else:
                 row_status = "partial"
                 row_reason = "runtime_endpoint_block"
-        rows.append(
-            enrich_capability_row(
+        capability: dict[str, Any] = {
+            "collector": name,
+            "status": row_status,
+            "reason": row_reason,
+            "required_permissions": required,
+            "missing_permissions": missing_permissions,
+            "observed_permissions": [],
+            "delegated_roles": [],
+            "minimum_role_hints": ["Google Workspace super admin or delegated admin"],
+            "notes": f"Google Workspace {auth_mode} auth.",
+            "endpoint_statuses": [
                 {
-                    "collector": name,
-                    "status": row_status,
-                    "reason": row_reason,
-                    "required_permissions": required,
-                    "missing_permissions": missing_permissions,
-                    "observed_permissions": [],
-                    "delegated_roles": [],
-                    "minimum_role_hints": ["Google Workspace super admin or delegated admin"],
-                    "notes": f"Google Workspace {auth_mode} auth.",
-                    "endpoint_statuses": [
-                        {
-                            "name": item.get("name"),
-                            "status": item.get("status"),
-                            "error_class": item.get("error_class"),
-                            "error": item.get("error"),
-                        }
-                        for item in failures
-                    ],
+                    "name": item.get("name"),
+                    "status": item.get("status"),
+                    "error_class": item.get("error_class"),
+                    "error": item.get("error"),
                 }
+                for item in failures
+            ],
+        }
+        scope = scope_by_collector.get(name)
+        if scope:
+            capability["subject_scoped"] = scope
+            capability["notes"] = (
+                f"Google Workspace {auth_mode} auth. "
+                + (
+                    "Evidence is each user's own settings, read by acting as that user."
+                    if scope == SUBJECT_SCOPE_USER
+                    else "Evidence is limited to what the delegated admin subject can see; it is not tenant-wide."
+                )
             )
-        )
+        rows.append(enrich_capability_row(capability))
     return rows
 
 
@@ -258,14 +300,19 @@ def build_google_preflight_rows(
     rows: list[dict[str, Any]] = []
     for collector in selected:
         if collector == "google_directory":
-            rows.append(_preflight_call(collector, "users", lambda: client.list_directory("users", top=top, domain=domain)))
+            rows.append(_preflight_call(collector, "users", lambda: client.list_directory("users", top=top)))
         elif collector == "google_reports":
             rows.append(_preflight_call(collector, "loginActivities", lambda: client.list_report_activities("login", top=top)))
         elif collector == "google_alert_center":
             rows.append(_preflight_call(collector, "alerts", lambda: client.list_alerts(top=top)))
+        elif collector == "google_policies":
+            rows.append(_preflight_call(collector, "twoStepVerificationPolicies", lambda: client.list_policies(top=top)))
         elif collector == "google_gmail_settings":
             def gmail_check() -> list[dict[str, Any]]:
-                users = client.list_directory("users", top=1, domain=domain)
+                # Without delegation only the signed-in mailbox can be read, so that is what the probe tries.
+                if not getattr(client, "per_user_delegation", True):
+                    return [client.get_gmail_settings_for_user("me")]
+                users = client.list_directory("users", top=1)
                 if not users:
                     return []
                 email = str(users[0].get("primaryEmail") or users[0].get("email") or "")
@@ -281,7 +328,7 @@ def build_google_preflight_rows(
             rows.append(_preflight_call(collector, "sharedDrives", lambda: client.list_shared_drives(top=top)))
         elif collector == "google_groups_settings":
             def group_settings_check() -> list[dict[str, Any]]:
-                groups = client.list_directory("groups", top=1, domain=domain)
+                groups = client.list_directory("groups", top=1)
                 if not groups:
                     return []
                 email = str(groups[0].get("email") or groups[0].get("id") or "")
@@ -306,6 +353,7 @@ def _write_google_bundle(
     mode: str,
     auth_context_path: Path | None = None,
     command_line: list[str] | None = None,
+    waiver_rows: list[dict[str, Any]] | None = None,
 ) -> int:
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
@@ -318,7 +366,10 @@ def _write_google_bundle(
         coverage_rows=coverage_rows,
         top_limit=config.top or None,
     )
-    findings = build_google_findings(normalized_snapshot, diagnostics=diagnostics)
+    findings = build_google_findings(normalized_snapshot, diagnostics=diagnostics, stale_user_days=config.stale_user_days)
+    if waiver_rows:
+        # Same semantics as Microsoft 365: AND matching, finding_id or rule_id required, expired rows ignored.
+        findings = apply_waivers(findings, waiver_rows)
     if findings:
         writer.write_findings(findings)
     coverage_ledger = build_coverage_ledger(
@@ -389,6 +440,7 @@ def _write_google_bundle(
                 "auth_context_path": str(auth_context_path.relative_to(writer.run_dir)) if auth_context_path is not None else None,
                 "command_line": scrub_google_command_line(command_line or []),
                 "coverage_count": len(coverage_rows),
+                "waiver_path": str(config.waiver_file) if config.waiver_file else None,
                 "top_limit": config.top or None,
                 "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
                 "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
@@ -407,7 +459,15 @@ def run_google_offline(
     domain: str | None,
     customer_id: str | None,
     fixture_provenance_override: dict[str, Any] | None = None,
+    waiver_file: Path | None = None,
+    stale_user_days: int = DEFAULT_STALE_USER_DAYS,
 ) -> int:
+    # An unreadable or invalid waiver file stops the run before anything is written.
+    try:
+        waiver_rows = load_waivers(waiver_file) if waiver_file else []
+    except WaiverFileError as exc:
+        LOG.error("%s", exc)
+        return 2
     target = resolve_resource_path(sample_path)
     try:
         sample = json.loads(target.read_text(encoding="utf-8"))
@@ -430,6 +490,8 @@ def run_google_offline(
         offline=True,
         sample=sample_path,
         fixture_provenance=fixture_provenance,
+        waiver_file=waiver_file,
+        stale_user_days=stale_user_days,
     )
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     writer.log_event("run.started", "Google Workspace offline run started", {"platform": "google_workspace", "sample": str(target)})
@@ -461,29 +523,48 @@ def run_google_offline(
         duration=0,
         mode="offline",
         command_line=[],
+        waiver_rows=waiver_rows,
+    )
+
+
+def _auth_config(config: GoogleRunConfig, selected: list[str]) -> GoogleAuthConfig:
+    scopes = scopes_for_collectors(selected)
+    return GoogleAuthConfig(
+        auth_mode=config.auth,
+        scopes=scopes,
+        subject=config.subject,
+        service_account_key=config.service_account_key,
+        oauth_client=config.oauth_client,
+        token_cache=config.token_cache,
+        isolated_scopes=tuple(scope for scope in scopes if scope in ISOLATED_GOOGLE_SCOPES),
     )
 
 
 def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None = None) -> int:
+    # Read the waiver file once, before any API call: a file that cannot be trusted must not let the run
+    # finish with no waivers applied. The rows loaded here are the ones applied later.
+    try:
+        waiver_rows = load_waivers(config.waiver_file) if config.waiver_file else []
+    except WaiverFileError as exc:
+        LOG.error("%s", exc)
+        return 2
     dependency_status = google_dependency_status()
     if not dependency_status["available"]:
         print(json.dumps({"error": "missing_google_dependencies", **dependency_status}, indent=2), file=sys.stderr)
         return 2
     selected = _selected_collectors(config)
-    auth_config = GoogleAuthConfig(
-        auth_mode=config.auth,
-        scopes=scopes_for_collectors(selected),
-        subject=config.subject,
-        service_account_key=config.service_account_key,
-        oauth_client=config.oauth_client,
-        token_cache=config.token_cache,
-    )
+    auth_config = _auth_config(config, selected)
     try:
         credentials = build_google_credentials(auth_config)
     except (RuntimeError, ValueError, OSError) as exc:
         print(json.dumps({"error": "google_auth_failed", "message": str(exc)}, indent=2), file=sys.stderr)
         return 2
-    client = GoogleWorkspaceClient(credentials, customer_id=config.customer_id, domain=config.domain, page_size=config.page_size)
+    client = GoogleWorkspaceClient(
+        credentials,
+        customer_id=config.customer_id,
+        page_size=config.page_size,
+        delegated=auth_config.supports_user_delegation,
+    )
     writer = AuditWriter(config.out, tenant_name=config.tenant_name, run_name=config.run_name)
     auth_context_path = writer.write_json_artifact("auth-context.json", build_google_auth_context_payload(config, auth_config))
     writer.log_event(
@@ -541,6 +622,7 @@ def run_google_live(config: GoogleRunConfig, *, command_line: list[str] | None =
         mode=config.auth,
         auth_context_path=auth_context_path,
         command_line=command_line,
+        waiver_rows=waiver_rows,
     )
 
 
@@ -561,6 +643,9 @@ def google_doctor(config: GoogleRunConfig | None = None) -> dict[str, Any]:
             "scope_count": len(scopes),
             "scopes": scopes,
             "scopes_csv": ",".join(scopes),
+            "per_user_delegation": config.auth == "domain-delegation",
+            "isolated_scopes": [scope for scope in scopes if scope in ISOLATED_GOOGLE_SCOPES],
+            "subject_scope": subject_scope_for_collectors(selected, per_user_delegation=config.auth == "domain-delegation"),
             "service_account": read_service_account_summary(config.service_account_key),
             "oauth_client_present": bool(config.oauth_client and config.oauth_client.expanduser().exists()),
             "token_cache_present": bool(config.token_cache and config.token_cache.expanduser().exists()),
@@ -750,14 +835,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
     dependency_status = google_dependency_status()
     selected = _selected_collectors(config)
     payload = google_doctor(config)
-    auth_config = GoogleAuthConfig(
-        auth_mode=config.auth,
-        scopes=scopes_for_collectors(selected),
-        subject=config.subject,
-        service_account_key=config.service_account_key,
-        oauth_client=config.oauth_client,
-        token_cache=config.token_cache,
-    )
+    auth_config = _auth_config(config, selected)
     writer = AuditWriter(config.out, tenant_name=config.tenant_name, run_name=config.run_name)
     if not dependency_status["available"]:
         payload["capability_matrix"] = build_google_capability_rows(
@@ -783,7 +861,12 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
         return 2
     try:
         credentials = build_google_credentials(auth_config)
-        client = GoogleWorkspaceClient(credentials, customer_id=config.customer_id, domain=config.domain, page_size=config.page_size)
+        client = GoogleWorkspaceClient(
+            credentials,
+            customer_id=config.customer_id,
+            page_size=config.page_size,
+            delegated=auth_config.supports_user_delegation,
+        )
         preflight_rows = build_google_preflight_rows(client, selected, domain=config.domain, top=5 if config.top is None else max(1, min(config.top, 5)))
         payload["preflight"] = preflight_rows
         payload["capability_matrix"] = build_google_capability_rows(
