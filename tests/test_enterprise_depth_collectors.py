@@ -535,7 +535,6 @@ def test_reports_usage_reads_report_settings_first_and_flags_concealed_names() -
 
 
 def test_reports_usage_records_gap_when_report_settings_unreadable() -> None:
-    from azure_tenant_audit.graph import GraphError
 
     class _NoSettingsClient(_ReportsUsageClient):
         def get_json(self, path, params=None, full_url=False):  # noqa: ANN001, ARG002

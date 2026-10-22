@@ -6,6 +6,6 @@ CURRENT = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(CURRENT, ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-from azure_tenant_audit import main
+from azure_tenant_audit import main  # noqa: E402
 
 raise SystemExit(main())

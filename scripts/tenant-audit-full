@@ -15,7 +15,7 @@ Defaults:
   COLLECTORS: identity,security,intune,teams
   TOP: none (every list is paged to its last row; --top N sets an explicit limit and records the cut as a coverage gap)
   OUTPUT: ./audit-output
-  
+
 The --include-exchange flag triggers Microsoft 365 CLI login (m365) and optional command collectors.
 
 Examples:

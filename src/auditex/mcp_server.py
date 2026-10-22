@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,7 @@ from . import auth as auditex_auth
 from .features import response_disabled_message, response_enabled
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.profiles import PROFILES
-from azure_tenant_audit.adapters import ADAPTERS, list_adapters as _list_adapters
+from azure_tenant_audit.adapters import list_adapters as _list_adapters
 from azure_tenant_audit.citations import build_citation_summary
 from azure_tenant_audit.response import response_actions
 from azure_tenant_audit.contracts import contract_schema_manifest

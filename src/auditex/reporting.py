@@ -305,7 +305,6 @@ def _preview_section_citations(
             missing.append("summary.json")
 
     report_pack_path, report_pack_payload = bundle.report_pack()
-    report_pack = _mapping(report_pack_payload)
     report_pack_sections = {
         "executive_summary",
         "technical_appendix",

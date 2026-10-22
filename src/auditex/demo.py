@@ -3,7 +3,7 @@
 `auditex demo` walks an operator (or a screen recording) through the audit
 flow without contacting any tenant: plan read-only access, run the offline
 collectors, read the risk summary, open one finding's evidence, follow the
-attack path, then build and tamper-check a customer handoff pack.
+attack path, then build and checksum-verify a customer handoff pack.
 """
 from __future__ import annotations
 
@@ -349,7 +349,7 @@ def _step_remediation(console: _Console, sample_path: Path, out_dir: Path, findi
 def _step_handoff(console: _Console, run_dir: Path, out_dir: Path) -> None:
     from .reporting import verify_enterprise_handoff_pack, write_enterprise_handoff_pack
 
-    console.heading("Hand over a tamper-evident customer pack")
+    console.heading("Hand over a checksum-verified customer pack")
     pack_dir = out_dir / "customer-pack"
     write_enterprise_handoff_pack(str(run_dir), str(pack_dir))
     verified = verify_enterprise_handoff_pack(str(pack_dir))

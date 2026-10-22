@@ -15,17 +15,29 @@ the run-specific evidence for read-only, no-content-read, and API-call claims.
 They are checks, not a substitute for reviewing an actual tenant authorization
 or deployment.
 
+## Supported versions
+
+| Version | Security fixes |
+| --- | --- |
+| 1.1.x | Yes |
+| Earlier than 1.1.0 | No; upgrade to the latest 1.1.x release |
+
+Only the latest minor release is supported.
+
 ## Private Reporting
 
-Email `contact@magrathean.uk` with subject `SECURITY: Auditex`. If GitHub
-private vulnerability reporting is available for this repository, reports can
-also be submitted there.
+Email [contact+auditex@magrathean.uk](mailto:contact+auditex@magrathean.uk) with subject `SECURITY: Auditex`, or use **Report a vulnerability** on the repository's Security tab (GitHub private vulnerability reporting is enabled). Do not open a public issue, discussion or pull request for a suspected vulnerability.
 
 Do not publish credentials, private keys, database dumps, signing certificates, or exploit details.
 
 Include affected version/commit, platform, topology, reproduction steps, impact, and redacted evidence.
 
-No response-time commitment or private-advisory status is stated here.
+## Handling and disclosure
+
+- We aim to acknowledge a report within 5 working days and to agree next steps after triage.
+- We aim to release a fix, or to agree a revised date with the reporter, within 90 days of the report. Please keep details private until a fix is released or that date has passed.
+- When a fix is released we publish a GitHub security advisory, request a CVE where the issue warrants one, and credit the reporter unless asked not to.
+- These are targets, not guarantees. No fixed response or remediation time is promised unless a separate written agreement says so.
 
 ## Scope & Safe Harbour
 

@@ -2144,7 +2144,9 @@ def test_powerplatform_rego_ast_views_are_subsets_with_the_same_labels(powerplat
     ast, earlier = _by_policy_and_variant(_rows(powerplatform_run[0] / "cases.jsonl")), _by_policy_and_variant(_rows(powerplatform_earlier_run / "cases.jsonl"))
     joined = sorted(ast.keys() & earlier.keys())
     assert len(joined) >= 55 and len(ast) < len(earlier)   # fewer distinct views, so fewer cases; ids hash the view, so they differ
-    digest = lambda row: re.search(r"input_sha256=([0-9a-f]{64})", row["provenance"]["source"]).group(1)
+    def digest(row):
+        return re.search(r"input_sha256=([0-9a-f]{64})", row["provenance"]["source"]).group(1)
+
     same_input = [key for key in joined if digest(ast[key]) == digest(earlier[key])]
     assert len(same_input) >= 50   # the three tests whose replay differs from OPA's input are the only ones left out
     both_confirmed = 0

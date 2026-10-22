@@ -9,6 +9,6 @@ _CANONICAL_PACKAGE_DIR = _REPO_ROOT / "src" / "azure_tenant_audit"
 if _CANONICAL_PACKAGE_DIR.exists():
     __path__.insert(0, str(_CANONICAL_PACKAGE_DIR))
 
-from .cli import main
+from .cli import main  # noqa: E402
 
 __all__ = ["main"]

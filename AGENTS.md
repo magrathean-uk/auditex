@@ -55,11 +55,13 @@ write-capable scope does not authorise a mutating operation; record its blast ra
 Response features stay disabled unless `AUDITEX_ENABLE_RESPONSE` is truthy (lab only).
 `tests/conftest.py` redirects auth/secret paths to a temp dir; keep new ones behind it.
 
-## Legal and pending migration
+## Legal and product URLs
 
-Legal files are owner-controlled. The next release applies `NEXT-RELEASE-URLS.md`
-(product sites -> `https://magrathean.uk/solutions/<slug>/`, support ->
-`contact+<slug>@magrathean.uk`), then remove it. `CLAUDE.md` only imports this file.
+Legal files are owner-controlled. The product-site and support-address migration is done
+(1.1.0): the product page is `https://magrathean.uk/solutions/auditex/` and support is
+`contact+auditex@magrathean.uk`. The former product-site domains, the `/apps/` paths and the shared
+`contact@` address are retired for this product; do not reintroduce them. `CLAUDE.md` only imports
+this file.
 
 ## Models
 

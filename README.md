@@ -7,9 +7,9 @@
 <p align="center">A read-only Microsoft 365 and Google Workspace tenant-audit toolkit, for auditors and admins.</p>
 
 <p align="center">
-  <a href="https://auditex.hu">Website</a> ·
+  <a href="https://magrathean.uk/solutions/auditex/">Website</a> ·
   <a href="docs/index.md">Documentation</a> ·
-  <a href="https://auditex.hu/privacy/">Privacy</a>
+  <a href="https://magrathean.uk/solutions/auditex/privacy/">Privacy</a>
 </p>
 
 ## Overview
@@ -70,7 +70,7 @@ Try the whole flow on a fictional company without touching any tenant:
 auditex demo
 ```
 
-`auditex demo` replays a synthetic tenant offline, then walks through access planning, findings, evidence, attack paths, and a tamper-evident customer pack, and writes an interactive HTML explorer. Use `--no-pause` for an unattended run.
+`auditex demo` replays a synthetic tenant offline, then walks through access planning, findings, evidence, attack paths, and a checksum-verified customer pack, and writes an interactive HTML explorer. Use `--no-pause` for an unattended run.
 
 Generate a provider-specific permission and scope plan before requesting access:
 

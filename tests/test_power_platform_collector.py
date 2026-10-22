@@ -85,7 +85,6 @@ def test_collector_marks_capability_unavailable_when_token_missing() -> None:
 
 
 def test_collector_records_403_as_insufficient_permissions() -> None:
-    from azure_tenant_audit.dns_lookup import DohError  # reuse generic error type for HTTP issues
 
     class _Forbidden(Exception):
         pass

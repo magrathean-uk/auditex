@@ -154,7 +154,6 @@ class GraphClient:
         return "/".join(part.split("(", 1)[0] for part in parts[:2]) if parts else "root"
 
     def _apply_pacing(self, *, method: str, url: str, attempt: int) -> None:
-        policy = self._throttle_policy()
         now = time.monotonic()
         if self._next_request_not_before <= now:
             return

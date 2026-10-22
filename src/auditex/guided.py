@@ -6,7 +6,7 @@ import platform
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from azure_tenant_audit import cli as tenant_cli
 from azure_tenant_audit.m365_home import m365_environment, m365_subprocess_kwargs

@@ -49,7 +49,7 @@ Invoke-BootstrapCommand -Name "collect-audit" -Module "audit" -Step "evidence" -
     "--run-name", "$($global:BootstrapSession.RunName)-evidence",
     "--include-exchange"
   )
-  $quotedCollectorArgs = $collectorArgs | ForEach-Object { 
+  $quotedCollectorArgs = $collectorArgs | ForEach-Object {
     if ($_.Contains(" ")) { "'$_'" } else { $_ }
   }
   Write-BootstrapEvent -Message "evidence.command" -Status "info" -Step "evidence" -Details @{

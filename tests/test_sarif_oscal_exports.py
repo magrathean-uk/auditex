@@ -566,7 +566,6 @@ def test_oscal_findings_include_related_observations() -> None:
     assert result["findings"][0]["title"] == "Alpha"
     related = result["findings"][0]["related-observations"]
     assert related and related[0]["observation-uuid"]
-    related_ctrls = result["findings"][0].get("related-risks") or []
     # control IDs surface via target.target-id
     targets = [
         target_id

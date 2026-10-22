@@ -96,10 +96,6 @@ def test_exchange_collector_collects_readiness_and_posture_sections() -> None:
 def test_exchange_collector_uses_fallbacks_and_marks_partial_for_failed_posture_sections() -> None:
     collector = _ExchangeTestCollector(
         {
-            "m365 status --output json": {
-                "error": "command_failed:1",
-                "error_class": "command_not_authenticated",
-            },
             "m365 tenant info get --output json": {
                 "error": "command_not_found:m365",
                 "error_class": "command_not_found",

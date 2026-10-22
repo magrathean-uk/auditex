@@ -45,6 +45,15 @@ doctor:
 	@auditex doctor
 
 
+.PHONY: release-check
+release-check:
+	$(MAKE) lint
+	$(MAKE) test
+	$(MAKE) contract-smoke
+	$(PYTHON) scripts/generate-rule-packs.py --check
+	./scripts/oss-taint-scan.sh
+	gitleaks dir . --no-banner --redact
+
 .PHONY: contract-smoke
 contract-smoke:
 	rm -rf outputs/ci-contract

@@ -8,7 +8,7 @@ from azure_tenant_audit.profiles import get_profile
 
 def test_selected_collectors_respects_include_exclude():
     config_path = Path("configs/collector-definitions.json")
-    cfg = CollectorConfig.from_path(config_path)
+    CollectorConfig.from_path(config_path)
     run = RunConfig(
         tenant_name="test",
         output_dir=Path("/tmp"),
@@ -47,7 +47,7 @@ def test_selected_collectors_includes_exchange_only_when_explicitly_requested():
 
 
 def test_selected_collectors_prefers_explicit_over_profile_defaults():
-    cfg = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
+    CollectorConfig.from_path(Path("configs/collector-definitions.json"))
     run = RunConfig(
         tenant_name="test",
         output_dir=Path("/tmp"),

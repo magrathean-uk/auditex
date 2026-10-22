@@ -21,6 +21,10 @@ updates:
       - "magrathean-uk"
     commit-message:
       prefix: "chore(deps)"
+    # mcp stays below 2 until a real FastMCP annotation test exists (see pyproject.toml).
+    ignore:
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         patterns:

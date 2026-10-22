@@ -1,0 +1,21 @@
+# Auditex gitleaks configuration: the default ruleset, minus local and generated directories
+# that .gitignore already keeps out of commits. `make release-check` runs `gitleaks dir .`.
+title = "Auditex gitleaks"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Local, git-ignored or generated directories"
+paths = [
+  '''^\.venv[^/]*/''',
+  '''^\.secrets/''',
+  '''^\.pytest_cache/''',
+  '''^\.ruff_cache/''',
+  '''^outputs/''',
+  '''^audit-output/''',
+  '''^tenant-bootstrap/runs/''',
+  '''^tenant-bootstrap/\.secrets/''',
+  '''(^|/)__pycache__/''',
+  '''(^|/)[^/]+\.egg-info/''',
+]

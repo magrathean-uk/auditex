@@ -21,8 +21,8 @@ for candidate in (SRC_ROOT, REPO_ROOT):
     if text not in sys.path:
         sys.path.insert(0, text)
 
-from auditex.google_workspace.run import run_google_offline
-from azure_tenant_audit.cli import run_offline
+from auditex.google_workspace.run import run_google_offline  # noqa: E402
+from azure_tenant_audit.cli import run_offline  # noqa: E402
 
 
 def _now_iso() -> str:

@@ -4,7 +4,6 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-from .capability_gate import capability_blocker_summary, classify_capability_blocker
 from .collection_gaps import list_truncations, truncation_summary
 from .evidence_gates import build_evidence_gate_summary
 

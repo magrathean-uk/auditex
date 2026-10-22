@@ -39,7 +39,7 @@ The pack includes:
 - `permissions.md` and `permissions.json` - required, observed, and missing permission ledger.
 - `proof-table.md` and `proof-table.json` - finding-to-evidence proof rows.
 - `source-artifacts/` - selected customer-safe source artifacts copied from the run.
-- `checksums.sha256` - file integrity hash list.
+- `checksums.sha256` - SHA-256 list of the pack's files. It is stored inside the pack and is not signed, so `verify-pack` detects corruption and edits that were not also re-hashed; it does not authenticate who produced the pack. When origin matters, send the SHA-256 of this file to the customer through a separate channel.
 - `pack-manifest.json` - pack manifest with generated and source artifact hashes, plus `validation_summary` and `reviewer_summary` copied from handoff truth.
 
 ## Reviewer Order

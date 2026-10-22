@@ -23,7 +23,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-import pytest
 
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.ai_context import build_ai_context

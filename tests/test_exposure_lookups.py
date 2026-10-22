@@ -106,7 +106,7 @@ def test_openid_discovery_parsing_keeps_tenant_facts_only() -> None:
     assert "jwks_uri" not in parsed
     assert parse_openid_configuration(["not", "a", "dict"]) is None
 
-    url = f"https://login.microsoftonline.com/contoso.com/v2.0/.well-known/openid-configuration"
+    url = "https://login.microsoftonline.com/contoso.com/v2.0/.well-known/openid-configuration"
     result = fetch_tenant_discovery("contoso.com", _Fetcher({url: (200, OIDC_BODY, None)}))
     assert result["discovery_status"] == "ok"
     assert result["tenant_id"] == TENANT_ID

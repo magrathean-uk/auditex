@@ -30,7 +30,7 @@ def test_demo_walkthrough_runs_offline_end_to_end(tmp_path: Path) -> None:
     output = stream.getvalue()
     assert rc == 0, output
     assert "No Microsoft 365 tenant is contacted" in output
-    for heading in ("Plan read-only access", "Collect evidence", "Read the risk summary", "Open one finding", "attack path", "tamper-evident"):
+    for heading in ("Plan read-only access", "Collect evidence", "Read the risk summary", "Open one finding", "attack path", "checksum-verified"):
         assert heading in output
     assert "with write access" in output and "(0 with write access)" in output
     assert "Edit one line of handoff.md, verify again: INVALID (checksum_mismatch)" in output

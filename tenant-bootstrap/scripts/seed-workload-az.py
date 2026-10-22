@@ -25,7 +25,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-import windows365_workload as windows365_workload
+import windows365_workload as windows365_workload  # noqa: E402
 
 
 def _m365_subprocess_kwargs(command: list[str]) -> dict:

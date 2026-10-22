@@ -360,7 +360,9 @@ def stage_public_corpus(source_manifest_path: str | Path, output_dir: str | Path
     for key in ("duplicate_rows", "unsupported_rows", "evaluation_overlap_rows", "rows_with_stripped_fields",
                 "conflicting_conversations", "conflicting_rows", "evaluation_jsonl_rows", "opaque_evaluation_files"):
         counts.setdefault(key, 0)
-    jsonl = lambda rows: "".join(_canonical(row) + "\n" for row in rows).encode("utf-8")
+    def jsonl(rows: list) -> bytes:
+        return "".join(_canonical(row) + "\n" for row in rows).encode("utf-8")
+
     outputs = {"staged-corpus.jsonl": jsonl(staged), "conflicts.jsonl": jsonl(conflicts),
                "rejected.jsonl": jsonl(rejected),
                "evaluation-sources.json": (json.dumps(eval_inventory, indent=2, ensure_ascii=False) + "\n").encode("utf-8")}

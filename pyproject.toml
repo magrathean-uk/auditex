@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditex"
-version = "1.0.0"
+version = "1.1.0"
 description = "Portable AI-first Microsoft 365 and Google Workspace audit toolkit for evidence collection"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,8 +16,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Capped below 2: the server is tested against a fake FastMCP only, so a 2.x API change
+# could silently drop the read-only tool annotations. Lift the cap only with a test that
+# starts the real FastMCP server and checks every tool's annotations.
 mcp = [
-    "mcp>=1.30.0,<3",
+    "mcp>=1.30.0,<2",
 ]
 google = [
     "google-auth>=2.58.1,<3",
@@ -41,6 +44,10 @@ auditex-mcp = "auditex.mcp_server:main"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# The Windows 365 entry points are rebound to windows365_workload on purpose (backward-compatible shims).
+"tenant-bootstrap/scripts/seed-workload-az.py" = ["F811"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

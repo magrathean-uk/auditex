@@ -32,6 +32,8 @@ make contract-smoke
 
 The first command is an example of a focused test. Select the test modules for the affected provider or behavior. `make lint` checks Python compilation, not formatting or types. `make contract-smoke` deletes and recreates `outputs/ci-contract`; use it for changes to collectors, normalization, schemas, reports, evidence references, or customer packs. Do not store valuable runs there.
 
+Run `pre-commit install` once so Ruff, the whitespace checks and a staged-file gitleaks scan run on every commit. Before a release, `make release-check` chains lint, tests, contract smoke, the rule-pack drift check, the taint scan and a gitleaks scan of the tree.
+
 For documentation-only changes, check command definitions, relative links, and agreement with the output contract. State which checks were run and which were skipped. Offline checks do not establish live tenant coverage.
 
 ## Keep contracts aligned
