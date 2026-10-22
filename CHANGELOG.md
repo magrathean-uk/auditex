@@ -88,6 +88,87 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   user who is only eligible to join such a group is not in the set. ScubaGear's `MS.AAD.7.1v1` instructions
   count them. Collecting those schedules is a follow-up.
 
+### Microsoft 365 devices, updates and malware (Cyber Essentials)
+
+Product review action 6: device, update and malware evidence for the Cyber Essentials requirements. Every
+new read is a GET or a read-only `Get-*` cmdlet that passes the shared read guard, and no Graph scope is
+added: each read uses a permission its collector already required. Every check is three-valued; a field that
+is absent, `Unknown` or unparseable, a list that was cut, and a read that was blocked are unknown and read
+`not_assessed` in baseline alignment, never `pass`.
+
+- **Devices.** `intune` reads `isEncrypted`, `jailBroken`, `managedDeviceOwnerType` (the v1.0 name of the owner
+  field; `ownerType` is beta only), `enrolledDateTime` and `deviceEnrollmentType` as well as `lastSyncDateTime`,
+  `complianceState`, `osVersion` and `operatingSystem`. `devices` records gain `is_encrypted`, `jail_broken`,
+  `owner_type`, `enrolled_at`, `enrollment_type` and `os_family`, and the new `device_posture` section counts the
+  devices each check cannot judge. New rules: `intune.device_encryption_off`, `intune.device_jailbroken` (iOS and
+  Android only), `intune.device_os_end_of_life`.
+- **Stale sync.** `intune.device_stale_sync` now defaults to 14 days (it was 90), the Cyber Essentials window for
+  installing updates, and is configurable with `--stale-sync-days` or `AUDITEX_STALE_SYNC_DAYS` (1 to 3650; an invalid
+  value is ignored). A device with no last-sync time is unknown. The demo tenant is judged as of its snapshot date, so
+  only its April device is stale there.
+- **End of life.** `configs/os-end-of-life.json` is a dated table (`verified_on` 2026-10-22, a source for every
+  entry) for Windows 10 and 11 builds, macOS, iOS and iPadOS, and Android. Windows dates are Microsoft's; Apple and
+  Android publish none, so their dates are marked `derived`. A Windows build whose Home/Pro date has passed and whose
+  Enterprise/Education date has not depends on the edition, which `osVersion` does not show, so it is unknown. So is a
+  build that a Long-Term Servicing edition shares (LTSC 2019 on 17763, LTSC and IoT LTSC 2021 on 19044, LTSC and IoT
+  LTSC 2024 on 26100): between the general date and `ltsc_end_of_support` the device is `edition_dependent`, and only
+  after the Long-Term Servicing date is it past end of life. Windows Server is not a Windows client here. iOS and
+  iPadOS 17 are not called end of life (Apple issued iPadOS 17.7.11 on 2026-05-11). A Windows 10 device may be
+  enrolled in paid Extended Security Updates, which Auditex cannot see, so its finding is medium while that window is
+  open.
+- **Compliance policies.** `deviceCompliancePolicies` records keep their platform, the settings that matter
+  (passcode, encryption, minimum OS, jailbreak block, Defender and firewall requirement where the policy type has
+  them) and their assignments (`GET .../deviceCompliancePolicies/{id}/assignments`), in the new
+  `compliance_policy_objects` section. New rule: `intune.compliance_policy_missing_platform`. This closes the
+  "compliance policy evidence is too thin" finding; Graph v1.0 returns no Defender settings for a Windows policy.
+- **Updates.** `intune_depth` identifies Windows Update for Business update rings from the `deviceConfigurations` list
+  it already reads, reads their assignments, and reads the quality and feature update profiles and their assignments
+  from Graph beta (v1.0 has no equivalent), in the new `update_management_objects` section. New rules:
+  `intune_depth.update_ring_not_assigned` and `intune_depth.update_ring_deferral_excessive` (quality deferral, or
+  deferral plus deadline and restart grace period, over 14 days; or paused). A tenant that manages updates through an
+  assigned update profile or Configuration Manager co-management reads `not_assessed` for the first rule, not failed;
+  settings catalog policies, group policy and WSUS are not read.
+- **Defender antivirus.** `intune` reads `GET /deviceManagement/managedDevices/{id}/windowsProtectionState` for each
+  Windows device (at most 100; beyond that a `fanout_limit` gap in `collection_gaps`). The Intune reports API is a POST export job
+  and is not used. A device Intune has no state for is `not_reported`. New rules: `intune.defender_av_off`,
+  `intune.defender_realtime_protection_off`, `intune.defender_signatures_stale`. New section `defender_av_objects`.
+- **Exchange.** `exchange_policy` adds `Get-MalwareFilterPolicy`, `Get-TransportConfig` and `Get-DkimSigningConfig`.
+  New rules: `exchange.malware_filter_weakened` (default policy has the common attachment filter or zero-hour auto
+  purge off), `exchange.smtp_auth_enabled_tenant_wide`, `exchange.dkim_signing_disabled` (CIS `2.1.9`, `MS.EXO.3.1v1`;
+  a domain `dns_posture.dkim_missing` already reports is left to that rule, and this rule reads `not_assessed` for it).
+- **Gaps stay in their own section.** A cut Defender read (more than 100 Windows devices), one failed compliance or update
+  assignment read and a failed beta update profile list no longer make the `intune` or `intune_depth` collector `partial`, which
+  would have turned every Intune rule, `intune.device_noncompliant` and `intune.device_stale_sync` included, `not_assessed`.
+  Their coverage rows carry `section_scoped`, the gap is listed under `collection_gaps`, and only the rules that read the
+  section say so (`defender_state_truncated`, `policy_assignments_not_read_for_every_policy`). A failed or cut base list still
+  makes the collector `partial`.
+- **Mail rules judged on their own rows.** The three Exchange rules read `not_assessed` unless their own command rows were
+  read in full, instead of waiting for the whole `exchange_policy` collector, which is partial in every app-only run
+  (`Get-ProtectionAlert` needs a Security & Compliance session). `auditex compare` reassesses their findings the same way.
+  CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` no longer pass on DNS evidence alone: `exchange.dkim_signing_disabled` is now
+  required as well. The adapter writes Exchange enumerations as names (`ConvertTo-Json -EnumsAsStrings`, used only where
+  PowerShell has the switch) and the normalizer reads `DomainType` and `DomainName` whether they arrive as names,
+  integers or objects.
+- **Evaluation date.** `run_offline`, `build_normalized_snapshot` and `auditex demo` take an evaluation instant (`as_of`) so
+  stale sync and end of life are judged as of a fixed day. The bundled demo tenant is pinned to 3 October 2026, the day its
+  fictional snapshot was taken, so its scores no longer drift with the clock (they would have moved on 2026-11-11, when
+  Windows 11 23H2 Enterprise ends).
+- **Detection coverage.** The `defender_alert_api` signal is `on` only when a Defender service raised an alert or a
+  Defender service plan is licensed and the alerts API answers; an API that merely answers is `unknown`
+  (`alerts_api_answered_no_defender_evidence`). It was `on` for any tenant whose alerts API answered. Its title is now
+  "Defender alert source present".
+- **Cyber Essentials.** `ce.sum.supported_software`, `ce.sum.automatic_updates`, `ce.sum.vulnerability_fixes_14_days`
+  and `ce.mp.antimalware` move from `manual` or `ce_plus_assessor_test` to `partial`: a rule can fail them, and a clean
+  result is `not_assessed` (`partial_requirement_no_gap_found`), never `pass`. `ce.mp.app_allow_listing` and the
+  provider-responsibility rows are unchanged. The rule mappings and their confidence (all `partial`) are in
+  `configs/control-mappings.json`.
+- **Bundle fields.** New normalized sections `device_posture`, `compliance_policy_objects`,
+  `update_management_objects` and `defender_av_objects`; `exchange_policy_objects` records gain
+  `is_default`, `enable_file_filter`, `zap_enabled`, `smtp_client_auth_disabled`, `dkim_enabled`, `dkim_status`,
+  `domain_type` and `default_domain`; `update_management_summary` gains `profiles_assigned` and `windows_comanaged_device_count`. `auditex compare` treats `device_posture.os_lifecycle_evaluated_on` as volatile. Two
+  offline samples (`endpoint_posture_result.json`, `update_rings_missing_result.json`) join the contract smoke, and
+  `docs/provenance/` records the sources of the end-of-life dates.
+
 ### Microsoft 365 false positives
 
 Rule id changes (old to new; ids not listed are unchanged):

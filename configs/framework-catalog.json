@@ -332,23 +332,23 @@
         "ce.sum.supported_software": {
           "title": "All in-scope software is licensed and supported, and removed when it becomes unsupported",
           "theme": "security_update_management",
-          "status": "manual",
+          "status": "partial",
           "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
-          "evidence_limits": "osVersion is collected but there is no end-of-life table, so no rule judges support status. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+          "evidence_limits": "Covers the operating system of devices enrolled in Intune, judged against the dated table in configs/os-end-of-life.json. Applications, firmware, Windows Server and devices that are not enrolled are not covered. A Windows build that Long-Term Servicing (LTSC, LTSB or IoT) editions share, or whose Home/Pro date has passed while Enterprise and Education is still supported, is unknown because osVersion does not show the edition; a release the table does not list is unknown too. A clean result is recorded as not assessed, never as a pass."
         },
         "ce.sum.automatic_updates": {
           "title": "Automatic updates enabled where possible",
           "theme": "security_update_management",
-          "status": "manual",
+          "status": "partial",
           "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
-          "evidence_limits": "Windows Update for Business rings and update policies are not collected. No Auditex rule reads this. Evidence comes from the applicant's answers and the assessor."
+          "evidence_limits": "Covers Windows Update for Business update rings read from Intune: whether a ring is assigned and whether it delays quality updates. macOS, iOS, Android and application updates, Windows Update settings made by group policy or other tools, and devices that are not enrolled are not covered, and a ring assigned to a group is not resolved to devices."
         },
         "ce.sum.vulnerability_fixes_14_days": {
           "title": "Critical and high-risk updates and vulnerability fixes installed within 14 days of release",
           "theme": "security_update_management",
-          "status": "ce_plus_assessor_test",
+          "status": "partial",
           "citation": "E. Requirements by technical control theme > 3. Security Update Management > Requirements",
-          "evidence_limits": "Intune noncompliance is supporting evidence only: it does not say which setting failed and no rule measures update age. The CE+ assessor decides this with an authenticated vulnerability scan of sampled devices.",
+          "evidence_limits": "Partial evidence only: update rings that delay quality updates beyond 14 days, devices that have not synced within the stale-sync window (14 days by default), operating systems past end of life, and Intune noncompliance. None of them measures the age of an installed update. The CE+ assessor decides this with an authenticated vulnerability scan of sampled devices.",
           "ce_plus_test": "Test case 2: Check patching, by authenticated vulnerability scan of devices"
         },
         "ce.sum.saas_provider": {
@@ -441,9 +441,9 @@
         "ce.mp.antimalware": {
           "title": "Anti-malware software active on in-scope devices, kept up to date, preventing malicious code and malicious websites",
           "theme": "malware_protection",
-          "status": "ce_plus_assessor_test",
+          "status": "partial",
           "citation": "E. Requirements by technical control theme > 5. Malware protection > Requirements > Anti-malware software (option for in scope devices running Windows or MacOS including servers, desktop computers, laptops)",
-          "evidence_limits": "Defender antivirus status and endpoint-security policies are not collected, so there is no tenant evidence yet. The CE+ assessor tests it with malware test files.",
+          "evidence_limits": "Covers Defender antivirus state read from Intune for Windows devices (antivirus off, real-time protection off, signatures stale) and the default Exchange Online anti-malware policy. macOS, anti-malware products other than Defender, devices Intune does not manage and protection against malicious websites are not covered; a device protected by a third-party product can read as Defender off. The CE+ assessor tests it with malware test files.",
           "ce_plus_test": "Test case 3: Check malware protection"
         },
         "ce.mp.app_allow_listing": {

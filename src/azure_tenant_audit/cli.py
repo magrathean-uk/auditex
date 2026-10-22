@@ -6,6 +6,7 @@ import importlib
 import logging
 import os
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Callable
 import sys
 import time
@@ -24,6 +25,7 @@ from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, 
 from .config import AuthConfig, CollectorConfig
 from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
+from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient
 from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
@@ -75,6 +77,17 @@ def _offline_item_count(payload: Any) -> int:
     )
 
 
+def _stale_sync_days(value: str) -> int:
+    """argparse type for ``--stale-sync-days``: a whole number of days from 1 to 3650."""
+    try:
+        days = int(value)
+    except ValueError:
+        days = 0
+    if not 1 <= days <= STALE_SYNC_DAYS_MAX:
+        raise argparse.ArgumentTypeError(f"must be a whole number of days from 1 to {STALE_SYNC_DAYS_MAX}")
+    return days
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Microsoft tenant audit collection.")
     parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
@@ -114,6 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
             "user principal names or group names, or @file with one per line. List the group your policies exclude "
             "when the accounts are excluded through it. Without a list the accounts are inferred from names and the "
             "Global Administrator role (weaker evidence, rated medium at most). Also read from AUDITEX_BREAK_GLASS_ACCOUNTS."
+        ),
+    )
+    parser.add_argument(
+        "--stale-sync-days",
+        type=_stale_sync_days,
+        default=None,
+        help=(
+            "Days without an Intune check-in after which a managed device is stale (1 to 3650). Default 14, the Cyber "
+            "Essentials window for installing updates. Also read from AUDITEX_STALE_SYNC_DAYS."
         ),
     )
     parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run.")
@@ -182,7 +204,10 @@ def run_offline(
     until: str | None = None,
     fixture_provenance_override: dict[str, Any] | None = None,
     break_glass_accounts: Sequence[str] | None = None,
+    stale_sync_days: int | None = None,
+    as_of: datetime | None = None,
 ) -> int:
+    """Replay an offline sample. ``as_of`` pins the instant that stale sync and operating-system end of life are judged at."""
     sample_path = resolve_resource_path(sample_path)
     if not sample_path.exists():
         LOG.error("Sample file not found: %s", sample_path)
@@ -261,6 +286,7 @@ def run_offline(
         coverage_rows=coverage_rows,
         run_dir=writer.run_dir,
         break_glass_accounts=break_glass_accounts,
+        as_of=as_of,
     )
     diagnostics.extend(build_normalization_diagnostics(normalized_snapshot))
     if diagnostics:
@@ -271,7 +297,7 @@ def run_offline(
         result_rows=result_rows,
         diagnostics=diagnostics,
     )
-    findings = build_findings(diagnostics, normalized_snapshot=normalized_snapshot)
+    findings = build_findings(diagnostics, normalized_snapshot=normalized_snapshot, stale_sync_days=stale_sync_days, now=as_of)
     writer.write_normalized("capability_matrix", {"kind": "capability_matrix", "records": capability_rows})
     writer.write_normalized("coverage_ledger", {"kind": "coverage_ledger", "records": coverage_ledger})
     for name, payload in normalized_snapshot.items():
@@ -688,7 +714,9 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     )
     # Waivers are the last step build_findings would take; applying the rows read at the start of
     # the run keeps the file from being read a second time after the tenant calls.
-    findings = build_findings(diagnostics, normalized_snapshot=normalized_snapshot)
+    findings = build_findings(
+        diagnostics, normalized_snapshot=normalized_snapshot, stale_sync_days=getattr(args, "stale_sync_days", None)
+    )
     if waiver_rows:
         findings = apply_waivers(findings, waiver_rows)
     writer.write_normalized("auth_context", auth_context_payload)
@@ -806,6 +834,7 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
             since=args.since,
             until=args.until,
             break_glass_accounts=offline_break_glass,
+            stale_sync_days=args.stale_sync_days,
         )
     return run_live(args, event_listener=event_listener)
 

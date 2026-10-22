@@ -109,6 +109,15 @@ Crown copyright, and are cited for dates only. The
 sources used to verify each identifier are listed in the catalog and in
 [Framework Mappings](../reference/framework-mappings.md).
 
+## Operating-system end-of-life dates
+
+`configs/os-end-of-life.json` records when each Windows 10 and 11 build, macOS, iOS, iPadOS and Android
+release stops receiving security updates, so a tenant audit can say which managed devices run unsupported
+software. The dates are facts taken from Microsoft's Windows lifecycle and release health pages, Apple's
+security release notes and the Android Security Bulletins, cross-checked against endoflife.date; every entry
+lists its sources and a `verified_on` date. Apple and Google publish no end-of-life dates, so those entries are
+marked `derived` and explain how the date was reached. No page text is copied.
+
 ## Run explorer icons
 
 The run explorer (`src/auditex/explorer_assets/`) inlines SVG path data for

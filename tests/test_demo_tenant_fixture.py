@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Iterator
 
+from auditex.demo import DEMO_AS_OF
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.resources import shipped_resource_manifest
 
@@ -107,6 +108,7 @@ def _run_demo(tmp_path: Path) -> Path:
         "demo",
         auditor_profile="global-reader",
         plane="inventory",
+        as_of=DEMO_AS_OF,
     )
     assert rc == 0
     return tmp_path / "halcyon-freight-demo"

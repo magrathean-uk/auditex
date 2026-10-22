@@ -60,10 +60,16 @@ Each observed Graph call records `api_version` (`v1.0` or `beta`). Auditex calls
 | --- | --- | --- | --- |
 | `intune_depth` | `/deviceManagement/groupPolicyConfigurations` | `DeviceManagementConfiguration.Read.All` | Not available on v1.0. |
 | `intune_depth` | `/deviceManagement/deviceManagementScripts` | `DeviceManagementConfiguration.Read.All` | Fixed `$select` of metadata fields; `scriptContent` (the script body) is never requested. |
+| `intune_depth` | `/deviceManagement/windowsQualityUpdateProfiles` | `DeviceManagementConfiguration.Read.All` | Not available on v1.0. Windows quality (expedite) update profiles. |
+| `intune_depth` | `/deviceManagement/windowsFeatureUpdateProfiles` | `DeviceManagementConfiguration.Read.All` | Not available on v1.0. Windows feature update profiles. |
+| `intune_depth` | `/deviceManagement/windowsQualityUpdateProfiles/{id}/assignments`, `/deviceManagement/windowsFeatureUpdateProfiles/{id}/assignments` | `DeviceManagementConfiguration.Read.All` | One GET per profile, at most 100 profiles. Beta reads are not batched because `$batch` here targets v1.0. |
 | `app_credentials` | `/reports/servicePrincipalSignInActivities` | `AuditLog.Read.All` | Capability-gated; without it `app_credentials.credential_dormant` is not evaluated. |
 
 Other v1.0 reads with gating worth knowing:
 
+- `intune` reads `/deviceManagement/managedDevices` with a fixed `$select` that adds `isEncrypted`, `jailBroken`, `managedDeviceOwnerType`, `enrolledDateTime` and `deviceEnrollmentType` to the fields it already read (`lastSyncDateTime`, `complianceState`, `osVersion`, `operatingSystem`). `managedDeviceOwnerType` is the v1.0 name; `ownerType` exists on beta only and is not selected. No user principal name, e-mail address, phone number or serial number is selected. No new permission.
+- `intune` reads the assignments of every device compliance policy (`GET /deviceManagement/deviceCompliancePolicies/{id}/assignments`, `DeviceManagementConfiguration.Read.All`, through `$batch` with GET-only inner requests, at most 100 policies) and the Defender antivirus state of each Windows managed device (`GET /deviceManagement/managedDevices/{id}/windowsProtectionState`, `DeviceManagementManagedDevices.Read.All`, at most 100 devices). A device Intune has no state for (HTTP 404) is recorded as `not_reported`; any other failure is a failed read. Only a fixed list of state fields is kept (antivirus, real-time protection, signature and scan state, product status, tamper protection, engine and signature versions, last report time). The Intune reports API that returns this for every device at once (`reports/getDefenderAgentsReport`, `reports/exportJobs`) is a POST export job, so the audit plane does not use it. A list longer than the limit is a `fanout_limit` gap in `collection_gaps`, never a complete read; the gap is scoped to the Defender section, so the `intune` collector stays `ok` when its device and policy lists were read in full and only the Defender rules read `not_assessed`.
+- `intune_depth` identifies Windows Update for Business update rings from the `deviceConfigurations` list it already reads (the `windowsUpdateForBusinessConfiguration` type, v1.0, no further call), keeps a fixed list of their settings, and reads each ring's assignments with `GET /deviceManagement/deviceConfigurations/{id}/assignments` (at most 100 rings). The quality and feature update profiles are Graph beta (table above).
 - `identity` reads `/users?$select=id,signInActivity` as a separate query (page size at most 500; `AuditLog.Read.All` plus Microsoft Entra ID P1 or P2). A licence or scope failure leaves a coverage gap and identity continues.
 - Identity relationship expansion reads complete collected group and
   role-assignment evidence, including chunk rows, and expands at most 50
@@ -122,6 +128,31 @@ These reads feed `report_pack["detection_coverage"]` and `report_pack["public_fo
 | `dns_posture` | `GET https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration` | Public tenant ID, region scope, cloud instance | <https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc> |
 
 Public HTTPS lookups target only domains that Microsoft Graph reports as verified for the audited tenant (at most 25). They are unauthenticated, never probe usernames, and do not use `getuserrealm.srf`. Offline runs make none of these calls. Entra diagnostic-settings export (Azure Resource Manager `microsoft.aadiam/diagnosticSettings`) is not collected, so the `siem_log_export` signal is always `unknown`.
+
+## Device, Update And Mail Protection Reads
+
+These reads feed the Cyber Essentials update and malware rules (see
+[framework mappings](framework-mappings.md#device-update-and-mail-protection-rules)). All are GET requests or read-only
+`Get-*` cmdlets that pass the shared read guard. No new Graph scope is needed: each read uses a permission the
+collector already required. Exchange cmdlets run in the Exchange Online PowerShell session the other `exchange_policy`
+cmdlets use, with the Global Reader role.
+
+| Collector | Call | Purpose | Permission or role |
+| --- | --- | --- | --- |
+| `intune` | `GET /deviceManagement/managedDevices` (added `$select` fields) | Encryption, jailbreak, owner type, enrolment, last sync, OS version | `DeviceManagementManagedDevices.Read.All` |
+| `intune` | `GET /deviceManagement/deviceCompliancePolicies/{id}/assignments` | Whether each compliance policy applies to anybody | `DeviceManagementConfiguration.Read.All` |
+| `intune` | `GET /deviceManagement/managedDevices/{id}/windowsProtectionState` | Defender antivirus, real-time protection and signature state per Windows device | `DeviceManagementManagedDevices.Read.All` |
+| `intune_depth` | `GET /deviceManagement/deviceConfigurations/{id}/assignments` (update rings only) | Whether each update ring is assigned | `DeviceManagementConfiguration.Read.All` |
+| `intune_depth` | `GET /beta/deviceManagement/windowsQualityUpdateProfiles`, `windowsFeatureUpdateProfiles` and their `/{id}/assignments` | Update profiles and their assignments | `DeviceManagementConfiguration.Read.All` |
+| `exchange_policy` | `Get-MalwareFilterPolicy` | `IsDefault`, `EnableFileFilter`, `ZapEnabled` of each anti-malware policy | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-TransportConfig` | `SmtpClientAuthenticationDisabled` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-DkimSigningConfig` | `Domain`, `Enabled`, `Status` per domain | Exchange Online, Global Reader |
+
+What could not be collected read-only: the Intune reports API for Defender state (a POST export job), the Windows
+Defender settings of a Windows compliance policy (not returned by Graph v1.0), compliance policies built from
+settings-catalog templates (not listed by `deviceCompliancePolicies`), the edition of a Windows device (not in
+`osVersion`) and enrolment in the Windows 10 Extended Security Updates programme. Each is reported as unknown or
+not assessed, never as a pass.
 
 ## Customer Use
 

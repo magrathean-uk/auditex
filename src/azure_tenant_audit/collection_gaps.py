@@ -188,8 +188,11 @@ def truncations_from_payloads(
         for name, section in sorted(payload.items()):
             if not isinstance(section, Mapping) or section.get("collection_truncated") is not True:
                 continue
-            # A fan-out wrapper restates its own coverage row (privilegedGroupFanout and the like).
-            if isinstance(section.get("fanout"), Mapping) or (str(collector), str(name)) in seen:
+            # A fan-out wrapper restates its own coverage row (privilegedGroupFanout and the like), unless its
+            # gap is scoped to the section: those coverage rows do not flag the cut, so the section does.
+            fanout = section.get("fanout")
+            restated = isinstance(fanout, Mapping) and not fanout.get("scoped_gap")
+            if restated or (str(collector), str(name)) in seen:
                 continue
             value = section.get("value")
             count = section.get("item_count")

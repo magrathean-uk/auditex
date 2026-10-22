@@ -46,7 +46,7 @@ Findings must include `evidence_refs`. Each reference must identify at least `ar
 
 `reports/report-pack.json` includes `proof_table` for board, CLI, and MCP review. New proof rows flatten every finding evidence reference into `finding_id`, `rule_id`, `proof_status`, `collector`, `artifact_path`, `artifact_kind`, `record_key`, and optional JSON pointer or endpoint fields; from `2026-10-22` they also carry `collected_at`, `content_hash` and `unresolved_reason`, and `proof_status` is derived from resolution. A finding's `proof` summary gains `supported_count`, the number of its references that resolved. The same pack now also carries `reviewer_index` with `start_here`, `prove_this`, and `known_limits` rows so customer reviewers can move from posture to proof faster. The validator accepts older per-finding proof summaries, and validates the stricter row shape when the new fields are present. Operators can render the same rows with `auditex report proof-table <run-dir> --format md`. Enterprise handoff starts with `auditex report customer-pack <run-dir> --output-dir <dir>`, `auditex report verify-pack <dir>`, or `auditex report handoff <run-dir> --format md`. The pack writes a README, handoff, full report, API ledger, permission ledger, proof table, JSON copies, selected customer-safe source artifacts, `checksums.sha256`, and generated-file/source-artifact hashes. `pack-manifest.json` source now also carries `validation_summary` and `reviewer_summary`; `verify-pack` checks those against `handoff.json` so customer start-point truth cannot drift. The handoff, API call, permission, and proof-table commands all accept `--output <path>` for persisted customer packs.
 
-Microsoft 365 report packs can also carry `detection_coverage` (`signals[]` with `name`, `title`, `status` of `on`, `off`, or `unknown`, `reason`, `why_it_matters`, and an `evidence_ref` into `normalized/detection_signal_objects.json`, plus `score`, `counts`, `assessed_ratio`, and `limitations`) and the informational `public_footprint` (`domains[]` with discovery status, authentication type, and an `evidence_ref` into `normalized/public_footprint_objects.json`). `score` is computed over `on` and `off` signals only; `unknown` is never counted as `off`. Both sections survive the coverage-gap refresh of the report pack. New normalized sections: `detection_signal_objects`, `public_footprint_objects`, and `identity_protection_objects`. Contract `2026-10-22` adds `intune_policy_assignment_objects`, keyed `intune_policy_assignment:<policyId>`, with `policy_id`, `policy_name` and `assignment_count` for every policy the Intune assignment read returned, including those with none. It also adds `sharepoint_tenant_settings` and `break_glass_assessment` (see "Microsoft 365 sharing, federation and emergency-access rules").
+Microsoft 365 report packs can also carry `detection_coverage` (`signals[]` with `name`, `title`, `status` of `on`, `off`, or `unknown`, `reason`, `why_it_matters`, and an `evidence_ref` into `normalized/detection_signal_objects.json`, plus `score`, `counts`, `assessed_ratio`, and `limitations`) and the informational `public_footprint` (`domains[]` with discovery status, authentication type, and an `evidence_ref` into `normalized/public_footprint_objects.json`). `score` is computed over `on` and `off` signals only; `unknown` is never counted as `off`. Both sections survive the coverage-gap refresh of the report pack. New normalized sections: `detection_signal_objects`, `public_footprint_objects`, and `identity_protection_objects`. Contract `2026-10-22` adds `intune_policy_assignment_objects`, keyed `intune_policy_assignment:<policyId>`, with `policy_id`, `policy_name` and `assignment_count` for every policy the Intune assignment read returned, including those with none. It also adds `sharepoint_tenant_settings` and `break_glass_assessment` (see "Microsoft 365 sharing, federation and emergency-access rules"). It also adds `device_posture`, `compliance_policy_objects`, `update_management_objects` and `defender_av_objects` (see "Microsoft 365 device, update and malware evidence"); `devices` and `exchange_policy_objects` records gain fields.
 
 Microsoft 365 runs that include the `conditional_access` or `consent_policy` collector also write `normalized/identity_control_verdicts.json`, one record per tenant and control, keyed `identity_control_verdict:<control>`. `control` is `effective_mfa`, `legacy_authentication_block` or `user_consent` (the last only when `consent_policy` ran). `verdict` is `enforced`, `not_enforced` or `unknown` for `effective_mfa`; `blocked`, `not_blocked` or `unknown` for `legacy_authentication_block`; `restricted`, `unrestricted` or `unknown` for `user_consent`. A negative verdict needs a complete read: a policy list that was blocked, truncated or never collected gives `unknown`, with the cause in `reasons` and the endpoint states in `policy_collection`, `security_defaults` and `authorization_policy`. `basis` lists what establishes a positive verdict (`security_defaults`, `conditional_access_policy`). For `effective_mfa`, `qualifying_policies` are the enabled policies that require MFA for all users on all cloud apps, `excluded_principals` are the principals excluded from every qualifying policy (`type`, `id`, resolved `display_name`), `non_qualifying_mfa_policies`, `report_only_mfa_policies` and `unverified_policies` carry each near-miss policy with its `reasons`, and `registration_context` repeats the registration counts as context only: registration never produces `enforced`. Findings from these verdicts cite the verdict record and the Conditional Access policy records it names. `normalized/conditional_access_graph.json` policy records gain `targeting`: the raw include and exclude lists for users, groups, roles and guests, applications, `client_app_types`, platforms, locations, risk levels, the device filter (`device_filter_mode` and `device_filter_rule`) and the grant (`operator`, `built_in_controls`, `authentication_strength`). A policy that excludes platforms, applications or devices (exclude-mode filter) never qualifies as enforcing MFA or blocking legacy authentication; the near-miss `reasons` are `excludes_platforms`, `excludes_applications` and `device_filter_excludes_devices`, and the policy summary records `excluded_platforms`, `excluded_applications` and `device_filter`. `normalized/consent_policy_objects.json` authorization policy records gain `permission_grant_policies_assigned`, `allowed_to_create_apps` and `guest_user_role_id`. New rules: `ca.mfa_not_enforced`, `ca.legacy_auth_not_blocked`, `consent_policy.user_consent_unrestricted` and `identity.privileged_mfa_not_registered`, plus the diagnostic `ca.enforcement_unverified` and `consent_policy.user_consent_unverified`, which an `unknown` verdict raises instead.
 
@@ -262,7 +262,13 @@ exist, so the collector is `partial` and the rules that read it are `not_assesse
 | `teams` | team channels | first 10 teams | `teamChannelsFanout` |
 | `app_consent` | service principal owners and role grants | first 10 principals plus Microsoft Graph | `servicePrincipalFanout` |
 | `identity` | members and owners of role-assignable groups | 50 groups | `privilegedGroupFanout` |
+| `intune` | compliance policy assignments | first 100 policies | `deviceCompliancePolicyAssignmentsFanout` (section-scoped, see below) |
+| `intune` | Defender antivirus state (`windowsProtectionState`) | first 100 Windows devices | `windowsProtectionStatesFanout` (section-scoped, see below) |
+| `intune_depth` | update ring assignments | first 100 rings | `windowsUpdateRingAssignmentsFanout` (section-scoped) |
+| `intune_depth` | quality and feature update profile assignments | first 100 profiles each | `windowsQualityUpdateProfileAssignmentsFanout`, `windowsFeatureUpdateProfileAssignmentsFanout` (section-scoped) |
 | `directory_relationships` | group members and owners, application owners | 100 groups and 100 applications | `relationshipGroups`, `relationshipApplications` and the per-parent member and owner rows |
+
+**Section-scoped fan-outs.** The Intune fan-outs marked above (compliance assignments, Defender state, update ring and update profile assignments, and the beta update profile lists) differ from the others: their coverage rows carry `section_scoped: true`, do not flag `collection_truncated`, and do not make the collector `partial`. The collector's status comes from its base reads (`managedDevices`, `deviceCompliancePolicies`, `deviceConfigurationProfiles`; for `intune_depth`, its own lists), so a fleet of more than 100 Windows devices, or one failed assignment read, does not turn every other Intune rule `not_assessed`. The gap is kept in the section (`collection_truncated`, `truncation_reason`, a `fanout` summary with `scoped_gap`), listed under `collection_gaps`, and read by the rules that depend on it (`defender_state_truncated`, `policy_assignments_not_read_for_every_policy`, `ring_assignments_not_read_for_every_ring`), which never pass on it. A failed base list still makes the collector `partial`.
 
 A rule that reads a fan-out can still `fail` from what the expanded objects show. The
 `intune_depth.policies_without_assignments` finding counts policies from
@@ -397,6 +403,95 @@ legacy-protocol only, over all users or administrator roles and all applications
 requirement is judged but never broad, so it is `medium`, and an inferred list never rates above `medium`. This replaces one `high` finding per policy
 (`conditional_access:ca_break_glass_exclusion:<policy id>`) raised for every enabled policy that excluded none
 of every holder of seven roles.
+
+### Microsoft 365 device, update and malware evidence
+
+Cyber Essentials asks whether devices are encrypted, supported, patched and protected against malware. A
+tenant audit sees part of that, through Intune and Exchange Online, and only for the devices Intune
+manages. Every check is three-valued: a field that is absent, `Unknown` or unparseable is unknown, never a
+pass and never a failure; a list that was blocked, cut or not collected makes the checks that read it
+unknown as a whole. Baseline alignment reads an unknown rule `not_assessed` with the reason shown, and the
+Cyber Essentials rows for these requirements are `partial`, so none reads `pass`.
+
+**`normalized/devices.json`** records gain `is_encrypted`, `jail_broken` (`true`/`false`; Intune's
+`Unknown` is left out), `owner_type` (`company`, `personal`, `unknown`; read from the v1.0 field
+`managedDeviceOwnerType`, with the beta `ownerType` as a fallback), `enrolled_at`, `enrollment_type` and
+`os_family` (`windows`, `macos`, `ios`, `android`). A field the payload does not carry is absent.
+
+**`normalized/device_posture.json`** holds one `device_posture_summary` record (`device_posture_summary:tenant`):
+`read_state` (`collected`, `truncated`, `blocked`), `device_count`, `platform_counts`, and for each check how many
+devices it says nothing about: `encryption_on`/`encryption_off`/`encryption_unknown`,
+`jailbreak_clean`/`jailbreak_jailbroken`/`jailbreak_unknown`/`jailbreak_not_applicable` (Intune reports
+jailbreak state for iOS and Android only), `last_sync_unknown`, `os_lifecycle_unknown` with
+`os_lifecycle_unknown_reasons`, and `os_lifecycle_edition_dependent` (the edition decides support, see below) as of `os_lifecycle_evaluated_on`. `auditex compare` ignores `os_lifecycle_evaluated_on`, and `run_offline` and `auditex demo` take an evaluation instant (`as_of`) so a replay is judged as of a fixed day; the demo tenant is pinned to the day its fictional snapshot was taken.
+
+**`normalized/compliance_policy_objects.json`** holds one `compliance_policy` record per compliance policy
+(`platform`, `policy_type`, `settings` (`passcode_required`, `passcode_min_length`, `encryption_required`,
+`min_os_version`, `jailbreak_blocked`, `defender_required`, `firewall_required`, `threat_protection_required`,
+`secure_boot_required`; a setting the policy type does not have is absent, so unknown), `assignments_known`,
+`assigned`, `assigned_to_all_devices`, `assigned_to_all_users`, `group_target_count`, `exclusion_count`;
+group ids are not kept), one `compliance_platform_coverage` record per platform (`device_count`,
+`policy_count`, `assigned_policy_count`, `unassigned_policy_count`, `assignments_unknown_count`) and one
+`compliance_policy_summary`. Microsoft Graph v1.0 does not return Defender settings for a Windows policy, so
+`defender_required` is usually absent there. Compliance policies built from settings-catalog templates are
+not listed by `/deviceManagement/deviceCompliancePolicies`.
+
+**`normalized/update_management_objects.json`** holds one `update_ring` record per Windows Update for Business ring
+(`quality_deferral_days`, `feature_deferral_days`, `quality_deadline_days`, `quality_paused`,
+`quality_pause_expires_at`, `automatic_update_mode`, and the assignment fields above), one `update_profile` record
+per Windows quality or feature update profile (`profile_type`, `api_version` `beta`), and one
+`update_management_summary` (read states, ring and profile counts, `rings_assigned`,
+`rings_assigned_to_all_devices`, `profiles_assigned`, `windows_comanaged_device_count`, `windows_device_count`). Update rings are `deviceConfigurations` of the
+`windowsUpdateForBusinessConfiguration` type, read from the v1.0 list the collector already holds; quality and
+feature update profiles exist on Graph beta only.
+
+**`normalized/defender_av_objects.json`** holds one `defender_av_state` record per Windows device whose state was
+requested (`read_status` `ok`, `not_reported` for HTTP 404, `failed`; `av_state`, `realtime_state`,
+`signature_state`; the raw `malware_protection_enabled`, `real_time_protection_enabled`,
+`signature_update_overdue`, `product_status`, `tamper_protection_enabled`) and one `defender_av_summary`
+(`windows_device_count`, `devices_expanded`, `devices_not_expanded`, `state_read`, `state_not_reported`,
+`state_read_failed`). The state is read with `GET /deviceManagement/managedDevices/{id}/windowsProtectionState`
+for at most 100 Windows devices; a larger fleet leaves a `fanout_limit` entry in `collection_gaps` and the section's `collection_truncated` flag. That gap is scoped to the section: the `intune` collector stays `ok` when its device and policy lists were read in full, so the other Intune rules keep their evidence and only the Defender rules read `defender_state_truncated`. The Intune reports API
+(`getDefenderAgentsReport`, `reports/exportJobs`) is a POST export job and is not used.
+
+**`normalized/exchange_policy_objects.json`** records for `malwareFilterPolicy` (`is_default`, `enable_file_filter`,
+`zap_enabled`), `transportConfig` (`smtp_client_auth_disabled`) and `dkimSigningConfig` (`dkim_enabled`,
+`dkim_status`, `domain_name`) are new, and `acceptedDomains` records gain `domain_type` and `default_domain`.
+
+| Rule | Condition | Severity | Not assessed when |
+| --- | --- | --- | --- |
+| `intune.device_encryption_off` | `is_encrypted` is false. One finding per device, `intune:<id>:device_encryption_off` | high on Windows and macOS, medium otherwise | any device has no value; the device list was not read in full |
+| `intune.device_jailbroken` | An iOS or Android device reports `jail_broken` true | high | an iOS or Android device reports no value; the device list was not read in full |
+| `intune.device_stale_sync` | No Intune check-in within the window: 14 days by default (the Cyber Essentials window for updates), `--stale-sync-days` or `AUDITEX_STALE_SYNC_DAYS` (1 to 3650; an invalid value is ignored) | medium | any device has no last-sync time; the device list was not read in full |
+| `intune.device_os_end_of_life` | The release is past its end-of-support date in `configs/os-end-of-life.json` (see below) | high for a vendor-published date with no extended programme open, otherwise medium | the version is missing, unparseable or not in the table; the Windows edition decides support (Home/Pro against Enterprise/Education, or a Long-Term Servicing edition sharing the build); the device list was not read in full |
+| `intune.compliance_policy_missing_platform` | A platform has enrolled devices and no compliance policy of its type (`no_policy`), or none of its policies is assigned (`no_assigned_policy`). One finding per platform | medium | the policy list or its assignments were not read in full for the platform |
+| `intune.defender_av_off` | `malwareProtectionEnabled` is false, or `productStatus` says the service is not running or runs without malware protection | high | the Defender state was not read for a Windows device, or the device list or the state fan-out was cut |
+| `intune.defender_realtime_protection_off` | `realTimeProtectionEnabled` is false | medium | as above, or the field is absent |
+| `intune.defender_signatures_stale` | `signatureUpdateOverdue` is true, or `productStatus` says the signatures are out of date | medium | as above, or the field is absent |
+| `intune_depth.update_ring_not_assigned` | Windows devices are enrolled, no update ring is assigned (none exists, or none has an assignment), no update profile is assigned and no Windows device is co-managed by Configuration Manager. A ring assigned only to groups is not flagged: group membership is not resolved. Update settings made through settings catalog policies, group policy or WSUS are not read | medium | the rings, their assignments or the device list were not read in full; there are no Windows devices; an assigned update profile or a co-managed device shows updates managed another way (`update_managed_by_other_means`) |
+| `intune_depth.update_ring_deferral_excessive` | An assigned ring lets quality updates wait more than 14 days: the deferral alone, or the deferral plus the deadline and restart grace period when a deadline is set (`install_delay_days` in the evidence); or it has them paused (a pause whose expiry has passed does not count) | medium | no ring is assigned; a ring's settings were not returned |
+| `exchange.malware_filter_weakened` | The default anti-malware policy has the common attachment types filter or zero-hour auto purge off | high when both are off, otherwise medium | `Get-MalwareFilterPolicy` was not read in full, returned no default policy or omitted a setting |
+| `exchange.smtp_auth_enabled_tenant_wide` | `SmtpClientAuthenticationDisabled` is false | medium | `Get-TransportConfig` was not read or omitted the setting |
+| `exchange.dkim_signing_disabled` | DKIM signing is off for an authoritative accepted domain other than `*.onmicrosoft.com`. One finding per domain. `DomainType` and `DomainName` are read whether Exchange returns names, integers or objects | medium | `Get-DkimSigningConfig` or `Get-AcceptedDomain` was not read, there is no custom domain, a domain has no signing row, or `dns_posture.dkim_missing` already reports the disabled domain (`reported_by:dns_posture.dkim_missing`) |
+
+**Mail protection rules are judged on their own command rows.** The three Exchange rules do not wait for the whole `exchange_policy` collector: it runs a dozen commands and is `partial` whenever one is unavailable (`Get-ProtectionAlert` needs a Security & Compliance session that app-only runs never open). Each rule reads `not_assessed` unless its own command rows were read in full (`malwareFilterPolicy`, `transportConfig`, `dkimSigningConfig` with `acceptedDomains`), and `auditex compare` reassesses a vanished finding on the same rows. CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` now need `exchange.dkim_signing_disabled` as well as `dns_posture.dkim_missing`: selectors published in DNS no longer make them `pass` on their own. Exchange Online returns enumerations as integers in some builds, so the adapter asks for names (`ConvertTo-Json -EnumsAsStrings` where PowerShell has it) and the normalizer reads either form.
+
+**End-of-life table.** `configs/os-end-of-life.json` is read from disk and never from the network. It records
+`verified_on`, and for each Windows build (10 and 11, General Availability Channel) and each macOS, iOS, iPadOS and
+Android major version: `end_of_support`, the earlier `end_of_support_home_pro` where Windows editions differ,
+`ltsc_end_of_support` (the latest end date of a Long-Term Servicing edition that shares the build: LTSC, LTSB or IoT Enterprise LTSC), `extended_support_until` (Windows 10 Extended Security Updates, whose enrolment Auditex cannot see), `basis`,
+`confidence` (`vendor_published` for Microsoft dates; `derived` for Apple and Android, which publish none),
+`status` on the verification date, `sources` and a `note`. A device is past end of life only after the last day of the
+latest date for every edition on its build, the Long-Term Servicing one included. Between the Home/Pro and Enterprise/Education dates,
+and between the general date and `ltsc_end_of_support` on a build an LTSC edition shares (17763, 19044, 26100 and the like), `osVersion`
+does not show the edition, so the state is unknown (`os_edition_dependent_for_<n>_devices`). Windows Server shares some builds and is not a
+Windows client here (`platform_not_covered`). iOS and iPadOS 17 are not called end of life: Apple still issued iPadOS 17 security updates
+on 2026-05-11. Tests check the schema, that no release past its last day is labelled supported, and that every release cites a source.
+
+**Detection coverage.** The `defender_alert_api` signal (title "Defender alert source present") is `on` only when an
+alert from a Defender service (`serviceSource`) was seen, or a Defender service plan is licensed, and the alerts API
+answers. An API that answers with an empty or Entra-only alert list is `unknown` (reason
+`alerts_api_answered_no_defender_evidence` or `alerts_api_answered_licensing_not_read`), never `on`.
 
 ### Google Workspace evidence scope, domains and rules
 

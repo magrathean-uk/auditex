@@ -59,3 +59,9 @@ def _isolate_auditex_secrets():
 def _no_break_glass_list_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
     """An operator's AUDITEX_BREAK_GLASS_ACCOUNTS must not reach a test that expects no list."""
     monkeypatch.delenv("AUDITEX_BREAK_GLASS_ACCOUNTS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_stale_sync_threshold_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An operator's AUDITEX_STALE_SYNC_DAYS must not change the 14-day default a test expects."""
+    monkeypatch.delenv("AUDITEX_STALE_SYNC_DAYS", raising=False)

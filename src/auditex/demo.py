@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
@@ -26,6 +27,9 @@ FALLBACK_SAMPLE = Path("examples/sample_audit_bundle/known_bad_result.json")
 REMEDIATED_SAMPLE = Path("examples/demo_tenant/demo_tenant_remediated.json")
 DEMO_TENANT_NAME = "halcyon"
 DEMO_RUN_NAME = "demo"
+# The demo tenant is a fixed snapshot taken in early October 2026. Judging its devices as of that day (stale sync,
+# operating-system end of life) keeps the story, and its score, the same on every run instead of drifting with the clock.
+DEMO_AS_OF = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
 SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
 _SEVERITY_COLOURS = {"critical": "1;31", "high": "31", "medium": "33", "low": "36", "info": "37"}
 
@@ -38,6 +42,9 @@ class DemoOptions:
     html: bool = True
     stream: TextIO = field(default_factory=lambda: sys.stdout)
     input_fn: Callable[[str], str] = input
+    # The instant date-dependent device evidence is judged at. ``None`` pins the bundled demo tenant to ``DEMO_AS_OF``
+    # and judges any other sample as of now.
+    as_of: datetime | None = None
 
 
 class _Console:
@@ -157,10 +164,10 @@ def _step_plan(console: _Console) -> None:
     console.pause()
 
 
-def _step_run(console: _Console, sample_path: Path, sample: dict[str, Any], out_dir: Path) -> Path | None:
+def _step_run(console: _Console, sample_path: Path, sample: dict[str, Any], out_dir: Path, as_of: datetime | None) -> Path | None:
     console.heading("Collect evidence (offline replay, nothing leaves this machine)")
     collectors = [key for key in sample if not key.startswith("_")]
-    rc = run_offline(sample_path, out_dir / "runs", DEMO_TENANT_NAME, DEMO_RUN_NAME, plane="full")
+    rc = run_offline(sample_path, out_dir / "runs", DEMO_TENANT_NAME, DEMO_RUN_NAME, plane="full", as_of=as_of)
     run_dir = out_dir / "runs" / f"{DEMO_TENANT_NAME}-{DEMO_RUN_NAME}"
     if rc != 0 or not run_dir.is_dir():
         console.line(console.style(f"  Offline run failed (exit {rc}).", "31"))
@@ -312,7 +319,9 @@ def _step_detection_and_baselines(console: _Console, report_pack: dict[str, Any]
     console.pause()
 
 
-def _step_remediation(console: _Console, sample_path: Path, out_dir: Path, findings: list[dict[str, Any]], risk: dict[str, Any]) -> None:
+def _step_remediation(
+    console: _Console, sample_path: Path, out_dir: Path, findings: list[dict[str, Any]], risk: dict[str, Any], as_of: datetime | None
+) -> None:
     remediated_path = sample_path.with_name(REMEDIATED_SAMPLE.name)
     if sample_path.name != DEMO_SAMPLE.name or not remediated_path.is_file():
         return
@@ -320,7 +329,7 @@ def _step_remediation(console: _Console, sample_path: Path, out_dir: Path, findi
     remediated = _load_json(remediated_path)
     for change in (remediated.get("_fixture_provenance") or {}).get("remediations") or []:
         console.line(f"  {console.style('•', '32')} {change}")
-    if run_offline(remediated_path, out_dir / "runs", DEMO_TENANT_NAME, "after-fixes", plane="full") != 0:
+    if run_offline(remediated_path, out_dir / "runs", DEMO_TENANT_NAME, "after-fixes", plane="full", as_of=as_of) != 0:
         console.line(console.style("  Re-audit failed.", "31"))
         return
     after_dir = out_dir / "runs" / f"{DEMO_TENANT_NAME}-after-fixes"
@@ -399,8 +408,12 @@ def run_demo(options: DemoOptions) -> int:
     console.line(console.style("All data is fictional and replayed offline. No Microsoft 365 tenant is contacted.", "33"))
     console.pause()
 
+    as_of = options.as_of
+    if as_of is None and sample_path.name == DEMO_SAMPLE.name:
+        as_of = DEMO_AS_OF
+        console.line(f"Devices are judged as of {as_of:%-d %B %Y}, when the fictional snapshot was taken, so the demo reads the same on every run.")
     _step_plan(console)
-    run_dir = _step_run(console, sample_path, sample, out_dir)
+    run_dir = _step_run(console, sample_path, sample, out_dir, as_of)
     if run_dir is None:
         return 1
     report_pack = _load_json(run_dir / "reports" / "report-pack.json")
@@ -409,7 +422,7 @@ def run_demo(options: DemoOptions) -> int:
     _step_evidence(console, run_dir, report_pack, findings)
     _step_attack_path(console, report_pack)
     _step_detection_and_baselines(console, report_pack)
-    _step_remediation(console, sample_path, out_dir, findings, (report_pack.get("summary") or {}).get("risk") or {})
+    _step_remediation(console, sample_path, out_dir, findings, (report_pack.get("summary") or {}).get("risk") or {}, as_of)
     _step_handoff(console, run_dir, out_dir)
     if options.html:
         _step_explorer(console, run_dir, out_dir)

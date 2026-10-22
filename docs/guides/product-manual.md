@@ -231,8 +231,11 @@ The graph only sees what the run collected. Group membership is read for role-as
 `reports/report-pack.json` answers "could this tenant see an attack?" in
 `detection_coverage`: a list of signals (unified audit log, mailbox auditing,
 audit bypass, alert policies, risk-based Conditional Access, Identity
-Protection, sign-in and directory audit logs, Defender alerts API, SIEM export),
-each `on`, `off`, or `unknown`, with `evidence_ref` and `why_it_matters`. The
+Protection, sign-in and directory audit logs, Defender alert source, SIEM export),
+each `on`, `off`, or `unknown`, with `evidence_ref` and `why_it_matters`. The Defender
+signal is `on` only when a Defender service raised an alert or a Defender service plan is
+licensed and the alerts API answers; an API that answers with nothing to show for Defender is
+`unknown`. The
 `score` counts only signals with evidence; `unknown` means not collected or
 blocked and is never treated as `off`. `off` signals raise `detection.*`
 findings. Exchange cmdlets need an Exchange Online PowerShell session, and
@@ -250,7 +253,7 @@ raise `dns_posture.mta_sts_missing`, `dns_posture.mta_sts_testing_mode`,
 
 `reports/report-pack.json` also carries `baseline_alignment`. It shows the status of each CIS Microsoft 365 v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, and Microsoft cloud security benchmark control that Auditex rules map to, and a Secure Score reconciliation table. To list rules by product area or framework, run `auditex rules packs --kind framework` or `auditex rules inventory`. [Framework Mappings](../reference/framework-mappings.md) describes the sources and limits.
 
-`baseline_alignment` also has a Cyber Essentials section, following the NCSC Requirements for IT Infrastructure v3.3. It lists every requirement with its status and the rules and evidence counts behind it, and the Markdown report shows it as a table. Most Cyber Essentials requirements concern devices, networks and process, so they appear as `manual`, `ce_plus_assessor_test` or `provider_responsibility` with no verdict; only user access control and parts of secure configuration take a verdict from tenant evidence, and that verdict can only be a fail. A clean result there is recorded as not assessed (`partial_requirement_no_gap_found`) with the evidence counts, never as a pass. Auditex output is evidence for a Cyber Essentials assessor, not a certification or a CE+ result.
+`baseline_alignment` also has a Cyber Essentials section, following the NCSC Requirements for IT Infrastructure v3.3. It lists every requirement with its status and the rules and evidence counts behind it, and the Markdown report shows it as a table. Most Cyber Essentials requirements concern devices, networks and process, so they appear as `manual`, `ce_plus_assessor_test` or `provider_responsibility` with no verdict; only user access control, parts of secure configuration and, through Intune and Exchange Online, parts of update management (supported operating systems, update rings, devices that stopped syncing) and malware protection (Defender antivirus state, the default anti-malware policy) take a verdict from tenant evidence, and that verdict can only be a fail. A clean result there is recorded as not assessed (`partial_requirement_no_gap_found`) with the evidence counts, never as a pass. Auditex output is evidence for a Cyber Essentials assessor, not a certification or a CE+ result.
 
 ## Render Reports
 

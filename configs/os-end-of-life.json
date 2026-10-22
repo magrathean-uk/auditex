@@ -1,0 +1,695 @@
+{
+  "_documentation": "Dated operating-system end-of-life table used by the intune.device_os_end_of_life rule. Auditex reads it from configs/ and never from the network. verified_on is the date every entry was last checked against its sources; refresh the table (and verified_on) when a release is added or a date changes, and keep tests/test_os_lifecycle.py green. end_of_support is the last day the vendor serves security updates for every General Availability edition of the release; a device is past end of life only after that date. end_of_support_home_pro is the earlier date for Home and Pro editions when it differs: between the two dates the edition decides, and Intune's osVersion does not show it, so the rule reports unknown (edition_dependent) rather than guess. ltsc_end_of_support is the last day of the latest Long-Term Servicing release that shares the build (LTSC, LTSB or IoT Enterprise LTSC): osVersion does not show the edition, so between end_of_support and ltsc_end_of_support the state is unknown (edition_dependent), and only after ltsc_end_of_support is the build past end of life. Windows Server shares some builds and is not covered. extended_support_until is a paid extension (Windows 10 ESU) whose enrolment Auditex cannot see. end_of_support is null while the vendor still patches the release. A release that is not in the table, or a version that cannot be parsed, is unknown, never supported. confidence is vendor_published for dates the vendor publishes and derived for Apple and Android, which publish none.",
+  "schema_version": "2026-10-22",
+  "verified_on": "2026-10-22",
+  "scope": "Windows 10 and 11 releases (matched on the build number in osVersion; Long-Term Servicing editions that share a build are recorded as ltsc_end_of_support), macOS, iOS and iPadOS (matched on the major version) and Android (matched on the major version). Windows Server and Windows IoT editions other than IoT Enterprise LTSC are not covered.",
+  "platforms": {
+    "windows": {
+      "title": "Windows",
+      "match": "build",
+      "releases": [
+        {
+          "id": "windows-11-26h2",
+          "name": "Windows 11 26H2",
+          "build": 26300,
+          "end_of_support": "2029-10-09",
+          "end_of_support_home_pro": "2028-10-10",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+          ],
+          "status": "supported"
+        },
+        {
+          "id": "windows-11-26h1",
+          "name": "Windows 11 26H1",
+          "build": 28000,
+          "end_of_support": "2029-03-13",
+          "end_of_support_home_pro": "2028-03-14",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+          ],
+          "note": "26H1 ships only on new devices; it is not offered as an in-place update.",
+          "status": "supported"
+        },
+        {
+          "id": "windows-11-25h2",
+          "name": "Windows 11 25H2",
+          "build": 26200,
+          "end_of_support": "2028-10-10",
+          "end_of_support_home_pro": "2027-10-12",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+          ],
+          "status": "supported"
+        },
+        {
+          "id": "windows-11-24h2",
+          "name": "Windows 11 24H2",
+          "build": 26100,
+          "end_of_support": "2027-10-12",
+          "end_of_support_home_pro": "2026-10-13",
+          "ltsc_end_of_support": "2034-10-10",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+          ],
+          "note": "Windows 11 Enterprise LTSC 2024 shares build 26100 and is supported until 2029-10-09; IoT Enterprise LTSC 2024 until 2034-10-10 (the date recorded as ltsc_end_of_support). osVersion does not show the edition.",
+          "status": "edition_dependent"
+        },
+        {
+          "id": "windows-11-23h2",
+          "name": "Windows 11 23H2",
+          "build": 22631,
+          "end_of_support": "2026-11-10",
+          "end_of_support_home_pro": "2025-11-11",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+          ],
+          "status": "edition_dependent"
+        },
+        {
+          "id": "windows-11-22h2",
+          "name": "Windows 11 22H2",
+          "build": 22621,
+          "end_of_support": "2025-10-14",
+          "end_of_support_home_pro": "2024-10-08",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-11-21h2",
+          "name": "Windows 11 21H2",
+          "build": 22000,
+          "end_of_support": "2024-10-08",
+          "end_of_support_home_pro": "2023-10-10",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-22h2",
+          "name": "Windows 10 22H2",
+          "build": 19045,
+          "end_of_support": "2025-10-14",
+          "extended_support_until": "2028-10-10",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/windows/release-health/release-information",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro",
+            "https://learn.microsoft.com/en-us/windows/whats-new/extended-security-updates"
+          ],
+          "note": "Windows 10 reached end of support on 2025-10-14. Devices enrolled in the paid Extended Security Updates programme (organisations: up to three years, to 2028-10-10) still receive security updates; ESU enrolment is not visible to Auditex.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-21h2",
+          "name": "Windows 10 21H2",
+          "build": 19044,
+          "end_of_support": "2024-06-11",
+          "end_of_support_home_pro": "2023-06-13",
+          "ltsc_end_of_support": "2032-01-13",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro",
+            "https://learn.microsoft.com/en-us/windows/release-health/release-information"
+          ],
+          "note": "Windows 10 Enterprise LTSC 2021 shares build 19044 and is supported until 2027-01-12; IoT Enterprise LTSC 2021 until 2032-01-13 (the date recorded as ltsc_end_of_support). osVersion does not show the edition.",
+          "status": "edition_dependent"
+        },
+        {
+          "id": "windows-10-21h1",
+          "name": "Windows 10 21H1",
+          "build": 19043,
+          "end_of_support": "2022-12-13",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-20h2",
+          "name": "Windows 10 20H2",
+          "build": 19042,
+          "end_of_support": "2023-05-09",
+          "end_of_support_home_pro": "2022-05-10",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-2004",
+          "name": "Windows 10 2004",
+          "build": 19041,
+          "end_of_support": "2021-12-14",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1909",
+          "name": "Windows 10 1909",
+          "build": 18363,
+          "end_of_support": "2022-05-10",
+          "end_of_support_home_pro": "2021-05-11",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1903",
+          "name": "Windows 10 1903",
+          "build": 18362,
+          "end_of_support": "2020-12-08",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1809",
+          "name": "Windows 10 1809",
+          "build": 17763,
+          "end_of_support": "2021-05-11",
+          "end_of_support_home_pro": "2020-11-10",
+          "ltsc_end_of_support": "2029-01-09",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro",
+            "https://learn.microsoft.com/en-us/windows/release-health/release-information"
+          ],
+          "note": "Windows 10 Enterprise LTSC 2019 shares build 17763 and is supported (extended) until 2029-01-09; osVersion does not show the edition. Windows Server 2019 shares the build too and is not covered by this table.",
+          "status": "edition_dependent"
+        },
+        {
+          "id": "windows-10-1803",
+          "name": "Windows 10 1803",
+          "build": 17134,
+          "end_of_support": "2021-05-11",
+          "end_of_support_home_pro": "2019-11-12",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1709",
+          "name": "Windows 10 1709",
+          "build": 16299,
+          "end_of_support": "2020-10-13",
+          "end_of_support_home_pro": "2019-04-09",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1703",
+          "name": "Windows 10 1703",
+          "build": 15063,
+          "end_of_support": "2019-10-08",
+          "end_of_support_home_pro": "2018-10-09",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1607",
+          "name": "Windows 10 1607",
+          "build": 14393,
+          "end_of_support": "2019-04-09",
+          "end_of_support_home_pro": "2018-04-10",
+          "ltsc_end_of_support": "2026-10-13",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro",
+            "https://learn.microsoft.com/en-us/windows/release-health/release-information"
+          ],
+          "note": "Windows 10 Enterprise LTSB 2016 shares build 14393 and reached end of updates on 2026-10-13. Windows Server 2016 shares the build too and is not covered by this table.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1511",
+          "name": "Windows 10 1511",
+          "build": 10586,
+          "end_of_support": "2017-10-10",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro"
+          ],
+          "status": "end_of_life"
+        },
+        {
+          "id": "windows-10-1507",
+          "name": "Windows 10 1507",
+          "build": 10240,
+          "end_of_support": "2017-05-09",
+          "ltsc_end_of_support": "2025-10-14",
+          "basis": "vendor_lifecycle",
+          "confidence": "vendor_published",
+          "sources": [
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+            "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro",
+            "https://learn.microsoft.com/en-us/windows/release-health/release-information"
+          ],
+          "note": "Windows 10 Enterprise LTSB 2015 shares build 10240 and reached end of support on 2025-10-14.",
+          "status": "end_of_life"
+        }
+      ]
+    },
+    "macos": {
+      "title": "macOS",
+      "match": "major",
+      "releases": [
+        {
+          "id": "macos-before-12",
+          "name": "macOS 11 and earlier",
+          "major_below": 12,
+          "end_of_support": "2024-09-16",
+          "basis": "apple_n_minus_2_practice",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/macos"
+          ],
+          "note": "Apple publishes no end-of-life dates. The date is when Apple stopped issuing security updates for the release, as recorded in Apple's security release notes and tracked by endoflife.date. Releases older than macOS 12 ended no later than this date.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "macos-12",
+          "name": "macOS 12 Monterey",
+          "major": 12,
+          "end_of_support": "2024-09-16",
+          "basis": "apple_n_minus_2_practice",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/macos"
+          ],
+          "note": "Apple publishes no end-of-life dates. The date is when Apple stopped issuing security updates for the release, as recorded in Apple's security release notes and tracked by endoflife.date.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "macos-13",
+          "name": "macOS 13 Ventura",
+          "major": 13,
+          "end_of_support": "2025-09-15",
+          "basis": "apple_n_minus_2_practice",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/macos"
+          ],
+          "note": "Apple publishes no end-of-life dates. The date is when Apple stopped issuing security updates for the release, as recorded in Apple's security release notes and tracked by endoflife.date.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "macos-14",
+          "name": "macOS 14 Sonoma",
+          "major": 14,
+          "end_of_support": "2026-09-14",
+          "basis": "apple_n_minus_2_practice",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/macos"
+          ],
+          "note": "Apple publishes no end-of-life dates. The date is when Apple stopped issuing security updates for the release, as recorded in Apple's security release notes and tracked by endoflife.date. Apple's last Sonoma release is 14.8.9 (2026-08-06); the date is the release of macOS 27, after which Apple has patched only the latest three majors.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "macos-15",
+          "name": "macOS 15 Sequoia",
+          "major": 15,
+          "basis": "apple_n_minus_2_practice",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/macos"
+          ],
+          "note": "Still receiving security updates (15.8.1, 2026-09-28).",
+          "status": "supported"
+        },
+        {
+          "id": "macos-26",
+          "name": "macOS 26 Tahoe",
+          "major": 26,
+          "basis": "apple_n_minus_2_practice",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/macos"
+          ],
+          "note": "Current or previous major; receiving security updates.",
+          "status": "supported"
+        },
+        {
+          "id": "macos-27",
+          "name": "macOS 27",
+          "major": 27,
+          "basis": "apple_n_minus_2_practice",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/macos"
+          ],
+          "note": "Current major; receiving security updates.",
+          "status": "supported"
+        }
+      ]
+    },
+    "ios": {
+      "title": "iOS and iPadOS",
+      "match": "major",
+      "releases": [
+        {
+          "id": "ios-13",
+          "name": "iOS and iPadOS 13",
+          "major": 13,
+          "end_of_support": "2020-09-16",
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Apple publishes no end-of-life dates. The date is when Apple stopped issuing security updates for the release, as recorded in Apple's security release notes and tracked by endoflife.date.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "ios-14",
+          "name": "iOS and iPadOS 14",
+          "major": 14,
+          "end_of_support": "2021-10-26",
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Apple publishes no end-of-life dates. The date is when Apple stopped issuing security updates for the release, as recorded in Apple's security release notes and tracked by endoflife.date.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "ios-15",
+          "name": "iOS and iPadOS 15",
+          "major": 15,
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Apple still issued security updates for iOS 15 on 2026-05-11 (15.8.8) for devices that cannot run a newer release.",
+          "status": "supported"
+        },
+        {
+          "id": "ios-16",
+          "name": "iOS and iPadOS 16",
+          "major": 16,
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Apple still issued security updates for iOS 16 on 2026-05-11 (16.7.16) for devices that cannot run a newer release.",
+          "status": "supported"
+        },
+        {
+          "id": "ios-17",
+          "name": "iOS and iPadOS 17",
+          "major": 17,
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Apple still issued iPadOS 17 security updates on 2026-05-11 (17.7.11) for iPads that cannot run iPadOS 18, as it did for iOS 16 and 15. The last iPhone release is iOS 17.7.7 (2025-05-13), but iOS and iPadOS share this entry and Intune reports an iPad as iOS or iPadOS depending on the enrolment, so the release is not called end of life.",
+          "status": "supported"
+        },
+        {
+          "id": "ios-18",
+          "name": "iOS and iPadOS 18",
+          "major": 18,
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Still receiving security updates (18.7.10, 2026-08-17).",
+          "status": "supported"
+        },
+        {
+          "id": "ios-26",
+          "name": "iOS and iPadOS 26",
+          "major": 26,
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Receiving security updates.",
+          "status": "supported"
+        },
+        {
+          "id": "ios-27",
+          "name": "iOS and iPadOS 27",
+          "major": 27,
+          "basis": "apple_last_security_release",
+          "confidence": "derived",
+          "sources": [
+            "https://support.apple.com/en-gb/100100",
+            "https://endoflife.date/ios"
+          ],
+          "note": "Current major; receiving security updates.",
+          "status": "supported"
+        }
+      ]
+    },
+    "android": {
+      "title": "Android",
+      "match": "major",
+      "releases": [
+        {
+          "id": "android-7",
+          "name": "Android 7",
+          "major": 7,
+          "end_of_support": "2019-10-01",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Date of the last Android Open Source Project security patch for the release. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "android-8",
+          "name": "Android 8",
+          "major": 8,
+          "end_of_support": "2021-01-10",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Date of the last Android Open Source Project security patch for the release. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "android-9",
+          "name": "Android 9",
+          "major": 9,
+          "end_of_support": "2022-01-01",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Date of the last Android Open Source Project security patch for the release. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "android-10",
+          "name": "Android 10",
+          "major": 10,
+          "end_of_support": "2023-03-06",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Date of the last Android Open Source Project security patch for the release. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "android-11",
+          "name": "Android 11",
+          "major": 11,
+          "end_of_support": "2024-02-05",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Date of the last Android Open Source Project security patch for the release. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "android-12",
+          "name": "Android 12 and 12L",
+          "major": 12,
+          "end_of_support": "2025-03-03",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Date of the last Android Open Source Project security patch for the release. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "android-13",
+          "name": "Android 13",
+          "major": 13,
+          "end_of_support": "2026-03-02",
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Date of the last Android Open Source Project security patch for the release. Some manufacturers patch their own builds for longer, so check the device maker's support policy before treating the device as unpatched.",
+          "status": "end_of_life"
+        },
+        {
+          "id": "android-14",
+          "name": "Android 14",
+          "major": 14,
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Still receiving Android Open Source Project security patches.",
+          "status": "supported"
+        },
+        {
+          "id": "android-15",
+          "name": "Android 15",
+          "major": 15,
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Still receiving Android Open Source Project security patches.",
+          "status": "supported"
+        },
+        {
+          "id": "android-16",
+          "name": "Android 16",
+          "major": 16,
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Still receiving Android Open Source Project security patches.",
+          "status": "supported"
+        },
+        {
+          "id": "android-17",
+          "name": "Android 17",
+          "major": 17,
+          "basis": "aosp_last_security_bulletin",
+          "confidence": "derived",
+          "sources": [
+            "https://source.android.com/docs/security/bulletin",
+            "https://endoflife.date/android"
+          ],
+          "note": "Current release; receiving Android Open Source Project security patches.",
+          "status": "supported"
+        }
+      ]
+    }
+  }
+}

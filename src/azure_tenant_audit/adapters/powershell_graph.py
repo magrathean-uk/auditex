@@ -60,6 +60,20 @@ class PowerShellGraphAdapter(Adapter):
         return {"value": [parsed]}
 
     @staticmethod
+    def _json_pipeline(script: str) -> str:
+        """The checked script piped to ConvertTo-Json.
+
+        Exchange Online's REST-backed cmdlets return enumerations (an accepted domain's ``DomainType``, for example)
+        as objects that ConvertTo-Json writes as their integer value. ``-EnumsAsStrings`` (PowerShell 7.3 and later)
+        writes the name instead; an older PowerShell does not have the switch, so it is used only where it exists.
+        """
+        convert = "ConvertTo-Json -Depth 20 -Compress"
+        return (
+            "if ((Get-Command ConvertTo-Json).Parameters.ContainsKey('EnumsAsStrings')) "
+            f"{{ {script} | {convert} -EnumsAsStrings }} else {{ {script} | {convert} }}"
+        )
+
+    @staticmethod
     def _session_prelude(session: Optional[dict[str, Any]], env: dict[str, str]) -> str:
         """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line."""
         if not session or session.get("kind") != "exchange_online":
@@ -116,7 +130,7 @@ class PowerShellGraphAdapter(Adapter):
 
         env = dict(os.environ)
         prelude = self._session_prelude(session, env)
-        prepared = f"{prelude}{script} | ConvertTo-Json -Depth 20 -Compress"
+        prepared = f"{prelude}{self._json_pipeline(script)}"
         try:
             if log_event:
                 log_event(

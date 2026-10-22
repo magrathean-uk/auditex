@@ -65,7 +65,7 @@ Typical Microsoft Graph application permissions depend on selected collectors, b
 - `Application.Read.All`
 - `DelegatedPermissionGrant.Read.All`
 - `SecurityAlert.Read.All` (alerts v2), `SecurityIncident.Read.All`, and `SecurityEvents.Read.All` (Secure Score) where Defender/Security APIs are in scope.
-- `DeviceManagementManagedDevices.Read.All` and related Intune read scopes where Intune is in scope.
+- `DeviceManagementManagedDevices.Read.All`, `DeviceManagementConfiguration.Read.All` and `DeviceManagementApps.Read.All` where Intune is in scope. The device posture fields (encryption, jailbreak, owner type, enrolment, last sync, OS version), the Defender antivirus state of Windows devices (`managedDevices/{id}/windowsProtectionState`, at most 100 devices), the compliance policy assignments and the Windows Update for Business update rings and profiles (the quality and feature update profiles are Graph beta) all use these three scopes: Auditex 1.1 adds no new scope for them. The Intune reports API that returns Defender state for every device at once is a POST export job and is not used, so a larger fleet is reported as a gap in `collection_gaps` (the Defender rules read `not_assessed`; the rest of the Intune evidence is unaffected), not read.
 - `IdentityRiskyUser.Read.All` only when the opt-in `identity_protection` collector is selected (Entra ID P2; stores aggregate counts only).
 - `ConsentRequest.Read.All` only when the opt-in `defender_cloud_apps` collector (app consent requests) is in scope. Defender for Cloud Apps app risk profiles have no Microsoft Graph REST endpoint; review them in the Defender portal.
 
@@ -76,6 +76,8 @@ Use `auditex probe live --mode app` before full collection. Do not grant broad p
 Exchange posture can use Microsoft 365 CLI and PowerShell adapters where Graph has poor coverage. Auditex still records the command surface and keeps audit output read-only. Do not use production write commands.
 
 Detection coverage reads `Get-AdminAuditLogConfig`, `Get-OrganizationConfig`, and `Get-MailboxAuditBypassAssociation` in Exchange Online PowerShell, and `Get-ProtectionAlert` in Security & Compliance PowerShell (`Connect-IPPSSession`). These are read-only `Get-*` cmdlets; View-Only Organization Management or Global Reader is sufficient. Without the session the signal is reported as `unknown`, not `off`.
+
+Mail protection reads `Get-MalwareFilterPolicy` (the default policy's common attachment types filter and zero-hour auto purge), `Get-TransportConfig` (`SmtpClientAuthenticationDisabled`) and `Get-DkimSigningConfig` (DKIM signing per domain) in the same Exchange Online session. They are read-only `Get-*` cmdlets that pass the shared read guard and need no role beyond Global Reader. Without the session the matching rules read `not_assessed`, never a pass.
 
 ## Google Workspace Access Models
 

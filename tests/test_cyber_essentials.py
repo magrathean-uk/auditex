@@ -143,9 +143,25 @@ def test_the_catalog_is_honest_about_what_a_tenant_audit_can_decide() -> None:
     assert len(by_status["manual"]) + len(by_status["ce_plus_assessor_test"]) + len(by_status["provider_responsibility"]) > len(
         by_status["partial"]
     )
-    # Firewalls, update management and malware protection have no tenant-decidable requirement.
+    # Firewalls have no tenant-decidable requirement. Update management and malware protection are partial: Intune
+    # and Exchange Online evidence covers part of each, never all of it.
     for requirement_id in by_status["partial"] + by_status["automated"]:
-        assert _REQUIREMENTS[requirement_id]["theme"] in {"secure_configuration", "user_access_control"}, requirement_id
+        assert _REQUIREMENTS[requirement_id]["theme"] in {
+            "secure_configuration",
+            "user_access_control",
+            "security_update_management",
+            "malware_protection",
+        }, requirement_id
+    assert {
+        requirement_id
+        for requirement_id in by_status["partial"]
+        if _REQUIREMENTS[requirement_id]["theme"] in {"security_update_management", "malware_protection"}
+    } == {
+        "ce.sum.supported_software",
+        "ce.sum.automatic_updates",
+        "ce.sum.vulnerability_fixes_14_days",
+        "ce.mp.antimalware",
+    }
     assert not by_status["automated"], "no CE requirement is decided by tenant evidence alone in v3.3"
     assert by_status["partial"], "the tenant-backed requirements are missing"
 
@@ -262,7 +278,9 @@ def test_a_requirement_row_has_the_documented_shape() -> None:
 
 def test_no_manual_assessor_or_provider_requirement_ever_reads_pass() -> None:
     every_collector = set(baselines._NAMESPACE_COLLECTORS.values()) | {c for cs in baselines._RULE_COLLECTORS.values() for c in cs}
-    alignment = build_baseline_alignment([], coverage_ledger=_ledger(*sorted(every_collector)))
+    alignment = build_baseline_alignment(
+        [], normalized_snapshot=_CLEAN_IDENTITY_SNAPSHOT, coverage_ledger=_ledger(*sorted(every_collector))
+    )
     rows = _section(alignment)["controls"]
 
     assert {row["status"] for row in rows} <= _VERDICT_STATUSES
@@ -271,9 +289,9 @@ def test_no_manual_assessor_or_provider_requirement_ever_reads_pass() -> None:
             assert row["status"] == "not_assessed", row["control_id"]
             assert row["reason"] == f"requirement_status:{row['requirement_status']}"
     # A supporting rule can pass without lending the assessor-tested requirement a verdict.
-    patching = _row(alignment, "ce.sum.vulnerability_fixes_14_days")
-    assert patching["requirement_status"] == "ce_plus_assessor_test" and patching["status"] == "not_assessed"
-    assert patching["evidence"]["rules_passed"] == 1
+    separation = _row(alignment, "ce.uac.separate_admin_accounts")
+    assert separation["requirement_status"] == "ce_plus_assessor_test" and separation["status"] == "not_assessed"
+    assert separation["evidence"]["rules_passed"] == 1
 
 
 def test_a_partial_requirement_never_reads_pass_on_a_clean_fully_evaluated_run() -> None:
@@ -321,13 +339,13 @@ def test_an_open_finding_fails_the_requirement_and_an_accepted_one_is_accepted_r
 
 
 def test_a_failing_supporting_rule_is_shown_but_gives_an_assessor_requirement_no_verdict() -> None:
-    finding = {"id": "intune:dev-1", "rule_id": "intune.device_noncompliant", "status": "open"}
-    row = _row(build_baseline_alignment([finding], coverage_ledger=_ledger("intune")), "ce.sum.vulnerability_fixes_14_days")
+    finding = {"id": "identity:admin-1:licence", "rule_id": "identity.admin_holds_productivity_licence", "status": "open"}
+    row = _row(build_baseline_alignment([finding], coverage_ledger=_ledger("identity", "licensing")), "ce.uac.separate_admin_accounts")
 
     assert row["status"] == "not_assessed" and row["requirement_status"] == "ce_plus_assessor_test"
-    assert row["open_finding_count"] == 1 and row["finding_ids"] == ["intune:dev-1"]
+    assert row["open_finding_count"] == 1 and row["finding_ids"] == ["identity:admin-1:licence"]
     assert row["evidence"]["rules_failed"] == 1
-    assert row["ce_plus_test"] == "Test case 2: Check patching, by authenticated vulnerability scan of devices"
+    assert row["ce_plus_test"] == "Test case 5: Check account separation"
 
 
 def test_google_findings_reach_the_requirement_through_their_own_mappings() -> None:

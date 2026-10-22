@@ -14,6 +14,20 @@ Detection-coverage commands (all read-only ``Get-*`` cmdlets):
 * ``Get-ProtectionAlert`` -> alert policy names, state, severity, category. Security & Compliance
   PowerShell only (``Connect-IPPSSession``); without that session the row is a coverage gap.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert
+
+Mail protection commands (Cyber Essentials malware protection and secure configuration; all read-only
+``Get-*`` cmdlets that pass the shared read guard, Exchange Online PowerShell):
+
+* ``Get-MalwareFilterPolicy`` -> ``IsDefault``, ``EnableFileFilter`` (the common attachment types filter) and
+  ``ZapEnabled`` (zero-hour auto purge of malware). The default policy applies to every recipient that no
+  other policy covers; the policy settings are read, not the recipients.
+  https://learn.microsoft.com/en-us/powershell/module/exchange/get-malwarefilterpolicy
+* ``Get-TransportConfig`` -> ``SmtpClientAuthenticationDisabled``: whether authenticated SMTP submission
+  (a basic-authentication protocol) is switched off for the whole tenant.
+  https://learn.microsoft.com/en-us/powershell/module/exchange/get-transportconfig
+* ``Get-DkimSigningConfig`` -> ``Domain``, ``Enabled`` and ``Status`` per domain: whether Exchange Online
+  signs outbound mail with DKIM, which the DNS lookup in ``dns_posture`` cannot show.
+  https://learn.microsoft.com/en-us/powershell/module/exchange/get-dkimsigningconfig
 """
 from __future__ import annotations
 
@@ -49,7 +63,7 @@ def _exchange_session(client: Any, log_event: Any) -> dict[str, Any]:
 
 class ExchangePolicyCollector(Collector):
     name = "exchange_policy"
-    description = "Exchange transport, domain, connector, and forwarding policy posture."
+    description = "Exchange transport, domain, connector, forwarding, malware filter, SMTP AUTH and DKIM signing policy posture."
     required_permissions: list[str] = []
     command_collectors = [
         (
@@ -74,6 +88,9 @@ class ExchangePolicyCollector(Collector):
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count",
         ),
         ("protectionAlerts", "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"),
+        ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled"),
+        ("transportConfig", "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled"),
+        ("dkimSigningConfig", "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"),
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:

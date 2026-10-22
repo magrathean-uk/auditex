@@ -342,6 +342,34 @@ reads `not_assessed` when no emergency-access account could be identified
 (`break_glass_accounts_not_identified`) or the accounts the operator listed were not found
 (`break_glass_accounts_unresolved`).
 
+## Device, update and mail protection rules
+
+These rules read Intune and Exchange Online for the Cyber Essentials update and malware requirements. Only
+`exchange.dkim_signing_disabled` maps to a verified CIS v7 and ScubaGear control (`2.1.9`, `MS.EXO.3.1v1`, the
+control `dns_posture.dkim_missing` already maps to, so a domain is reported by one rule only: the DNS rule keeps
+a domain with no published selector and the Exchange rule reads `not_assessed` for it). Both rules now feed those controls: published selectors
+no longer make CIS `2.1.9` or `MS.EXO.3.1v1` `pass` on DNS evidence alone, because they do not show that Exchange Online signs mail. The three
+Exchange rules are judged on their own command rows, not on whether the whole `exchange_policy` collector completed, which it rarely does
+in an app-only run (`Get-ProtectionAlert` needs a Security & Compliance session). The others map to the
+Microsoft Zero Trust pillar and MCSB anchors, NIST SP 800-53, ISO/IEC 27001, SOC 2, NIS2, DORA and (for
+malware) MITRE ATT&CK, and to the Cyber Essentials requirements below. No CIS or ScubaGear id is claimed
+where the catalog has no verified control.
+
+| Rule | Cyber Essentials requirement (confidence) |
+| --- | --- |
+| `intune.device_os_end_of_life` | `ce.sum.supported_software` (partial), `ce.sum.vulnerability_fixes_14_days` (partial) |
+| `intune.device_stale_sync` | `ce.sum.vulnerability_fixes_14_days` (partial) |
+| `intune_depth.update_ring_not_assigned` | `ce.sum.automatic_updates` (partial), `ce.sum.vulnerability_fixes_14_days` (partial) |
+| `intune_depth.update_ring_deferral_excessive` | `ce.sum.vulnerability_fixes_14_days` (partial) |
+| `intune.defender_av_off`, `intune.defender_realtime_protection_off`, `intune.defender_signatures_stale` | `ce.mp.antimalware` (partial) |
+| `exchange.malware_filter_weakened` | `ce.mp.antimalware` (partial) |
+| `exchange.smtp_auth_enabled_tenant_wide` | `ce.sc.saas_configuration` (partial), `ce.uac.mfa_cloud_services` (partial) |
+| `intune.device_encryption_off`, `intune.device_jailbroken`, `intune.compliance_policy_missing_platform`, `exchange.dkim_signing_disabled` | none (no Cyber Essentials requirement names them) |
+
+Every mapping is `partial`: the rules cover enrolled devices and one Exchange policy, not every device or
+every recipient. See "Microsoft 365 device, update and malware evidence" in the
+[output contract](output-contract.md) for the evidence each rule reads and when it reads `not_assessed`.
+
 ## Cyber Essentials
 
 The `cyber_essentials` key follows **Cyber Essentials: Requirements for IT Infrastructure v3.3**
@@ -375,8 +403,11 @@ Malware protection. Every requirement carries one status:
   commitment. Auditex reports no verdict.
 
 Most requirements are device, network or process side, so most are `manual`, `ce_plus_assessor_test`
-or `provider_responsibility`. Only user access control and parts of secure configuration have tenant
-evidence.
+or `provider_responsibility`. Tenant evidence covers user access control, parts of secure configuration and,
+through Intune and Exchange Online, parts of update management and malware protection. Those four
+requirements (`ce.sum.supported_software`, `ce.sum.automatic_updates`, `ce.sum.vulnerability_fixes_14_days`,
+`ce.mp.antimalware`) were `manual` or `ce_plus_assessor_test` until the device, update and malware rules
+existed; they are `partial` now, so a rule can fail them and a clean result is `not_assessed`.
 
 | Requirement | Status | Rules |
 | --- | --- | --- |
@@ -391,15 +422,15 @@ evidence.
 | `ce.sc.autorun_disabled` | manual | none |
 | `ce.sc.user_authentication` | manual | none |
 | `ce.sc.device_unlocking` | manual | none |
-| `ce.sc.saas_configuration` | partial | `ca.legacy_auth_not_blocked`, `consent_policy.user_consent_unrestricted` |
-| `ce.sum.supported_software` | manual | `google.chromeos_device_past_aue` (supporting evidence only) |
-| `ce.sum.automatic_updates` | manual | none |
-| `ce.sum.vulnerability_fixes_14_days` | CE+ assessor test | `google.chromeos_device_past_aue`, `intune.device_noncompliant` (supporting evidence only) |
+| `ce.sc.saas_configuration` | partial | `ca.legacy_auth_not_blocked`, `consent_policy.user_consent_unrestricted`, `exchange.smtp_auth_enabled_tenant_wide` |
+| `ce.sum.supported_software` | partial | `google.chromeos_device_past_aue`, `intune.device_os_end_of_life` |
+| `ce.sum.automatic_updates` | partial | `intune_depth.update_ring_not_assigned` |
+| `ce.sum.vulnerability_fixes_14_days` | partial | `google.chromeos_device_past_aue`, `intune.device_noncompliant`, `intune.device_os_end_of_life`, `intune.device_stale_sync`, `intune_depth.update_ring_deferral_excessive`, `intune_depth.update_ring_not_assigned` |
 | `ce.sum.saas_provider` | provider responsibility | none |
 | `ce.uac.account_approval` | manual | none |
 | `ce.uac.unique_credentials` | manual | none |
 | `ce.uac.remove_unused_accounts` | partial | `google.admin_stale_login`, `google.never_logged_in_user`, `google.stale_user`, `identity.privileged_stale_account`, `identity.stale_enabled_account`, `identity.stale_guest` |
-| `ce.uac.mfa_cloud_services` | partial | `ca.legacy_auth_not_blocked`, `ca.mfa_not_enforced`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `google.user_2sv_not_enforced`, `google.user_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered` |
+| `ce.uac.mfa_cloud_services` | partial | `ca.legacy_auth_not_blocked`, `ca.mfa_not_enforced`, `exchange.smtp_auth_enabled_tenant_wide`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `google.user_2sv_not_enforced`, `google.user_2sv_not_enrolled`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered` |
 | `ce.uac.mfa_admin_accounts` | partial | `attack_path.no_mfa_to_tier0`, `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.org_2sv_policy_not_enforced`, `identity.global_admin_mfa_not_registered`, `identity.privileged_mfa_not_registered` |
 | `ce.uac.separate_admin_accounts` | CE+ assessor test | `identity.admin_holds_productivity_licence` (supporting evidence only) |
 | `ce.uac.special_access_privileges` | partial | `google.admin_stale_login`, `google.super_admin_sprawl`, `google.suspended_admin`, `identity.global_admin_disabled`, `identity.global_admin_sprawl`, `identity.guest_with_privileged_role`, `identity.privileged_stale_account` |
@@ -407,7 +438,7 @@ evidence.
 | `ce.uac.password_quality` | manual | none |
 | `ce.uac.password_guidance` | manual | none |
 | `ce.uac.third_party_accounts` | manual | none |
-| `ce.mp.antimalware` | CE+ assessor test | none |
+| `ce.mp.antimalware` | partial | `exchange.malware_filter_weakened`, `intune.defender_av_off`, `intune.defender_realtime_protection_off`, `intune.defender_signatures_stale` |
 | `ce.mp.app_allow_listing` | manual | none |
 | `ce.mp.saas_provider` | provider responsibility | none |
 
@@ -452,10 +483,13 @@ met. The applicant's own answers and the assessor's tests decide that.
   collectors completed and its inputs were present) and raised no finding, not a full CIS audit
   result.
 - `consent_policy.user_consent_unrestricted` fires only when users can consent to any app. CIS v7 `5.1.5.1` and SCuBA `MS.AAD.5.2v1` ask for no user consent, so a clean result against them means no unrestricted user consent, not that consent is off.
-- Cyber Essentials coverage is partial by design. Six of 30 requirements have tenant evidence behind
-  them and none is `automated`, so no Cyber Essentials row can read `pass`. No rule yet checks separate administrator accounts, Defender or other
-  anti-malware status, operating system support dates, update age or device lock settings; those stay
-  `manual` or `ce_plus_assessor_test` until a collector and rule exist. CE+ is assessed against the v3.2
+- Cyber Essentials coverage is partial by design. Ten of 30 requirements have tenant evidence behind
+  them and none is `automated`, so no Cyber Essentials row can read `pass`. The update and malware
+  evidence covers devices Intune manages (Defender antivirus on Windows only, operating systems in the
+  dated table, update rings but not update age) and the default Exchange Online anti-malware policy. No rule
+  checks macOS or third-party anti-malware, application allow listing, update age, device lock settings or
+  separate administrator accounts beyond the licence proxy; those stay `manual` or `ce_plus_assessor_test`
+  until a collector and rule exist. CE+ is assessed against the v3.2
   test specification, so a future v3.3 specification may change the test-case names.
 - MCSB v2 is a preview release, and its ids could change before it is generally available.
 - Secure Score control ids are service-defined and change over time. Microsoft does not publish

@@ -1,0 +1,363 @@
+{
+  "_fixture_provenance": {
+    "fixture_version": "2026-10-22",
+    "provider": "m365",
+    "seed_kind": "known_bad",
+    "synthetic": true,
+    "fixture_id": "m365-endpoint-posture",
+    "source_path": "examples/sample_audit_bundle/endpoint_posture_result.json",
+    "description": "Synthetic tenant whose devices, updates and malware protection are weak in every way the endpoint rules read: an unencrypted Windows 11 device with Defender off, an unsupported Windows 10 device that has not synced, a jailbroken iPhone, an Android 11 phone, a Mac with unknown encryption and sync time, compliance policies missing or unassigned for two platforms, an update ring that delays quality updates by 30 days, and Exchange Online with the default malware policy weakened, SMTP AUTH enabled and DKIM signing off. Every identifier is fictional; domains use the reserved .example TLD. Last-sync dates are fixed in the past, so the stale-sync rule fires on any replay date."
+  },
+  "intune": {
+    "managedDevices": {
+      "value": [
+        {
+          "id": "00000000-0000-4000-8000-00000000d001",
+          "deviceName": "EP-WIN10-01",
+          "operatingSystem": "Windows",
+          "osVersion": "10.0.19045.5371",
+          "complianceState": "compliant",
+          "managedDeviceOwnerType": "company",
+          "enrolledDateTime": "2025-01-15T09:00:00Z",
+          "deviceEnrollmentType": "windowsAzureADJoin",
+          "isEncrypted": true,
+          "jailBroken": "Unknown",
+          "lastSyncDateTime": "2024-01-02T08:00:00Z"
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000d002",
+          "deviceName": "EP-WIN11-02",
+          "operatingSystem": "Windows",
+          "osVersion": "10.0.26200.1000",
+          "complianceState": "compliant",
+          "managedDeviceOwnerType": "company",
+          "enrolledDateTime": "2025-01-15T09:00:00Z",
+          "deviceEnrollmentType": "windowsAzureADJoin",
+          "isEncrypted": false,
+          "jailBroken": "Unknown",
+          "lastSyncDateTime": "2026-10-20T07:30:00Z"
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000d003",
+          "deviceName": "EP-IPHONE-03",
+          "operatingSystem": "iOS",
+          "osVersion": "18.5",
+          "complianceState": "compliant",
+          "managedDeviceOwnerType": "company",
+          "enrolledDateTime": "2025-01-15T09:00:00Z",
+          "deviceEnrollmentType": "userEnrollment",
+          "isEncrypted": true,
+          "jailBroken": "True",
+          "lastSyncDateTime": "2026-10-20T07:30:00Z"
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000d004",
+          "deviceName": "EP-ANDROID-04",
+          "operatingSystem": "Android",
+          "osVersion": "11",
+          "complianceState": "compliant",
+          "managedDeviceOwnerType": "company",
+          "enrolledDateTime": "2025-01-15T09:00:00Z",
+          "deviceEnrollmentType": "userEnrollment",
+          "isEncrypted": true,
+          "jailBroken": "False",
+          "lastSyncDateTime": "2026-10-20T07:30:00Z"
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000d005",
+          "deviceName": "EP-MAC-05",
+          "operatingSystem": "macOS",
+          "osVersion": "15.1",
+          "complianceState": "compliant",
+          "managedDeviceOwnerType": "company",
+          "enrolledDateTime": "2025-01-15T09:00:00Z",
+          "deviceEnrollmentType": "userEnrollment"
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000d006",
+          "deviceName": "EP-WIN11-06",
+          "operatingSystem": "Windows",
+          "osVersion": "10.0.26200.1000",
+          "complianceState": "compliant",
+          "managedDeviceOwnerType": "company",
+          "enrolledDateTime": "2025-01-15T09:00:00Z",
+          "deviceEnrollmentType": "windowsAzureADJoin",
+          "isEncrypted": true,
+          "jailBroken": "Unknown",
+          "lastSyncDateTime": "2026-10-20T07:30:00Z"
+        }
+      ]
+    },
+    "deviceCompliancePolicies": {
+      "value": [
+        {
+          "id": "00000000-0000-4000-8000-00000000c001",
+          "displayName": "Windows baseline",
+          "@odata.type": "#microsoft.graph.windows10CompliancePolicy",
+          "passwordRequired": true,
+          "passwordMinimumLength": 12,
+          "bitLockerEnabled": true,
+          "storageRequireEncryption": true,
+          "osMinimumVersion": "10.0.22631"
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000c002",
+          "displayName": "iOS baseline",
+          "@odata.type": "#microsoft.graph.iosCompliancePolicy",
+          "passcodeRequired": true,
+          "passcodeMinimumLength": 6,
+          "securityBlockJailbrokenDevices": true,
+          "osMinimumVersion": "17.0"
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000c003",
+          "displayName": "Android baseline (not assigned)",
+          "@odata.type": "#microsoft.graph.androidWorkProfileCompliancePolicy",
+          "passwordRequired": true,
+          "securityBlockJailbrokenDevices": true,
+          "storageRequireEncryption": true
+        }
+      ]
+    },
+    "deviceCompliancePolicyAssignments": {
+      "value": [
+        {
+          "policyId": "00000000-0000-4000-8000-00000000c001",
+          "displayName": "Windows baseline",
+          "assignments": [
+            {
+              "id": "a1",
+              "target": {
+                "@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"
+              }
+            }
+          ]
+        },
+        {
+          "policyId": "00000000-0000-4000-8000-00000000c002",
+          "displayName": "iOS baseline",
+          "assignments": [
+            {
+              "id": "a2",
+              "target": {
+                "@odata.type": "#microsoft.graph.groupAssignmentTarget",
+                "groupId": "00000000-0000-4000-8000-0000000000a1"
+              }
+            }
+          ]
+        },
+        {
+          "policyId": "00000000-0000-4000-8000-00000000c003",
+          "displayName": "Android baseline (not assigned)",
+          "assignments": []
+        }
+      ],
+      "collection_truncated": false
+    },
+    "windowsProtectionStates": {
+      "value": [
+        {
+          "deviceId": "00000000-0000-4000-8000-00000000d001",
+          "deviceName": "EP-WIN10-01",
+          "read_status": "ok",
+          "malwareProtectionEnabled": true,
+          "realTimeProtectionEnabled": true,
+          "signatureUpdateOverdue": false,
+          "productStatus": "noStatus",
+          "tamperProtectionEnabled": true,
+          "lastReportedDateTime": "2024-01-02T08:00:00Z"
+        },
+        {
+          "deviceId": "00000000-0000-4000-8000-00000000d002",
+          "deviceName": "EP-WIN11-02",
+          "read_status": "ok",
+          "malwareProtectionEnabled": false,
+          "realTimeProtectionEnabled": false,
+          "signatureUpdateOverdue": true,
+          "productStatus": "serviceStartedWithoutMalwareProtection, avSignaturesOutOfDate",
+          "tamperProtectionEnabled": false,
+          "lastReportedDateTime": "2026-10-20T07:30:00Z"
+        },
+        {
+          "deviceId": "00000000-0000-4000-8000-00000000d006",
+          "deviceName": "EP-WIN11-06",
+          "read_status": "ok",
+          "malwareProtectionEnabled": true,
+          "realTimeProtectionEnabled": true,
+          "signatureUpdateOverdue": false,
+          "productStatus": "noStatus",
+          "tamperProtectionEnabled": true,
+          "lastReportedDateTime": "2026-10-20T07:30:00Z"
+        }
+      ],
+      "collection_truncated": false
+    }
+  },
+  "intune_depth": {
+    "windowsUpdateRings": {
+      "value": [
+        {
+          "@odata.type": "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+          "automaticUpdateMode": "autoInstallAndRebootAtMaintenanceTime",
+          "microsoftUpdateServiceAllowed": true,
+          "featureUpdatesDeferralPeriodInDays": 30,
+          "id": "00000000-0000-4000-8000-00000000e001",
+          "displayName": "Slow ring",
+          "qualityUpdatesDeferralPeriodInDays": 30,
+          "qualityUpdatesPaused": false,
+          "deadlineForQualityUpdatesInDays": 7
+        },
+        {
+          "@odata.type": "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+          "automaticUpdateMode": "autoInstallAndRebootAtMaintenanceTime",
+          "microsoftUpdateServiceAllowed": true,
+          "featureUpdatesDeferralPeriodInDays": 30,
+          "id": "00000000-0000-4000-8000-00000000e002",
+          "displayName": "Pilot ring",
+          "qualityUpdatesDeferralPeriodInDays": 3,
+          "qualityUpdatesPaused": false,
+          "deadlineForQualityUpdatesInDays": 2
+        }
+      ],
+      "collection_truncated": false
+    },
+    "windowsUpdateRingAssignments": {
+      "value": [
+        {
+          "policyId": "00000000-0000-4000-8000-00000000e001",
+          "displayName": "Slow ring",
+          "assignments": [
+            {
+              "id": "r1",
+              "target": {
+                "@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"
+              }
+            }
+          ]
+        },
+        {
+          "policyId": "00000000-0000-4000-8000-00000000e002",
+          "displayName": "Pilot ring",
+          "assignments": [
+            {
+              "id": "r2",
+              "target": {
+                "@odata.type": "#microsoft.graph.groupAssignmentTarget",
+                "groupId": "00000000-0000-4000-8000-0000000000a1"
+              }
+            }
+          ]
+        }
+      ],
+      "collection_truncated": false
+    },
+    "windowsQualityUpdateProfiles": {
+      "value": [
+        {
+          "id": "00000000-0000-4000-8000-00000000f001",
+          "displayName": "Expedite critical fixes",
+          "expeditedUpdateSettings": {
+            "qualityUpdateRelease": "2026-10-01T00:00:00Z",
+            "daysUntilForcedReboot": 1
+          }
+        }
+      ],
+      "collection_truncated": false
+    },
+    "windowsQualityUpdateProfileAssignments": {
+      "value": [
+        {
+          "policyId": "00000000-0000-4000-8000-00000000f001",
+          "displayName": "Expedite critical fixes",
+          "assignments": [
+            {
+              "id": "q1",
+              "target": {
+                "@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"
+              }
+            }
+          ]
+        }
+      ],
+      "collection_truncated": false
+    },
+    "windowsFeatureUpdateProfiles": {
+      "value": [
+        {
+          "id": "00000000-0000-4000-8000-00000000f002",
+          "displayName": "Windows 11 25H2",
+          "featureUpdateVersion": "Windows 11, version 25H2"
+        }
+      ],
+      "collection_truncated": false
+    },
+    "windowsFeatureUpdateProfileAssignments": {
+      "value": [
+        {
+          "policyId": "00000000-0000-4000-8000-00000000f002",
+          "displayName": "Windows 11 25H2",
+          "assignments": [
+            {
+              "id": "f1",
+              "target": {
+                "@odata.type": "#microsoft.graph.groupAssignmentTarget",
+                "groupId": "00000000-0000-4000-8000-0000000000a1"
+              }
+            }
+          ]
+        }
+      ],
+      "collection_truncated": false
+    }
+  },
+  "exchange_policy": {
+    "acceptedDomains": {
+      "value": [
+        {
+          "Name": "contoso",
+          "DomainName": "contoso.example",
+          "DomainType": "Authoritative",
+          "Default": true
+        },
+        {
+          "Name": "contoso-tenant",
+          "DomainName": "contosoexample.onmicrosoft.com",
+          "DomainType": "Authoritative",
+          "Default": false
+        }
+      ]
+    },
+    "malwareFilterPolicy": {
+      "value": [
+        {
+          "Identity": "Default",
+          "Name": "Default",
+          "IsDefault": true,
+          "EnableFileFilter": false,
+          "ZapEnabled": false
+        }
+      ]
+    },
+    "transportConfig": {
+      "value": [
+        {
+          "SmtpClientAuthenticationDisabled": false
+        }
+      ]
+    },
+    "dkimSigningConfig": {
+      "value": [
+        {
+          "Domain": "contoso.example",
+          "Enabled": false,
+          "Status": "Valid"
+        },
+        {
+          "Domain": "contosoexample.onmicrosoft.com",
+          "Enabled": true,
+          "Status": "Valid"
+        }
+      ]
+    }
+  }
+}

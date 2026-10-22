@@ -193,7 +193,7 @@
         "Intune Administrator",
         "Security Reader"
       ],
-      "notes": "Will return empty/unavailable datasets if tenant lacks Intune licensing."
+      "notes": "Will return empty/unavailable datasets if tenant lacks Intune licensing. No scope beyond the three above is needed for the device posture fields (managedDevices $select: isEncrypted, jailBroken, managedDeviceOwnerType, enrolledDateTime, deviceEnrollmentType, lastSyncDateTime), the compliance policy assignments (GET /deviceManagement/deviceCompliancePolicies/{id}/assignments, DeviceManagementConfiguration.Read.All) or the Defender antivirus state (GET /deviceManagement/managedDevices/{id}/windowsProtectionState for at most 100 Windows devices, DeviceManagementManagedDevices.Read.All). The Intune reports API (reports/getDefenderAgentsReport, reports/exportJobs) is a POST export job and is not used."
     },
     "sharepoint": {
       "graph_scopes": [
@@ -366,7 +366,7 @@
         "Intune Reader",
         "Global Reader"
       ],
-      "notes": "Deeper Intune policy and assignment surfaces can still return empty or partial results when Intune is not licensed or the tenant does not use those workloads. groupPolicyConfigurations and deviceManagementScripts are Graph beta endpoints; script metadata is read with a fixed $select that excludes scriptContent."
+      "notes": "Deeper Intune policy and assignment surfaces can still return empty or partial results when Intune is not licensed or the tenant does not use those workloads. groupPolicyConfigurations, deviceManagementScripts, windowsQualityUpdateProfiles and windowsFeatureUpdateProfiles are Graph beta endpoints; script metadata is read with a fixed $select that excludes scriptContent. Windows Update for Business update rings are read from the deviceConfigurations list already collected (type windowsUpdateForBusinessConfiguration, v1.0), and the assignments of each ring and update profile are read with GET .../assignments (DeviceManagementConfiguration.Read.All); no new scope is needed."
     },
     "exchange": {
       "graph_scopes": [],
@@ -409,7 +409,7 @@
         "Exchange Administrator",
         "Global Reader"
       ],
-      "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert is available only in Security & Compliance PowerShell (Connect-IPPSSession). None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal, never 'off'.",
+      "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert is available only in Security & Compliance PowerShell (Connect-IPPSSession). Mail protection cmdlets Get-MalwareFilterPolicy, Get-TransportConfig and Get-DkimSigningConfig run in the same Exchange Online session and are readable with the Global Reader role the other Exchange cmdlets already use; they need no Graph scope and no further role. None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal and 'not_assessed' mail protection rules, never 'off' or a pass.",
       "command_tools": [
         "pwsh",
         "powershell_graph"
@@ -424,7 +424,10 @@
         "Get-AdminAuditLogConfig",
         "Get-OrganizationConfig",
         "Get-MailboxAuditBypassAssociation",
-        "Get-ProtectionAlert"
+        "Get-ProtectionAlert",
+        "Get-MalwareFilterPolicy",
+        "Get-TransportConfig",
+        "Get-DkimSigningConfig"
       ]
     }
   },

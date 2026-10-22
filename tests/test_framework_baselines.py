@@ -57,6 +57,7 @@ _EXPECTED_CIS_V7 = {
     "dns_posture.spf_missing",
     "dns_posture.spf_multiple_records",
     "dns_posture.spf_passthrough",
+    "exchange.dkim_signing_disabled",
     "exchange.remote_domain_auto_forward_enabled",
     "exchange.transport_external_redirect",
     "external_identity.broad_guest_invite_policy",

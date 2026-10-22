@@ -16,7 +16,7 @@ import pytest
 from azure_tenant_audit.cli import run_offline
 
 from auditex.cli import main as auditex_main
-from auditex.demo import DemoOptions, run_demo
+from auditex.demo import DEMO_AS_OF, DemoOptions, run_demo
 from auditex.explorer import (
     ExplorerCompareError,
     build_explorer_bundle,
@@ -35,8 +35,8 @@ HTML_SINKS = re.compile(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write
 @pytest.fixture(scope="module")
 def halcyon_runs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     root = tmp_path_factory.mktemp("halcyon")
-    assert run_offline(DEMO_DIR / "demo_tenant.json", root, "halcyon", "before") == 0
-    assert run_offline(DEMO_DIR / "demo_tenant_remediated.json", root, "halcyon", "after") == 0
+    assert run_offline(DEMO_DIR / "demo_tenant.json", root, "halcyon", "before", as_of=DEMO_AS_OF) == 0
+    assert run_offline(DEMO_DIR / "demo_tenant_remediated.json", root, "halcyon", "after", as_of=DEMO_AS_OF) == 0
     return root / "halcyon-before", root / "halcyon-after"
 
 
@@ -167,6 +167,8 @@ def test_demo_explorer_embeds_before_and_after(tmp_path: Path) -> None:
     assert [run["run_name"] for run in data["runs"]] == ["halcyon-demo", "halcyon-after-fixes"]
     assert data["runs"][data["default_run"]]["run_name"] == "halcyon-demo"
     assert data["compare"]["a"]["grade"] == "critical"
+    # The demo judges its devices as of the day the fictional snapshot was taken (DEMO_AS_OF), so the endpoint rules
+    # (stale sync, operating-system end of life) read the same on every run and the scores do not drift with the clock.
     assert data["compare"]["a"]["score"] == 97 and data["compare"]["b"]["score"] == 64
 
 
@@ -259,3 +261,29 @@ def test_barlow_fonts_are_embedded_and_allowed_only_as_data(tmp_path) -> None:  
     assert "font-family:'Barlow Condensed'" in page and "font/woff2;base64," in page
     assert "font-src data:" in page
     assert "fonts.googleapis" not in page and "fonts.gstatic" not in page
+
+
+def test_the_demo_judges_its_devices_as_of_the_snapshot_date_not_today(tmp_path: Path) -> None:
+    from datetime import datetime, timezone
+
+    stream = io.StringIO()
+    options = DemoOptions(out_dir=tmp_path / "demo", pause=False, html=False, stream=stream)
+    assert run_demo(options) == 0
+    assert "judged as of 3 October 2026" in stream.getvalue()
+    findings = json.loads((tmp_path / "demo" / "runs" / "halcyon-demo" / "findings" / "findings.json").read_text(encoding="utf-8"))
+    by_rule: dict[str, set[str]] = {}
+    for item in findings:
+        by_rule.setdefault(item["rule_id"], set()).add(item["affected_objects"][0])
+    # Eight of the ten demo devices synced within 14 days of the snapshot; only the April one is stale.
+    assert by_rule["intune.device_stale_sync"] == {"HFL-LT-019"}
+    assert by_rule["intune.device_encryption_off"] == {"HFL-LT-007", "HFL-LT-011", "HFL-IPH-022"}
+    assert by_rule["intune.device_os_end_of_life"] == {"HFL-LT-007"}, "Windows 10 22H2 only; the 23H2 devices depend on the edition until November"
+    assert DEMO_AS_OF == datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+
+    # A caller can pin another day; the same fixture is judged as of that day.
+    later = DemoOptions(out_dir=tmp_path / "later", pause=False, html=False, stream=io.StringIO(), as_of=datetime(2026, 12, 1, tzinfo=timezone.utc))
+    assert run_demo(later) == 0
+    later_findings = json.loads((tmp_path / "later" / "runs" / "halcyon-demo" / "findings" / "findings.json").read_text(encoding="utf-8"))
+    later_rules = {item["rule_id"]: {x["affected_objects"][0] for x in later_findings if x["rule_id"] == item["rule_id"]} for item in later_findings}
+    assert {"HFL-LT-011", "HFL-LT-019"} <= later_rules["intune.device_os_end_of_life"], "Windows 11 23H2 Enterprise ended 2026-11-10"
+    assert len(later_rules["intune.device_stale_sync"]) == 10

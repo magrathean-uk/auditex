@@ -217,7 +217,27 @@ class _IntuneDepthClient:
     def get_all(self, path, params=None):  # noqa: ANN001, ARG002
         self.requests.append((path, dict(params or {})))
         responses = {
-            "/deviceManagement/deviceConfigurations": [{"id": "config-1", "displayName": "Windows baseline"}],
+            "/deviceManagement/deviceConfigurations": [
+                {"id": "config-1", "displayName": "Windows baseline"},
+                {
+                    "id": "ring-1",
+                    "displayName": "Windows ring",
+                    "@odata.type": "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+                    "qualityUpdatesDeferralPeriodInDays": 30,
+                    "qualityUpdatesPaused": False,
+                    "customerSecretNote": "not a ring field",
+                },
+            ],
+            "https://graph.microsoft.com/beta/deviceManagement/windowsQualityUpdateProfiles": [
+                {"id": "quality-1", "displayName": "Expedite", "expeditedUpdateSettings": {"qualityUpdateRelease": "2026-10-01"}}
+            ],
+            "https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles": [
+                {"id": "feature-1", "displayName": "Windows 11 25H2", "featureUpdateVersion": "Windows 11, version 25H2"}
+            ],
+            "https://graph.microsoft.com/beta/deviceManagement/windowsQualityUpdateProfiles/quality-1/assignments": [
+                {"id": "qa-1", "target": {"@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"}}
+            ],
+            "https://graph.microsoft.com/beta/deviceManagement/windowsFeatureUpdateProfiles/feature-1/assignments": [],
             "https://graph.microsoft.com/beta/deviceManagement/groupPolicyConfigurations": [
                 {"id": "gp-1", "displayName": "Edge hardening"}
             ],
@@ -250,6 +270,15 @@ class _IntuneDepthClient:
                                 {"id": "assign-1", "target": {"groupId": "group-1"}}
                             ]
                         },
+                    }
+                )
+                continue
+            if request["path"] == "/deviceManagement/deviceConfigurations/ring-1/assignments":
+                responses.append(
+                    {
+                        "request": request,
+                        "status": 200,
+                        "body": {"value": [{"id": "ring-assign-1", "target": {"@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"}}]},
                     }
                 )
                 continue
@@ -455,11 +484,109 @@ def test_intune_depth_collector_collects_configurations_scripts_and_assignments(
     assert result.payload["deviceConfigurations"]["value"][0]["id"] == "config-1"
     assert result.payload["deviceManagementScripts"]["value"][0]["id"] == "script-1"
     assert result.payload["deviceConfigurationAssignments"]["value"][0]["assignments"][0]["id"] == "assign-1"
-    assert client.batch_calls == [["/deviceManagement/deviceConfigurations/config-1/assignments"]]
+    assert client.batch_calls == [
+        [
+            "/deviceManagement/deviceConfigurations/config-1/assignments",
+            "/deviceManagement/deviceConfigurations/ring-1/assignments",
+        ],
+        ["/deviceManagement/deviceConfigurations/ring-1/assignments"],
+    ]
     by_name = {row["name"]: row for row in result.coverage or []}
     assert by_name["deviceManagementScripts"]["api_version"] == "beta"
     assert by_name["groupPolicyConfigurations"]["api_version"] == "beta"
     assert by_name["deviceConfigurations"]["api_version"] == "v1.0"
+    assert by_name["windowsQualityUpdateProfiles"]["api_version"] == "beta"
+    assert by_name["windowsFeatureUpdateProfiles"]["api_version"] == "beta"
+    assert by_name["windowsQualityUpdateProfileAssignments"]["api_version"] == "beta"
+
+
+def test_intune_depth_collects_update_rings_and_profiles_with_assignments() -> None:
+    result = IntuneDepthCollector().run({"client": _IntuneDepthClient(), "top": 100, "audit_logger": None})
+
+    assert result.status == "ok"
+    (ring,) = result.payload["windowsUpdateRings"]["value"]
+    # Only the named update ring fields are kept from the configuration row.
+    assert ring["id"] == "ring-1" and ring["qualityUpdatesDeferralPeriodInDays"] == 30
+    assert "customerSecretNote" not in ring
+    assert result.payload["windowsUpdateRingAssignments"]["value"][0]["assignments"][0]["id"] == "ring-assign-1"
+    assert result.payload["windowsQualityUpdateProfiles"]["value"][0]["id"] == "quality-1"
+    assert result.payload["windowsFeatureUpdateProfiles"]["value"][0]["featureUpdateVersion"] == "Windows 11, version 25H2"
+    quality = result.payload["windowsQualityUpdateProfileAssignments"]["value"]
+    assert quality == [{"policyId": "quality-1", "displayName": "Expedite", "assignments": quality[0]["assignments"]}]
+    assert result.payload["windowsFeatureUpdateProfileAssignments"]["value"] == [
+        {"policyId": "feature-1", "displayName": "Windows 11 25H2", "assignments": []}
+    ]
+    assert result.payload["windowsUpdateRingAssignments"]["collection_truncated"] is False
+    derived = {row["name"]: row for row in result.coverage or [] if row.get("type") == "derived"}
+    assert derived["windowsUpdateRingAssignmentsFanout"]["status"] == "ok"
+    assert derived["windowsUpdateRings"]["item_count"] == 1
+
+
+def test_a_failed_beta_update_profile_read_does_not_make_the_rest_of_intune_depth_partial() -> None:
+    class _ProfilesDenied(_IntuneDepthClient):
+        def get_all(self, path, params=None):  # noqa: ANN001
+            if path.endswith("/windowsQualityUpdateProfiles") or path.endswith("/windowsFeatureUpdateProfiles"):
+                raise GraphError("not available", status=404, request=path)
+            return super().get_all(path, params=params)
+
+    result = IntuneDepthCollector().run({"client": _ProfilesDenied(), "top": 100, "audit_logger": None})
+
+    # The unassigned-policy rule reads deviceConfigurations and their assignments, all read in full.
+    assert result.status == "ok" and "windowsQualityUpdateProfiles" in result.message
+    by_name = {row["name"]: row for row in result.coverage or []}
+    assert by_name["windowsQualityUpdateProfiles"]["status"] == "failed" and by_name["windowsQualityUpdateProfiles"]["section_scoped"] is True
+    assert result.payload["windowsQualityUpdateProfiles"]["error_class"] == "resource_not_found"
+    assert result.payload["windowsQualityUpdateProfileAssignments"]["error_class"] == "incomplete_evidence"
+    # The rings, which come from the v1.0 list, are unaffected.
+    assert result.payload["windowsUpdateRings"]["value"][0]["id"] == "ring-1"
+    assert result.payload["windowsUpdateRingAssignments"]["value"][0]["assignments"][0]["id"] == "ring-assign-1"
+
+
+def test_a_failed_base_list_still_makes_intune_depth_partial() -> None:
+    class _ScriptsDenied(_IntuneDepthClient):
+        def get_all(self, path, params=None):  # noqa: ANN001
+            if path.endswith("/deviceManagementScripts"):
+                raise GraphError("denied", status=403, request=path)
+            return super().get_all(path, params=params)
+
+    assert IntuneDepthCollector().run({"client": _ScriptsDenied(), "top": 100, "audit_logger": None}).status == "partial"
+
+
+def test_intune_depth_update_rings_are_unknown_when_the_configuration_list_failed() -> None:
+    class _NoConfigurations(_IntuneDepthClient):
+        def get_all(self, path, params=None):  # noqa: ANN001
+            if path == "/deviceManagement/deviceConfigurations":
+                raise GraphError("denied", status=403, request=path)
+            return super().get_all(path, params=params)
+
+    result = IntuneDepthCollector().run({"client": _NoConfigurations(), "top": 100, "audit_logger": None})
+
+    assert result.status == "partial"
+    # An unreadable list is an error section, never an empty one that would read as "no update rings".
+    assert result.payload["windowsUpdateRings"]["error_class"] == "incomplete_evidence"
+    assert "value" not in result.payload["windowsUpdateRings"]
+    assert result.payload["windowsUpdateRingAssignments"]["error_class"] == "incomplete_evidence"
+
+
+def test_intune_depth_update_ring_assignments_stop_at_the_fanout_limit() -> None:
+    from azure_tenant_audit.collectors import _endpoint_reads
+
+    section, coverage = _endpoint_reads.assignment_fanout(
+        collector="intune_depth",
+        client=_IntuneDepthClient(),
+        name="windowsUpdateRingAssignments",
+        source={"value": [{"id": "ring-1", "displayName": "Ring"}, {"id": "ring-2", "displayName": "Ring 2"}]},
+        run_dir=None,
+        endpoint_for=lambda policy_id: f"/deviceManagement/deviceConfigurations/{policy_id}/assignments",
+        endpoint_template="/deviceManagement/deviceConfigurations/{id}/assignments",
+        scope="windows_update_rings",
+        limit=1,
+    )
+    derived = next(row for row in coverage if row["type"] == "derived")
+    assert section["collection_truncated"] is True and section["truncation_reason"] == "fanout_limit"
+    assert section["fanout"]["fanout_omitted_count"] == 1
+    assert derived["status"] == "partial" and derived["section_scoped"] is True and "collection_truncated" not in derived
+    assert derived["truncation_reason"] == "fanout_limit"
 
 
 def test_intune_depth_never_requests_script_content() -> None:
@@ -616,6 +743,15 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule": {
                 "value": [{"Name": "Elevation of Exchange admin privilege", "Disabled": False}]
             },
+            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled": {
+                "value": [{"Identity": "Default", "Name": "Default", "IsDefault": True, "EnableFileFilter": True, "ZapEnabled": True}]
+            },
+            "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled": {
+                "value": [{"SmtpClientAuthenticationDisabled": True}]
+            },
+            "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status": {
+                "value": [{"Domain": "contoso.com", "Enabled": True, "Status": "Valid"}]
+            },
         }
     )
     monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _name: adapter)
@@ -624,6 +760,9 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
     result = collector.run({"audit_logger": None})
 
     assert result.status == "ok"
+    assert result.payload["malwareFilterPolicy"]["value"][0]["ZapEnabled"] is True
+    assert result.payload["transportConfig"]["value"] == [{"SmtpClientAuthenticationDisabled": True}]
+    assert result.payload["dkimSigningConfig"]["value"][0]["Domain"] == "contoso.com"
     assert result.payload["adminAuditLogConfig"]["value"][0]["UnifiedAuditLogIngestionEnabled"] is True
     assert result.payload["mailboxAuditBypass"]["value"] == [{"Count": 0}]
     assert result.payload["transportRules"]["value"][0]["Name"] == "Block Forwarding"

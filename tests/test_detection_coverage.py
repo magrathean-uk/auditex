@@ -117,19 +117,52 @@ def test_signin_logs_license_blocker_is_off_but_permission_blocker_is_unknown() 
     assert collected["directory_audit_logs"]["status"] == "on"
 
 
-def test_identity_protection_and_defender_signals() -> None:
+def test_identity_protection_signal() -> None:
     available = _signals(
-        {
-            "identity_protection": {"riskyUserSummary": {"value": [{"id": "summary", "sampled_count": 2}]}},
-            "defender": {"securityAlerts": {"value": []}},
-        }
+        {"identity_protection": {"riskyUserSummary": {"value": [{"id": "summary", "sampled_count": 2}]}}}
     )
     assert available["identity_protection_risk_detection"]["status"] == "on"
-    assert available["defender_alert_api"]["status"] == "on"
     unlicensed = _signals(
         {"identity_protection": {"riskyUserSummary": {"error": "not licensed", "error_class": "license_required"}}}
     )
     assert unlicensed["identity_protection_risk_detection"]["status"] == "off"
+
+
+def _licences(*plans: str, status: str = "Success", capability: str = "Enabled") -> dict[str, Any]:
+    sku = {"capabilityStatus": capability, "servicePlans": [{"servicePlanName": name, "provisioningStatus": status} for name in plans]}
+    return {"licensing": {"subscribedSkus": {"value": [sku]}}}
+
+
+def test_defender_alert_signal_is_on_only_with_evidence_that_defender_produces_alerts() -> None:
+    answering = {"defender": {"securityAlerts": {"value": []}}}
+    # The alerts API answers for any tenant: an empty list proves nothing about Defender.
+    bare = _signals(answering)["defender_alert_api"]
+    assert bare["status"] == "unknown" and bare["reason"] == "alerts_api_answered_licensing_not_read"
+    no_defender = _signals({**answering, **_licences("EXCHANGE_S_ENTERPRISE")})["defender_alert_api"]
+    assert no_defender["status"] == "unknown" and no_defender["reason"] == "alerts_api_answered_no_defender_evidence"
+    # Entra ID Protection alerts come through the same API and are not Defender.
+    entra_only = {"defender": {"securityAlerts": {"value": [{"serviceSource": "microsoftEntraIdProtection"}]}}}
+    assert _signals({**entra_only, **_licences("EXCHANGE_S_ENTERPRISE")})["defender_alert_api"]["status"] == "unknown"
+
+    alerts = {"defender": {"securityAlerts": {"value": [{"serviceSource": "microsoftDefenderForEndpoint"}]}}}
+    observed = _signals(alerts)["defender_alert_api"]
+    assert (observed["status"], observed["reason"]) == ("on", "defender_alerts_observed")
+    assert observed["observed_value"] == {"service_sources": ["microsoftDefenderForEndpoint"]}
+    # The sentinel_xdr copy of the same API counts the same way.
+    xdr = {"sentinel_xdr": {"xdrAlerts": {"value": [{"serviceSource": "microsoftDefenderForOffice365"}]}}}
+    assert _signals(xdr)["defender_alert_api"]["status"] == "on"
+
+    licensed = _signals({**answering, **_licences("WINDEFATP")})["defender_alert_api"]
+    assert (licensed["status"], licensed["reason"]) == ("on", "defender_service_plan_present")
+    assert licensed["observed_value"] == {"service_plans": ["WINDEFATP"]}
+    # A disabled plan or a suspended subscription is not a service plan in use.
+    assert _signals({**answering, **_licences("WINDEFATP", status="Disabled")})["defender_alert_api"]["status"] == "unknown"
+    assert _signals({**answering, **_licences("WINDEFATP", capability="Suspended")})["defender_alert_api"]["status"] == "unknown"
+    # A plan without an answering alerts API is not evidence either.
+    blocked = _signals(_licences("WINDEFATP"), [{"collector": "defender", "item": "securityAlerts", "error_class": "insufficient_permissions"}])
+    assert blocked["defender_alert_api"]["status"] == "unknown" and blocked["defender_alert_api"]["reason"] == "source_blocked"
+    unlicensed = _signals({}, [{"collector": "defender", "item": "securityAlerts", "error_class": "license_required"}])
+    assert unlicensed["defender_alert_api"]["status"] == "off"
 
 
 def test_summary_score_ignores_unknown_signals() -> None:

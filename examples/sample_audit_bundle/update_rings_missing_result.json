@@ -1,0 +1,103 @@
+{
+  "_fixture_provenance": {
+    "fixture_version": "2026-10-22",
+    "provider": "m365",
+    "seed_kind": "known_bad",
+    "synthetic": true,
+    "fixture_id": "m365-endpoint-no-update-rings",
+    "source_path": "examples/sample_audit_bundle/update_rings_missing_result.json",
+    "description": "Synthetic tenant with Windows devices and no Windows Update for Business update ring, and a compliance policy for Windows that is assigned. Every identifier is fictional."
+  },
+  "intune": {
+    "managedDevices": {
+      "value": [
+        {
+          "id": "00000000-0000-4000-8000-00000000d006",
+          "deviceName": "EP-WIN11-06",
+          "operatingSystem": "Windows",
+          "osVersion": "10.0.26200.1000",
+          "complianceState": "compliant",
+          "managedDeviceOwnerType": "company",
+          "enrolledDateTime": "2025-01-15T09:00:00Z",
+          "deviceEnrollmentType": "windowsAzureADJoin",
+          "isEncrypted": true,
+          "jailBroken": "Unknown",
+          "lastSyncDateTime": "2026-10-20T07:30:00Z"
+        }
+      ]
+    },
+    "deviceCompliancePolicies": {
+      "value": [
+        {
+          "id": "00000000-0000-4000-8000-00000000c001",
+          "displayName": "Windows baseline",
+          "@odata.type": "#microsoft.graph.windows10CompliancePolicy",
+          "passwordRequired": true,
+          "passwordMinimumLength": 12,
+          "bitLockerEnabled": true,
+          "storageRequireEncryption": true,
+          "osMinimumVersion": "10.0.22631"
+        }
+      ]
+    },
+    "deviceCompliancePolicyAssignments": {
+      "value": [
+        {
+          "policyId": "00000000-0000-4000-8000-00000000c001",
+          "displayName": "Windows baseline",
+          "assignments": [
+            {
+              "id": "a1",
+              "target": {
+                "@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"
+              }
+            }
+          ]
+        }
+      ],
+      "collection_truncated": false
+    },
+    "windowsProtectionStates": {
+      "value": [
+        {
+          "deviceId": "00000000-0000-4000-8000-00000000d006",
+          "deviceName": "EP-WIN11-06",
+          "read_status": "ok",
+          "malwareProtectionEnabled": true,
+          "realTimeProtectionEnabled": true,
+          "signatureUpdateOverdue": false,
+          "productStatus": "noStatus",
+          "tamperProtectionEnabled": true,
+          "lastReportedDateTime": "2026-10-20T07:30:00Z"
+        }
+      ],
+      "collection_truncated": false
+    }
+  },
+  "intune_depth": {
+    "windowsUpdateRings": {
+      "value": [],
+      "collection_truncated": false
+    },
+    "windowsUpdateRingAssignments": {
+      "value": [],
+      "collection_truncated": false
+    },
+    "windowsQualityUpdateProfiles": {
+      "value": [],
+      "collection_truncated": false
+    },
+    "windowsQualityUpdateProfileAssignments": {
+      "value": [],
+      "collection_truncated": false
+    },
+    "windowsFeatureUpdateProfiles": {
+      "value": [],
+      "collection_truncated": false
+    },
+    "windowsFeatureUpdateProfileAssignments": {
+      "value": [],
+      "collection_truncated": false
+    }
+  }
+}

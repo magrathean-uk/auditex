@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from . import external_sharing
+from . import endpoint_posture, exchange_protection, external_sharing, os_lifecycle
 from .attack_graph import analyze_attack_graph
 from .autopilot import build_board_report_sections
 from .baselines import (
@@ -2513,8 +2513,404 @@ def _read_in_full(report: dict[str, Any]) -> bool:
     return bool(report) and report.get("collection_status") == "collected" and report.get("complete") is True
 
 
-def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int | None = None) -> list[dict[str, Any]]:
+def _section_records(normalized_snapshot: dict[str, Any], section: str) -> list[dict[str, Any]]:
+    return [row for row in ((normalized_snapshot.get(section) or {}).get("records") or []) if isinstance(row, dict)]
+
+
+def _summary_record(normalized_snapshot: dict[str, Any], section: str, kind: str) -> dict[str, Any] | None:
+    return next((row for row in _section_records(normalized_snapshot, section) if row.get("kind") == kind), None)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(tz=timezone.utc)
+
+
+def _device_base(device: dict[str, Any]) -> dict[str, Any]:
+    """The fields every managed-device finding shares; the caller adds ``id``, ``rule_id`` and the rest."""
+    return {
+        "status": "open",
+        "category": "device_management",
+        "collector": "intune",
+        "affected_objects": [device.get("display_name") or device.get("id")],
+        "evidence_refs": _normalized_evidence_refs("devices", device, "intune"),
+    }
+
+
+def _eol_severity(lifecycle: os_lifecycle.Lifecycle, today: Any) -> str:
+    """High for a vendor-published end date, medium where the date is derived or a paid extension may still apply."""
+    extended = lifecycle.extended_support_until
+    extension_open = bool(extended) and str(extended) >= today.isoformat()
+    return "high" if lifecycle.confidence == "vendor_published" and not extension_open else "medium"
+
+
+def _build_device_posture_findings(
+    normalized_snapshot: dict[str, Any], *, sync_days: int, now: datetime
+) -> list[dict[str, Any]]:
+    """Encryption, jailbreak, stale sync and end-of-life findings from the managed device records.
+
+    A device whose field is absent, ``Unknown`` or unparseable is skipped here and counted as unknown in
+    ``device_posture`` (which baseline alignment reads); an unknown is never a finding.
+    """
     findings: list[dict[str, Any]] = []
+    today = now.date()
+    for device in _section_records(normalized_snapshot, "devices"):
+        family = device.get("os_family") or os_lifecycle.os_family(device.get("platform"))
+        device_id = device.get("id")
+        if endpoint_posture.encryption_state(device) == endpoint_posture.STATE_OFF:
+            findings.append(
+                _finalize_finding(
+                    {
+                        **_device_base(device),
+                        "id": f"intune:{device_id}:device_encryption_off",
+                        "rule_id": "intune.device_encryption_off",
+                        "severity": "high" if family in {os_lifecycle.FAMILY_WINDOWS, os_lifecycle.FAMILY_MACOS} else "medium",
+                        "title": "Managed device storage is not encrypted",
+                        "evidence": device,
+                        "returned_value": device.get("is_encrypted"),
+                        **_metadata_for("intune.device_encryption_off"),
+                    }
+                )
+            )
+        if endpoint_posture.jailbreak_state(device) == endpoint_posture.STATE_JAILBROKEN:
+            findings.append(
+                _finalize_finding(
+                    {
+                        **_device_base(device),
+                        "id": f"intune:{device_id}:device_jailbroken",
+                        "rule_id": "intune.device_jailbroken",
+                        "severity": "high",
+                        "title": "Managed device is jailbroken or rooted",
+                        "evidence": device,
+                        "returned_value": device.get("jail_broken"),
+                        **_metadata_for("intune.device_jailbroken"),
+                    }
+                )
+            )
+        if endpoint_posture.sync_state(device, sync_days, now) == endpoint_posture.STATE_STALE:
+            findings.append(
+                _finalize_finding(
+                    {
+                        **_device_base(device),
+                        "id": f"intune:{device_id}:device_stale_sync",
+                        "rule_id": "intune.device_stale_sync",
+                        "severity": "medium",
+                        "title": "Managed device has stale sync",
+                        "evidence": {**device, "stale_after_days": sync_days},
+                        "returned_value": device.get("last_sync_at"),
+                        **{
+                            **_metadata_for("intune.device_stale_sync"),
+                            "description": f"A managed Intune device has not synced for more than {sync_days} days.",
+                            "expected_value": f"Managed devices sync within {sync_days} days.",
+                        },
+                    }
+                )
+            )
+        lifecycle = endpoint_posture.lifecycle(device, today)
+        if lifecycle.state == os_lifecycle.STATE_PAST_END_OF_LIFE:
+            findings.append(
+                _finalize_finding(
+                    {
+                        **_device_base(device),
+                        "id": f"intune:{device_id}:device_os_end_of_life",
+                        "rule_id": "intune.device_os_end_of_life",
+                        "severity": _eol_severity(lifecycle, today),
+                        "title": "Managed device runs an operating system past its end of support",
+                        "evidence": {
+                            **device,
+                            "os_lifecycle": lifecycle.evidence(),
+                            "os_lifecycle_table_verified_on": os_lifecycle.table_verified_on(),
+                        },
+                        "returned_value": device.get("os_version"),
+                        **{
+                            **_metadata_for("intune.device_os_end_of_life"),
+                            "description": (
+                                f"{lifecycle.release_name} reached the end of its security updates on {lifecycle.end_of_support}."
+                                + (
+                                    f" A paid extended support programme runs to {lifecycle.extended_support_until}; Auditex cannot see enrolment."
+                                    if lifecycle.extended_support_until
+                                    else ""
+                                )
+                            ),
+                        },
+                    }
+                )
+            )
+    return findings
+
+
+def _build_compliance_policy_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """One finding per platform that has enrolled devices and no compliance policy that applies to anybody."""
+    summary = _summary_record(normalized_snapshot, endpoint_posture.COMPLIANCE_SECTION, endpoint_posture.COMPLIANCE_SUMMARY_KIND)
+    if summary is None or summary.get("policies_read_state") != "collected":
+        return []
+    findings: list[dict[str, Any]] = []
+    for row in _section_records(normalized_snapshot, endpoint_posture.COMPLIANCE_SECTION):
+        if row.get("kind") != endpoint_posture.COMPLIANCE_PLATFORM_KIND or not row.get("device_count"):
+            continue
+        if not row.get("policy_count"):
+            reason = "no_policy"
+        elif (
+            summary.get("assignments_read_state") == "collected"
+            and not row.get("assignments_unknown_count")
+            and not row.get("assigned_policy_count")
+        ):
+            reason = "no_assigned_policy"
+        else:
+            continue
+        platform = str(row.get("platform"))
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"intune:compliance_policy:{platform}:missing",
+                    "rule_id": "intune.compliance_policy_missing_platform",
+                    "severity": "medium",
+                    "category": "device_management",
+                    "title": f"No compliance policy applies to {platform} devices",
+                    "status": "open",
+                    "collector": "intune",
+                    "affected_objects": [f"{platform} devices"],
+                    "evidence": {**row, "reason": reason},
+                    "returned_value": {"devices": row.get("device_count"), "policies": row.get("policy_count"), "assigned_policies": row.get("assigned_policy_count")},
+                    "evidence_refs": _normalized_evidence_refs(endpoint_posture.COMPLIANCE_SECTION, row, "intune"),
+                    **{
+                        **_metadata_for("intune.compliance_policy_missing_platform"),
+                        "description": (
+                            f"{row.get('device_count')} {platform} devices are enrolled in Intune, and "
+                            + (
+                                f"no {platform} device compliance policy exists."
+                                if reason == "no_policy"
+                                else f"none of the {row.get('policy_count')} {platform} device compliance policies is assigned to a group, all devices or all users."
+                            )
+                        ),
+                    },
+                }
+            )
+        )
+    return findings
+
+
+def _build_update_management_findings(normalized_snapshot: dict[str, Any], *, now: datetime) -> list[dict[str, Any]]:
+    """Update rings: none assigned, or an assigned ring that delays quality updates beyond 14 days."""
+    summary = _summary_record(normalized_snapshot, endpoint_posture.UPDATE_SECTION, endpoint_posture.UPDATE_SUMMARY_KIND)
+    if summary is None:
+        return []
+    findings: list[dict[str, Any]] = []
+    rings = [row for row in _section_records(normalized_snapshot, endpoint_posture.UPDATE_SECTION) if row.get("kind") == endpoint_posture.UPDATE_RING_KIND]
+    ring_inputs_complete = (
+        summary.get("rings_read_state") == "collected"
+        and (not summary.get("ring_count") or summary.get("ring_assignments_read_state") == "collected")
+        and not summary.get("rings_with_unknown_assignments")
+    )
+    if (
+        ring_inputs_complete
+        and not summary.get("rings_assigned")
+        and summary.get("windows_device_count")
+        # An assigned update profile or a co-managed device means updates are managed some other way: not a gap.
+        and not summary.get("profiles_assigned")
+        and not summary.get("windows_comanaged_device_count")
+    ):
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "intune_depth:update_rings:none_assigned",
+                    "rule_id": "intune_depth.update_ring_not_assigned",
+                    "severity": "medium",
+                    "category": "device_management",
+                    "title": "No Windows Update for Business update ring is assigned",
+                    "status": "open",
+                    "collector": "intune_depth",
+                    "affected_objects": ["Windows Update for Business update rings"],
+                    "evidence": {key: summary.get(key) for key in ("ring_count", "rings_assigned", "profile_count", "windows_device_count", "update_ring_source")},
+                    "returned_value": {"update_rings": summary.get("ring_count"), "assigned": summary.get("rings_assigned")},
+                    "evidence_refs": _normalized_evidence_refs(endpoint_posture.UPDATE_SECTION, summary, "intune_depth"),
+                    **_metadata_for("intune_depth.update_ring_not_assigned"),
+                }
+            )
+        )
+    for ring in rings:
+        if ring.get("assignments_known") is not True or ring.get("assigned") is not True:
+            continue
+        reasons = endpoint_posture.ring_delay_reasons(ring, now)
+        if not reasons:
+            continue
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"intune_depth:{ring.get('id')}:update_ring_deferral",
+                    "rule_id": "intune_depth.update_ring_deferral_excessive",
+                    "severity": "medium",
+                    "category": "device_management",
+                    "title": "An assigned update ring delays quality updates beyond 14 days",
+                    "status": "open",
+                    "collector": "intune_depth",
+                    "affected_objects": [ring.get("display_name") or ring.get("id")],
+                    "evidence": {
+                        **ring,
+                        "reasons": reasons,
+                        "deferral_limit_days": endpoint_posture.UPDATE_DEFERRAL_LIMIT_DAYS,
+                        "install_delay_days": endpoint_posture.ring_install_delay_days(ring),
+                    },
+                    "returned_value": {"quality_deferral_days": ring.get("quality_deferral_days"), "quality_paused": ring.get("quality_paused")},
+                    "evidence_refs": _normalized_evidence_refs(endpoint_posture.UPDATE_SECTION, ring, "intune_depth"),
+                    **_metadata_for("intune_depth.update_ring_deferral_excessive"),
+                }
+            )
+        )
+    return findings
+
+
+def _build_defender_av_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Antivirus off, real-time protection off and stale signatures, from devices whose protection state was read."""
+    findings: list[dict[str, Any]] = []
+    for row in _section_records(normalized_snapshot, endpoint_posture.DEFENDER_SECTION):
+        if row.get("kind") != endpoint_posture.DEFENDER_STATE_KIND or row.get("read_status") != endpoint_posture.READ_OK:
+            continue
+        base = {
+            "status": "open",
+            "category": "device_management",
+            "collector": "intune",
+            "affected_objects": [row.get("device_name") or row.get("id")],
+            "evidence": row,
+            "evidence_refs": _normalized_evidence_refs(endpoint_posture.DEFENDER_SECTION, row, "intune"),
+        }
+        if row.get("av_state") == endpoint_posture.STATE_OFF:
+            findings.append(
+                _finalize_finding(
+                    {
+                        **base,
+                        "id": f"intune:{row.get('id')}:defender_av_off",
+                        "rule_id": "intune.defender_av_off",
+                        "severity": "high",
+                        "title": "Defender antivirus is not protecting a Windows device",
+                        "returned_value": row.get("product_status") or row.get("malware_protection_enabled"),
+                        **_metadata_for("intune.defender_av_off"),
+                    }
+                )
+            )
+        if row.get("realtime_state") == endpoint_posture.STATE_OFF:
+            findings.append(
+                _finalize_finding(
+                    {
+                        **base,
+                        "id": f"intune:{row.get('id')}:defender_realtime_off",
+                        "rule_id": "intune.defender_realtime_protection_off",
+                        "severity": "medium",
+                        "title": "Defender real-time protection is off on a Windows device",
+                        "returned_value": row.get("real_time_protection_enabled"),
+                        **_metadata_for("intune.defender_realtime_protection_off"),
+                    }
+                )
+            )
+        if row.get("signature_state") == endpoint_posture.STATE_STALE:
+            findings.append(
+                _finalize_finding(
+                    {
+                        **base,
+                        "id": f"intune:{row.get('id')}:defender_signatures_stale",
+                        "rule_id": "intune.defender_signatures_stale",
+                        "severity": "medium",
+                        "title": "Defender antivirus signatures are out of date on a Windows device",
+                        "returned_value": row.get("product_status") or row.get("signature_update_overdue"),
+                        **_metadata_for("intune.defender_signatures_stale"),
+                    }
+                )
+            )
+    return findings
+
+
+def _build_exchange_protection_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Weakened default malware policy, tenant-wide SMTP AUTH, and DKIM signing switched off for a custom domain."""
+    findings: list[dict[str, Any]] = []
+
+    def refs(record: dict[str, Any]) -> list[dict[str, Any]]:
+        return _normalized_evidence_refs("exchange_policy_objects", record, "exchange_policy")
+
+    policy = exchange_protection.default_malware_policy(exchange_protection.source_records(normalized_snapshot, exchange_protection.SOURCE_MALWARE))
+    weaknesses = exchange_protection.malware_filter_weaknesses(policy) if policy else []
+    if policy and weaknesses:
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "exchange_policy:malware_filter:default_weakened",
+                    "rule_id": "exchange.malware_filter_weakened",
+                    "severity": "high" if len(weaknesses) > 1 else "medium",
+                    "category": "mail_flow",
+                    "title": "The default anti-malware policy has protections switched off",
+                    "status": "open",
+                    "collector": "exchange_policy",
+                    "affected_objects": [policy.get("display_name") or "Default malware filter policy"],
+                    "evidence": {**policy, "weaknesses": weaknesses},
+                    "returned_value": {"enable_file_filter": policy.get("enable_file_filter"), "zap_enabled": policy.get("zap_enabled")},
+                    "evidence_refs": refs(policy),
+                    **_metadata_for("exchange.malware_filter_weakened"),
+                }
+            )
+        )
+    for record in exchange_protection.source_records(normalized_snapshot, exchange_protection.SOURCE_TRANSPORT):
+        if record.get("smtp_client_auth_disabled") is False:
+            findings.append(
+                _finalize_finding(
+                    {
+                        "id": "exchange_policy:transport_config:smtp_auth_enabled",
+                        "rule_id": "exchange.smtp_auth_enabled_tenant_wide",
+                        "severity": "medium",
+                        "category": "mail_flow",
+                        "title": "Authenticated SMTP submission is enabled for the whole tenant",
+                        "status": "open",
+                        "collector": "exchange_policy",
+                        "affected_objects": ["Exchange Online transport configuration"],
+                        "evidence": record,
+                        "returned_value": record.get("smtp_client_auth_disabled"),
+                        "evidence_refs": refs(record),
+                        **_metadata_for("exchange.smtp_auth_enabled_tenant_wide"),
+                    }
+                )
+            )
+            break
+    dkim = exchange_protection.dkim_by_domain(normalized_snapshot)
+    covered = exchange_protection.dns_dkim_domains(normalized_snapshot)
+    for domain in exchange_protection.dkim_disabled_domains(normalized_snapshot):
+        if domain in covered:
+            # The DNS rule already reports this domain (no DKIM selector published); one gap, one finding.
+            continue
+        record = dkim[domain]
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"exchange_policy:{domain}:dkim_signing_disabled",
+                    "rule_id": "exchange.dkim_signing_disabled",
+                    "severity": "medium",
+                    "category": "mail_flow",
+                    "title": "DKIM signing is disabled for a verified domain",
+                    "status": "open",
+                    "collector": "exchange_policy",
+                    "affected_objects": [domain],
+                    "evidence": record,
+                    "returned_value": {"enabled": record.get("dkim_enabled"), "status": record.get("dkim_status")},
+                    "evidence_refs": refs(record),
+                    **_metadata_for("exchange.dkim_signing_disabled"),
+                }
+            )
+        )
+    return findings
+
+
+def _normalized_findings(
+    normalized_snapshot: dict[str, Any],
+    *,
+    stale_days: int | None = None,
+    stale_sync_days: int | None = None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    now = now or _utc_now()
+    findings.extend(
+        _build_device_posture_findings(normalized_snapshot, sync_days=endpoint_posture.stale_sync_days(stale_sync_days), now=now)
+    )
+    findings.extend(_build_compliance_policy_findings(normalized_snapshot))
+    findings.extend(_build_update_management_findings(normalized_snapshot, now=now))
+    findings.extend(_build_defender_av_findings(normalized_snapshot))
+    findings.extend(_build_exchange_protection_findings(normalized_snapshot))
     findings.extend(_build_admin_resilience_findings(normalized_snapshot))
     findings.extend(_build_secure_score_findings(normalized_snapshot))
     findings.extend(_build_user_mfa_findings(normalized_snapshot))
@@ -3066,27 +3462,6 @@ def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int
             }
             )
         )
-    for device in ((normalized_snapshot.get("devices") or {}).get("records") or []):
-        if not _is_stale_timestamp(device.get("last_sync_at")):
-            continue
-        findings.append(
-            _finalize_finding(
-                {
-                    "id": f"intune:{device.get('id')}:device_stale_sync",
-                    "rule_id": "intune.device_stale_sync",
-                    "severity": "medium",
-                    "category": "device_management",
-                    "title": "Managed device has stale sync",
-                    "status": "open",
-                    "collector": "intune",
-                    "affected_objects": [device.get("display_name") or device.get("id")],
-                    "evidence": device,
-                    "returned_value": device.get("last_sync_at"),
-                    "evidence_refs": _normalized_evidence_refs("devices", device, "intune"),
-                    **_metadata_for("intune.device_stale_sync"),
-                }
-            )
-        )
 
     governance_records = ((normalized_snapshot.get("governance_objects") or {}).get("records") or [])
     assignment_count = sum(1 for item in governance_records if item.get("kind") == "role_assignment_schedule")
@@ -3377,6 +3752,8 @@ def build_findings(
     normalized_snapshot: dict[str, Any] | None = None,
     waiver_file: str | Path | None = None,
     stale_guest_days: int | None = None,
+    stale_sync_days: int | None = None,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 
@@ -3472,7 +3849,9 @@ def build_findings(
             body["aggregated_count"] = len(group)
         findings.append(_finalize_finding(body))
     if normalized_snapshot:
-        findings.extend(_normalized_findings(normalized_snapshot, stale_days=stale_guest_days))
+        findings.extend(
+            _normalized_findings(normalized_snapshot, stale_days=stale_guest_days, stale_sync_days=stale_sync_days, now=now)
+        )
         findings.extend(_build_detection_findings(normalized_snapshot))
     waiver_rows = load_waivers(Path(waiver_file)) if waiver_file else []
     return apply_waivers(findings, waiver_rows) if waiver_rows else findings

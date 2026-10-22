@@ -176,7 +176,7 @@
     },
     "intune": {
       "enabled": true,
-      "description": "Intune/Endpoint Management posture and device state",
+      "description": "Intune/Endpoint Management posture, device state (encryption, jailbreak, ownership, enrolment, last sync, OS version), compliance policies with assignments, and Defender antivirus state read per Windows device (GET only)",
       "required_permissions": [
         "DeviceManagementManagedDevices.Read.All",
         "DeviceManagementConfiguration.Read.All",
@@ -185,7 +185,9 @@
       "query_plan": [
         "managedDevices",
         "deviceCompliancePolicies",
-        "deviceConfigurationProfiles"
+        "deviceConfigurationProfiles",
+        "deviceCompliancePolicyAssignments",
+        "windowsProtectionStates"
       ]
     },
     "sharepoint": {
@@ -404,7 +406,7 @@
     },
     "intune_depth": {
       "enabled": true,
-      "description": "Deeper Intune policy, script metadata, app protection, and sampled assignment inventory (groupPolicyConfigurations and deviceManagementScripts use Graph beta; script bodies are never requested)",
+      "description": "Deeper Intune policy, script metadata, app protection, Windows Update for Business update rings and update profiles, and sampled assignment inventory (groupPolicyConfigurations, deviceManagementScripts and the quality and feature update profiles use Graph beta; script bodies are never requested)",
       "required_permissions": [
         "DeviceManagementConfiguration.Read.All",
         "DeviceManagementApps.Read.All"
@@ -415,7 +417,13 @@
         "deviceManagementScripts",
         "androidManagedAppProtections",
         "iosManagedAppProtections",
-        "deviceConfigurationAssignments"
+        "windowsQualityUpdateProfiles",
+        "windowsFeatureUpdateProfiles",
+        "deviceConfigurationAssignments",
+        "windowsUpdateRings",
+        "windowsUpdateRingAssignments",
+        "windowsQualityUpdateProfileAssignments",
+        "windowsFeatureUpdateProfileAssignments"
       ]
     },
     "purview": {
@@ -630,7 +638,7 @@
     },
     "exchange_policy": {
       "enabled": true,
-      "description": "Exchange transport, connector, domain, mailbox forwarding, and audit/alerting (detection coverage) policy posture",
+      "description": "Exchange transport, connector, domain, mailbox forwarding, malware filter, SMTP AUTH and DKIM signing, and audit/alerting (detection coverage) policy posture",
       "required_permissions": [],
       "query_plan": [
         "transportRules",
@@ -642,7 +650,10 @@
         "adminAuditLogConfig",
         "organizationAuditConfig",
         "mailboxAuditBypass",
-        "protectionAlerts"
+        "protectionAlerts",
+        "malwareFilterPolicy",
+        "transportConfig",
+        "dkimSigningConfig"
       ],
       "command_collectors": [
         {
@@ -713,6 +724,27 @@
           "category": "detection",
           "commands": [
             "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"
+          ]
+        },
+        {
+          "name": "malwareFilterPolicy",
+          "category": "policy",
+          "commands": [
+            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled"
+          ]
+        },
+        {
+          "name": "transportConfig",
+          "category": "policy",
+          "commands": [
+            "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled"
+          ]
+        },
+        {
+          "name": "dkimSigningConfig",
+          "category": "policy",
+          "commands": [
+            "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"
           ]
         }
       ]

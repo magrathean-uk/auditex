@@ -62,9 +62,9 @@ SIGNAL_CATALOG: dict[str, dict[str, str]] = {
         "source": "security.directoryAudits (/auditLogs/directoryAudits)",
     },
     "defender_alert_api": {
-        "title": "Defender alert API reachable",
-        "why_it_matters": "A reachable alerts_v2 API means Defender XDR detections exist in a place a SOC or SIEM connector can consume.",
-        "source": "defender.securityAlerts or sentinel_xdr.xdrAlerts (/security/alerts_v2)",
+        "title": "Defender alert source present",
+        "why_it_matters": "Defender XDR detections reach a place a SOC or SIEM connector can consume only when a Defender service produces alerts. The alerts API answers for any tenant, so the signal needs an alert from a Defender service or a Defender service plan as well.",
+        "source": "defender.securityAlerts or sentinel_xdr.xdrAlerts (/security/alerts_v2) with licensing.subscribedSkus service plans",
     },
     "siem_log_export": {
         "title": "Entra log export to SIEM",
@@ -217,16 +217,63 @@ def _graph_log(collector: str, key: str, reason_on: str):
     return _signal
 
 
+# Licensing service plans of the Defender products that produce /security/alerts_v2 alerts: Defender for
+# Endpoint (plans 1 and 2, Business), Defender XDR, Defender for Office 365 (plans 1 and 2) and Defender for Identity.
+_DEFENDER_SERVICE_PLANS = frozenset(
+    {"WINDEFATP", "MDE_LITE", "MDE_SMB", "MTP", "ATP_ENTERPRISE", "THREAT_INTELLIGENCE", "ATA"}
+)
+_ACTIVE_CAPABILITY_STATUSES = frozenset({"enabled", "warning"})
+_INACTIVE_PROVISIONING_STATUSES = frozenset({"disabled", "deleted"})
+
+
+def _defender_alert_sources(sections: list[Any]) -> set[str]:
+    """``serviceSource`` values of alerts that a Defender service raised (Entra ID Protection and the like do not count)."""
+    return {
+        str(row.get("serviceSource"))
+        for section in sections
+        for row in _rows(section)
+        if "defender" in str(row.get("serviceSource") or "").lower()
+    }
+
+
+def _defender_service_plans(payloads: dict[str, Any]) -> set[str]:
+    licensing = payloads.get("licensing")
+    plans: set[str] = set()
+    for sku in _rows(licensing.get("subscribedSkus") if isinstance(licensing, dict) else None):
+        if str(sku.get("capabilityStatus") or "Enabled").lower() not in _ACTIVE_CAPABILITY_STATUSES:
+            continue
+        for plan in sku.get("servicePlans") or []:
+            if not isinstance(plan, dict) or plan.get("servicePlanName") not in _DEFENDER_SERVICE_PLANS:
+                continue
+            if str(plan.get("provisioningStatus") or "").lower() not in _INACTIVE_PROVISIONING_STATUSES:
+                plans.add(str(plan["servicePlanName"]))
+    return plans
+
+
 def _defender_alerts(payloads: dict[str, Any], diagnostics: list[dict[str, Any]]) -> tuple[str, str, Any]:
-    states = [
-        section_state(payloads, diagnostics, "defender", "securityAlerts")[0],
-        section_state(payloads, diagnostics, "sentinel_xdr", "xdrAlerts")[0],
+    """``on`` only with evidence that Defender is producing alerts: an alert from a Defender service, or a
+    Defender service plan in the tenant's licences, together with an alerts API that answers. An API that
+    merely answers (an empty or Entra-only alert list) proves nothing about Defender, so it is ``unknown``.
+    """
+    results = [
+        section_state(payloads, diagnostics, "defender", "securityAlerts"),
+        section_state(payloads, diagnostics, "sentinel_xdr", "xdrAlerts"),
     ]
-    if "collected" in states:
-        return "on", "alerts_api_reachable", None
-    if "license" in states:
-        return "off", "license_required", None
-    return (*_unknown("blocked" if "blocked" in states else "not_collected"), None)
+    states = [state for state, _section in results]
+    if "collected" not in states:
+        if "license" in states:
+            return "off", "license_required", None
+        return (*_unknown("blocked" if "blocked" in states else "not_collected"), None)
+    sources = _defender_alert_sources([section for state, section in results if state == "collected"])
+    if sources:
+        return "on", "defender_alerts_observed", {"service_sources": sorted(sources)}
+    licensing_state, _licensing = section_state(payloads, diagnostics, "licensing", "subscribedSkus")
+    plans = _defender_service_plans(payloads)
+    if plans:
+        return "on", "defender_service_plan_present", {"service_plans": sorted(plans)}
+    if licensing_state != "collected":
+        return "unknown", "alerts_api_answered_licensing_not_read", None
+    return "unknown", "alerts_api_answered_no_defender_evidence", None
 
 
 def _siem_export(_payloads: dict[str, Any], _diagnostics: list[dict[str, Any]]) -> tuple[str, str, Any]:

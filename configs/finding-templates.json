@@ -454,6 +454,49 @@
     ],
     "expected_value": "Remote-domain policies do not allow automatic forwarding to external domains by default."
   },
+  "exchange.malware_filter_weakened": {
+    "risk_rating": "high",
+    "description": "The default Exchange Online anti-malware policy has the common attachment types filter or zero-hour auto purge switched off.",
+    "impact": "Messages with executable attachments are not filtered by type, or malware found after delivery is not removed from mailboxes, so malicious code reaches users that the policy was meant to protect.",
+    "remediation": "Turn on the common attachment types filter and zero-hour auto purge in the default anti-malware policy, or apply the Standard or Strict preset security policy. Only the default policy is judged; custom policies and the recipients they cover are not read.",
+    "references": [
+      "Microsoft Defender for Office 365 anti-malware policies",
+      "Get-MalwareFilterPolicy (Exchange Online PowerShell)"
+    ],
+    "control_ids": [
+      "AUDITEX-EXO-MALWARE-FILTER-WEAKENED"
+    ],
+    "expected_value": "The default anti-malware policy has the common attachment types filter and zero-hour auto purge on."
+  },
+  "exchange.smtp_auth_enabled_tenant_wide": {
+    "risk_rating": "medium",
+    "description": "Authenticated SMTP client submission (SMTP AUTH) is enabled for the whole Exchange Online tenant.",
+    "impact": "SMTP AUTH uses basic authentication, which cannot enforce MFA, so a guessed or leaked password is enough to send mail as the user.",
+    "remediation": "Disable SMTP AUTH for the organisation (Set-TransportConfig -SmtpClientAuthenticationDisabled $true) and enable it per mailbox only for the devices and applications that need it, ideally replaced by OAuth.",
+    "references": [
+      "Microsoft Exchange Online deprecation of basic authentication for client submission",
+      "Get-TransportConfig (Exchange Online PowerShell)"
+    ],
+    "control_ids": [
+      "AUDITEX-EXO-SMTP-AUTH-ENABLED"
+    ],
+    "expected_value": "SmtpClientAuthenticationDisabled is true for the organisation."
+  },
+  "exchange.dkim_signing_disabled": {
+    "risk_rating": "medium",
+    "description": "Exchange Online does not sign outbound mail with DKIM for a verified, authoritative domain.",
+    "impact": "Receivers cannot cryptographically authenticate mail from the domain, which weakens DMARC alignment and makes spoofing easier.",
+    "remediation": "Publish the selector1 and selector2 CNAME records for the domain and enable DKIM signing for it in Exchange Online. Domains with no published selector are reported by dns_posture.dkim_missing instead.",
+    "references": [
+      "RFC 6376",
+      "Get-DkimSigningConfig (Exchange Online PowerShell)",
+      "Microsoft 365 DKIM guidance"
+    ],
+    "control_ids": [
+      "AUDITEX-EXO-DKIM-SIGNING-DISABLED"
+    ],
+    "expected_value": "DKIM signing is enabled for every verified, authoritative domain."
+  },
   "dns_posture.spf_missing": {
     "risk_rating": "high",
     "description": "No SPF (Sender Policy Framework) TXT record was discovered for a verified tenant domain.",
@@ -863,16 +906,116 @@
   },
   "intune.device_stale_sync": {
     "risk_rating": "medium",
-    "description": "A managed Intune device has not synced recently.",
-    "impact": "Stale device sync can hide missing security baselines, device loss, deprovisioning gaps, or stale access assumptions.",
-    "remediation": "Investigate stale managed devices, retire devices no longer in use, and confirm conditional access blocks unknown device posture.",
+    "description": "A managed Intune device has not synced within the stale-sync window (14 days by default, the Cyber Essentials window for installing updates).",
+    "impact": "A device that has not checked in cannot be shown to have received policy or security updates, and may be lost, retired or unmanaged.",
+    "remediation": "Investigate the device, retire it if it is no longer in use, and confirm Conditional Access blocks devices with unknown posture. Set the window with --stale-sync-days or AUDITEX_STALE_SYNC_DAYS.",
     "references": [
       "Microsoft Intune managed device inventory"
     ],
     "control_ids": [
       "AUDITEX-INTUNE-DEVICE-STALE-SYNC"
     ],
-    "expected_value": "Managed devices sync within the approved recency window."
+    "expected_value": "Managed devices sync within the stale-sync window (14 days by default)."
+  },
+  "intune.device_encryption_off": {
+    "risk_rating": "high",
+    "description": "Intune reports that a managed device's storage is not encrypted (BitLocker on Windows, FileVault on macOS, device encryption on iOS and Android).",
+    "impact": "A lost or stolen device exposes every file on it, including cached mail and synced documents, to anyone who can read the disk.",
+    "remediation": "Turn on BitLocker or FileVault through an Intune endpoint security policy, require encryption in the device compliance policy, and recheck the device after its next sync. The field is read from managedDevice.isEncrypted; a device that reports no value is not flagged.",
+    "references": [
+      "Microsoft Intune managedDevice resource (isEncrypted)",
+      "Microsoft Intune encrypt devices with BitLocker and FileVault"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEVICE-ENCRYPTION-OFF"
+    ],
+    "expected_value": "Every managed device reports isEncrypted true."
+  },
+  "intune.device_jailbroken": {
+    "risk_rating": "high",
+    "description": "Intune reports that a managed iOS or Android device is jailbroken or rooted.",
+    "impact": "A jailbroken or rooted device can run code outside the platform's security model, read app data and defeat the controls that compliance and Conditional Access rely on.",
+    "remediation": "Retire or reset the device, block jailbroken and rooted devices in the device compliance policy for the platform, and require compliant devices in Conditional Access. The field is read from managedDevice.jailBroken, which Intune fills for iOS and Android only.",
+    "references": [
+      "Microsoft Intune managedDevice resource (jailBroken)",
+      "Microsoft Intune device compliance settings for iOS and Android"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEVICE-JAILBROKEN"
+    ],
+    "expected_value": "No managed iOS or Android device reports jailBroken true."
+  },
+  "intune.device_os_end_of_life": {
+    "risk_rating": "high",
+    "description": "A managed device runs an operating system release whose vendor security updates have ended, according to the dated table in configs/os-end-of-life.json.",
+    "impact": "The device no longer receives security fixes, so every newly published vulnerability stays open on it. Cyber Essentials requires supported software and timely fixes.",
+    "remediation": "Upgrade the device to a supported release or replace it. Windows 10 devices enrolled in the paid Extended Security Updates programme still receive fixes, and Auditex cannot see enrolment; check the device before treating it as unpatched. Windows LTSC and IoT editions share build numbers with the General Availability releases and may remain supported; confirm the edition.",
+    "references": [
+      "Microsoft Lifecycle and Windows release health",
+      "Apple security releases",
+      "Android Security Bulletins",
+      "configs/os-end-of-life.json"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEVICE-OS-END-OF-LIFE"
+    ],
+    "expected_value": "Every managed device runs an operating system release that still receives security updates."
+  },
+  "intune.compliance_policy_missing_platform": {
+    "risk_rating": "medium",
+    "description": "A platform has devices enrolled in Intune but no device compliance policy for that platform, or none of its policies is assigned.",
+    "impact": "Devices on the platform are never evaluated against a compliance baseline, so complianceState says nothing about them and Conditional Access cannot rely on it. The Intune compliance state of a device with no policy is set by the tenant's default.",
+    "remediation": "Create a device compliance policy for the platform that requires a passcode, encryption, a minimum operating system version and a jailbreak or root block, assign it to all devices or the right groups, and require compliant devices in Conditional Access. Policies built from settings-catalog templates are not listed by the endpoint Auditex reads; confirm in the Intune admin centre before acting.",
+    "references": [
+      "Microsoft Intune device compliance policies",
+      "Microsoft Graph deviceCompliancePolicy resource"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-COMPLIANCE-POLICY-MISSING"
+    ],
+    "expected_value": "Each platform with enrolled devices has at least one assigned device compliance policy."
+  },
+  "intune.defender_av_off": {
+    "risk_rating": "high",
+    "description": "Intune reports that Microsoft Defender Antivirus is not protecting a Windows device: malware protection is disabled or its service is not running.",
+    "impact": "The device has no active anti-malware engine, so malicious code that reaches it is not blocked. Cyber Essentials requires anti-malware that is active and kept up to date.",
+    "remediation": "Re-enable Defender Antivirus through an Intune endpoint security antivirus policy, or confirm that another anti-malware product protects the device. A device protected by a third-party product can report Defender as off; Auditex cannot see that product.",
+    "references": [
+      "Microsoft Graph windowsProtectionState resource",
+      "Microsoft Intune endpoint security antivirus policy"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEFENDER-AV-OFF"
+    ],
+    "expected_value": "Defender Antivirus is enabled on every Windows device, or another anti-malware product demonstrably is."
+  },
+  "intune.defender_realtime_protection_off": {
+    "risk_rating": "medium",
+    "description": "Intune reports that Microsoft Defender real-time protection is turned off on a Windows device.",
+    "impact": "Files are not scanned when they are opened or written, so malware can run until the next scheduled scan.",
+    "remediation": "Turn real-time protection on through an Intune endpoint security antivirus policy and keep tamper protection enabled. A device protected by a third-party product can report Defender real-time protection as off.",
+    "references": [
+      "Microsoft Graph windowsProtectionState resource (realTimeProtectionEnabled)",
+      "Microsoft Intune endpoint security antivirus policy"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEFENDER-REALTIME-OFF"
+    ],
+    "expected_value": "Defender real-time protection is on for every Windows device protected by Defender."
+  },
+  "intune.defender_signatures_stale": {
+    "risk_rating": "medium",
+    "description": "Intune reports that the Microsoft Defender antivirus signatures on a Windows device are out of date.",
+    "impact": "Out-of-date signatures miss recently identified malware, which weakens anti-malware protection that Cyber Essentials requires to be kept up to date.",
+    "remediation": "Check why the device cannot update its signatures (connectivity, update source, policy) and let it check in. The state is read from windowsProtectionState.signatureUpdateOverdue and productStatus.",
+    "references": [
+      "Microsoft Graph windowsProtectionState resource (signatureUpdateOverdue)",
+      "Microsoft Defender Antivirus security intelligence updates"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-DEFENDER-SIGNATURES-STALE"
+    ],
+    "expected_value": "Defender signatures are current on every Windows device protected by Defender."
   },
   "detection.unified_audit_log_disabled": {
     "risk_rating": "high",
@@ -1129,6 +1272,34 @@
       "AUDITEX-INTUNE-POLICY-UNASSIGNED"
     ],
     "expected_value": "Every in-scope Intune policy is assigned to a device or user group."
+  },
+  "intune_depth.update_ring_not_assigned": {
+    "risk_rating": "medium",
+    "description": "Windows devices are enrolled in Intune but no Windows Update for Business update ring is assigned to any group, all devices or all users, and no assigned Windows update profile or Configuration Manager co-managed device was seen.",
+    "impact": "Intune does not control how and when Windows quality updates install through an update ring, so update behaviour depends on each device's local defaults and Cyber Essentials patching cannot be evidenced from the tenant.",
+    "remediation": "Create a Windows Update for Business update ring with a quality update deferral of 14 days or less and a deadline, and assign it to all Windows devices. A ring assigned only to groups is not flagged, because Auditex does not resolve group membership. Update settings made through settings catalog policies, group policy, Configuration Manager or WSUS are not read: a tenant that manages updates only that way should confirm in the Intune admin centre before acting. An assigned update profile or a co-managed Windows device makes the rule not assessed instead of failed.",
+    "references": [
+      "Microsoft Intune Windows 10 and later update rings",
+      "Microsoft Graph windowsUpdateForBusinessConfiguration resource"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-UPDATE-RING-NOT-ASSIGNED"
+    ],
+    "expected_value": "At least one Windows Update for Business update ring is assigned and covers the Windows devices."
+  },
+  "intune_depth.update_ring_deferral_excessive": {
+    "risk_rating": "medium",
+    "description": "An assigned Windows Update for Business update ring lets quality updates wait more than 14 days: the deferral alone exceeds 14 days, or the deferral plus the deadline and restart grace period does, or quality updates are paused.",
+    "impact": "Security fixes install later than the 14 days Cyber Essentials allows for critical and high-risk updates, so devices on this ring stay exposed longer than the standard permits.",
+    "remediation": "Reduce the quality update deferral so that deferral, deadline and restart grace period add up to 14 days or less, resume paused updates, and use a deadline to force installation. The ring's settings are read from windowsUpdateForBusinessConfiguration.",
+    "references": [
+      "Microsoft Intune Windows 10 and later update rings",
+      "Cyber Essentials Requirements for IT Infrastructure, security update management"
+    ],
+    "control_ids": [
+      "AUDITEX-INTUNE-UPDATE-RING-DEFERRAL"
+    ],
+    "expected_value": "Assigned update rings defer quality updates by 14 days or less and are not paused."
   },
   "ca.policy_report_only": {
     "risk_rating": "medium",

@@ -178,6 +178,63 @@
       "Article 9(4)(a)"
     ]
   },
+  "intune_depth.update_ring_not_assigned": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "CM-6",
+      "SI-2"
+    ],
+    "iso_27001": [
+      "A.8.8",
+      "A.8.9"
+    ],
+    "soc2": [
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(e)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "cyber_essentials": [
+      "ce.sum.automatic_updates",
+      "ce.sum.vulnerability_fixes_14_days"
+    ]
+  },
+  "intune_depth.update_ring_deferral_excessive": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "CM-6",
+      "SI-2"
+    ],
+    "iso_27001": [
+      "A.8.8",
+      "A.8.9"
+    ],
+    "soc2": [
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(e)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "cyber_essentials": [
+      "ce.sum.vulnerability_fixes_14_days"
+    ]
+  },
   "ca.policy_report_only": {
     "ms_zero_trust": [
       "identities"
@@ -1082,6 +1139,95 @@
     "mitre_attack": [
       "T1114.003",
       "T1567"
+    ]
+  },
+  "exchange.malware_filter_weakened": {
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "SI-3",
+      "SI-8"
+    ],
+    "iso_27001": [
+      "A.8.7",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC6.8"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1566"
+    ],
+    "cyber_essentials": [
+      "ce.mp.antimalware"
+    ]
+  },
+  "exchange.smtp_auth_enabled_tenant_wide": {
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6"
+    ],
+    "nist_800_53": [
+      "CM-7",
+      "IA-2(1)"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1110.003"
+    ],
+    "cyber_essentials": [
+      "ce.sc.saas_configuration",
+      "ce.uac.mfa_cloud_services"
+    ]
+  },
+  "exchange.dkim_signing_disabled": {
+    "cis_m365_v7": [
+      "2.1.9"
+    ],
+    "cisa_scuba": [
+      "MS.EXO.3.1v1"
+    ],
+    "nist_800_53": [
+      "SC-8",
+      "SI-3"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.20"
+    ],
+    "soc2": [
+      "CC6.6"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1566"
     ]
   },
   "app_credentials.secret_expired": {
@@ -2332,6 +2478,211 @@
     ],
     "mitre_attack": [
       "T1200"
+    ],
+    "cyber_essentials": [
+      "ce.sum.vulnerability_fixes_14_days"
+    ]
+  },
+  "intune.device_encryption_off": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "CM-6",
+      "SC-28"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.24"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.7"
+    ],
+    "nis2": [
+      "Article 21(2)(h)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ]
+  },
+  "intune.device_jailbroken": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "CM-6",
+      "CM-7",
+      "SI-7"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.9"
+    ],
+    "soc2": [
+      "CC6.8",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ]
+  },
+  "intune.device_os_end_of_life": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "CM-8",
+      "RA-5",
+      "SI-2"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.8"
+    ],
+    "soc2": [
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(e)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "cyber_essentials": [
+      "ce.sum.supported_software",
+      "ce.sum.vulnerability_fixes_14_days"
+    ]
+  },
+  "intune.compliance_policy_missing_platform": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "CM-2",
+      "CM-6"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.9"
+    ],
+    "soc2": [
+      "CC6.8",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ]
+  },
+  "intune.defender_av_off": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "SI-3",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.7"
+    ],
+    "soc2": [
+      "CC6.8",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "cyber_essentials": [
+      "ce.mp.antimalware"
+    ],
+    "mitre_attack": [
+      "T1562"
+    ]
+  },
+  "intune.defender_realtime_protection_off": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "SI-3",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.7"
+    ],
+    "soc2": [
+      "CC6.8",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "cyber_essentials": [
+      "ce.mp.antimalware"
+    ],
+    "mitre_attack": [
+      "T1562"
+    ]
+  },
+  "intune.defender_signatures_stale": {
+    "ms_zero_trust": [
+      "endpoints"
+    ],
+    "mcsb": [
+      "PV-4"
+    ],
+    "nist_800_53": [
+      "SI-3",
+      "SI-4"
+    ],
+    "iso_27001": [
+      "A.8.1",
+      "A.8.7"
+    ],
+    "soc2": [
+      "CC6.8",
+      "CC7.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "cyber_essentials": [
+      "ce.mp.antimalware"
     ]
   },
   "detection.unified_audit_log_disabled": {
@@ -2807,6 +3158,13 @@
     "consent_policy.user_consent_unrestricted": {
       "ce.sc.saas_configuration": "partial"
     },
+    "exchange.malware_filter_weakened": {
+      "ce.mp.antimalware": "partial"
+    },
+    "exchange.smtp_auth_enabled_tenant_wide": {
+      "ce.sc.saas_configuration": "partial",
+      "ce.uac.mfa_cloud_services": "partial"
+    },
     "google.admin_2sv_not_enforced": {
       "ce.uac.mfa_admin_accounts": "full",
       "ce.uac.mfa_cloud_services": "full"
@@ -2883,7 +3241,30 @@
     "identity.user_mfa_not_registered": {
       "ce.uac.mfa_cloud_services": "partial"
     },
+    "intune.defender_av_off": {
+      "ce.mp.antimalware": "partial"
+    },
+    "intune.defender_realtime_protection_off": {
+      "ce.mp.antimalware": "partial"
+    },
+    "intune.defender_signatures_stale": {
+      "ce.mp.antimalware": "partial"
+    },
     "intune.device_noncompliant": {
+      "ce.sum.vulnerability_fixes_14_days": "partial"
+    },
+    "intune.device_os_end_of_life": {
+      "ce.sum.supported_software": "partial",
+      "ce.sum.vulnerability_fixes_14_days": "partial"
+    },
+    "intune.device_stale_sync": {
+      "ce.sum.vulnerability_fixes_14_days": "partial"
+    },
+    "intune_depth.update_ring_deferral_excessive": {
+      "ce.sum.vulnerability_fixes_14_days": "partial"
+    },
+    "intune_depth.update_ring_not_assigned": {
+      "ce.sum.automatic_updates": "partial",
       "ce.sum.vulnerability_fixes_14_days": "partial"
     }
   },

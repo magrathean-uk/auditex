@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from azure_tenant_audit.baselines import rule_inputs_gap, unmet_rule_collectors
+from azure_tenant_audit.baselines import rule_inputs_gap, rule_judged_on_inputs, unmet_rule_collectors
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
@@ -318,9 +318,11 @@ def reassessment_gap(
     row = coverage.get(collector)
     if row is None:
         return "collector_not_run"
-    if not row["complete"]:
-        return f"collector_{row['status']}"
     rule_id = str(finding.get("rule_id") or "")
+    # A rule judged on its own input rows (the Exchange mail protection rules) is reassessed whenever those rows were
+    # read, even if another command of its collector was not available; its input check below decides.
+    if not row["complete"] and not rule_judged_on_inputs(rule_id):
+        return f"collector_{row['status']}"
     if not rule_id:
         return None
     unmet = unmet_rule_collectors(

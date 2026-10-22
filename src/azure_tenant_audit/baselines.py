@@ -22,7 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from . import break_glass
+from . import break_glass, endpoint_posture, exchange_protection
 from .cyber_essentials import CE_FRAMEWORK_KEY, build_cyber_essentials_section
 from .effective_admins import (
     SECTION as _ADMIN_SET_SECTION,
@@ -143,8 +143,18 @@ _ADMIN_SET_RULES = frozenset(
 _ADMIN_LICENCE_RULE = "identity.admin_holds_productivity_licence"
 _STALE_GUEST_RULE = "identity.stale_guest"
 _MTA_STS_POLICY_RULES = frozenset({"dns_posture.mta_sts_policy_invalid", "dns_posture.mta_sts_testing_mode"})
+# Rules judged on the rows they read, not on whether their whole collector completed. ``exchange_policy`` runs a dozen
+# commands and is partial whenever one of them is not available (``Get-ProtectionAlert`` needs a Security & Compliance
+# session that app-only runs never open), which would keep these rules, and CIS 2.1.9 and SCuBA MS.EXO.3.1v1 with them,
+# from ever reading ``pass``. Each rule's own command rows are checked by ``exchange_protection.inputs_gap``.
+INPUT_JUDGED_RULES = frozenset(exchange_protection.RULES)
 _NOT_ASSESSED = "not_assessed"
 _STATUS_ORDER = ("fail", "accepted_risk", "pass", _NOT_ASSESSED)
+
+
+def rule_judged_on_inputs(rule_id: str) -> bool:
+    """Whether ``rule_id`` is judged on its own input rows instead of its collector's overall status."""
+    return rule_id in INPUT_JUDGED_RULES
 
 
 def _read_json(path: Path) -> Any:
@@ -222,6 +232,8 @@ def unmet_rule_collectors(
     rule_id: str, *, complete: Collection[str], not_applicable: Collection[str] = ()
 ) -> list[str]:
     """The collectors ``rule_id`` needs that neither completed nor (where allowed) were not applicable."""
+    if rule_id in INPUT_JUDGED_RULES:
+        return []
     tolerant = _RULE_COLLECTORS_NOT_APPLICABLE_OK.get(rule_id, ())
     return [
         collector
@@ -583,6 +595,128 @@ def _intune_assignment_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | N
 _TEAMS_FEDERATION_RULE = "teams.external_federation_open"
 _BREAK_GLASS_RULE = "ca.break_glass_exclusion_missing"
 
+# Device rules -> the device_posture count of devices the check says nothing about. A rule is evaluated
+# only when the device list was read in full, there is at least one device and no device is unknown for
+# the check; a clean result over a partly unknown fleet is not a pass.
+_DEVICE_UNKNOWN_FIELDS = {
+    "intune.device_encryption_off": "encryption_unknown",
+    "intune.device_jailbroken": "jailbreak_unknown",
+    "intune.device_stale_sync": "last_sync_unknown",
+    "intune.device_os_end_of_life": "os_lifecycle_unknown",
+}
+_DEFENDER_RULE_FIELDS = {
+    "intune.defender_av_off": "av_state",
+    "intune.defender_realtime_protection_off": "realtime_state",
+    "intune.defender_signatures_stale": "signature_state",
+}
+_COMPLIANCE_PLATFORM_RULE = "intune.compliance_policy_missing_platform"
+_UPDATE_RING_RULES = frozenset({"intune_depth.update_ring_not_assigned", "intune_depth.update_ring_deferral_excessive"})
+
+
+def _summary(snapshot: Mapping[str, Any], section: str, kind: str) -> Mapping[str, Any] | None:
+    return next((row for row in _records(snapshot, section) if row.get("kind") == kind), None)
+
+
+def _device_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
+    if snapshot is None:
+        return "inputs_not_available"
+    summary = _summary(snapshot, endpoint_posture.DEVICE_SECTION, endpoint_posture.DEVICE_SUMMARY_KIND)
+    if summary is None:
+        return "device_posture_not_collected"
+    if summary.get("read_state") != "collected":
+        return f"device_list_{summary.get('read_state')}"
+    if not summary.get("device_count"):
+        return "no_managed_devices"
+    field = _DEVICE_UNKNOWN_FIELDS[rule_id]
+    unknown = summary.get(field)
+    if isinstance(unknown, int) and unknown > 0:
+        return f"{field}_for_{unknown}_devices"
+    if rule_id == "intune.device_os_end_of_life" and summary.get("os_lifecycle_edition_dependent"):
+        # The Home/Pro date has passed and the Enterprise/Education date has not; osVersion does not show the edition.
+        return f"os_edition_dependent_for_{summary['os_lifecycle_edition_dependent']}_devices"
+    return None
+
+
+def _defender_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
+    if snapshot is None:
+        return "inputs_not_available"
+    summary = _summary(snapshot, endpoint_posture.DEFENDER_SECTION, endpoint_posture.DEFENDER_SUMMARY_KIND)
+    if summary is None:
+        return "defender_state_not_collected"
+    if summary.get("devices_read_state") != "collected":
+        return f"device_list_{summary.get('devices_read_state')}"
+    if summary.get("read_state") != "collected":
+        return f"defender_state_{summary.get('read_state')}"
+    if not summary.get("windows_device_count"):
+        return "no_windows_devices"
+    unavailable = int(summary.get("state_not_reported") or 0) + int(summary.get("state_read_failed") or 0)
+    if unavailable:
+        return f"defender_state_unavailable_for_{unavailable}_devices"
+    field = _DEFENDER_RULE_FIELDS[rule_id]
+    unknown = sum(
+        1
+        for row in _records(snapshot, endpoint_posture.DEFENDER_SECTION)
+        if row.get("kind") == endpoint_posture.DEFENDER_STATE_KIND and row.get(field) == endpoint_posture.STATE_UNKNOWN
+    )
+    return f"defender_{field}_unknown_for_{unknown}_devices" if unknown else None
+
+
+def _compliance_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    if snapshot is None:
+        return "inputs_not_available"
+    summary = _summary(snapshot, endpoint_posture.COMPLIANCE_SECTION, endpoint_posture.COMPLIANCE_SUMMARY_KIND)
+    if summary is None:
+        return "compliance_policies_not_collected"
+    if summary.get("policies_read_state") != "collected":
+        return f"compliance_policies_{summary.get('policies_read_state')}"
+    if summary.get("devices_read_state") != "collected":
+        return f"device_list_{summary.get('devices_read_state')}"
+    platforms = [
+        row
+        for row in _records(snapshot, endpoint_posture.COMPLIANCE_SECTION)
+        if row.get("kind") == endpoint_posture.COMPLIANCE_PLATFORM_KIND and row.get("device_count")
+    ]
+    if not platforms:
+        return "no_managed_devices"
+    for row in platforms:
+        if row.get("policy_count") and not row.get("assigned_policy_count"):
+            if row.get("assignments_unknown_count") or summary.get("assignments_read_state") != "collected":
+                return "policy_assignments_not_read_for_every_policy"
+    return None
+
+
+def _update_ring_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
+    if snapshot is None:
+        return "inputs_not_available"
+    summary = _summary(snapshot, endpoint_posture.UPDATE_SECTION, endpoint_posture.UPDATE_SUMMARY_KIND)
+    if summary is None:
+        return "update_management_not_collected"
+    if summary.get("rings_read_state") != "collected":
+        return f"update_rings_{summary.get('rings_read_state')}"
+    if summary.get("ring_count") and summary.get("ring_assignments_read_state") != "collected":
+        return f"ring_assignments_{summary.get('ring_assignments_read_state')}"
+    if summary.get("rings_with_unknown_assignments"):
+        return "ring_assignments_not_read_for_every_ring"
+    if rule_id == "intune_depth.update_ring_not_assigned":
+        if summary.get("devices_read_state") != "collected":
+            return f"device_list_{summary.get('devices_read_state')}"
+        if not summary.get("windows_device_count"):
+            return "no_windows_devices"
+        if not summary.get("rings_assigned") and (summary.get("profiles_assigned") or summary.get("windows_comanaged_device_count")):
+            # Updates may be managed through an update profile or Configuration Manager: no ring is not no management.
+            return "update_managed_by_other_means"
+        return None
+    if not summary.get("rings_assigned"):
+        return "no_assigned_update_ring"
+    assigned = [
+        row
+        for row in _records(snapshot, endpoint_posture.UPDATE_SECTION)
+        if row.get("kind") == endpoint_posture.UPDATE_RING_KIND and row.get("assigned") is True
+    ]
+    if any(not endpoint_posture.ring_settings_known(row) for row in assigned):
+        return "ring_settings_not_returned"
+    return None
+
 
 def _teams_federation_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
     """Open federation means federation allowed with no allow list, so the allow list must have been read."""
@@ -625,6 +759,16 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         return _teams_federation_inputs_gap(snapshot)
     if rule_id == _BREAK_GLASS_RULE:
         return _break_glass_inputs_gap(snapshot)
+    if rule_id in _DEVICE_UNKNOWN_FIELDS:
+        return _device_inputs_gap(snapshot, rule_id)
+    if rule_id in _DEFENDER_RULE_FIELDS:
+        return _defender_inputs_gap(snapshot, rule_id)
+    if rule_id == _COMPLIANCE_PLATFORM_RULE:
+        return _compliance_inputs_gap(snapshot)
+    if rule_id in _UPDATE_RING_RULES:
+        return _update_ring_inputs_gap(snapshot, rule_id)
+    if rule_id in exchange_protection.RULES:
+        return exchange_protection.inputs_gap(rule_id, snapshot)
     if rule_id in _RULE_VERDICT_CONTROLS:
         return _verdict_inputs_gap(snapshot, rule_id)
     if rule_id in _ADMIN_SET_RULES:
@@ -667,7 +811,9 @@ def _rule_evaluation(
     if accepted_by_rule.get(rule_id):
         return {"rule_id": rule_id, "status": "accepted_risk", "evaluated": True}
     collectors = rule_evidence_collectors(rule_id)
-    if not collectors:
+    if rule_id in INPUT_JUDGED_RULES:
+        reason = _inputs_gap(rule_id, snapshot)
+    elif not collectors:
         reason = "no_collector_mapping"
     else:
         incomplete = unmet_rule_collectors(

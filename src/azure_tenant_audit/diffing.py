@@ -53,6 +53,8 @@ _VOLATILE_FIELD_NAMES = frozenset(
 _KIND_VOLATILE_PATHS = {
     "usage_report_objects": frozenset({"report_refresh_date"}),
     "copilot_usage_objects": frozenset({"created"}),
+    # The day the end-of-life table was applied; it moves every day without any device changing.
+    "device_posture": frozenset({"os_lifecycle_evaluated_on"}),
 }
 
 

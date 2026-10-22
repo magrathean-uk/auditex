@@ -3,11 +3,14 @@ from __future__ import annotations
 from collections import Counter
 from collections import defaultdict
 from collections.abc import Callable, Sequence
+from datetime import date, datetime
 from pathlib import Path
 import re
 from typing import Any
 
 from . import break_glass
+from . import endpoint_posture
+from . import exchange_protection
 from . import external_sharing
 from .chunk_reader import iter_endpoint_records
 from .collection_gaps import (
@@ -1291,6 +1294,204 @@ def _build_effective_admin_records(
     )
 
 
+def _with_assignments(assignments: Any) -> dict[str, Any]:
+    """Assignment fields for a policy record: known only when the assignment read returned that policy's list."""
+    if not isinstance(assignments, list):
+        return {"assignments_known": False}
+    return {"assignments_known": True, **endpoint_posture.assignment_summary(assignments)}
+
+
+def _assignments_by_policy(evidence: Evidence) -> dict[str, list[Any]]:
+    return {
+        str(row.get("policyId")): row["assignments"]
+        for row in evidence.rows
+        if row.get("policyId") and isinstance(row.get("assignments"), list)
+    }
+
+
+def _present_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in settings.items() if value is not None}
+
+
+def _build_endpoint_records(
+    sources: _NormalizationSources,
+    payloads: dict[str, dict[str, Any]],
+    devices: list[dict[str, Any]],
+    today: date | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Device posture, compliance policy, update management and Defender antivirus evidence.
+
+    Each section carries a summary record that says how completely its inputs were read, so a rule can tell
+    "nothing found" from "nothing read". A section is left out when its collector did not run at all.
+    """
+    sections: dict[str, list[dict[str, Any]]] = {}
+    intune = payloads.get("intune") if isinstance(payloads.get("intune"), dict) else {}
+    depth = payloads.get("intune_depth") if isinstance(payloads.get("intune_depth"), dict) else {}
+
+    device_evidence = sources.endpoint_evidence(intune, "managedDevices")
+    if device_evidence.state != EVIDENCE_ABSENT:
+        sections[endpoint_posture.DEVICE_SECTION] = [
+            _record(
+                endpoint_posture.DEVICE_SUMMARY_KIND,
+                "intune.managedDevices",
+                "tenant",
+                **endpoint_posture.device_posture_summary(
+                    devices, read_state=device_evidence.state, read_detail=device_evidence.detail, today=today
+                ),
+            )
+        ]
+
+    policy_evidence = sources.endpoint_evidence(intune, "deviceCompliancePolicies")
+    if policy_evidence.state != EVIDENCE_ABSENT:
+        assignment_evidence = sources.endpoint_evidence(intune, "deviceCompliancePolicyAssignments")
+        assigned = _assignments_by_policy(assignment_evidence)
+        policy_records = [
+            _record(
+                endpoint_posture.COMPLIANCE_POLICY_KIND,
+                "intune.deviceCompliancePolicies",
+                str(item.get("id")),
+                display_name=item.get("displayName"),
+                platform=endpoint_posture.compliance_platform(item.get("@odata.type")),
+                policy_type=str(item.get("@odata.type") or "").rsplit(".", 1)[-1] or None,
+                settings=_present_settings(endpoint_posture.compliance_settings(item)),
+                **_with_assignments(assigned.get(str(item.get("id")))),
+            )
+            for item in policy_evidence.rows
+            if item.get("id")
+        ]
+        coverage_rows = endpoint_posture.compliance_platform_coverage(devices, policy_records)
+        sections[endpoint_posture.COMPLIANCE_SECTION] = [
+            *policy_records,
+            *(
+                _record(endpoint_posture.COMPLIANCE_PLATFORM_KIND, "intune.deviceCompliancePolicies", row["platform"], **row)
+                for row in coverage_rows
+            ),
+            _record(
+                endpoint_posture.COMPLIANCE_SUMMARY_KIND,
+                "intune.deviceCompliancePolicies",
+                "tenant",
+                policies_read_state=policy_evidence.state,
+                policies_read_detail=policy_evidence.detail,
+                assignments_read_state=assignment_evidence.state,
+                assignments_read_detail=assignment_evidence.detail,
+                devices_read_state=device_evidence.state,
+                policy_count=len(policy_records),
+                policies_with_unknown_assignments=sum(1 for row in policy_records if row.get("assignments_known") is not True),
+            ),
+        ]
+
+    ring_evidence = sources.endpoint_evidence(depth, "windowsUpdateRings")
+    profile_inputs = {
+        "quality": (sources.endpoint_evidence(depth, "windowsQualityUpdateProfiles"), "windowsQualityUpdateProfiles", "windowsQualityUpdateProfileAssignments"),
+        "feature": (sources.endpoint_evidence(depth, "windowsFeatureUpdateProfiles"), "windowsFeatureUpdateProfiles", "windowsFeatureUpdateProfileAssignments"),
+    }
+    if ring_evidence.state != EVIDENCE_ABSENT or any(evidence.state != EVIDENCE_ABSENT for evidence, _, _ in profile_inputs.values()):
+        ring_assignment_evidence = sources.endpoint_evidence(depth, "windowsUpdateRingAssignments")
+        assigned = _assignments_by_policy(ring_assignment_evidence)
+        rings = [
+            _record(
+                endpoint_posture.UPDATE_RING_KIND,
+                "intune_depth.windowsUpdateRings",
+                str(item.get("id")),
+                display_name=item.get("displayName"),
+                **endpoint_posture.update_ring_fields(item),
+                **_with_assignments(assigned.get(str(item.get("id")))),
+            )
+            for item in ring_evidence.rows
+            if item.get("id")
+        ]
+        profiles: list[dict[str, Any]] = []
+        profile_states: dict[str, Any] = {}
+        for profile_type, (evidence, list_name, assignments_name) in profile_inputs.items():
+            assignment_evidence = sources.endpoint_evidence(depth, assignments_name)
+            by_profile = _assignments_by_policy(assignment_evidence)
+            profile_states[f"{profile_type}_profiles_read_state"] = evidence.state
+            profile_states[f"{profile_type}_profile_assignments_read_state"] = assignment_evidence.state
+            profiles.extend(
+                _record(
+                    endpoint_posture.UPDATE_PROFILE_KIND,
+                    f"intune_depth.{list_name}",
+                    str(item.get("id")),
+                    display_name=item.get("displayName"),
+                    api_version="beta",
+                    **endpoint_posture.update_profile_fields(item, profile_type),
+                    **_with_assignments(by_profile.get(str(item.get("id")))),
+                )
+                for item in evidence.rows
+                if item.get("id")
+            )
+        known = [ring for ring in rings if ring.get("assignments_known") is True]
+        # Other update management that is visible: an assigned update profile, or Windows devices that Configuration
+        # Manager co-manages (its update settings and WSUS are not read). With either, "no update ring" is not "no
+        # update management".
+        comanaged = sum(
+            1
+            for device in devices
+            if device.get("os_family") == "windows" and str(device.get("enrollment_type") or "").lower() == "windowscomanagement"
+        )
+        sections[endpoint_posture.UPDATE_SECTION] = [
+            *rings,
+            *profiles,
+            _record(
+                endpoint_posture.UPDATE_SUMMARY_KIND,
+                "intune_depth.windowsUpdateRings",
+                "tenant",
+                rings_read_state=ring_evidence.state,
+                rings_read_detail=ring_evidence.detail,
+                ring_assignments_read_state=ring_assignment_evidence.state,
+                ring_count=len(rings),
+                rings_with_unknown_assignments=len(rings) - len(known),
+                rings_assigned=sum(1 for ring in known if ring.get("assigned") is True),
+                rings_assigned_to_all_devices=sum(
+                    1 for ring in known if ring.get("assigned") is True and (ring.get("assigned_to_all_devices") or ring.get("assigned_to_all_users"))
+                ),
+                profile_count=len(profiles),
+                profiles_assigned=sum(1 for profile in profiles if profile.get("assigned") is True),
+                windows_comanaged_device_count=comanaged,
+                devices_read_state=device_evidence.state,
+                windows_device_count=sum(1 for device in devices if device.get("os_family") == "windows"),
+                update_ring_source="deviceConfigurations of type windowsUpdateForBusinessConfiguration (v1.0)",
+                update_profile_api_version="beta",
+                **profile_states,
+            ),
+        ]
+
+    av_evidence = sources.endpoint_evidence(intune, "windowsProtectionStates")
+    if av_evidence.state != EVIDENCE_ABSENT:
+        fanout = (intune.get("windowsProtectionStates") or {}).get("fanout") if isinstance(intune.get("windowsProtectionStates"), dict) else None
+        fanout = fanout if isinstance(fanout, dict) else {}
+        states = [
+            _record(
+                endpoint_posture.DEFENDER_STATE_KIND,
+                "intune.windowsProtectionStates",
+                str(row.get("deviceId")),
+                **endpoint_posture.defender_state_fields(row),
+            )
+            for row in av_evidence.rows
+            if row.get("deviceId")
+        ]
+        statuses = Counter(str(row.get("read_status")) for row in states)
+        sections[endpoint_posture.DEFENDER_SECTION] = [
+            *states,
+            _record(
+                endpoint_posture.DEFENDER_SUMMARY_KIND,
+                "intune.windowsProtectionStates",
+                "tenant",
+                read_state=av_evidence.state,
+                read_detail=av_evidence.detail,
+                devices_read_state=device_evidence.state,
+                windows_device_count=sum(1 for device in devices if device.get("os_family") == "windows"),
+                devices_expanded=len(states),
+                devices_not_expanded=fanout.get("fanout_omitted_count"),
+                state_read=statuses[endpoint_posture.READ_OK],
+                state_not_reported=statuses[endpoint_posture.READ_NOT_REPORTED],
+                state_read_failed=statuses[endpoint_posture.READ_FAILED],
+                read_via="Intune managedDevices/{id}/windowsProtectionState (GET per Windows device)",
+            ),
+        ]
+    return sections
+
+
 def build_normalized_snapshot(
     *,
     tenant_name: str,
@@ -1301,7 +1502,9 @@ def build_normalized_snapshot(
     coverage_rows: list[dict[str, Any]] | None = None,
     run_dir: Path | None = None,
     break_glass_accounts: Sequence[str] | None = None,
+    as_of: datetime | None = None,
 ) -> dict[str, dict[str, Any]]:
+    """Normalize collector payloads. ``as_of`` pins the day date-dependent evidence (the end-of-life table) is applied."""
     diagnostics = diagnostics or []
     result_rows = result_rows or []
     coverage_rows = coverage_rows or []
@@ -1414,6 +1617,7 @@ def build_normalized_snapshot(
             compliance_state=item.get("complianceState"),
             azure_ad_device_id=item.get("azureADDeviceId"),
             last_sync_at=item.get("lastSyncDateTime"),
+            **endpoint_posture.device_fields(item),
         )
         for item in _values(collector_payloads.get("intune", {}), "managedDevices")
         if item.get("id")
@@ -1765,9 +1969,14 @@ def build_normalized_snapshot(
         "organizationAuditConfig",
         "mailboxAuditBypass",
         "protectionAlerts",
+        exchange_protection.SOURCE_MALWARE,
+        exchange_protection.SOURCE_TRANSPORT,
+        exchange_protection.SOURCE_DKIM,
     ):
         for item in _values(collector_payloads.get("exchange_policy", {}), source_name):
-            object_id = str(item.get("Identity") or item.get("Name") or item.get("PrimarySmtpAddress") or source_name)
+            object_id = str(
+                item.get("Identity") or item.get("Name") or item.get("Domain") or item.get("PrimarySmtpAddress") or source_name
+            )
             exchange_policy_objects.append(
                 _record(
                     "exchange_policy_object",
@@ -1775,7 +1984,7 @@ def build_normalized_snapshot(
                     object_id,
                     source_name=source_name,
                     display_name=item.get("Name") or item.get("Identity") or item.get("DisplayName"),
-                    domain_name=item.get("DomainName"),
+                    domain_name=exchange_protection.domain_text(item.get("DomainName") or item.get("Domain")),
                     trusted_mail_outbound_enabled=item.get("TrustedMailOutboundEnabled"),
                     auto_reply_enabled=item.get("AutoReplyEnabled"),
                     auto_forward_enabled=item.get("AutoForwardEnabled"),
@@ -1796,6 +2005,7 @@ def build_normalized_snapshot(
                     severity=item.get("Severity"),
                     category=item.get("Category"),
                     is_system_rule=item.get("IsSystemRule"),
+                    **exchange_protection.protection_fields(source_name, item),
                 )
             )
     governance_objects: list[dict[str, Any]] = []
@@ -2546,6 +2756,7 @@ def build_normalized_snapshot(
         "copilot_admin_setting_objects": copilot_admin_setting_records,
         "copilot_usage_objects": copilot_usage_records,
     }
+    records_by_section.update(_build_endpoint_records(sources, collector_payloads, devices, as_of.date() if as_of else None))
     directory_payload = collector_payloads.get("directory_relationships", {})
     if directory_payload:
         directory_payload = sources.analysis_payloads(("directory_relationships",))["directory_relationships"]

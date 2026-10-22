@@ -3,8 +3,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ..collection_gaps import FANOUT_OBJECT_LIMIT, fanout_gap_row
+from ..collection_gaps import FANOUT_OBJECT_LIMIT, REASON_INPUT_LIMITED, TRUNCATION_ERROR_CLASS, fanout_gap_row
+from ..endpoint_posture import UPDATE_RING_FIELDS, is_update_ring, project
 from ..graph import GraphClient, GraphError
+from ._endpoint_reads import assignment_fanout, collector_partial, input_rows, mark_section_scoped, scoped_gap_message
 from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
 
 # deviceManagementScripts returns ``scriptContent`` (the base64 script body) unless
@@ -16,9 +18,20 @@ DEVICE_MANAGEMENT_SCRIPT_SELECT = (
 )
 
 
+# Windows quality and feature update profiles exist only on the Graph beta API; v1.0 returns 404 for both.
+# Update rings are ordinary deviceConfigurations of the windowsUpdateForBusinessConfiguration type, so they
+# are taken from the deviceConfigurations list already read (no further call), and only their assignments
+# are read one ring at a time.
+_UPDATE_PROFILES = (
+    ("windowsQualityUpdateProfiles", "windowsQualityUpdateProfileAssignments", "quality_update_profiles"),
+    ("windowsFeatureUpdateProfiles", "windowsFeatureUpdateProfileAssignments", "feature_update_profiles"),
+)
+_UPDATE_PROFILE_LISTS = frozenset(list_name for list_name, _assignments, _scope in _UPDATE_PROFILES)
+
+
 class IntuneDepthCollector(Collector):
     name = "intune_depth"
-    description = "Deeper Intune policy, script, protection, and sampled assignment inventory."
+    description = "Deeper Intune policy, script, protection, update ring and update profile inventory, with sampled assignments."
     required_permissions = [
         "DeviceManagementConfiguration.Read.All",
         "DeviceManagementApps.Read.All",
@@ -54,6 +67,16 @@ class IntuneDepthCollector(Collector):
                 },
                 "iosManagedAppProtections": {
                     "endpoint": "/deviceAppManagement/iosManagedAppProtections",
+                    "params": {},
+                },
+                "windowsQualityUpdateProfiles": {
+                    "endpoint": "/deviceManagement/windowsQualityUpdateProfiles",
+                    "api_version": "beta",
+                    "params": {},
+                },
+                "windowsFeatureUpdateProfiles": {
+                    "endpoint": "/deviceManagement/windowsFeatureUpdateProfiles",
+                    "api_version": "beta",
                     "params": {},
                 },
             },
@@ -224,13 +247,82 @@ class IntuneDepthCollector(Collector):
                 )
             )
         payload["deviceConfigurationAssignments"] = {"value": assignment_rows}
+        # The beta update profile lists and everything derived from the update rings are evidence of their own:
+        # a failed or cut one stays in its section (the update rules and the summary read it) and does not make
+        # the rest of the collector, such as the unassigned-policy rule, not assessed.
+        mark_section_scoped([row for row in coverage if row.get("name") in _UPDATE_PROFILE_LISTS])
+        coverage.extend(self._update_management(client, context.get("run_dir"), payload))
         total = sum(item.get("item_count", 0) for item in coverage)
-        partial = any(item.get("status") != "ok" for item in coverage)
+        partial = collector_partial(coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",
             payload=payload,
             item_count=total,
-            message="Intune depth collector partially completed" if partial else "",
+            message="Intune depth collector partially completed" if partial else scoped_gap_message("Intune depth collector", coverage),
             coverage=coverage,
         )
+
+    def _update_management(self, client: GraphClient, run_dir: Any, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Windows Update for Business rings and update profiles, each with its assignments."""
+        coverage: list[dict[str, Any]] = []
+        source = payload.get("deviceConfigurations")
+        rows, issues, failed, cut = input_rows(source, run_dir)
+        rings = [project(row, UPDATE_RING_FIELDS) for row in rows if is_update_ring(row)]
+        if failed or issues:
+            payload["windowsUpdateRings"] = {
+                "error": "The device configuration list could not be read in full, so update rings were not identified.",
+                "error_class": "incomplete_evidence",
+            }
+        else:
+            payload["windowsUpdateRings"] = {"value": rings, "collection_truncated": cut}
+            if cut:
+                payload["windowsUpdateRings"]["truncation_reason"] = REASON_INPUT_LIMITED
+        incomplete = bool(failed or issues)
+        coverage.append(
+            {
+                "section_scoped": True,
+                "collector": self.name,
+                "type": "derived",
+                "name": "windowsUpdateRings",
+                "status": "partial" if cut or incomplete else "ok",
+                "item_count": len(rings),
+                "error_class": "incomplete_evidence" if incomplete else TRUNCATION_ERROR_CLASS if cut else None,
+                "error": (
+                    "Update rings come from the device configuration list, which was not read in full."
+                    if incomplete or cut
+                    else None
+                ),
+                # The section carries ``collection_truncated`` (normalization lists the gap from it); a row that
+                # flagged it would have to be named in the manifest's coverage gaps.
+                **({"truncation_reason": REASON_INPUT_LIMITED} if cut and not incomplete else {}),
+            }
+        )
+        section, rows_coverage = assignment_fanout(
+            collector=self.name,
+            client=client,
+            name="windowsUpdateRingAssignments",
+            source=source,
+            run_dir=run_dir,
+            endpoint_for=lambda policy_id: f"/deviceManagement/deviceConfigurations/{policy_id}/assignments",
+            endpoint_template="/deviceManagement/deviceConfigurations/{id}/assignments",
+            scope="windows_update_rings",
+            rows_filter=is_update_ring,
+        )
+        payload["windowsUpdateRingAssignments"] = section
+        coverage.extend(rows_coverage)
+        for list_name, assignments_name, scope in _UPDATE_PROFILES:
+            section, rows_coverage = assignment_fanout(
+                collector=self.name,
+                client=client,
+                name=assignments_name,
+                source=payload.get(list_name),
+                run_dir=run_dir,
+                endpoint_for=lambda profile_id, path=list_name: f"/deviceManagement/{path}/{profile_id}/assignments",
+                endpoint_template=f"/deviceManagement/{list_name}/{{id}}/assignments",
+                scope=scope,
+                api_version="beta",
+            )
+            payload[assignments_name] = section
+            coverage.extend(rows_coverage)
+        return coverage
