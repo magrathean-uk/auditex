@@ -17,6 +17,7 @@ from auditex.model_training import (
     _validate_resume_input,
     distinct_prompt_sha256,
     load_cases,
+    oracle_provenance,
     prepare_training_pack,
     training_main,
     validate_case,
@@ -285,6 +286,62 @@ def test_provenance_accepts_template_and_prompt_digest_and_rejects_other_keys() 
         broken["provenance"][key] = value
         with pytest.raises(ValueError):
             validate_case(broken)
+
+
+def test_provenance_accepts_every_evidence_view_and_oracle_outcome() -> None:
+    for view in ("rego_ast", "widened"):
+        for outcome in ("met", "not_met", "fail_closed_missing_input", "not_applicable", "not_collected"):
+            case = _case("a")
+            case["provenance"].update(evidence_view=view, oracle_outcome=outcome)
+            assert validate_case(copy.deepcopy(case)) == case
+    case = _case("a")
+    case["provenance"]["evidence_view"] = "widened"
+    assert validate_case(case) is case                      # each field is optional on its own
+
+
+@pytest.mark.parametrize("field, value", [
+    ("evidence_view", "other"), ("evidence_view", "Rego_AST"), ("evidence_view", ""), ("evidence_view", None),
+    ("evidence_view", 1), ("evidence_view", True), ("evidence_view", ["rego_ast"]), ("evidence_view", {"rego_ast": 1}),
+    ("oracle_outcome", "evaluated"), ("oracle_outcome", "not_collected_variant"), ("oracle_outcome", "MET"),
+    ("oracle_outcome", ""), ("oracle_outcome", None), ("oracle_outcome", 0), ("oracle_outcome", False),
+    ("oracle_outcome", ["met"]), ("oracle_outcome", {"met": 1}),
+])
+def test_provenance_rejects_unknown_or_non_string_oracle_attributes(field: str, value: object) -> None:
+    case = _case("a")
+    case["provenance"][field] = value
+    with pytest.raises(ValueError, match=f"{field} must be one of"):
+        validate_case(case)
+
+
+def test_oracle_provenance_prefers_the_fields_over_source_pairs() -> None:
+    case = _case("a")
+    case["provenance"].update(source="oracle:x; evidence_view=widened; oracle_outcome=evaluated; sections=a",
+                              evidence_view="rego_ast", oracle_outcome="not_met")
+    assert oracle_provenance(case) == {"evidence_view": "rego_ast", "oracle_outcome": "not_met"}
+
+
+def test_oracle_provenance_falls_back_to_source_pairs_per_field() -> None:
+    case = _case("a")
+    case["provenance"]["source"] = ("oracle:cisa-scubagear@abc aad MS.AAD.1.1v1; variant=base; opa=1.2.3; input_sha256=" + "0" * 64
+                                    + "; evidence_view=rego_ast; oracle_outcome=fail_closed_missing_input; sections=a,b;"
+                                    ' report_details="; evidence_view=widened; oracle_outcome=met"')
+    assert oracle_provenance(case) == {"evidence_view": "rego_ast", "oracle_outcome": "fail_closed_missing_input"}
+    # A legacy pair is returned as written, not enum-checked.
+    case["provenance"]["source"] = "oracle:x; evidence_view=widened; oracle_outcome=evaluated; sections=a"
+    assert oracle_provenance(case) == {"evidence_view": "widened", "oracle_outcome": "evaluated"}
+    # One field present, the other parsed from source.
+    case["provenance"]["oracle_outcome"] = "met"
+    assert oracle_provenance(case) == {"evidence_view": "widened", "oracle_outcome": "met"}
+    # A key that merely ends in the name is not a pair.
+    case["provenance"].pop("oracle_outcome")
+    case["provenance"]["source"] = "oracle:x; prior_evidence_view=widened; my_oracle_outcome=met"
+    assert oracle_provenance(case) == {"evidence_view": None, "oracle_outcome": None}
+
+
+def test_oracle_provenance_reports_absence_as_none() -> None:
+    case = _case("a")
+    assert oracle_provenance(case) == {"evidence_view": None, "oracle_outcome": None}
+    assert validate_case(case) is case
 
 
 def test_prompt_digest_hides_only_the_case_id() -> None:

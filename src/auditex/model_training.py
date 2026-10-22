@@ -29,7 +29,13 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PROVENANCE_REQUIRED = {"source", "synthetic", "review_status"}
 # template groups cases by reasoning template and distinct_prompt_sha256 marks id-only duplicates; both are
 # optional curation aids written by scripts/build-oracle-cases.py and read by scripts/split-oracle-cases.py.
-_PROVENANCE_OPTIONAL = {"reviewer", "template", "distinct_prompt_sha256"}
+# evidence_view and oracle_outcome record how an oracle-labelled case was derived; oracle_provenance() also
+# reads them from the evidence_view= and oracle_outcome= pairs that older miner output keeps in source.
+_PROVENANCE_OPTIONAL = {"reviewer", "template", "distinct_prompt_sha256", "evidence_view", "oracle_outcome"}
+_EVIDENCE_VIEWS = ("rego_ast", "widened")
+_ORACLE_OUTCOMES = ("met", "not_met", "fail_closed_missing_input", "not_applicable", "not_collected")
+_ORACLE_PROVENANCE_FIELDS = ("evidence_view", "oracle_outcome")
+_SOURCE_PAIRS = {field: re.compile(rf"(?:^|;)\s*{field}=([^;\s]+)") for field in _ORACLE_PROVENANCE_FIELDS}
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -84,7 +90,8 @@ def validate_case(payload: Any) -> dict[str, Any]:
         raise ValueError("case split must be train, validation or test")
     provenance = payload["provenance"]
     if not isinstance(provenance, dict) or not _PROVENANCE_REQUIRED <= set(provenance) <= _PROVENANCE_REQUIRED | _PROVENANCE_OPTIONAL:
-        raise ValueError("provenance requires source, synthetic, review_status and optional reviewer, template and distinct_prompt_sha256")
+        raise ValueError("provenance requires source, synthetic, review_status and optional reviewer, template, "
+                         "distinct_prompt_sha256, evidence_view and oracle_outcome")
     _text(provenance["source"], "provenance source")
     if type(provenance["synthetic"]) is not bool:
         raise ValueError("provenance synthetic must be a boolean")
@@ -96,6 +103,9 @@ def validate_case(payload: Any) -> dict[str, Any]:
     if "distinct_prompt_sha256" in provenance and not (
             isinstance(provenance["distinct_prompt_sha256"], str) and _SHA256.fullmatch(provenance["distinct_prompt_sha256"])):
         raise ValueError("distinct_prompt_sha256 must be a lowercase hex SHA-256 digest")
+    for field, allowed_values in (("evidence_view", _EVIDENCE_VIEWS), ("oracle_outcome", _ORACLE_OUTCOMES)):
+        if field in provenance and not (isinstance(provenance[field], str) and provenance[field] in allowed_values):
+            raise ValueError(f"{field} must be one of {', '.join(allowed_values)}")
     messages = payload["messages"]
     if not isinstance(messages, list) or len(messages) < 2:
         raise ValueError("messages require a prompt and final assistant response")
@@ -127,6 +137,24 @@ def validate_case(payload: Any) -> dict[str, Any]:
     except (ValueError, TypeError) as exc:
         raise ValueError("case must contain finite JSON values") from exc
     return payload
+
+
+def oracle_provenance(case: dict[str, Any]) -> dict[str, str | None]:
+    """The oracle attributes `evidence_view` and `oracle_outcome` of a case, `None` where a case records neither.
+
+    A first-class provenance field wins. Otherwise the value comes from the first `key=value` pair of that name in
+    `provenance.source` (the form older miner output uses). Only validate_case checks the enums, so a pair parsed from
+    a legacy source can hold a value such as `evaluated` that the field itself would reject."""
+    provenance = case["provenance"]
+    source = provenance.get("source")
+    result: dict[str, str | None] = {}
+    for field in _ORACLE_PROVENANCE_FIELDS:
+        value = provenance.get(field)
+        if value is None and isinstance(source, str):
+            match = _SOURCE_PAIRS[field].search(source)
+            value = match.group(1) if match else None
+        result[field] = value
+    return result
 
 
 def _normalized_prompt(case: dict[str, Any], *, mask_id: bool = False) -> str:
