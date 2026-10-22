@@ -1,6 +1,7 @@
 """Oracle-case miner and splitter: pure functions on inline fixtures, plus an end-to-end run when OPA and ScubaGear exist.
 
-Nothing here needs OPA or ScubaGear except the tests marked `needs_oracle`. They run only when these are exported:
+Nothing here needs OPA or ScubaGear except the tests marked `needs_opa` (parse and evaluate small inline Rego with the real
+binary) and `needs_oracle` (the full miner against ScubaGear). They run only when these are exported:
 
     AUDITEX_TEST_OPA                OPA 1.20.2 binary
     AUDITEX_TEST_SCUBAGEAR          PowerShell/ScubaGear directory of a ScubaGear checkout at the pinned commit
@@ -15,14 +16,16 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import stat
 import subprocess
+import tempfile
 from collections import Counter
 from pathlib import Path
 
 import pytest
 
-from auditex.model_training import distinct_prompt_sha256, validate_case, validate_cases
+from auditex.model_training import distinct_prompt_sha256, oracle_provenance, validate_case, validate_cases
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
@@ -40,6 +43,7 @@ PINNED_OPA = "1.20.2"
 needs_oracle = pytest.mark.skipif(
     not (OPA and OPA.is_file() and SCUBA and SCUBA.is_dir()),
     reason="export AUDITEX_TEST_OPA (OPA 1.20.2) and AUDITEX_TEST_SCUBAGEAR (PowerShell/ScubaGear at the pinned commit)")
+needs_opa = pytest.mark.skipif(not (OPA and OPA.is_file()), reason="export AUDITEX_TEST_OPA (OPA 1.20.2) to parse and evaluate inline Rego")
 needs_reference = pytest.mark.skipif(not (REFERENCE and REFERENCE.is_file()), reason="export AUDITEX_TEST_ORACLE_REFERENCE to compare with a prototype output")
 
 
@@ -250,19 +254,445 @@ Inner := input.sec_a if {
     assert miner.policy_text({"baseline": tmp_path / "missing.md"}) == {}
 
 
-def test_evidence_view_widens_until_identical_views_agree(miner):
-    inputs = [
+def _view_inputs():
+    return [
         {"dep": {"x": 1}, "hidden": {"mode": "a"}, "other": 1},
         {"dep": {"x": 1}, "hidden": {"mode": "b"}, "other": 1},
         {"dep": {"x": 2}, "hidden": {"mode": "a"}, "other": 1},
     ]
-    evaluations = _evaluations(inputs, {"MS.DEMO.1.1v1": [True, False, True], "MS.DEMO.1.2v1": [True, True, True]})
+
+
+def test_widened_view_widens_until_identical_views_agree(miner):
+    evaluations = _evaluations(_view_inputs(), {"MS.DEMO.1.1v1": [True, False, True], "MS.DEMO.1.2v1": [True, True, True]})
     evaluations[0][1].append({"PolicyId": "MS.DEMO.1.3v1", "Criticality": "Shall/3rd Party", "RequirementMet": "N/A"})
     deps = {"MS.DEMO.1.1v1": {"dep"}, "MS.DEMO.1.2v1": {"dep"}, "MS.DEMO.1.3v1": {"dep"}}
-    sections = miner.derive_sections(deps, evaluations, ["dep", "hidden", "other"])
-    assert sections["MS.DEMO.1.1v1"] == ["dep", "hidden"]   # `hidden` flips the verdict, so the view must include it
-    assert sections["MS.DEMO.1.2v1"] == ["dep"]             # already consistent: no widening
-    assert "MS.DEMO.1.3v1" not in sections                  # non-boolean verdicts are never labelled
+    views = miner.derive_views(deps, evaluations, ["dep", "hidden", "other"], method="widened")
+    assert views["MS.DEMO.1.1v1"]["sections"] == ["dep", "hidden"]   # `hidden` flips the verdict, so the view must include it
+    assert views["MS.DEMO.1.2v1"]["sections"] == ["dep"]             # already consistent: no widening
+    assert "MS.DEMO.1.3v1" not in views                              # non-boolean verdicts are never labelled
+    assert {v["method"] for v in views.values()} == {"widened"} and views["MS.DEMO.1.1v1"]["widened_with"] == ["hidden"]
+    with pytest.raises(ValueError, match="unknown evidence view method"):
+        miner.derive_views(deps, evaluations, ["dep"], method="guess")
+
+
+def test_ast_view_is_kept_when_consistent_and_widened_only_where_verdicts_conflict(miner):
+    evaluations = _evaluations(_view_inputs(), {"MS.DEMO.1.1v1": [True, False, True], "MS.DEMO.1.2v1": [True, True, True],
+                                               "MS.DEMO.1.4v1": [True, True, True]})
+    deps = {"MS.DEMO.1.1v1": {"dep"}, "MS.DEMO.1.2v1": {"dep", "other"}}   # 1.4 has no dependency at all
+    views = miner.derive_views(deps, evaluations, ["dep", "hidden", "other"], method="rego_ast")
+    assert views["MS.DEMO.1.2v1"] == {"sections": ["dep", "other"], "method": "rego_ast", "dependencies": ["dep", "other"],
+                                      "widened_with": [], "reason": None}
+    assert views["MS.DEMO.1.1v1"] == {"sections": ["dep", "hidden"], "method": "widened", "dependencies": ["dep"],
+                                      "widened_with": ["hidden"], "reason": "verdict_conflict"}
+    assert views["MS.DEMO.1.4v1"]["method"] == "widened" and views["MS.DEMO.1.4v1"]["reason"] == "no_dependency"
+    assert views["MS.DEMO.1.4v1"]["sections"] == ["dep", "hidden", "other"]   # nothing is read, so nothing is known: every section
+
+
+DEMO_POLICY = """package demo
+
+import rego.v1
+import data.utils.demo.Shared
+import data.utils.demo as helpers
+
+tests contains {
+    "PolicyId": "MS.DEMO.1.1v1",
+    "ReportDetails": ReportText(Status),
+    "ErrorDetails": input.sec_error_text,
+    "RequirementMet": Status
+} if {
+    Status := count(input.sec_body) > 0
+    input.not_a_variant_key
+}
+
+tests contains {
+    "PolicyId": "MS.DEMO.1.2v1",
+    "ActualValue": Chain,
+    "RequirementMet": true
+} if {
+    true
+}
+
+tests contains {
+    "PolicyId": PolicyId,
+    "RequirementMet": false
+} if {
+    PolicyId := "MS.DEMO.1.3v1"
+    Shared(input.sec_c)
+}
+
+tests contains {
+    "PolicyId": "MS.DEMO.1.4v1",
+    "RequirementMet": object.get(input, "sec_opt", false)
+} if {
+    true
+}
+
+tests contains {
+    "PolicyId": "MS.DEMO.1.5v1",
+    "RequirementMet": helpers.Deep
+} if {
+    true
+}
+
+tests contains {
+    "PolicyId": "MS.DEMO.1.6v1",
+    "RequirementMet": LoopA
+} if {
+    true
+}
+
+tests contains {
+    "PolicyId": "MS.DEMO.1.7v1",
+    "RequirementMet": Pick == "a"
+} if {
+    true
+}
+
+tests contains {
+    "PolicyId": "MS.DEMO.1.8v1",
+    "RequirementMet": count(input[Name]) > 0
+} if {
+    Name := "dynamic"
+}
+
+ReportText(Status) := input.sec_msg_only if {
+    Status
+}
+
+Chain := Inner if {
+    true
+}
+
+Inner := input.sec_a if {
+    true
+}
+
+LoopA := LoopB if {
+    input.sec_loop
+}
+
+LoopB := LoopA if {
+    true
+}
+
+Pick := "a" if {
+    input.sec_first
+} else := "b" if {
+    input.sec_second
+}
+
+Unused := input.sec_unused if {
+    true
+}
+"""
+DEMO_UTILS = """package utils.demo
+
+import rego.v1
+
+Shared(value) if {
+    value
+    input.sec_util
+}
+
+Deep := input.sec_deep if {
+    true
+}
+"""
+DEMO_KEYS = ["dynamic", "sec_a", "sec_body", "sec_c", "sec_deep", "sec_error_text", "sec_first", "sec_loop", "sec_msg_only",
+             "sec_opt", "sec_second", "sec_unused", "sec_util"]
+
+
+def _demo_rego(tmp_path: Path) -> dict:
+    rego = tmp_path / "Rego"
+    (rego / "Utils").mkdir(parents=True)
+    (rego / "DemoConfig.rego").write_text(DEMO_POLICY, encoding="utf-8")
+    (rego / "Utils" / "Demo.rego").write_text(DEMO_UTILS, encoding="utf-8")
+    return {"config": rego / "DemoConfig.rego", "package": "demo", "keys": DEMO_KEYS}
+
+
+@needs_opa
+def test_ast_dependencies_follow_the_parsed_rego_through_bodies_helpers_and_utils(miner, tmp_path):
+    deps = miner.rego_ast_dependencies(OPA, _demo_rego(tmp_path))
+    assert deps["MS.DEMO.1.1v1"] == {"sec_body"}                          # body reference; message fields and non-variant keys are not evidence
+    assert deps["MS.DEMO.1.2v1"] == {"sec_a"}                             # head -> Chain -> Inner, a reference the regex scan never saw
+    assert deps["MS.DEMO.1.3v1"] == {"sec_c", "sec_util"}                 # PolicyId assigned in the body; imported Utils function reads input
+    assert deps["MS.DEMO.1.4v1"] == {"sec_opt"}                           # object.get(input, "...", default)
+    assert deps["MS.DEMO.1.5v1"] == {"sec_deep"}                          # a rule reached through an imported package alias
+    assert deps["MS.DEMO.1.6v1"] == {"sec_loop"}                          # mutually recursive helpers terminate
+    assert deps["MS.DEMO.1.7v1"] == {"sec_first", "sec_second"}           # `else` branches count
+    assert deps["MS.DEMO.1.8v1"] == set(DEMO_KEYS)                        # a computed section name could be any section
+    assert not any("sec_unused" in sections or "sec_msg_only" in sections for pid, sections in deps.items() if pid != "MS.DEMO.1.8v1")
+    assert set(deps) == {f"MS.DEMO.1.{n}v1" for n in range(1, 9)}
+
+
+@needs_opa
+def test_the_regex_scan_misses_what_the_ast_scan_finds(miner, tmp_path):
+    meta = _demo_rego(tmp_path)
+    # only the head of each rule is read: the sections that merely feed the message are found and the one the verdict reads is not
+    assert miner.rego_dependencies(meta)["MS.DEMO.1.1v1"] == {"sec_error_text", "sec_msg_only"}
+    assert miner.rego_ast_dependencies(OPA, meta)["MS.DEMO.1.1v1"] == {"sec_body"}
+
+
+@needs_opa
+def test_a_rego_file_opa_rejects_is_an_error_not_an_empty_view(miner, tmp_path):
+    broken = tmp_path / "Broken.rego"
+    broken.write_text("package broken\np if {\n", encoding="utf-8")
+    with pytest.raises(miner.OpaError, match="opa parse failed"):
+        miner.opa_parse(OPA, broken)
+
+
+def test_parse_failures_and_timeouts_are_reported_clearly(miner, tmp_path, monkeypatch):
+    with pytest.raises(miner.OpaError, match="returned no JSON"):
+        miner.opa_parse(_fake_opa(tmp_path, "echo 'not json'"), tmp_path / "x.rego")
+    monkeypatch.setattr(miner, "SUBPROCESS_TIMEOUT", 0.3)
+    with pytest.raises(miner.OpaError, match="timed out"):
+        miner.opa_parse(_fake_opa(tmp_path, "exec sleep 5"), tmp_path / "x.rego")
+
+
+def _outcome(details, met, policy="MS.DEMO.1.1v1", criticality="Shall"):
+    return {"PolicyId": policy, "Criticality": criticality, "RequirementMet": met, "ReportDetails": details}
+
+
+GATE = "This policy is only applicable if the external sharing slider is set to Anyone."
+LINK = ' See <a href="https://example.test/baselines/demo.md#msdemo11v1" target="_blank">Secure Configuration Baseline policy</a> for instructions.'
+MISSING = "SPO_tenant or Expiry or SharingCapability are missing from input JSON"
+
+
+def test_engine_wording_decides_the_outcome(miner):
+    assert miner.oracle_outcome(_outcome("Requirement met", True)) == "evaluated"
+    assert miner.oracle_outcome(_outcome("SPO_tenant or SharingCapability are missing from input JSON", False)) == "fail_closed_missing_input"
+    assert miner.oracle_outcome(_outcome("SharingCapability is missing from input JSON", False)) == "fail_closed_missing_input"
+    assert miner.oracle_outcome(_outcome("Power BI license was not found. Unable to evaluate tenant setting.", False)) == "fail_closed_missing_input"
+    assert miner.oracle_outcome(_outcome("Unable to evaluate tenant setting. Access denied (403).", False)) == "fail_closed_missing_input"
+    assert miner.oracle_outcome(_outcome("Unable to evaluate tenant setting.", True)) == "evaluated"   # only a false is a guard
+    assert miner.oracle_outcome(_outcome(GATE + LINK, True)) == "not_applicable"
+    assert miner.oracle_outcome(_outcome("This policy is not applicable to GCC, GCC High, or DOD environments." + LINK, True)) == "not_applicable"
+    assert miner.oracle_outcome(_outcome(GATE, False)) == "evaluated"                         # only a pass is a not-applicable result
+    assert miner.oracle_outcome(_outcome(["not a string"], True)) == "evaluated"
+    assert miner.missing_sections("SPO_tenant or SharingCapability are missing from input JSON", ["SPO_tenant", "other"]) == ["SPO_tenant"]
+    assert miner.missing_sections("nothing named is missing from input JSON", ["a", "b"]) == ["a", "b"]
+    view = ["powerbi_access_denied_reason", "powerbi_license_found", "powerbi_tenant_settings"]
+    assert miner.unreadable_sections({"powerbi_license_found": False}, view) == ["powerbi_license_found"]
+    assert miner.unreadable_sections({}, view) == ["powerbi_license_found"]
+    assert miner.unreadable_sections({"powerbi_license_found": True, "powerbi_access_denied_reason": "403"}, view) == ["powerbi_access_denied_reason"]
+    assert miner.unreadable_sections({"powerbi_license_found": False}, ["other"]) == ["other"]
+
+
+def test_only_rows_that_state_a_verdict_count(miner):
+    assert miner.is_verdict(_outcome("r", True)) and miner.is_verdict(_outcome("r", False))
+    assert not miner.is_verdict(_outcome("r", False, criticality="Shall/Not-Implemented"))   # MS.AAD.9.1v1 in GCC High and DoD
+    assert not miner.is_verdict(_outcome("r", "N/A", criticality="Shall/3rd Party"))
+    assert not miner.is_verdict({"PolicyId": "x", "Criticality": "Shall"})
+
+
+def _outcome_cases(miner, rows, sections, *, masks=None, every=1000, applicability=None, methods=None, gates=None, policy="MS.DEMO.1.1v1"):
+    """One case per variant of one policy; `rows` are (observed input, ReportDetails, RequirementMet)."""
+    inputs = [row[0] for row in rows]
+    evaluations = []
+    for index, (value, details, met) in enumerate(rows):
+        variant = {"name": "base" if index == 0 else f"demo_test:variant_{index}", "input": value, "sha256": f"{index:064x}"}
+        evaluations.append((variant, [_outcome(details, met, policy)]))
+    cases, stats = miner.build_cases("demo", evaluations, {policy: sections}, {policy: "Expiry SHALL be 30 days or less."},
+                                     inputs[0], commit="abcdef123456", opa_version="1.20.2", config_name="DemoConfig.rego",
+                                     not_collected_every=every, masks=masks, applicability=applicability, methods=methods, gates=gates)
+    validate_cases(cases)
+    return cases, stats
+
+
+def _user(case):
+    return json.loads(case["messages"][1]["content"])
+
+
+def test_a_fail_closed_result_is_unknown_and_cites_the_section_whose_field_is_missing(miner):
+    rows = [({"SPO_tenant": [{"Expiry": 30}], "other": {"k": 1}}, "Requirement met", True),
+            ({"SPO_tenant": [], "other": {"k": 1}}, "SPO_tenant or Expiry are missing from input JSON", False)]
+    cases, stats = _outcome_cases(miner, rows, ["SPO_tenant", "other"])
+    assert cases[0]["expected"]["claims"][0] == {"id": "requirement_met", "status": "confirmed", "value": True, "evidence_ids": ["e1", "e2"]}
+    closed = cases[1]
+    assert closed["expected"]["claims"][0] == {"id": "requirement_met", "status": "unknown", "value": None, "evidence_ids": ["e1"]}
+    assert closed["expected"]["limitations"] == ["required_evidence_section_not_collected"]
+    assert closed["expected"]["recommendations"] == ["collect_missing_evidence_section"]
+    assert (closed["provenance"]["oracle_outcome"], cases[0]["provenance"]["oracle_outcome"]) == ("fail_closed_missing_input", "met")
+    assert [e["section"] for e in _user(closed)["evidence"][1:]] == ["SPO_tenant", "other"]   # the view itself is unchanged
+    assert stats["fail_closed_missing_input"] == 1 and stats["met"] == 1 and stats["not_met"] == 0
+
+
+def test_a_power_bi_tenant_that_could_not_be_read_is_unknown_and_cites_the_licence_or_access_section(miner):
+    view = ["powerbi_access_denied_reason", "powerbi_license_found", "powerbi_tenant_settings"]
+    settings = [{"settingName": "PublishToWeb", "enabled": False}]
+    rows = [({"powerbi_license_found": True, "powerbi_tenant_settings": settings}, "Requirement met", True),
+            ({"powerbi_license_found": False, "powerbi_tenant_settings": settings}, "Power BI license was not found. Unable to evaluate tenant setting.", False),
+            ({"powerbi_license_found": True, "powerbi_access_denied_reason": "HTTP 403", "powerbi_tenant_settings": settings},
+             "Unable to evaluate tenant setting. HTTP 403", False)]
+    cases, stats = _outcome_cases(miner, rows, view)
+    assert [c["provenance"]["oracle_outcome"] for c in cases] == ["met", "fail_closed_missing_input", "fail_closed_missing_input"]
+    assert [c["expected"]["claims"][0]["evidence_ids"] for c in cases[1:]] == [["e2"], ["e1"]]   # licence flag; access-denied reason
+    assert all(c["expected"]["claims"][0]["status"] == "unknown" and c["expected"]["claims"][0]["value"] is None for c in cases[1:])
+    assert stats["fail_closed_missing_input"] == 2 and stats["not_met"] == 0
+
+
+def test_a_not_applicable_pass_is_inferred_true_with_a_limitation_and_the_gate_is_quoted_for_every_case(miner):
+    rows = [({"SPO_tenant": [{"Expiry": 30, "SharingCapability": 2}]}, "Requirement met", True),
+            ({"SPO_tenant": [{"Expiry": 45, "SharingCapability": 0}]}, GATE + LINK, True)]
+    sentences = miner.applicability_sentences(_evaluations_with_details(rows))
+    assert sentences == {"MS.DEMO.1.1v1": GATE}                         # most common wording, link dropped
+    cases, stats = _outcome_cases(miner, rows, ["SPO_tenant"], applicability=sentences)
+    gated = cases[1]
+    assert gated["expected"]["claims"][0] == {"id": "requirement_met", "status": "inferred", "value": True, "evidence_ids": ["e1"]}
+    assert gated["expected"]["limitations"] == ["policy_not_applicable"] and gated["expected"]["recommendations"] == []
+    assert gated["provenance"]["oracle_outcome"] == "not_applicable" and stats["not_applicable"] == 1
+    for case in cases:   # the evaluated case shows the same gate, so the sentence does not give the label away
+        assert _user(case)["evidence"][0]["observed"]["applicability"] == GATE
+        assert "policy_not_applicable" in _user(case)["limitation_ids"]
+    plain, _ = _outcome_cases(miner, rows[:1], ["SPO_tenant"])
+    assert "applicability" not in _user(plain[0])["evidence"][0]["observed"]
+
+
+def test_a_policy_with_a_second_applicability_condition_quotes_both(miner):
+    engine = "This policy is only applicable if MS Authenticator is enabled." + LINK
+    rows = [({"s": 1}, engine, True), ({"s": 2}, "Requirement met", True)]
+    sentences = miner.applicability_sentences(_evaluations_with_details(rows, "MS.AAD.3.3v2") + _evaluations_with_details(rows, "MS.DEMO.1.1v1"))
+    assert sentences["MS.DEMO.1.1v1"] == "This policy is only applicable if MS Authenticator is enabled."   # no note for this policy: the engine's words
+    note = sentences["MS.AAD.3.3v2"]
+    assert note == miner.APPLICABILITY_NOTES["MS.AAD.3.3v2"]
+    assert "MS Authenticator is enabled" in note and "phishing-resistant MFA" in note
+
+
+def _evaluations_with_details(rows, policy="MS.DEMO.1.1v1"):
+    return [({"name": f"v{i}", "input": value, "sha256": f"{i:064x}"}, [_outcome(details, met, policy)]) for i, (value, details, met) in enumerate(rows)]
+
+
+def _gate_rows():
+    """A SharePoint-like policy: the slider (SharingCapability) 2 means the policy applies; Expiry is the setting."""
+    def tenant(**fields):
+        return {"SPO_tenant": [fields]}
+    return [(tenant(SharingCapability=2, Expiry=30), "Requirement met", True),
+            (tenant(SharingCapability=2, Expiry=45), "Requirement not met", False),
+            (tenant(SharingCapability=0, Expiry=45), GATE + LINK, True),
+            (tenant(SharingCapability=1, Expiry=45), GATE + LINK, True),
+            (tenant(SharingCapability=0), MISSING, False),                  # the gate is visibly unmet, the setting is absent
+            (tenant(SharingCapability=1), MISSING, False),
+            (tenant(Expiry=30), MISSING, False),                            # the gate itself is absent: it cannot be told
+            (tenant(SharingCapability=2), MISSING, False),                  # the gate is met and the setting is absent: unknown
+            ({"SPO_tenant": []}, MISSING, False)]
+
+
+def test_the_gate_is_learned_from_the_engines_own_answers(miner):
+    evaluations = _evaluations_with_details(_gate_rows())
+    views = {"MS.DEMO.1.1v1": {"sections": ["SPO_tenant"]}}
+    gates = miner.learn_gates(evaluations, views)
+    assert gates == {"MS.DEMO.1.1v1": {("SPO_tenant", 0, "SharingCapability"): {"0", "1"}}}   # Expiry overlaps between the two, so it is no gate
+    assert miner.learn_gates(evaluations, {}) == {}                                        # no view, no gate
+    assert miner.learn_gates(_evaluations_with_details(_gate_rows()[:2] + _gate_rows()[4:]), views) == {}   # never answered as not applicable
+    assert miner.leaves({"a": [{"b": 1}, 2], "c": None}) == {("a", 0, "b"): "1", ("a", 1): "2", ("c",): "null"}
+
+
+def test_a_visibly_unmet_gate_takes_precedence_over_a_missing_field(miner):
+    rows = _gate_rows()
+    gates = miner.learn_gates(_evaluations_with_details(rows), {"MS.DEMO.1.1v1": {"sections": ["SPO_tenant"]}})
+    cases, stats = _outcome_cases(miner, rows, ["SPO_tenant"], gates=gates, applicability={"MS.DEMO.1.1v1": GATE})
+    assert [c["provenance"]["oracle_outcome"] for c in cases] == [
+        "met", "not_met", "not_applicable", "not_applicable", "not_applicable", "not_applicable",
+        "fail_closed_missing_input", "fail_closed_missing_input", "fail_closed_missing_input"]
+    assert cases[4]["expected"]["claims"][0] == {"id": "requirement_met", "status": "inferred", "value": True, "evidence_ids": ["e1"]}
+    assert cases[4]["expected"]["limitations"] == ["policy_not_applicable"]
+    assert cases[6]["expected"]["claims"][0]["status"] == "unknown" and cases[6]["expected"]["limitations"] == ["required_evidence_section_not_collected"]
+    assert stats["not_applicable"] == 4 and stats["fail_closed_missing_input"] == 3
+    without, _ = _outcome_cases(miner, rows, ["SPO_tenant"], applicability={"MS.DEMO.1.1v1": GATE})   # no gate learned: the engine's guard stands
+    assert [c["provenance"]["oracle_outcome"] for c in without].count("fail_closed_missing_input") == 5
+
+
+def test_not_implemented_skip_rows_are_not_cases(miner):
+    inputs = [{"s": 1}, {"s": 2}]
+    evaluations = _evaluations_with_details([(inputs[0], "Requirement met", True), (inputs[1], "Requirement met", True)], "MS.DEMO.9.1v1")
+    evaluations[1][1].insert(0, _outcome("This policy is not applicable to GCC High or DOD environments." + LINK, False, "MS.DEMO.9.1v1", "Shall/Not-Implemented"))
+    evaluations[1][1].append(_outcome("N/A", "N/A", "MS.DEMO.9.1v1", "Shall/3rd Party"))
+    cases, stats = miner.build_cases("demo", evaluations, {"MS.DEMO.9.1v1": ["s"]}, {}, inputs[0], commit="abcdef123456",
+                                     opa_version="1.20.2", config_name="DemoConfig.rego", not_collected_every=1000)
+    assert [c["expected"]["claims"][0]["value"] for c in cases] == [True, True] and stats["not_a_verdict"] == 2 and stats["not_applicable"] == 0
+
+
+def test_a_view_must_tell_an_evaluated_pass_from_a_not_applicable_one(miner):
+    inputs = [{"dep": {"x": 1}, "gate": {"on": True}}, {"dep": {"x": 1}, "gate": {"on": False}}]
+    evaluations = [(({"name": f"v{i}", "input": value, "sha256": f"{i:064x}"}), [_outcome(details, True)])
+                   for i, (value, details) in enumerate(zip(inputs, ["Requirement met", GATE + LINK]))]
+    views = miner.derive_views({"MS.DEMO.1.1v1": {"dep"}}, evaluations, ["dep", "gate"], method="rego_ast")
+    assert views["MS.DEMO.1.1v1"]["sections"] == ["dep", "gate"] and views["MS.DEMO.1.1v1"]["method"] == "widened"   # same verdict, different outcome
+    assert views["MS.DEMO.1.1v1"]["widened_with"] == ["gate"] and views["MS.DEMO.1.1v1"]["reason"] == "verdict_conflict"
+
+
+def test_a_not_collected_variant_masks_only_a_dependency_that_holds_data(miner):
+    absent = {"dep_a": None, "dep_b": {"v": 1}, "dep_c": {"v": 2}, "noise": {"v": 3}}
+    rows = [(absent, "Requirement met", True)]
+    masks = {"MS.DEMO.1.1v1": ["dep_a", "dep_b", "dep_c"]}
+    cases, _ = _outcome_cases(miner, rows, ["dep_a", "dep_b", "dep_c", "noise"], masks=masks, every=1)
+    masked = cases[0]["provenance"]["template"].rsplit("not_collected:", 1)[1]
+    assert cases[0]["id"].endswith("-nc") and masked in {"dep_b", "dep_c"}     # dep_a holds nothing here, noise is no dependency
+    evidence = _user(cases[0])["evidence"]
+    assert [e["observed"] for e in evidence[1:] if e["section"] == masked] == [{"collection_status": "not_collected"}]
+    assert cases[0]["expected"]["claims"][0]["evidence_ids"] == [next(e["id"] for e in evidence if e["section"] == masked)]
+    assert cases[0]["provenance"]["oracle_outcome"] == "not_collected"
+    assert evidence[4]["observed"] == {"v": 3}                                  # a section that is no dependency is never hidden
+
+
+def test_the_masked_section_is_picked_by_a_hash_of_the_case_id_not_always_the_first(miner):
+    inputs = [{"dep_a": {"v": i}, "dep_b": {"v": i}, "dep_c": {"v": i}} for i in range(24)]
+    rows = [(value, "Requirement met", True) for value in inputs]
+    masks = {"MS.DEMO.1.1v1": ["dep_a", "dep_b", "dep_c"]}
+    first, _ = _outcome_cases(miner, rows, ["dep_a", "dep_b", "dep_c"], masks=masks, every=1)
+    second, _ = _outcome_cases(miner, rows, ["dep_a", "dep_b", "dep_c"], masks=masks, every=1)
+    chosen = [c["provenance"]["template"].rsplit("not_collected:", 1)[1] for c in first]
+    assert chosen == [c["provenance"]["template"].rsplit("not_collected:", 1)[1] for c in second]   # deterministic
+    assert set(chosen) == {"dep_a", "dep_b", "dep_c"}                                                # and spread over every dependency
+
+
+def test_a_one_section_view_never_gets_a_not_collected_variant_and_the_debt_is_a_counter(miner):
+    inputs = [{"one": {"v": 0}, "a": {"v": 0}, "b": {"v": 0}}]
+    singles = [f"MS.DEMO.1.{n}v1" for n in range(1, 5)]
+    pairs = [f"MS.DEMO.2.{n}v1" for n in range(1, 4)]
+    variant = {"name": "base", "input": inputs[0], "sha256": "0" * 64}
+    evaluations = [(variant, [_outcome("Requirement met", True, pid) for pid in singles + pairs])]
+    sections = {**{pid: ["one"] for pid in singles}, **{pid: ["a", "b"] for pid in pairs}}
+    masks = {**{pid: ["one"] for pid in singles}, **{pid: ["a", "b"] for pid in pairs}}
+    cases, stats = miner.build_cases("demo", evaluations, sections, {}, inputs[0], commit="abcdef123456", opa_version="1.20.2",
+                                     config_name="DemoConfig.rego", not_collected_every=2, masks=masks)
+    gaps = {_user(c)["policy_id"]: c["id"].endswith("-nc") for c in cases}
+    assert not any(gaps[pid] for pid in singles)                       # a single section is never masked
+    assert [gaps[pid] for pid in pairs] == [True, True, True]         # gap cases fell due at positions 1, 3 and 5, two of them on singles: a counter repays all three
+    assert stats["unknown"] == 3
+    # without masks (the earlier method) the first listed section is masked wherever the position falls
+    legacy, _ = miner.build_cases("demo", evaluations, sections, {}, inputs[0], commit="abcdef123456", opa_version="1.20.2",
+                                  config_name="DemoConfig.rego", not_collected_every=2)
+    assert [c["id"].endswith("-nc") for c in legacy] == [False, True, False, True, False, True, False]
+
+
+def test_the_oracle_attributes_are_provenance_fields_and_not_source_pairs(miner):
+    rows = [({"s": {"v": 1}}, "Requirement met", True), ({"s": {"v": 2}}, "Requirement not met", False)]
+    default, _ = _outcome_cases(miner, rows, ["s"])
+    ast, _ = _outcome_cases(miner, rows, ["s"], methods={"MS.DEMO.1.1v1": "rego_ast"})
+    assert [(c["provenance"]["evidence_view"], c["provenance"]["oracle_outcome"]) for c in default] == [("widened", "met"), ("widened", "not_met")]
+    assert {c["provenance"]["evidence_view"] for c in ast} == {"rego_ast"}
+    assert not any("evidence_view=" in c["provenance"]["source"] or "oracle_outcome=" in c["provenance"]["source"] for c in default + ast)
+    for case in ast:
+        assert oracle_provenance(case) == {"evidence_view": "rego_ast", "oracle_outcome": case["provenance"]["oracle_outcome"]}
+    gap, _ = _outcome_cases(miner, rows[:1], ["s"], masks=None, every=1)
+    assert gap[0]["provenance"]["oracle_outcome"] == "not_collected"
+    for field, bad in (("evidence_view", "fast"), ("oracle_outcome", "evaluated")):
+        broken = copy.deepcopy(default[0])
+        broken["provenance"][field] = bad
+        with pytest.raises(ValueError, match=f"{field} must be one of"):
+            validate_case(broken)
+
+
+def test_case_ids_hash_the_view_with_the_labelling_convention(miner, monkeypatch):
+    rows = [({"s": {"v": 1}}, "Requirement met", True)]
+    case = _outcome_cases(miner, rows, ["s"])[0][0]
+    view = miner.canonical({"s": {"v": 1}})
+    assert miner.CONVENTION == "conv2"
+    assert case["id"] == f"scuba-demo-ms-demo-1-1v1-{hashlib.sha256(f'conv2:{view}'.encode()).hexdigest()[:10]}"
+    assert case["id"] != f"scuba-demo-ms-demo-1-1v1-{hashlib.sha256(view.encode()).hexdigest()[:10]}"   # the unsalted id of the earlier packs
+    monkeypatch.setattr(miner, "CONVENTION", "conv3")
+    assert _outcome_cases(miner, rows, ["s"])[0][0]["id"] != case["id"]
 
 
 def test_mutation_family_reports_changed_fields_without_values(miner):
@@ -334,7 +764,7 @@ def test_template_key_can_be_disabled_and_cases_still_validate(miner):
     cases, stats = miner.build_cases("aad", _evaluations(inputs, {"MS.AAD.1.1v1": [True]}), {"MS.AAD.1.1v1": ["sec_a"]}, {}, inputs[0],
                                      commit="abcdef123456", opa_version="1.20.2", config_name="AADConfig.rego",
                                      not_collected_every=4, template=False)
-    assert set(cases[0]["provenance"]) == {"source", "synthetic", "review_status"} and stats["met"] == 1
+    assert set(cases[0]["provenance"]) == {"source", "synthetic", "review_status", "evidence_view", "oracle_outcome"} and stats["met"] == 1
     validate_cases(cases)
 
 
@@ -380,9 +810,9 @@ def test_a_variant_whose_evaluation_fails_is_counted_and_the_run_continues(miner
     variants = [{"name": "base", "input": base}, {"name": "demo_test:broken", "input": {"sec_a": {"enabled": False}}}]
     monkeypatch.setattr(miner, "product_meta", lambda scuba, name: meta)
     monkeypatch.setattr(miner, "load_base", lambda opa, m: (base, {}, {"mapped": {}, "unmatched_fixture_objects": []}))
-    monkeypatch.setattr(miner, "harvest_variants", lambda m, objects, inp: (variants, Counter()))
+    monkeypatch.setattr(miner, "harvest_variants", lambda m, objects, inp, opa=None, resolved=None: (variants, Counter()))
     monkeypatch.setattr(miner, "policy_text", lambda m: {})
-    monkeypatch.setattr(miner, "rego_dependencies", lambda m: {"MS.DEMO.1.1v1": {"sec_a"}})
+    monkeypatch.setattr(miner, "rego_ast_dependencies", lambda opa, m: {"MS.DEMO.1.1v1": {"sec_a"}})
     calls = []
 
     def fake_opa(opa, args):
@@ -397,6 +827,366 @@ def test_a_variant_whose_evaluation_fails_is_counted_and_the_run_continues(miner
     cases, summary = miner.mine_product("Demo", tmp_path, tmp_path / "opa", out, 4, commit="abcdef123456", opa_version="1.20.2")
     assert len(cases) == 1 and summary["stats"]["variants_failed"] == 1 and len(calls) == 2
     assert "no usable result" in (out / "first-eval-error-demo.txt").read_text(encoding="utf-8")
+
+
+def _two_policy_product(miner, tmp_path, monkeypatch):
+    """Policy 1.1 depends on sec_a alone; policy 1.2 declares sec_a but its verdict also flips with sec_b."""
+    variants = [{"name": "base", "input": {"sec_a": {"on": True}, "sec_b": {"mode": "x"}}},
+                {"name": "demo_test:a_off", "input": {"sec_a": {"on": False}, "sec_b": {"mode": "x"}}},
+                {"name": "demo_test:b_changed", "input": {"sec_a": {"on": True}, "sec_b": {"mode": "y"}}}]
+    meta = {"name": "Demo", "config": tmp_path / "DemoConfig.rego", "package": "demo", "keys": ["sec_a", "sec_b"]}
+    monkeypatch.setattr(miner, "product_meta", lambda scuba, name: meta)
+    monkeypatch.setattr(miner, "load_base", lambda opa, m: (variants[0]["input"], {}, {"mapped": {}, "unmatched_fixture_objects": []}))
+    monkeypatch.setattr(miner, "harvest_variants", lambda m, objects, inp, opa=None, resolved=None: (variants, Counter({"unparsable_patch": 1})))
+    monkeypatch.setattr(miner, "policy_text", lambda m: {})
+    monkeypatch.setattr(miner, "rego_ast_dependencies", lambda opa, m: {"MS.DEMO.1.1v1": {"sec_a"}, "MS.DEMO.1.2v1": {"sec_a"}})
+    monkeypatch.setattr(miner, "rego_dependencies", lambda m: {"MS.DEMO.1.1v1": {"sec_a"}, "MS.DEMO.1.2v1": {"sec_a"}})
+
+    def fake_opa(opa, args):
+        value = json.loads(Path(args[args.index("-i") + 1]).read_text(encoding="utf-8"))
+        return [{"PolicyId": "MS.DEMO.1.1v1", "Criticality": "Shall", "RequirementMet": value["sec_a"]["on"], "ReportDetails": "r"},
+                {"PolicyId": "MS.DEMO.1.2v1", "Criticality": "Shall", "RequirementMet": value["sec_b"]["mode"] == "x", "ReportDetails": "r"}]
+
+    monkeypatch.setattr(miner, "opa_json", fake_opa)
+    out = tmp_path / "out"
+    out.mkdir()
+    return out
+
+
+def test_the_view_method_is_recorded_per_policy_in_the_cases_and_the_summary(miner, tmp_path, monkeypatch):
+    out = _two_policy_product(miner, tmp_path, monkeypatch)
+    cases, summary = miner.mine_product("Demo", tmp_path, tmp_path / "opa", out, 1000, commit="abcdef123456", opa_version="1.20.2")
+    method = {pid: {c["provenance"]["evidence_view"] for c in cases if f" {pid};" in c["provenance"]["source"]}
+              for pid in ("MS.DEMO.1.1v1", "MS.DEMO.1.2v1")}
+    assert method == {"MS.DEMO.1.1v1": {"rego_ast"}, "MS.DEMO.1.2v1": {"widened"}}
+    assert summary["evidence_view"] == "rego_ast" and summary["evidence_view_methods"] == {"rego_ast": 1, "widened": 1}
+    assert summary["sections_per_policy"] == {"MS.DEMO.1.1v1": ["sec_a"], "MS.DEMO.1.2v1": ["sec_a", "sec_b"]}
+    assert summary["evidence_views"] == {"MS.DEMO.1.2v1": {"method": "widened", "dependencies": ["sec_a"], "widened_with": ["sec_b"],
+                                                          "reason": "verdict_conflict"}}
+    assert summary["harvest_skipped"] == {"unparsable_patch": 1} and summary["harvest_resolved"] == {} and summary["absent_keys"] == []
+
+
+def test_the_earlier_view_method_is_still_available_and_says_so(miner, tmp_path, monkeypatch):
+    out = _two_policy_product(miner, tmp_path, monkeypatch)
+    monkeypatch.setattr(miner, "rego_ast_dependencies", lambda opa, m: pytest.fail("the earlier method must not parse Rego"))
+    cases, summary = miner.mine_product("Demo", tmp_path, tmp_path / "opa", out, 1000, commit="abcdef123456", opa_version="1.20.2",
+                                        evidence_view="widened")
+    assert {c["provenance"]["evidence_view"] for c in cases} == {"widened"}
+    assert summary["evidence_view"] == "widened" and summary["evidence_view_methods"] == {"widened": 2}
+    assert set(summary["evidence_views"]) == {"MS.DEMO.1.1v1", "MS.DEMO.1.2v1"} and summary["evidence_views"]["MS.DEMO.1.2v1"]["reason"] is None
+
+
+def test_expression_patches_can_be_switched_off(miner, tmp_path, monkeypatch):
+    out = _two_policy_product(miner, tmp_path, monkeypatch)
+    seen = []
+    monkeypatch.setattr(miner, "harvest_variants", lambda m, objects, inp, opa=None, resolved=None: (seen.append(opa), ([{"name": "base", "input": inp}], Counter()))[1])
+    miner.mine_product("Demo", tmp_path, tmp_path / "opa", out, 1000, commit="abcdef123456", opa_version="1.20.2", expression_patches=False)
+    (out / "second").mkdir()
+    miner.mine_product("Demo", tmp_path, tmp_path / "opa", out / "second", 1000, commit="abcdef123456", opa_version="1.20.2")
+    assert seen == [None, tmp_path / "opa"]
+
+
+# --- the tenant each unit test describes -----------------------------------------------------------------------
+
+EXPRESSION_BASE = """package demo_test
+
+import rego.v1
+
+Settings := [{"name": "alpha", "enabled": true}, {"name": "beta", "enabled": true}]
+
+IndexOf(name) := i if {
+    some i, setting in Settings
+    setting.name == name
+}
+"""
+EXPRESSION_TESTS = """package demo_test
+
+import rego.v1
+import data.demo
+
+Local := [{"name": "file", "enabled": true}]
+
+test_beta_off if {
+    Patched := json.patch(Settings, [{"op": "replace", "path": sprintf("/%v/enabled", [IndexOf("beta")]), "value": false}])
+    Output := demo.tests with input.sec_a as Patched
+    count(Output) == 1
+}
+
+test_string_value if {
+    Output := demo.tests with input.sec_s as "Test Id"
+    count(Output) == 1
+}
+
+test_nested_config if {
+    Output := demo.tests
+        with input.sec_a as Settings
+        with input.scuba_config.Demo["MS.DEMO.1.1v1"].Allowed as ["example.com"]
+    count(Output) == 1
+}
+
+test_function_value if {
+    Output := demo.tests with input.sec_a as array.concat(Settings, [{"name": "gamma", "enabled": false}])
+    count(Output) == 1
+}
+
+test_local_shadows_the_file_literal if {
+    Local := [{"name": "body", "enabled": false}]
+    Output := demo.tests with input.sec_a as Local
+    count(Output) == 1
+}
+
+test_uses_the_file_literal if {
+    Output := demo.tests with input.sec_a as Local
+    count(Output) == 1
+}
+
+test_no_with_clause if {
+    Output := demo.tests
+    count(Output) == 1
+}
+"""
+EXPRESSION_BROKEN_TESTS = """package demo_test
+
+import rego.v1
+import data.demo
+
+test_helper_is_missing if {
+    Patched := json.patch(Settings, [{"op": "replace", "path": sprintf("/%v/enabled", [Nowhere("beta")]), "value": false}])
+    Output := demo.tests with input.sec_a as Patched
+    count(Output) == 1
+}
+"""
+SETTINGS = [{"name": "alpha", "enabled": True}, {"name": "beta", "enabled": True}]
+
+
+def _expression_meta(tmp_path: Path) -> tuple[dict, dict, dict]:
+    rego = tmp_path / "Rego"
+    (rego / "Utils").mkdir(parents=True)
+    (rego / "DemoConfig.rego").write_text('package demo\n\nimport rego.v1\n\ntests contains {"PolicyId": "MS.DEMO.1.1v1"} if {\n    true\n}\n', encoding="utf-8")
+    (rego / "Utils" / "Demo.rego").write_text("package utils.demo\n", encoding="utf-8")
+    unit = tmp_path / "Unit"
+    unit.mkdir()
+    (unit / "DemoBaseConfig.rego").write_text(EXPRESSION_BASE, encoding="utf-8")
+    (unit / "Demo_01_test.rego").write_text(EXPRESSION_TESTS, encoding="utf-8")
+    (unit / "Demo_02_test.rego").write_text(EXPRESSION_BROKEN_TESTS, encoding="utf-8")   # its own file: one that fails to compile only spoils its own tests
+    meta = {"config": rego / "DemoConfig.rego", "base": unit / "DemoBaseConfig.rego", "tests_dir": unit,
+            "keys": ["scuba_config", "sec_a", "sec_s"], "wrap": {"sec_a": True}}
+    return meta, {"Settings": SETTINGS}, {"sec_a": SETTINGS, "sec_s": "base-id"}
+
+
+def test_the_replay_follows_string_literals_and_a_tests_own_literals(miner, tmp_path):
+    meta, objects, base_input = _expression_meta(tmp_path)
+    variants, skipped = miner.harvest_variants(meta, objects, copy.deepcopy(base_input))
+    assert [v["name"] for v in variants] == ["base", "Demo_01_test:string_value", "Demo_01_test:local_shadows_the_file_literal",
+                                             "Demo_01_test:uses_the_file_literal"]
+    assert variants[1]["input"] == {"sec_a": SETTINGS, "sec_s": "Test Id"}     # `with input.sec_s as "Test Id"` is not dropped
+    assert variants[2]["input"]["sec_a"] == [{"name": "body", "enabled": False}]   # the literal inside the test wins over the file's
+    assert variants[3]["input"]["sec_a"] == [{"name": "file", "enabled": True}]    # and does not leak into the tests that do not define it
+    # what Python cannot follow: the sprintf path, a call as a with value, a nested path; Demo_02 is not even a test it can read
+    assert dict(skipped) == {"unparsable_patch": 2, "unresolved_with_input": 1, "identical_to_base": 2}
+
+
+def test_with_values_may_be_strings_lists_indexes_and_names(miner):
+    assert miner.split_list('[One, "two, three", Four[0], [5, 6], {"k": [7]}]') == ['One', '"two, three"', 'Four[0]', '[5, 6]', '{"k": [7]}']
+    assert miner.split_list("[]") == []
+    assert miner.WITH_RE.findall('with input.tenant_id as "Test Id" with input.a as ["null"] with input.b as [X[0], Y] with input.c as -3') == [
+        ("tenant_id", '"Test Id"'), ("a", '["null"]'), ("b", "[X[0], Y]"), ("c", "-3")]
+    meta = {"keys": ["a", "b", "c"], "wrap": {}}
+    body = 'Output := demo.tests with input.a as "x \\"y\\"" with input.b as ["null", Pick[1]] with input.c as -3'
+    replayed, reason = miner.replay_test(meta, {"Pick": [10, 20]}, {"a": 0, "b": 0, "c": 0}, {}, body)
+    assert reason is None and replayed == {"a": 'x "y"', "b": ["null", 20], "c": -3}
+    assert miner.replay_test(meta, {}, {"a": 0}, {}, 'Output := demo.tests with input.a as Pick[1]')[1] == "unresolved_with_input"
+
+
+def test_with_clauses_are_read_across_lines_comments_and_strings(miner):
+    body = "\n".join([
+        "    X := 1",
+        "    Output := demo.tests",
+        "        with input.a as [1,  # one",
+        "                         2]",
+        '        with input.b as "with input.c as 3"   # not a clause',
+        "        with input.d as `raw \"text\" )`",
+        "    count(Output) == 1", ""])
+    start = miner.EVAL_LINE_RE.search(body).end()
+    assert miner.with_modifiers(body, start).split() == ["with", "input.a", "as", "[1,", "#", "one", "2]", "with", "input.b", "as",
+                                                         '"with', "input.c", "as", '3"', "#", "not", "a", "clause", "with", "input.d", "as", '`raw', '"text"', ')`']
+    assert miner.with_modifiers("Output := demo.tests\n    count(Output) == 1", len("Output := demo.tests")) == ""
+
+
+@needs_opa
+def test_opa_builds_the_input_each_test_evaluates(miner, tmp_path):
+    meta, objects, base_input = _expression_meta(tmp_path)
+    resolved: Counter = Counter()
+    variants, skipped = miner.harvest_variants(meta, objects, copy.deepcopy(base_input), OPA, resolved)
+    assert [v["name"] for v in variants] == ["base"] + [f"Demo_01_test:{n}" for n in (
+        "beta_off", "string_value", "nested_config", "function_value", "local_shadows_the_file_literal", "uses_the_file_literal")]
+    by_name = {v["name"].split(":")[1]: v["input"] for v in variants[1:]}
+    assert by_name["beta_off"]["sec_a"] == [{"name": "alpha", "enabled": True}, {"name": "beta", "enabled": False}]
+    assert by_name["string_value"] == {"sec_a": SETTINGS, "sec_s": "Test Id"}
+    assert by_name["nested_config"]["scuba_config"] == {"Demo": {"MS.DEMO.1.1v1": {"Allowed": ["example.com"]}}}   # a nested with path
+    assert by_name["function_value"]["sec_a"] == SETTINGS + [{"name": "gamma", "enabled": False}]
+    assert by_name["local_shadows_the_file_literal"]["sec_a"] == [{"name": "body", "enabled": False}]
+    assert by_name["uses_the_file_literal"]["sec_a"] == [{"name": "file", "enabled": True}]
+    assert resolved == {"opa_probe": 6, "replay_could_not": 2, "replay_differed": 1}
+    assert dict(skipped) == {"unparsable_patch": 1, "identical_to_base": 1}   # Demo_02 does not compile and falls back to the replay; no with clause
+    assert objects == {"Settings": SETTINGS}
+
+
+def test_opa_wins_where_the_replay_disagrees_and_the_replay_is_the_fallback(miner, tmp_path, monkeypatch):
+    meta, objects, base_input = _expression_meta(tmp_path)
+    different = {"sec_a": [{"name": "opa", "enabled": False}], "sec_s": "base-id"}
+    calls = []
+
+    def fake_effective(opa, m, path, text, body, base_file):
+        calls.append(path.stem)
+        assert json.loads(base_file.read_text(encoding="utf-8")) == base_input   # evaluated against the base input
+        if "Local" in body and "body" in body:
+            return different                                                         # the replay builds another input for this test
+        if '"Test Id"' in body or "with " not in body:
+            return None                                                              # OPA cannot or need not evaluate it
+        return copy.deepcopy(base_input)                                             # evaluates to the base: not a variant
+
+    monkeypatch.setattr(miner, "opa_effective_input", fake_effective)
+    resolved: Counter = Counter()
+    variants, skipped = miner.harvest_variants(meta, objects, copy.deepcopy(base_input), tmp_path / "opa", resolved)
+    named = {v["name"].split(":")[1]: v["input"] for v in variants[1:]}
+    assert named["local_shadows_the_file_literal"] == different                      # OPA's input, not the replay's
+    assert "string_value" in named                                                   # OPA returned None: the replay stands
+    assert "beta_off" not in named and "nested_config" not in named                  # OPA says identical to the base, so no variant
+    assert "uses_the_file_literal" not in named                                      # the replay would have built one, OPA says it is the base
+    assert dict(resolved) == {"opa_probe": 1, "opa_probe_identical_to_base": 5, "replay_could_not": 3, "replay_differed": 2}
+    seen = len(calls)
+    miner.harvest_variants(meta, objects, copy.deepcopy(base_input))                 # without OPA nothing is evaluated by OPA
+    assert len(calls) == seen
+
+
+def test_a_section_the_fixture_lacks_stays_absent(miner, tmp_path, monkeypatch):
+    rego = tmp_path / "Rego"
+    (rego / "Utils").mkdir(parents=True)
+    (rego / "DemoConfig.rego").write_text('package demo\n\nimport rego.v1\n\nReason := object.get(input, "sec_reason", "")\n\n'
+                                          'tests contains {"PolicyId": "MS.DEMO.1.1v1", "RequirementMet": count(input.sec_a) > 0} if {\n'
+                                          '    Reason == ""\n    count(input.sec_missing) == 0\n}\n', encoding="utf-8")
+    (rego / "Utils" / "Demo.rego").write_text("package utils.demo\n", encoding="utf-8")
+    unit = tmp_path / "Testing/Unit/Rego/Demo"
+    unit.mkdir(parents=True)
+    (unit / "DemoBaseConfig.rego").write_text("package demo_test\n", encoding="utf-8")
+    meta = miner.product_meta(tmp_path, "Demo")
+    assert meta["keys"] == ["sec_a", "sec_missing", "sec_reason"] and "optional_keys" not in meta
+    monkeypatch.setattr(miner, "opa_json", lambda opa, args: {"Settings": [{"x": 1}], "Reasons": "stale"})
+    meta["wrap"] = {"sec_a": True}
+    inp, _, _ = miner.load_base(tmp_path / "opa", meta)
+    assert inp == {}                      # no fixture object maps onto them: an empty list in sec_reason would read as "a reason was given"
+    whole = miner.replay_test(meta, {"Whole": {"sec_a": [{"x": 1}]}}, inp, {}, "Output := demo.tests with input as Whole")[0]
+    assert whole == {"sec_a": [{"x": 1}]}   # `with input as X` evaluates X itself
+    meta["wrap"] = {}
+    monkeypatch.setattr(miner, "opa_json", lambda opa, args: {"Sec_a": [{"x": 1}]})
+    inp, _, mapping = miner.load_base(tmp_path / "opa", {**meta, "base": tmp_path / "b"})
+    assert inp == {"sec_a": [{"x": 1}]} and mapping["mapped"] == {"Sec_a": "sec_a"}
+
+
+TENANTLESS_TESTS = """package demo_test
+
+import rego.v1
+import data.demo
+
+test_empty_object if {
+    Output := demo.tests with input as {}
+    count(Output) == 0
+}
+
+test_list_input if {
+    Output := demo.tests with input as []
+    count(Output) == 0
+}
+
+test_object_without_a_known_key if {
+    Output := demo.tests with input as {"unrelated": 1}
+    count(Output) == 0
+}
+
+test_literal_tenant if {
+    Output := demo.tests with input as {"sec_a": [{"name": "literal", "enabled": true}]}
+    count(Output) == 1
+}
+
+test_a_section_only if {
+    Output := demo.tests with input.sec_a as []
+    count(Output) == 1
+}
+"""
+
+
+def _tenantless_meta(tmp_path: Path) -> tuple[dict, dict, dict]:
+    meta, objects, base_input = _expression_meta(tmp_path)
+    unit = tmp_path / "Tenantless"
+    unit.mkdir()
+    (unit / "DemoBaseConfig.rego").write_text(EXPRESSION_BASE, encoding="utf-8")
+    (unit / "Demo_01_test.rego").write_text(TENANTLESS_TESTS, encoding="utf-8")
+    return {**meta, "tests_dir": unit, "base": unit / "DemoBaseConfig.rego"}, objects, base_input
+
+
+def test_an_empty_or_non_object_input_is_no_tenant_whatever_builds_it(miner, tmp_path):
+    meta, objects, base_input = _tenantless_meta(tmp_path)
+    variants, skipped = miner.harvest_variants(meta, objects, copy.deepcopy(base_input))   # the Python replay reads the literals itself
+    assert [v["name"] for v in variants] == ["base", "Demo_01_test:literal_tenant", "Demo_01_test:a_section_only"]
+    assert variants[1]["input"] == {"sec_a": [{"name": "literal", "enabled": True}]} and variants[2]["input"]["sec_a"] == []
+    assert dict(skipped) == {"empty_tenant_input": 2, "non_object_input": 1}   # `{}` and the unrelated object; `[]`
+
+
+@needs_opa
+def test_opa_inputs_that_hold_no_tenant_are_dropped_too(miner, tmp_path):
+    meta, objects, base_input = _tenantless_meta(tmp_path)
+    resolved: Counter = Counter()
+    variants, skipped = miner.harvest_variants(meta, objects, copy.deepcopy(base_input), OPA, resolved)
+    assert [v["name"] for v in variants] == ["base", "Demo_01_test:literal_tenant", "Demo_01_test:a_section_only"]
+    assert dict(skipped) == {"empty_tenant_input": 2, "non_object_input": 1}
+    assert resolved["opa_probe"] == 2   # only the two real variants count as supplied by OPA
+
+
+def test_a_verdict_on_a_tenant_without_the_policys_sections_is_no_case(miner):
+    inputs = [{"sec_a": None, "sec_b": None, "other": {"v": 1}}, {"sec_a": {"v": 1}, "sec_b": None, "other": {"v": 1}}]
+    rows = [(value, "Requirement met", True) for value in inputs]
+    cases, stats = _outcome_cases(miner, rows, ["sec_a", "sec_b"])
+    assert [c["provenance"]["oracle_outcome"] for c in cases] == ["met"] and stats["empty_tenant_input"] == 1
+    assert cases[0]["expected"]["claims"][0]["status"] == "confirmed"   # a partly observed view is still a case
+    assert [e["observed"] for e in _user(cases[0])["evidence"][1:]] == [{"v": 1}, None]
+    # an engine outcome keeps its label: only an evaluated verdict needs something to have been observed
+    closed, stats = _outcome_cases(miner, [({"sec_a": None, "sec_b": None}, MISSING.replace("SPO_tenant", "sec_a"), False)], ["sec_a", "sec_b"])
+    assert closed[0]["provenance"]["oracle_outcome"] == "fail_closed_missing_input" and not stats["empty_tenant_input"]
+
+
+def test_a_policys_only_section_being_absent_makes_the_label_unknown(miner):
+    rows = [({"dep": {"v": 1}}, "Requirement met", True), ({"dep": None}, "Requirement not met", False), ({}, "Requirement met", True)]
+    cases, stats = _outcome_cases(miner, rows, ["dep"])
+    assert [c["provenance"]["oracle_outcome"] for c in cases] == ["met", "fail_closed_missing_input"] and stats["duplicate_view"] == 1   # `{}` shows the same null view
+    absent = cases[1]
+    assert absent["expected"]["claims"][0] == {"id": "requirement_met", "status": "unknown", "value": None, "evidence_ids": ["e1"]}
+    assert absent["expected"]["limitations"] == ["required_evidence_section_not_collected"]
+    assert absent["expected"]["recommendations"] == ["collect_missing_evidence_section"]
+    assert _user(absent)["evidence"][1] == {"id": "e1", "section": "dep", "observed": None}
+    assert stats["absent_dependency"] == 1 and stats["not_met"] == 0 and stats["empty_tenant_input"] == 0
+    # not an evaluated verdict at all when the section is observed: confirmed as before
+    assert cases[0]["expected"]["claims"][0]["status"] == "confirmed"
+
+
+def test_a_null_section_is_explained_to_the_model_and_is_not_a_not_collected_section(miner):
+    sentence = "A section shown as null means the export holds no object for it and the policy's default applies, which is different from a section marked not collected."
+    assert sentence in miner.SYSTEM
+    rows = [({"flag": {"on": True}, "reason": None}, "Requirement met", True)]
+    cases, _ = _outcome_cases(miner, rows, ["flag", "reason"])
+    case = cases[0]
+    assert case["expected"]["claims"][0]["status"] == "confirmed" and case["provenance"]["oracle_outcome"] == "met"
+    assert _user(case)["evidence"][2] == {"id": "e2", "section": "reason", "observed": None}   # null, not {"collection_status": "not_collected"}
+    assert sentence in case["messages"][0]["content"]
+    assert case["expected"]["limitations"] == []
+
+
+def test_the_summary_names_the_keys_the_fixture_left_absent(miner, tmp_path, monkeypatch):
+    out = _two_policy_product(miner, tmp_path, monkeypatch)
+    monkeypatch.setattr(miner, "product_meta", lambda scuba, name: {"name": "Demo", "config": tmp_path / "DemoConfig.rego", "package": "demo",
+                                                                    "keys": ["sec_a", "sec_b", "sec_x"]})
+    _, summary = miner.mine_product("Demo", tmp_path, tmp_path / "opa", out, 1000, commit="abcdef123456", opa_version="1.20.2")
+    assert summary["absent_keys"] == ["sec_x"] and summary["input_keys"] == ["sec_a", "sec_b"]
 
 
 # --- provenance contract ----------------------------------------------------------------------------------------
@@ -428,11 +1218,12 @@ def fake_oracle(tmp_path, miner, monkeypatch):
     opa.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr(miner, "tool_versions", lambda scuba_dir, opa_bin: ("abcdef123456", "a" * 40, True, "1.20.2"))
 
-    def fake_mine(name, scuba_dir, opa_bin, out, every, *, commit, opa_version, template=True):
+    def fake_mine(name, scuba_dir, opa_bin, out, every, *, commit, opa_version, template=True, evidence_view="rego_ast", expression_patches=True):
         if name == "EXO":
             raise ValueError("boom")
         cases = _mined(miner, name.lower(), 1)
-        return cases, {"product": name, "variants": 2, "harvest_skipped": {}, "cases": len(cases), "stats": {}}
+        return cases, {"product": name, "variants": 2, "harvest_skipped": {}, "harvest_resolved": {}, "cases": len(cases), "stats": {},
+                       "evidence_view_methods": {evidence_view: 1}}
 
     monkeypatch.setattr(miner, "mine_product", fake_mine)
     return scuba, opa
@@ -507,6 +1298,29 @@ def test_an_unexpected_failure_says_the_output_is_incomplete(miner, fake_oracle,
     assert out.is_dir() and not (out / "summary.json").exists()
     err = capsys.readouterr().err
     assert "did not finish" in err and "incomplete" in err and "should be deleted" in err
+
+
+def test_the_evidence_view_and_expression_patches_are_options_recorded_in_summary_json(miner, fake_oracle, tmp_path, monkeypatch):
+    scuba, opa = fake_oracle
+    seen = []
+
+    def fake_mine(name, scuba_dir, opa_bin, out, every, *, commit, opa_version, template, evidence_view, expression_patches):
+        seen.append((evidence_view, expression_patches))
+        cases = _mined(miner, name.lower(), 1)
+        return cases, {"product": name, "variants": 2, "harvest_skipped": {}, "harvest_resolved": {}, "cases": len(cases), "stats": {},
+                       "evidence_view_methods": {evidence_view: 1}}
+
+    monkeypatch.setattr(miner, "mine_product", fake_mine)
+    assert miner.main(_miner_args(scuba, opa, tmp_path / "default", "--products", "AAD")) == 0
+    assert miner.main(_miner_args(scuba, opa, tmp_path / "earlier", "--products", "AAD", "--evidence-view", "widened", "--no-expression-patches")) == 0
+    assert seen == [("rego_ast", True), ("widened", False)]
+    default = json.loads((tmp_path / "default" / "summary.json").read_text(encoding="utf-8"))
+    earlier = json.loads((tmp_path / "earlier" / "summary.json").read_text(encoding="utf-8"))
+    assert (default["evidence_view"], default["expression_patches"], default["labelling_convention"]) == ("rego_ast", True, "conv2")
+    assert (earlier["evidence_view"], earlier["expression_patches"]) == ("widened", False)
+    with pytest.raises(SystemExit) as exc:
+        miner.main(_miner_args(scuba, opa, tmp_path / "bad", "--evidence-view", "guess"))
+    assert exc.value.code == 2 and not (tmp_path / "bad").exists()
 
 
 def test_miner_exits_zero_and_can_drop_the_template_key(miner, fake_oracle, tmp_path):
@@ -840,57 +1654,180 @@ def _git_head(path: Path) -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
-@pytest.fixture(scope="module")
-def powerplatform_run(miner, splitter, tmp_path_factory):
+def _pinned_tools() -> None:
     if _git_head(SCUBA) != PINNED_COMMIT:
         pytest.skip(f"ScubaGear is not at the pinned commit {PINNED_COMMIT}")
     version = subprocess.run([str(OPA), "version"], capture_output=True, text=True).stdout.splitlines()[0].split()[-1]
     if version != PINNED_OPA:
         pytest.skip(f"OPA {version} is not the pinned {PINNED_OPA}")
+
+
+def _mine_powerplatform(miner, tmp_path_factory, *extra: str) -> Path:
     out = tmp_path_factory.mktemp("oracle") / "mined"
-    assert miner.main(["--scuba", str(SCUBA), "--opa", str(OPA), "--output-dir", str(out), "--products", "PowerPlatform"]) == 0
+    assert miner.main(["--scuba", str(SCUBA), "--opa", str(OPA), "--output-dir", str(out), "--products", "PowerPlatform", *extra]) == 0
+    return out
+
+
+def _rows(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _sections(case: dict) -> list[str]:
+    return [e["section"] for e in json.loads(case["messages"][1]["content"])["evidence"][1:]]
+
+
+def _by_policy_and_variant(rows: list[dict]) -> dict[tuple[str, str], dict]:
+    found = {}
+    for row in rows:
+        match = re.search(r"\.rego (MS\.[A-Z0-9.]+v\d+); variant=(.*?); opa=", row["provenance"]["source"])
+        found[(match.group(1), match.group(2))] = row
+    return found
+
+
+@pytest.fixture(scope="module")
+def powerplatform_run(miner, splitter, tmp_path_factory):
+    _pinned_tools()
+    out = _mine_powerplatform(miner, tmp_path_factory)
     split_dir = out.parent / "split"
     assert splitter.main(["--cases", str(out / "cases.jsonl"), "--output", str(split_dir / "cases.jsonl"), "--approve-as-oracle"]) == 0
     return out, split_dir
 
 
+@pytest.fixture(scope="module")
+def powerplatform_earlier_run(miner, tmp_path_factory):
+    """The earlier method end to end: widened views, replay only."""
+    _pinned_tools()
+    return _mine_powerplatform(miner, tmp_path_factory, "--evidence-view", "widened", "--no-expression-patches")
+
+
 @needs_oracle
-def test_powerplatform_end_to_end_yields_152_cases(powerplatform_run):
+def test_powerplatform_end_to_end_mines_the_rego_ast_views(powerplatform_run):
     out, _ = powerplatform_run
     assert sorted(p.name for p in out.iterdir()) == ["cases-powerplatform.jsonl", "cases.jsonl", "summary.json", "variants-powerplatform"]
-    rows = [json.loads(line) for line in (out / "cases.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 152 and rows == [json.loads(line) for line in (out / "cases-powerplatform.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = _rows(out / "cases.jsonl")
+    assert len(rows) == 64 and rows == _rows(out / "cases-powerplatform.jsonl")
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     product = summary["products"]["PowerPlatform"]
-    assert summary["total_cases"] == 152 and product["variants"] == 20
+    assert summary["total_cases"] == 64 and product["variants"] == 25
+    assert summary["evidence_view"] == product["evidence_view"] == "rego_ast" and summary["expression_patches"] is True
+    assert summary["labelling_convention"] == "conv2"
+    assert product["harvest_resolved"] == {"opa_probe": 24, "opa_probe_identical_to_base": 5, "replay_could_not": 2, "replay_differed": 1}
+    assert product["harvest_skipped"] == {"identical_to_base": 5, "empty_tenant_input": 2}   # CISA's two NotImplemented tests run `with input as {}`
     assert {k: product["stats"][k] for k in ("met", "not_met", "unknown", "duplicate_view", "variants_failed")} == \
-        {"met": 76, "not_met": 38, "unknown": 38, "duplicate_view": 8, "variants_failed": 0}
+        {"met": 33, "not_met": 18, "unknown": 13, "duplicate_view": 136, "variants_failed": 0}
+    assert product["evidence_view_methods"] == {"rego_ast": 8} and product["evidence_views"] == {}   # no policy needed the widened fallback
+    assert product["absent_keys"] and "tenant_id" in product["absent_keys"] and product["input_keys"] == [
+        "dlp_policies", "environment_creation", "environment_list", "tenant_id", "tenant_isolation"]
     assert summary["oracle"]["commit"] == PINNED_COMMIT and summary["oracle"]["opa_version"] == PINNED_OPA
-    assert len(list((out / "variants-powerplatform").glob("variant-*.json"))) == 20
+    assert len(list((out / "variants-powerplatform").glob("variant-*.json"))) == 25
+    assert all(set(json.loads(p.read_text(encoding="utf-8"))) & set(product["input_keys"]) for p in (out / "variants-powerplatform").glob("variant-*.json"))   # no empty tenant
+    assert not any(all(e["observed"] is None for e in json.loads(r["messages"][1]["content"])["evidence"][1:]) for r in rows)
     assert all(r["provenance"]["template"].startswith("powerplatform/MS.POWERPLATFORM.") for r in rows)
     assert all(r["provenance"]["distinct_prompt_sha256"] == distinct_prompt_sha256(r) for r in rows)
+    assert all(r["provenance"]["evidence_view"] == "rego_ast" and "evidence_view=" not in r["provenance"]["source"] for r in rows)
+    assert {r["provenance"]["oracle_outcome"] for r in rows} == {"met", "not_met", "not_collected"}
+    assert all(r["provenance"]["oracle_outcome"] == "not_collected" for r in rows if r["id"].endswith("-nc"))
+    views = product["sections_per_policy"]
+    assert views["MS.POWERPLATFORM.1.1v1"] == ["environment_creation"] and views["MS.POWERPLATFORM.2.1v1"] == ["dlp_policies", "tenant_id"]
+    assert all(_sections(r) == views[re.search(r"\.rego (MS\.[A-Z0-9.]+v\d+);", r["provenance"]["source"]).group(1)] for r in rows)
+    assert max(len(_sections(r)) for r in rows) == 2   # the earlier method cited all 20 sections in every case
+    for row in (r for r in rows if r["id"].endswith("-nc")):   # a gap case hides a section the policy reads and keeps another one in view
+        sections = _sections(row)
+        masked = row["provenance"]["template"].rsplit("not_collected:", 1)[1]
+        assert masked in sections and len(sections) > 1
     validate_cases(rows)
+
+
+@needs_oracle
+def test_powerplatform_variants_agree_with_cisas_own_expectations(miner):
+    """Every variant, evaluated by the engine, gives the verdict the unit test that built it expects (`TestResult(..., true|false)`)."""
+    _pinned_tools()
+    meta = miner.product_meta(SCUBA, "PowerPlatform")
+    base_input, base_objects, _ = miner.load_base(OPA, meta)
+    variants, _ = miner.harvest_variants(meta, base_objects, base_input, OPA)
+    expected = {}
+    for path in sorted(meta["tests_dir"].glob("*_test.rego")):
+        text = path.read_text(encoding="utf-8")
+        for test in miner.TEST_RE.finditer(text):
+            for policy, wanted in re.findall(r'TestResult\(\s*"(MS\.[A-Z0-9.]+v\d+)"\s*,\s*Output\s*,.*?,\s*(true|false)\s*\)\s*==\s*true', test.group(2), re.S):
+                expected[(f"{path.stem}:{test.group(1)}", policy)] = wanted == "true"
+    compared = disagreed = 0
+    for index, variant in enumerate(variants[1:], start=1):
+        wanted = {policy: value for (name, policy), value in expected.items() if name == variant["name"]}
+        if not wanted:
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "input.json"
+            target.write_text(miner.canonical(variant["input"]), encoding="utf-8")
+            rows = miner.opa_json(OPA, ["-d", str(meta["config"]), "-d", str(SCUBA / "Rego/Utils"), "-i", str(target), f"data.{meta['package']}.tests"])
+        for policy, value in wanted.items():
+            verdicts = {r["RequirementMet"] for r in rows if r["PolicyId"] == policy}
+            compared += 1
+            disagreed += value not in verdicts
+    assert compared >= 24 and disagreed == 0, (compared, disagreed)   # the dropped `with input.tenant_id as "Test Id"` had flipped some
 
 
 @needs_oracle
 def test_powerplatform_split_holds_whole_groups_out(powerplatform_run):
     _, split_dir = powerplatform_run
     report = json.loads((split_dir / "split-report.json").read_text(encoding="utf-8"))
-    assert report["input_cases"] == 152 and report["cases"] + report["duplicates_dropped"]["count"] == 152
+    assert report["input_cases"] == 64 and report["cases"] + report["duplicates_dropped"]["count"] == 64
     assert report["splits"]["test"]["families"] == ["scuba-powerplatform-ms-powerplatform-6"]
     assert report["splits"]["validation"]["families"] == ["scuba-powerplatform-ms-powerplatform-5"]
     assert report["splits"]["train"]["families"] == [f"scuba-powerplatform-ms-powerplatform-{g}" for g in (1, 2, 3)]
     assert not any(report["leakage"].values())
-    rows = [json.loads(line) for line in (split_dir / "cases.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = _rows(split_dir / "cases.jsonl")
     assert all(r["provenance"]["reviewer"].startswith(f"oracle:cisa-scubagear@{PINNED_COMMIT[:12]}/opa-{PINNED_OPA};") for r in rows)
+    assert all("evidence_view" in r["provenance"] and "oracle_outcome" in r["provenance"] for r in rows)   # the splitter keeps the oracle fields
+
+
+@needs_oracle
+def test_powerplatform_earlier_method_end_to_end(powerplatform_earlier_run):
+    out = powerplatform_earlier_run
+    rows = _rows(out / "cases.jsonl")
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    product = summary["products"]["PowerPlatform"]
+    assert len(rows) == 176 and summary["evidence_view"] == "widened" and summary["expression_patches"] is False
+    assert product["variants"] == 23 and product["harvest_resolved"] == {} and product["evidence_view_methods"] == {"widened": 8}
+    assert product["harvest_skipped"] == {"identical_to_base": 5, "unparsable_patch": 2, "empty_tenant_input": 2}   # the sprintf patches only OPA can follow
+    assert {k: product["stats"][k] for k in ("met", "not_met", "unknown", "duplicate_view", "variants_failed")} == \
+        {"met": 95, "not_met": 37, "unknown": 44, "duplicate_view": 8, "variants_failed": 0}
+    assert all(r["provenance"]["evidence_view"] == "widened" for r in rows)
+    assert {len(_sections(r)) for r in rows} == {5}   # every section any variant carries: the widened view of the earlier method
+
+
+@needs_oracle
+def test_powerplatform_rego_ast_views_are_subsets_with_the_same_labels(powerplatform_run, powerplatform_earlier_run):
+    ast, earlier = _by_policy_and_variant(_rows(powerplatform_run[0] / "cases.jsonl")), _by_policy_and_variant(_rows(powerplatform_earlier_run / "cases.jsonl"))
+    joined = sorted(ast.keys() & earlier.keys())
+    assert len(joined) >= 55 and len(ast) < len(earlier)   # fewer distinct views, so fewer cases; ids hash the view, so they differ
+    digest = lambda row: re.search(r"input_sha256=([0-9a-f]{64})", row["provenance"]["source"]).group(1)
+    same_input = [key for key in joined if digest(ast[key]) == digest(earlier[key])]
+    assert len(same_input) >= 50   # the three tests whose replay differs from OPA's input are the only ones left out
+    both_confirmed = 0
+    for key in same_input:
+        assert set(_sections(ast[key])) <= set(_sections(earlier[key]))
+        label, was = ast[key]["expected"]["claims"][0], earlier[key]["expected"]["claims"][0]
+        if label["status"] == was["status"] == "confirmed":
+            both_confirmed += 1
+            assert label["value"] == was["value"], key   # a gap case hides its label; where both show one, the oracle verdict is unchanged
+    assert both_confirmed >= 25
+    assert sum(len(_sections(ast[k])) for k in same_input) < sum(len(_sections(earlier[k])) for k in same_input)
 
 
 @needs_oracle
 @needs_reference
-def test_powerplatform_labels_match_the_prototype_reference(powerplatform_run):
-    out, _ = powerplatform_run
-    mined = {r["id"]: r for r in map(json.loads, (out / "cases-powerplatform.jsonl").read_text(encoding="utf-8").splitlines())}
-    reference = {r["id"]: r for r in map(json.loads, REFERENCE.read_text(encoding="utf-8").splitlines())}
-    assert mined.keys() == reference.keys() and len(mined) == 152
-    assert all(mined[i]["expected"] == reference[i]["expected"] for i in reference)
-    assert all(mined[i]["messages"] == reference[i]["messages"] and mined[i]["family"] == reference[i]["family"] for i in reference)
+def test_powerplatform_reference_differs_only_where_it_dropped_the_tenant_id(powerplatform_earlier_run):
+    """The 20261019 prototype labels, joined on policy and variant: its mismatches are the `tenant_id` string literals it dropped."""
+    mined = _by_policy_and_variant(_rows(powerplatform_earlier_run / "cases-powerplatform.jsonl"))
+    reference = _by_policy_and_variant(_rows(REFERENCE))
+    assert mined.keys() >= reference.keys() and len(reference) == 152
+    assert all(mined[k]["id"] != reference[k]["id"] for k in reference)   # the convention salt: no id of the earlier pack is reused
+    mismatched, agreed = [], 0
+    for key in sorted(reference):
+        label, was = mined[key]["expected"]["claims"][0], reference[key]["expected"]["claims"][0]
+        if label["status"] == was["status"] == "confirmed":
+            agreed += label["value"] == was["value"]
+            if label["value"] != was["value"]:
+                mismatched.append(key)
+    assert agreed >= 100 and mismatched and {policy for policy, _ in mismatched} <= {"MS.POWERPLATFORM.2.1v1", "MS.POWERPLATFORM.2.3v1"}

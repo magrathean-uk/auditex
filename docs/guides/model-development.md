@@ -86,6 +86,11 @@ Each JSONL case has `id`, `family`, `split`, `provenance`, `messages` and
 cases (optional for unreviewed proposals). Two optional curation keys are accepted:
 `template`, a reasoning-template label, and `distinct_prompt_sha256`, the SHA-256 of the
 case-id-masked normalized prompt, so id-only duplicates can be found without a full comparison.
+Oracle-labelled cases may also record `evidence_view` (`rego_ast` or `widened`) and `oracle_outcome`
+(`met`, `not_met`, `fail_closed_missing_input`, `not_applicable` or `not_collected`) as optional fields; other values
+are rejected and `source` stays free text. `auditex.model_training.oracle_provenance(case)` returns both fields and
+falls back to the `evidence_view=` and `oracle_outcome=` pairs in `source` when the fields are absent, so scripts can
+read either form (a fallback value is not enum-checked).
 Messages contain string `role`/`content` fields and finish with an assistant
 response. Approval describes an actual review; scripts never grant it.
 
@@ -142,29 +147,146 @@ Cases whose labels come from running CISA ScubaGear's Rego policies, a determini
 engine, offline over fictional tenant configurations. No tenant is contacted. Needs a ScubaGear
 checkout (`PowerShell/ScubaGear`, pinned commit in `configs/assessment-sources.json`) and OPA 1.20.2,
 the version ScubaGear pins; OPA 1.21 rejects a helper in `Rego/Utils/TestAssertions.rego`. The
-end-to-end tests in `tests/test_oracle_cases.py` run when `AUDITEX_TEST_OPA` and
-`AUDITEX_TEST_SCUBAGEAR` are exported (optionally `AUDITEX_TEST_ORACLE_REFERENCE` for a label
-comparison); otherwise they are skipped.
+tests in `tests/test_oracle_cases.py` that parse and evaluate Rego run when `AUDITEX_TEST_OPA` is
+exported, and the end-to-end ones when `AUDITEX_TEST_SCUBAGEAR` is exported as well (optionally
+`AUDITEX_TEST_ORACLE_REFERENCE` for a label comparison); otherwise they are skipped.
 
 ```sh
 clean-development run --session session-only -- .venv/bin/python scripts/build-oracle-cases.py \
   --scuba /absolute/path/to/ScubaGear/PowerShell/ScubaGear --opa /absolute/path/to/opa-1.20.2 \
-  --output-dir /absolute/path/to/new-oracle-cases [--products PowerPlatform ...] [--not-collected-every 4]
+  --output-dir /absolute/path/to/new-oracle-cases [--products PowerPlatform ...] [--not-collected-every 4] \
+  [--evidence-view rego_ast|widened] [--no-expression-patches]
 clean-development run --session session-only -- .venv/bin/python scripts/split-oracle-cases.py \
   --cases /absolute/path/to/new-oracle-cases/cases.jsonl \
   --output /absolute/path/to/new-oracle-split/cases.jsonl --approve-as-oracle
 ```
 
-`build-oracle-cases.py` loads each product's base fixture, replays the `json.patch` mutations and
-literals from CISA's own unit tests as tenant variants, evaluates them, and writes one case per
-distinct (policy, evidence view): `requirement_met` confirmed true or false, plus every Nth case with
-its first section marked `not_collected` and an `unknown` answer. The output directory is new
-(`cases.jsonl`, `cases-<product>.jsonl`, `summary.json`, `variants-<product>/`); an existing one is
-refused. Every case carries the commit, policy id, test name, OPA version and input hash in
-`provenance.source`, a `provenance.template` of `<product>/<policy id>/<mutation family>` (which
-fields of its evidence the variant changes; `not_collected:<section>` for gap cases) and
-`provenance.distinct_prompt_sha256`. Cases are written `unreviewed` in `train`. At the pinned commit
-a full run yields 4,247 cases, 3,780 with distinct prompts.
+`build-oracle-cases.py` loads each product's base fixture, builds for every unit test CISA wrote against it
+the tenant that test describes (one test = one tenant variant), evaluates the variants, and writes one case per
+distinct (policy, evidence view): `requirement_met` confirmed true or false (or one of the engine outcomes below),
+plus a share of the cases (`--not-collected-every`, default one in four) with one section marked
+`not_collected` and an `unknown` answer. The output directory is new (`cases.jsonl`,
+`cases-<product>.jsonl`, `summary.json`, `variants-<product>/`); an existing one is refused. Every case
+carries the commit, policy id, test name, OPA version, input hash and CISA's ReportDetails in
+`provenance.source`; `provenance.evidence_view` (`rego_ast` or `widened`, per policy) and
+`provenance.oracle_outcome` (`met`, `not_met`, `fail_closed_missing_input`, `not_applicable` or
+`not_collected`) as first-class fields, as the contract above defines them (`source` carries no
+`evidence_view=` or `oracle_outcome=` pairs; `oracle_provenance` still reads them from older output); a
+`provenance.template` of `<product>/<policy id>/<mutation family>` (which fields of its evidence the
+variant changes; `not_collected:<section>` for gap cases) and `provenance.distinct_prompt_sha256`. Cases are
+written `unreviewed` in `train`.
+
+Case ids. The id is the policy and a hash of the evidence view salted with the labelling convention
+(`conv2`, recorded as `labelling_convention` in `summary.json`), so an id never names two different cases
+across packs. The ids of the 20261019 kit were unsalted: an earlier revision of this miner reused 464 of them
+(every SharePoint id) for cases whose content differed, 14 with a different label; salted, no id is shared. The id
+still hashes the view, so a different view or method gives a different id. To join two packs on the same variant use the policy id and `variant=` in the source.
+
+Evidence views (`--evidence-view`, recorded in `summary.json`). The default, `rego_ast`, cites only
+the sections the policy reads: `opa parse --format json` gives the AST of the product's policy file and
+of every `Rego/Utils` package, and every `input.<section>` or `object.get(input, "<section>", ...)`
+reachable from the policy's `tests contains` rules through helper rules and functions (body references,
+imported Utils packages, `else` branches; transitively) is a dependency. References reached only through
+a rule's `ReportDetails` or `ErrorDetails` field are not evidence, because that text does not decide
+`RequirementMet` (without this, `module_version` would sit in the views of several SharePoint, Teams and
+Defender-suite policies, and the Power BI views would carry the licence-reason text). The view is then
+checked against the variants: if two variants share a view but carry a different verdict or engine outcome
+(a not-applicable pass is not an evaluated pass), or the policy reads no input, the view is widened one
+section at a time and the policy is recorded as `evidence_view: widened` (in `summary.json` under
+`evidence_views`, with the dependencies, the sections added and the reason `verdict_conflict` or
+`no_dependency`); otherwise as `rego_ast`. At the pinned commit none of the 102 policies needed the
+fallback. `widened` is the earlier method: the sections named in each rule head, widened the same way, which
+ended in whole-tenant views for most policies. **Packs built with the two methods must not be mixed**: the
+same policy and variant carries different evidence under a different id, and a smaller view merges variants
+that differ only in unread sections, so there are fewer cases (4,248 against 5,850 with the same harvest and
+label rules at the pinned commit).
+
+The tenant of a test. With `--expression-patches` (the default) the input of each unit test is the one OPA
+builds for it: the statements before its `Output := <package>.tests` line become a throwaway rule next to the
+fixture and helpers, whose value is `input` under the test's own `with` clauses, evaluated against the base
+input. Whatever expression builds a value (a `sprintf` path through a helper, a variable, a function call, a
+string such as `with input.tenant_id as "Test Id"`, a nested `with input.scuba_config.Aad[...].CapExclusions...`
+path) therefore means what it means to CISA. The Python replay of `json.patch` and `with input... as` is the
+fallback for a test OPA cannot evaluate and the whole harvest under `--no-expression-patches`; it reads string
+literals, `Name[0]` and nested lists too, and a literal defined inside a test shadows one of the same name in the
+file. `harvest_resolved` in `summary.json` counts the variants OPA supplied (`opa_probe`,
+`opa_probe_identical_to_base`), the tests the replay could not follow (`replay_could_not`) and those where it
+built a different input (`replay_differed`). At the pinned commit OPA builds the input of 834 variants and 55
+more tests evaluate to the base input (`identical_to_base`); the replay could not follow 88 of these tests (Power BI 39,
+AAD 25, Defender suite 12, Exchange 10, Power Platform 2) and built a different input for 118 (AAD 107, Exchange 7,
+Defender suite 3, Power Platform 1), mostly by ignoring a nested `scuba_config` path or a `with` value it could not
+read. Two kinds of test describe no tenant and are skipped under their own reason: `empty_tenant_input`, an input
+that holds none of the product's input keys (CISA's `NotImplemented` tests run `with input as {}`: AAD 3, Defender
+suite 3, Power Platform 2), and `non_object_input`, an input that is not an object (the 8 SharePoint
+`*_SharepointSettings_Missing` tests run `with input as []`). Nothing else is skipped. Against CISA's own
+expectations (the last argument of each test's `TestResult(...)`, rows the engine answers as not applicable or
+fail-closed left out) the earlier harvest disagreed on 47 of 553 comparisons and this one on 5 of 634 (two in AAD
+and three in the Defender suite, where CISA's sparse test input meets a full tenant); the dropped `tenant_id`
+string had flipped variants of MS.POWERPLATFORM.2.1v1 and 2.3v1.
+
+A section the fixture does not define stays absent. The base input holds only the objects the fixture maps onto
+`input.<key>`; nothing is invented for the others. An invented `[]` or `{}` is evidence nobody collected, and for a
+key read with `object.get` it changes the verdict (an empty `powerbi_access_denied_reason` list reads as "access
+denied", so the earlier Power BI set had no case labelled met; 17 of its 19 sections per case were invented).
+`absent_keys` in `summary.json` lists the sections missing from each product's base input (Teams
+`tenant_app_settings`, the Defender suite's `hosted_content_filter_*`, AAD `app_management_policies` and
+`domain_settings`; the list also holds keys only another product's Utils read, such as `defender_license`), and some of
+them appear in the variants whose test sets them.
+A policy whose section is absent has no result for that variant, so it produces no case there. Measured against
+inventing them: 849 variants, every one with a different input; the evaluated results change for 687 of them and
+for 5,338 of 20,502 (variant, policy) results, which include the ReportDetails text (AAD 2,354 of 12,598, Defender
+suite 1,050 of 3,558, Power BI 1,520 of 1,616, SharePoint 234 of 733, Power Platform 108 of 310, Teams 72 of 1,051,
+Exchange 0 of 636).
+
+Engine outcomes that are not plain verdicts:
+
+- A false whose ReportDetails says an input is "... missing from input JSON", or that a Power BI tenant could not
+  be read ("Unable to evaluate tenant setting": no licence found, or the Admin API refused with 401 or 403), is
+  the engine failing closed, not a finding. The case labels `requirement_met` `unknown` (null), cites the section
+  that lacks the field (for an unreadable tenant the licence flag, or the access-denied reason), with
+  `required_evidence_section_not_collected` and `collect_missing_evidence_section`
+  (`oracle_outcome: fail_closed_missing_input`; SharePoint 31, Power BI 96, of which 48 unreadable tenants).
+- A pass because the policy does not apply ("only applicable if the external sharing slider ... is set to
+  Anyone", the Teams GCC, GCC High and DoD skips, the Authenticator gate of MS.AAD.3.3v2) is `requirement_met`
+  `inferred` true with the limitation `policy_not_applicable` (`oracle_outcome: not_applicable`; SharePoint 116,
+  AAD 85, Teams 23). The applicability sentence is quoted as `applicability` in the policy evidence of every case
+  of that policy, so the gate is visible whatever the label. The sentence is the engine's, checked against its Rego:
+  SharePoint 1.3, 3.1, 3.2 and 3.3 apply or not by the slider value, Teams 2.2, 2.3 and 4.1 by
+  `scuba_config.M365Environment`, and MS.AAD.3.3v2 is also not applicable whenever a conditional access policy
+  already enforces phishing-resistant MFA, which the engine's sentence omits, so `APPLICABILITY_NOTES` names both
+  conditions. `policy_not_applicable` is in every case's candidate limitations and the system prompt states the
+  rules.
+- Precedence: a missing field does not make a case unknown when the applicability condition is visibly unmet. The
+  gate is learned from the engine's own answers: a field named in the policy's missing-input message whose values
+  in evaluated results never occur in not-applicable ones (SharePoint's `SharingCapability`: `{0}` for 1.3 and 3.3,
+  `{0, 1, 3}` for 3.1 and 3.2, found automatically, `gates` in `summary.json`). A missing-input result whose evidence
+  shows such a value is not applicable (7 SharePoint cases, formerly fail-closed); one that lacks the gate field
+  itself, or has the gate met and the setting missing, stays unknown.
+- Rows that are not verdicts are dropped: the `Shall/Not-Implemented` skip row of a policy that also has verdicts
+  (MS.AAD.9.1v1 in GCC High and DoD answered a false) and non-boolean results, counted as `not_a_verdict`. A policy
+  whose rows are all Not-Implemented has no view, and its rows count as `policy_skipped`.
+- A verdict needs something observed. A section of a case's view can be null: that means the export holds no object
+  for it and the policy's default applies, which the system prompt says in one sentence and keeps apart from a section
+  marked not collected. Every one of the 258 confirmed labels that cite a null section (Power BI 187,
+  Defender suite 24, AAD 23, Teams 15, Power Platform 8, Exchange 1; 187 of them `powerbi_access_denied_reason`) is on
+  an input that lacks the key, so the label is what the Rego gives for an absent key. A verdict whose view sections
+  are all absent is no case (`empty_tenant_input` in the case stats; none remain), and a policy whose only section
+  is absent is labelled unknown like a missing input (`absent_dependency`: MS.AAD.6.1v1 on the base fixture, which
+  has no `domain_settings`).
+- A not-collected variant (`oracle_outcome: not_collected`) hides one section the policy reads that holds data in
+  that variant, chosen by a hash of the case id among such sections, and never an engine outcome above. A policy whose
+  view is a single section never gets one (it would leave nothing to read). One gap case is owed for every N cases and
+  issued at the next eligible case, so a skipped position only delays it: the share is one in N where eligible cases
+  exist (AAD 25%, Defender suite 25%, Teams 25%, Power Platform 20%, Power BI 25%, Exchange 10% because 93 of its cases have
+  one section) and
+  SharePoint has none, all its views being the single section `SPO_tenant`.
+
+Output of a full run at the pinned commit (default options), cases by product: AAD 2,552, Exchange 118,
+Defender suite 448, SharePoint 464, Teams 226, Power Platform 64, Power BI 376; 4,248 cases, 3,978 with distinct
+prompts (the earlier packs: 4,247 and 3,780). Evidence sections per case (median and maximum) in the earlier packs
+against now: AAD 2 and 25 against 2 and 3, Exchange 1 and 3 against 1 and 3, Defender suite 3 and 25 against 4 and
+6, SharePoint 16 and 16 against 1 and 1, Teams 21 and 21 against 1 and 2, Power Platform 20 and 20 against 2 and 2,
+Power BI 19 and 19 against 3 and 3.
 
 `split-oracle-cases.py` first keeps the first case of each `distinct_prompt_sha256`, then splits by
 whole policy group and whole template, so no family or template appears in two splits. Per product
@@ -176,7 +298,7 @@ not. Both files are new: created exclusively with mode 0600 (new parent director
 existing file, a symlink, the same path for output and report, or a location inside a finalized audit
 run is refused.
 
-Deduplication matters for the holdout. At the pinned commit the deduplicated test split has 280 rows.
+Deduplication matters for the holdout. At the pinned commit the deduplicated test split of the earlier (`widened`) packs has 280 rows.
 `auditex model prepare` removes id-only duplicates from train and validation only and writes
 `test.jsonl` as given, so a pack prepared from an approved file that was not deduplicated carries
 more test rows (371 in the first oracle training pack, prepared from the un-deduplicated prototype file).
@@ -198,12 +320,23 @@ Caveats:
 - Labels are deterministic engine output, not human judgement, and inherit any gap between ScubaGear's
   policy logic and its baseline text. Fixtures are fictional; the mutations are CISA's, so coverage
   follows what CISA tests, not what tenants do.
-- Power BI (120 cases) and Exchange (81) are thin: many unit tests patch values through Rego
-  expressions, which the patch replay cannot parse (39 Power BI and 10 Exchange unit tests were
-  skipped as unparsable) until those expressions are evaluated.
-- Evidence views come from the references in each policy's rule head plus a widening step, so many
-  views carry sections the policy does not read, and the gap case always masks the first listed
-  section, usually the alphabetically first. Treat them as a starting point, not a minimal evidence set.
+- A `rego_ast` view is the policy's dependency set, which is the least that can decide its verdict, not
+  what an auditor would cite: a policy reads `scuba_config` or a licence flag that the auditor would not
+  quote, and a section a policy reads only on a branch the variants never take is still a dependency.
+  The widening check only proves the view is sufficient for the variants mined. A local variable that
+  shares a rule's name is treated as that rule, which can only widen a view.
+- Outcomes are classified from ReportDetails wording ("missing from input JSON", "Unable to evaluate tenant
+  setting", "only applicable" and "not applicable"), so a new engine message outside those patterns would be
+  labelled as an ordinary verdict. Two such messages existed at the pinned commit and were first labelled as
+  ordinary verdicts: Power BI's "Unable to evaluate tenant setting" and the GCC High and DoD skip row of
+  MS.AAD.9.1v1; both are handled now. The learned gate needs both an evaluated and a not-applicable answer for
+  the policy in the variants mined, and a gate field that never varies is not found.
+- A variant is a full tenant: the base fixture under a test's own overrides, where CISA's unit test evaluates a
+  sparse input. The engine's verdict on such a tenant can differ from the test's expectation (MS.AAD.3.3v2 is not
+  applicable once the base tenant's phishing-resistant MFA policy is in place; five rows disagree outright).
+- Earlier packs and reviews (the 20261019 kit, 4,247 cases) were built with `--evidence-view widened`, without
+  expression patches, with invented empty sections, unsalted ids and the earlier label rules; they stay valid
+  as built but must not be mixed with a current pack.
 - The `policy` evidence quotes baseline text, partly adapted from Microsoft documentation under
   CC BY 4.0. Attribute Microsoft and CISA when redistributing, or strip `baseline_text`. ScubaGear is
   CC0 1.0 and is not vendored; CISA does not endorse Auditex or models trained on this data. See
