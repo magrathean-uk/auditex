@@ -15,7 +15,7 @@ class TeamsPolicyCollector(Collector):
     command_collectors = [
         (
             "tenantFederationConfiguration",
-            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers",
+            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers,AllowedDomains,BlockedDomains",
         ),
         (
             "messagingPolicies",

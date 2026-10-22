@@ -47,8 +47,14 @@ class OneDrivePostureCollector(Collector):
                 continue
             enriched_site = dict(site)
             enriched_site["siteKind"] = _site_kind_from_web_url(enriched_site.get("webUrl"))
-            if sharing_capability is not None:
+            # /sites carries no sharing setting of its own, so a site gets the tenant value and says so:
+            # a copied value is the tenant's single setting, not evidence about the site. A value a site
+            # already carries (an offline export) is kept and marked as the site's own.
+            if enriched_site.get("sharingCapability") not in (None, ""):
+                enriched_site["sharingCapabilitySource"] = "site"
+            elif sharing_capability is not None:
                 enriched_site["sharingCapability"] = sharing_capability
+                enriched_site["sharingCapabilitySource"] = "tenant"
             enriched_sites.append(enriched_site)
 
         if isinstance(payload.get("sites"), dict):

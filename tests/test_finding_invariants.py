@@ -150,7 +150,7 @@ def test_each_formerly_ruleless_builder_reports_under_its_rule() -> None:
             {"id": "m1", "source_name": "mailboxForwarding", "forwarding_smtp_address": "x@example.net", "display_name": "Box"}
         ]},
         "teams_policy_objects": {"records": [
-            {"id": "t1", "source_name": "tenantFederationConfiguration", "allow_federated_users": True}
+            {"id": "t1", "source_name": "tenantFederationConfiguration", "allow_federated_users": True, "allowed_domains_state": "open"}
         ]},
         "governance_objects": {"records": [{"kind": "role_assignment_schedule"}]},
         "intune_assignment_objects": {"records": []},
@@ -165,8 +165,10 @@ def test_each_formerly_ruleless_builder_reports_under_its_rule() -> None:
     findings = build_findings([], normalized_snapshot=snapshot)
 
     by_rule = {item["rule_id"]: item for item in findings}
-    assert set(by_rule) == FORMERLY_RULELESS | {"sharepoint.site_weak_ownership"}
-    assert len(findings) == 9, "one finding per record that raises one"
+    # The OneDrive site's copied capability also stands in for the tenant setting (a bundle with no
+    # sharepoint_tenant_settings section), so the SharePoint capability rule reads it too: new guests, low.
+    assert set(by_rule) == FORMERLY_RULELESS | {"sharepoint.site_weak_ownership", "sharepoint.external_sharing_broad"}
+    assert len(findings) == 10, "one finding per record that raises one, and the tenant capability finding"
     assert by_rule["sharepoint.site_orphaned"]["severity"] == "high"
     assert by_rule["sharepoint.site_weak_ownership"]["severity"] == "medium"
     assert by_rule["ca.break_glass_exclusion_missing"]["severity"] == "high"

@@ -22,6 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from . import break_glass
 from .cyber_essentials import CE_FRAMEWORK_KEY, build_cyber_essentials_section
 from .effective_admins import (
     SECTION as _ADMIN_SET_SECTION,
@@ -34,6 +35,7 @@ from .identity_controls import (
     CONTROL_USER_CONSENT,
     SECTION as _IDENTITY_CONTROL_SECTION,
 )
+from .external_sharing import FEDERATION_UNKNOWN, SETTING_RULES, setting_inputs_gap
 from .resources import resolve_resource_path
 from .waivers import is_accepted_status
 
@@ -534,6 +536,30 @@ def _stale_guest_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
     return None
 
 
+# Coverage row the intune_depth collector writes when it expanded only its first policies.
+_INTUNE_ASSIGNMENT_FANOUT_SOURCE = "intune_depth.deviceConfigurationAssignmentsFanout"
+
+
+def intune_assignments_are_a_sample(snapshot: Mapping[str, Any] | None) -> bool:
+    """Whether the assignment read covers only some of the device configuration profiles.
+
+    The collector reads assignments one policy at a time and stops at its fan-out limit, recording a
+    ``deviceConfigurationAssignmentsFanout`` gap. A profile it never expanded may well be assigned, so
+    "no assignments" over a sample says nothing about the rest. The per-policy rows are checked too, for
+    a bundle that carries them but no gap record.
+    """
+    if snapshot is None:
+        return False
+    if any(record.get("source") == _INTUNE_ASSIGNMENT_FANOUT_SOURCE for record in _records(snapshot, "collection_gaps")):
+        return True
+    expanded = len(_records(snapshot, "intune_policy_assignment_objects"))
+    configurations = {str(record.get("source")): record for record in _records(snapshot, "normalization_coverage")}.get(
+        "intune_depth.deviceConfigurations"
+    )
+    total = configurations.get("record_count") if configurations else None
+    return bool(expanded) and isinstance(total, int) and not isinstance(total, bool) and expanded < total
+
+
 def _intune_assignment_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
     """The unassigned-policy rule reads intune_depth's own policy inventory and assignment reads."""
     if snapshot is None:
@@ -549,6 +575,42 @@ def _intune_assignment_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | N
     assignments = reports.get("intune_depth.deviceConfigurationAssignments")
     if assignments is None or assignments.get("collection_status") != "collected" or assignments.get("complete") is not True:
         return "policy_assignments_not_read_in_full"
+    if intune_assignments_are_a_sample(snapshot):
+        return "policy_assignments_not_read_for_every_policy"
+    return None
+
+
+_TEAMS_FEDERATION_RULE = "teams.external_federation_open"
+_BREAK_GLASS_RULE = "ca.break_glass_exclusion_missing"
+
+
+def _teams_federation_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    """Open federation means federation allowed with no allow list, so the allow list must have been read."""
+    if snapshot is None:
+        return "inputs_not_available"
+    rows = [row for row in _records(snapshot, "teams_policy_objects") if row.get("source_name") == "tenantFederationConfiguration"]
+    if not rows:
+        return "federation_configuration_not_collected"
+    for row in rows:
+        federated = row.get("allow_federated_users")
+        # A value that is not a boolean (a string, a number) is not a reading of the setting.
+        if not isinstance(federated, bool):
+            return "federation_setting_not_read"
+        if federated is True and row.get("allowed_domains_state") in (None, FEDERATION_UNKNOWN):
+            return "federation_allow_list_not_read"
+    return None
+
+
+def _break_glass_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    """The emergency-access check needs accounts to look for: the operator's list or an inference."""
+    if snapshot is None:
+        return "inputs_not_available"
+    # No assessment record means no Conditional Access policy was collected; the collector status says so.
+    for record in _records(snapshot, break_glass.SECTION):
+        if record.get("state") == break_glass.STATE_NO_ACCOUNTS:
+            return "break_glass_accounts_not_identified"
+        if record.get("state") == break_glass.STATE_UNRESOLVED:
+            return "break_glass_accounts_unresolved"
     return None
 
 
@@ -557,6 +619,12 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
     namespace = rule_id.split(".", 1)[0]
     if rule_id == "intune_depth.policies_without_assignments":
         return _intune_assignment_inputs_gap(snapshot)
+    if rule_id in SETTING_RULES:
+        return setting_inputs_gap(rule_id, snapshot)
+    if rule_id == _TEAMS_FEDERATION_RULE:
+        return _teams_federation_inputs_gap(snapshot)
+    if rule_id == _BREAK_GLASS_RULE:
+        return _break_glass_inputs_gap(snapshot)
     if rule_id in _RULE_VERDICT_CONTROLS:
         return _verdict_inputs_gap(snapshot, rule_id)
     if rule_id in _ADMIN_SET_RULES:

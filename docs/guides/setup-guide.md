@@ -48,8 +48,10 @@ Accepted risks go in a waiver file, the same JSON format as the Microsoft 365 ru
 
 ```bash
 auditex google run --auth domain-delegation --service-account-key key.json --subject admin@example.com \
-  --domain example.com --waiver-file waivers.json --stale-user-days 90
+  --domain example.com --waiver-file waivers.json --stale-user-days 90 --stale-device-days 90
 ```
+
+`--stale-user-days` sets how long an active account may go without signing in; `--stale-device-days` sets how long a managed mobile or ChromeOS device may go without syncing before `google.mobile_device_stale_sync` or `google.chromeos_device_stale_sync` reports it. Both default to 90.
 
 OAuth mode is available for development or partial review:
 
@@ -83,6 +85,13 @@ auditex setup-guide m365 --mode app --auditor-profile app-readonly-full --collec
 ```
 
 The app registration must be customer-owned. Add only the listed Microsoft Graph application permissions and grant tenant-wide admin consent.
+
+Emergency access accounts: tell the Conditional Access check which accounts they are, so that it does not rely on inference. Pass `--break-glass-accounts` to `auditex run` or `azure-tenant-audit` (comma-separated object IDs or user principal names, or `@file` with one per line) or set `AUDITEX_BREAK_GLASS_ACCOUNTS` for any entry point; the option wins over the variable. List the group your policies exclude when the accounts are excluded through it, because group membership is not read. The finding `ca.break_glass_exclusion_missing` then names each enabled policy that requires MFA or blocks and excludes none of the listed accounts. Without a list the accounts are inferred (names containing break glass or emergency access, and Global Administrator role holders), and the finding is rated medium at most.
+
+```bash
+auditex run --tenant-name CONTOSO --tenant-id contoso.onmicrosoft.com --use-azure-cli-token \
+  --break-glass-accounts "bg1@contoso.onmicrosoft.com,Break Glass Accounts"
+```
 
 ## Scope Risk
 

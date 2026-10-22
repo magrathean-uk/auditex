@@ -103,6 +103,30 @@ def _device_state(value: Any, *, positive: str, negative: str) -> str | None:
     return None
 
 
+# The Directory API describes ``deviceCompromisedStatus`` only as "the compromised device status" and
+# lists no values. These are the texts seen in the Admin console and API output, and the Cloud Identity
+# Devices enum (COMPROMISED, UNCOMPROMISED). Anything else is unknown: never a pass, never a failure.
+COMPROMISED = "compromised"
+NOT_COMPROMISED = "not_compromised"
+UNKNOWN_COMPROMISE = "unknown"
+_COMPROMISED_TEXTS = frozenset({"compromised", "compromise detected", "device compromised"})
+_NOT_COMPROMISED_TEXTS = frozenset({"no compromise detected", "no compromise", "not compromised", "uncompromised"})
+
+
+def compromised_state(value: Any) -> str:
+    """``compromised``, ``not_compromised`` or ``unknown`` for a ``deviceCompromisedStatus`` value.
+
+    Only the recognised texts classify. An absent field, ``unknown`` or ``COMPROMISED_STATE_UNSPECIFIED``,
+    or any text this tool has not seen, is ``unknown``; the raw text stays on the record beside it.
+    """
+    text = " ".join(str(value or "").replace("_", " ").replace("-", " ").lower().split())
+    if text in _COMPROMISED_TEXTS:
+        return COMPROMISED
+    if text in _NOT_COMPROMISED_TEXTS:
+        return NOT_COMPROMISED
+    return UNKNOWN_COMPROMISE
+
+
 _POLICY_PREFIX = "settings/"
 
 
@@ -477,6 +501,7 @@ def build_google_normalized_snapshot(
             status=item.get("status"),
             # The Directory API names the field deviceCompromisedStatus; compromisedStatus is the older sample key.
             compromised_status=item.get("deviceCompromisedStatus") or item.get("compromisedStatus"),
+            compromised_state=compromised_state(item.get("deviceCompromisedStatus") or item.get("compromisedStatus")),
             encryption_status=item.get("encryptionStatus"),
             encryption=_device_state(item.get("encryptionStatus"), positive="encrypted", negative="not_encrypted"),
             # Named for the lock, not the password: the bundle's sensitive-key scanner rejects the word.

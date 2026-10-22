@@ -675,6 +675,70 @@ def test_a_failed_assignment_read_does_not_open_the_unassigned_policy_finding_en
     assert "intune_depth.policies_without_assignments" in rule_ids(ok)
 
 
+def _intune_snapshot(policy_count: int, expanded: int, *, gap: bool) -> dict[str, Any]:
+    """An intune_depth read of ``policy_count`` profiles, none assigned, of which ``expanded`` were expanded."""
+    from azure_tenant_audit.collection_gaps import fanout_gap_row
+
+    policies = [{"id": f"p-{index}", "displayName": f"Profile {index}"} for index in range(policy_count)]
+    payload = {
+        "deviceConfigurations": {"value": policies},
+        "deviceConfigurationAssignments": {
+            "value": [{"policyId": row["id"], "displayName": row["displayName"], "assignments": []} for row in policies[:expanded]]
+        },
+    }
+    coverage = [
+        {"collector": "intune_depth", "name": "deviceConfigurations", "endpoint": "/deviceManagement/deviceConfigurations",
+         "status": "ok", "item_count": policy_count},
+        *[
+            {"collector": "intune_depth", "name": "deviceConfigurationAssignments", "endpoint": f"/{row['id']}/assignments",
+             "status": "ok", "item_count": 0}
+            for row in policies[:expanded]
+        ],
+    ]
+    if gap:
+        coverage.append(
+            fanout_gap_row("intune_depth", "deviceConfigurationAssignmentsFanout", total=policy_count, expanded=expanded,
+                           scope="Device configuration assignments")
+        )
+    return build_normalized_snapshot(
+        tenant_name="acme", run_id="r", collector_payloads={"intune_depth": payload}, coverage_rows=coverage,
+        result_rows=[{"name": "intune_depth", "status": "partial" if gap else "ok", "item_count": policy_count}],
+    )
+
+
+def test_unassigned_profiles_are_not_reported_from_a_fan_out_that_stopped_early() -> None:
+    from azure_tenant_audit.baselines import intune_assignments_are_a_sample, rule_inputs_gap
+
+    rule = "intune_depth.policies_without_assignments"
+    complete = _intune_snapshot(3, 3, gap=False)
+    cut = _intune_snapshot(12, 10, gap=True)
+    cut_without_gap_row = _intune_snapshot(12, 10, gap=False)
+
+    assert rule in _rule_ids(complete) and not intune_assignments_are_a_sample(complete)
+    assert rule_inputs_gap(rule, complete) is None
+    for snapshot in (cut, cut_without_gap_row):
+        assert intune_assignments_are_a_sample(snapshot)
+        assert rule not in _rule_ids(snapshot), "the 2 profiles never expanded may well be assigned"
+        assert rule_inputs_gap(rule, snapshot) == "policy_assignments_not_read_for_every_policy"
+
+
+def test_a_conditional_access_only_tenant_gets_no_device_management_finding() -> None:
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="r",
+        collector_payloads={
+            "conditional_access": {
+                "conditionalAccessPolicies": {"value": [{"id": "ca-1", "displayName": "MFA", "state": "enabled", "conditions": {}, "grantControls": {"builtInControls": ["mfa"]}}]}
+            },
+            "auth_methods": {"authenticationMethodsPolicy": {"value": [{"id": "a-1"}]}},
+        },
+        result_rows=[{"name": "conditional_access", "status": "ok", "item_count": 1}],
+    )
+
+    assert snapshot["snapshot"]["object_counts"]["policies"] > 0
+    assert "intune_depth.policies_without_assignments" not in _rule_ids(snapshot)
+
+
 def test_the_identity_controls_sample_no_longer_fails_the_endpoints_pillar(tmp_path: Path) -> None:
     from azure_tenant_audit.cli import run_offline
 

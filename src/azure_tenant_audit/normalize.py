@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections import Counter
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 import re
 from typing import Any
 
+from . import break_glass
+from . import external_sharing
 from .chunk_reader import iter_endpoint_records
 from .collection_gaps import (
     COLLECTION_GAP_SECTION,
@@ -51,17 +53,6 @@ _DETECTION_SOURCE_COLLECTORS = (
     "identity_protection",
     "exchange_policy",
 )
-
-_BREAK_GLASS_ROLE_KEYWORDS = (
-    "global administrator",
-    "privileged role administrator",
-    "security administrator",
-    "security operator",
-    "exchange administrator",
-    "intune administrator",
-    "global reader",
-)
-
 
 def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     section = payload.get(key, {})
@@ -564,32 +555,6 @@ def _site_permission_summary(
     }
 
 
-def _build_break_glass_candidates(
-    role_assignments: list[dict[str, Any]],
-    role_definitions: list[dict[str, Any]],
-    groups: list[dict[str, Any]],
-) -> set[str]:
-    role_by_id = _build_index(role_definitions)
-    candidates: set[str] = set()
-    for assignment in role_assignments:
-        role_id = assignment.get("roleDefinitionId")
-        if not isinstance(role_id, str):
-            continue
-        role = role_by_id.get(role_id)
-        display_name = str(role.get("displayName", "")).lower() if role else ""
-        if any(keyword in display_name for keyword in _BREAK_GLASS_ROLE_KEYWORDS):
-            principal = assignment.get("principalId")
-            if isinstance(principal, str):
-                candidates.add(principal)
-    for group in groups:
-        group_name = str(group.get("displayName", "")).lower()
-        if "break" in group_name and "glass" in group_name:
-            group_id = group.get("id")
-            if isinstance(group_id, str):
-                candidates.add(group_id)
-    return candidates
-
-
 def _resolve_reference(
     reference_type: str,
     reference_id: str,
@@ -695,7 +660,8 @@ def _build_conditional_access_graph(
     auth_contexts: list[dict[str, Any]],
     auth_methods_payload: dict[str, Any],
     values: Callable[[dict[str, Any], str], list[dict[str, Any]]] = _values,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
+    break_glass_accounts: Sequence[str] = (),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
     users = values(identity_payload, "users")
     groups = values(identity_payload, "groups")
     role_definitions = values(identity_payload, "roleDefinitions")
@@ -716,7 +682,15 @@ def _build_conditional_access_graph(
     }
 
     mfa_stats = _normalize_mfa_registration(values(auth_methods_payload, "userRegistrationDetails"))
-    break_glass_candidates = _build_break_glass_candidates(role_assignments, role_definitions, groups)
+    accounts = break_glass.resolve_accounts(
+        break_glass_accounts,
+        users=users,
+        groups=groups,
+        role_assignments=role_assignments,
+        role_definitions=role_definitions,
+    )
+    break_glass_flagged: list[dict[str, Any]] = []
+    break_glass_in_scope = 0
 
     reference_tracker: dict[str, list[str]] = {}
     graph_records: list[dict[str, Any]] = []
@@ -929,11 +903,22 @@ def _build_conditional_access_graph(
         )
         relationship_records = unique_relationship_records
 
-        missing_break_glass = False
-        if policy_state == "enabled":
-            if break_glass_candidates:
-                excluded_ids = set(excluded_users + excluded_groups)
-                missing_break_glass = not bool(break_glass_candidates.intersection(excluded_ids))
+        targeting = policy_targeting(policy)
+        assessment = break_glass.assess_policy(targeting, policy_state.lower(), accounts)
+        missing_break_glass = bool(assessment["missing"])
+        if assessment["in_scope"]:
+            break_glass_in_scope += 1
+        if missing_break_glass:
+            break_glass_flagged.append(
+                {
+                    "policy_id": policy_id,
+                    "policy_name": policy.get("displayName"),
+                    "key": f"conditional_access_policy:{policy_id}",
+                    "enforces": assessment["enforces"],
+                    "reach": assessment["reach"],
+                    "broad": assessment["broad"],
+                }
+            )
 
         report_only = policy_state == "enabledForReportingButNotEnforced"
         mfa_enforcement = {
@@ -971,7 +956,11 @@ def _build_conditional_access_graph(
                     "excluded_locations": len(exclude_locations),
                 },
                 missing_break_glass_exclusion=missing_break_glass,
-                targeting=compact_targeting(policy_targeting(policy)),
+                break_glass_in_scope=assessment["in_scope"] or None,
+                break_glass_enforces=assessment.get("enforces"),
+                break_glass_excluded_accounts=assessment.get("excluded_accounts"),
+                break_glass_not_excluded_accounts=assessment.get("not_excluded_accounts"),
+                targeting=compact_targeting(targeting),
                 mfa_enforcement=mfa_enforcement,
                 relationships=[
                     item
@@ -994,17 +983,49 @@ def _build_conditional_access_graph(
                     policy_id=policy_id,
                 )
             )
-        if missing_break_glass:
+    break_glass_record: dict[str, Any] | None = None
+    if graph_records:
+        severity = break_glass.grade(accounts.source, break_glass_flagged)
+        break_glass_record = _record(
+            break_glass.KIND,
+            "conditional_access.conditionalAccessPolicies",
+            "tenant",
+            state=accounts.state,
+            account_source=accounts.source,
+            account_count=len(accounts.ids),
+            accounts=accounts.labels,
+            unresolved_accounts=accounts.unresolved,
+            policies_in_scope=break_glass_in_scope,
+            policies_missing_exclusion=len(break_glass_flagged),
+        )
+        if break_glass_flagged:
             policy_findings.append(
                 _record(
                     "ca_finding",
                     "conditional_access",
-                    f"{policy_id}:missing-break-glass-exception",
-                    title="Potentially missing emergency access exclusion",
+                    "tenant",
+                    title="Emergency access accounts are not excluded from enforcing Conditional Access policies",
                     finding_type="ca_break_glass_exclusion",
-                    severity="high",
-                    description="Enabled policy does not explicitly exclude a detected emergency-access principal/group.",
-                    policy_id=policy_id,
+                    severity=severity,
+                    description=(
+                        f"{len(break_glass_flagged)} enabled Conditional Access "
+                        f"{'policy requires' if len(break_glass_flagged) == 1 else 'policies require'} MFA or a managed "
+                        f"device, or {'blocks' if len(break_glass_flagged) == 1 else 'block'} sign-ins, and "
+                        f"{'excludes' if len(break_glass_flagged) == 1 else 'exclude'} none of the "
+                        f"{'operator-listed' if accounts.source == break_glass.SOURCE_OPERATOR else 'inferred'} "
+                        "emergency access accounts."
+                    ),
+                    account_source=accounts.source,
+                    account_basis=(
+                        "Accounts listed by the operator."
+                        if accounts.source == break_glass.SOURCE_OPERATOR
+                        else "Accounts inferred from names containing break glass or emergency access and from Global "
+                        "Administrator role holders; list the real accounts with --break-glass-accounts or "
+                        f"{break_glass.ENV_VAR} to confirm."
+                    ),
+                    accounts=accounts.labels,
+                    policies=break_glass_flagged,
+                    policy_count=len(break_glass_flagged),
                 )
             )
 
@@ -1021,7 +1042,7 @@ def _build_conditional_access_graph(
         ),
         "dangling_references": sum(1 for rel in unique_relationship_records if rel.get("resolution") == "unresolved"),
     }
-    return graph_records, unique_relationship_records, summary, policy_findings
+    return graph_records, unique_relationship_records, summary, policy_findings, break_glass_record
 
 
 def _owner_type(owner: dict[str, Any]) -> str:
@@ -1279,6 +1300,7 @@ def build_normalized_snapshot(
     result_rows: list[dict[str, Any]] | None = None,
     coverage_rows: list[dict[str, Any]] | None = None,
     run_dir: Path | None = None,
+    break_glass_accounts: Sequence[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     diagnostics = diagnostics or []
     result_rows = result_rows or []
@@ -1848,6 +1870,15 @@ def build_normalized_snapshot(
     ):
         for item in _values(collector_payloads.get("teams_policy", {}), source_name):
             object_id = str(item.get("Identity") or item.get("id") or source_name)
+            federation: dict[str, Any] = {}
+            if source_name == "tenantFederationConfiguration":
+                # Federation is open only when no allow list restricts it; the lists are kept as counts.
+                allowed_state, allowed_count = external_sharing.federation_allow_list(item.get("AllowedDomains"))
+                federation = {
+                    "allowed_domains_state": allowed_state,
+                    "allowed_domain_count": allowed_count if allowed_state != external_sharing.FEDERATION_UNKNOWN else None,
+                    "blocked_domain_count": external_sharing.federation_block_count(item.get("BlockedDomains")),
+                }
             teams_policy_objects.append(
                 _record(
                     "teams_policy_object",
@@ -1857,7 +1888,9 @@ def build_normalized_snapshot(
                     policy_name=item.get("Identity") or item.get("displayName"),
                     allow_public_users=item.get("AllowPublicUsers"),
                     allow_federated_users=item.get("AllowFederatedUsers"),
+                    allow_teams_consumer=item.get("AllowTeamsConsumer"),
                     allow_cloud_recording=item.get("AllowCloudRecording"),
+                    **federation,
                 )
             )
     service_health_objects: list[dict[str, Any]] = []
@@ -2003,8 +2036,32 @@ def build_normalized_snapshot(
                         web_url=item.get("webUrl"),
                         site_kind=item.get("siteKind") or _site_kind_from_web_url(item.get("webUrl")),
                         sharing_capability=item.get("sharingCapability"),
+                        # "tenant" marks the tenant's single value copied onto the site, "site" the site's own.
+                        sharing_capability_source=item.get("sharingCapabilitySource"),
                     )
                 )
+    sharepoint_tenant_settings: list[dict[str, Any]] = []
+    for collector_name in ("onedrive_posture", "sharepoint_access"):
+        settings_payload = collector_payloads.get(collector_name)
+        if not isinstance(settings_payload, dict) or "sharePointSettings" not in settings_payload:
+            continue
+        settings_evidence = sources.endpoint_evidence(settings_payload, "sharePointSettings", singleton=True)
+        settings_fields = (
+            external_sharing.tenant_settings_fields(settings_evidence.rows[0])
+            if settings_evidence.state == EVIDENCE_COLLECTED and settings_evidence.rows
+            else {}
+        )
+        sharepoint_tenant_settings.append(
+            _record(
+                external_sharing.KIND,
+                f"{collector_name}.sharePointSettings",
+                collector_name,
+                collector=collector_name,
+                source_name="sharePointSettings",
+                read_state=settings_evidence.state,
+                **settings_fields,
+            )
+        )
     purview_audit_jobs = [
         _record(
             "purview_audit_job",
@@ -2458,6 +2515,7 @@ def build_normalized_snapshot(
         "consent_policy_objects": consent_policy_objects,
         "domain_hybrid_objects": domain_hybrid_objects,
         "onedrive_posture_objects": onedrive_posture_objects,
+        external_sharing.SECTION: sharepoint_tenant_settings,
         "purview_audit_jobs": purview_audit_jobs,
         "purview_audit_exports": purview_audit_exports,
         "purview_retention_labels": purview_retention_labels,
@@ -2494,7 +2552,13 @@ def build_normalized_snapshot(
         for section, payload in normalize_directory_relationships(directory_payload).items():
             records_by_section[section] = payload["records"]
 
-    conditional_access_graph_records, relationships, graph_summary, policy_findings = _build_conditional_access_graph(
+    (
+        conditional_access_graph_records,
+        relationships,
+        graph_summary,
+        policy_findings,
+        break_glass_record,
+    ) = _build_conditional_access_graph(
         policies=_values(collector_payloads.get("conditional_access", {}), "conditionalAccessPolicies"),
         identity_payload=collector_payloads.get("identity", {}),
         named_locations=_values(collector_payloads.get("conditional_access", {}), "namedLocations"),
@@ -2502,7 +2566,10 @@ def build_normalized_snapshot(
         auth_contexts=_values(collector_payloads.get("conditional_access", {}), "authenticationContextClassReferences"),
         auth_methods_payload=collector_payloads.get("auth_methods", {}),
         values=_values,
+        break_glass_accounts=break_glass.configured_accounts(break_glass_accounts),
     )
+    if break_glass_record:
+        records_by_section[break_glass.SECTION] = [break_glass_record]
     if conditional_access_graph_records:
         records_by_section["conditional_access_graph"] = conditional_access_graph_records
     if relationships:

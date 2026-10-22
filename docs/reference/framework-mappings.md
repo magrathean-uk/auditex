@@ -310,6 +310,38 @@ New rules:
 - `identity.guest_with_privileged_role`: a guest that holds an administrator role by any route. It maps
   to MCSB `PA-1` and `PA-7`, Zero Trust `identities` and `ce.uac.special_access_privileges` (partial).
 
+## SharePoint, OneDrive and Teams sharing rules
+
+The tenant sharing rules read `normalized/sharepoint_tenant_settings.json` (see
+`docs/reference/output-contract.md`). Each maps only to the control whose condition the rule tests, and a
+finding says per framework whether it breaches that framework's requirement (`framework_thresholds`, the
+mechanism the Global Administrator count uses), so a control fails exactly when the benchmark would. The
+SCuBA conditions follow the ScubaGear v1.8.0 `SharepointConfig.rego`:
+
+| Rule | CIS v7 | SCuBA | CIS requirement | SCuBA requirement |
+| --- | --- | --- | --- | --- |
+| `sharepoint.external_sharing_broad` | `7.2.3` | `MS.SHAREPOINT.1.1v1` | New and existing guests, or less | Existing guests, or off |
+| `sharepoint.sharing_domains_unrestricted` | `7.2.6` | `MS.SHAREPOINT.1.3v1` | Allow list or block list | Allow list (not applicable when sharing is off) |
+| `sharepoint.default_link_type_broad` | `7.2.7` | `MS.SHAREPOINT.2.1v1` | Specific people (Direct) | Specific people (Direct) |
+
+So new and existing guests are a low finding that fails `MS.SHAREPOINT.1.1v1` and leaves CIS `7.2.3`
+passing; a block list is a low finding that fails `MS.SHAREPOINT.1.3v1` and leaves CIS `7.2.6` passing; a
+default link of `None`, organisation-wide or anyone fails both `7.2.7` and `MS.SHAREPOINT.2.1v1`.
+
+`onedrive.external_sharing_enabled` and `teams.external_federation_open` keep their Zero Trust, NIST,
+ISO, SOC 2, NIS2 and DORA mappings and claim no CIS or SCuBA control. All three SharePoint rules use the
+`sharepoint` namespace, so they need the `sharepoint_access` collector to read `pass`; a run that read
+the settings only through `onedrive_posture` still raises them but cannot clear them. Microsoft Graph
+returns the sharing capability and the domain restriction mode but not the default link type or the
+anonymous-link settings, so on a Graph-only run `sharepoint.default_link_type_broad` reads
+`not_assessed` (`sharing_setting_not_read:default_sharing_link_type`) and CIS `7.2.7` and SCuBA
+`MS.SHAREPOINT.2.1v1` read `not_assessed` too, instead of passing on a setting nobody read.
+
+`ca.break_glass_exclusion_missing` and `ca.policy_report_only` keep their mappings. The break-glass rule
+reads `not_assessed` when no emergency-access account could be identified
+(`break_glass_accounts_not_identified`) or the accounts the operator listed were not found
+(`break_glass_accounts_unresolved`).
+
 ## Cyber Essentials
 
 The `cyber_essentials` key follows **Cyber Essentials: Requirements for IT Infrastructure v3.3**

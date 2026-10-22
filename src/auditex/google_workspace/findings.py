@@ -5,10 +5,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .collectors import SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPED_COLLECTORS
+from .normalize import COMPROMISED, UNKNOWN_COMPROMISE, compromised_state
 
 # Days without a login before an active account is reported by google.stale_user. Admin accounts keep the
 # 365-day google.admin_stale_login threshold; this one is the default for everyone and is configurable.
 DEFAULT_STALE_USER_DAYS = 90
+# Days since a managed mobile or ChromeOS device last synced before google.mobile_device_stale_sync and
+# google.chromeos_device_stale_sync report it. Configurable with --stale-device-days.
+DEFAULT_STALE_DEVICE_DAYS = 90
 # An account younger than this has not had time to sign in, so google.never_logged_in_user leaves it alone.
 NEVER_LOGGED_IN_GRACE_DAYS = 30
 _ADMIN_STALE_LOGIN_DAYS = 365
@@ -548,7 +552,7 @@ _GOOGLE_RULE_METADATA: dict[str, dict[str, Any]] = {
     "google.evidence_unknown": {
         "title": "Evidence needed for a check was not returned",
         "risk_rating": "medium",
-        "description": "Google returned no value for a field a check needs, so the check could not be evaluated for those objects.",
+        "description": "Google returned no usable value (absent, or a value this tool does not recognise) for a field a check needs, so the check could not be evaluated for those objects.",
         "impact": "The affected objects are neither passed nor failed; a gap here must not be read as a clean result.",
         "remediation": "Confirm the account or device data is readable with the granted scopes and rerun; collect the missing evidence by hand if the field does not exist for these objects.",
         "expected_value": "Every field the checks use is present for every object they evaluate.",
@@ -799,17 +803,8 @@ def _stale_google_login(value: Any, *, days: int = 365, now: datetime | None = N
     return parsed < (now or datetime.now(tz=timezone.utc)) - timedelta(days=days)
 
 
-def _stale_google_timestamp(value: Any, *, days: int = 90, now: datetime | None = None) -> bool:
+def _stale_google_timestamp(value: Any, *, days: int = DEFAULT_STALE_DEVICE_DAYS, now: datetime | None = None) -> bool:
     return _stale_google_login(value, days=days, now=now)
-
-
-def _device_compromised(value: Any) -> bool:
-    """True when Google reports a compromised device. The API says "No compromise detected" for a clean one,
-    so the match is on the word and excludes the negated forms."""
-    text = " ".join(str(value or "").replace("_", " ").lower().split())
-    if "compromise" not in text:
-        return False
-    return not (text.startswith(("no ", "not ")) or "no compromise" in text or "not compromised" in text or "uncompromised" in text)
 
 
 def _is_privileged(user: dict[str, Any]) -> bool:
@@ -998,8 +993,11 @@ def _evidence_unknown_finding(
     collector: str,
     missing: list[dict[str, Any]],
     total: int,
+    observed_values: Iterable[Any] = (),
 ) -> dict[str, Any]:
     first = missing[0]
+    # The texts Google did return that this tool does not recognise (empty for an absent field).
+    unrecognised = sorted({str(value)[:80] for value in observed_values if str(value or "").strip()})[:10]
     return _finding(
         rule_id="google.evidence_unknown",
         title="Evidence needed for a check was not returned",
@@ -1008,7 +1006,7 @@ def _evidence_unknown_finding(
         collector=collector,
         section=section,
         record=first,
-        description=f"Google returned no {field} for {len(missing)} of {total} objects, so {', '.join(rule_ids)} could not be evaluated for them.",
+        description=f"Google returned no usable {field} for {len(missing)} of {total} objects, so {', '.join(rule_ids)} could not be evaluated for them.",
         remediation="",  # the registry text applies to every check
         returned_value={
             "check": check,
@@ -1017,6 +1015,7 @@ def _evidence_unknown_finding(
             "objects_total": total,
             "objects_without_field": len(missing),
             "examples": [_affected_object(item) for item in missing[:5]],
+            **({"unrecognised_values": unrecognised} if unrecognised else {}),
         },
         finding_id=f"google.evidence_unknown:{check}",
         affected_objects=[_affected_object(item) for item in missing[:_ISSUE_OBJECT_LIMIT]],
@@ -1029,6 +1028,7 @@ def build_google_findings(
     diagnostics: list[dict[str, Any]] | None = None,
     *,
     stale_user_days: int = DEFAULT_STALE_USER_DAYS,
+    stale_device_days: int = DEFAULT_STALE_DEVICE_DAYS,
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     diagnostics = diagnostics or []
@@ -1950,10 +1950,15 @@ def build_google_findings(
 
     unknown_encryption: list[dict[str, Any]] = []
     unknown_aue: list[dict[str, Any]] = []
+    unknown_compromise: list[dict[str, Any]] = []
     mobile_devices = _records(normalized_snapshot, "google_mobile_devices")
     chrome_devices = _records(normalized_snapshot, "google_chromeos_devices")
     for mobile_device in mobile_devices:
-        if _device_compromised(mobile_device.get("compromised_status")):
+        # A record written before the state was classified carries only the raw text.
+        compromise = mobile_device.get("compromised_state") or compromised_state(mobile_device.get("compromised_status"))
+        if compromise == UNKNOWN_COMPROMISE:
+            unknown_compromise.append(mobile_device)
+        if compromise == COMPROMISED:
             findings.append(
                 _finding(
                     rule_id="google.mobile_device_compromised",
@@ -1968,7 +1973,7 @@ def build_google_findings(
                     returned_value=mobile_device.get("compromised_status"),
                 )
             )
-        if _stale_google_timestamp(mobile_device.get("last_sync"), now=now):
+        if _stale_google_timestamp(mobile_device.get("last_sync"), days=stale_device_days, now=now):
             findings.append(
                 _finding(
                     rule_id="google.mobile_device_stale_sync",
@@ -1978,7 +1983,7 @@ def build_google_findings(
                     collector="google_devices",
                     section="google_mobile_devices",
                     record=mobile_device,
-                    description="Google Workspace reports a managed mobile device that has not synced recently.",
+                    description=f"Google Workspace reports a managed mobile device that has not synced in more than {stale_device_days} days.",
                     remediation="Investigate stale mobile devices, block or remove devices no longer in use, and require re-enrollment before restoring access.",
                     returned_value=mobile_device.get("last_sync"),
                 )
@@ -2009,7 +2014,7 @@ def build_google_findings(
             unknown_encryption.append(mobile_device)
 
     for chrome_device in chrome_devices:
-        if _stale_google_timestamp(chrome_device.get("last_sync"), now=now):
+        if _stale_google_timestamp(chrome_device.get("last_sync"), days=stale_device_days, now=now):
             findings.append(
                 _finding(
                     rule_id="google.chromeos_device_stale_sync",
@@ -2019,7 +2024,7 @@ def build_google_findings(
                     collector="google_devices",
                     section="google_chromeos_devices",
                     record=chrome_device,
-                    description="Google Workspace reports a managed ChromeOS device that has not synced recently.",
+                    description=f"Google Workspace reports a managed ChromeOS device that has not synced in more than {stale_device_days} days.",
                     remediation="Investigate stale ChromeOS devices, remove inactive inventory, and re-enroll devices before restoring managed access.",
                     returned_value=chrome_device.get("last_sync"),
                 )
@@ -2064,6 +2069,19 @@ def build_google_findings(
                     },
                 )
             )
+    if unknown_compromise:
+        findings.append(
+            _evidence_unknown_finding(
+                check="mobile_compromised_status",
+                rule_ids=["google.mobile_device_compromised"],
+                field="deviceCompromisedStatus",
+                section="google_mobile_devices",
+                collector="google_devices",
+                missing=unknown_compromise,
+                total=len(mobile_devices),
+                observed_values=[device.get("compromised_status") for device in unknown_compromise],
+            )
+        )
     if unknown_encryption:
         findings.append(
             _evidence_unknown_finding(

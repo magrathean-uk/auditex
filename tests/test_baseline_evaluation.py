@@ -686,6 +686,17 @@ _CLEAN_RUN_SNAPSHOTS = {
     "intune_depth.policies_without_assignments": _read_in_full(
         "intune_depth.deviceConfigurations", "intune_depth.deviceConfigurationAssignments"
     ),
+    "onedrive.external_sharing_enabled": {
+        "sharepoint_tenant_settings": {
+            "records": [{"collector": "onedrive_posture", "read_state": "collected", "sharing_capability": "disabled"}]
+        }
+    },
+    "teams.external_federation_open": {
+        "teams_policy_objects": {
+            "records": [{"source_name": "tenantFederationConfiguration", "allow_federated_users": False}]
+        }
+    },
+    "ca.break_glass_exclusion_missing": {"break_glass_assessment": {"records": [{"state": "assessed"}]}},
 }
 
 
@@ -745,7 +756,7 @@ def test_each_formerly_ruleless_builder_reports_under_the_collector_its_namespac
             {"id": "m1", "source_name": "mailboxForwarding", "forwarding_smtp_address": "x@example.net", "display_name": "Box"}
         ]},
         "teams_policy_objects": {"records": [
-            {"id": "t1", "source_name": "tenantFederationConfiguration", "allow_federated_users": True}
+            {"id": "t1", "source_name": "tenantFederationConfiguration", "allow_federated_users": True, "allowed_domains_state": "open"}
         ]},
         "governance_objects": {"records": [{"kind": "role_assignment_schedule"}]},
         "intune_assignment_objects": {"records": []},
@@ -759,7 +770,9 @@ def test_each_formerly_ruleless_builder_reports_under_the_collector_its_namespac
 
     emitted = {finding["rule_id"]: finding["collector"] for finding in build_findings([], normalized_snapshot=snapshot)}
 
-    assert emitted == dict(_FORMERLY_RULELESS_COLLECTORS)
+    # The OneDrive site's copied capability stands in for the tenant setting in a bundle that has no
+    # sharepoint_tenant_settings section, so the SharePoint capability rule reads it as well (new guests: low).
+    assert emitted == {**dict(_FORMERLY_RULELESS_COLLECTORS), "sharepoint.external_sharing_broad": "sharepoint_access"}
     for rule, collector in emitted.items():
         assert rule_evidence_collector(rule) == collector, rule
 

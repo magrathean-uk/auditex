@@ -1130,10 +1130,10 @@ def test_the_aue_rule_is_unknown_for_an_active_device_without_the_field() -> Non
 def test_a_mobile_device_with_encryption_off_is_reported_and_one_without_the_field_is_unknown() -> None:
     snapshot = _snapshot(
         mobile=[
-            {"resourceId": "off", "status": "APPROVED", "encryptionStatus": "Not encrypted", "devicePasswordStatus": "Off", "lastSync": _ago(1)},
-            {"resourceId": "on", "status": "APPROVED", "encryptionStatus": "Encrypted", "lastSync": _ago(1)},
-            {"resourceId": "blocked", "status": "BLOCKED", "encryptionStatus": "Not encrypted", "lastSync": _ago(1)},
-            {"resourceId": "silent", "status": "APPROVED", "lastSync": _ago(1)},
+            {"resourceId": "off", "status": "APPROVED", "deviceCompromisedStatus": "No compromise detected", "encryptionStatus": "Not encrypted", "devicePasswordStatus": "Off", "lastSync": _ago(1)},
+            {"resourceId": "on", "status": "APPROVED", "deviceCompromisedStatus": "No compromise detected", "encryptionStatus": "Encrypted", "lastSync": _ago(1)},
+            {"resourceId": "blocked", "status": "BLOCKED", "deviceCompromisedStatus": "No compromise detected", "encryptionStatus": "Not encrypted", "lastSync": _ago(1)},
+            {"resourceId": "silent", "status": "APPROVED", "deviceCompromisedStatus": "No compromise detected", "lastSync": _ago(1)},
         ]
     )
 

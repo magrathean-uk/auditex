@@ -46,7 +46,7 @@ Findings must include `evidence_refs`. Each reference must identify at least `ar
 
 `reports/report-pack.json` includes `proof_table` for board, CLI, and MCP review. New proof rows flatten every finding evidence reference into `finding_id`, `rule_id`, `proof_status`, `collector`, `artifact_path`, `artifact_kind`, `record_key`, and optional JSON pointer or endpoint fields; from `2026-10-22` they also carry `collected_at`, `content_hash` and `unresolved_reason`, and `proof_status` is derived from resolution. A finding's `proof` summary gains `supported_count`, the number of its references that resolved. The same pack now also carries `reviewer_index` with `start_here`, `prove_this`, and `known_limits` rows so customer reviewers can move from posture to proof faster. The validator accepts older per-finding proof summaries, and validates the stricter row shape when the new fields are present. Operators can render the same rows with `auditex report proof-table <run-dir> --format md`. Enterprise handoff starts with `auditex report customer-pack <run-dir> --output-dir <dir>`, `auditex report verify-pack <dir>`, or `auditex report handoff <run-dir> --format md`. The pack writes a README, handoff, full report, API ledger, permission ledger, proof table, JSON copies, selected customer-safe source artifacts, `checksums.sha256`, and generated-file/source-artifact hashes. `pack-manifest.json` source now also carries `validation_summary` and `reviewer_summary`; `verify-pack` checks those against `handoff.json` so customer start-point truth cannot drift. The handoff, API call, permission, and proof-table commands all accept `--output <path>` for persisted customer packs.
 
-Microsoft 365 report packs can also carry `detection_coverage` (`signals[]` with `name`, `title`, `status` of `on`, `off`, or `unknown`, `reason`, `why_it_matters`, and an `evidence_ref` into `normalized/detection_signal_objects.json`, plus `score`, `counts`, `assessed_ratio`, and `limitations`) and the informational `public_footprint` (`domains[]` with discovery status, authentication type, and an `evidence_ref` into `normalized/public_footprint_objects.json`). `score` is computed over `on` and `off` signals only; `unknown` is never counted as `off`. Both sections survive the coverage-gap refresh of the report pack. New normalized sections: `detection_signal_objects`, `public_footprint_objects`, and `identity_protection_objects`. Contract `2026-10-22` adds `intune_policy_assignment_objects`, keyed `intune_policy_assignment:<policyId>`, with `policy_id`, `policy_name` and `assignment_count` for every policy the Intune assignment read returned, including those with none.
+Microsoft 365 report packs can also carry `detection_coverage` (`signals[]` with `name`, `title`, `status` of `on`, `off`, or `unknown`, `reason`, `why_it_matters`, and an `evidence_ref` into `normalized/detection_signal_objects.json`, plus `score`, `counts`, `assessed_ratio`, and `limitations`) and the informational `public_footprint` (`domains[]` with discovery status, authentication type, and an `evidence_ref` into `normalized/public_footprint_objects.json`). `score` is computed over `on` and `off` signals only; `unknown` is never counted as `off`. Both sections survive the coverage-gap refresh of the report pack. New normalized sections: `detection_signal_objects`, `public_footprint_objects`, and `identity_protection_objects`. Contract `2026-10-22` adds `intune_policy_assignment_objects`, keyed `intune_policy_assignment:<policyId>`, with `policy_id`, `policy_name` and `assignment_count` for every policy the Intune assignment read returned, including those with none. It also adds `sharepoint_tenant_settings` and `break_glass_assessment` (see "Microsoft 365 sharing, federation and emergency-access rules").
 
 Microsoft 365 runs that include the `conditional_access` or `consent_policy` collector also write `normalized/identity_control_verdicts.json`, one record per tenant and control, keyed `identity_control_verdict:<control>`. `control` is `effective_mfa`, `legacy_authentication_block` or `user_consent` (the last only when `consent_policy` ran). `verdict` is `enforced`, `not_enforced` or `unknown` for `effective_mfa`; `blocked`, `not_blocked` or `unknown` for `legacy_authentication_block`; `restricted`, `unrestricted` or `unknown` for `user_consent`. A negative verdict needs a complete read: a policy list that was blocked, truncated or never collected gives `unknown`, with the cause in `reasons` and the endpoint states in `policy_collection`, `security_defaults` and `authorization_policy`. `basis` lists what establishes a positive verdict (`security_defaults`, `conditional_access_policy`). For `effective_mfa`, `qualifying_policies` are the enabled policies that require MFA for all users on all cloud apps, `excluded_principals` are the principals excluded from every qualifying policy (`type`, `id`, resolved `display_name`), `non_qualifying_mfa_policies`, `report_only_mfa_policies` and `unverified_policies` carry each near-miss policy with its `reasons`, and `registration_context` repeats the registration counts as context only: registration never produces `enforced`. Findings from these verdicts cite the verdict record and the Conditional Access policy records it names. `normalized/conditional_access_graph.json` policy records gain `targeting`: the raw include and exclude lists for users, groups, roles and guests, applications, `client_app_types`, platforms, locations, risk levels, the device filter (`device_filter_mode` and `device_filter_rule`) and the grant (`operator`, `built_in_controls`, `authentication_strength`). A policy that excludes platforms, applications or devices (exclude-mode filter) never qualifies as enforcing MFA or blocking legacy authentication; the near-miss `reasons` are `excludes_platforms`, `excludes_applications` and `device_filter_excludes_devices`, and the policy summary records `excluded_platforms`, `excluded_applications` and `device_filter`. `normalized/consent_policy_objects.json` authorization policy records gain `permission_grant_policies_assigned`, `allowed_to_create_apps` and `guest_user_role_id`. New rules: `ca.mfa_not_enforced`, `ca.legacy_auth_not_blocked`, `consent_policy.user_consent_unrestricted` and `identity.privileged_mfa_not_registered`, plus the diagnostic `ca.enforcement_unverified` and `consent_policy.user_consent_unverified`, which an `unknown` verdict raises instead.
 
@@ -272,7 +272,12 @@ failed or was cut. Baselines evaluate the Intune rule only when
 `normalization_coverage` shows both the policy inventory and the assignments were read in
 full (`device_configurations_not_collected`, `device_configurations_not_read_in_full`,
 `no_device_configurations` and `policy_assignments_not_read_in_full` are the reasons it
-reports otherwise).
+reports otherwise). The assignment read also has to cover every profile: when the collector
+stopped at its fan-out limit (the `deviceConfigurationAssignmentsFanout` gap, or fewer
+`intune_policy_assignment_objects` rows than profiles), a profile it never expanded may be
+assigned, so the finding stays silent and the rule reads `policy_assignments_not_read_for_every_policy`.
+The rule counts device configuration profiles only: compliance policies, app protection policies,
+Conditional Access policies and authentication-method policies are not counted.
 
 The Google Workspace fan-outs run one call per object and are the slow part of a large
 domain: `google_directory` makes two calls per user (aliases and OAuth tokens) and one or
@@ -315,6 +320,84 @@ though its operations are read-only.
 
 Report and compare code can use this database as the durable lookup surface instead of rewalking every JSON file.
 
+### Microsoft 365 sharing, federation and emergency-access rules
+
+These rules read tenant settings, not one record per site or per policy. Each one stays silent when
+the setting it needs was not read, and baseline alignment reads it `not_assessed` (never `pass`) with
+the reason shown.
+
+**`normalized/sharepoint_tenant_settings.json`** holds one `sharepoint_tenant_settings` record per
+collector that read `/admin/sharepoint/settings` (`onedrive_posture`, `sharepoint_access`), keyed
+`sharepoint_tenant_settings:<collector>`. `read_state` is `collected`, `blocked` or `absent`. A
+collected record carries the settings it could read, each in one canonical form whichever spelling
+the payload used (Microsoft Graph names and strings, or SharePoint Online Management Shell names and
+numbers): `sharing_capability` and `onedrive_sharing_capability` (`disabled`,
+`existingExternalUserSharingOnly`, `externalUserSharingOnly`, `externalUserAndGuestSharing`),
+`sharing_domain_restriction_mode` (`none`, `allowList`, `blockList`), `allowed_domain_count`,
+`blocked_domain_count`, `default_sharing_link_type` (`none`, `direct`, `internal`, `anonymous`),
+`anonymous_link_expiry_days` (0 when links never expire), `file_anonymous_link_type` and
+`folder_anonymous_link_type` (`none`, `view`, `edit`). A setting the payload does not carry is
+absent; one in a form this tool does not recognise is listed under `unrecognised` with its raw
+text. Domain names are kept as counts. Microsoft Graph v1.0 returns the sharing capability and the
+domain restriction mode; the default link type and the anonymous-link settings are read only when
+the settings payload carries them (for example an export from the SharePoint Online Management
+Shell), so on a Graph-only run those rules report `sharing_setting_not_read:<setting>`.
+
+`onedrive_posture_objects` records gain `sharing_capability_source`: `tenant` when the collector
+copied the tenant's single value onto the site, `site` when the site carried its own.
+`teams_policy_objects` records for `tenantFederationConfiguration` gain `allow_teams_consumer`,
+`allowed_domains_state` (`open`: no allow list; `allow_list`; `unknown`: not collected or an unrecognised
+shape), `allowed_domain_count` and `blocked_domain_count`.
+
+| Rule | Condition | Severity | Not assessed when |
+| --- | --- | --- | --- |
+| `onedrive.external_sharing_enabled` | One finding for the tenant, with the personal sites in `evidence.sites` (up to 50, with the full count). The OneDrive capability is `oneDriveSharingCapability` when read, otherwise the SharePoint value, which OneDrive inherits unless set stricter. Anyone links: high; new and existing guests: low; existing guests only or off: no finding | high, medium or low | `sharepoint_settings_not_collected`, `sharing_setting_not_read:sharing_capability` |
+| `sharepoint.external_sharing_broad` | `sharing_capability` allows more than existing guests. Anyone links: high unless anonymous links are known to expire within 30 days and both file and folder links are known to be view-only (then medium); a setting that was not read never mitigates. New and existing guests: low. CIS `7.2.3` allows new and existing guests, ScubaGear `MS.SHAREPOINT.1.1v1` passes only existing guests or off, so the low finding breaches SCuBA only (`framework_thresholds`) | high, medium or low | as above |
+| `sharepoint.sharing_domains_unrestricted` | External sharing is on and `sharing_domain_restriction_mode` is `none` (medium; low when only existing guests may be shared with), or `blockList` (low). CIS `7.2.6` accepts a block list, ScubaGear `MS.SHAREPOINT.1.3v1` passes only an allow list, so a block list breaches SCuBA only. Sharing off is not applicable | medium or low | `sharing_setting_not_read:sharing_domain_restriction_mode` |
+| `sharepoint.default_link_type_broad` | `default_sharing_link_type` is not `direct` (specific people), the requirement of CIS `7.2.7` and `MS.SHAREPOINT.2.1v1`: `anonymous` is high; `internal` and `none` (no default set) are low | high or low | `sharing_setting_not_read:default_sharing_link_type` |
+| `teams.external_federation_open` | `AllowFederatedUsers` is true and no allow list restricts it (`allowed_domains_state` `open`). Federation to an allow list (including an allow list object with no domains, which allows federation with none), federation that is off, and a configuration whose allow list was not collected, is empty, or has an unrecognised shape raise nothing. `AllowFederatedUsers` must be a boolean; any other value reads `federation_setting_not_read`. `AllowTeamsConsumer`, `AllowPublicUsers` and the blocked-domain count are evidence only | medium | `federation_configuration_not_collected`, `federation_setting_not_read`, `federation_allow_list_not_read` |
+| `ca.break_glass_exclusion_missing` | See below | high or medium | `break_glass_accounts_not_identified`, `break_glass_accounts_unresolved` |
+
+The tenant-level SharePoint findings have the ids `sharepoint_tenant:external_sharing_broad`,
+`sharepoint_tenant:sharing_domains_unrestricted` and `sharepoint_tenant:default_link_type_broad`, one each at
+most, and carry `framework_thresholds` rows (`framework`, `control_ids`, `metric`, `observed`, `requirement`,
+`breached`) so that baseline alignment fails a control only for a framework whose requirement the finding
+breaches: a low finding for new and existing guests or a block list fails the SCuBA controls and leaves the CIS
+ones passing.
+
+The OneDrive finding used to be one `high` finding per personal site (`onedrive_posture:<site>:external_sharing_enabled`)
+repeating the tenant's setting. Its id is now `onedrive_posture:tenant:external_sharing_enabled`. A site
+cannot be more permissive than the tenant, and the collector copies the tenant value onto every site, so
+no site can show its own exceedance from collected data; a site that carries its own value above the
+tenant's is listed in `evidence.sites_exceeding_tenant_setting` and counts at its own level.
+
+**Emergency access.** `normalized/break_glass_assessment.json` holds one `break_glass_assessment`
+record per run that collected Conditional Access policies (`break_glass_assessment:tenant`): `state`
+(`assessed`, `no_accounts_identified`, `operator_accounts_unresolved`), `account_source` (`operator`,
+`inferred`, `none`), the account labels, `unresolved_accounts`, `policies_in_scope` and
+`policies_missing_exclusion`. Conditional Access policy records gain `missing_break_glass_exclusion`,
+`break_glass_in_scope`, `break_glass_enforces` (`mfa` or `block`) and the accounts the policy does and
+does not exclude. The accounts come from `--break-glass-accounts` (comma-separated object IDs, user
+principal names or group names, or `@file`, one per line) or `AUDITEX_BREAK_GLASS_ACCOUNTS`; the option
+wins. Entries are separated by commas or semicolons (or lines in a file); spaces are part of an entry, so a group
+is listed by its display name; a `#` that starts a line or follows whitespace begins a comment, and one inside an
+entry (a guest user principal name contains `#EXT#`) does not; there is no limit on the number of entries. List the group your policies exclude when the accounts are excluded through it: group membership is
+not read. Without a list the accounts are inferred from users and groups whose name says break glass or
+emergency access and from Global Administrator role holders (a role excluded with `excludeRoles` counts).
+A policy is judged when it is enabled, requires MFA (a built-in `mfa` control or an authentication
+strength), blocks, or requires a compliant or hybrid-joined device with no MFA alternative (`enforces` `device`: those
+controls alone, or the operator is AND), and reaches the accounts: it targets all users or administrator roles, or names one
+of the accounts or groups. Report-only policies, policies whose grant is a session control, a password change or a device control with an MFA or
+other alternative, and policies aimed at other groups are not judged. A judged policy passes when it excludes at least one listed
+account or group; the finding is one for the tenant, `conditional_access:ca_break_glass_exclusion:tenant`,
+that names each policy without an exclusion (`affected_objects`, `evidence.policies` with `enforces`,
+`reach` and `broad`) and cites the policy records and the assessment. Severity is `high` only for an
+operator-supplied list and a policy that can lock every administrator out (MFA, or a block that is not
+legacy-protocol only, over all users or administrator roles and all applications); otherwise `medium`. A device
+requirement is judged but never broad, so it is `medium`, and an inferred list never rates above `medium`. This replaces one `high` finding per policy
+(`conditional_access:ca_break_glass_exclusion:<policy id>`) raised for every enabled policy that excluded none
+of every holder of seven roles.
+
 ### Google Workspace evidence scope, domains and rules
 
 What a Google bundle states about how far its evidence reaches, and the sections the Google rules read.
@@ -338,7 +421,7 @@ The external-principal rules are `google.group_external_member`, the `google.gma
 
 **Sections.** `google_users` rows carry `is_privileged` (`is_admin` or `is_delegated_admin`; the 2-step verification, suspended-admin, stale and never-signed-in rules use it, while the super-admin counts use `is_admin` alone), `archived` and `creation_time`. `google_two_step_policies` holds the Cloud Identity 2-step verification policies read by `google_policies` (`setting_type`, `org_unit`, `group`, `sort_order`, `policy_type`, `enforced_from`, `allow_enrollment`, `allowed_sign_in_factor_set`, `enrollment_grace_period`); each policy record carries `policy_scope`: `organisation` (the root organisational unit, no group), `org_unit`, `group`, or `unclassified` when the root unit is unknown. The root unit has no row in the Directory org unit list, so it is taken as the parent of the top-level units; an org unit list that was read and is empty means the root is the only unit, and without the list (not collected, failed) no policy can be called organisation-wide. The snapshot's `two_step_policy_status` is `enforcing` (the organisation-level policy is in force), `partial` (only some organisational units or groups are enforced, the organisation-level policy is not), `scheduled` (every enforcement date is in the future), `not_enforced` (the policy read completed and no policy enforces) or `unknown` (not read, failed or cut, or an enforcing policy cannot be placed because the root unit is unknown: never read as not enforced). An organisational unit that opts out of an organisation-level policy cannot be seen from the policy list alone; the per-user `isEnforcedIn2Sv` flag is the authority for who is covered. Mobile devices (`google_mobile_devices`) gain `encryption_status` and `encryption` (`encrypted` or `not_encrypted`), `device_lock_status` and `device_lock_policy` (`enabled` or `disabled`), `security_patch_level` and `security_patch_date`, `os_release` and `device_type`; ChromeOS devices gain `auto_update_expiration` (from `autoUpdateThrough`, else the deprecated `autoUpdateExpiration`) with `auto_update_source`, `platform_version`, `model`, `boot_mode`, `org_unit_path` and `support_end_date`. The Directory API does not enumerate the values of `encryptionStatus` and `devicePasswordStatus`: a value this tool does not recognise leaves `encryption` or `device_lock_policy` absent (unknown) and keeps the raw text beside it. The device list requests the posture fields by name with the `FULL` projection, so installed-app and recent-user telemetry is not collected. The lock fields avoid the word the bundle's sensitive-key scanner rejects.
 
-**Rules.** An absent field is unknown, never a pass: one `google.evidence_unknown` finding per check (`user_login_time`, `user_2sv_enforcement`, `mobile_encryption`, `chromeos_auto_update_expiration`) gives the number of objects without the field and cites the first of them.
+**Rules.** An absent field is unknown, never a pass: one `google.evidence_unknown` finding per check (`user_login_time`, `user_2sv_enforcement`, `mobile_encryption`, `mobile_compromised_status`, `chromeos_auto_update_expiration`) gives the number of objects without the field and cites the first of them.
 
 | Rule | Condition | Severity | Cyber Essentials (confidence) |
 | --- | --- | --- | --- |
@@ -350,7 +433,7 @@ The external-principal rules are `google.group_external_member`, the `google.gma
 | `google.mobile_device_encryption_off` | Mobile device (not blocked) with `encryption` `not_encrypted` | medium | none |
 | `google.internal_domains_unknown`, `google.evidence_unknown` | Diagnostics: the domain set is missing or limited, or a field a check needs was not returned | medium | none |
 
-The delegated-admin flag also moves `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.suspended_admin` and `google.admin_stale_login` onto delegated admins. `google.mobile_device_compromised` now reads the API's `deviceCompromisedStatus` (the older `compromisedStatus` key still works) and does not match the clean value "No compromise detected".
+The delegated-admin flag also moves `google.admin_2sv_not_enforced`, `google.admin_2sv_not_enrolled`, `google.suspended_admin` and `google.admin_stale_login` onto delegated admins. `google.mobile_device_compromised` reads the API's `deviceCompromisedStatus` (the older `compromisedStatus` key still works). The Directory API documents the field only as "the compromised device status" and lists no values, so Auditex classifies by the texts seen in the Admin console and API output and the Cloud Identity Devices enum: `compromised` ("Compromised", "Compromise detected"), `not_compromised` ("No compromise detected", "Not compromised", "Uncompromised") and `unknown` for an absent field, `UNKNOWN`, `COMPROMISED_STATE_UNSPECIFIED` or any text not listed. Each `google_mobile_devices` record carries `compromised_status` (the raw text) and `compromised_state`; only `compromised` raises the rule, and devices in the `unknown` state are counted in one `google.evidence_unknown:mobile_compromised_status` finding (with the unrecognised texts), never passed or failed. The stale-sync rules (`google.mobile_device_stale_sync`, `google.chromeos_device_stale_sync`) use `--stale-device-days` (default 90); the description names the threshold.
 
 **One collector issue per surface.** A per-object failure no longer raises a finding per object. Every `google.collector_issue` for a surface (`group-members`, `aliases`, `oauth-grants`, `group-settings`, `calendar-acls`, `mailbox-settings`, a Gmail setting such as `delegates`, or a whole list such as `users`) is one finding with the id `google.collector_issue:<collector>:<surface>`. Its `returned_value` carries `surface`, `object_count`, up to 50 `objects` (`objects_truncated` when more), `error_classes` and the three most common `errors` with their counts; a failure with no object keeps the error text as its `returned_value`. The severity is `high` when any failure is a permission error. The per-object rows stay in `blockers/blockers.json` and the `google_*_errors` sections. A finding id built from a per-object failure changes from `google.collector_issue:<object-id>` to the surface id, so a waiver written for the old id must name the new one or the rule.
 

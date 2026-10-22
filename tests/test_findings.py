@@ -418,6 +418,7 @@ def test_build_findings_promotes_normalized_workload_risks() -> None:
                     "policy_name": "Global",
                     "allow_public_users": True,
                     "allow_federated_users": True,
+                    "allowed_domains_state": "open",
                 }
             ]
         },
@@ -484,7 +485,8 @@ def test_build_findings_promotes_normalized_workload_risks() -> None:
     assert "sharepoint:site-1:perm-1:sharing" in ids
     assert "sharepoint_permission:site-1:perm-2:external-user:external_principal" in ids
     assert "sharepoint_site_posture:site-1:weak_ownership" in ids
-    assert "onedrive_posture:od-1:external_sharing_enabled" in ids
+    assert "onedrive_posture:tenant:external_sharing_enabled" in ids
+    assert "onedrive_posture:od-1:external_sharing_enabled" not in ids, "one finding for the tenant, not one per site"
     assert "app_consent:grant-1:high_privilege" in ids
     assert "exchange:forwarding-user-1:mailbox_forwarding" in ids
     assert "teams_policy:teams-federation-1:external_federation_open" in ids

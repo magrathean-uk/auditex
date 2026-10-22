@@ -53,3 +53,9 @@ def _isolate_auditex_secrets():
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = prev
+
+
+@pytest.fixture(autouse=True)
+def _no_break_glass_list_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An operator's AUDITEX_BREAK_GLASS_ACCOUNTS must not reach a test that expects no list."""
+    monkeypatch.delenv("AUDITEX_BREAK_GLASS_ACCOUNTS", raising=False)

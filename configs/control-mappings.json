@@ -397,6 +397,101 @@
       "T1530"
     ]
   },
+  "sharepoint.external_sharing_broad": {
+    "cis_m365_v7": [
+      "7.2.3"
+    ],
+    "cisa_scuba": [
+      "MS.SHAREPOINT.1.1v1"
+    ],
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-22"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.3"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.7"
+    ],
+    "nis2": [
+      "Article 21(2)(g)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1530"
+    ]
+  },
+  "sharepoint.sharing_domains_unrestricted": {
+    "cis_m365_v7": [
+      "7.2.6"
+    ],
+    "cisa_scuba": [
+      "MS.SHAREPOINT.1.3v1"
+    ],
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-21"
+    ],
+    "iso_27001": [
+      "A.5.14",
+      "A.8.3"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.7"
+    ],
+    "nis2": [
+      "Article 21(2)(g)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ]
+  },
+  "sharepoint.default_link_type_broad": {
+    "cis_m365_v7": [
+      "7.2.7"
+    ],
+    "cisa_scuba": [
+      "MS.SHAREPOINT.2.1v1"
+    ],
+    "ms_zero_trust": [
+      "data"
+    ],
+    "nist_800_53": [
+      "AC-3",
+      "AC-22"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.8.3"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(g)",
+      "Article 21(2)(i)"
+    ],
+    "dora": [
+      "Article 9(2)"
+    ],
+    "mitre_attack": [
+      "T1530"
+    ]
+  },
   "attack_path.app_owner_to_tier0": {
     "nist_800_53": [
       "AC-2",

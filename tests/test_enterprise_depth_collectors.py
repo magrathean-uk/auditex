@@ -585,6 +585,7 @@ def test_onedrive_posture_collector_distinguishes_personal_and_team_sites() -> N
     assert result.payload["oneDriveSites"]["value"][0]["id"] == "od-1"
     assert result.payload["oneDriveSites"]["value"][0]["siteKind"] == "personal"
     assert result.payload["oneDriveSites"]["value"][0]["sharingCapability"] == "externalUserAndGuestSharing"
+    assert result.payload["oneDriveSites"]["value"][0]["sharingCapabilitySource"] == "tenant"
     assert result.payload["teamSites"]["value"][0]["id"] == "team-1"
     assert result.payload["teamSites"]["value"][0]["siteKind"] == "team"
     assert result.payload["teamSites"]["value"][0]["sharingCapability"] == "externalUserAndGuestSharing"
@@ -632,7 +633,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
 def test_teams_policy_collector_collects_command_sections(monkeypatch) -> None:
     adapter = _FakeAdapter(
         {
-            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers": {"value": [{"AllowFederatedUsers": True}]},
+            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers,AllowedDomains,BlockedDomains": {"value": [{"AllowFederatedUsers": True}]},
             "Get-CsTeamsMessagingPolicy | Select-Object Identity,AllowOwnerDeleteMessage,AllowUserDeleteMessage,AllowUserEditMessage": {"value": [{"Identity": "Global"}]},
             "Get-CsTeamsMeetingPolicy | Select-Object Identity,AllowCloudRecording,AllowIPVideo,ScreenSharingMode": {"value": [{"Identity": "Global"}]},
             "Get-CsTeamsAppPermissionPolicy | Select-Object Identity,GlobalCatalogAppsType": {"value": [{"Identity": "Global"}]},

@@ -9,9 +9,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from . import external_sharing
 from .attack_graph import analyze_attack_graph
 from .autopilot import build_board_report_sections
-from .baselines import SECURE_SCORE_LOW_THRESHOLD_PERCENT, build_baseline_alignment, latest_secure_score
+from .baselines import (
+    SECURE_SCORE_LOW_THRESHOLD_PERCENT,
+    build_baseline_alignment,
+    intune_assignments_are_a_sample,
+    latest_secure_score,
+)
 from .effective_admins import (
     ROUTE_DIRECT as _ADMIN_ROUTE_DIRECT,
     ROUTE_ELIGIBLE as _ADMIN_ROUTE_ELIGIBLE,
@@ -21,6 +27,7 @@ from .effective_admins import (
     STATE_COMPLETE as _ADMIN_SET_COMPLETE,
     SUMMARY_KIND as _ADMIN_SUMMARY_KIND,
 )
+from .break_glass import SECTION as _BREAK_GLASS_SECTION
 from .identity_controls import SECTION as _IDENTITY_CONTROL_SECTION
 from .resources import resolve_resource_path
 from .waivers import apply_waivers, load_waivers
@@ -2196,6 +2203,291 @@ def _build_secure_score_findings(normalized_snapshot: dict[str, Any]) -> list[di
     ]
 
 
+def _tenant_settings_refs(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """References to the tenant sharing settings records that were read."""
+    return [
+        ref
+        for record in ((normalized_snapshot.get(external_sharing.SECTION) or {}).get("records") or [])
+        if record.get("read_state") == "collected"
+        for ref in _normalized_evidence_refs(external_sharing.SECTION, record, str(record.get("collector") or "sharepoint_access"))
+    ]
+
+
+def _build_onedrive_sharing_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """One graded tenant-level finding for OneDrive external sharing, with the affected sites as evidence.
+
+    Sharing is a tenant setting. The collector copies it onto every site it lists, so a finding per site
+    repeated one fact N times at the tenant's severity. The grade follows the capability (anyone links
+    high, new and existing guests low, existing guests only none) and, when sites carry a value of their
+    own, the share of sites at the anyone level. A site cannot be more permissive than the tenant: one that
+    reports a value above it is listed as an inconsistency and counts at its own level.
+    """
+    settings = external_sharing.tenant_settings(normalized_snapshot)
+    capability, capability_basis = external_sharing.onedrive_capability(settings)
+    if capability is None:
+        return []
+    tenant_rank = external_sharing.capability_rank(capability) or 0
+    personal_sites = [
+        item
+        for item in ((normalized_snapshot.get("onedrive_posture_objects") or {}).get("records") or [])
+        if str(item.get("site_kind") or "").lower() == "personal"
+    ]
+    rows: list[dict[str, Any]] = []
+    exceeding: list[dict[str, Any]] = []
+    anyone = guests = 0
+    worst = capability
+    for site in personal_sites:
+        own = external_sharing.canonical_sharing_capability(site.get("sharing_capability")) if site.get("sharing_capability_source") == "site" else None
+        effective = own or capability
+        rank = external_sharing.capability_rank(effective) or 0
+        row = {
+            "id": site.get("id"),
+            "name": site.get("site_name"),
+            "web_url": site.get("web_url"),
+            "effective_sharing_capability": effective,
+            "value_source": "site" if own else "tenant",
+        }
+        if own and rank > tenant_rank:
+            exceeding.append(row)
+            worst = effective if rank > (external_sharing.capability_rank(worst) or 0) else worst
+        if rank == 3:
+            anyone += 1
+        elif rank == 2:
+            guests += 1
+        if rank >= 2:
+            rows.append(row)
+    severity = external_sharing.grade_onedrive_sharing(worst, anyone_sites=anyone, known_sites=len(personal_sites))
+    if severity is None:
+        return []
+    limit = external_sharing.SITE_EVIDENCE_LIMIT
+    site_refs = [
+        ref
+        for site in personal_sites[:_AGGREGATE_REF_LIMIT]
+        for ref in _normalized_evidence_refs("onedrive_posture_objects", site, "onedrive_posture")
+    ]
+    evidence = {
+        "sharing_capability": capability,
+        "capability_basis": capability_basis,
+        "most_permissive_capability": worst,
+        "personal_site_count": len(personal_sites),
+        "sites_with_anyone_links": anyone,
+        "sites_with_guest_sharing": guests,
+        "share_of_sites_with_anyone_links": round(anyone / len(personal_sites), 3) if personal_sites else None,
+        "site_values": "site_specific" if any(site.get("sharing_capability_source") == "site" for site in personal_sites) else "tenant_default",
+        "sites": rows[:limit],
+        "sites_listed_truncated": len(rows) > limit,
+        "sites_exceeding_tenant_setting": exceeding[:limit],
+    }
+    if settings.get("unrecognised"):
+        evidence["unrecognised_settings"] = settings["unrecognised"]
+    return [
+        _finalize_finding(
+            {
+                "id": "onedrive_posture:tenant:external_sharing_enabled",
+                "rule_id": "onedrive.external_sharing_enabled",
+                "severity": severity,
+                "category": "exposure",
+                "title": "OneDrive external sharing is enabled",
+                "status": "open",
+                "collector": "onedrive_posture",
+                "affected_objects": [f"OneDrive sharing setting: {worst}"],
+                "evidence": evidence,
+                "returned_value": {
+                    "sharing_capability": worst,
+                    "personal_sites": len(personal_sites),
+                    "sites_with_anyone_links": anyone,
+                    "sites_with_guest_sharing": guests,
+                },
+                "evidence_refs": [*_tenant_settings_refs(normalized_snapshot), *site_refs],
+                **_metadata_for("onedrive.external_sharing_enabled"),
+            }
+        )
+    ]
+
+
+def _build_sharepoint_tenant_sharing_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tenant sharing settings that widen who can reach SharePoint and OneDrive content.
+
+    Each rule reads the settings it names and stays silent when a setting was not read: Microsoft Graph
+    returns the sharing capability and the domain restriction, while the default link type and the
+    anonymous-link settings arrive only when the settings payload carries them (an export from the
+    SharePoint Online Management Shell). Baseline alignment reads an unread setting as not assessed.
+    """
+    settings = external_sharing.tenant_settings(normalized_snapshot)
+    if not settings["read"]:
+        return []
+    collector = str((settings.get("collectors") or ["sharepoint_access"])[0])
+    refs = _tenant_settings_refs(normalized_snapshot)
+    capability = settings.get("sharing_capability")
+    findings: list[dict[str, Any]] = []
+
+    def _tenant_finding(body: dict[str, Any]) -> None:
+        findings.append(
+            _finalize_finding(
+                {
+                    "status": "open",
+                    "category": "exposure",
+                    "collector": collector,
+                    "evidence_refs": refs,
+                    **body,
+                    **_metadata_for(body["rule_id"]),
+                }
+            )
+        )
+
+    def _thresholds(rule_id: str, metric: str, observed: Any, grade: dict[str, Any], requirements: dict[str, str]) -> list[dict[str, Any]]:
+        """Per framework: what it requires and whether this finding breaches it (a benchmark that allows
+        what the setting is, as CIS does for new and existing guests, is not failed by a low finding)."""
+        mapped = _framework_mappings_for(rule_id)
+        return [
+            {
+                "framework": framework,
+                "control_ids": list(mapped.get(framework) or []),
+                "metric": metric,
+                "observed": observed,
+                "requirement": requirements[framework],
+                "breached": bool(breached),
+            }
+            for framework, breached in grade["breaches"].items()
+            if mapped.get(framework)
+        ]
+
+    grade = external_sharing.grade_external_sharing(settings)
+    if grade:
+        anyone = grade["scope"] == "anyone_links"
+        _tenant_finding(
+            {
+                "id": "sharepoint_tenant:external_sharing_broad",
+                "rule_id": "sharepoint.external_sharing_broad",
+                "severity": grade["severity"],
+                "title": (
+                    "SharePoint and OneDrive allow anyone links"
+                    if anyone
+                    else "SharePoint and OneDrive allow sharing with new guests"
+                ),
+                "affected_objects": ["Tenant sharing capability"],
+                "evidence": {
+                    "sharing_capability": capability,
+                    "anonymous_link_expiry_days": settings.get("anonymous_link_expiry_days"),
+                    "file_anonymous_link_type": settings.get("file_anonymous_link_type"),
+                    "folder_anonymous_link_type": settings.get("folder_anonymous_link_type"),
+                    "mitigations_observed": grade["mitigations"],
+                    "settings_not_read": grade["not_read"],
+                },
+                "returned_value": {"sharing_capability": capability, "mitigations_observed": grade["mitigations"]},
+                "framework_thresholds": _thresholds(
+                    "sharepoint.external_sharing_broad",
+                    "sharing_capability",
+                    capability,
+                    grade,
+                    {
+                        "cis_m365_v7": "New and existing guests, or less permissive",
+                        "cisa_scuba": "Existing guests, or only people in the organisation",
+                    },
+                ),
+            }
+        )
+    grade = external_sharing.grade_domain_restriction(settings)
+    if grade:
+        _tenant_finding(
+            {
+                "id": "sharepoint_tenant:sharing_domains_unrestricted",
+                "rule_id": "sharepoint.sharing_domains_unrestricted",
+                "severity": grade["severity"],
+                "title": "External sharing is not limited to approved domains",
+                "affected_objects": ["Tenant sharing domain restriction"],
+                "evidence": {
+                    "sharing_capability": capability,
+                    "sharing_domain_restriction_mode": settings.get("sharing_domain_restriction_mode"),
+                    "allowed_domain_count": settings.get("allowed_domain_count"),
+                    "blocked_domain_count": settings.get("blocked_domain_count"),
+                },
+                "returned_value": {
+                    "sharing_capability": capability,
+                    "sharing_domain_restriction_mode": settings.get("sharing_domain_restriction_mode"),
+                },
+                "framework_thresholds": _thresholds(
+                    "sharepoint.sharing_domains_unrestricted",
+                    "sharing_domain_restriction_mode",
+                    settings.get("sharing_domain_restriction_mode"),
+                    grade,
+                    {
+                        "cis_m365_v7": "An allow list or a block list of domains",
+                        "cisa_scuba": "An allow list of approved domains",
+                    },
+                ),
+            }
+        )
+    grade = external_sharing.grade_default_link_type(settings)
+    if grade:
+        _tenant_finding(
+            {
+                "id": "sharepoint_tenant:default_link_type_broad",
+                "rule_id": "sharepoint.default_link_type_broad",
+                "severity": grade["severity"],
+                "title": "The default sharing link is not for specific people",
+                "affected_objects": ["Tenant default sharing link type"],
+                "evidence": {
+                    "default_sharing_link_type": settings.get("default_sharing_link_type"),
+                    "sharing_capability": capability,
+                },
+                "returned_value": {"default_sharing_link_type": settings.get("default_sharing_link_type")},
+                "framework_thresholds": _thresholds(
+                    "sharepoint.default_link_type_broad",
+                    "default_sharing_link_type",
+                    settings.get("default_sharing_link_type"),
+                    grade,
+                    {"cis_m365_v7": "Specific people (Direct)", "cisa_scuba": "Specific people (Direct)"},
+                ),
+            }
+        )
+    return findings
+
+
+def _build_teams_federation_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Teams federation that is allowed with no allow list, so every external domain can reach staff.
+
+    Federation to an allow list of partner domains is the intended configuration and is not reported. A
+    configuration whose allow list was not collected, or has a shape this tool does not recognise, is not
+    reported either: baseline alignment reads it as not assessed instead of guessing. Consumer and
+    public-account access (``AllowTeamsConsumer``, ``AllowPublicUsers``) are evidence on the finding.
+    """
+    findings: list[dict[str, Any]] = []
+    for item in ((normalized_snapshot.get("teams_policy_objects") or {}).get("records") or []):
+        if item.get("source_name") != "tenantFederationConfiguration":
+            continue
+        if item.get("allow_federated_users") is not True:
+            continue
+        if item.get("allowed_domains_state") != external_sharing.FEDERATION_OPEN:
+            continue
+        returned = {
+            "allow_federated_users": True,
+            "allowed_domains": "all known domains (no allow list)",
+            "blocked_domain_count": item.get("blocked_domain_count"),
+            "allow_teams_consumer": item.get("allow_teams_consumer"),
+            "allow_public_users": item.get("allow_public_users"),
+        }
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"teams_policy:{item.get('id')}:external_federation_open",
+                    "rule_id": "teams.external_federation_open",
+                    "severity": "medium",
+                    "category": "collaboration",
+                    "title": "Teams external federation is open to every domain",
+                    "status": "open",
+                    "collector": "teams_policy",
+                    "affected_objects": [item.get("policy_name") or item.get("id")],
+                    "evidence": item,
+                    "returned_value": {key: value for key, value in returned.items() if value is not None},
+                    "evidence_refs": _normalized_evidence_refs("teams_policy_objects", item, "teams_policy"),
+                    **_metadata_for("teams.external_federation_open"),
+                }
+            )
+        )
+    return findings
+
+
 # Conditional Access finding types produced by normalization, and the rule each one reports under.
 _CA_FINDING_RULES = {
     "ca_reporting_only": {"rule_id": "ca.policy_report_only"},
@@ -2305,28 +2597,8 @@ def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int
             )
         )
 
-    for item in ((normalized_snapshot.get("onedrive_posture_objects") or {}).get("records") or []):
-        site_kind = str(item.get("site_kind") or "").lower()
-        sharing_capability = str(item.get("sharing_capability") or "").lower()
-        if site_kind != "personal" or not sharing_capability or sharing_capability == "disabled":
-            continue
-        findings.append(
-            _finalize_finding(
-                {
-                "id": f"onedrive_posture:{item.get('id')}:external_sharing_enabled",
-                "rule_id": "onedrive.external_sharing_enabled",
-                "severity": "high",
-                "category": "exposure",
-                "title": "OneDrive external sharing is enabled",
-                "status": "open",
-                "collector": "onedrive_posture",
-                "affected_objects": [item.get("site_name") or item.get("id")],
-                "evidence": item,
-                "evidence_refs": _normalized_evidence_refs("onedrive_posture_objects", item, "onedrive_posture"),
-                **_metadata_for("onedrive.external_sharing_enabled"),
-            }
-            )
-        )
+    findings.extend(_build_onedrive_sharing_findings(normalized_snapshot))
+    findings.extend(_build_sharepoint_tenant_sharing_findings(normalized_snapshot))
 
     risky_scopes = {
         "Directory.Read.All",
@@ -2462,29 +2734,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int
             )
         )
 
-    teams_records = ((normalized_snapshot.get("teams_policy_objects") or {}).get("records") or [])
-    for item in teams_records:
-        if item.get("source_name") != "tenantFederationConfiguration":
-            continue
-        if not (item.get("allow_public_users") or item.get("allow_federated_users")):
-            continue
-        findings.append(
-            _finalize_finding(
-                {
-                "id": f"teams_policy:{item.get('id')}:external_federation_open",
-                "rule_id": "teams.external_federation_open",
-                "severity": "medium",
-                "category": "collaboration",
-                "title": "Teams external federation is enabled",
-                "status": "open",
-                "collector": "teams_policy",
-                "affected_objects": [item.get("policy_name") or item.get("id")],
-                "evidence": item,
-                "evidence_refs": _normalized_evidence_refs("teams_policy_objects", item, "teams_policy"),
-                **_metadata_for("teams.external_federation_open"),
-            }
-            )
-        )
+    findings.extend(_build_teams_federation_findings(normalized_snapshot))
 
     service_health_records = ((normalized_snapshot.get("service_health_objects") or {}).get("records") or [])
     active_service_health_statuses = {"serviceDegradation", "serviceInterruption", "investigating", "restoringService"}
@@ -2888,7 +3138,15 @@ def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int
     configuration_report = _normalization_report(normalized_snapshot, "intune_depth.deviceConfigurations")
     policy_count = int(configuration_report.get("record_count") or 0)
     assignments_read = _read_in_full(_normalization_report(normalized_snapshot, "intune_depth.deviceConfigurationAssignments"))
-    if policy_count and not intune_assignments and _read_in_full(configuration_report) and assignments_read:
+    # The assignment read expands one profile at a time up to a limit: with profiles left unexpanded,
+    # "no assignments" describes the sample only, so the finding stays silent (baselines read not_assessed).
+    if (
+        policy_count
+        and not intune_assignments
+        and _read_in_full(configuration_report)
+        and assignments_read
+        and not intune_assignments_are_a_sample(normalized_snapshot)
+    ):
         findings.append(
             _finalize_finding(
                 {
@@ -2896,7 +3154,7 @@ def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int
                 "rule_id": "intune_depth.policies_without_assignments",
                 "severity": "medium",
                 "category": "device_management",
-                "title": "Policies observed without sampled Intune assignments",
+                "title": "Intune device configuration profiles have no assignments",
                 "status": "open",
                 "collector": "intune_depth",
                 "affected_objects": ["intune_policies"],
@@ -2937,6 +3195,29 @@ def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int
             # Normalization and this map move together; an unmapped type must not become a rule-less finding.
             raise ValueError(f"Conditional Access finding type {item.get('finding_type')!r} has no rule_id.")
         ca_rule_id = ca_rule["rule_id"]
+        affected = [item.get("policy_name") or item.get("policy_id")]
+        evidence_refs = _normalized_evidence_refs("ca_findings", item, "conditional_access")
+        returned_value = None
+        policies = [policy for policy in (item.get("policies") or []) if isinstance(policy, dict)]
+        if policies:
+            # One finding for the tenant, naming each enabled MFA or block policy that lacks the exclusion.
+            affected = [policy.get("policy_name") or policy.get("policy_id") for policy in policies]
+            evidence_refs += [
+                ref
+                for policy in policies[:_MFA_NOT_ENFORCED_POLICY_LIMIT]
+                if policy.get("key")
+                for ref in _normalized_evidence_refs("conditional_access_graph", policy, "conditional_access")
+            ]
+            evidence_refs += [
+                ref
+                for record in ((normalized_snapshot.get(_BREAK_GLASS_SECTION) or {}).get("records") or [])
+                for ref in _normalized_evidence_refs(_BREAK_GLASS_SECTION, record, "conditional_access")
+            ]
+            returned_value = {
+                "account_source": item.get("account_source"),
+                "policies_without_exclusion": len(policies),
+                "policy_names": affected[:_MFA_NOT_ENFORCED_POLICY_LIMIT],
+            }
         findings.append(
             _finalize_finding(
                 {
@@ -2947,9 +3228,10 @@ def _normalized_findings(normalized_snapshot: dict[str, Any], *, stale_days: int
                 "title": item.get("title") or item.get("finding_type") or "Conditional Access finding",
                 "status": "open",
                 "collector": "conditional_access",
-                "affected_objects": [item.get("policy_name") or item.get("policy_id")],
+                "affected_objects": affected,
                 "evidence": item,
-                "evidence_refs": _normalized_evidence_refs("ca_findings", item, "conditional_access"),
+                **({"returned_value": returned_value} if returned_value is not None else {}),
+                "evidence_refs": evidence_refs,
                 **_metadata_for(ca_rule_id),
             }
             )

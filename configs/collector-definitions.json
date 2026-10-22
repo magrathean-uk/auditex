@@ -309,7 +309,7 @@
           "name": "tenantFederationConfiguration",
           "category": "policy",
           "commands": [
-            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers"
+            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers,AllowedDomains,BlockedDomains"
           ]
         },
         {

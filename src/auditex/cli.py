@@ -310,6 +310,15 @@ def _add_google_findings_args(parser: argparse.ArgumentParser) -> None:
         default=90,
         help="Days without a sign-in before an active account raises google.stale_user (default 90).",
     )
+    parser.add_argument(
+        "--stale-device-days",
+        type=_google_positive_days,
+        default=90,
+        help=(
+            "Days since a managed mobile or ChromeOS device last synced before it raises "
+            "google.mobile_device_stale_sync or google.chromeos_device_stale_sync (default 90)."
+        ),
+    )
 
 
 def _build_google_parser() -> argparse.ArgumentParser:
@@ -350,6 +359,7 @@ def _google_config_from_args(args: argparse.Namespace) -> GoogleRunConfig:
         sample=Path(getattr(args, "sample", "examples/google_workspace_sample.json")),
         waiver_file=Path(args.waiver_file).expanduser() if getattr(args, "waiver_file", None) else None,
         stale_user_days=getattr(args, "stale_user_days", 90),
+        stale_device_days=getattr(args, "stale_device_days", 90),
     )
 
 
@@ -1065,6 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
                     customer_id=cfg.customer_id,
                     waiver_file=cfg.waiver_file,
                     stale_user_days=cfg.stale_user_days,
+                    stale_device_days=cfg.stale_device_days,
                 )
             return run_google_live(cfg, command_line=["auditex", *argv])
         return 2

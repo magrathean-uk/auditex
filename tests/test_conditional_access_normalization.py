@@ -85,11 +85,11 @@ def test_conditional_access_graph_builds_relationships_and_findings() -> None:
 
     findings = normalized["ca_findings"]["records"]
     assert any(finding["finding_type"] == "ca_reporting_only" for finding in findings)
-    assert any(
-        finding["finding_type"] == "ca_break_glass_exclusion"
-        and finding["policy_id"] == "ca-1"
-        for finding in findings
-    )
+    (break_glass,) = [finding for finding in findings if finding["finding_type"] == "ca_break_glass_exclusion"]
+    assert [policy["policy_id"] for policy in break_glass["policies"]] == ["ca-1"]
+    assert break_glass["account_source"] == "inferred"
+    assert break_glass["severity"] == "medium", "an inferred account list never rates above medium"
+    assert not any(finding["finding_type"] == "ca_break_glass_exclusion" and finding.get("policy_id") for finding in findings)
 
     assert normalized["snapshot"]["object_counts"]["conditional_access_graph"] == 2
 

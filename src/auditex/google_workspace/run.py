@@ -30,7 +30,7 @@ from .auth import (
 from .client import GoogleWorkspaceClient
 from .client import classify_google_error
 from .collectors import DEFAULT_ORDER, PRESETS, REGISTRY, SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPE_USER, SUBJECT_SCOPED_COLLECTORS
-from .findings import DEFAULT_STALE_USER_DAYS, build_google_findings
+from .findings import DEFAULT_STALE_DEVICE_DAYS, DEFAULT_STALE_USER_DAYS, build_google_findings
 from .normalize import build_google_normalized_snapshot
 
 
@@ -80,6 +80,7 @@ class GoogleRunConfig:
     # Accepted-risk waivers, read before any API call (see azure_tenant_audit.waivers).
     waiver_file: Path | None = None
     stale_user_days: int = DEFAULT_STALE_USER_DAYS
+    stale_device_days: int = DEFAULT_STALE_DEVICE_DAYS
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
@@ -366,7 +367,12 @@ def _write_google_bundle(
         coverage_rows=coverage_rows,
         top_limit=config.top or None,
     )
-    findings = build_google_findings(normalized_snapshot, diagnostics=diagnostics, stale_user_days=config.stale_user_days)
+    findings = build_google_findings(
+        normalized_snapshot,
+        diagnostics=diagnostics,
+        stale_user_days=config.stale_user_days,
+        stale_device_days=config.stale_device_days,
+    )
     if waiver_rows:
         # Same semantics as Microsoft 365: AND matching, finding_id or rule_id required, expired rows ignored.
         findings = apply_waivers(findings, waiver_rows)
@@ -461,6 +467,7 @@ def run_google_offline(
     fixture_provenance_override: dict[str, Any] | None = None,
     waiver_file: Path | None = None,
     stale_user_days: int = DEFAULT_STALE_USER_DAYS,
+    stale_device_days: int = DEFAULT_STALE_DEVICE_DAYS,
 ) -> int:
     # An unreadable or invalid waiver file stops the run before anything is written.
     try:
@@ -492,6 +499,7 @@ def run_google_offline(
         fixture_provenance=fixture_provenance,
         waiver_file=waiver_file,
         stale_user_days=stale_user_days,
+        stale_device_days=stale_device_days,
     )
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     writer.log_event("run.started", "Google Workspace offline run started", {"platform": "google_workspace", "sample": str(target)})

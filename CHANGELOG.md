@@ -88,6 +88,56 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   user who is only eligible to join such a group is not in the set. ScubaGear's `MS.AAD.7.1v1` instructions
   count them. Collecting those schedules is a follow-up.
 
+### Microsoft 365 false positives
+
+Rule id changes (old to new; ids not listed are unchanged):
+
+- `onedrive.external_sharing_enabled` keeps its rule id but is one finding for the tenant,
+  `onedrive_posture:tenant:external_sharing_enabled`, instead of one `high` finding per personal site
+  (`onedrive_posture:<site id>:external_sharing_enabled`). It is graded by the OneDrive sharing capability:
+  anyone links `high`, new and existing guests `low`, existing guests only or off no finding. `medium` replaces
+  `high` only when a site inventory shows fewer than half of the personal sites at the anyone level, which needs
+  sites that carry a value of their own: a tenant value copied onto every site puts them all at the tenant's level,
+  so the usual grade is `high`. The personal sites at that level are listed in the evidence (up to 50, with the
+  full count).
+- `ca.break_glass_exclusion_missing` keeps its rule id but is one finding for the tenant,
+  `conditional_access:ca_break_glass_exclusion:tenant`, naming each policy, instead of one `high` finding per
+  policy (`conditional_access:ca_break_glass_exclusion:<policy id>`). It judges enabled policies that require MFA,
+  block, or require a compliant or hybrid-joined device with no MFA alternative (judged at `medium`: an emergency
+  account on an unmanaged device would be refused), and that can reach the accounts; report-only policies and
+  policies whose grant is a session control or a password change are no longer flagged. It takes the operator's accounts from `--break-glass-accounts` or
+  `AUDITEX_BREAK_GLASS_ACCOUNTS`; without a list the accounts are inferred from names and Global Administrator
+  holders (Security Administrator, Security Operator, Exchange Administrator, Intune Administrator, Global Reader and
+  Privileged Role Administrator holders no longer count), and the severity is `medium` at most. `high` needs an
+  operator list and a policy that can lock every administrator out.
+- `teams.external_federation_open` now fires only when `AllowFederatedUsers` is true and no allow list restricts
+  federation. It used to fire on `AllowFederatedUsers` or `AllowPublicUsers`, which are commonly on by default. The collector
+  selects `AllowedDomains` and `BlockedDomains`; a bundle that does not carry the allow list, or carries an empty or
+  unrecognised one, raises nothing and reads `not_assessed` (`federation_allow_list_not_read`), and an
+  `AllowFederatedUsers` that is not a boolean reads `federation_setting_not_read`. An allow list object with no
+  domains is an allow list (federation with none), not open federation.
+- `intune_depth.policies_without_assignments` (the rule behind the earlier `intune.intune_policies_without_assignments`
+  false positive) now also stays silent when the assignment read stopped at the fan-out limit
+  (`policy_assignments_not_read_for_every_policy`). It counts device configuration profiles from `intune_depth`
+  only and needs both reads in full, as before.
+- New rules, graded against what each benchmark accepts (ScubaGear v1.8.0 `SharepointConfig.rego` for SCuBA), each
+  finding carrying `framework_thresholds` so that a control fails only where its benchmark does:
+  `sharepoint.external_sharing_broad` (CIS `7.2.3`, SCuBA `MS.SHAREPOINT.1.1v1`: anyone links `high`, or `medium`
+  when expiring view-only links were read; new and existing guests `low`, which fails SCuBA but not CIS),
+  `sharepoint.sharing_domains_unrestricted` (CIS `7.2.6`, `MS.SHAREPOINT.1.3v1`: no list `medium` or `low`; a block
+  list `low`, which fails SCuBA, whose requirement is an allow list, but not CIS) and
+  `sharepoint.default_link_type_broad` (CIS `7.2.7`, `MS.SHAREPOINT.2.1v1`: anything but specific people fails both;
+  anyone `high`, organisation-wide or no default `low`). The findings are `sharepoint_tenant:<rule suffix>`. Microsoft
+  Graph returns the sharing capability and the domain restriction but not the default link type or the anonymous-link
+  settings, so on a Graph-only run the last rule, and CIS `7.2.7` and `MS.SHAREPOINT.2.1v1` with it, read
+  `not_assessed` where the controls used to read `pass` on per-item evidence alone.
+
+New bundle fields (within contract `2026-10-22`): the sections `sharepoint_tenant_settings` and
+`break_glass_assessment`; `sharing_capability_source` on `onedrive_posture_objects`; `allow_teams_consumer`,
+`allowed_domains_state`, `allowed_domain_count` and `blocked_domain_count` on the Teams federation record; and
+`break_glass_*` fields on Conditional Access policy records. A consumer that keyed on the old per-site OneDrive
+or per-policy break-glass finding ids must read the tenant-level ones.
+
 ### Google Workspace
 
 Upgrade notes (all in `auditex google`):
@@ -115,6 +165,12 @@ Upgrade notes (all in `auditex google`):
   calendar. Finding ids for per-object failures change to `google.collector_issue:<collector>:<surface>`.
 - **Device lists use the `FULL` projection with a field mask**, and `google.mobile_device_compromised` reads
   the API's `deviceCompromisedStatus` (the old `compromisedStatus` key never appeared in real responses).
+  The Directory API lists no values for the field, so a value is classified `compromised`, `not_compromised` or
+  `unknown` (record field `compromised_state`); an absent or unrecognised value is never a pass or a failure and
+  is counted in one `google.evidence_unknown:mobile_compromised_status` finding. The previous substring match
+  that treated any text containing "compromise" as compromised is gone.
+- **`--stale-device-days`** (default 90, was fixed) sets the sync age for `google.mobile_device_stale_sync` and
+  `google.chromeos_device_stale_sync`.
 
 ### Added
 

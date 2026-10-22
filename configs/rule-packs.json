@@ -432,7 +432,10 @@
       "title": "Microsoft 365 sharepoint rules",
       "rules": [
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted",
         "sharepoint.site_orphaned",
         "sharepoint.site_weak_ownership"
       ]
@@ -478,7 +481,10 @@
         "identity.user_mfa_not_registered",
         "mailbox_forwarding.external_inbox_rule",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.default_link_type_broad",
+        "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted"
       ]
     },
     {
@@ -511,7 +517,10 @@
         "identity.user_mfa_not_registered",
         "mailbox_forwarding.external_inbox_rule",
         "sharepoint.broad_link",
-        "sharepoint.external_principal"
+        "sharepoint.default_link_type_broad",
+        "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted"
       ]
     },
     {
@@ -634,7 +643,10 @@
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted",
         "sharepoint.site_orphaned",
         "sharepoint.site_weak_ownership",
         "teams.external_federation_open"
@@ -846,7 +858,10 @@
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted",
         "sharepoint.site_orphaned",
         "sharepoint.site_weak_ownership",
         "teams.external_federation_open"
@@ -998,7 +1013,9 @@
         "security.privilege_change_event",
         "security.risky_signin",
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
         "teams.external_federation_open"
       ]
     },
@@ -1099,7 +1116,10 @@
         "security.privilege_change_event",
         "security.risky_signin",
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted",
         "sharepoint.site_orphaned",
         "sharepoint.site_weak_ownership",
         "teams.external_federation_open"
@@ -1192,7 +1212,10 @@
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted",
         "sharepoint.site_orphaned",
         "sharepoint.site_weak_ownership",
         "teams.external_federation_open"
@@ -1342,7 +1365,10 @@
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted",
         "sharepoint.site_orphaned",
         "sharepoint.site_weak_ownership",
         "teams.external_federation_open"
@@ -1492,7 +1518,10 @@
         "security.risky_signin",
         "service_health.active_service_issue",
         "sharepoint.broad_link",
+        "sharepoint.default_link_type_broad",
         "sharepoint.external_principal",
+        "sharepoint.external_sharing_broad",
+        "sharepoint.sharing_domains_unrestricted",
         "sharepoint.site_orphaned",
         "sharepoint.site_weak_ownership",
         "teams.external_federation_open"

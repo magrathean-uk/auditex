@@ -5,6 +5,7 @@ import json
 import importlib
 import logging
 import os
+from collections.abc import Sequence
 from typing import Any, Callable
 import sys
 import time
@@ -35,6 +36,7 @@ from .utils import load_env_file
 from .versioning import package_version_line
 from .waivers import WaiverFileError, apply_waivers, load_waivers
 from .ai_context import build_privacy_block
+from .break_glass import load_accounts_argument as load_break_glass_accounts
 from .capability_gate import relabel_intune_license_blockers
 from . import run as run_core
 
@@ -104,6 +106,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional JSON waiver file for accepted findings.",
     )
+    parser.add_argument(
+        "--break-glass-accounts",
+        default=None,
+        help=(
+            "Emergency-access accounts for the Conditional Access exclusion check: comma-separated object IDs, "
+            "user principal names or group names, or @file with one per line. List the group your policies exclude "
+            "when the accounts are excluded through it. Without a list the accounts are inferred from names and the "
+            "Global Administrator role (weaker evidence, rated medium at most). Also read from AUDITEX_BREAK_GLASS_ACCOUNTS."
+        ),
+    )
     parser.add_argument("--collectors", default=None, help="Comma-separated collectors to run.")
     parser.add_argument("--exclude", default=None, help="Comma-separated collectors to skip.")
     parser.add_argument("--include-exchange", action="store_true", help="Enable optional exchange collectors.")
@@ -169,6 +181,7 @@ def run_offline(
     since: str | None = None,
     until: str | None = None,
     fixture_provenance_override: dict[str, Any] | None = None,
+    break_glass_accounts: Sequence[str] | None = None,
 ) -> int:
     sample_path = resolve_resource_path(sample_path)
     if not sample_path.exists():
@@ -247,6 +260,7 @@ def run_offline(
         result_rows=result_rows,
         coverage_rows=coverage_rows,
         run_dir=writer.run_dir,
+        break_glass_accounts=break_glass_accounts,
     )
     diagnostics.extend(build_normalization_diagnostics(normalized_snapshot))
     if diagnostics:
@@ -322,6 +336,11 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         waiver_rows = load_waivers(Path(args.waiver_file)) if getattr(args, "waiver_file", None) else []
     except WaiverFileError as exc:
         LOG.error("%s", exc)
+        return 2
+    try:
+        break_glass_list = load_break_glass_accounts(getattr(args, "break_glass_accounts", None))
+    except (OSError, UnicodeError) as exc:
+        LOG.error("Unable to read the break-glass accounts file: %s", exc)
         return 2
     out = Path(args.out).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -650,6 +669,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         result_rows=result_rows,
         coverage_rows=coverage_rows,
         run_dir=writer.run_dir,
+        break_glass_accounts=break_glass_list,
     )
     normalization_diagnostics = build_normalization_diagnostics(normalized_snapshot)
     diagnostics.extend(normalization_diagnostics)
@@ -771,6 +791,11 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
     if args.scopes:
         args.scopes = args.scopes.strip()
     if args.offline:
+        try:
+            offline_break_glass = load_break_glass_accounts(args.break_glass_accounts)
+        except (OSError, UnicodeError) as exc:
+            LOG.error("Unable to read the break-glass accounts file: %s", exc)
+            return 2
         return run_offline(
             Path(args.sample),
             Path(args.out),
@@ -780,6 +805,7 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
             plane=args.plane,
             since=args.since,
             until=args.until,
+            break_glass_accounts=offline_break_glass,
         )
     return run_live(args, event_listener=event_listener)
 

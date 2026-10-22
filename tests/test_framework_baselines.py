@@ -67,8 +67,11 @@ _EXPECTED_CIS_V7 = {
     "identity.privileged_mfa_not_registered",
     "identity.user_mfa_not_registered",
     "mailbox_forwarding.external_inbox_rule",
+    "sharepoint.external_sharing_broad",
     "sharepoint.broad_link",
+    "sharepoint.default_link_type_broad",
     "sharepoint.external_principal",
+    "sharepoint.sharing_domains_unrestricted",
 }
 _EXPECTED_SECURE_SCORE = {
     "app_consent.high_privilege",

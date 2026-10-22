@@ -94,6 +94,45 @@
     ],
     "expected_value": "Direct SharePoint and OneDrive permissions are limited to approved tenant principals."
   },
+  "sharepoint.external_sharing_broad": {
+    "risk_rating": "high",
+    "description": "SharePoint and OneDrive external sharing allows more than existing guests. Anyone links are high unless anonymous links are known to expire within 30 days and to be view-only (then medium; a setting that was not read never mitigates). New and existing guests are low: CIS 7.2.3 allows them, ScubaGear's MS.SHAREPOINT.1.1v1 does not.",
+    "impact": "With anyone links, anyone who obtains a link can open the content and a forwarded link cannot be tied to a person. With new guests, any user can invite an outside account that the organisation has not yet vetted.",
+    "remediation": "Set external sharing to existing guests or stricter (SharePoint admin center, Policies, Sharing). Where anyone links are needed, require them to expire within 30 days and limit them to view.",
+    "references": [
+      "SharePoint and OneDrive external sharing settings"
+    ],
+    "control_ids": [
+      "AUDITEX-SPO-EXTERNAL-SHARING-BROAD"
+    ],
+    "expected_value": "External sharing is limited to existing guests or the organisation; where anyone links are on, they expire within 30 days and are view-only."
+  },
+  "sharepoint.sharing_domains_unrestricted": {
+    "risk_rating": "medium",
+    "description": "External sharing is allowed but is not limited to an allow list of approved domains. No list at all is medium (low when only existing guests may be shared with); a block list alone is low: CIS 7.2.6 accepts it, ScubaGear's MS.SHAREPOINT.1.3v1 does not.",
+    "impact": "Users can share with any external domain, including personal and unvetted ones, so content can reach parties the organisation has no relationship with.",
+    "remediation": "Limit external sharing to approved partner domains with an allow list, or block unwanted domains (SharePoint admin center, Policies, Sharing, More external sharing settings).",
+    "references": [
+      "SharePoint and OneDrive external sharing settings"
+    ],
+    "control_ids": [
+      "AUDITEX-SPO-SHARING-DOMAINS"
+    ],
+    "expected_value": "External sharing is limited by an allow list of approved domains, or is off."
+  },
+  "sharepoint.default_link_type_broad": {
+    "risk_rating": "high",
+    "description": "The default sharing link is not a link for specific people: an anyone link (high), an organisation-wide link or no default set (low). CIS 7.2.7 and ScubaGear's MS.SHAREPOINT.2.1v1 both require specific people (Direct).",
+    "impact": "A user who shares without changing the link type gives access to anyone holding the link, or to the whole organisation, instead of the people named.",
+    "remediation": "Set the default sharing link type to Specific people (Direct) in the SharePoint admin center, Policies, Sharing.",
+    "references": [
+      "SharePoint and OneDrive default sharing link type"
+    ],
+    "control_ids": [
+      "AUDITEX-SPO-DEFAULT-LINK"
+    ],
+    "expected_value": "The default sharing link type is Specific people."
+  },
   "attack_path.app_owner_to_tier0": {
     "risk_rating": "critical",
     "description": "A principal that is not a tier-0 administrator owns an application or service principal that holds tier-0 rights, so it can add a credential and act with those rights.",
@@ -1027,16 +1066,16 @@
   },
   "onedrive.external_sharing_enabled": {
     "risk_rating": "high",
-    "description": "A personal OneDrive site allows sharing with people outside the organisation.",
-    "impact": "Users can share work files externally without review, which exposes content outside the approved collaboration boundary.",
-    "remediation": "Restrict OneDrive sharing to the tenant, or to named partner domains, and review existing external shares.",
+    "description": "OneDrive is set to allow sharing outside the organisation. This is one finding for the tenant, not one per site: anyone links are rated high, new and existing guests low, and the personal sites the setting covers are listed in the evidence.",
+    "impact": "Users can share work files outside the organisation without review, which exposes content beyond the approved collaboration boundary. Anyone links also cannot be tied to a person.",
+    "remediation": "Limit OneDrive sharing to existing guests or to the organisation, or to named partner domains, and review existing external shares.",
     "references": [
       "OneDrive sharing policy review"
     ],
     "control_ids": [
       "AUDITEX-ONEDRIVE-EXTERNAL-SHARING"
     ],
-    "expected_value": "OneDrive sharing is limited to the organisation or approved partner domains."
+    "expected_value": "OneDrive sharing is limited to existing guests or the organisation, with anyone links off."
   },
   "exchange.mailbox_forwarding_configured": {
     "risk_rating": "high",
@@ -1054,16 +1093,16 @@
   },
   "teams.external_federation_open": {
     "risk_rating": "medium",
-    "description": "Microsoft Teams federation allows chat and meetings with users in external organisations or public accounts.",
-    "impact": "Open federation lets outside parties contact staff directly, which supports phishing and data sharing outside approved partners.",
-    "remediation": "Limit external access to an allow-list of partner domains, or turn it off where it is not needed.",
+    "description": "Microsoft Teams federation is allowed with no allow list of partner domains, so users in every external organisation can contact staff directly. Federation limited to an allow list is not reported.",
+    "impact": "Open federation lets outside parties contact staff directly, which supports phishing and data sharing outside approved partners. A block list removes named domains only; it does not make federation selective.",
+    "remediation": "Limit external access to an allow list of partner domains in the Teams admin center (External access), or turn it off where it is not needed.",
     "references": [
       "Microsoft Teams external access review"
     ],
     "control_ids": [
       "AUDITEX-TEAMS-EXTERNAL-FEDERATION"
     ],
-    "expected_value": "Teams external access is limited to approved partner domains."
+    "expected_value": "Teams external access is limited to an allow list of approved partner domains, or is off."
   },
   "identity_governance.standing_privilege_only": {
     "risk_rating": "medium",
@@ -1080,7 +1119,7 @@
   },
   "intune_depth.policies_without_assignments": {
     "risk_rating": "medium",
-    "description": "Intune policies were observed, but no policy assignments were found in the sampled assignment data.",
+    "description": "Intune device configuration profiles were read in full (every profile's assignments included) and none of them has an assignment. Compliance policies, app protection policies and Conditional Access policies are not counted.",
     "impact": "A policy that is assigned to nobody enforces nothing, so devices may be unmanaged although a baseline appears to exist.",
     "remediation": "Assign each Intune policy to the intended device or user groups and confirm devices receive it.",
     "references": [
@@ -1106,16 +1145,16 @@
   },
   "ca.break_glass_exclusion_missing": {
     "risk_rating": "high",
-    "description": "An enabled Conditional Access policy does not explicitly exclude a detected emergency-access account or group.",
+    "description": "One or more enabled Conditional Access policies that require MFA, require a compliant or hybrid-joined device with no MFA alternative, or block sign-ins exclude none of the emergency-access accounts. The accounts are the ones the operator listed, or, without a list, accounts inferred from names and the Global Administrator role. The finding names each policy. Report-only policies and policies without an MFA, device or block grant are not judged.",
     "impact": "A policy or sign-in service failure can lock out every administrator, including the accounts kept for recovery.",
-    "remediation": "Exclude the emergency-access accounts from the policy, and monitor their sign-ins separately.",
+    "remediation": "Exclude the emergency-access accounts (or the group that holds them) from the named policies, protect them with a phishing-resistant method, and monitor their sign-ins separately. List the accounts with --break-glass-accounts or AUDITEX_BREAK_GLASS_ACCOUNTS so the check does not rely on inference.",
     "references": [
       "Microsoft Entra emergency access accounts"
     ],
     "control_ids": [
       "AUDITEX-CA-BREAK-GLASS-EXCLUSION"
     ],
-    "expected_value": "Emergency-access accounts are excluded from every enforcing Conditional Access policy and monitored."
+    "expected_value": "Emergency-access accounts are excluded from every enabled policy that requires MFA or a managed device, or blocks sign-ins, and are monitored."
   },
   "identity.admin_set_unverified": {
     "risk_rating": "medium",

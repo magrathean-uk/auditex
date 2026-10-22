@@ -29,7 +29,7 @@ EXPECTED_FINDING_IDS = {
     "security_directory_audit:Directory_0d3e1a7f-0000-4000-8000-000800000002:privilege_change",
     # Conditional Access.
     "conditional_access:ca_reporting_only:0d3e1a7f-0000-4000-8000-000500000002",
-    "conditional_access:ca_break_glass_exclusion:0d3e1a7f-0000-4000-8000-000500000003",
+    "conditional_access:ca_break_glass_exclusion:tenant",
     # Applications: ShipTrack Sync consent and credential hygiene.
     "app_consent:shiptrack-graph-allprincipals:high_privilege",
     "app_credentials:0d3e1a7f-0000-4000-8000-000300000001:secret_expired",

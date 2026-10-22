@@ -354,6 +354,7 @@
           "model": "Handset",
           "os": "Android",
           "status": "APPROVED",
+          "deviceCompromisedStatus": "No compromise detected",
           "lastSync": "2026-10-20T08:00:00.000Z"
         }
       ]
