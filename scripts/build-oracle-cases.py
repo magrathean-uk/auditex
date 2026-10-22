@@ -9,8 +9,8 @@ Offline only: nothing here contacts a tenant. For each selected ScubaGear produc
    variant): the base input under the test's own `with input... as` clauses,
 3. evaluates every variant against the production policy set with the supplied OPA binary,
 4. derives, per policy, the evidence view (`--evidence-view`, see below),
-5. emits one case per distinct (policy, view): `requirement_met` confirmed true/false citing the view, plus
-   periodic "section not collected" variants whose expected answer is unknown.
+5. emits one case per distinct (policy, view): `requirement_met` confirmed true/false citing the policy item (e0) and the
+   view, plus periodic "section not collected" variants whose expected answer is unknown.
 
 A section the fixture does not define stays absent from the base input; nothing is invented for it.
 
@@ -34,11 +34,18 @@ inferred true with the limitation `policy_not_applicable`, and the policy eviden
 every case of that policy so that the gate is visible. Precedence: when the evidence visibly fails the policy's
 applicability condition the case is not applicable even if the engine also reports a missing field (the gate is learned
 from the engine's own answers, see learn_gates); when the gate itself cannot be read it stays unknown. A not-collected
-variant hides only a section the policy reads that holds data in that variant (chosen by a hash of the case id) and is
-skipped for one-section views. Rows that are not verdicts (the Not-Implemented skip rows) are dropped.
+variant hides only a section the policy reads that holds data in that variant (chosen by a hash of the view id salted with
+MASK_ID_SALT, not with CONVENTION, so every convention hides the same section) and is skipped for one-section views. Rows that are not verdicts (the Not-Implemented skip rows) are dropped.
 
 Every case id hashes the evidence view together with the labelling convention (CONVENTION, recorded in summary.json), so
-a pack built under another convention never shares an id with this one. Every case records provenance (commit, policy
+a pack built under another convention never shares an id with this one. conv3 cites the policy item e0 (policy id,
+baseline text, applicability gate, criticality) on every `requirement_met` claim, ahead of the data sections the policy
+depends on, because the gate sentence and the baseline text live in e0; `policy_criticality` cites e0 alone. conv2 cited
+the data sections only. Packs of the two conventions must not be mixed. conv3 also renders absence: where the engine did not
+fail closed, a field the policy reads (`rego_ast_field_reads`: the `input.<section>` fields it reaches through variables, arguments,
+helpers and rule values) that an object of the section lacks is shown as an explicit null (`null_fields` in summary.json), and
+where it did fail closed on a missing input, a top-level key the variant removed from the base input is shown as the not-collected
+marker instead of null and cited, while an absent field stays absent. Every case records provenance (commit, policy
 id, test name, OPA version, input hash, CISA ReportDetails), a `template` key `<product>/<policy id>/<mutation family>`
 for grouping by reasoning template, and `distinct_prompt_sha256` for duplicate detection. Cases are written
 `unreviewed` in `train`; use scripts/split-oracle-cases.py to assign splits and (optionally) record the oracle as reviewer.
@@ -82,8 +89,17 @@ SYSTEM = (
     "be read (no licence, access denied), the requirement status is unknown, unless the applicability condition stated in "
     "the policy evidence is visibly unmet, which takes precedence: answer status inferred, value true and the limitation "
     "policy_not_applicable. A section shown as null means the export holds no object for it and the policy's default "
-    "applies, which is different from a section marked not collected. Select only applicable limitation and "
-    "recommendation codes from the supplied candidates; return empty lists when none apply."
+    "applies, which is different from a section marked not collected. A field shown as null means the export holds no "
+    "value for it and the policy's default applies. Cite the policy item (e0) on every claim about "
+    "the requirement; a met, not-met or not-applicable verdict also cites every evidence section the policy depends "
+    "on, including sections that happen not to change the answer for this tenant, and an unknown verdict also cites "
+    "only the sections that were not collected, lack the field or could not be read; the criticality claim cites the "
+    "policy item alone. A not-met verdict carries the recommendation review_policy_against_baseline_text; a verdict "
+    "that is unknown because a section was not collected, a field is absent or the setting could not be read carries "
+    "the limitation required_evidence_section_not_collected and the recommendation collect_missing_evidence_section; "
+    "an applicability condition that is visibly unmet carries the limitation policy_not_applicable and no "
+    "recommendation; otherwise the lists are empty. Select only applicable limitation and recommendation codes from "
+    "the supplied candidates; return empty lists when none apply."
 )
 LIMITATIONS = ["required_evidence_section_not_collected", "policy_scope_depends_on_licence", "policy_not_applicable"]
 RECOMMENDATIONS = ["collect_missing_evidence_section", "review_policy_against_baseline_text"]
@@ -103,7 +119,12 @@ EVIDENCE_VIEWS = ("rego_ast", "widened")
 MESSAGE_FIELDS = ("ReportDetails", "ErrorDetails")  # explanation text of a `tests` rule: not evidence for the verdict
 MISSING_INPUT_RE = re.compile(r"\b(?:is|are) missing from input JSON", re.I)
 UNAVAILABLE_RE = re.compile(r"\bUnable to evaluate tenant setting\b")  # Power BI: no licence, or the Admin API refused (401/403)
-CONVENTION = "conv2"  # labelling convention, salted into every case id so that a different convention never reuses an id
+CONVENTION = "conv3"  # labelling convention, salted into every case id so that a different convention never reuses an id
+MASK_ID_SALT = "conv2"  # the id salt the hidden section of a not-collected case is hashed with, whatever CONVENTION is: it is fixed so that
+#                         conventions differ only in labels and prompt text and a gap case keeps its evidence across them
+NOT_COLLECTED = {"collection_status": "not_collected"}
+STAR, WRAP = "*", "^"  # components of an input pointer: any item of a collection; a collection built from the pointed-at values
+MAX_FIELD_DEPTH = 16
 # The engine's applicability sentence, completed where its Rego has a condition the sentence omits. Audited against the pinned
 # commit: SharePoint 1.3, 3.1, 3.2, 3.3 and Teams 2.2, 2.3, 4.1 behave as their sentence says (a slider value, the M365
 # environment); MS.AAD.3.3v2 is also not applicable whenever phishing-resistant MFA is enforced (AAD_3_3_Not_Applicable).
@@ -125,6 +146,11 @@ class OpaError(ValueError):
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def view_case_id(prefix: str, policy_id: str, view: str, salt: str) -> str:
+    """`<prefix>-<policy>-<10 hex of sha256(salt:view)>`: the id of a case under the labelling convention `salt`."""
+    return f"{prefix}-{policy_id.lower().replace('.', '-')}-{sha(f'{salt}:{view}'.encode())[:10]}"
 
 
 def canonical(value) -> str:
@@ -669,6 +695,18 @@ def _rule_policy_id(rule: dict) -> str | None:
     return None
 
 
+def parsed_modules(opa: Path, meta: dict) -> dict[tuple[str, ...], dict]:
+    """The product's policy file and every Rego/Utils package, parsed and merged by package (see rego_module)."""
+    modules: dict[tuple[str, ...], dict] = {}
+    for rego in [meta["config"], *sorted((meta["config"].parent / "Utils").glob("*.rego"))]:
+        parsed = rego_module(opa_parse(opa, rego))
+        merged = modules.setdefault(parsed["package"], {"package": parsed["package"], "imports": {}, "rules": defaultdict(list)})
+        merged["imports"].update(parsed["imports"])
+        for name, rules in parsed["rules"].items():
+            merged["rules"][name].extend(rules)
+    return modules
+
+
 def rego_ast_dependencies(opa: Path, meta: dict) -> dict[str, set[str]]:
     """Per policy id, the input sections its `tests contains` rules read, from the parsed Rego (`--evidence-view rego_ast`).
 
@@ -677,13 +715,7 @@ def rego_ast_dependencies(opa: Path, meta: dict) -> dict[str, set[str]]:
     within the product package, the imported Utils packages and `data....` references. A section is an
     `input.<section>...` reference or an `object.get(input, "<section>", ...)` call, kept when it is one of the
     variant keys. Local variables that share a rule's name are treated as that rule, which can only widen a view."""
-    modules: dict[tuple[str, ...], dict] = {}
-    for rego in [meta["config"], *sorted((meta["config"].parent / "Utils").glob("*.rego"))]:
-        parsed = rego_module(opa_parse(opa, rego))
-        merged = modules.setdefault(parsed["package"], {"package": parsed["package"], "imports": {}, "rules": defaultdict(list)})
-        merged["imports"].update(parsed["imports"])
-        for name, rules in parsed["rules"].items():
-            merged["rules"][name].extend(rules)
+    modules = parsed_modules(opa, meta)
     product = modules[tuple(meta["package"].split("."))]
     scanned: dict[tuple[tuple[str, ...], str], dict] = {}
 
@@ -714,6 +746,276 @@ def rego_ast_dependencies(opa: Path, meta: dict) -> dict[str, set[str]]:
                 stack.extend(reached["rules"])
         deps.setdefault(pid, set()).update(keys if whole else sections & keys)
     return deps
+
+
+def _rule_ref(parts: list, module: dict, modules: dict) -> tuple[tuple[tuple[str, ...], str], int] | None:
+    """The (package, rule) a reference or call operator names and how many leading parts of it name the rule, as _resolve_rule."""
+    if not parts or parts[0].get("type") != "var":
+        return None
+    name = parts[0]["value"]
+    target = _resolve_rule(name, parts[1:], module, modules)
+    if target is None:
+        return None
+    if name in module["rules"]:
+        return target, 1
+    if name in module["imports"]:
+        names = module["imports"][name]
+        owner = modules.get(names[:-1])
+        return target, 1 if owner and names[-1] in owner["rules"] else 2
+    return target, 2 + len(target[0])   # data.<package>.<rule>
+
+
+def _iterate(path: tuple[str, ...]) -> tuple[str, ...]:
+    """The path of the items of the collection at `path` (a collection built from pointed-at values unwraps to them)."""
+    return path[:-1] if path and path[-1] == WRAP else path + (STAR,)
+
+
+def _extend(pointers, key: str) -> set[tuple[str, tuple[str, ...]]]:
+    """The pointers one named field further down; the root pointer ("", ()) turns the field name into the section."""
+    out = set()
+    for section, path in pointers:
+        if not section:
+            out.add((key, ()))
+        elif not (path and path[-1] == WRAP) and len(path) < MAX_FIELD_DEPTH:
+            out.add((section, path + (key,)))
+    return out
+
+
+class FieldReads:
+    """The fields of each input section a policy reads, from the parsed Rego (`--evidence-view rego_ast`).
+
+    A pointer is (section, path): the part of `input.<section>` that an expression holds, a path being field names, STAR
+    (any item of a list, any value of an object) and WRAP (a collection built from the pointed-at values, which iterating
+    unwraps). Pointers come from `input.<section>...` and `object.get(input, "<section>", ...)`, and flow through
+    `some x in <expr>`, `x := <expr>`, `x = <expr>`, `every`, comprehensions, the value of a rule, and the arguments of a
+    function call into the function's parameters (so `policy.Conditions.X` in a helper that is called with
+    `some policy in input.conditional_access_policies` reads `conditional_access_policies.*.Conditions.X`). Every reference
+    that goes through at least one named field is a read. Rego forbids recursion, so a scan always ends; results are kept
+    per rule and arguments."""
+
+    def __init__(self, modules: dict, product: dict):
+        self.modules, self.product = modules, product
+        self.memo: dict = {}
+
+    def policy_reads(self, rule: dict) -> set[tuple[str, tuple[str, ...]]]:
+        """The reads of one `tests contains {...}` rule: its body and head, without the MESSAGE_FIELDS of the head."""
+        reads: set = set()
+        env: dict = {}
+        while rule:
+            head = rule["head"]
+            self._body(rule.get("body", []), env, reads, self.product)
+            key = head.get("key")
+            if key and key.get("type") == "object":
+                key = [pair for pair in key["value"] if pair[0].get("value") not in MESSAGE_FIELDS]
+                for pair in key:
+                    self._ptrs(pair[1], env, reads, self.product)
+            elif key:
+                self._ptrs(key, env, reads, self.product)
+            for term in (head.get("value"), *head["ref"][1:]):
+                if term:
+                    self._ptrs(term, env, reads, self.product)
+            rule = rule.get("else")
+        return reads
+
+    def _scan(self, target: tuple[tuple[str, ...], str], args: tuple) -> tuple[frozenset, frozenset]:
+        """(what the rule or function returns, what it reads) for the given argument pointers."""
+        key = (target, args)
+        if key in self.memo:
+            return self.memo[key]
+        self.memo[key] = (frozenset(), frozenset())
+        module = self.modules[target[0]]
+        out: set = set()
+        reads: set = set()
+        for rule in module["rules"][target[1]]:
+            params = rule["head"].get("args") or []
+            while rule:
+                env = {term["value"]: pointers for term, pointers in zip(params, args) if term.get("type") == "var"}
+                self._body(rule.get("body", []), env, reads, module)
+                out |= self._returned(rule["head"], env, reads, module)
+                rule = rule.get("else")
+        self.memo[key] = (frozenset(out), frozenset(reads))
+        return self.memo[key]
+
+    def _returned(self, head: dict, env: dict, reads: set, module: dict) -> set:
+        """What a rule or function yields: its value, or its key for a set. A set or an object holds the pointed-at things."""
+        key, value = head.get("key"), head.get("value")
+        for part in head["ref"][1:]:
+            self._ptrs(part, env, reads, module)
+        pointers = set(self._ptrs(value if value is not None else key, env, reads, module)) if (value or key) else set()
+        if head.get("args") is None and (key or head["ref"][1:]):
+            return {(section, path + (WRAP,)) for section, path in pointers if len(path) < MAX_FIELD_DEPTH}
+        return pointers
+
+    def _body(self, exprs: list, env: dict, reads: set, module: dict) -> None:
+        for _ in range(2):   # a statement may use a variable a later one binds
+            for expr in exprs:
+                self._expr(expr, env, reads, module)
+
+    @staticmethod
+    def _bind(term: dict, pointers, env: dict) -> None:
+        if term.get("type") == "var" and not term["value"].startswith("$") and pointers:
+            env[term["value"]] = frozenset(env.get(term["value"], frozenset()) | frozenset(pointers))
+
+    def _expr(self, expr: dict, env: dict, reads: set, module: dict) -> None:
+        terms = expr.get("terms")
+        for modifier in expr.get("with") or []:
+            self._ptrs(modifier.get("value") or {}, env, reads, module)
+        if isinstance(terms, dict) and "symbols" in terms:                    # some x in c; some i, x in c
+            for symbol in terms["symbols"]:
+                if symbol.get("type") == "call":
+                    parts = symbol["value"]
+                    members = self._ptrs(parts[-1], env, reads, module)
+                    self._bind(parts[-2], {(s, _iterate(p)) for s, p in members}, env)
+        elif isinstance(terms, dict) and "domain" in terms:                  # every x in c { ... }
+            members = self._ptrs(terms["domain"], env, reads, module)
+            inner = dict(env)
+            self._bind(terms.get("value") or {}, {(s, _iterate(p)) for s, p in members}, inner)
+            self._body(terms.get("body", []), inner, reads, module)
+        elif isinstance(terms, dict):
+            self._ptrs(terms, env, reads, module)
+        elif isinstance(terms, list) and terms:
+            op = terms[0].get("value") if terms[0].get("type") == "ref" else None
+            name = op[0].get("value") if op and len(op) == 1 else None
+            if name in ("assign", "eq") and len(terms) == 3:
+                left, right = self._ptrs(terms[1], env, reads, module), self._ptrs(terms[2], env, reads, module)
+                self._bind(terms[1], right, env)
+                if name == "eq":
+                    self._bind(terms[2], left, env)
+            else:
+                self._ptrs({"type": "call", "value": terms}, env, reads, module)
+
+    def _ptrs(self, term: dict, env: dict, reads: set, module: dict) -> frozenset:
+        """The pointers an expression holds; the references inside it are recorded as reads."""
+        kind, value = term.get("type"), term.get("value")
+        if kind == "var":
+            if value == "input":
+                return frozenset({("", ())})
+            if value in env:
+                return env[value]
+            target = _resolve_rule(value, [], module, self.modules)
+            if target:
+                out, inner = self._scan(target, ())
+                reads |= inner
+                return out
+            return frozenset()
+        if kind == "ref":
+            return self._ref(value, env, reads, module)
+        if kind == "call":
+            return self._call(value, env, reads, module)
+        if kind in ("arraycomprehension", "setcomprehension", "objectcomprehension"):
+            inner = dict(env)
+            self._body(value.get("body", []), inner, reads, module)
+            if kind == "objectcomprehension":
+                self._ptrs(value["key"], inner, reads, module)
+            held = self._ptrs(value["value" if kind == "objectcomprehension" else "term"], inner, reads, module)
+            return frozenset((s, p + (WRAP,)) for s, p in held if len(p) < MAX_FIELD_DEPTH)
+        if kind in ("array", "set"):
+            for item in value:
+                self._ptrs(item, env, reads, module)
+        elif kind == "object":
+            for pair in value:
+                for item in pair:
+                    self._ptrs(item, env, reads, module)
+        return frozenset()
+
+    def _ref(self, parts: list, env: dict, reads: set, module: dict) -> frozenset:
+        head, rest = parts[0], parts[1:]
+        if head.get("type") == "var":
+            name = head["value"]
+            if name == "input":
+                base = {("", ())}
+            elif name in env:
+                base = env[name]
+            elif (named := _rule_ref(parts, module, self.modules)):
+                target, used = named
+                base, inner = self._scan(target, ())
+                reads |= inner
+                rest = parts[used:]
+            else:
+                base = set()
+        else:
+            base = self._ptrs(head, env, reads, module)
+        pointers = set(base)
+        for part in rest:
+            if part.get("type") == "string":
+                pointers = _extend(pointers, part["value"])
+            else:
+                self._ptrs(part, env, reads, module)
+                pointers = {(s, _iterate(p)) for s, p in pointers if s and len(p) < MAX_FIELD_DEPTH}
+        if rest:
+            self._record(pointers, reads)
+        return frozenset(pointers)
+
+    def _call(self, parts: list, env: dict, reads: set, module: dict) -> frozenset:
+        op, args = parts[0], parts[1:]
+        names = [p.get("value") for p in op["value"]] if op.get("type") == "ref" else []
+        if names == ["object", "get"] and len(args) >= 2:
+            base = self._ptrs(args[0], env, reads, module)
+            for extra in args[2:]:
+                self._ptrs(extra, env, reads, module)
+            if args[1].get("type") == "string":
+                pointers = _extend(base, args[1]["value"])
+            else:
+                self._ptrs(args[1], env, reads, module)
+                pointers = {(s, _iterate(p)) for s, p in base if s and len(p) < MAX_FIELD_DEPTH}
+            self._record(pointers, reads)
+            return frozenset(pointers)
+        pointers_in = tuple(self._ptrs(arg, env, reads, module) for arg in args)
+        named = _rule_ref(op["value"], module, self.modules) if op.get("type") == "ref" else None
+        if named:
+            out, inner = self._scan(named[0], pointers_in)
+            reads |= inner
+            return out
+        return frozenset()   # a built-in: its arguments were read above
+
+    @staticmethod
+    def _record(pointers, reads: set) -> None:
+        for section, path in pointers:
+            trimmed = list(path)
+            while trimmed and trimmed[-1] in (STAR, WRAP):
+                trimmed.pop()
+            if section and any(part not in (STAR, WRAP) for part in trimmed):
+                reads.add((section, tuple(trimmed)))
+
+
+def rego_ast_field_reads(opa: Path, meta: dict) -> dict[str, set[tuple[str, tuple[str, ...]]]]:
+    """Per policy id, the (section, field path) pairs its `tests contains` rules read (see FieldReads), for the sections that
+    are variant keys. A path is relative to the section: `("*", "Conditions", "State")` is the `Conditions.State` of every item of a
+    list section; a section that is an object has paths without the leading `*`."""
+    modules = parsed_modules(opa, meta)
+    product = modules[tuple(meta["package"].split("."))]
+    scanner = FieldReads(modules, product)
+    keys = set(meta["keys"])
+    found: dict[str, set] = {}
+    for rule in product["rules"].get("tests", []):
+        pid = _rule_policy_id(rule)
+        if pid is not None:
+            found.setdefault(pid, set()).update((s, p) for s, p in scanner.policy_reads(rule) if s in keys)
+    return found
+
+
+def null_missing(value, path: tuple[str, ...]):
+    """(a copy of `value`, whether it added a null) with the field at `path` set to null at the first level it is absent.
+
+    STAR iterates the items of a list or the values of an object; a level that holds something else (a scalar, null, a list
+    where a field name is expected) is left as it is."""
+    if not path:
+        return value, False
+    head, rest = path[0], path[1:]
+    if head == STAR:
+        if isinstance(value, list):
+            items = [null_missing(item, rest) for item in value]
+            return [item for item, _ in items], any(added for _, added in items)
+        if isinstance(value, dict):
+            items = {key: null_missing(item, rest) for key, item in value.items()}
+            return {key: item for key, (item, _) in items.items()}, any(added for _, added in items.values())
+        return value, False
+    if not isinstance(value, dict):
+        return value, False
+    if head not in value:
+        return {**value, head: None}, True
+    inner, added = null_missing(value[head], rest)
+    return ({**value, head: inner} if added else value), added
 
 
 def derive_views(deps: dict[str, set[str]], evaluations: list[tuple[dict, list[dict]]], all_keys: list[str], *, method: str) -> dict[str, dict]:
@@ -896,7 +1198,9 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                 base_input: dict, *, commit: str, opa_version: str, config_name: str, not_collected_every: int,
                 template: bool = True, variants_failed: int = 0, methods: dict[str, str] | None = None,
                 masks: dict[str, list[str]] | None = None, applicability: dict[str, str] | None = None,
-                gates: dict[str, dict[tuple, set[str]]] | None = None) -> tuple[list[dict], Counter]:
+                gates: dict[str, dict[tuple, set[str]]] | None = None,
+                fields: dict[str, set[tuple[str, tuple[str, ...]]]] | None = None,
+                fields_added: dict[str, set[str]] | None = None) -> tuple[list[dict], Counter]:
     """Turn evaluated variants into one case per distinct (policy, evidence view); pure, no OPA needed.
 
     `methods` is the evidence-view method per policy (`provenance.evidence_view`), `masks` the sections a not-collected
@@ -908,7 +1212,14 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
     `not_a_verdict`; those of a policy with no verdict at all have no view and count as `policy_skipped`. An evaluated
     verdict whose view sections are all absent (null) is no case (`empty_tenant_input`) unless the view is the policy's
     single section, which is then labelled unknown like a missing input. The id hashes the view with
-    CONVENTION, so a pack built under another labelling convention never shares an id with this one."""
+    CONVENTION, so a pack built under another labelling convention never shares an id with this one, while the hidden
+    section of a not-collected case is picked with MASK_ID_SALT, so it does not depend on the convention.
+
+    How the evidence is rendered, with the label unchanged. Where the engine did not fail closed, `fields` (per policy, the
+    (section, field path) pairs it reads, see rego_ast_field_reads) are shown as an explicit null in every object that lacks them
+    (`fields_added` collects the paths per policy): the export holds no value for the field and the policy's default applies.
+    Where the engine failed closed on a missing input, a field that is absent stays absent and a top-level key that the variant
+    removed from the base input is shown as the not-collected marker instead of null, and the label cites it."""
     prefix = f"scuba-{name.lower()}"
     cases: list[dict] = []
     stats: Counter = Counter(variants_failed=variants_failed)
@@ -929,7 +1240,7 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                 stats["duplicate_view"] += 1
                 continue
             observed = {s: variant["input"].get(s) for s in view_sections}
-            outcome = oracle_outcome(result)
+            outcome = engine_outcome = oracle_outcome(result)
             nothing_observed = outcome == "evaluated" and all(value is None for value in observed.values())
             if nothing_observed and len(view_sections) > 1:
                 stats["empty_tenant_input"] += 1   # a verdict on a tenant that holds none of the policy's sections is no case
@@ -943,12 +1254,22 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                 held = leaves(observed)
                 if any(path in held and held[path] in answered for path, answered in gates[pid].items()):
                     outcome = "not_applicable"   # the gate is visibly unmet, which takes precedence over the missing field
-            evidence = [{"id": f"e{i + 1}", "section": s, "observed": observed[s]} for i, s in enumerate(view_sections)]
+            shown, nulled, marked = dict(observed), [], []
+            if engine_outcome == "fail_closed_missing_input":
+                marked = [s for s in view_sections if s in base_input and s not in variant["input"]]
+                shown.update({s: dict(NOT_COLLECTED) for s in marked})
+            else:
+                for field_section, path in sorted((fields or {}).get(pid, ())):
+                    if field_section in shown:
+                        shown[field_section], added = null_missing(shown[field_section], path)
+                        if added:
+                            nulled.append((field_section, ".".join((field_section, *path))))
+            evidence = [{"id": f"e{i + 1}", "section": s, "observed": shown[s]} for i, s in enumerate(view_sections)]
             policy_observed = {"policy_id": pid, "criticality": result["Criticality"], "baseline_text": texts.get(pid, "")}
             if applicability and pid in applicability:
                 policy_observed["applicability"] = applicability[pid]
             policy_evidence = {"id": "e0", "section": "policy", "observed": policy_observed}
-            case_id = f"{prefix}-{pid.lower().replace('.', '-')}-{sha(f'{CONVENTION}:{view}'.encode())[:10]}"
+            case_id = view_case_id(prefix, pid, view, CONVENTION)
             mutation = mutation_family(base_input, variant["input"], view_sections)
             if masks is None:
                 candidates = view_sections[:1]
@@ -960,10 +1281,11 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
             make_gap = outcome == "evaluated" and bool(candidates) and owed > 0
             if make_gap:
                 owed -= 1
-                masked = candidates[int(sha(case_id.encode())[:8], 16) % len(candidates)]
+                masked = candidates[int(sha(view_case_id(prefix, pid, view, MASK_ID_SALT).encode())[:8], 16) % len(candidates)]
                 index = view_sections.index(masked)
-                evidence[index] = {"id": f"e{index + 1}", "section": masked, "observed": {"collection_status": "not_collected"}}
-                claims = [{"id": "requirement_met", "status": "unknown", "value": None, "evidence_ids": [f"e{index + 1}"]},
+                evidence[index] = {"id": f"e{index + 1}", "section": masked, "observed": dict(NOT_COLLECTED)}
+                nulled = [(field_section, text) for field_section, text in nulled if field_section != masked]
+                claims = [{"id": "requirement_met", "status": "unknown", "value": None, "evidence_ids": ["e0", f"e{index + 1}"]},
                           {"id": "policy_criticality", "status": "confirmed", "value": result["Criticality"], "evidence_ids": ["e0"]}]
                 limitations, recommendations = ["required_evidence_section_not_collected"], ["collect_missing_evidence_section"]
                 case_id += "-nc"
@@ -976,19 +1298,27 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                              unreadable_sections(observed, view_sections) if UNAVAILABLE_RE.search(result["ReportDetails"])
                              else missing_sections(result["ReportDetails"], view_sections))
                     requirement = {"id": "requirement_met", "status": "unknown", "value": None,
-                                   "evidence_ids": [e["id"] for e in evidence if e["section"] in cited]}
+                                   "evidence_ids": ["e0", *(e["id"] for e in evidence if e["section"] in cited or e["section"] in marked)]}
                     limitations, recommendations = ["required_evidence_section_not_collected"], ["collect_missing_evidence_section"]
                     stats["fail_closed_missing_input"] += 1
                 elif outcome == "not_applicable":
-                    requirement = {"id": "requirement_met", "status": "inferred", "value": True, "evidence_ids": [e["id"] for e in evidence]}
+                    requirement = {"id": "requirement_met", "status": "inferred", "value": True, "evidence_ids": ["e0", *(e["id"] for e in evidence)]}
                     limitations, recommendations = ["policy_not_applicable"], []
                     stats["not_applicable"] += 1
                 else:
-                    requirement = {"id": "requirement_met", "status": "confirmed", "value": result["RequirementMet"], "evidence_ids": [e["id"] for e in evidence]}
+                    requirement = {"id": "requirement_met", "status": "confirmed", "value": result["RequirementMet"],
+                                   "evidence_ids": ["e0", *(e["id"] for e in evidence)]}
                     limitations, recommendations = [], ([] if result["RequirementMet"] else ["review_policy_against_baseline_text"])
                     stats["met" if result["RequirementMet"] else "not_met"] += 1
                 claims = [requirement, {"id": "policy_criticality", "status": "confirmed", "value": result["Criticality"], "evidence_ids": ["e0"]}]
                 outcome_label = outcome if outcome != "evaluated" else ("met" if result["RequirementMet"] else "not_met")
+            if marked:
+                stats["removed_marked_not_collected"] += 1
+            if nulled:
+                stats["fields_rendered_null"] += 1
+            if fields_added is not None:
+                for _, text in nulled:
+                    fields_added.setdefault(pid, set()).add(text)
             all_evidence = [policy_evidence, *evidence]
             response = {"claims": claims, "limitations": limitations, "recommendations": recommendations}
             case = {
@@ -1036,15 +1366,20 @@ def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_eve
         evaluations.append((variant, results))
     all_keys = sorted(set(base_input) | {key for variant, _ in evaluations for key in variant["input"]})
     ast_deps = rego_ast_dependencies(opa, meta) if evidence_view == "rego_ast" else {}
+    field_reads = rego_ast_field_reads(opa, meta) if evidence_view == "rego_ast" else None
     views = derive_views(ast_deps if evidence_view == "rego_ast" else rego_dependencies(meta), evaluations, all_keys, method=evidence_view)
     sections = {pid: view["sections"] for pid, view in views.items()}
     methods = {pid: view["method"] for pid, view in views.items()}
     masks = {pid: [s for s in view["sections"] if s in ast_deps.get(pid, ())] for pid, view in views.items()} if evidence_view == "rego_ast" else None
     gates = learn_gates(evaluations, views)
+    fields = ({pid: {(s, p) for s, p in found if s in sections.get(pid, ())} for pid, found in field_reads.items()}
+              if field_reads is not None else None)
+    null_fields: dict[str, set[str]] = {}
     cases, stats = build_cases(name, evaluations, sections, texts, base_input, commit=commit, opa_version=opa_version,
                                config_name=meta["config"].name, not_collected_every=not_collected_every,
                                template=template, variants_failed=failed, methods=methods, masks=masks,
-                               applicability=applicability_sentences(evaluations), gates=gates)
+                               applicability=applicability_sentences(evaluations), gates=gates,
+                               fields=fields, fields_added=null_fields)
     summary = {"product": name, "package": meta["package"], "scubagear_commit": commit, "opa_version": opa_version, "input_keys": all_keys,
                "absent_keys": sorted(set(meta["keys"]) - set(base_input)), "fixture_mapping": mapping, "variants": len(variants),
                "harvest_skipped": dict(skipped),
@@ -1053,6 +1388,7 @@ def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_eve
                "evidence_views": {pid: {k: v for k, v in view.items() if k != "sections"} for pid, view in sorted(views.items())
                                   if view["method"] == "widened"},
                "gates": {pid: {".".join(map(str, path)): sorted(values) for path, values in found.items()} for pid, found in sorted(gates.items())},
+               "null_fields": {pid: sorted(paths) for pid, paths in sorted(null_fields.items())},
                "families": dict(Counter(c["family"] for c in cases))}
     if template:
         summary["templates"] = len({c["provenance"]["template"] for c in cases})

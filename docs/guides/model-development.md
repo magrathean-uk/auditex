@@ -177,10 +177,61 @@ variant changes; `not_collected:<section>` for gap cases) and `provenance.distin
 written `unreviewed` in `train`.
 
 Case ids. The id is the policy and a hash of the evidence view salted with the labelling convention
-(`conv2`, recorded as `labelling_convention` in `summary.json`), so an id never names two different cases
+(`conv3`, recorded as `labelling_convention` in `summary.json`), so an id never names two different cases
 across packs. The ids of the 20261019 kit were unsalted: an earlier revision of this miner reused 464 of them
 (every SharePoint id) for cases whose content differed, 14 with a different label; salted, no id is shared. The id
 still hashes the view, so a different view or method gives a different id. To join two packs on the same variant use the policy id and `variant=` in the source.
+
+Labelling conventions. A convention fixes what the labels cite, which codes the system prompt asks for and how absence
+is rendered. It is salted into every id (`<convention>:<view>`), so the same policy and variant has one id per
+convention, and it is recorded once per pack in `summary.json`.
+
+| | conv2 | conv3 (current) |
+| --- | --- | --- |
+| `requirement_met` met, not met, not applicable | the data sections of the view | `e0`, then the data sections of the view |
+| `requirement_met` unknown (section not collected, field missing, setting unreadable) | the section that is hidden, lacks the field or could not be read | `e0`, then that section, and any section shown as not collected |
+| `policy_criticality` | `e0` | `e0` |
+| A field the policy reads that an object of a section lacks, engine evaluated | absent | explicit `null` in every object (`null_fields` in `summary.json` lists the paths per policy) |
+| The same, engine failed closed on a missing input | absent | absent, so that the unknown label stays readable |
+| Top-level key the variant removed from the base input, engine failed closed | `null` | the not-collected marker, cited by the label |
+| Section hidden in a not-collected case | hash of the conv2 id | the same (`MASK_ID_SALT`, fixed) |
+| System prompt | no rule on citations or on which codes a verdict carries | cite `e0` on every claim about the requirement and every section the policy depends on (an unknown verdict: only the sections not collected, lacking the field or unreadable); states the limitation and recommendation codes of a not-met, unknown and not-applicable verdict; a field shown as null means the export holds no value and the policy's default applies |
+| Id | `conv2:<view>` | `conv3:<view>` |
+
+`e0` is the policy item (`policy_id`, `criticality`, `baseline_text` and, where the policy has a gate,
+`applicability`). conv3 puts it in the label because the baseline text and the gate sentence a verdict rests on
+live there: in the blind review of the v3 holdout (`reviews/20261022-heldout-blind-review-v3`) reviewers agreed
+with the label on 293 of 300 claims but strictly on 96 of 300, and of 197 evidence mismatches 140 cited `e0` on
+`requirement_met` where the conv2 label cited the data sections only, and 50 left out a dependency section the
+label includes (a section that does not change the answer for that tenant is still a dependency); reviewers also
+omitted `review_policy_against_baseline_text` on 35 not-met verdicts because the conv2 prompt never said it is
+expected. The adjudication of the seven remaining disagreements found five caused by rendering: a field the policy
+reads (MS.AAD.9.1v1 reads agent-identity and agent-risk fields that conditional access policies of reused fixtures
+never carry) was simply missing, so a reader could not reach the engine's not-met, and a key the variant removed
+(Power BI `LicenseVariableMissing`, `PowerBITenantSettings_Missing`) read as null while the label was unknown.
+
+How fields are found. `rego_ast_field_reads` walks the parsed Rego like the dependency scan, and follows data as well as
+rules: a variable bound by `some x in input.<section>`, `x := input.<section>[_]`, `every`, a comprehension or a rule value,
+and the arguments of a function call into the function's parameters, so `policy.Conditions.AgentIdRiskLevels` in a helper
+called with an item of `conditional_access_policies` is the read `conditional_access_policies.*.Conditions.AgentIdRiskLevels`
+(`*` is any item). The message fields of the head are skipped as for views. A field is shown as null at the first level an
+object lacks it (`Conditions.ClientApplications` when the whole `ClientApplications` object is missing). Only the `rego_ast`
+method does this; the earlier `widened` method does not parse Rego for fields. Fields of `scuba_config`, a configuration
+document rather than an export, are rendered the same way (623 of the changed cases differ in `scuba_config` alone).
+
+Conv2 and conv3 packs of the same harvest hold the same cases: at the pinned commit 4,248 each, no id in common, joined one
+to one on policy id and `variant=`, with every verdict, limitation, recommendation and outcome unchanged and the same
+section hidden in every not-collected case. The evidence differs in 1,665 of the 4,248 (1,641 with a field shown as null, 24
+with a removed key shown as not collected; AAD 1,436 cases carry a field rendered null, Security suite 143, Teams 14, Power BI 48);
+the `requirement_met` citation differs beyond `e0` in 8 (the Power BI `NoLicense_TakesPrecedence_OverMissingTenantSettings`
+variants cite the removed settings as well as the licence flag). Eight Power BI cases whose removed settings now read exactly
+like a not-collected case merge with it, so the splitter keeps 3,970 cases and a 435-row test split, against 3,978 and 436
+under conv2.
+
+Do not mix conventions. A pack, a training set and an evaluation set must come from one convention: a model
+trained on conv2 labels learns not to cite `e0` and fails strict evidence matching on every conv3 requirement claim, and
+the prompts differ, so one case would carry two different answers. Rebuild instead of editing ids or citations in an
+existing pack, split the pack of one convention only, and compare packs by the policy and `variant=` join, never by id.
 
 Evidence views (`--evidence-view`, recorded in `summary.json`). The default, `rego_ast`, cites only
 the sections the policy reads: `opa parse --format json` gives the AST of the product's policy file and
@@ -274,7 +325,7 @@ Engine outcomes that are not plain verdicts:
   is absent is labelled unknown like a missing input (`absent_dependency`: MS.AAD.6.1v1 on the base fixture, which
   has no `domain_settings`).
 - A not-collected variant (`oracle_outcome: not_collected`) hides one section the policy reads that holds data in
-  that variant, chosen by a hash of the case id among such sections, and never an engine outcome above. A policy whose
+  that variant, chosen by a hash of the view id (salted with `MASK_ID_SALT`, fixed, not with the convention) among such sections, and never an engine outcome above. A policy whose
   view is a single section never gets one (it would leave nothing to read). One gap case is owed for every N cases and
   issued at the next eligible case, so a skipped position only delays it: the share is one in N where eligible cases
   exist (AAD 25%, Defender suite 25%, Teams 25%, Power Platform 20%, Power BI 25%, Exchange 10% because 93 of its cases have
@@ -282,8 +333,8 @@ Engine outcomes that are not plain verdicts:
   SharePoint has none, all its views being the single section `SPO_tenant`.
 
 Output of a full run at the pinned commit (default options), cases by product: AAD 2,552, Exchange 118,
-Defender suite 448, SharePoint 464, Teams 226, Power Platform 64, Power BI 376; 4,248 cases, 3,978 with distinct
-prompts (the earlier packs: 4,247 and 3,780). Evidence sections per case (median and maximum) in the earlier packs
+Defender suite 448, SharePoint 464, Teams 226, Power Platform 64, Power BI 376; 4,248 cases, 3,970 with distinct
+prompts (conv2, same harvest: 3,978; the earlier packs: 4,247 and 3,780). Evidence sections per case (median and maximum) in the earlier packs
 against now: AAD 2 and 25 against 2 and 3, Exchange 1 and 3 against 1 and 3, Defender suite 3 and 25 against 4 and
 6, SharePoint 16 and 16 against 1 and 1, Teams 21 and 21 against 1 and 2, Power Platform 20 and 20 against 2 and 2,
 Power BI 19 and 19 against 3 and 3.
