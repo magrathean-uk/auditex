@@ -575,6 +575,10 @@ class _Directory:
     def roles(self, principal: str) -> frozenset[str]:
         return self._roles.get(principal, frozenset())
 
+    def knows_principal(self, principal: str) -> bool:
+        """Whether the set lists the principal as an administrator (so its roles are known)."""
+        return principal in self._roles
+
     def is_guest(self, principal: str) -> bool | None:
         if principal in self.guests:
             return True
@@ -631,6 +635,10 @@ def _common_exclusions(
     by principal: a user excluded by id from one policy, through a group the run read the members of from a second
     and through a role they hold from a third is outside all three, though no single exclusion is common to them.
     Those principals are added as ``user`` rows with the route each policy excludes them by (``via``).
+
+    A group whose members the run did not read, and the operator did not list as emergency access, might contain
+    any principal. A principal that some policies exclude by a route the run can see, and every other policy only
+    through such a group, is added as a ``possible`` row: it may well be outside all of them.
     """
     if not policies:
         return []
@@ -644,29 +652,53 @@ def _common_exclusions(
             result.append({**row, "policy_ids": policy_ids})
     if directory is None or len(policies) < 2:
         return result
+    sanctioned_ids = {str(item).lower() for item in sanctioned}
     per_policy = [_excluded_principals(policy["exclusions"], directory) for policy in policies]
+    unread_groups = [
+        sorted(
+            str(row["id"])
+            for row in policy["exclusions"]
+            if row["type"] == "group"
+            and not directory.knows_group(str(row["id"]).lower())
+            and str(row["id"]).lower() not in sanctioned_ids
+        )
+        for policy in policies
+    ]
     shared = set(per_policy[0]).intersection(*per_policy[1:])
-    if not shared:
+    possible = {
+        principal
+        for principal in set().union(*per_policy)
+        if all(principal in routes or groups for routes, groups in zip(per_policy, unread_groups))
+    } - shared
+    if not shared and not possible:
         return result
     implied: set[str] = set()
     for row in result:
         implied |= set(_excluded_principals([row], directory))
-    sanctioned_ids = {str(item).lower() for item in sanctioned}
     sanctioned_members = {member for item in sanctioned_ids for member in directory.members(item)}
     names = {key.lower(): value for key, value in ((lookups or {}).get("user") or {}).items()}
-    for principal in sorted(shared - implied):
+    for principal in sorted((shared | possible) - implied):
+        is_sanctioned = principal in sanctioned_ids or principal in sanctioned_members
+        if principal in possible and is_sanctioned:
+            continue
         via = [
-            {"policy_id": policy["id"], "type": routes[principal][0]["type"], "id": routes[principal][0]["id"]}
-            for policy, routes in zip(policies, per_policy)
+            (
+                {"policy_id": policy["id"], "type": routes[principal][0]["type"], "id": routes[principal][0]["id"]}
+                if principal in routes
+                else {"policy_id": policy["id"], "type": "group", "id": groups[0], "members_read": False}
+            )
+            for policy, routes, groups in zip(policies, per_policy, unread_groups)
         ]
         row = {
             "type": "user",
             "id": principal,
             "resolved": principal in names,
-            "sanctioned": principal in sanctioned_ids or principal in sanctioned_members,
+            "sanctioned": is_sanctioned,
             "via": via,
             "policy_ids": policy_ids,
         }
+        if principal in possible:
+            row["possible"] = True
         if principal in names:
             row["display_name"] = names[principal]
         result.append(row)
@@ -713,8 +745,8 @@ def _plural_principals(count: int) -> str:
 
 
 def _unsanctioned(exclusions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Exclusions that are not emergency-access accounts the operator listed."""
-    return [row for row in exclusions if not row.get("sanctioned")]
+    """Exclusions that are a gap: not an emergency-access account the operator listed, and not covered by another policy."""
+    return [row for row in exclusions if not row.get("sanctioned") and not row.get("covered_by_policy_ids")]
 
 
 def _exclusion_fields(
@@ -765,6 +797,12 @@ def evaluate_effective_mfa(
     ``enforced_with_exclusions``: MFA is required, but not of everyone. ``admin_scope`` lets the comparison run by
     principal (who holds an excluded role, who is in an excluded group the run read); ``unresolved_accounts`` are
     operator entries that matched no account, recorded on the verdict.
+
+    The verdict is the reading Cyber Essentials takes: an administrator role or administrator that every all-users
+    policy excludes, but a role-targeted MFA policy requires MFA of, is covered (the row is marked
+    ``covered_by_policy_ids`` and the policy listed in ``supplementary_policies``). ``single_policy_verdict`` is the
+    reading CIS 5.2.2.2 and SCuBA MS.AAD.3.2v1 take, which look for one policy that leaves nobody out, and does not
+    credit that cover.
     """
     defaults_view, defaults_enabled = _security_defaults_view(security_defaults)
     policy_rows = [row for row in policies.rows if isinstance(row, Mapping)] if policies.usable else []
@@ -772,6 +810,7 @@ def evaluate_effective_mfa(
     near_miss: list[dict[str, Any]] = []
     report_only: list[dict[str, Any]] = []
     unverified: list[dict[str, Any]] = []
+    coverers: list[_Coverer] = []
     for policy in policy_rows:
         targeting = policy_targeting(policy)
         if targeting["state"].lower() not in _ENFORCING_STATES:
@@ -791,22 +830,43 @@ def evaluate_effective_mfa(
             # Would qualify if its authentication strength could be shown to require MFA.
             unverified.append(_policy_summary(policy, targeting, lookups, reasons, sanctioned))
         elif reasons:
-            near_miss.append(_policy_summary(policy, targeting, lookups, reasons, sanctioned))
+            summary = _policy_summary(policy, targeting, lookups, reasons, sanctioned)
+            near_miss.append(summary)
+            if targeting["include_roles"] and set(reasons) <= _MFA_ROLE_POLICY_REASONS:
+                # Requires MFA of the roles it names, so it covers an administrator an all-users policy excludes.
+                coverers.append(
+                    _Coverer(
+                        targeting=targeting,
+                        summary=summary,
+                        strength_unverified="authentication_strength_unverified" in reasons,
+                        phishing_resistant=False,
+                        full_reach=False,
+                    )
+                )
         else:
             qualifying.append(_policy_summary(policy, targeting, lookups, [], sanctioned))
 
     policy_view = _policy_view(policies, policy_rows)
-    excluded = _common_exclusions(qualifying, _Directory(admin_scope), sanctioned=sanctioned, lookups=lookups)
+    directory = _Directory(admin_scope)
+    excluded_all = _common_exclusions(qualifying, directory, sanctioned=sanctioned, lookups=lookups)
+    excluded, relied_on = _rescue_exclusions(
+        excluded_all, coverers, directory, known=admin_scope is not None and admin_scope.complete, sanctioned=sanctioned
+    )
     gap = _unsanctioned(excluded)
+    single_gap = _unsanctioned(excluded_all)
+    # The policies back a positive verdict only when they alone leave nobody out. Security defaults that are on beside
+    # a policy with gaps establish the verdict, and that policy is not a basis for a Conditional Access benchmark
+    # control, so it is not listed.
+    ca_backs = bool(qualifying) and not gap
     basis = [name for name, present in (
         ("security_defaults", defaults_enabled is True),
-        ("conditional_access_policy", bool(qualifying)),
+        ("conditional_access_policy", bool(qualifying) and (not gap or defaults_enabled is not True)),
     ) if present]
     reasons = [*_evidence_reasons("policy_collection", policy_view), *_evidence_reasons("security_defaults", defaults_view)]
-    if basis and (defaults_enabled is True or not gap):
+    if defaults_enabled is True or ca_backs:
         verdict, reasons = VERDICT_ENFORCED, []
         basis_summary = _MFA_BASIS_SUMMARY[tuple(basis)]
-    elif basis:
+    elif qualifying:
         verdict, reasons = VERDICT_ENFORCED_WITH_EXCLUSIONS, []
         basis_summary = (
             "An enabled Conditional Access policy requires MFA for all users on all cloud apps, but every qualifying "
@@ -836,7 +896,15 @@ def evaluate_effective_mfa(
         "security_defaults": defaults_view,
         "policy_collection": policy_view,
         "authentication_strength_collection": authentication_strengths.summary(),
+        "single_policy_verdict": (
+            VERDICT_ENFORCED
+            if defaults_enabled is True or (qualifying and not single_gap)
+            else VERDICT_ENFORCED_WITH_EXCLUSIONS
+            if qualifying
+            else verdict
+        ),
         "qualifying_policies": qualifying,
+        "supplementary_policies": list({id(coverer): coverer.summary for coverer in relied_on}.values()),
         **_exclusion_fields(excluded, sanctioned, unresolved_accounts),
         "excluded_locations": _common_values(qualifying, "excluded_locations"),
         "non_qualifying_mfa_policies": near_miss,
@@ -879,13 +947,17 @@ def evaluate_legacy_authentication_block(
     A policy counts only when it names both legacy client app types (Exchange ActiveSync clients and Other clients),
     as ScubaGear and the CIS audit do, and no location condition limits it: a block of every client type that
     exempts the trusted countries (``all`` client types, locations excluded) leaves legacy protocols open from
-    them, and a legacy block that exempts a network leaves them open from that network.
+    them, and a legacy block that exempts a network leaves them open from that network. Two block policies that
+    each name one legacy client type, and are otherwise the same, do block both, but neither is the one policy the
+    benchmarks look for: the verdict stays ``not_blocked`` and records ``legacy_block_split_across_policies`` with the
+    policies in ``block_split_across_policies``.
     """
     defaults_view, defaults_enabled = _security_defaults_view(security_defaults)
     policy_rows = [row for row in policies.rows if isinstance(row, Mapping)] if policies.usable else []
     blocking: list[dict[str, Any]] = []
     near_miss: list[dict[str, Any]] = []
     report_only: list[dict[str, Any]] = []
+    split_candidates: list[tuple[dict[str, Any], set[str]]] = []
     for policy in policy_rows:
         targeting = policy_targeting(policy)
         if targeting["state"].lower() not in _ENFORCING_STATES:
@@ -915,22 +987,28 @@ def evaluate_legacy_authentication_block(
         if targeting["state"].lower() == "enabledforreportingbutnotenforced":
             report_only.append(_policy_summary(policy, targeting, lookups, ["report_only", *reasons], sanctioned))
         elif reasons:
-            near_miss.append(_policy_summary(policy, targeting, lookups, reasons, sanctioned))
+            summary = _policy_summary(policy, targeting, lookups, reasons, sanctioned)
+            near_miss.append(summary)
+            if reasons == ["legacy_client_app_types_incomplete"]:
+                split_candidates.append((summary, lowered_types & set(_LEGACY_CLIENT_APP_TYPES)))
         else:
             blocking.append(_policy_summary(policy, targeting, lookups, [], sanctioned))
 
     policy_view = _policy_view(policies, policy_rows)
     excluded = _common_exclusions(blocking, _Directory(admin_scope), sanctioned=sanctioned, lookups=lookups)
     gap = _unsanctioned(excluded)
+    # As for MFA: security defaults beside a block policy with gaps establish the verdict, and the policy is not listed
+    # as a basis for a Conditional Access benchmark control.
+    ca_backs = bool(blocking) and not gap
     basis = [name for name, present in (
         ("security_defaults", defaults_enabled is True),
-        ("conditional_access_policy", bool(blocking)),
+        ("conditional_access_policy", bool(blocking) and (not gap or defaults_enabled is not True)),
     ) if present]
     reasons = [*_evidence_reasons("policy_collection", policy_view), *_evidence_reasons("security_defaults", defaults_view)]
-    if basis and (defaults_enabled is True or not gap):
+    if defaults_enabled is True or ca_backs:
         verdict, reasons = VERDICT_BLOCKED, []
         basis_summary = _LEGACY_BASIS_SUMMARY[tuple(basis)]
-    elif basis:
+    elif blocking:
         verdict, reasons = VERDICT_BLOCKED_WITH_EXCLUSIONS, []
         basis_summary = (
             "An enabled Conditional Access policy blocks legacy authentication clients for all users on all cloud apps, "
@@ -947,6 +1025,13 @@ def evaluate_legacy_authentication_block(
         verdict = VERDICT_UNKNOWN
         basis_summary = "The evidence does not establish whether legacy authentication is blocked."
 
+    split: list[dict[str, Any]] = []
+    if verdict == VERDICT_NOT_BLOCKED and len(split_candidates) > 1:
+        covered = set().union(*(types for _, types in split_candidates))
+        if set(_LEGACY_CLIENT_APP_TYPES) <= covered:
+            split = [summary for summary, _types in split_candidates]
+            reasons.append("legacy_block_split_across_policies")
+
     return {
         "control": CONTROL_LEGACY_AUTH,
         "title": "Legacy authentication block",
@@ -959,6 +1044,7 @@ def evaluate_legacy_authentication_block(
         "security_defaults": defaults_view,
         "policy_collection": policy_view,
         "blocking_policies": blocking,
+        "block_split_across_policies": [summary["id"] for summary in split if summary.get("id")],
         **_exclusion_fields(excluded, sanctioned, unresolved_accounts),
         "excluded_locations": _common_values(blocking, "excluded_locations"),
         "non_qualifying_block_policies": near_miss,
@@ -967,6 +1053,8 @@ def evaluate_legacy_authentication_block(
 
 
 _ADMIN_UNVERIFIED_REASONS = frozenset({"authentication_strength_unverified", "administrator_set_unknown"})
+# An MFA policy that is only a near miss for "all users" for these reasons still requires MFA of the roles it names.
+_MFA_ROLE_POLICY_REASONS = frozenset({"not_all_users", "authentication_strength_unverified"})
 # A policy that carries only these reasons still requires MFA of the administrators it reaches: it names some of the
 # roles an administrator holds, or the set is not known well enough to say who it reaches, or its authentication
 # strength cannot be rated. Each such policy counts for the administrators it does reach (see ``_coverage``).
@@ -1109,6 +1197,63 @@ def _role_coverage(
     return ("maybe" if maybe else "no"), maybe, reasons
 
 
+def _exclusion_coverage(
+    row: Mapping[str, Any],
+    coverers: Iterable[_Coverer],
+    directory: _Directory,
+    *,
+    known: bool,
+    sanctioned: Collection[str],
+) -> list[tuple[str, list[_Coverer], list[str]]] | None:
+    """Whether other policies require MFA of the administrators an excluded role or user row leaves out.
+
+    One outcome per administrator the row reaches (``yes``, ``maybe`` or ``no``, see ``_coverage``). A role is also
+    judged as a whole when the administrator set is not complete or nobody is known to hold it: the set may be missing
+    a holder (a PIM-eligible user, say), and a policy that includes the role but excludes a user cannot be shown to
+    reach him. ``None`` when the row is not an administrator role or user.
+    """
+    row_id = str(row["id"]).lower()
+    if row["type"] == "role":
+        holders = sorted(directory.holders(row_id))
+        outcomes = [_coverage(coverers, principal, directory, sanctioned) for principal in holders]
+        if not known or not holders:
+            outcomes.append(_role_coverage(row_id, coverers, sanctioned))
+        return outcomes
+    if row["type"] == "user" and directory.knows_principal(row_id):
+        return [_coverage(coverers, row_id, directory, sanctioned)]
+    return None
+
+
+def _rescue_exclusions(
+    rows: list[dict[str, Any]],
+    coverers: list[_Coverer],
+    directory: _Directory,
+    *,
+    known: bool,
+    sanctioned: Collection[str],
+) -> tuple[list[dict[str, Any]], list[_Coverer]]:
+    """The exclusion rows, each marked ``covered_by_policy_ids`` when other enabled policies require MFA of everyone it leaves out.
+
+    Used by the all-users verdicts: an all-users policy that excludes the Global Administrator role, and a policy for
+    that role, still require MFA of everyone. Only a policy that verifiably requires MFA counts; a row that is not an
+    administrator role or user, an emergency-access account, or one that is only possibly excluded stays as it is.
+    """
+    sanctioned_ids = {str(item).lower() for item in sanctioned}
+    result: list[dict[str, Any]] = []
+    relied: list[_Coverer] = []
+    for row in rows:
+        outcomes = None if row.get("sanctioned") or row.get("possible") else _exclusion_coverage(
+            row, coverers, directory, known=known, sanctioned=sanctioned_ids
+        )
+        if outcomes and all(state == "yes" for state, _, _ in outcomes):
+            used = [coverer for _, items, _ in outcomes for coverer in items]
+            relied.extend(used)
+            result.append({**row, "covered_by_policy_ids": sorted({str(item.summary["id"]) for item in used if item.summary.get("id")}) or ["unnamed"]})
+        else:
+            result.append(row)
+    return result, relied
+
+
 def _administrator_outcome(
     qualifying: list[dict[str, Any]],
     coverers: list[_Coverer],
@@ -1151,37 +1296,36 @@ def _administrator_outcome(
         if row["type"] == "user" and row_id == _LEGACY_GUEST_EXCLUSION:
             # The older way to exclude every guest and external user: the same as a guest type.
             row = {**row, "type": "guests_or_external_users"}
-        affected: list[str] = []
         if row["type"] == "role":
-            if row_id in relevant_roles:
-                affected = sorted(directory.holders(row_id))
-            elif not known:
-                possible.append(row)
-                continue
-            else:
+            if row_id not in relevant_roles:
+                if not known:
+                    possible.append(row)
                 continue
         elif row["type"] == "user":
-            if scope is not None and row_id in scope.admin_principal_ids:
-                affected = [row_id]
-            elif not known:
-                possible.append(row)
-                continue
-            else:
+            if not (scope is not None and row_id in scope.admin_principal_ids):
+                if not known:
+                    possible.append(row)
                 continue
         elif row["type"] == "group" or not (known and scope.guest_admin_count == 0):
             possible.append(row)
             continue
         else:
             continue
-        outcomes = (
-            [_coverage(coverers, principal, directory, sanctioned_ids) for principal in affected]
-            if affected
-            else [_role_coverage(row_id, coverers, sanctioned_ids)]
-        )
-        if all(state == "yes" for state, _, _ in outcomes):
+        outcomes = _exclusion_coverage(row, coverers, directory, known=known, sanctioned=sanctioned_ids) or []
+        if row["type"] == "role" and not known and not directory.holders(row_id):
+            # Nobody known holds the role, but the set is not complete: a holder may be missing from it.
+            state, items, why = outcomes[0]
+            if state == "yes":
+                used.extend(items)
+            else:
+                undecided.extend(["administrator_set_unknown", *why])
+        elif all(state == "yes" for state, _, _ in outcomes):
             used.extend(coverer for _, items, _ in outcomes for coverer in items)
-        elif any(state == "no" for state, _, _ in outcomes):
+        elif any(state == "no" for state, _, _ in outcomes) and not row.get("possible"):
             definite.append(row)
+        elif any(state == "no" for state, _, _ in outcomes):
+            # A group the run did not read might contain the administrator, and might not.
+            undecided.append("administrator_exclusion_unresolved")
         else:
             undecided.extend(reason for _, _, items in outcomes for reason in items)
     if definite:
@@ -1317,17 +1461,20 @@ def evaluate_administrator_mfa(
         resistant, resistant_coverers, admin_scope, directory, principals, **outcome_kwargs
     )
     supplementary = {id(coverer): coverer.summary for coverer in relied_on if not coverer.full_reach}
+    # Policies back the verdict only when they alone enforce it; security defaults that are on beside policies with
+    # gaps establish the verdict, and those policies are not a basis for a Conditional Access benchmark control.
+    ca_backs = kind == VERDICT_ENFORCED and bool(qualifying or relied_on)
     basis = [name for name, present in (
         ("security_defaults", defaults_enabled is True),
-        ("conditional_access_policy", bool(qualifying) or (kind == VERDICT_ENFORCED and bool(relied_on))),
+        ("conditional_access_policy", ca_backs or (bool(qualifying) and defaults_enabled is not True)),
     ) if present]
     reasons = [*_evidence_reasons("policy_collection", policy_view), *_evidence_reasons("security_defaults", defaults_view)]
     if defaults_enabled is True or kind == VERDICT_ENFORCED:
         verdict, reasons = VERDICT_ENFORCED, []
         basis_summary = (
-            "Security defaults are enabled, which require MFA of administrator roles."
-            if not qualifying and not relied_on
-            else "An enabled Conditional Access policy requires MFA of every administrator, or security defaults are enabled."
+            "An enabled Conditional Access policy requires MFA of every administrator, or security defaults are enabled."
+            if ca_backs
+            else "Security defaults are enabled, which require MFA of administrator roles."
         )
     elif kind == VERDICT_ENFORCED_WITH_EXCLUSIONS:
         verdict, reasons = VERDICT_ENFORCED_WITH_EXCLUSIONS, []

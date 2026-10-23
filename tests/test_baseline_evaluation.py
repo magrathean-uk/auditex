@@ -580,6 +580,7 @@ def test_verdict_rule_controls_match_the_rules_the_findings_engine_raises() -> N
         assert control in baselines._RULE_VERDICT_CONTROLS[spec["rule_id"]], control
     negative_rules = {
         "ca.mfa_not_enforced",
+        "ca.mfa_split_across_policies",
         "ca.admin_mfa_not_enforced",
         "ca.admin_phishing_resistant_mfa_not_enforced",
         "ca.admin_mfa_role_set_incomplete",

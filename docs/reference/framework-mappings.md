@@ -280,6 +280,13 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   own yet and is not mapped. It is also raised when the phishing-resistant policies do not cover ScubaGear's
   eight privileged roles (or exclude one), whoever holds them today, as ScubaGear requires; an all-users
   phishing-resistant policy still passes, which ScubaGear does not accept.
+- `ca.mfa_split_across_policies` maps to CIS v7 `5.2.2.2` and SCuBA `MS.AAD.3.2v1` (and the MCSB, Zero Trust, NIST, ISO,
+  SOC 2, NIS2, DORA and ATT&CK anchors of `ca.mfa_not_enforced`), not to Secure Score or Cyber Essentials. The
+  `effective_mfa` verdict, which Cyber Essentials reads, counts an administrator role that an all-users policy excludes
+  as covered when a role-targeted MFA policy includes it. The two benchmark controls look for a single policy that
+  leaves nobody out (ScubaGear fails any role exclusion), so they read `single_policy_verdict` through this rule, which
+  is raised when the two readings differ. Groups, other users and roles that no role policy includes are not covered
+  this way and still raise `ca.mfa_not_enforced`.
 - `ca.admin_mfa_role_set_incomplete` maps to CIS v7 `5.2.2.1` (and the MCSB, Zero Trust, NIST, ISO, SOC 2, NIS2,
   DORA and ATT&CK anchors of `ca.admin_mfa_not_enforced`), not to Secure Score or Cyber Essentials. It reads
   `role_catalog_verdict`: the policies together must include every role of the CIS 5.2.2.1 list (15 roles, by
@@ -292,8 +299,9 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   (Secure Score is Microsoft's own scoring, and the reconciliation compares Auditex with it as it stands). CIS `5.2.2.1` to
   `5.2.2.3` and SCuBA `MS.AAD.3.2v1` and `MS.AAD.1.1v1` audit a Conditional Access policy (ScubaGear and Prowler
   evaluate policies only), so baseline alignment reads those controls `not_assessed` with
-  `conditional_access_policy_required:basis_security_defaults` while no qualifying policy backs the verdict. The
-  table is `_verdict_basis_requirements` in `configs/control-mappings.json`.
+  `conditional_access_policy_required:basis_security_defaults` while no qualifying policy backs the verdict (security
+  defaults beside a Conditional Access policy that has gaps list only `security_defaults` in `basis`). The table is
+  `_verdict_basis_requirements` in `configs/control-mappings.json`.
 - The registration rules (`identity.global_admin_mfa_not_registered`,
   `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered`,
   `attack_path.no_mfa_to_tier0`) say who could use MFA, never whether it is required, so they map only to
@@ -312,7 +320,9 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   `BlockLegacyAuthentication`. The policy must name both legacy client app types (Exchange ActiveSync clients and
   Other clients, as ScubaGear and the CIS audit require) and no location condition may limit it: a block of every
   client type that exempts the trusted countries is a country block, not a legacy block, and a legacy block that
-  exempts a network leaves legacy protocols open from it. The catalog entries were verified on 2026-10-20 against the Tenable
+  exempts a network leaves legacy protocols open from it. Two block policies that each name one legacy client type
+  block both, but are not the one policy the benchmarks look for: the rule is raised at medium with the verdict
+  reason `legacy_block_split_across_policies`. The catalog entries were verified on 2026-10-20 against the Tenable
   CIS v7.0.0 audit list, the ScubaGear v1.8.0 `aad.md` baseline and the CIPP Secure Score profile
   sample already listed as sources.
 - `ca.*` maps to the `conditional_access` collector and `consent_policy.*` to `consent_policy`
@@ -589,7 +599,7 @@ met. The applicant's own answers and the assessor's tests decide that.
   collectors completed and its inputs were present) and raised no finding, not a full CIS audit
   result.
 - `consent_policy.user_consent_unrestricted` fires only when users can consent to any app; `consent_policy.user_consent_limited` fires when they can consent under the Microsoft-managed or low-risk policy. CIS v7 `5.1.5.1` and SCuBA `MS.AAD.5.2v1` read both rules, so they pass only when no self-service consent policy is assigned. A tenant-defined permission grant policy is not evaluated and reads `unknown`.
-- Microsoft 365 MFA enforcement is read from security defaults and Conditional Access. Per-user (legacy) MFA states are not read: a tenant that enforces MFA only per user, with security defaults off and no Conditional Access, reads `not_enforced` (CIS `5.2.2.2` and `5.2.2.1` require Conditional Access, so that is right for them, but `ce.uac.mfa_cloud_services` and `ce.uac.mfa_admin_accounts` carry the caveat in `evidence_limits` and fail with `partial` confidence). Security defaults enforce MFA for the tenant verdict, but CIS `5.2.2.x` and the SCuBA Conditional Access controls read `not_assessed` on that basis alone. Exclusions are compared by person across the qualifying policies, but who is in a group is known only for the role-assignable groups the run expanded (nested groups included) and who holds a role only for administrator roles, so an excluded group or role outside that may still overlap another policy without the verdict knowing. The effective MFA and legacy verdicts do not credit a policy that reaches only some roles or groups toward an excluded principal, as the administrator verdict does.
+- Microsoft 365 MFA enforcement is read from security defaults and Conditional Access. Per-user (legacy) MFA states are not read: a tenant that enforces MFA only per user, with security defaults off and no Conditional Access, reads `not_enforced` (CIS `5.2.2.2` and `5.2.2.1` require Conditional Access, so that is right for them, but `ce.uac.mfa_cloud_services` and `ce.uac.mfa_admin_accounts` carry the caveat in `evidence_limits` and fail with `partial` confidence). Security defaults enforce MFA for the tenant verdict, but CIS `5.2.2.x` and the SCuBA Conditional Access controls read `not_assessed` on that basis alone. Exclusions are compared by person across the qualifying policies, but who is in a group is known only for the role-assignable groups the run expanded (nested groups included) and who holds a role only for administrator roles, so an excluded group or role outside that may still overlap another policy without the verdict knowing. The effective MFA verdict credits a role-targeted MFA policy toward an excluded administrator role or administrator (the Cyber Essentials reading); the legacy verdict does not credit one block policy toward another's exclusions. A group whose members were not read is treated as possibly containing a principal another policy excludes by id.
 - Cyber Essentials coverage is partial by design. Ten of 30 requirements have tenant evidence behind
   them and none is `automated`, so no Cyber Essentials row can read `pass`. The update and malware
   evidence covers devices Intune manages (Defender antivirus on Windows only, operating systems in the

@@ -2193,6 +2193,42 @@
       "ce.uac.mfa_cloud_services"
     ]
   },
+  "ca.mfa_split_across_policies": {
+    "cis_m365_v7": [
+      "5.2.2.2"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.2v1"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)",
+      "IA-2(2)"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.8.5"
+    ],
+    "soc2": [
+      "CC6.1"
+    ],
+    "nis2": [
+      "Article 21(2)(j)"
+    ],
+    "dora": [
+      "Article 9(4)(d)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1110"
+    ]
+  },
   "ca.admin_mfa_not_enforced": {
     "cis_m365_v7": [
       "5.2.2.1"

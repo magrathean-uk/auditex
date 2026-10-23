@@ -1671,6 +1671,52 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
             )
         )
 
+    covered = [row for row in (mfa or {}).get("excluded_principals") or [] if row.get("covered_by_policy_ids")]
+    if (
+        mfa
+        and mfa.get("verdict") == "enforced"
+        and "conditional_access_policy" in (mfa.get("basis") or [])
+        and mfa.get("single_policy_verdict") == "enforced_with_exclusions"
+        and covered
+    ):
+        rows = _exclusion_rows({"covered": covered}, "covered")
+        metadata = _metadata_for("ca.mfa_split_across_policies")
+        metadata["description"] = (
+            "Everyone is required to use MFA, but only by combining policies: the all-users policy excludes "
+            f"{_exclusion_text(rows, len(covered))}, and a separate policy for the administrator roles requires MFA of "
+            "them. CIS 5.2.2.2 and ScubaGear MS.AAD.3.2v1 look for one all-users policy that excludes nobody but "
+            "documented emergency access accounts, so they are not met. Cyber Essentials reads the combined result."
+        )
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "conditional_access:mfa_split_across_policies",
+                    "rule_id": "ca.mfa_split_across_policies",
+                    "severity": "low",
+                    "category": "identity",
+                    "title": "MFA for all users depends on combining policies",
+                    "status": "open",
+                    "collector": "conditional_access",
+                    "affected_objects": ["Tenant MFA enforcement"],
+                    "evidence": mfa,
+                    "returned_value": {
+                        "verdict": mfa["verdict"],
+                        "single_policy_verdict": mfa["single_policy_verdict"],
+                        "basis": mfa.get("basis") or [],
+                        "covered_exclusions": [
+                            {**row_summary, "covered_by_policy_ids": item["covered_by_policy_ids"]}
+                            for row_summary, item in zip(rows, covered)
+                        ],
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("effective_mfa", "conditional_access"),
+                        *_policy_refs(mfa, "qualifying_policies", "supplementary_policies"),
+                    ],
+                    **metadata,
+                }
+            )
+        )
+
     admin_mfa = verdicts.get("administrator_mfa")
     if admin_mfa and admin_mfa.get("verdict") in {"not_enforced", "enforced_with_exclusions"}:
         with_exclusions = admin_mfa["verdict"] == "enforced_with_exclusions"
@@ -1808,8 +1854,17 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
     legacy = verdicts.get("legacy_authentication_block")
     if legacy and legacy.get("verdict") in {"not_blocked", "blocked_with_exclusions"}:
         with_exclusions = legacy["verdict"] == "blocked_with_exclusions"
+        split = legacy.get("verdict") == "not_blocked" and bool(legacy.get("block_split_across_policies"))
         gap = _exclusion_rows(legacy)
         metadata = _metadata_for("ca.legacy_auth_not_blocked")
+        if split:
+            metadata["description"] = (
+                "Security defaults are off and no single enabled Conditional Access policy blocks both the Exchange "
+                "ActiveSync and the other legacy client types for all users on all cloud apps. "
+                f"{len(legacy['block_split_across_policies'])} policies each block one of them, so legacy protocols are "
+                "probably blocked, but CIS 5.2.2.3 and ScubaGear MS.AAD.1.1v1 look for one policy that names both, "
+                "and the exclusions of the separate policies are not compared. Combine them into one policy."
+            )
         if with_exclusions:
             metadata["description"] = (
                 "An enabled Conditional Access policy blocks legacy authentication clients for all users on all cloud apps, "
@@ -1823,11 +1878,13 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                 {
                     "id": "conditional_access:legacy_auth_not_blocked",
                     "rule_id": "ca.legacy_auth_not_blocked",
-                    "severity": "medium" if with_exclusions else "high",
+                    "severity": "medium" if with_exclusions or split else "high",
                     "category": "identity",
                     "title": (
                         "Legacy authentication is blocked, but the block policy excludes principals other than emergency access accounts"
                         if with_exclusions
+                        else "Legacy authentication is blocked only by separate policies, none of which names both legacy client types"
+                        if split
                         else "Legacy authentication is not blocked"
                     ),
                     "status": "open",
@@ -1840,6 +1897,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                         "non_qualifying_policy_count": len(legacy.get("non_qualifying_block_policies") or []),
                         "report_only_policy_count": len(legacy.get("report_only_block_policies") or []),
                         **({"unsanctioned_exclusions": gap} if with_exclusions else {}),
+                        **({"block_split_across_policies": legacy["block_split_across_policies"]} if split else {}),
                         **_unresolved_returned(legacy),
                     },
                     "evidence_refs": [

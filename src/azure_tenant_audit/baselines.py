@@ -143,6 +143,7 @@ _DETECTION_RULE_SIGNALS = {
 # both verdicts are known. Mirrors ``_UNVERIFIED_CONTROL_RULES`` in findings.py (a test keeps them in step).
 _RULE_VERDICT_CONTROLS = {
     "ca.mfa_not_enforced": (CONTROL_EFFECTIVE_MFA,),
+    "ca.mfa_split_across_policies": (CONTROL_EFFECTIVE_MFA,),
     "ca.admin_mfa_not_enforced": (CONTROL_ADMIN_MFA,),
     "ca.admin_phishing_resistant_mfa_not_enforced": (CONTROL_ADMIN_MFA,),
     "ca.admin_mfa_role_set_incomplete": (CONTROL_ADMIN_MFA,),

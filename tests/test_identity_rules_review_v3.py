@@ -1050,3 +1050,231 @@ def test_a_service_principal_with_global_administrator_is_found_through_the_pipe
     assert _status(controls, "mcsb", "PA-1") == "fail"
     summary = next(row for row in snapshot["effective_admin_set"]["records"] if row["kind"] == "effective_admin_set_summary")
     assert summary["non_user_principal_count"] == 1, "a service principal is not counted as an administrator"
+
+
+# --- follow-up to the focused verify: six verdict-logic gaps ---------------------------------------------------------
+# 1. A group the run did not read might contain the principal another policy excludes by id.
+# 2. A role-targeted MFA policy covers the role an all-users policy excludes (the Cyber Essentials reading).
+# 3. An excluded privileged role nobody is known to hold, in an incomplete administrator set, is not a high finding.
+# 4. A covering role policy's own user exclusion is doubted while the administrator set is incomplete.
+# 5. Security defaults beside a Conditional Access policy with gaps do not make that policy a benchmark basis.
+# 6. Two block policies that each name one legacy client type block both, but are not the one policy benchmarks read.
+
+
+def test_a_user_excluded_by_id_and_another_policy_excluding_an_unread_group_is_a_possible_exclusion() -> None:
+    by_id = _policy("by-id", users=_all_users(excludeUsers=[STAFF]))
+    by_unread_group = _policy("by-group", users=_all_users(excludeGroups=[ALL_STAFF]))
+
+    mfa = _mfa(by_id, by_unread_group, scope=_two_admins())
+
+    assert mfa["verdict"] == "enforced_with_exclusions"
+    [row] = mfa["unsanctioned_exclusions"]
+    assert row["id"] == STAFF and row["possible"] is True and row["type"] == "user"
+    assert sorted(row["via"], key=lambda item: item["policy_id"]) == [
+        {"policy_id": "by-group", "type": "group", "id": ALL_STAFF, "members_read": False},
+        {"policy_id": "by-id", "type": "user", "id": STAFF},
+    ]
+    legacy = _legacy(
+        _block("block-id", users=_all_users(excludeUsers=[STAFF])),
+        _block("block-group", users=_all_users(excludeGroups=[ALL_STAFF])),
+        scope=_two_admins(),
+    )
+    assert legacy["verdict"] == "blocked_with_exclusions" and legacy["unsanctioned_exclusions"][0]["possible"] is True
+
+
+def test_an_unread_group_beside_an_administrator_excluded_by_id_leaves_the_administrator_verdict_unknown() -> None:
+    by_id = _policy("by-id", users=_all_users(excludeUsers=[ADMIN_A]))
+    by_unread_group = _policy("by-group", users=_all_users(excludeGroups=[ALL_STAFF]))
+
+    verdict = _admin(by_id, by_unread_group, scope=_two_admins())
+
+    assert verdict["verdict"] == "unknown"
+    assert verdict["reasons"] == ["administrator_exclusion_unresolved"]
+
+
+def test_an_unread_group_is_not_doubted_when_the_operator_listed_it_or_the_principal_is_an_emergency_account() -> None:
+    by_id = _policy("by-id", users=_all_users(excludeUsers=[STAFF]))
+    by_unread_group = _policy("by-group", users=_all_users(excludeGroups=[ALL_STAFF]))
+
+    assert _mfa(by_id, by_unread_group, scope=_two_admins(), sanctioned=frozenset({ALL_STAFF}))["verdict"] == "enforced"
+    assert _mfa(by_id, by_unread_group, scope=_two_admins(), sanctioned=frozenset({STAFF}))["verdict"] == "enforced"
+    read_group = _policy("by-group", users=_all_users(excludeGroups=[OPS]))
+    assert _mfa(by_id, read_group, scope=_two_admins(groups={OPS: (ADMIN_B,)}))["verdict"] == "enforced"
+
+
+def test_a_possible_exclusion_of_an_administrator_is_settled_by_a_policy_that_covers_the_administrator() -> None:
+    by_id = _policy("by-id", users=_all_users(excludeUsers=[ADMIN_A]))
+    by_unread_group = _policy("by-group", users=_all_users(excludeGroups=[ALL_STAFF]))
+    ga_only = _policy("ga", users=_roles(GLOBAL_ADMIN))
+
+    verdict = _admin(by_id, by_unread_group, ga_only, scope=_two_admins())
+
+    assert verdict["verdict"] == "enforced"
+    assert [row["id"] for row in verdict["supplementary_policies"]] == ["ga"]
+
+
+def test_the_role_policy_covers_the_role_an_all_users_policy_excludes_for_the_tenant_verdict() -> None:
+    everyone_but_ga = _policy("all", users=_all_users(excludeRoles=[GLOBAL_ADMIN]))
+    ga_only = _policy("ga", users=_roles(GLOBAL_ADMIN))
+
+    verdict = _mfa(everyone_but_ga, ga_only, scope=_two_admins())
+
+    assert verdict["verdict"] == "enforced" and verdict["basis"] == ["conditional_access_policy"]
+    assert verdict["single_policy_verdict"] == "enforced_with_exclusions"
+    assert verdict["unsanctioned_exclusion_count"] == 0
+    [row] = verdict["excluded_principals"]
+    assert row["id"] == GLOBAL_ADMIN and row["covered_by_policy_ids"] == ["ga"]
+    assert [policy["id"] for policy in verdict["supplementary_policies"]] == ["ga"]
+
+
+def test_a_role_policy_does_not_cover_groups_other_users_or_roles_it_does_not_include() -> None:
+    ga_only = _policy("ga", users=_roles(GLOBAL_ADMIN))
+
+    group = _mfa(_policy("all", users=_all_users(excludeGroups=[ALL_STAFF])), ga_only, scope=_two_admins())
+    exchange = _mfa(_policy("all", users=_all_users(excludeRoles=[EXCHANGE_ADMIN])), ga_only, scope=_two_admins())
+    staff = _mfa(_policy("all", users=_all_users(excludeUsers=[STAFF])), ga_only, scope=_two_admins())
+
+    for verdict in (group, exchange, staff):
+        assert verdict["verdict"] == "enforced_with_exclusions"
+        assert verdict["single_policy_verdict"] == "enforced_with_exclusions"
+        assert verdict["supplementary_policies"] == []
+    assert _mfa(_policy("all"), scope=_two_admins())["single_policy_verdict"] == "enforced"
+
+
+def test_the_ga_role_split_passes_cyber_essentials_and_fails_the_single_policy_benchmarks(tmp_path: Path) -> None:
+    everyone_but_ga = _policy("all", users=_all_users(excludeRoles=[GLOBAL_ADMIN]))
+    ga_only = _policy("ga", users=_roles(GLOBAL_ADMIN))
+
+    snapshot, findings, controls = _run(tmp_path, [everyone_but_ga, ga_only])
+
+    assert _verdicts(snapshot)["effective_mfa"]["verdict"] == "enforced"
+    rules = _rules(findings)
+    assert "ca.mfa_not_enforced" not in rules
+    finding = rules["ca.mfa_split_across_policies"]
+    assert finding["severity"] == "low" and "Global Administrator" in finding["description"]
+    assert finding["returned_value"]["covered_exclusions"][0]["covered_by_policy_ids"] == ["ga"]
+    assert _rule_row(controls, "cyber_essentials", "ce.uac.mfa_cloud_services", "ca.mfa_not_enforced")["status"] == "pass"
+    assert "ca.mfa_split_across_policies" not in controls[("cyber_essentials", "ce.uac.mfa_cloud_services")]["rule_ids"]
+    for framework, control_id in (("cis_m365_v7", "5.2.2.2"), ("cisa_scuba", "MS.AAD.3.2v1")):
+        assert _status(controls, framework, control_id) == "fail", (framework, control_id)
+    assert "cyber_essentials" not in finding["framework_mappings"] and "ms_secure_score" not in finding["framework_mappings"]
+
+
+def test_an_incomplete_set_does_not_let_a_role_nobody_is_known_to_hold_read_not_enforced() -> None:
+    excludes_exchange = _policy("all", users=_all_users(excludeRoles=[EXCHANGE_ADMIN]))
+    scope = _scope({ADMIN_A: (GLOBAL_ADMIN,)}, complete=False)
+
+    incomplete = _admin(excludes_exchange, scope=scope)
+    complete = _admin(excludes_exchange, scope=_scope({ADMIN_A: (GLOBAL_ADMIN,)}))
+
+    assert incomplete["verdict"] == "unknown" and incomplete["reasons"] == ["administrator_set_unknown"]
+    assert complete["verdict"] == "enforced", "nobody holds it in a complete set"
+    covered = _admin(excludes_exchange, _policy("exchange", users=_roles(EXCHANGE_ADMIN)), scope=scope)
+    assert covered["verdict"] == "enforced", "a policy that includes the role covers whoever holds it"
+    held = _admin(_policy("all", users=_all_users(excludeRoles=[GLOBAL_ADMIN])), scope=scope)
+    assert held["verdict"] == "not_enforced", "a known holder of the excluded role is still a definite gap"
+
+
+def test_an_incomplete_set_doubts_the_user_exclusion_of_a_covering_role_policy() -> None:
+    everyone_but_ga = _policy("all", users=_all_users(excludeRoles=[GLOBAL_ADMIN]))
+    ga_but_not_contractor = _policy("ga", users=_roles(GLOBAL_ADMIN, excludeUsers=["u-contractor"]))
+
+    incomplete = _admin(everyone_but_ga, ga_but_not_contractor, scope=_scope({ADMIN_A: (GLOBAL_ADMIN,)}, complete=False))
+    complete = _admin(everyone_but_ga, ga_but_not_contractor, scope=_scope({ADMIN_A: (GLOBAL_ADMIN,)}))
+
+    assert incomplete["verdict"] == "unknown"
+    assert incomplete["reasons"] == ["administrator_exclusion_unresolved", "administrator_set_unknown"]
+    assert complete["verdict"] == "enforced", "every holder is known, and the contractor is not one"
+    listed = _admin(
+        everyone_but_ga,
+        ga_but_not_contractor,
+        scope=_scope({ADMIN_A: (GLOBAL_ADMIN,)}, complete=False),
+        sanctioned=frozenset({"u-contractor"}),
+    )
+    assert listed["verdict"] == "enforced"
+
+
+def test_security_defaults_beside_a_policy_with_gaps_do_not_make_the_policy_a_benchmark_basis() -> None:
+    gapped = _policy("gapped", users=_all_users(excludeGroups=[ALL_STAFF]))
+    block_gapped = _block("block-gapped", users=_all_users(excludeGroups=[ALL_STAFF]))
+    scope = _two_admins()
+
+    mfa = evaluate_effective_mfa(
+        policies=_collected(gapped), security_defaults=_defaults(True), authentication_strengths=_collected(), lookups=LOOKUPS
+    )
+    legacy = evaluate_legacy_authentication_block(
+        policies=_collected(block_gapped), security_defaults=_defaults(True), lookups=LOOKUPS
+    )
+    admin = evaluate_administrator_mfa(
+        policies=_collected(gapped),
+        security_defaults=_defaults(True),
+        authentication_strengths=_collected(),
+        lookups=LOOKUPS,
+        admin_scope=scope,
+    )
+
+    assert (mfa["verdict"], mfa["basis"]) == ("enforced", ["security_defaults"])
+    assert (legacy["verdict"], legacy["basis"]) == ("blocked", ["security_defaults"])
+    assert (admin["verdict"], admin["basis"]) == ("enforced", ["security_defaults"])
+    # Without security defaults the policy with gaps is the (partial) basis, as before.
+    assert _mfa(gapped, scope=scope)["basis"] == ["conditional_access_policy"]
+
+
+def test_security_defaults_beside_a_clean_policy_keep_both_bases_and_the_benchmarks_pass() -> None:
+    mfa = evaluate_effective_mfa(
+        policies=_collected(_policy()), security_defaults=_defaults(True), authentication_strengths=_collected(), lookups=LOOKUPS
+    )
+
+    assert mfa["basis"] == ["security_defaults", "conditional_access_policy"]
+
+
+def test_security_defaults_beside_a_policy_with_gaps_leave_the_benchmark_controls_not_assessed(tmp_path: Path) -> None:
+    gapped = [_policy("gapped", users=_all_users(excludeGroups=["g-000"])), _block("block", users=_all_users(excludeGroups=["g-000"]))]
+
+    snapshot, _findings, controls = _run(tmp_path, gapped, defaults=True)
+
+    verdicts = _verdicts(snapshot)
+    assert verdicts["effective_mfa"]["basis"] == ["security_defaults"]
+    for framework, control_id in (
+        ("cis_m365_v7", "5.2.2.1"),
+        ("cis_m365_v7", "5.2.2.2"),
+        ("cis_m365_v7", "5.2.2.3"),
+        ("cisa_scuba", "MS.AAD.3.2v1"),
+        ("cisa_scuba", "MS.AAD.1.1v1"),
+    ):
+        assert _status(controls, framework, control_id) != "pass", (framework, control_id)
+    assert _rule_row(controls, "cis_m365_v7", "5.2.2.2", "ca.mfa_not_enforced")["reason"] == (
+        "conditional_access_policy_required:basis_security_defaults"
+    )
+
+
+def test_two_block_policies_that_each_name_one_legacy_client_type_are_a_split_block_not_an_unblocked_tenant() -> None:
+    exchange = _block("eas", client_app_types=["exchangeActiveSync"])
+    other = _block("other", client_app_types=["other"])
+
+    verdict = _legacy(exchange, other)
+
+    assert verdict["verdict"] == "not_blocked", "the benchmarks look for one policy that names both"
+    assert verdict["reasons"] == ["legacy_block_split_across_policies"]
+    assert verdict["block_split_across_policies"] == ["eas", "other"]
+    assert _legacy(exchange, _block("eas-again", client_app_types=["exchangeActiveSync"]))["reasons"] == []
+    assert not _legacy(exchange).get("block_split_across_policies")
+    assert not _legacy(exchange, _block("geo", client_app_types=["other"], locations={"includeLocations": ["loc-ru"]})).get(
+        "block_split_across_policies"
+    )
+
+
+def test_a_split_legacy_block_is_a_medium_finding_that_still_fails_the_benchmark_controls(tmp_path: Path) -> None:
+    exchange = _block("eas", client_app_types=["exchangeActiveSync"])
+    other = _block("other", client_app_types=["other"])
+
+    snapshot, findings, controls = _run(tmp_path, [_policy(), exchange, other])
+
+    assert _verdicts(snapshot)["legacy_authentication_block"]["verdict"] == "not_blocked"
+    finding = _rules(findings)["ca.legacy_auth_not_blocked"]
+    assert finding["severity"] == "medium"
+    assert finding["returned_value"]["block_split_across_policies"] == ["eas", "other"]
+    assert "separate policies" in finding["title"] and "one policy that names both" in finding["description"]
+    assert _status(controls, "cis_m365_v7", "5.2.2.3") == "fail"
+    only_one, only_findings, _controls = _run(tmp_path, [_policy(), exchange])
+    assert _rules(only_findings)["ca.legacy_auth_not_blocked"]["severity"] == "high"

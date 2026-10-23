@@ -333,6 +333,19 @@ or per-policy break-glass finding ids must read the tenant-level ones.
   on role assignments, which the Bundle fields entry above already claimed.
 - **Sign-in reason.** A licence-limited identity run now reads the three sign-in rules `not_assessed` with
   `signin_activity_unavailable`, as documented; they stopped at `collector_not_complete:identity`.
+- **Verdict logic follow-ups (focused verify).** An excluded group whose members were not read now counts as possibly
+  containing a principal another policy excludes by id: the MFA and legacy verdicts read `*_with_exclusions` (a
+  `possible` row) and the administrator verdict reads `unknown` (`administrator_exclusion_unresolved`) unless another
+  policy covers the administrator. `effective_mfa` credits a role-targeted MFA policy toward an administrator role an
+  all-users policy excludes (`covered_by_policy_ids`, `supplementary_policies`), so Cyber Essentials
+  `ce.uac.mfa_cloud_services` no longer fails when everyone is covered; `single_policy_verdict` keeps the CIS 5.2.2.2 and
+  SCuBA `MS.AAD.3.2v1` reading and the new rule `ca.mfa_split_across_policies` (low) fails those two controls. With the
+  administrator set incomplete, an excluded privileged role nobody is known to hold reads `unknown`
+  (`administrator_set_unknown`), not a high `not_enforced`, and a covering role policy's user exclusion is doubted
+  (`administrator_exclusion_unresolved`). Security defaults beside a Conditional Access policy with gaps list only
+  `security_defaults` in `basis`, so the Conditional Access benchmark controls stay `not_assessed`. Two block policies that
+  each name one legacy client type keep the verdict `not_blocked` with the reason `legacy_block_split_across_policies`
+  and `ca.legacy_auth_not_blocked` is medium.
 - **New rule.** `identity.service_principal_privileged_role` (high): a service principal that holds Global
   Administrator or Privileged Role Administrator, directly, PIM-eligible or through a role-assignable group. It maps
   to MCSB `PA-1`/`PA-7` and Zero Trust `identities`, lists `ce.uac.special_access_privileges` as supporting

@@ -48,6 +48,7 @@ _EXPECTED_CIS_V7 = {
     "ca.admin_mfa_role_set_incomplete",
     "ca.legacy_auth_not_blocked",
     "ca.mfa_not_enforced",
+    "ca.mfa_split_across_policies",
     "consent_policy.admin_consent_workflow_disabled",
     "consent_policy.user_consent_limited",
     "consent_policy.user_consent_unrestricted",
