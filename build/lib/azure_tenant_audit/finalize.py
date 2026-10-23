@@ -1,0 +1,331 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from .ai_context import build_ai_context, build_privacy_block, build_validation_report
+from .api_inventory import build_api_call_inventory
+from .assurance import build_coverage_gap_summary, build_live_readiness_summary, build_surface_coverage_map
+from .autopilot import build_audit_autopilot_plan
+from .bundle_integrity import BUNDLE_HASHES_PATH, build_bundle_hash_manifest
+from .citations import build_citation_summary, dedupe_citations
+from .contracts import CONTRACT_VERSION
+from .data_handling import build_data_handling_summary
+from .evidence_db import build_run_evidence_index
+from .evidence_refs import seal_findings
+from .output import AuditWriter
+from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
+from .tenant_identity import canonical_tenant_uuid, resolve_tenant_identity
+
+
+def seal_run_findings(writer: AuditWriter, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Resolve and hash every evidence reference of ``findings`` against the run directory.
+
+    Call it once the artifacts the findings cite are written and before the report pack is built,
+    so the proof table and the confidence of each finding come from what resolved. The sealed
+    findings replace ``findings/findings.json``.
+    """
+    if not findings:
+        return findings
+    manifest = getattr(writer, "_manifest", None)
+    created_utc = manifest.get("created_utc") if isinstance(manifest, dict) else None
+    sealed = seal_findings(writer.run_dir, findings, created_utc=created_utc)
+    writer.write_findings(sealed)
+    return sealed
+
+
+def _write_bundle_hash_manifest(writer: AuditWriter) -> None:
+    """Last step of finalization: the SHA-256 of every artifact as it now stands."""
+    manifest = writer._safe_load_json(writer.run_dir / "run-manifest.json")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    writer.write_json_artifact(
+        BUNDLE_HASHES_PATH,
+        build_bundle_hash_manifest(
+            writer.run_dir,
+            run_id=str(manifest.get("run_id") or writer.run_id),
+            created_utc=manifest.get("created_utc"),
+        ),
+    )
+
+
+def _append_report_evidence_path(writer: AuditWriter, relative_path: str) -> None:
+    report_path = writer.run_dir / "reports" / "report-pack.json"
+    try:
+        report_pack = writer._safe_load_json(report_path)
+    except AttributeError:
+        return
+    if not isinstance(report_pack, dict):
+        return
+    evidence_paths = report_pack.get("evidence_paths")
+    if not isinstance(evidence_paths, list):
+        return
+    if relative_path in evidence_paths:
+        return
+    report_pack["evidence_paths"] = [*evidence_paths, relative_path]
+    writer.write_report_pack(report_pack)
+
+
+def _auth_scopes_from_capabilities(capability_rows: list[dict[str, Any]]) -> list[str]:
+    scopes: set[str] = set()
+    for row in capability_rows:
+        if not isinstance(row, dict):
+            continue
+        for key in ("required_permissions", "observed_permissions"):
+            values = row.get(key)
+            if isinstance(values, list):
+                scopes.update(str(item) for item in values if str(item))
+    return sorted(scopes)
+
+
+def _collector_scope_catalog(platform: str) -> dict[str, dict[str, Any]]:
+    if platform == "google_workspace":
+        try:
+            return build_google_scope_catalog()
+        except Exception:  # noqa: BLE001
+            return {}
+    try:
+        return load_m365_scope_catalog()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _apply_audit_plan_to_report_pack(writer: AuditWriter, audit_plan: dict[str, Any]) -> None:
+    report_path = writer.run_dir / "reports" / "report-pack.json"
+    try:
+        report_pack = writer._safe_load_json(report_path)
+    except AttributeError:
+        return
+    if not isinstance(report_pack, dict):
+        return
+    summary = report_pack.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    quality_gate = audit_plan.get("quality_gate") if isinstance(audit_plan.get("quality_gate"), dict) else {}
+    summary["autopilot_quality"] = quality_gate
+    report_pack["summary"] = summary
+    report_pack["audit_plan"] = audit_plan
+    writer.write_report_pack(report_pack)
+
+
+def _apply_report_pack_citations(writer: AuditWriter, metadata: dict[str, Any]) -> None:
+    report_path = writer.run_dir / "reports" / "report-pack.json"
+    try:
+        report_pack = writer._safe_load_json(report_path)
+    except AttributeError:
+        return
+    if not isinstance(report_pack, dict):
+        return
+
+    rows: list[dict[str, str]] = []
+    for artifact_path in report_pack.get("evidence_paths") or []:
+        text = str(artifact_path or "").strip()
+        if text:
+            rows.append({"artifact_path": text, "reason": "Evidence artifact referenced by this report pack."})
+    for proof_row in report_pack.get("proof_table") or []:
+        if not isinstance(proof_row, dict):
+            continue
+        artifact_path = str(proof_row.get("artifact_path") or "").strip()
+        if not artifact_path:
+            continue
+        row: dict[str, str] = {
+            "artifact_path": artifact_path,
+            "reason": "Artifact referenced by proof row.",
+        }
+        record_key = str(proof_row.get("record_key") or "").strip()
+        json_pointer = str(proof_row.get("json_pointer") or "").strip()
+        if record_key:
+            row["record_key"] = record_key
+        if json_pointer:
+            row["json_pointer"] = json_pointer
+        rows.append(row)
+    for key, reason in (
+        ("data_handling_path", "Read-only and no-content-read declaration for this run."),
+        ("api_inventory_path", "Observed API call ledger for this run."),
+        ("audit_plan_path", "Evidence gates and blockers for this run."),
+        ("validation_path", "Bundle contract validation result."),
+    ):
+        text = str(metadata.get(key) or "").strip()
+        if text:
+            rows.append({"artifact_path": text, "reason": reason})
+
+    deduped = dedupe_citations(rows)
+    report_pack["citations"] = deduped
+    report_pack["citation_summary"] = build_citation_summary(deduped)
+    writer.write_report_pack(report_pack)
+
+
+def finalize_bundle_contract(
+    *,
+    writer: AuditWriter,
+    bundle_metadata: dict[str, Any],
+    run_metadata: dict[str, Any],
+    normalized_snapshot: dict[str, Any],
+    capability_rows: list[dict[str, Any]],
+    coverage_ledger: list[dict[str, Any]],
+    blockers: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Write the stable post-run contract artifacts through one path.
+
+    The manifest must exist before the evidence DB and validation can be checked against
+    it, so this function writes a suppressed manifest snapshot first, builds the DB,
+    writes ai_context/validation, then writes the final manifest.
+    """
+
+    privacy = bundle_metadata.get("privacy") or build_privacy_block(safe_for_external_llm=False)
+    metadata = dict(bundle_metadata)
+    platform = str(metadata.get("platform") or run_metadata.get("platform") or "m365")
+    requested = run_metadata.get("tenant_id_requested", metadata.get("tenant_id_requested"))
+    if "tenant_id_requested" not in run_metadata and "tenant_id_requested" not in metadata:
+        requested = run_metadata.get("tenant_id") or metadata.get("tenant_id")
+    identity_fields = resolve_tenant_identity(
+        writer.run_dir, platform=platform, requested=requested, metadata=metadata,
+        additional_requests=[("bundle_metadata.tenant_id", metadata.get("tenant_id")), ("run_metadata.tenant_id", run_metadata.get("tenant_id"))],
+    )
+    identity = identity_fields["tenant_identity"]
+    previous = writer._safe_load_json(writer.run_dir / "run-manifest.json") or {}
+    previous_id = canonical_tenant_uuid(previous.get("tenant_id")) if platform == "m365" else None
+    observed_ids = {row["tenant_id"] for row in identity["sources"]}
+    if previous_id and observed_ids and observed_ids != {previous_id}:
+        identity["conflicts"].append({"code": "existing_tenant_mismatch", "tenant_id": previous_id})
+    previous_identity = previous.get("tenant_identity") or {}
+    if previous_id and not observed_ids and isinstance(previous_identity, dict) and previous_identity.get("status") == "verified":
+        identity["conflicts"].append({"code": "existing_tenant_evidence_missing", "tenant_id": previous_id})
+    if isinstance(previous_identity, dict) and previous_identity.get("status") == "conflict":
+        for conflict in previous_identity.get("conflicts") or []:
+            if conflict not in identity["conflicts"]:
+                identity["conflicts"].append(conflict)
+    if identity["conflicts"]:
+        identity["status"] = "conflict"
+        identity["reason"] = "inconsistent_tenant_evidence"
+        identity_fields["tenant_id"] = None
+    metadata.update(identity_fields)
+    run_metadata = {**run_metadata, **identity_fields, "platform": platform}
+    selected_collectors = [str(item) for item in run_metadata.get("selected_collectors") or metadata.get("collectors") or [] if str(item)]
+    if not metadata.get("data_handling_path"):
+        data_handling_payload = build_data_handling_summary(
+            platform=str(metadata.get("platform") or run_metadata.get("platform") or "m365"),
+            mode=str(metadata.get("mode") or run_metadata.get("mode") or ""),
+            plane=str(metadata.get("plane") or run_metadata.get("plane") or ""),
+            collectors=selected_collectors,
+            auth_scopes=_auth_scopes_from_capabilities(capability_rows),
+            events=metadata.get("data_handling_events") if isinstance(metadata.get("data_handling_events"), list) else [],
+            response_execute=bool(metadata.get("response_execute")),
+            response_allow_write=bool(metadata.get("response_allow_write")),
+        )
+        data_handling_path = writer.write_json_artifact("data-handling.json", data_handling_payload)
+        metadata["data_handling_path"] = str(data_handling_path.relative_to(writer.run_dir))
+        _append_report_evidence_path(writer, metadata["data_handling_path"])
+    else:
+        data_handling_payload = writer._safe_load_json(writer.run_dir / str(metadata["data_handling_path"]))
+        if not isinstance(data_handling_payload, dict):
+            data_handling_payload = {}
+    if not metadata.get("live_readiness_path") and capability_rows and metadata.get("mode") != "offline":
+        live_readiness_path = writer.write_json_artifact(
+            "live-readiness.json",
+            build_live_readiness_summary(
+                selected_collectors=selected_collectors,
+                capability_rows=capability_rows,
+                dependency_available=True,
+            ),
+        )
+        metadata["live_readiness_path"] = str(live_readiness_path.relative_to(writer.run_dir))
+        _append_report_evidence_path(writer, metadata["live_readiness_path"])
+    collector_rows = [dict(row) for row in writer.summary.get("collectors", []) if isinstance(row, dict)]
+    coverage_rows = [dict(row) for row in writer.coverage if isinstance(row, dict)]
+    surface_coverage = build_surface_coverage_map(collector_rows=collector_rows, platform=platform, coverage_rows=coverage_rows)
+    computed_coverage_gaps = build_coverage_gap_summary(
+        surface_coverage=surface_coverage,
+        collector_rows=collector_rows,
+        coverage_rows=coverage_rows,
+    )
+    audit_plan = build_audit_autopilot_plan(
+        platform=platform,
+        selected_collectors=selected_collectors,
+        capability_rows=capability_rows,
+        coverage_gaps=computed_coverage_gaps,
+        blockers=blockers,
+        findings=findings,
+    )
+    audit_plan_path = writer.write_json_artifact("audit-plan.json", audit_plan)
+    metadata["audit_plan_path"] = str(audit_plan_path.relative_to(writer.run_dir))
+    metadata["autopilot_quality"] = audit_plan.get("quality_gate", {})
+    _append_report_evidence_path(writer, metadata["audit_plan_path"])
+    if not metadata.get("api_inventory_path"):
+        api_inventory_path = writer.write_json_artifact(
+            "api-inventory.json",
+            build_api_call_inventory(
+                platform=platform,
+                selected_collectors=selected_collectors,
+                capability_rows=capability_rows,
+                coverage_rows=[dict(row) for row in writer.coverage if isinstance(row, dict)] or coverage_ledger,
+                data_handling=data_handling_payload,
+                collector_catalog=_collector_scope_catalog(platform),
+            ),
+        )
+        metadata["api_inventory_path"] = str(api_inventory_path.relative_to(writer.run_dir))
+        _append_report_evidence_path(writer, metadata["api_inventory_path"])
+    metadata.update(
+        {
+            "privacy": privacy,
+            "ai_context_path": "ai_context.json",
+            "validation_path": "validation.json",
+            "evidence_db_path": "index/evidence.sqlite",
+            "schema_contract_version": CONTRACT_VERSION,
+        }
+    )
+    # Pre-register the artifacts finalize is about to create so the suppressed
+    # manifest write (and the evidence DB rebuild that reads it) sees the same
+    # artifacts list on the first finalize call as it does on a re-finalize of
+    # the same bundle. Without this the first call writes 22 artifacts and the
+    # second writes 25, breaking idempotent re-finalize.
+    for relative in ("index/evidence.sqlite", "ai_context.json", "validation.json", BUNDLE_HASHES_PATH):
+        writer.record_artifact(writer.run_dir / relative)
+
+    writer.write_bundle({**metadata, "_suppress_completion_log": True})
+    evidence_db_path = build_run_evidence_index(writer.run_dir)
+    writer.record_artifact(evidence_db_path)
+
+    ai_context = build_ai_context(
+        run_dir=writer.run_dir,
+        run_metadata=run_metadata,
+        normalized_snapshot=normalized_snapshot,
+        capability_rows=capability_rows,
+        coverage_ledger=coverage_ledger,
+        blockers=blockers,
+        findings=findings,
+    )
+    writer.write_json_artifact("ai_context.json", ai_context)
+    validation = build_validation_report(run_dir=writer.run_dir, ai_context=ai_context, findings=findings)
+    writer.write_json_artifact("validation.json", validation)
+    writer.log_event(
+        "contract.validation.passed" if validation.get("valid") else "contract.validation.failed",
+        "Bundle contract validation passed" if validation.get("valid") else "Bundle contract validation failed",
+        {
+            "contract_version": validation.get("contract_version"),
+            "valid": validation.get("valid"),
+            "issue_count": validation.get("issue_count", 0),
+            "error_count": validation.get("error_count", 0),
+        },
+    )
+
+    final_metadata = dict(metadata)
+    final_metadata["contract_status"] = "valid" if validation.get("valid") else "invalid"
+    final_metadata["contract_issue_count"] = validation.get("issue_count", 0)
+    writer.write_bundle(final_metadata)
+    _apply_audit_plan_to_report_pack(writer, audit_plan)
+    _apply_report_pack_citations(writer, metadata)
+
+    # Rebuild the evidence DB once the final manifest (with contract_status /
+    # contract_issue_count) is on disk so run_meta carries the final values.
+    # build_run_evidence_index is idempotent (DROP TABLE / CREATE TABLE on each
+    # call) so this second pass is safe and keeps re-finalise byte-stable.
+    build_run_evidence_index(writer.run_dir)
+    _write_bundle_hash_manifest(writer)
+
+    return {
+        "evidence_db_path": str(Path(evidence_db_path).relative_to(writer.run_dir)),
+        "ai_context_path": "ai_context.json",
+        "validation_path": "validation.json",
+        "validation": validation,
+    }

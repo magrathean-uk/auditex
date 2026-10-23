@@ -1,0 +1,660 @@
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Iterator, Mapping
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable
+
+from azure_tenant_audit.baselines import rule_inputs_gap, rule_judged_on_inputs, unmet_rule_collectors
+from azure_tenant_audit.bundle_integrity import integrity_failed, manifest_digest_problem, normalize_digest
+from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
+from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.rule_parameters import recorded_rule_parameters, rule_parameter_gap
+from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
+
+from .run_bundle import RunBundle
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _run_metadata(run_dir: Path, expected_digest: str | None = None) -> dict[str, Any]:
+    bundle = RunBundle(run_dir)
+    metadata = bundle.metadata()
+    metadata["_created_at"] = _parse_utc(metadata.get("created_utc"))
+    metadata["verification"] = run_verification(bundle, expected_digest)
+    return metadata
+
+
+def _expected_digests(run_dirs: list[Path], expected: Mapping[str, str] | None) -> list[str | None]:
+    """The expected ``bundle-hashes.json`` digest of each run, in order; a digest naming no compared run is an error.
+
+    A digest that silently matched nothing would leave its run unchecked, so it raises ``ValueError``.
+    """
+    if not expected:
+        return [None] * len(run_dirs)
+    resolved = [os.path.realpath(run_dir) for run_dir in run_dirs]
+    digests: list[str | None] = [None] * len(run_dirs)
+    for run_dir, digest in expected.items():
+        wanted = normalize_digest(digest)
+        key = os.path.realpath(run_dir)
+        if key not in resolved:
+            raise ValueError(f"an expected manifest digest names {run_dir}, which is not one of the runs being compared")
+        for position, candidate in enumerate(resolved):
+            if candidate == key:
+                digests[position] = wanted
+    return digests
+
+
+def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    platforms = [run.get("platform") or "m365" for run in runs]
+    same_platform = len(set(platforms)) <= 1
+    tenant_ids = [
+        (canonical_tenant_uuid(run.get("tenant_id")) or run.get("tenant_id"))
+        if platform == "m365" else (run.get("tenant_id") if run.get("tenant_id") != "my_customer" else None)
+        for run, platform in zip(runs, platforms)
+    ]
+    tenant_names = [run.get("tenant_name") for run in runs]
+    identities = [run.get("tenant_identity") or {} for run in runs]
+    verified = bool(runs) and all(identity.get("status") == "verified" for identity in identities)
+    context: dict[str, Any] = {
+        "same_tenant": False,
+        "same_platform": same_platform,
+        "gate": "same_tenant_required" if same_platform else "same_platform_required",
+        "tenant_key": None,
+        "platform_key": platforms[0] if same_platform and platforms else None,
+        "identity_basis": "unknown",
+        "identity_verified": verified,
+        "legacy_fallback": False,
+        "unknown_identity_count": sum(identity.get("status") != "verified" for identity in identities),
+    }
+    if any(identity.get("status") == "conflict" for identity in identities):
+        return {**context, "gate": "tenant_identity_conflict", "identity_basis": "conflict", "identity_verified": False}
+    established_uuids = {canonical_tenant_uuid(value) for value, platform in zip(tenant_ids, platforms) if platform == "m365"}
+    established_uuids.discard(None)
+    if same_platform and len(established_uuids) > 1:
+        return {**context, "gate": "tenant_id_mismatch", "identity_basis": "conflicting_tenant_ids", "identity_verified": False}
+
+    def matched(key: Any, basis: str, *, fallback: bool = False) -> dict[str, Any]:
+        return {
+            **context,
+            "same_tenant": True,
+            "gate": "same_tenant" if same_platform else "same_platform_required",
+            "tenant_key": key,
+            "identity_basis": basis,
+            "legacy_fallback": fallback,
+        }
+
+    if tenant_ids and all(tenant_ids) and len(set(tenant_ids)) == 1:
+        return matched(tenant_ids[0], "verified_tenant_id" if verified else "legacy_tenant_id", fallback=not verified)
+    # A display name is only a legacy fallback when known immutable IDs do not
+    # contradict each other. Different tenants can have the same display name.
+    known_tenant_ids = {tenant_id for tenant_id in tenant_ids if tenant_id}
+    domains = [str(run.get("workspace_domain") or identity.get("domain") or "").lower() for run, identity in zip(runs, identities)]
+    if len(known_tenant_ids) <= 1:
+        if len({domain for domain in domains if domain}) > 1:
+            return {**context, "identity_basis": "different_domain_aliases"}
+        if domains and all(domains) and len(set(domains)) == 1:
+            return matched(domains[0], "domain_alias", fallback=True)
+        if tenant_names and all(tenant_names) and len(set(tenant_names)) == 1:
+            return matched(tenant_names[0], "legacy_tenant_name", fallback=True)
+    return context
+
+
+def require_same_tenant_runs(run_dirs: Iterable[str | Path]) -> dict[str, Any]:
+    """Shared identity guard for finding-only consumers such as drift gates."""
+    context = _tenant_gate([RunBundle(run_dir).metadata() for run_dir in run_dirs])
+    if context["gate"] != "same_tenant":
+        raise ValueError(f"refusing to compare runs: {context['gate']}")
+    return context
+
+
+def _sort_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        list(runs),
+        key=lambda item: (
+            item.get("_created_at") is None,
+            item.get("_created_at") or datetime.max.replace(tzinfo=timezone.utc),
+            str(item.get("run_id") or item.get("path") or ""),
+        ),
+    )
+
+
+def _blocked_diff(left_run: dict[str, Any], right_run: dict[str, Any], reason: str) -> dict[str, Any]:
+    context = _tenant_gate([left_run, right_run])
+    return {
+        "left_run": _public_run(left_run),
+        "right_run": _public_run(right_run),
+        "status": "blocked",
+        "reason": reason,
+        "compare_context": {**context, "gate": reason},
+        "summary": {"added": 0, "removed": 0, "changed": 0, "object_kinds": 0},
+        "changes": {},
+        "compared_files": [],
+        "citations": [
+            {"artifact_path": "run-manifest.json", "reason": "Run identity and compare gate for blocked comparison."}
+        ],
+        "citation_summary": build_citation_summary(
+            [{"artifact_path": "run-manifest.json", "reason": "Run identity and compare gate for blocked comparison."}]
+        ),
+        "evidence_missing": [],
+    }
+
+
+def _public_run(run: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(run)
+    payload.pop("_created_at", None)
+    return payload
+
+
+def _compare_pair(
+    left_run: dict[str, Any],
+    right_run: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    allow_cross_tenant: bool,
+    classic: bool,
+) -> dict[str, Any]:
+    if (left_run.get("platform") or "m365") != (right_run.get("platform") or "m365"):
+        return _blocked_diff(left_run, right_run, "same_platform_required")
+    if context["gate"] in {"tenant_identity_conflict", "tenant_id_mismatch"}:
+        return _blocked_diff(left_run, right_run, context["gate"])
+    same_tenant = context["same_tenant"]
+    if not same_tenant and not allow_cross_tenant:
+        return _blocked_diff(left_run, right_run, "same_tenant_required")
+    for side, run in (("baseline", left_run), ("current", right_run)):
+        problem = (run.get("verification") or {}).get("problem")
+        if problem:
+            # A run whose hash manifest or recorded contract fails is not the bundle that was finalized.
+            return _blocked_diff(left_run, right_run, f"run_unverified:{side}:{problem}")
+    diff = diff_run_directories(left_run["path"], right_run["path"], classic=classic)
+    diff["left_run"] = _public_run(left_run)
+    diff["right_run"] = _public_run(right_run)
+    diff["status"] = "ok"
+    diff["reason"] = None
+    diff["compare_context"] = {
+        **context,
+        "same_tenant": same_tenant,
+        "same_platform": True,
+        "gate": "same_tenant" if same_tenant else "allow_cross_tenant",
+        "tenant_name": left_run.get("tenant_name"),
+        "tenant_id": left_run.get("tenant_id"),
+        "platform": left_run.get("platform") or "m365",
+    }
+    return diff
+
+
+def compare_run_directories(
+    run_dirs: Iterable[str | Path],
+    *,
+    allow_cross_tenant: bool = False,
+    classic: bool = False,
+    expect_manifest_sha256: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Compare the runs in time order.
+
+    ``expect_manifest_sha256`` maps a run directory to the SHA-256 of its ``bundle-hashes.json``, received
+    separately. A run whose manifest has another digest, or none, is unverified
+    (``expected_manifest_sha256_mismatch``) and no comparison involving it calls a finding resolved.
+    """
+    paths = [Path(run_dir) for run_dir in run_dirs]
+    digests = _expected_digests(paths, expect_manifest_sha256)
+    runs = [_run_metadata(path, digest) for path, digest in zip(paths, digests)]
+    ordered_runs = _sort_runs(runs)
+    compare_context = _tenant_gate(ordered_runs)
+    ordered_runs_public = [_public_run(run) for run in ordered_runs]
+
+    timeline: list[dict[str, Any]] = []
+    for position, run in enumerate(ordered_runs_public):
+        timeline.append(
+            {
+                "position": position,
+                **run,
+            }
+        )
+
+    adjacent_diffs: list[dict[str, Any]] = []
+    for left_run, right_run in zip(ordered_runs, ordered_runs[1:]):
+        adjacent_diffs.append(
+            _compare_pair(left_run, right_run, compare_context, allow_cross_tenant=allow_cross_tenant, classic=classic)
+        )
+
+    if len(ordered_runs) >= 2:
+        baseline_diff = _compare_pair(
+            ordered_runs[0],
+            ordered_runs[-1],
+            compare_context,
+            allow_cross_tenant=allow_cross_tenant,
+            classic=classic,
+        )
+    else:
+        baseline_diff = _blocked_diff(
+            ordered_runs[0] if ordered_runs else {},
+            ordered_runs[0] if ordered_runs else {},
+            "needs_at_least_two_runs",
+        )
+
+    citations = dedupe_citations(
+        [{"artifact_path": "run-manifest.json", "reason": "Run identity and ordering for compared runs."}]
+        + [
+            dict(row)
+            for diff in [*adjacent_diffs, baseline_diff]
+            for row in diff.get("citations") or []
+            if isinstance(row, dict)
+        ]
+    )
+    evidence_missing = sorted(
+        {
+            str(item)
+            for diff in [*adjacent_diffs, baseline_diff]
+            for item in diff.get("evidence_missing") or []
+            if str(item)
+        }
+    )
+
+    return {
+        "runs": ordered_runs_public,
+        "timeline": timeline,
+        "adjacent_diffs": adjacent_diffs,
+        "baseline_diff": baseline_diff,
+        "compare_context": compare_context,
+        "classic": classic,
+        "citations": citations,
+        "citation_summary": build_citation_summary(citations),
+        "evidence_missing": evidence_missing,
+    }
+
+
+def compare_runs(
+    run_dirs: Iterable[str | Path],
+    *,
+    allow_cross_tenant: bool = False,
+    classic: bool = False,
+    expect_manifest_sha256: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    return compare_run_directories(
+        run_dirs,
+        allow_cross_tenant=allow_cross_tenant,
+        classic=classic,
+        expect_manifest_sha256=expect_manifest_sha256,
+    )
+
+
+_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+
+
+def _severity(row: dict[str, Any]) -> str:
+    text = str(row.get("severity") or row.get("risk_rating") or "info").strip().lower()
+    return text if text in _SEVERITY_ORDER else "info"
+
+
+def _finding_key(row: dict[str, Any]) -> str:
+    return str(row.get("id") or f"{row.get('rule_id')}:{','.join(str(item) for item in row.get('affected_objects') or [])}")
+
+
+def _risk_snapshot(run: dict[str, Any], findings: list[dict[str, Any]]) -> dict[str, Any]:
+    risk = run.get("risk") if isinstance(run.get("risk"), dict) else {}
+    if risk.get("grade") is not None:
+        return {"grade": risk.get("grade"), "score": risk.get("score")}
+    from azure_tenant_audit.findings import build_risk_rollup
+
+    rollup = build_risk_rollup(findings)
+    return {"grade": rollup.get("grade"), "score": rollup.get("score")}
+
+
+class NormalizedSections(Mapping[str, Any]):
+    """The sections of a run's ``normalized/`` folder, each read the first time it is asked for.
+
+    Baseline alignment judges a rule from these sections (verdicts, the administrator set, sign-in
+    data), so comparing two runs reads the later run the same way. A section the run did not write
+    is absent, which a rule that needs it reports as an input gap.
+    """
+
+    def __init__(self, bundle: RunBundle) -> None:
+        self._bundle = bundle
+        self._cache: dict[str, Any] = {}
+
+    def __getitem__(self, name: str) -> Any:
+        if name not in self._cache:
+            value: Any = None
+            path = self._bundle.path(f"normalized/{name}.json")
+            if path.is_file():
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    value = None
+            self._cache[name] = value
+        if self._cache[name] is None:
+            raise KeyError(name)
+        return self._cache[name]
+
+    def __iter__(self) -> Iterator[str]:
+        folder = self._bundle.path("normalized")
+        return iter(sorted(path.stem for path in folder.glob("*.json"))) if folder.is_dir() else iter(())
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+# Google Workspace rules whose verdict also needs collectors beyond the finding's own, and the snapshot
+# status that decides whether the evidence was there. The Microsoft 365 rule maps in baselines.py know no
+# ``google.*`` rule, so a Google finding that vanished because its inputs went unknown would read resolved.
+_GOOGLE_TWO_STEP_COLLECTORS = ("google_directory", "google_policies")
+_GOOGLE_EXTERNAL_PRINCIPAL_RULES = frozenset(
+    {
+        "google.group_external_member",
+        "google.gmail_external_forwarding",
+        "google.gmail_external_forwarding_address_ready",
+        "google.gmail_filter_external_forwarding",
+        "google.gmail_hidden_forwarding_filter",
+        "google.gmail_external_send_as",
+        "google.gmail_external_delegate",
+        "google.drive_external_permission",
+        "google.drive_domain_permission",
+        "google.calendar_external_acl",
+        "google.calendar_domain_acl",
+    }
+)
+
+
+def _snapshot_value(snapshot: Mapping[str, Any] | None, key: str) -> Any:
+    if snapshot is None:
+        return None
+    try:
+        section = snapshot["snapshot"]
+    except KeyError:
+        return None
+    return section.get(key) if isinstance(section, Mapping) else None
+
+
+def google_reassessment_gap(
+    rule_id: str, coverage: Mapping[str, Mapping[str, Any]], snapshot: Mapping[str, Any] | None
+) -> str | None:
+    """Why a vanished Google Workspace finding cannot be called resolved, or ``None``.
+
+    The 2-step verification rules read the organisation policy (``google_policies`` placed with the
+    ``google_directory`` org units): both collectors must have completed and the policy status must be
+    known. The external-principal rules do not run when the internal domains are unknown. Without the
+    later run's snapshot a rule with an input check is not reassessed.
+    """
+    if "_2sv_" in rule_id:
+        for name in _GOOGLE_TWO_STEP_COLLECTORS:
+            row = coverage.get(name)
+            if row is None:
+                return f"rule_collector_not_run:{name}"
+            if not row["complete"]:
+                return f"rule_collector_{row['status']}:{name}"
+        status = _snapshot_value(snapshot, "two_step_policy_status")
+        if status is None:
+            return "rule_inputs:two_step_policy_not_collected"
+        if str(status) == "unknown":
+            return "rule_inputs:two_step_policy_unknown"
+    elif rule_id in _GOOGLE_EXTERNAL_PRINCIPAL_RULES:
+        row = coverage.get("google_directory")
+        if row is None:
+            return "rule_collector_not_run:google_directory"
+        if not row["complete"]:
+            return f"rule_collector_{row['status']}:google_directory"
+        status = _snapshot_value(snapshot, "internal_domains_status")
+        if status is None:
+            return "rule_inputs:internal_domains_not_collected"
+        if str(status) == "unknown":
+            return "rule_inputs:internal_domains_unknown"
+    return None
+
+
+def reassessment_gap(
+    finding: dict[str, Any],
+    coverage: dict[str, dict[str, Any]],
+    snapshot: Mapping[str, Any] | None = None,
+    *,
+    parameters: tuple[Mapping[str, Any] | None, Mapping[str, Any] | None] | None = None,
+) -> str | None:
+    """Why a finding that is gone from a later run cannot be called resolved, or ``None``.
+
+    A finding is only resolved when its own collector and every collector its rule reads
+    completed in the later run, and the inputs its rule needs were known there. If any collector
+    was blocked, partial, not run, or unknown, the finding was not reassessed: a rule that reads
+    role assignments cannot be judged without them. The same goes for a rule whose inputs went
+    unknown in the later run (an administrator set or an MFA verdict that could not be established):
+    its finding vanished because the evidence did, not because the problem was fixed. ``snapshot``
+    is the later run's normalized sections; without it, a rule that has an input check is not
+    reassessed. ``parameters`` is the (baseline, later) pair of ``rule_parameters`` the two runs
+    recorded: a rule judged with a larger window in the later run, or whose window one of the runs did
+    not record, cannot be called resolved.
+    """
+    collector = str(finding.get("collector") or "")
+    if not collector:
+        return "collector_unknown"
+    row = coverage.get(collector)
+    if row is None:
+        return "collector_not_run"
+    rule_id = str(finding.get("rule_id") or "")
+    # A rule judged on its own input rows (the Exchange mail protection rules) is reassessed whenever those rows were
+    # read, even if another command of its collector was not available; its input check below decides.
+    if not row["complete"] and not rule_judged_on_inputs(rule_id):
+        return f"collector_{row['status']}"
+    if not rule_id:
+        return None
+    unmet = unmet_rule_collectors(
+        rule_id,
+        complete={name for name, item in coverage.items() if item["complete"]},
+        not_applicable={name for name, item in coverage.items() if item["status"] == "not_applicable"},
+    )
+    if unmet:
+        status = coverage[unmet[0]]["status"] if unmet[0] in coverage else "not_run"
+        return f"rule_collector_{status}:{unmet[0]}"
+    inputs = rule_inputs_gap(rule_id, snapshot)
+    if inputs:
+        return f"rule_inputs:{inputs}"
+    if rule_id.startswith("google."):
+        google_gap = google_reassessment_gap(rule_id, coverage, snapshot)
+        if google_gap:
+            return google_gap
+    if parameters is not None:
+        return rule_parameter_gap(rule_id, parameters[0], parameters[1])
+    return None
+
+
+def run_verification(bundle: RunBundle, expected_digest: str | None = None) -> dict[str, Any]:
+    """Whether a run is the bundle that was finalized: its hash manifest and its recorded contract.
+
+    ``problem`` is ``expected_manifest_sha256_mismatch`` (the manifest is not the one the caller was sent the
+    digest of, or is missing), ``bundle_integrity_mismatch``, ``bundle_integrity_invalid`` or
+    ``contract_invalid`` when the run cannot be trusted as written, else ``None``. A bundle finalized before
+    the hash manifest existed reads ``absent`` (unverified, not a problem); one finalized under the contract
+    that writes it and found without it is ``invalid``. Comparison does not recompute the structural
+    validation; ``auditex gate-drift`` does.
+    """
+    integrity = bundle.integrity()
+    _, validation = bundle.validation()
+    recorded_invalid = isinstance(validation, Mapping) and validation.get("valid") is False
+    problem: str | None = None
+    digest_problem = manifest_digest_problem(integrity, expected_digest)
+    if digest_problem:
+        problem = "expected_manifest_sha256_mismatch"
+    elif integrity_failed(integrity):
+        problem = f"bundle_integrity_{integrity.get('status')}"
+    elif recorded_invalid or bundle.manifest().get("contract_status") == "invalid":
+        problem = "contract_invalid"
+    result: dict[str, Any] = {"integrity": integrity.get("status"), "problem": problem}
+    if expected_digest:
+        result["expected_manifest_sha256"] = normalize_digest(expected_digest)
+        result["expected_manifest_sha256_matched"] = digest_problem is None
+    return result
+
+
+def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
+    """Summarise findings that are new, resolved, not reassessed, or changed between two runs.
+
+    A finding that is absent from the later run is ``resolved`` only if its collector
+    completed there, its rule's inputs were known and it was judged with the same or a stricter
+    window; otherwise it is ``not_reassessed`` with a ``reason``. When either run fails
+    ``run_verification`` (its hash manifest or recorded contract), no finding is called resolved.
+    """
+    left_bundle = RunBundle(Path(str(left_run.get("path")))) if left_run.get("path") else None
+    left_rows = left_bundle.finding_rows() if left_bundle else []
+    right_bundle = RunBundle(Path(str(right_run.get("path")))) if right_run.get("path") else None
+    right_rows = right_bundle.finding_rows() if right_bundle else []
+    verification = {
+        # A run that came out of ``compare_runs`` already carries its verification (with any expected digest).
+        "baseline": left_run.get("verification")
+        or (run_verification(left_bundle) if left_bundle else {"integrity": None, "problem": None}),
+        "current": right_run.get("verification")
+        or (run_verification(right_bundle) if right_bundle else {"integrity": None, "problem": None}),
+    }
+    unverified = next(
+        (f"run_unverified:{side}:{item['problem']}" for side, item in verification.items() if item["problem"]), None
+    )
+    parameters = (
+        recorded_rule_parameters(left_bundle.manifest()) if left_bundle else None,
+        recorded_rule_parameters(right_bundle.manifest()) if right_bundle else None,
+    )
+    right_coverage = right_bundle.collector_coverage() if right_bundle else {}
+    right_sections = NormalizedSections(right_bundle) if right_bundle else None
+    left = {_finding_key(row): row for row in left_rows}
+    right = {_finding_key(row): row for row in right_rows}
+
+    def _summary(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row.get("id"),
+            "rule_id": row.get("rule_id"),
+            "severity": _severity(row),
+            "status": row.get("status"),
+            "title": row.get("title"),
+        }
+
+    new = [_summary(right[key]) for key in sorted(set(right) - set(left))]
+    resolved: list[dict[str, Any]] = []
+    not_reassessed: list[dict[str, Any]] = []
+    for key in sorted(set(left) - set(right)):
+        gap = unverified or reassessment_gap(left[key], right_coverage, right_sections, parameters=parameters)
+        if gap is None:
+            resolved.append(_summary(left[key]))
+        else:
+            not_reassessed.append({**_summary(left[key]), "reason": gap})
+    changed: list[dict[str, Any]] = []
+    for key in sorted(set(left) & set(right)):
+        before, after = left[key], right[key]
+        if _severity(before) != _severity(after) or str(before.get("status") or "") != str(after.get("status") or ""):
+            changed.append(
+                {
+                    **_summary(after),
+                    "severity_before": _severity(before),
+                    "status_before": before.get("status"),
+                }
+            )
+    return {
+        "new": new,
+        "resolved": resolved,
+        "not_reassessed": not_reassessed,
+        "changed": changed,
+        "verification": verification,
+        "risk_before": _risk_snapshot(left_run, left_rows),
+        "risk_after": _risk_snapshot(right_run, right_rows),
+    }
+
+
+def _md(value: Any) -> str:
+    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _severity_counts(rows: list[dict[str, Any]]) -> str:
+    counts = {severity: 0 for severity in _SEVERITY_ORDER}
+    for row in rows:
+        counts[_severity(row)] += 1
+    parts = [f"{severity} {count}" for severity, count in counts.items() if count]
+    return ", ".join(parts) if parts else "none"
+
+
+def _finding_table(title: str, rows: list[dict[str, Any]], *, changed: bool = False, reason: bool = False) -> list[str]:
+    lines = [f"## {title} ({len(rows)})", ""]
+    if not rows:
+        return lines + ["None.", ""]
+    ordered = sorted(rows, key=lambda row: (_SEVERITY_ORDER.index(_severity(row)), str(row.get("id") or "")))
+    if reason:
+        lines += ["| Severity | Finding | Rule | Reason |", "| --- | --- | --- | --- |"]
+        for row in ordered:
+            lines.append(
+                f"| {_md(row.get('severity'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} | {_md(row.get('reason'))} |"
+            )
+    elif changed:
+        lines += ["| Severity | Was | Status | Was | Finding | Rule |", "| --- | --- | --- | --- | --- | --- |"]
+        for row in ordered:
+            lines.append(
+                f"| {_md(row.get('severity'))} | {_md(row.get('severity_before'))} | {_md(row.get('status'))} | "
+                f"{_md(row.get('status_before'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} |"
+            )
+    else:
+        lines += ["| Severity | Finding | Rule |", "| --- | --- | --- |"]
+        for row in ordered:
+            lines.append(f"| {_md(row.get('severity'))} | {_md(row.get('title') or row.get('id'))} | {_md(row.get('rule_id'))} |")
+    return lines + [""]
+
+
+def _verification_text(verification: Mapping[str, Mapping[str, Any]]) -> str:
+    parts = []
+    for side in ("baseline", "current"):
+        item = verification.get(side) or {}
+        state = item.get("problem") or f"hash manifest {item.get('integrity') or 'unknown'}"
+        parts.append(f"{side} {state}")
+    text = "; ".join(parts)
+    if any((verification.get(side) or {}).get("problem") for side in ("baseline", "current")):
+        text += " (no finding is called resolved)"
+    return text
+
+
+def render_compare_markdown(result: dict[str, Any]) -> str:
+    """Render a readable before/after summary of the baseline (first vs last) comparison."""
+    runs = [row for row in result.get("runs") or [] if isinstance(row, dict)]
+    baseline = result.get("baseline_diff") if isinstance(result.get("baseline_diff"), dict) else {}
+    context = result.get("compare_context") if isinstance(result.get("compare_context"), dict) else {}
+    lines = ["# Auditex Run Comparison", ""]
+    if len(runs) < 2:
+        return "\n".join(lines + ["At least two runs are needed for a comparison.", ""])
+    before, after = runs[0], runs[-1]
+    lines += [
+        f"- Tenant: {_md(context.get('tenant_key') or before.get('tenant_name') or before.get('tenant_id'))}",
+        f"- Before: {_md(before.get('run_id') or before.get('path'))} ({_md(before.get('created_utc'))})",
+        f"- After: {_md(after.get('run_id') or after.get('path'))} ({_md(after.get('created_utc'))})",
+        f"- Runs compared: {len(runs)}",
+        f"- Tenant identity: {_md(context.get('identity_basis', 'unknown'))} (verified: {str(bool(context.get('identity_verified'))).lower()})",
+    ]
+    if baseline.get("status") == "blocked":
+        lines += [f"- Status: blocked ({_md(baseline.get('reason'))})", ""]
+        return "\n".join(lines)
+    delta = build_finding_delta(before, after)
+    risk_before, risk_after = delta["risk_before"], delta["risk_after"]
+    grade_before, grade_after = risk_before.get("grade") or "unknown", risk_after.get("grade") or "unknown"
+    risk_change = "unchanged" if grade_before == grade_after else f"{grade_before} -> {grade_after}"
+    summary = baseline.get("summary") if isinstance(baseline.get("summary"), dict) else {}
+    lines += [
+        f"- Risk grade: {_md(grade_before)} -> {_md(grade_after)} ({_md(risk_change)}; score {_md(risk_before.get('score'))} -> {_md(risk_after.get('score'))})",
+        f"- New findings: {len(delta['new'])} ({_severity_counts(delta['new'])})",
+        f"- Resolved findings: {len(delta['resolved'])} ({_severity_counts(delta['resolved'])})",
+        f"- Not reassessed findings: {len(delta['not_reassessed'])} ({_severity_counts(delta['not_reassessed'])})",
+        f"- Changed findings: {len(delta['changed'])} ({_severity_counts(delta['changed'])})",
+        f"- Object changes: {_md(summary.get('added', 0))} added, {_md(summary.get('removed', 0))} removed, {_md(summary.get('changed', 0))} changed",
+        "- Run verification: " + _md(_verification_text(delta["verification"])),
+        "",
+    ]
+    lines += _finding_table("New findings", delta["new"])
+    lines += _finding_table("Resolved findings", delta["resolved"])
+    lines += _finding_table("Not reassessed findings (collector did not complete in the later run)", delta["not_reassessed"], reason=True)
+    lines += _finding_table("Changed findings", delta["changed"], changed=True)
+    return "\n".join(lines)

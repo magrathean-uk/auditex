@@ -7,6 +7,10 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.2.0] - 2026-10-23
+
 ### Bundle compatibility
 
 - **Contract version.** `CONTRACT_VERSION` is `2026-10-22` (was `2026-10-20`). Evidence is now
@@ -745,5 +749,7 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/magrathean-uk/auditex/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/magrathean-uk/auditex/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/magrathean-uk/auditex/releases/tag/v1.0.0

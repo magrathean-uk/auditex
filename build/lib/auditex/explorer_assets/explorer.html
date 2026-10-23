@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>__TITLE__</title>
+<style>
+__STYLE__
+</style>
+</head>
+<body>
+<div id="ax-root" data-ax="">
+<a class="ax-skip" href="#ax-main">Skip to content</a>
+<header class="ax-header">
+<div class="ax-header-in">
+<div class="ax-brand">__LOGO__<span class="ax-brand-name">Auditex</span><span class="ax-brand-sub">Run explorer</span></div>
+<span class="ax-hdr-div" aria-hidden="true"></span>
+<div class="ax-tenant"><span class="ax-tenant-name" id="ax-tenant-name"></span><span class="ax-tenant-sub" id="ax-tenant-sub"></span></div>
+<div class="ax-hdr-tools" data-noprint="">
+<label class="ax-run-label"><span>Run</span><select id="ax-run" class="ax-run-select"></select></label>
+<span class="ax-ro-chip" title="Auditex never writes to the tenant" id="ax-ro-chip">Read-only</span>
+<button type="button" class="ax-icon-btn" id="ax-theme"></button>
+<button type="button" class="ax-print-btn" id="ax-print">Handoff PDF</button>
+</div>
+</div>
+</header>
+<div class="ax-guarantees"><ul aria-label="Run guarantees" id="ax-guarantees"></ul></div>
+<div id="ax-banners"></div>
+<div class="ax-body" id="ax-body">
+<nav aria-label="Explorer sections" data-noprint="" class="ax-nav" id="ax-nav">
+<div class="ax-nav-in">
+<ul class="ax-nav-list">
+<li><button type="button" data-view="overview"><span class="ax-l">Overview</span><span class="ax-s">Overview</span><span class="ax-c"></span></button></li>
+<li><button type="button" data-view="findings"><span class="ax-l">Findings</span><span class="ax-s">Findings</span><span class="ax-c"></span></button></li>
+<li><button type="button" data-view="paths"><span class="ax-l">Attack paths</span><span class="ax-s">Paths</span><span class="ax-c"></span></button></li>
+<li><button type="button" data-view="detection"><span class="ax-l">Detection</span><span class="ax-s">Detection</span><span class="ax-c"></span></button></li>
+<li><button type="button" data-view="baselines"><span class="ax-l">Baselines</span><span class="ax-s">Baselines</span><span class="ax-c"></span></button></li>
+<li><button type="button" data-view="access"><span class="ax-l">Access &amp; data handling</span><span class="ax-s">Access</span><span class="ax-c"></span></button></li>
+<li><button type="button" data-view="compare"><span class="ax-l">Before / after</span><span class="ax-s">Compare</span><span class="ax-c"></span></button></li>
+</ul>
+<dl class="ax-nav-meta" id="ax-nav-meta"></dl>
+</div>
+</nav>
+<main id="ax-main" tabindex="-1" class="ax-main">
+<section id="ax-cover" class="ax-cover" hidden></section>
+<section id="view-overview" data-view-section="overview" aria-labelledby="h-overview"></section>
+<section id="view-findings" data-view-section="findings" aria-labelledby="h-findings" data-print-break="" hidden></section>
+<section id="view-paths" data-view-section="paths" aria-labelledby="h-paths" data-print-break="" hidden></section>
+<section id="view-detection" data-view-section="detection" aria-labelledby="h-detection" data-print-break="" hidden></section>
+<section id="view-baselines" data-view-section="baselines" aria-labelledby="h-baselines" data-print-break="" hidden></section>
+<section id="view-access" data-view-section="access" aria-labelledby="h-access" data-print-break="" hidden></section>
+<section id="view-compare" data-view-section="compare" aria-labelledby="h-compare" data-print-break="" hidden></section>
+<noscript><p class="ax-noscript">This explorer needs JavaScript. The same evidence is in the run folder: findings/findings.json and reports/report-pack.json.</p></noscript>
+<footer class="ax-footer"><span id="ax-footer-version"></span><span>Contains tenant evidence. Share it the way you would share the run folder.</span></footer>
+</main>
+</div>
+</div>
+<svg id="ax-svgns" width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute"></svg>
+<script id="data" type="application/json">__DATA__</script>
+<script>__SCRIPT__</script>
+</body>
+</html>
