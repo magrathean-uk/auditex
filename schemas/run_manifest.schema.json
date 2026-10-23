@@ -144,6 +144,21 @@
     },
     "schema_contract_version": {
       "type": "string"
+    },
+    "rule_parameters": {
+      "type": "object",
+      "description": "The windows and lists the run's rules were judged with: stale_sync_days, stale_guest_days, stale_account_days (Microsoft 365), stale_user_days, stale_device_days (Google Workspace) and break_glass_accounts (the emergency-access list the Conditional Access verdicts exempted). Run comparison and the gates read them back.",
+      "properties": {
+        "break_glass_accounts": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "replay_source": {
+      "type": "object",
+      "description": "Offline replays only: the sample the evidence was replayed from. No tenant was contacted.",
+      "properties": {
+        "file": { "type": "string", "description": "The sample's file name, never its directory." },
+        "sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
     }
   }
 }

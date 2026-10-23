@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -60,10 +61,21 @@ def _build_root_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def compare_runs(run_dirs: list[str], *, allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, object]:
+def compare_runs(
+    run_dirs: list[str],
+    *,
+    allow_cross_tenant: bool = False,
+    classic: bool = False,
+    expect_manifest_sha256: dict[str, str] | None = None,
+) -> dict[str, object]:
     from .compare import compare_runs as _compare_runs
 
-    return _compare_runs(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)
+    return _compare_runs(
+        run_dirs,
+        allow_cross_tenant=allow_cross_tenant,
+        classic=classic,
+        expect_manifest_sha256=expect_manifest_sha256,
+    )
 
 
 def render_report(
@@ -471,6 +483,15 @@ def _build_compare_parser() -> argparse.ArgumentParser:
         default="json",
         help="Output format: json (default) or md for a readable before/after summary.",
     )
+    parser.add_argument(
+        "--expect-manifest-sha256",
+        action="append",
+        default=[],
+        metavar="RUN_DIR=DIGEST",
+        help=_EXPECT_MANIFEST_HELP
+        + " Repeat it, once per run: the run directory as given to --run-dir, then '=' and the digest. "
+        "A run that fails it is unverified and no finding of a comparison with it is called resolved.",
+    )
     return parser
 
 
@@ -563,10 +584,14 @@ def _build_export_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def gate_findings(*, run_dir: str, fail_on: str, allow_partial: bool = False) -> dict[str, object]:
+def gate_findings(
+    *, run_dir: str, fail_on: str, allow_partial: bool = False, expect_manifest_sha256: str | None = None
+) -> dict[str, object]:
     from .gate import gate_findings as _gate_findings
 
-    return _gate_findings(run_dir=run_dir, fail_on=fail_on, allow_partial=allow_partial)
+    return _gate_findings(
+        run_dir=run_dir, fail_on=fail_on, allow_partial=allow_partial, expect_manifest_sha256=expect_manifest_sha256
+    )
 
 
 def _build_model_parser() -> argparse.ArgumentParser:
@@ -643,6 +668,48 @@ _ALLOW_PARTIAL_HELP = (
 )
 
 
+_EXPECT_MANIFEST_HELP = (
+    "SHA-256 of the run's bundle-hashes.json, received through a separate channel (shasum -a 256 <run>/bundle-hashes.json "
+    "taken when the run was written). The hash manifest is unsigned and a bundle can be rewritten with it; a run whose "
+    "manifest has another digest, or none, is blocked."
+)
+
+
+def _parse_expected_digests(
+    parser: argparse.ArgumentParser, values: list[str], run_dirs: list[str]
+) -> dict[str, str]:
+    """``--expect-manifest-sha256`` values as ``{run directory as given: digest}``.
+
+    A value is ``RUN_DIR=DIGEST``; a bare digest is accepted only when one run is named. A malformed digest, a
+    run that is not part of the command and two digests for one run are usage errors (exit status 2), never
+    a check that quietly does not run.
+    """
+    from azure_tenant_audit.bundle_integrity import normalize_digest
+
+    resolved = {os.path.realpath(run_dir): run_dir for run_dir in run_dirs}
+    expected: dict[str, str] = {}
+    for value in values:
+        path, separator, digest = value.rpartition("=")
+        if not separator or not path:
+            path, digest = "", value
+        try:
+            wanted = normalize_digest(digest)
+        except ValueError as exc:
+            parser.error(f"--expect-manifest-sha256 {value!r}: {exc}")
+        if path:
+            run_dir = resolved.get(os.path.realpath(path))
+            if run_dir is None:
+                parser.error(f"--expect-manifest-sha256 names {path}, which is not one of the runs given")
+        elif len(run_dirs) == 1:
+            run_dir = run_dirs[0]
+        else:
+            parser.error("--expect-manifest-sha256 needs RUN_DIR=DIGEST when more than one run is given")
+        if run_dir in expected and expected[run_dir] != wanted:
+            parser.error(f"--expect-manifest-sha256 gives two different digests for {run_dir}")
+        expected[run_dir] = wanted
+    return expected
+
+
 def _emit_gate_result(command: str, result: dict[str, object]) -> int:
     print(json.dumps(result, indent=2))
     for message in result.get("warnings") or []:
@@ -662,11 +729,24 @@ def _build_gate_parser() -> argparse.ArgumentParser:
         help="Minimum severity that triggers a non-zero exit code.",
     )
     parser.add_argument("--allow-partial", action="store_true", help=_ALLOW_PARTIAL_HELP)
+    parser.add_argument(
+        "--expect-manifest-sha256",
+        action="append",
+        default=[],
+        metavar="DIGEST",
+        help=_EXPECT_MANIFEST_HELP + " One digest, for the run being gated.",
+    )
     return parser
 
 
 def gate_drift(
-    *, baseline_run_dir: str, current_run_dir: str, fail_on: str, allow_partial: bool = False
+    *,
+    baseline_run_dir: str,
+    current_run_dir: str,
+    fail_on: str,
+    allow_partial: bool = False,
+    expect_baseline_manifest_sha256: str | None = None,
+    expect_current_manifest_sha256: str | None = None,
 ) -> dict[str, object]:
     from .gate import gate_drift as _gate_drift
 
@@ -675,6 +755,8 @@ def gate_drift(
         current_run_dir=current_run_dir,
         fail_on=fail_on,
         allow_partial=allow_partial,
+        expect_baseline_manifest_sha256=expect_baseline_manifest_sha256,
+        expect_current_manifest_sha256=expect_current_manifest_sha256,
     )
 
 
@@ -692,6 +774,13 @@ def _build_gate_drift_parser() -> argparse.ArgumentParser:
         help="Minimum severity for a NEW finding that triggers a non-zero exit code.",
     )
     parser.add_argument("--allow-partial", action="store_true", help=_ALLOW_PARTIAL_HELP)
+    parser.add_argument(
+        "--expect-manifest-sha256",
+        action="append",
+        default=[],
+        metavar="RUN_DIR=DIGEST",
+        help=_EXPECT_MANIFEST_HELP + " Repeat it, once per run: --baseline's directory or --current's, then '=' and the digest.",
+    )
     return parser
 
 
@@ -860,7 +949,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "compare":
         parser = _build_compare_parser()
         args = parser.parse_args(argv[1:])
-        result = compare_runs(args.run_dirs, allow_cross_tenant=args.allow_cross_tenant, classic=args.classic)
+        expected_digests = _parse_expected_digests(parser, args.expect_manifest_sha256, args.run_dirs)
+        result = compare_runs(
+            args.run_dirs,
+            allow_cross_tenant=args.allow_cross_tenant,
+            classic=args.classic,
+            **({"expect_manifest_sha256": expected_digests} if expected_digests else {}),
+        )
         if args.format == "md":
             from .compare import render_compare_markdown
 
@@ -1106,12 +1201,20 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "gate":
         parser = _build_gate_parser()
         args = parser.parse_args(argv[1:])
+        expected = _parse_expected_digests(parser, args.expect_manifest_sha256, [args.run_dir])
         return _emit_gate_result(
-            "gate", gate_findings(run_dir=args.run_dir, fail_on=args.fail_on, allow_partial=args.allow_partial)
+            "gate",
+            gate_findings(
+                run_dir=args.run_dir,
+                fail_on=args.fail_on,
+                allow_partial=args.allow_partial,
+                expect_manifest_sha256=expected.get(args.run_dir),
+            ),
         )
     if argv[0] == "gate-drift":
         parser = _build_gate_drift_parser()
         args = parser.parse_args(argv[1:])
+        expected = _parse_expected_digests(parser, args.expect_manifest_sha256, [args.baseline, args.current])
         return _emit_gate_result(
             "gate-drift",
             gate_drift(
@@ -1119,6 +1222,8 @@ def main(argv: list[str] | None = None) -> int:
                 current_run_dir=args.current,
                 fail_on=args.fail_on,
                 allow_partial=args.allow_partial,
+                expect_baseline_manifest_sha256=expected.get(args.baseline),
+                expect_current_manifest_sha256=expected.get(args.current),
             ),
         )
     if argv[0] == "run":

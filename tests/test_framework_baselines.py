@@ -45,6 +45,7 @@ _EXPECTED_CIS_V7 = {
     "app_consent.high_privilege",
     "app_credentials.secret_long_validity",
     "ca.admin_mfa_not_enforced",
+    "ca.admin_mfa_role_set_incomplete",
     "ca.legacy_auth_not_blocked",
     "ca.mfa_not_enforced",
     "consent_policy.admin_consent_workflow_disabled",

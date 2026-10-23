@@ -582,6 +582,7 @@ def test_verdict_rule_controls_match_the_rules_the_findings_engine_raises() -> N
         "ca.mfa_not_enforced",
         "ca.admin_mfa_not_enforced",
         "ca.admin_phishing_resistant_mfa_not_enforced",
+        "ca.admin_mfa_role_set_incomplete",
         "ca.legacy_auth_not_blocked",
         "consent_policy.user_consent_unrestricted",
         "consent_policy.user_consent_limited",

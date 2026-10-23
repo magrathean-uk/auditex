@@ -80,7 +80,7 @@ auditex export list
 auditex notify send <run-dir> --sink teams
 ```
 
-Comparison suppresses selected volatile timestamp changes by default; `--classic` retains them. `gate` and `gate-drift` fail closed: a missing, empty or invalid run, a contract that does not validate when recomputed, or partial coverage exits non-zero unless `--allow-partial` is given (see the product manual). Notifications are previews unless `--execute` is supplied. Sending is an external action that needs an authorized destination and reviewed content.
+Comparison suppresses selected volatile timestamp changes by default; `--classic` retains them. `gate` and `gate-drift` fail closed: a missing, empty or invalid run, a contract that does not validate when recomputed, or partial coverage exits non-zero unless `--allow-partial` is given (see the product manual). `--expect-manifest-sha256` (`<run-dir>=<digest>` per run for `gate-drift` and `compare`) pins each run to the SHA-256 of its `bundle-hashes.json` taken when it was written; see the output contract, "Expected manifest digest". Notifications are previews unless `--execute` is supplied. Sending is an external action that needs an authorized destination and reviewed content.
 
 ## Development and release checks
 

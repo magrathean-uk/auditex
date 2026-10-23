@@ -160,6 +160,24 @@ def has_matching_waiver(finding: Mapping[str, Any]) -> bool:
     return isinstance(waiver, Mapping) and _match_score(finding, waiver) > 0
 
 
+def waiver_expiry(finding: Mapping[str, Any]) -> date | None:
+    """The date the waiver a finding carries expires on, or ``None`` when it has no waiver or no valid expiry."""
+    waiver = finding.get("waiver")
+    return _parse_expiry_date(waiver) if isinstance(waiver, Mapping) else None
+
+
+def has_expired_waiver(finding: Mapping[str, Any], *, today: date | None = None) -> bool:
+    """Whether the waiver a finding carries has passed its ``expires_on`` date.
+
+    An expired waiver accepts nothing: ``apply_waivers`` never matches one, so a finding that still claims an
+    accepted or closed status on it was waived when the waiver stood and is open again now, whatever the
+    status value says (``accepted_risk``, ``accepted``, ``waived``, ``closed`` or ``resolved``). A waiver
+    with no expiry never expires.
+    """
+    expiry = waiver_expiry(finding)
+    return expiry is not None and expiry < (today or date.today())
+
+
 def accepted_risk_summary(
     findings: list[dict[str, Any]],
     *,

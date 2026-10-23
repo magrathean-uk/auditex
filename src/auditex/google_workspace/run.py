@@ -12,7 +12,7 @@ from azure_tenant_audit.assurance import build_live_readiness_summary
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
-from azure_tenant_audit.offline_replay import replay_collector_status, replay_coverage_rows
+from azure_tenant_audit.offline_replay import replay_collector_status, replay_coverage_rows, replay_source
 from azure_tenant_audit.output import AuditWriter
 from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from azure_tenant_audit.resources import resolve_resource_path
@@ -357,6 +357,7 @@ def _write_google_bundle(
     auth_context_path: Path | None = None,
     command_line: list[str] | None = None,
     waiver_rows: list[dict[str, Any]] | None = None,
+    replay: dict[str, Any] | None = None,
 ) -> int:
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
@@ -453,6 +454,7 @@ def _write_google_bundle(
                 "rule_parameters": google_rule_parameters(
                     stale_user_days=config.stale_user_days, stale_device_days=config.stale_device_days
                 ),
+                "replay_source": replay,
                 "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
                 "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
             },
@@ -507,7 +509,11 @@ def run_google_offline(
         stale_device_days=stale_device_days,
     )
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
-    writer.log_event("run.started", "Google Workspace offline run started", {"platform": "google_workspace", "sample": str(target)})
+    writer.log_event(
+        "run.started",
+        "Google Workspace offline run started",
+        {"mode": "offline", "platform": "google_workspace", "sample": str(target)},
+    )
     collector_payloads = {
         str(key): value
         for key, value in sample.items()
@@ -558,6 +564,7 @@ def run_google_offline(
         mode="offline",
         command_line=[],
         waiver_rows=waiver_rows,
+        replay=replay_source(target),
     )
 
 

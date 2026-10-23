@@ -132,6 +132,7 @@ def test_a_link_in_a_bundle_without_a_hash_manifest_is_still_a_mismatch(bundle: 
     (bundle / BUNDLE_HASHES_PATH).unlink()
     manifest = _json(bundle / "run-manifest.json")
     manifest["artifacts"].remove(BUNDLE_HASHES_PATH)
+    manifest["schema_contract_version"] = "2026-10-20"  # finalized before the hash manifest existed
     (bundle / "run-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert verify_bundle_hashes(bundle)["status"] == "absent"
     outside = tmp_path / "outside.json"
@@ -221,15 +222,16 @@ def test_the_pack_copy_never_follows_a_link_or_copies_a_file_the_manifest_does_n
     linked = _copy_source_artifact(bundle, root, "live-readiness.json", "p", listed)
     through_a_link_in_the_run = _copy_source_artifact(bundle, root, "data-handling.json", "p", listed)
     unlisted = _copy_source_artifact(bundle, root, "data-handling.moved", "p", listed)
-    plain = _copy_source_artifact(bundle, root, "run-manifest.json", "p", listed)
+    plain = _copy_source_artifact(bundle, root, "summary.json", "p", listed)
     missing = _copy_source_artifact(bundle, root, "no-such-file.json", "p", listed)
 
     assert linked["present"] is False and linked["skipped_reason"] == "symbolic_link"
     assert through_a_link_in_the_run["present"] is False and through_a_link_in_the_run["skipped_reason"] == "symbolic_link"
     assert unlisted["present"] is False and unlisted["skipped_reason"] == "not_in_bundle_hashes"
-    assert plain["present"] is True and Path(plain["path"]).read_bytes() == (bundle / "run-manifest.json").read_bytes()
+    assert plain["present"] is True and Path(plain["path"]).read_bytes() == (bundle / "summary.json").read_bytes()
+    assert "transformed" not in plain
     assert missing["present"] is False and "skipped_reason" not in missing
-    assert sorted(path.name for path in root.rglob("*") if path.is_file()) == ["run-manifest.json"]
+    assert sorted(path.name for path in root.rglob("*") if path.is_file()) == ["summary.json"]
 
 
 # --- verify-pack (findings: copied bundle-hashes.json ignored, extra files ignored, absolute local paths) -----------------
@@ -463,40 +465,72 @@ def test_a_declared_only_inventory_says_it_is_declared_not_observed() -> None:
     assert "No transport ledger in this bundle" in text
 
 
-def test_the_handoff_and_pack_state_the_basis_of_the_read_only_flag(bundle: Path, tmp_path: Path) -> None:
+def test_the_handoff_and_pack_of_a_replay_say_it_was_replayed_and_never_claim_transport_observation(
+    bundle: Path, tmp_path: Path
+) -> None:
+    """The demo bundle is an offline replay of a saved sample: no tenant was contacted, so no call was observed."""
     pack = _write_pack(bundle, tmp_path)
     handoff = _json(pack / "handoff.json")
 
-    assert handoff["safety"]["observation_basis"] == "transport_audit_log"
+    assert handoff["safety"]["observation_basis"] == "offline_replay"
+    assert handoff["safety"]["replay_source"] == "demo_tenant.json"
     counts = handoff["counts"]
     assert counts["declared_calls"] == counts["api_calls"]
     assert {"observed_graph_requests", "observed_commands", "observed_outside_declared"} <= set(counts)
+    for name in ("README.md", "handoff.md", "api-calls.md", "report.md"):
+        text = (pack / name).read_text(encoding="utf-8")
+        assert "Read-only: True (replayed from demo_tenant.json, no tenant contact)" in text, name
+        assert "No content reads: True (replayed from demo_tenant.json, no tenant contact)" in text, name
+        assert "observed in the transport audit log" not in text, name
+        assert not re.search(r"(Read-only|No content reads): True(?! \()", text), name
     for name in ("README.md", "handoff.md", "api-calls.md"):
         text = (pack / name).read_text(encoding="utf-8")
-        assert "Read-only: True (observed in the transport audit log)" in text, name
-        assert not re.search(r"Read-only: True(?! \()", text), name
         assert "Declared calls:" in text and "- API calls:" not in text, name
-    assert "## Observed calls (transport ledger)" in (pack / "api-calls.md").read_text(encoding="utf-8")
+        assert "Observed Graph requests" not in text, name
+        assert "Observed calls: none (replayed from demo_tenant.json, no tenant contact" in text, name
+    assert "- Observation basis: offline_replay" in (pack / "handoff.md").read_text(encoding="utf-8")
+    api = (pack / "api-calls.md").read_text(encoding="utf-8")
+    assert "## Observed calls (transport ledger)" in api and "No transport ledger applies" in api
+    assert "Graph requests attempted" not in api
     report = (pack / "report.md").read_text(encoding="utf-8")  # report.md nests the ledger under its API Calls section
     assert not re.search(r"^## Observed calls", report, re.MULTILINE)
     assert re.search(r"^### Observed calls \(transport ledger\)", report, re.MULTILINE)
     assert "every observed API call" not in (pack / "README.md").read_text(encoding="utf-8")
+    assert "transport audit log recorded no" not in " ".join(row["message"] for row in handoff["limitations"])
 
 
-def test_a_google_pack_does_not_present_a_declaration_as_an_observed_fact(google_bundle: Path, tmp_path: Path) -> None:
+def test_a_google_replay_pack_says_it_was_replayed_not_observed_or_merely_declared(google_bundle: Path, tmp_path: Path) -> None:
     pack = _write_pack(google_bundle, tmp_path)
     inventory = _json(google_bundle / "api-inventory.json")
-    assert inventory["safety"]["observation_basis"] == "coverage_ledger_only"
+    assert inventory["safety"]["observation_basis"] == "offline_replay"
+    assert inventory["safety"]["replay_source"] == "google_workspace_sample.json"
 
     for name in ("README.md", "handoff.md", "api-calls.md", "report.md"):
         text = (pack / name).read_text(encoding="utf-8")
-        assert "Read-only: True (declared, not observed)" in text, name
-        assert "No content reads: True (declared, not observed)" in text, name
+        assert "Read-only: True (replayed from google_workspace_sample.json, no tenant contact)" in text, name
+        assert "No content reads: True (replayed from google_workspace_sample.json, no tenant contact)" in text, name
         assert not re.search(r"(Read-only|No content reads): True(?! \()", text), name
+        assert "observed in the transport audit log" not in text, name
     handoff = (pack / "handoff.md").read_text(encoding="utf-8")
     assert "Auditex still stayed read-only" not in handoff
-    assert "was not observed for this run" in handoff
-    assert _json(pack / "handoff.json")["safety"]["observation_basis"] == "coverage_ledger_only"
+    assert "nothing was observed about calls to a tenant" in handoff
+    assert _json(pack / "handoff.json")["safety"]["observation_basis"] == "offline_replay"
+
+
+def test_a_live_run_keeps_the_transport_wording_and_a_declared_run_keeps_the_declared_wording() -> None:
+    live = {
+        "handoff_status": "ready",
+        "safety": {"read_only": True, "no_content_reads": True, "observation_basis": "transport_audit_log"},
+        "counts": {"declared_calls": 3, "observed_graph_requests": 7, "observed_commands": 0, "observed_outside_declared": 0},
+    }
+    declared = {**live, "safety": {"read_only": True, "no_content_reads": True, "observation_basis": "coverage_ledger_only"}}
+
+    live_text = render_enterprise_handoff_markdown(live)
+    declared_text = render_enterprise_handoff_markdown(declared)
+
+    assert "- Read-only: True (observed in the transport audit log)" in live_text
+    assert "- Observed Graph requests: 7" in live_text and "replayed" not in live_text
+    assert "- Read-only: True (declared, not observed)" in declared_text and "replayed" not in declared_text
 
 
 def test_the_scope_risk_limitation_claims_read_only_only_when_it_was_observed() -> None:
@@ -620,6 +654,7 @@ def test_the_private_writer_tightens_an_existing_file_and_never_writes_through_a
 def test_the_handoff_markdown_names_the_basis_next_to_the_flags(bundle: Path) -> None:
     text = render_enterprise_handoff_markdown(enterprise_handoff(bundle))
 
-    assert "- Read-only: True (observed in the transport audit log)" in text
-    assert "- Observation basis: transport_audit_log" in text
-    assert "- Declared calls:" in text and "- Observed Graph requests:" in text
+    assert "- Read-only: True (replayed from demo_tenant.json, no tenant contact)" in text
+    assert "- Observation basis: offline_replay" in text
+    assert "- Declared calls:" in text and "- Observed calls: none (replayed from demo_tenant.json, no tenant contact)" in text
+    assert "Observed Graph requests" not in text

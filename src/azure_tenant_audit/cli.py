@@ -29,7 +29,7 @@ from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient
 from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
-from .offline_replay import replay_collector_status, replay_coverage_rows
+from .offline_replay import replay_collector_status, replay_coverage_rows, replay_source
 from .output import AuditWriter
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
@@ -362,7 +362,10 @@ def run_offline(
                 "command_line": [],
                 "coverage_count": len(coverage_rows),
                 "platform": "m365",
-                "rule_parameters": effective_rule_parameters(stale_sync_days=stale_sync_days),
+                "rule_parameters": effective_rule_parameters(
+                    stale_sync_days=stale_sync_days, break_glass_accounts=break_glass_accounts
+                ),
+                "replay_source": replay_source(sample_path),
             },
         ),
     )
@@ -860,7 +863,9 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
                 "preflight_path": preflight_path,
                 "top_limit": normalize_collection_limit(run_cfg.top_items, default=None),
                 "platform": "m365",
-                "rule_parameters": effective_rule_parameters(stale_sync_days=getattr(args, "stale_sync_days", None)),
+                "rule_parameters": effective_rule_parameters(
+                    stale_sync_days=getattr(args, "stale_sync_days", None), break_glass_accounts=break_glass_list
+                ),
             },
         ),
     )

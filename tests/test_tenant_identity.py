@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -204,8 +205,10 @@ def test_stale_or_mislabeled_metadata_is_rejected_in_contract_and_comparison(tmp
     run = _bundle(tmp_path / "run")
     other_run = _bundle(tmp_path / "other")
     if artifact.endswith("sqlite"):
-        with sqlite3.connect(run / artifact) as conn:
+        # Closed, so the edit is in the index file itself (a sidecar beside a hashed index is never read).
+        with closing(sqlite3.connect(run / artifact)) as conn:
             conn.execute("UPDATE run_meta SET value = ? WHERE key = 'tenant_id'", (OTHER,))
+            conn.commit()
     else:
         payload = _read(run / artifact)
         target = payload[section] if section else payload

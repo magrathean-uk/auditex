@@ -285,6 +285,58 @@ or per-policy break-glass finding ids must read the tenant-level ones.
 - **Demo.** The remediated demo tenant turns user consent off (it limited it, which no longer reads
   restricted), and its emergency-group exclusions read "with exclusions" because the demo lists no
   `--break-glass-accounts`.
+- **Emergency-access list is read against the full lists (third CE+ review).** The MFA and legacy-authentication
+  verdicts resolved `--break-glass-accounts` against the 20-row inline sample while the Conditional Access graph
+  read the chunk files, so on a tenant with more than 20 users an account listed by user principal name, display
+  name or group name was ignored and the verdicts read `enforced_with_exclusions` or `not_enforced` (a false high
+  `ca.admin_mfa_not_enforced`). The accounts are now resolved once, against the full user and group lists, and
+  both the break-glass check and every verdict use that resolution. An entry matches an object ID, user principal
+  name, mail or display name; a display name that two accounts share is `ambiguous_display_name`. An entry that
+  matches nothing is recorded as unresolved, never dropped: `break_glass_assessment` gains
+  `unresolved_account_details` and `unverified_accounts` (object IDs not in the directory read, still honoured), the
+  verdict records gain `unresolved_operator_accounts`, and `ca.mfa_not_enforced`, `ca.admin_mfa_not_enforced`,
+  `ca.legacy_auth_not_blocked` and `ca.break_glass_exclusion_missing` name them.
+- **Security defaults and the benchmark controls.** Security defaults still read `enforced` and `blocked` (Cyber
+  Essentials, Zero Trust and Secure Score keep treating them as enforcement), but CIS `5.2.2.1` to `5.2.2.3` and
+  SCuBA `MS.AAD.3.2v1` and `MS.AAD.1.1v1` audit a Conditional Access policy and passed on security defaults alone.
+  Baseline alignment now reads them `not_assessed` with `conditional_access_policy_required:basis_security_defaults`
+  until a qualifying policy backs the verdict (`_verdict_basis_requirements` in `configs/control-mappings.json`).
+- **A country block is not the legacy-authentication block.** A policy now counts only when it names both legacy
+  client app types (`exchangeActiveSync` and `other`, as ScubaGear and the CIS audit require) and no location
+  condition limits it. A block of every client type that exempts the trusted countries (`all`, locations excluded)
+  read `blocked` and passed CIS `5.2.2.3`, SCuBA `MS.AAD.1.1v1` and `BlockLegacyAuthentication`; it is now a near miss
+  (`legacy_client_app_types_not_targeted`, `excludes_locations`, `narrowed_by_location`). A legacy block that exempts
+  a network is a near miss too.
+- **Administrator MFA is judged per administrator, across every enabled policy.** An all-users policy that excludes
+  the Global Administrator role, plus a policy that includes it, read `not_enforced` (a false high finding and a
+  failing Cyber Essentials row) whenever the second policy did not reach every administrator. A role policy that
+  reaches only some roles now covers the administrators it reaches (`supplementary_policies`), role policies that
+  each reach some administrators cover them together, and when only a policy that cannot be verified could cover an
+  excluded administrator the verdict is `unknown` (`authentication_strength_unverified`,
+  `administrator_exclusion_unresolved`) instead of `not_enforced`.
+- **Exclusions are compared by person.** A user excluded by id from one qualifying policy, through a
+  role-assignable group the run read from a second and through an administrator role they hold from a third was
+  outside every policy and still read `enforced`. The three verdicts now add such principals to
+  `excluded_principals` as `user` rows with the route each policy takes (`via`), so CIS `5.2.2.1`/`5.2.2.2`/`5.2.2.3`
+  and SCuBA `MS.AAD.3.2v1`/`MS.AAD.1.1v1` no longer pass on them.
+- **Administrator MFA must cover the benchmark role lists.** A policy for the roles held today, or an all-users policy
+  that excludes a role nobody holds, passed CIS `5.2.2.1` and SCuBA `MS.AAD.3.6v1`. `administrator_mfa` gains
+  `role_catalog_verdict` (the CIS 5.2.2.1 list: 15 roles by template id) and
+  `phishing_resistant_role_catalog_verdict` (ScubaGear's 8 default privileged roles) with the uncovered roles; the
+  verdict itself, which Cyber Essentials and Secure Score `AdminMFAV2` read, still reads the roles held today. New
+  rule `ca.admin_mfa_role_set_incomplete` (medium; CIS `5.2.2.1`) fails the first, and
+  `ca.admin_phishing_resistant_mfa_not_enforced` is also raised for the second.
+- **Administrator scope reads the full role definitions.** The scope was built from the 20-row inline sample of raw
+  role definitions, so only Global Administrator and three template-id roles were privileged and an excluded held
+  role such as Security Administrator read `enforced_with_exclusions` (medium) when the administrator set was
+  unknown. It is built from the normalized definitions read in full, and the collector now selects `directoryScopeId`
+  on role assignments, which the Bundle fields entry above already claimed.
+- **Sign-in reason.** A licence-limited identity run now reads the three sign-in rules `not_assessed` with
+  `signin_activity_unavailable`, as documented; they stopped at `collector_not_complete:identity`.
+- **New rule.** `identity.service_principal_privileged_role` (high): a service principal that holds Global
+  Administrator or Privileged Role Administrator, directly, PIM-eligible or through a role-assignable group. It maps
+  to MCSB `PA-1`/`PA-7` and Zero Trust `identities`, lists `ce.uac.special_access_privileges` as supporting
+  evidence, and reads `not_assessed` while the administrator set is `unknown`.
 
 ### Google Workspace
 
@@ -324,13 +376,17 @@ Upgrade notes (all in `auditex google`):
 
 Contract notes. These are additive to `2026-10-22`, which is unreleased, so the contract version is unchanged:
 the validation codes `unwaived_accepted_status` (error) and `unknown_finding_status` (warning), the manifest key
-`rule_parameters`, the gate codes `bundle_integrity_mismatch`, `bundle_integrity_invalid` and
-`bundle_integrity_absent`, the truncation reason `pagination_not_followed`, the rule input reason
+`rule_parameters` (with the emergency-access list `break_glass_accounts`), the manifest key `replay_source`, the gate
+codes `bundle_integrity_mismatch`, `bundle_integrity_invalid`, `bundle_integrity_absent`,
+`expected_manifest_sha256_mismatch` and `expected_manifest_sha256_invalid`, the truncation reason `pagination_not_followed`, the rule input reason
 `bounded_sample:<collector>.<list>`, the normalized section `bounded_samples`, the `update_management_summary`
 fields `update_profiles_gap` and `profiles_with_unknown_assignments`, the `forwarding_address` field of mailbox
 forwarding records, `graph.redirects` and `graph.redirects_refused` in the observed ledger, coverage rows of an
 offline replay, and the `verify-pack` issue codes and options listed below. Changed behaviour a pipeline may
-notice: the legacy cut-off for unresolved references is the fixed version `2026-10-22` and not the current
+notice: a bundle finalized under `2026-10-22` and found without `bundle-hashes.json` is `invalid` (handoff
+`unusable`, no pack), an accepted or closed status on an expired waiver counts as open, a report written into a run
+makes the handoff `ready_with_limitations`, an offline replay no longer says its flags were observed in a transport
+log, and `source-artifacts/run-manifest.json` in a pack has local paths made pack-relative; the legacy cut-off for unresolved references is the fixed version `2026-10-22` and not the current
 `CONTRACT_VERSION`; an operator `--top` below the list length now also cuts `secureScoreControlProfiles`,
 `secureScores`, `subscribedSkus` and `domains` (below about 250 it makes `defender` partial); a DNS resolver failure
 makes the `dns_posture` collector and the run partial; the mailbox forwarding command text and the eDiscovery
@@ -381,6 +437,45 @@ command spellings in `configs/collector-definitions.json` changed; packs use pac
   links, prints `digests`, and takes `--expect-manifest-sha256` and `--expect-checksums-sha256` (also on the MCP
   tool). Packs carry pack-relative paths and no absolute path of the operator's machine, and a non-empty output
   directory with no earlier pack is refused.
+- **Fixed: `verify-pack` skipped its source-artifact check when the pack claimed the run was not verified.** A pack
+  whose copied `reports/report-pack.json` was rewritten, with its manifest and `handoff.json` edited to say the run's
+  integrity was `absent`, passed with the genuine `--expect-manifest-sha256`. The copied `bundle-hashes.json` is now
+  checked whenever the pack carries it, over every listed file under `source-artifacts/` found by where it sits
+  (`source_integrity_status_inconsistent` when the pack claims anything but `verified`), and a current-contract pack
+  with no copy is `missing_bundle_hashes`.
+- **Fixed: a planted SQLite sidecar was excluded from hashing but replayed by every consumer.** A `-wal` file beside
+  `index/evidence.sqlite` changed the run id, dates and section counts that `compare`, the gates and the handoff read
+  (and could reverse a comparison) while integrity read `verified`. A sidecar beside the hashed index is now an
+  `unexpected` file (mismatch); the index is read with SQLite `mode=ro&immutable=1`, which neither replays nor creates
+  a sidecar and opens on read-only media; read-only validation copies the hashed file alone. `excluded[].reason`
+  `sqlite_sidecar` is no longer written. A bundle no hash manifest covers is read as before.
+- **Fixed: the emergency-access list was an unrecorded rule input.** Listing the excluded staff group in a later run
+  made the MFA findings `resolved`. `rule_parameters.break_glass_accounts` records the list, and a vanished finding of
+  a Conditional Access rule (`ca.*`) is `not_reassessed` (`rule_parameters_changed:break_glass_accounts`, or `..._unrecorded:...`)
+  unless both runs used the same list.
+- **Fixed: an offline replay claimed "Read-only: True (observed in the transport audit log)".** A replay has no tenant
+  traffic. Handoff, pack and `api-calls` say `replayed from <file>, no tenant contact`, the basis is `offline_replay`
+  (`api-inventory.json` `safety.observation_basis`, `observed_ledger.basis`), and `run-manifest.json` records
+  `replay_source` (file name and SHA-256). Older replay bundles read the same way from `mode: offline`.
+- **Fixed: a current-contract bundle stripped of `bundle-hashes.json` was "from before the manifest existed" to the
+  handoff.** It is `invalid` (`manifest_missing`), the handoff is `unusable` and `customer-pack` refuses it; only a
+  bundle finalized under an older contract is `absent`. The gates keep the code `bundle_integrity_absent`.
+- **Fixed: an expired waiver left a `closed` or `resolved` finding closed.** `accepted_risk` on the same waiver failed
+  the gate; `closed` passed silently. An expired waiver now reopens every accepted or closed status in `gate` and
+  `gate-drift` (`expired_waiver_status_count`; `reason` `stale_accepted_risk` or `expired_waiver`), reported once.
+- **Added: `--expect-manifest-sha256` on `gate`, `gate-drift` and `compare`.** The absent-manifest block rests on the
+  contract version in the bundle, which can be rewritten with the manifest; the SHA-256 of `bundle-hashes.json`
+  received separately cannot. A run with another digest, or none, is blocked first (`expected_manifest_sha256_mismatch`;
+  `compare` reads `run_unverified:...` and resolves nothing). `gate-drift` and `compare` take `<run-dir>=<digest>` per
+  run. See the output contract, "Expected manifest digest". The MCP compare tool does not take it yet.
+- **Fixed: a pack carried the operator's absolute path in `source-artifacts/run-manifest.json`.** The copy has `run_dir`
+  set to the run folder name, paths below the run run-relative and other absolute paths reduced to
+  `<local-path>/<name>`. Its pack-manifest row has `transformed: "pack_relative_paths"` and `source_sha256` (the digest
+  the run's `bundle-hashes.json` lists); `verify-pack` accepts it on that basis, and only `checksums.sha256` binds the copy.
+- **Fixed: reports written into a run after it was finalized were unhashed and raised no limitation.** The explorer
+  page, `rendered-report.*` and `reports/handoff.md` are readable by an assessor. They stay out of
+  `bundle-hashes.json` (adding them would change the digest after it was handed over); the handoff lists them as the
+  limitation `unhashed_outputs` and never copies them into a pack.
 - **Fixed: handoff, report and pack presented the declared call rows as "Observed calls" and an unqualified
   "Read-only: True".** They render the transport ledger ("Observed calls (transport ledger)"), label the declared
   figure "Declared calls", print the observation basis next to Read-only and No content reads, and never claim

@@ -148,7 +148,7 @@ The finding is unsupported for customer handoff. Add or fix `evidence_refs` in t
 
 ### Customer pack refused: the run changed since it was finalized
 
-`auditex report customer-pack` exits with status 2 when files in the run directory no longer match `bundle-hashes.json` (or the file was deleted), or when the bundle no longer validates. `auditex report handoff <run-dir> --format json` shows `handoff_status: unusable` with `status_reasons`, and lists the files under `integrity.modified_paths` and `integrity.missing_paths`. Restore the original files or rerun the audit; see the [customer handoff guide](customer-handoff-guide.md).
+`auditex report customer-pack` exits with status 2 when files in the run directory no longer match `bundle-hashes.json` (or the file was deleted, or a SQLite sidecar was planted beside `index/evidence.sqlite`), or when the bundle no longer validates. `auditex report handoff <run-dir> --format json` shows `handoff_status: unusable` with `status_reasons`, and lists the files under `integrity.modified_paths` and `integrity.missing_paths`. Restore the original files or rerun the audit; see the [customer handoff guide](customer-handoff-guide.md).
 
 ### Customer pack verification fails
 

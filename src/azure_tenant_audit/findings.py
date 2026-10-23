@@ -1311,6 +1311,76 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
     return findings
 
 
+# Directory roles a workload identity should never hold: each one lets the holder take over the tenant (Global
+# Administrator) or give itself or anything else any role (Privileged Role Administrator). By role template id.
+_SERVICE_PRINCIPAL_TENANT_ROLES = {
+    "62e90394-69f5-4237-9190-012177145e10": "Global Administrator",
+    "e8611ab8-c189-46e8-94e1-60213ab1f814": "Privileged Role Administrator",
+}
+
+
+def _build_service_principal_role_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """One finding per service principal that holds Global Administrator or Privileged Role Administrator.
+
+    The effective administrator set lists a service principal that holds a role (directly, as a PIM-eligible
+    assignment, or through a role-assignable group) with ``counted: false``: it is not a person, so no user count
+    includes it. Baseline alignment reads the rule ``not_assessed`` when the set is ``unknown``.
+    """
+    _summary, rows = _effective_admins(normalized_snapshot)
+    service_principals = {
+        str(item.get("id")).lower(): item
+        for item in ((normalized_snapshot.get("service_principals") or {}).get("records") or [])
+        if item.get("id")
+    }
+    findings: list[dict[str, Any]] = []
+    for row in sorted(rows, key=lambda item: str(item.get("principal_id") or "")):
+        if row.get("principal_type") != "service_principal" or not row.get("principal_id"):
+            continue
+        held = [
+            role for role in row.get("roles") or [] if str(role.get("role_definition_id") or "").lower() in _SERVICE_PRINCIPAL_TENANT_ROLES
+        ]
+        if not held:
+            continue
+        principal_id = str(row["principal_id"])
+        record = service_principals.get(principal_id.lower()) or {}
+        roles = [
+            {
+                "role": _SERVICE_PRINCIPAL_TENANT_ROLES[str(role["role_definition_id"]).lower()],
+                **{key: role[key] for key in ("route", "group_id", "scope") if role.get(key)},
+            }
+            for role in held
+        ]
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": f"identity:service_principal_privileged_role:{principal_id}",
+                    "rule_id": "identity.service_principal_privileged_role",
+                    "severity": "high",
+                    "category": "identity",
+                    "title": "Service principal holds a tenant-wide administrator role",
+                    "status": "open",
+                    "collector": "identity",
+                    "affected_objects": [row.get("display_name") or principal_id],
+                    "evidence": {
+                        "principal_id": principal_id,
+                        "app_id": record.get("app_id"),
+                        "service_principal_type": record.get("service_principal_type"),
+                        "enabled": row.get("enabled"),
+                        "roles": roles,
+                        "routes": row.get("routes") or [],
+                    },
+                    "returned_value": {"principal_id": principal_id, "roles": roles},
+                    "evidence_refs": [
+                        *_admin_row_refs(row, held),
+                        *(_normalized_evidence_refs("service_principals", record, "identity") if record else []),
+                    ],
+                    **_metadata_for("identity.service_principal_privileged_role"),
+                }
+            )
+        )
+    return findings
+
+
 _ADMIN_ASSIGNMENT_LABELS = {_ADMIN_ROUTE_DIRECT: "active", _ADMIN_ROUTE_ELIGIBLE: "eligible", _ADMIN_ROUTE_GROUP: "group"}
 
 
@@ -1503,6 +1573,37 @@ def _exclusion_text(rows: list[dict[str, Any]], total: int) -> str:
     return ", ".join(names) + (f" and {total - len(names)} more" if total > len(names) else "")
 
 
+def _role_gap_text(uncovered: list[dict[str, Any]]) -> str:
+    names = [
+        f"{row.get('name') or row.get('id')} ({'excluded' if row.get('reason') == 'excluded' else 'not included'})"
+        for row in uncovered[:6]
+    ]
+    return ", ".join(names) + (f" and {len(uncovered) - len(names)} more" if len(uncovered) > len(names) else "")
+
+
+def _unresolved_note(verdict: dict[str, Any]) -> str:
+    """A sentence naming the emergency-access entries the operator listed that matched no collected account."""
+    entries = [str(item) for item in verdict.get("unresolved_operator_accounts") or []]
+    if not entries:
+        return ""
+    count = len(entries)
+    return (
+        f" {count} emergency access {'entry' if count == 1 else 'entries'} listed with --break-glass-accounts could not be "
+        f"resolved against the collected users and groups and {'is' if count == 1 else 'are'} not treated as excluded: "
+        f"{', '.join(entries[:10])}{' and more' if count > 10 else ''}."
+    )
+
+
+def _append_note(metadata: dict[str, Any], note: str) -> None:
+    if note:
+        metadata["description"] = f"{metadata.get('description') or ''}{note}".strip()
+
+
+def _unresolved_returned(verdict: dict[str, Any]) -> dict[str, Any]:
+    entries = verdict.get("unresolved_operator_accounts") or []
+    return {"unresolved_operator_accounts": list(entries)} if entries else {}
+
+
 def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     """Findings from the tenant-level identity control verdicts.
 
@@ -1530,6 +1631,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                 "which is not an emergency access account listed with --break-glass-accounts. Excluded roles, guest "
                 "types and groups are not required to use MFA, so the control is not met for them."
             )
+        _append_note(metadata, _unresolved_note(mfa))
         findings.append(
             _finalize_finding(
                 {
@@ -1553,6 +1655,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                         "non_qualifying_policy_count": len(mfa.get("non_qualifying_mfa_policies") or []),
                         "report_only_policy_count": len(mfa.get("report_only_mfa_policies") or []),
                         **({"unsanctioned_exclusions": gap} if with_exclusions else {}),
+                        **_unresolved_returned(mfa),
                     },
                     "evidence_refs": [
                         *_verdict_ref("effective_mfa", "conditional_access"),
@@ -1585,6 +1688,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                 f"administrator ({_exclusion_text(gap, len(admin_mfa.get('administrator_exclusions') or gap))}), so those "
                 "administrators are not required to use MFA, and security defaults are off."
             )
+        _append_note(metadata, _unresolved_note(admin_mfa))
         findings.append(
             _finalize_finding(
                 {
@@ -1609,20 +1713,69 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                         "non_qualifying_policy_count": len(admin_mfa.get("non_qualifying_mfa_policies") or []),
                         "report_only_policy_count": len(admin_mfa.get("report_only_mfa_policies") or []),
                         **({"administrator_exclusions": gap} if gap else {}),
+                        **_unresolved_returned(admin_mfa),
                     },
                     "evidence_refs": [
                         *_verdict_ref("administrator_mfa", "conditional_access"),
-                        *_policy_refs(admin_mfa, "qualifying_policies", "non_qualifying_mfa_policies", "report_only_mfa_policies"),
+                        *_policy_refs(
+                            admin_mfa,
+                            "qualifying_policies",
+                            "supplementary_policies",
+                            "non_qualifying_mfa_policies",
+                            "report_only_mfa_policies",
+                        ),
                     ],
                     **metadata,
                 }
             )
         )
-    if (
-        admin_mfa
-        and admin_mfa.get("verdict") in {"enforced", "enforced_with_exclusions"}
-        and admin_mfa.get("phishing_resistant_verdict") in {"not_enforced", "enforced_with_exclusions"}
-    ):
+    admin_enforced = bool(admin_mfa) and admin_mfa.get("verdict") in {"enforced", "enforced_with_exclusions"}
+    if admin_enforced and admin_mfa.get("role_catalog_verdict") == "not_enforced":
+        uncovered = admin_mfa.get("role_catalog_uncovered_roles") or []
+        metadata = _metadata_for("ca.admin_mfa_role_set_incomplete")
+        metadata["description"] = (
+            "MFA is required of the administrators the tenant has today, but the policies together do not include every "
+            f"administrator role the CIS 5.2.2.1 list names, or exclude one ({_role_gap_text(uncovered)}). Whoever is "
+            "given one of those roles next is not required to use MFA by Conditional Access."
+        )
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "conditional_access:administrator_mfa_role_set_incomplete",
+                    "rule_id": "ca.admin_mfa_role_set_incomplete",
+                    "severity": "medium",
+                    "category": "identity",
+                    "title": "Administrator MFA does not cover every administrator role",
+                    "status": "open",
+                    "collector": "conditional_access",
+                    "affected_objects": ["Administrator MFA enforcement"],
+                    "evidence": admin_mfa,
+                    "returned_value": {
+                        "verdict": admin_mfa["verdict"],
+                        "role_catalog_verdict": admin_mfa["role_catalog_verdict"],
+                        "uncovered_roles": uncovered,
+                        "basis": admin_mfa.get("basis") or [],
+                    },
+                    "evidence_refs": [
+                        *_verdict_ref("administrator_mfa", "conditional_access"),
+                        *_policy_refs(admin_mfa, "qualifying_policies", "supplementary_policies", "non_qualifying_mfa_policies"),
+                    ],
+                    **metadata,
+                }
+            )
+        )
+    resistant_gap = admin_mfa.get("phishing_resistant_verdict") in {"not_enforced", "enforced_with_exclusions"} if admin_mfa else False
+    resistant_roles_gap = bool(admin_mfa) and admin_mfa.get("phishing_resistant_role_catalog_verdict") == "not_enforced"
+    if admin_enforced and (resistant_gap or resistant_roles_gap):
+        metadata = _metadata_for("ca.admin_phishing_resistant_mfa_not_enforced")
+        uncovered = admin_mfa.get("phishing_resistant_role_catalog_uncovered_roles") or []
+        if not resistant_gap:
+            metadata["description"] = (
+                "A policy that requires a phishing-resistant authentication strength reaches the administrators the tenant has "
+                "today, but together the phishing-resistant policies do not include every one of ScubaGear's privileged "
+                f"roles (MS.AAD.3.6v1), or exclude one ({_role_gap_text(uncovered)}). Whoever is given one of those roles "
+                "next is not required to use a phishing-resistant method."
+            )
         findings.append(
             _finalize_finding(
                 {
@@ -1638,14 +1791,16 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                     "returned_value": {
                         "verdict": admin_mfa["verdict"],
                         "phishing_resistant_verdict": admin_mfa["phishing_resistant_verdict"],
+                        "phishing_resistant_role_catalog_verdict": admin_mfa.get("phishing_resistant_role_catalog_verdict"),
+                        "uncovered_roles": uncovered,
                         "basis": admin_mfa.get("basis") or [],
                         "phishing_resistant_policy_ids": admin_mfa.get("phishing_resistant_policy_ids") or [],
                     },
                     "evidence_refs": [
                         *_verdict_ref("administrator_mfa", "conditional_access"),
-                        *_policy_refs(admin_mfa, "qualifying_policies"),
+                        *_policy_refs(admin_mfa, "qualifying_policies", "supplementary_policies"),
                     ],
-                    **_metadata_for("ca.admin_phishing_resistant_mfa_not_enforced"),
+                    **metadata,
                 }
             )
         )
@@ -1662,6 +1817,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                 "which is not an emergency access account listed with --break-glass-accounts. Legacy protocols cannot "
                 "perform MFA, so the excluded principals can still sign in with a password alone."
             )
+        _append_note(metadata, _unresolved_note(legacy))
         findings.append(
             _finalize_finding(
                 {
@@ -1684,6 +1840,7 @@ def _build_identity_control_findings(normalized_snapshot: dict[str, Any]) -> lis
                         "non_qualifying_policy_count": len(legacy.get("non_qualifying_block_policies") or []),
                         "report_only_policy_count": len(legacy.get("report_only_block_policies") or []),
                         **({"unsanctioned_exclusions": gap} if with_exclusions else {}),
+                        **_unresolved_returned(legacy),
                     },
                     "evidence_refs": [
                         *_verdict_ref("legacy_authentication_block", "conditional_access"),
@@ -3093,6 +3250,7 @@ def _normalized_findings(
     findings.extend(_build_defender_av_findings(normalized_snapshot))
     findings.extend(_build_exchange_protection_findings(normalized_snapshot))
     findings.extend(_build_admin_resilience_findings(normalized_snapshot))
+    findings.extend(_build_service_principal_role_findings(normalized_snapshot))
     findings.extend(_build_secure_score_findings(normalized_snapshot))
     findings.extend(_build_user_mfa_findings(normalized_snapshot))
     findings.extend(_build_identity_control_findings(normalized_snapshot))
@@ -3783,7 +3941,10 @@ def _normalized_findings(
                 "account_source": item.get("account_source"),
                 "policies_without_exclusion": len(policies),
                 "policy_names": affected[:_MFA_NOT_ENFORCED_POLICY_LIMIT],
+                **({"unresolved_accounts": item["unresolved_accounts"]} if item.get("unresolved_accounts") else {}),
             }
+        ca_metadata = _metadata_for(ca_rule_id)
+        _append_note(ca_metadata, _unresolved_note({"unresolved_operator_accounts": item.get("unresolved_accounts")}))
         findings.append(
             _finalize_finding(
                 {
@@ -3798,7 +3959,7 @@ def _normalized_findings(
                 "evidence": item,
                 **({"returned_value": returned_value} if returned_value is not None else {}),
                 "evidence_refs": evidence_refs,
-                **_metadata_for(ca_rule_id),
+                **ca_metadata,
             }
             )
         )

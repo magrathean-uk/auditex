@@ -807,7 +807,7 @@
   },
   "ca.admin_mfa_not_enforced": {
     "risk_rating": "high",
-    "description": "Security defaults are off and no enabled Conditional Access policy requires MFA of every administrator: one that targets all users, or every directory role an administrator holds, on all cloud apps, with MFA or an MFA authentication strength, and without excluding an administrator role or an administrator. The roles come from the effective administrator set (direct, PIM-eligible and group-inherited). A policy that excludes a group or a guest type without administrator evidence reads enforced_with_exclusions and raises this rule at medium. Registration reports are not read here: they show who could use MFA, not whether it is required. Per-user (legacy) MFA states are not read.",
+    "description": "Security defaults are off and no enabled Conditional Access policy requires MFA of every administrator: one that targets all users, or every directory role an administrator holds, on all cloud apps, with MFA or an MFA authentication strength, and without excluding an administrator role or an administrator. The roles come from the effective administrator set (direct, PIM-eligible and group-inherited). Policies are combined per administrator: an administrator that one policy excludes (for example an all-users policy that excludes the Global Administrator role) is covered by another enabled policy that includes the role, and a principal left out of every qualifying policy by a different route (itself in one, a group the run read in another, a role it holds in a third) counts as excluded. A policy that excludes a group or a guest type without administrator evidence reads enforced_with_exclusions and raises this rule at medium. Registration reports are not read here: they show who could use MFA, not whether it is required. Per-user (legacy) MFA states are not read.",
     "impact": "Administrator accounts are the highest-value sign-in targets. Where nothing requires them to use MFA, a stolen or guessed password grants administrative control, whether or not the administrator has registered a method.",
     "remediation": "Enable security defaults, or create an enabled Conditional Access policy that targets administrator roles, or all users, on all cloud apps and requires MFA, preferably a phishing-resistant authentication strength. Do not exclude administrator roles or administrators; exclude only documented emergency access accounts and list them with --break-glass-accounts.",
     "references": [
@@ -821,9 +821,23 @@
     ],
     "expected_value": "Security defaults are enabled, or an enabled Conditional Access policy requires MFA of every administrator role on all cloud apps with no administrator excluded."
   },
+  "ca.admin_mfa_role_set_incomplete": {
+    "risk_rating": "medium",
+    "description": "Administrator MFA is enforced for the administrators the tenant has today, but the enabled policies that require MFA do not, together, include every administrator role in the CIS 5.2.2.1 list (Application, Authentication, Billing, Cloud Application, Conditional Access, Exchange, Global, Helpdesk, Password, Privileged Authentication, Privileged Role, Security, SharePoint and User Administrator, and Global Reader), or exclude one of them. A role nobody holds today still counts: a policy that covers only the roles currently held, or that excludes a role nobody holds, leaves the next person given that role without an MFA requirement. A policy for all users covers every role it does not exclude. Security defaults cover every administrator role. Cyber Essentials reads the roles held today and is not affected.",
+    "impact": "An administrator role that no policy requires MFA for is a standing gap: the role can be assigned in a minute, and the new holder signs in with a password alone until someone notices.",
+    "remediation": "Target all users with the MFA policy, or add every administrator role in the CIS list to the policy's included directory roles, and remove role exclusions. Exclude only documented emergency access accounts and list them with --break-glass-accounts.",
+    "references": [
+      "Microsoft Entra Conditional Access: require MFA for administrators",
+      "CIS Microsoft 365 Foundations v7.0.0 5.2.2.1"
+    ],
+    "control_ids": [
+      "AUDITEX-CA-ADMIN-MFA-ROLE-SET-INCOMPLETE"
+    ],
+    "expected_value": "Enabled Conditional Access policies require MFA for all users, or for every administrator role in the CIS 5.2.2.1 list, with no administrator role excluded."
+  },
   "ca.admin_phishing_resistant_mfa_not_enforced": {
     "risk_rating": "low",
-    "description": "Administrators are required to use MFA, but no enabled Conditional Access policy requires a phishing-resistant authentication strength (the built-in Phishing-resistant MFA strength, or one that allows only FIDO2, Windows Hello for Business or certificate-based multi-factor credentials) of every administrator. Security defaults require MFA of administrators but accept SMS, voice and push. This rule is raised only when administrator MFA itself is enforced; when it is not, ca.admin_mfa_not_enforced reports the larger gap.",
+    "description": "Administrators are required to use MFA, but no enabled Conditional Access policy requires a phishing-resistant authentication strength (the built-in Phishing-resistant MFA strength, or one that allows only FIDO2, Windows Hello for Business or certificate-based multi-factor credentials) of every administrator, or the phishing-resistant policies do not include every one of ScubaGear's privileged roles (Global Administrator, Privileged Role Administrator, User Administrator, SharePoint Administrator, Exchange Administrator, Hybrid Identity Administrator, Application Administrator and Cloud Application Administrator) or exclude one of them, whoever holds it today. Security defaults require MFA of administrators but accept SMS, voice and push. This rule is raised only when administrator MFA itself is enforced; when it is not, ca.admin_mfa_not_enforced reports the larger gap.",
     "impact": "MFA by SMS, voice or push can be phished or fatigued. A phishing-resistant method removes the commonest route to taking over an administrator account.",
     "remediation": "Register FIDO2 keys or Windows Hello for Business for administrators, then require the Phishing-resistant MFA authentication strength for administrator roles in Conditional Access, with an emergency access account excluded.",
     "references": [
@@ -837,9 +851,9 @@
   },
   "ca.legacy_auth_not_blocked": {
     "risk_rating": "high",
-    "description": "Security defaults are off and no enabled Conditional Access policy blocks the Exchange ActiveSync and other legacy client types for all users on all cloud apps. Policies that exclude platforms, devices or applications, or are narrowed by platform, location, risk or device, do not count. A block policy that excludes anything other than the emergency access accounts listed with --break-glass-accounts leaves the excluded principals able to use legacy protocols: the verdict is blocked_with_exclusions and this rule is raised at medium. Exchange Online protocol settings such as SMTP AUTH are not evaluated by this rule.",
+    "description": "Security defaults are off and no enabled Conditional Access policy blocks the Exchange ActiveSync and other legacy client types for all users on all cloud apps. The policy must name both legacy client app types, as ScubaGear and the CIS audit require: a block of every client type (the default when client apps are not configured) does not count, and neither does a policy limited by a location condition, whether it includes only some locations or excludes any (a country block that exempts the trusted countries still allows legacy protocols from them). Policies that exclude platforms, devices or applications, or are narrowed by platform, risk or device, do not count either. A block policy that excludes anything other than the emergency access accounts listed with --break-glass-accounts leaves the excluded principals able to use legacy protocols: the verdict is blocked_with_exclusions and this rule is raised at medium. A principal that every qualifying policy leaves out by a different route (itself in one, a group the run read in another, a role it holds in a third) counts as excluded. Exchange Online protocol settings such as SMTP AUTH are not evaluated by this rule.",
     "impact": "Legacy authentication protocols cannot perform MFA. Attackers use them for password spray and to bypass the MFA and Conditional Access requirements that apply to modern sign-in.",
-    "remediation": "Create an enabled Conditional Access policy that targets all users and all cloud apps, selects the Exchange ActiveSync and other legacy client app types, and blocks access. Exclude only documented emergency access accounts (list them with --break-glass-accounts), start in report-only mode, then enable.",
+    "remediation": "Create an enabled Conditional Access policy that targets all users and all cloud apps, selects the Exchange ActiveSync and other legacy client app types (and no location condition), and blocks access. Exclude only documented emergency access accounts (list them with --break-glass-accounts), start in report-only mode, then enable.",
     "references": [
       "Microsoft Entra Conditional Access: block legacy authentication",
       "Microsoft Entra security defaults",
@@ -1428,5 +1442,20 @@
       "AUDITEX-ID-GUEST-PRIVILEGED-ROLE"
     ],
     "expected_value": "Administrator roles are held by member accounts of this tenant."
+  },
+  "identity.service_principal_privileged_role": {
+    "risk_rating": "high",
+    "description": "A service principal (an app registration's identity or a managed identity) holds the Global Administrator or Privileged Role Administrator directory role, directly, as a PIM-eligible assignment or through a role-assignable group. The effective administrator set lists it but does not count it as a person, so no administrator count includes it. Whoever controls the application (its owners, anyone who can add a secret or certificate) controls the tenant.",
+    "impact": "A workload identity authenticates with a secret or certificate that is not protected by MFA or Conditional Access for users, and is often stored in code, pipelines or key vaults. If it is stolen or its owner is compromised, the attacker holds tenant-wide administrator rights, or can grant themselves any role.",
+    "remediation": "Remove the role. Give the application only the Microsoft Graph application permissions or the narrower directory role it needs, review who owns it and which credentials it holds, and use a managed identity where possible. If the assignment is unavoidable, make it PIM-eligible, scope it, and monitor the identity's sign-ins and credential changes.",
+    "references": [
+      "Microsoft Entra privileged access best practices",
+      "Microsoft Entra workload identity security",
+      "Microsoft Graph permissions reference"
+    ],
+    "control_ids": [
+      "AUDITEX-ID-SERVICE-PRINCIPAL-PRIVILEGED-ROLE"
+    ],
+    "expected_value": "No service principal holds Global Administrator or Privileged Role Administrator."
   }
 }

@@ -16,9 +16,13 @@ The check here is narrow on purpose:
 * An account counts as excluded when the policy excludes it, a group it belongs to (as far as the run read
   the group's members: role-assignable groups), or, for inferred accounts, the Global Administrator role.
 * The accounts come from the operator when they supply them (``--break-glass-accounts`` or
-  ``AUDITEX_BREAK_GLASS_ACCOUNTS``: object IDs, user principal names, or the group the policies
-  exclude). Without a list the accounts are inferred, and an inference is weaker evidence: users and
-  groups named for emergency access, and holders of the Global Administrator role.
+  ``AUDITEX_BREAK_GLASS_ACCOUNTS``: object IDs, user principal names, mail addresses, display names, or the
+  group the policies exclude). Without a list the accounts are inferred, and an inference is weaker evidence:
+  users and groups named for emergency access, and holders of the Global Administrator role.
+* An entry is looked up in the full user and group lists the run read (the chunk files, never the inline
+  sample), by object ID, user principal name, mail and display name. A display name that matches more than
+  one account is ambiguous and not guessed at. An entry that matches nothing is ``unresolved``; it is recorded,
+  never dropped, and the verdicts are judged without it.
 
 The module is pure: it reads the collected users, groups, role data and each policy's targeting, and
 returns what it found. Normalization stores the result and the finding builder grades it.
@@ -121,6 +125,8 @@ class BreakGlassAccounts:
         label_of: Mapping[str, str],
         role_ids: set[str] | None = None,
         unresolved: list[str] | None = None,
+        unresolved_detail: list[dict[str, str]] | None = None,
+        unverified: list[str] | None = None,
         roles_held: Mapping[str, set[str]] | None = None,
         roles_unknown: bool = False,
         global_admin_role_ids: set[str] | None = None,
@@ -133,7 +139,13 @@ class BreakGlassAccounts:
         self.ids = set(self.label_of)
         self.labels = [self.label_of[identifier] for identifier in sorted(self.label_of)]
         self.role_ids = role_ids or set()
+        # Entries that matched no collected user or group, or more than one.
         self.unresolved = unresolved or []
+        # The same entries with the reason (``not_found`` or ``ambiguous_display_name``), as ``{"entry", "reason"}`` rows.
+        self.unresolved_detail = unresolved_detail or []
+        # Object IDs the operator listed that are not among the collected users or groups. They still match a policy's
+        # exclusion by id, but nothing confirms the account exists.
+        self.unverified = unverified or []
         # Lower-case user ID -> lower-case ids of the directory roles the user holds (any route the run read).
         self.roles_held = {key: set(value) for key, value in (roles_held or {}).items()}
         # True when an account is a group or an object the run did not collect: its roles cannot be listed.
@@ -175,9 +187,11 @@ def resolve_accounts(
 ) -> BreakGlassAccounts:
     """Resolve the operator's list against the collected identity data, or infer the accounts.
 
-    An entry resolves to a user (object ID, user principal name or mail) or a group (object ID or
-    display name). An object ID that is not in the collected users or groups is still matched against
-    the policies' exclusions as given.
+    An entry resolves to a user (object ID, user principal name or mail) or a group (object ID or display
+    name), or, failing those, to the one user or group with that display name. ``users`` and ``groups`` must be
+    the full lists the run read: an account beyond the inline sample is found only there. An object ID that is
+    not in the collected users or groups is still matched against the policies' exclusions as given, and listed
+    as unverified. An entry that matches nothing, or a display name more than one account carries, is unresolved.
 
     ``admin_rows`` (the effective administrator set's rows) and ``role_assignments`` give the roles each
     user holds, so a role-targeted policy is judged only when it can reach an account. ``membership_edges``
@@ -190,9 +204,14 @@ def resolve_accounts(
                 user_by_key.setdefault(str(key).lower(), user)
     group_by_key: dict[str, Mapping[str, Any]] = {}
     for group in groups:
-        for key in (group.get("id"), group.get("displayName")):
-            if key:
-                group_by_key.setdefault(str(key).lower(), group)
+        if group.get("id"):
+            group_by_key.setdefault(str(group["id"]).lower(), group)
+    # Display names: users and groups alike, so a name that is both is ambiguous rather than guessed.
+    by_display_name: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+    for kind, rows in (("user", users), ("group", groups)):
+        for row in rows:
+            if row.get("id") and row.get("displayName"):
+                by_display_name.setdefault(str(row["displayName"]).lower(), []).append((kind, row))
 
     role_by_id = {str(role.get("id")): role for role in role_definitions if role.get("id")}
     global_admin_role_ids = {
@@ -225,24 +244,44 @@ def resolve_accounts(
     label_of: dict[str, str] = {}
     if configured:
         unresolved: list[str] = []
+        unresolved_detail: list[dict[str, str]] = []
+        unverified: list[str] = []
+
+        def add_user(user: Mapping[str, Any]) -> None:
+            label_of[str(user["id"]).lower()] = str(user.get("userPrincipalName") or user.get("displayName") or user["id"])
+
+        def add_group(group: Mapping[str, Any]) -> None:
+            label_of[str(group["id"]).lower()] = str(group.get("displayName") or group["id"])
+
         for entry in configured:
             key = entry.lower()
             user = user_by_key.get(key)
             group = group_by_key.get(key)
+            named = by_display_name.get(key, [])
             if user is not None and user.get("id"):
-                label_of[str(user["id"]).lower()] = str(user.get("userPrincipalName") or user.get("displayName") or user["id"])
+                add_user(user)
             elif group is not None and group.get("id"):
-                label_of[str(group["id"]).lower()] = str(group.get("displayName") or group["id"])
+                add_group(group)
+            elif len(named) == 1:
+                (kind, row), = named
+                (add_user if kind == "user" else add_group)(row)
+            elif len(named) > 1:
+                unresolved.append(entry)
+                unresolved_detail.append({"entry": entry, "reason": "ambiguous_display_name"})
             elif _GUID.fullmatch(entry):
                 label_of[key] = entry
+                unverified.append(entry)
             else:
                 unresolved.append(entry)
+                unresolved_detail.append({"entry": entry, "reason": "not_found"})
         held, unknown = role_view(label_of)
         return BreakGlassAccounts(
             source=SOURCE_OPERATOR,
             state=STATE_ASSESSED if label_of else STATE_UNRESOLVED,
             label_of=label_of,
             unresolved=unresolved,
+            unresolved_detail=unresolved_detail,
+            unverified=unverified,
             roles_held=held,
             roles_unknown=unknown,
             global_admin_role_ids=global_admin_role_ids,

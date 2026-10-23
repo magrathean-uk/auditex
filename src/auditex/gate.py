@@ -15,8 +15,14 @@ continue, so a missing, empty, unreadable or invalid input must never read as
 * collectors that completed (``--allow-partial`` accepts known gaps, but a run
   with no completed collector is never accepted).
 
-A finding counts as accepted (or closed) only when a matching waiver stands behind that status; the
-engine never writes one without it, so a bare ``accepted_risk`` or ``closed`` counts as open.
+A finding counts as accepted (or closed) only when a matching waiver stands behind that status and the
+waiver has not expired; the engine never writes a status without one, so a bare ``accepted_risk`` or
+``closed`` counts as open, and so does any accepted or closed status whose waiver has expired.
+
+``--expect-manifest-sha256`` (per run) takes the SHA-256 of a run's ``bundle-hashes.json`` received through a
+separate channel. The hash manifest is unsigned and the run can be rewritten together with it, so the digest
+is the only check that a rewritten run, or one whose manifest was removed and whose contract version was
+lowered, cannot pass. A run whose manifest has another digest, or none, is blocked.
 
 Anything else returns ``status: "blocked"`` with a machine-readable ``code``
 and a human ``reason``. The CLI turns a blocked or failed result into a
@@ -27,12 +33,19 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_SCHEMA_VERSION, integrity_failed
+from azure_tenant_audit.bundle_integrity import integrity_failed, manifest_digest_problem, normalize_digest
 from azure_tenant_audit.rule_parameters import changed_rule_parameters, recorded_rule_parameters
-from azure_tenant_audit.waivers import accepted_risk_summary, has_matching_waiver, is_accepted_status
+from azure_tenant_audit.waivers import (
+    accepted_risk_summary,
+    has_expired_waiver,
+    has_matching_waiver,
+    is_accepted_status,
+    waiver_expiry,
+)
 
 from .compare import NormalizedSections, reassessment_gap, require_same_tenant_runs
 from .run_bundle import RunBundle
@@ -89,19 +102,41 @@ def _claimed_class(row: Mapping[str, Any]) -> str:
 def _status_class(row: Mapping[str, Any]) -> str:
     """``accepted``, ``closed`` or ``open``. Anything unrecognised stays open (fail closed).
 
-    An accepted or closed status counts only when a matching waiver stands behind it. The engine writes
-    ``accepted_risk`` only together with the waiver it matched and never writes ``closed`` or ``resolved``,
-    so a status without a waiver is an edit and the finding stays open.
+    An accepted or closed status counts only when a matching waiver stands behind it and that waiver has not
+    expired. The engine writes ``accepted_risk`` only together with the waiver it matched (it never matches an
+    expired one) and never writes ``closed`` or ``resolved``, so a status without a waiver is an edit, and a
+    status on an expired waiver is a finding whose acceptance has lapsed: both stay open, whatever the status
+    value says.
     """
     claimed = _claimed_class(row)
-    if claimed != "open" and not has_matching_waiver(row):
+    if claimed != "open" and (not has_matching_waiver(row) or has_expired_waiver(row)):
         return "open"
     return claimed
 
 
 def _unbacked_status_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Findings that claim an accepted or closed status with no matching waiver (counted as open)."""
-    return [row for row in rows if _claimed_class(row) != "open" and _status_class(row) == "open"]
+    return [row for row in rows if _claimed_class(row) != "open" and not has_matching_waiver(row)]
+
+
+def _is_expired_claim(row: Mapping[str, Any]) -> bool:
+    """Whether a finding claims an accepted or closed status on a matching waiver that has expired."""
+    return _claimed_class(row) != "open" and has_matching_waiver(row) and has_expired_waiver(row)
+
+
+def _expired_status_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Findings that claim an accepted or closed status on a waiver that has expired (counted as open)."""
+    return [row for row in rows if _is_expired_claim(row)]
+
+
+def _expiry_text(row: Mapping[str, Any]) -> str | None:
+    expiry = waiver_expiry(row)
+    return expiry.isoformat() if expiry is not None else None
+
+
+def _expired_reason(row: Mapping[str, Any]) -> str:
+    """``stale_accepted_risk`` for an accepted status on an expired waiver, ``expired_waiver`` for a closed one."""
+    return "stale_accepted_risk" if _claimed_class(row) == "accepted" else "expired_waiver"
 
 
 def _unbacked_status_warning(label: str, rows: list[dict[str, Any]]) -> str | None:
@@ -112,6 +147,18 @@ def _unbacked_status_warning(label: str, rows: list[dict[str, Any]]) -> str | No
     more = f" and {len(unbacked) - 5} more" if len(unbacked) > 5 else ""
     return (
         f"{label}: {len(unbacked)} finding(s) claim an accepted or closed status without a matching waiver "
+        f"and are counted as open ({ids}{more})"
+    )
+
+
+def _expired_status_warning(label: str, rows: list[dict[str, Any]]) -> str | None:
+    expired = _expired_status_rows(rows)
+    if not expired:
+        return None
+    ids = ", ".join(str(row.get("id")) for row in expired[:5])
+    more = f" and {len(expired) - 5} more" if len(expired) > 5 else ""
+    return (
+        f"{label}: {len(expired)} finding(s) claim an accepted or closed status on a waiver that has expired "
         f"and are counted as open ({ids}{more})"
     )
 
@@ -213,13 +260,39 @@ def _verify_contract(bundle: RunBundle, label: str) -> dict[str, Any]:
     return summary
 
 
+def _verify_expected_digest(bundle: RunBundle, label: str, expected: str) -> str:
+    """Require ``bundle-hashes.json`` to have the SHA-256 the caller received separately; return it normalised.
+
+    This is checked before anything else is trusted: it is the one test a run that was rewritten together with
+    its manifest, or stripped of the manifest and given an older contract version, cannot pass.
+    """
+    try:
+        wanted = normalize_digest(expected)
+    except ValueError as exc:
+        raise GateInputError("expected_manifest_sha256_invalid", f"{label}: {exc}") from exc
+    integrity = bundle.integrity()
+    problem = manifest_digest_problem(integrity, wanted)
+    if problem:
+        raise GateInputError(
+            "expected_manifest_sha256_mismatch",
+            f"{label} is not the run the expected manifest digest names ({problem})",
+            integrity={
+                "status": integrity.get("status"),
+                "manifest_sha256": integrity.get("manifest_sha256"),
+                "expected_manifest_sha256": wanted,
+            },
+        )
+    return wanted
+
+
 def _verify_integrity(bundle: RunBundle, label: str) -> tuple[dict[str, Any], list[str]]:
     """Require the hash manifest to match every artifact; return its summary and any warnings.
 
-    ``mismatch`` and ``invalid`` block. ``absent`` blocks for a bundle finalized under the contract that
-    writes the manifest (a bundle that lost it, or never listed it, is not trustworthy) and is a warning
-    for an older bundle that predates it. Files added after finalization are listed as a warning. The
-    manifest is unsigned: this stops accidental and naive edits, not a deliberate re-hash.
+    ``mismatch`` and ``invalid`` block. ``absent`` is a warning only for a bundle that predates the manifest: a
+    bundle finalized under the contract that writes it and found without it is ``invalid`` (reported as
+    ``bundle_integrity_absent``), because a bundle that lost its manifest is not trustworthy. Files added after
+    finalization are listed as a warning. The manifest is unsigned: this stops accidental and naive edits, not a
+    deliberate re-hash, and the contract version it reads is in the bundle; ``--expect-manifest-sha256`` closes both.
     """
     integrity = bundle.integrity()
     status = str(integrity.get("status"))
@@ -234,24 +307,19 @@ def _verify_integrity(bundle: RunBundle, label: str) -> tuple[dict[str, Any], li
             f"{integrity.get('modified_count', 0)} modified and {integrity.get('missing_count', 0)} missing "
             "artifact(s) since finalization"
         )
+        required_missing = integrity.get("manifest_missing_reason") == "required_by_contract"
         raise GateInputError(
-            f"bundle_integrity_{status}",
+            "bundle_integrity_absent" if required_missing else f"bundle_integrity_{status}",
             f"{label} does not match its hash manifest ({problem})",
             integrity={
                 **summary,
                 "modified": [row.get("path") for row in integrity.get("modified") or []][:_ISSUE_CODE_LIMIT],
                 "missing": list(integrity.get("missing") or [])[:_ISSUE_CODE_LIMIT],
+                "unexpected": list(integrity.get("unexpected") or [])[:_ISSUE_CODE_LIMIT],
             },
         )
     warnings: list[str] = []
     if status == "absent":
-        version = bundle.manifest().get("schema_contract_version")
-        if isinstance(version, str) and version >= BUNDLE_HASHES_SCHEMA_VERSION:
-            raise GateInputError(
-                "bundle_integrity_absent",
-                f"{label} was finalized under contract {version} but has no bundle-hashes.json",
-                integrity=summary,
-            )
         warnings.append(f"{label} predates the hash manifest, so its artifacts could not be checked for edits")
     if summary["unlisted_count"]:
         warnings.append(
@@ -397,35 +465,48 @@ def _require_coverage(coverage: dict[str, Any], label: str, *, allow_partial: bo
 
 
 def _verified_run(
-    run_dir: str | Path, label: str, *, bundle: RunBundle | None = None
+    run_dir: str | Path,
+    label: str,
+    *,
+    bundle: RunBundle | None = None,
+    expect_manifest_sha256: str | None = None,
 ) -> tuple[RunBundle, dict[str, Any], list[dict[str, Any]], dict[str, Any], list[str]]:
     """Contract, hash manifest, findings and coverage for one run, raising ``GateInputError`` on the first problem.
 
     The contract carries the recomputed validation and, under ``integrity``, the hash manifest check. The
     last element is the warnings the checks accept (a legacy bundle without a manifest, files added later).
+    ``expect_manifest_sha256`` is checked first and, when it matches, recorded under ``integrity``.
     """
     bundle = bundle or _open_run(run_dir, label)
+    expected = _verify_expected_digest(bundle, label, expect_manifest_sha256) if expect_manifest_sha256 else None
     contract = _verify_contract(bundle, label)
     integrity, warnings = _verify_integrity(bundle, label)
+    if expected:
+        integrity = {**integrity, "expected_manifest_sha256": expected, "expected_manifest_sha256_matched": True}
     rows = _verify_findings(bundle, label)
     return bundle, {**contract, "integrity": integrity}, rows, _assess_coverage(bundle), warnings
 
 
-def gate_findings(*, run_dir: str, fail_on: str, allow_partial: bool = False) -> dict[str, object]:
+def gate_findings(
+    *, run_dir: str, fail_on: str, allow_partial: bool = False, expect_manifest_sha256: str | None = None
+) -> dict[str, object]:
     threshold, threshold_rank = _threshold(fail_on)
     context = {"fail_on": threshold, "run_dir": str(run_dir)}
     try:
-        bundle, contract, rows, coverage, run_warnings = _verified_run(run_dir, "run")
+        bundle, contract, rows, coverage, run_warnings = _verified_run(
+            run_dir, "run", expect_manifest_sha256=expect_manifest_sha256
+        )
         warnings = [*run_warnings, *_require_coverage(coverage, "run", allow_partial=allow_partial)]
     except GateInputError as error:
         return _blocked(error, **context)
-    status_warning = _unbacked_status_warning("run", rows)
-    if status_warning:
-        warnings.append(status_warning)
+    for status_warning in (_unbacked_status_warning("run", rows), _expired_status_warning("run", rows)):
+        if status_warning:
+            warnings.append(status_warning)
 
     counts_by_severity = {key: 0 for key in SEVERITY_RANKS}
     accepted_by_severity = {key: 0 for key in SEVERITY_RANKS}
     triggered: list[dict[str, object]] = []
+    stale_accepted: list[dict[str, object]] = []
     closed_count = 0
     accepted_count = 0
     for row in rows:
@@ -442,15 +523,15 @@ def gate_findings(*, run_dir: str, fail_on: str, allow_partial: bool = False) ->
         if severity in counts_by_severity:
             counts_by_severity[severity] += 1
         if SEVERITY_RANKS.get(severity, 0) >= threshold_rank:
-            triggered.append(_brief(row, reason="open"))
+            if _is_expired_claim(row):
+                # Accepted or closed on a waiver that has lapsed: open again, and reported as what it is.
+                entry = _brief(row, reason=_expired_reason(row), expires_on=_expiry_text(row))
+                stale_accepted.append(entry)
+            else:
+                entry = _brief(row, reason="open")
+            triggered.append(entry)
 
     accepted_summary = accepted_risk_summary(rows)
-    stale_accepted = [
-        _brief(row, reason="stale_accepted_risk", expires_on=row.get("expires_on"))
-        for row in accepted_summary["stale"]
-        if SEVERITY_RANKS.get(_severity(row), 0) >= threshold_rank
-    ]
-    triggered.extend(stale_accepted)
     warnings.extend(accepted_summary["warnings"])
     return {
         "pass": not triggered,
@@ -464,6 +545,7 @@ def gate_findings(*, run_dir: str, fail_on: str, allow_partial: bool = False) ->
         "stale_accepted_risk_count_at_or_above_threshold": len(stale_accepted),
         "closed_count": closed_count,
         "unbacked_status_count": len(_unbacked_status_rows(rows)),
+        "expired_waiver_status_count": len(_expired_status_rows(rows)),
         "accepted_risk_summary": accepted_summary,
         "contract": contract,
         # The windows the run's rules were judged with, so a later run with a laxer one is visible.
@@ -483,13 +565,26 @@ def _index(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 
 def gate_drift(
-    *, baseline_run_dir: str, current_run_dir: str, fail_on: str, allow_partial: bool = False
+    *,
+    baseline_run_dir: str,
+    current_run_dir: str,
+    fail_on: str,
+    allow_partial: bool = False,
+    expect_baseline_manifest_sha256: str | None = None,
+    expect_current_manifest_sha256: str | None = None,
 ) -> dict[str, object]:
     threshold, threshold_rank = _threshold(fail_on)
     context = {"fail_on": threshold, "baseline_run_dir": str(baseline_run_dir), "current_run_dir": str(current_run_dir)}
     try:
         baseline_bundle = _open_run(baseline_run_dir, "baseline run")
         current_bundle = _open_run(current_run_dir, "current run")
+        # A run that is not the one its digest names is refused before the runs are read or compared.
+        for bundle, label, expected in (
+            (baseline_bundle, "baseline run", expect_baseline_manifest_sha256),
+            (current_bundle, "current run", expect_current_manifest_sha256),
+        ):
+            if expected:
+                _verify_expected_digest(bundle, label, expected)
     except GateInputError as error:
         return _blocked(error, **context)
     try:
@@ -498,10 +593,10 @@ def gate_drift(
         return {"pass": False, "status": "blocked", "code": "tenant_guard", "reason": str(exc)}
     try:
         _, baseline_contract, baseline_rows, baseline_coverage, baseline_warnings = _verified_run(
-            baseline_run_dir, "baseline run", bundle=baseline_bundle
+            baseline_run_dir, "baseline run", bundle=baseline_bundle, expect_manifest_sha256=expect_baseline_manifest_sha256
         )
         _, current_contract, current_rows, current_coverage, current_warnings = _verified_run(
-            current_run_dir, "current run", bundle=current_bundle
+            current_run_dir, "current run", bundle=current_bundle, expect_manifest_sha256=expect_current_manifest_sha256
         )
         warnings = [
             *baseline_warnings,
@@ -509,9 +604,9 @@ def gate_drift(
             *_require_coverage(current_coverage, "current run", allow_partial=allow_partial),
         ]
         for label, rows in (("baseline run", baseline_rows), ("current run", current_rows)):
-            status_warning = _unbacked_status_warning(label, rows)
-            if status_warning:
-                warnings.append(status_warning)
+            for status_warning in (_unbacked_status_warning(label, rows), _expired_status_warning(label, rows)):
+                if status_warning:
+                    warnings.append(status_warning)
         baseline_done = set(baseline_coverage["completed_collectors"])
         current_done = set(current_coverage["completed_collectors"])
         parity = {
@@ -541,7 +636,7 @@ def gate_drift(
         warnings.append(
             "rule parameters differ between the runs ("
             + ", ".join(f"{row['parameter']} {row['baseline']} -> {row['current']}" for row in parameter_changes)
-            + "); findings that vanished under a larger window are not resolved"
+            + "); findings that vanished under a larger window or a different emergency-access list are not resolved"
         )
     baseline_index = _index(baseline_rows)
     current_index = _index(current_rows)
@@ -567,6 +662,8 @@ def gate_drift(
         row = current_index[key]
         if _status_class(row) != "open":
             new_accepted.append(_brief(row, status=str(row.get("status") or "").lower()))
+        elif _is_expired_claim(row):
+            continue  # open again, and reported below with the other lapsed waivers
         elif SEVERITY_RANKS.get(_severity(row), 0) >= threshold_rank:
             new_above_threshold.append(_brief(row))
 
@@ -588,7 +685,8 @@ def gate_drift(
                 }
             )
         if _status_class(baseline_row) == "accepted" and _status_class(current_row) != "accepted":
-            if SEVERITY_RANKS.get(_severity(current_row), 0) >= threshold_rank:
+            # A waiver that lapsed is reported below with the other stale acceptances, not as a reactivation.
+            if SEVERITY_RANKS.get(_severity(current_row), 0) >= threshold_rank and not _is_expired_claim(current_row):
                 reactivated_above_threshold.append(
                     {
                         **_brief(current_row),
@@ -600,14 +698,15 @@ def gate_drift(
 
     accepted_summary = accepted_risk_summary(current_rows)
     warnings.extend(accepted_summary["warnings"])
+    # Accepted or closed on a waiver that has expired: open again, whichever status value claims it.
     stale_accepted_above_threshold = [
         {
-            **_brief(row),
-            "expires_on": row.get("expires_on"),
-            "days_until_expiry": row.get("days_until_expiry"),
+            **_brief(row, reason=_expired_reason(row)),
+            "expires_on": _expiry_text(row),
+            "days_until_expiry": (waiver_expiry(row) - date.today()).days if waiver_expiry(row) else None,
         }
-        for row in accepted_summary["stale"]
-        if SEVERITY_RANKS.get(_severity(row), 0) >= threshold_rank
+        for row in current_rows
+        if _is_expired_claim(row) and SEVERITY_RANKS.get(_severity(row), 0) >= threshold_rank
     ]
 
     passed = not (new_above_threshold or reactivated_above_threshold or stale_accepted_above_threshold)

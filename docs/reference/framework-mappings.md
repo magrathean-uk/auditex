@@ -148,13 +148,15 @@ was not evaluated also has a `reason`:
   failed or missing one. A collector that is partial only because a licence refused one section
   (`license_required`: `identity` without `userSignInActivity`, which needs Microsoft Entra ID P1 or P2;
   `identity_governance` without its PIM schedules, which need P2) still evidences every rule that does not read
-  that section: `identity` counts as complete for everything except the sign-in rules
-  (`identity.stale_enabled_account`, `identity.privileged_stale_account`, `identity.stale_guest`), and a
-  refused-PIM `identity_governance` as not applicable. Any other diagnostic on the collector (a failed users read,
+  that section: `identity` counts as complete, and a refused-PIM `identity_governance` as not applicable. The
+  sign-in rules (`identity.stale_enabled_account`, `identity.privileged_stale_account`, `identity.stale_guest`)
+  read the refused section, so they read `not_assessed` with `signin_activity_unavailable` (below). Any other diagnostic on the collector (a failed users read,
   a cut list) leaves it partial for every rule.
 - `signin_activity_unavailable`: a stale-account rule judges an account only when the sign-in activity read
   covered it (guests for `identity.stale_guest`, administrators for `identity.privileged_stale_account`, every
-  enabled member for `identity.stale_enabled_account`). Without it the rule finds nothing, which is not a pass.
+  enabled member for `identity.stale_enabled_account`). Without it the rule finds nothing, which is not a pass. A
+  licence-limited identity collector (`userSignInActivity` refused with `license_required`) reads all three rules
+  this way, even for a tenant with no account left to judge.
 - `users_truncated`, `chromeosDevices_truncated`, `two_step_policy_<status>`, `evidence_not_returned:<check>`: a
   Google rule needs the list it reads read in full, the organisation 2-step policy status to be known, and
   Google to have returned the field it checks (`google.evidence_unknown`).
@@ -261,16 +263,37 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   excluded; the shipped rule reads the operator's break-glass list as that allow-list, so a policy that
   excludes the Global Administrator role, an all-staff group or all guests does not pass either control.
   It does not map to `5.2.2.1`: that control is MFA for administrators, which is judged by its own
-  verdict.
+  verdict. A principal is compared by person: a user excluded by id from one qualifying policy, through a
+  role-assignable group the run read from a second and through an administrator role they hold from a third
+  is outside all of them, which ScubaGear's single-policy rule fails as well.
 - `ca.admin_mfa_not_enforced` maps to CIS v7 `5.2.2.1`, SCuBA `MS.AAD.3.6v1` and Secure Score
   `AdminMFAV2`. It reads the `administrator_mfa` verdict: MFA required of every administrator in the
   effective administrator set, by security defaults or by an enabled policy for all users or for every
-  role an administrator holds, with no administrator role or administrator excluded.
+  role an administrator holds, with no administrator role or administrator excluded. This reads the
+  administrators there are (Cyber Essentials, `AdminMFAV2`), combining the enabled policies per administrator: a
+  role policy that covers the role an all-users policy excludes closes that exclusion, and role policies that
+  each reach some administrators cover them together.
   `ca.admin_phishing_resistant_mfa_not_enforced` also maps to `MS.AAD.3.6v1` (phishing-resistant MFA for
   highly privileged roles): it is raised when administrator MFA is enforced but no policy requires a
   phishing-resistant authentication strength of every administrator, so security defaults and plain MFA do
   not satisfy that control. `MS.AAD.3.1v1` (phishing-resistant MFA for all users) has no verdict of its
-  own yet and is not mapped.
+  own yet and is not mapped. It is also raised when the phishing-resistant policies do not cover ScubaGear's
+  eight privileged roles (or exclude one), whoever holds them today, as ScubaGear requires; an all-users
+  phishing-resistant policy still passes, which ScubaGear does not accept.
+- `ca.admin_mfa_role_set_incomplete` maps to CIS v7 `5.2.2.1` (and the MCSB, Zero Trust, NIST, ISO, SOC 2, NIS2,
+  DORA and ATT&CK anchors of `ca.admin_mfa_not_enforced`), not to Secure Score or Cyber Essentials. It reads
+  `role_catalog_verdict`: the policies together must include every role of the CIS 5.2.2.1 list (15 roles, by
+  template id, which is also Prowler's `AdminRoles`) and exclude none, whoever holds it now. A policy for the
+  roles held today passes `ca.admin_mfa_not_enforced` but fails this rule, because the next person given another
+  administrator role would not be required to use MFA. Mapping method rule 1 above is why the benchmark controls
+  read this rule and the Cyber Essentials row does not.
+- Security defaults and the benchmark controls: security defaults keep the three verdicts `enforced` or `blocked`
+  with `basis: [security_defaults]`, and Cyber Essentials, Zero Trust and Secure Score read that as enforcement
+  (Secure Score is Microsoft's own scoring, and the reconciliation compares Auditex with it as it stands). CIS `5.2.2.1` to
+  `5.2.2.3` and SCuBA `MS.AAD.3.2v1` and `MS.AAD.1.1v1` audit a Conditional Access policy (ScubaGear and Prowler
+  evaluate policies only), so baseline alignment reads those controls `not_assessed` with
+  `conditional_access_policy_required:basis_security_defaults` while no qualifying policy backs the verdict. The
+  table is `_verdict_basis_requirements` in `configs/control-mappings.json`.
 - The registration rules (`identity.global_admin_mfa_not_registered`,
   `identity.privileged_mfa_not_registered`, `identity.user_mfa_not_registered`,
   `attack_path.no_mfa_to_tier0`) say who could use MFA, never whether it is required, so they map only to
@@ -286,7 +309,10 @@ claim no benchmark control, so an unreadable policy list is neither a pass nor a
   `restricted`. `identity.privileged_mfa_not_registered` carries the same registration mappings as
   `identity.global_admin_mfa_not_registered`.
 - `ca.legacy_auth_not_blocked` maps to CIS v7 `5.2.2.3`, SCuBA `MS.AAD.1.1v1` and Secure Score
-  `BlockLegacyAuthentication`. The catalog entries were verified on 2026-10-20 against the Tenable
+  `BlockLegacyAuthentication`. The policy must name both legacy client app types (Exchange ActiveSync clients and
+  Other clients, as ScubaGear and the CIS audit require) and no location condition may limit it: a block of every
+  client type that exempts the trusted countries is a country block, not a legacy block, and a legacy block that
+  exempts a network leaves legacy protocols open from it. The catalog entries were verified on 2026-10-20 against the Tenable
   CIS v7.0.0 audit list, the ScubaGear v1.8.0 `aad.md` baseline and the CIPP Secure Score profile
   sample already listed as sources.
 - `ca.*` maps to the `conditional_access` collector and `consent_policy.*` to `consent_policy`
@@ -361,6 +387,11 @@ New rules:
   `identity.privileged_stale_account`.
 - `identity.guest_with_privileged_role`: a guest that holds an administrator role by any route. It maps
   to MCSB `PA-1` and `PA-7`, Zero Trust `identities` and `ce.uac.special_access_privileges` (partial).
+- `identity.service_principal_privileged_role`: a service principal that holds Global Administrator or Privileged
+  Role Administrator by any route (the administrator set lists it with `counted: false`). It maps to MCSB `PA-1`
+  and `PA-7`, Zero Trust `identities` and, as supporting evidence only, `ce.uac.special_access_privileges`; CIS v7
+  and SCuBA have no workload-identity role control. It reads `not_assessed` while the administrator set is
+  `unknown`.
 
 ## SharePoint, OneDrive and Teams sharing rules
 
@@ -558,7 +589,7 @@ met. The applicant's own answers and the assessor's tests decide that.
   collectors completed and its inputs were present) and raised no finding, not a full CIS audit
   result.
 - `consent_policy.user_consent_unrestricted` fires only when users can consent to any app; `consent_policy.user_consent_limited` fires when they can consent under the Microsoft-managed or low-risk policy. CIS v7 `5.1.5.1` and SCuBA `MS.AAD.5.2v1` read both rules, so they pass only when no self-service consent policy is assigned. A tenant-defined permission grant policy is not evaluated and reads `unknown`.
-- Microsoft 365 MFA enforcement is read from security defaults and Conditional Access. Per-user (legacy) MFA states are not read: a tenant that enforces MFA only per user, with security defaults off and no Conditional Access, reads `not_enforced` (CIS `5.2.2.2` and `5.2.2.1` require Conditional Access, so that is right for them, but `ce.uac.mfa_cloud_services` and `ce.uac.mfa_admin_accounts` carry the caveat in `evidence_limits` and fail with `partial` confidence). Group membership is resolved only for role-assignable groups, so an excluded group may overlap another policy without the verdict knowing.
+- Microsoft 365 MFA enforcement is read from security defaults and Conditional Access. Per-user (legacy) MFA states are not read: a tenant that enforces MFA only per user, with security defaults off and no Conditional Access, reads `not_enforced` (CIS `5.2.2.2` and `5.2.2.1` require Conditional Access, so that is right for them, but `ce.uac.mfa_cloud_services` and `ce.uac.mfa_admin_accounts` carry the caveat in `evidence_limits` and fail with `partial` confidence). Security defaults enforce MFA for the tenant verdict, but CIS `5.2.2.x` and the SCuBA Conditional Access controls read `not_assessed` on that basis alone. Exclusions are compared by person across the qualifying policies, but who is in a group is known only for the role-assignable groups the run expanded (nested groups included) and who holds a role only for administrator roles, so an excluded group or role outside that may still overlap another policy without the verdict knowing. The effective MFA and legacy verdicts do not credit a policy that reaches only some roles or groups toward an excluded principal, as the administrator verdict does.
 - Cyber Essentials coverage is partial by design. Ten of 30 requirements have tenant evidence behind
   them and none is `automated`, so no Cyber Essentials row can read `pass`. The update and malware
   evidence covers devices Intune manages (Defender antivirus on Windows only, operating systems in the

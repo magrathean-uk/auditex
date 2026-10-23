@@ -671,7 +671,19 @@ def _build_conditional_access_graph(
     break_glass_accounts: Sequence[str] = (),
     admin_rows: Sequence[dict[str, Any]] = (),
     membership_edges: Sequence[dict[str, Any]] = (),
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+    list[dict[str, Any]],
+    dict[str, Any] | None,
+    break_glass.BreakGlassAccounts,
+]:
+    """The Conditional Access graph, its findings, the break-glass assessment and the emergency-access accounts.
+
+    ``values`` reads each endpoint in full (the chunk files, not the inline sample). The accounts are resolved here,
+    once, against those full lists, and the identity control verdicts use this same resolution.
+    """
     users = values(identity_payload, "users")
     groups = values(identity_payload, "groups")
     role_definitions = values(identity_payload, "roleDefinitions")
@@ -1007,6 +1019,8 @@ def _build_conditional_access_graph(
             account_count=len(accounts.ids),
             accounts=accounts.labels,
             unresolved_accounts=accounts.unresolved,
+            unresolved_account_details=accounts.unresolved_detail,
+            unverified_accounts=accounts.unverified,
             policies_in_scope=break_glass_in_scope,
             policies_missing_exclusion=len(break_glass_flagged),
         )
@@ -1026,8 +1040,18 @@ def _build_conditional_access_graph(
                         f"{'excludes' if len(break_glass_flagged) == 1 else 'exclude'} none of the "
                         f"{'operator-listed' if accounts.source == break_glass.SOURCE_OPERATOR else 'inferred'} "
                         "emergency access accounts."
+                        + (
+                            f" {len(accounts.unresolved)} listed "
+                            f"{'entry' if len(accounts.unresolved) == 1 else 'entries'} could not be resolved against the "
+                            f"collected users and groups and {'is' if len(accounts.unresolved) == 1 else 'are'} not "
+                            f"judged: {', '.join(accounts.unresolved)}."
+                            if accounts.unresolved
+                            else ""
+                        )
                     ),
                     account_source=accounts.source,
+                    unresolved_accounts=accounts.unresolved,
+                    unresolved_account_details=accounts.unresolved_detail,
                     account_basis=(
                         "Accounts listed by the operator."
                         if accounts.source == break_glass.SOURCE_OPERATOR
@@ -1054,7 +1078,7 @@ def _build_conditional_access_graph(
         ),
         "dangling_references": sum(1 for rel in unique_relationship_records if rel.get("resolution") == "unresolved"),
     }
-    return graph_records, unique_relationship_records, summary, policy_findings, break_glass_record
+    return graph_records, unique_relationship_records, summary, policy_findings, break_glass_record, accounts
 
 
 def _owner_type(owner: dict[str, Any]) -> str:
@@ -1194,15 +1218,17 @@ def _build_identity_control_verdicts(
     users: list[dict[str, Any]],
     groups: list[dict[str, Any]],
     role_definitions: list[dict[str, Any]],
+    accounts: break_glass.BreakGlassAccounts,
     admin_records: Sequence[dict[str, Any]] = (),
-    break_glass_accounts: Sequence[str] = (),
     membership_edges: Sequence[dict[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Tenant-level verdicts, one record per control, for every collector that was part of the run.
 
     The principals the operator lists as emergency-access accounts (``--break-glass-accounts``) may be excluded from
-    a policy without it counting against the verdicts; any other exclusion is a gap. The administrator MFA verdict
-    reads the effective administrator set (``admin_records``).
+    a policy without it counting against the verdicts; any other exclusion is a gap. ``accounts`` is the resolution the
+    Conditional Access graph made against the full user and group lists, so the verdicts and the break-glass check
+    always agree on who the accounts are. The verdicts read the effective administrator set (``admin_records``), its
+    role definitions in full (``role_definitions`` is the normalized list) and the group members the run read.
     """
     lookups = {
         "user": {str(item["id"]): str(item.get("principal_name") or item.get("display_name") or "") for item in users},
@@ -1213,18 +1239,9 @@ def _build_identity_control_verdicts(
     verdicts: list[dict[str, Any]] = []
     access_payload = collector_payloads.get("conditional_access")
     if isinstance(access_payload, dict):
-        # The same inputs as the Conditional Access graph, so the accounts match the break-glass check.
-        identity_payload = collector_payloads.get("identity", {})
-        operator_accounts = break_glass.resolve_accounts(
-            break_glass_accounts,
-            users=_values(identity_payload, "users"),
-            groups=_values(identity_payload, "groups"),
-            role_assignments=_values(identity_payload, "roleAssignments"),
-            role_definitions=_values(identity_payload, "roleDefinitions"),
-            admin_rows=admin_records,
-            membership_edges=membership_edges,
-        )
-        sanctioned = frozenset(operator_accounts.ids) if operator_accounts.source == break_glass.SOURCE_OPERATOR else frozenset()
+        sanctioned = frozenset(accounts.ids) if accounts.source == break_glass.SOURCE_OPERATOR else frozenset()
+        unresolved = tuple(accounts.unresolved) if accounts.source == break_glass.SOURCE_OPERATOR else ()
+        admin_scope = build_admin_scope(admin_records, role_definitions, membership_edges)
         policies = sources.endpoint_evidence(access_payload, "conditionalAccessPolicies")
         security_defaults = sources.endpoint_evidence(
             access_payload, "identitySecurityDefaultsEnforcementPolicy", singleton=True
@@ -1240,6 +1257,8 @@ def _build_identity_control_verdicts(
                 lookups=lookups,
                 registration=registration if registration["sampled_users"] else None,
                 sanctioned=sanctioned,
+                admin_scope=admin_scope,
+                unresolved_accounts=unresolved,
             )
         )
         verdicts.append(
@@ -1248,13 +1267,19 @@ def _build_identity_control_verdicts(
                 security_defaults=security_defaults,
                 authentication_strengths=strengths,
                 lookups=lookups,
-                admin_scope=build_admin_scope(admin_records, _values(identity_payload, "roleDefinitions")),
+                admin_scope=admin_scope,
                 sanctioned=sanctioned,
+                unresolved_accounts=unresolved,
             )
         )
         verdicts.append(
             evaluate_legacy_authentication_block(
-                policies=policies, security_defaults=security_defaults, lookups=lookups, sanctioned=sanctioned
+                policies=policies,
+                security_defaults=security_defaults,
+                lookups=lookups,
+                sanctioned=sanctioned,
+                admin_scope=admin_scope,
+                unresolved_accounts=unresolved,
             )
         )
     consent_payload = collector_payloads.get("consent_policy")
@@ -2867,6 +2892,7 @@ def build_normalized_snapshot(
         graph_summary,
         policy_findings,
         break_glass_record,
+        break_glass_accounts_resolved,
     ) = _build_conditional_access_graph(
         policies=_values(collector_payloads.get("conditional_access", {}), "conditionalAccessPolicies"),
         identity_payload=collector_payloads.get("identity", {}),
@@ -2893,8 +2919,8 @@ def build_normalized_snapshot(
         users=users,
         groups=groups,
         role_definitions=role_definitions,
+        accounts=break_glass_accounts_resolved,
         admin_records=effective_admin_records,
-        break_glass_accounts=configured_break_glass,
         membership_edges=group_membership_edges,
     )
     if identity_control_verdicts:

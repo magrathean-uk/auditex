@@ -211,11 +211,18 @@ def _privileged_roles(role_definitions: Iterable[Mapping[str, Any]]) -> dict[str
     return roles
 
 
-def admin_scope(records: Sequence[Mapping[str, Any]], role_definitions: Sequence[Mapping[str, Any]]) -> AdminScope | None:
+def admin_scope(
+    records: Sequence[Mapping[str, Any]],
+    role_definitions: Sequence[Mapping[str, Any]],
+    membership_edges: Sequence[Mapping[str, Any]] = (),
+) -> AdminScope | None:
     """The administrator MFA verdict's view of the set (``build_effective_admin_set`` records), or ``None`` without one.
 
     Only enabled, counted principals matter: a disabled account cannot sign in, so a policy that excludes it does not
     leave an administrator without MFA. Service principals and groups are not counted (they are not people).
+    ``role_definitions`` are the normalized role definitions (``id`` and ``display_name``), read in full, not the
+    inline sample. ``membership_edges`` are the group membership edges the run read (members of role-assignable
+    groups): the verdicts use them to tell who a group exclusion reaches.
     """
     summary = next((row for row in records if row.get("kind") == SUMMARY_KIND), None)
     if summary is None:
@@ -226,14 +233,28 @@ def admin_scope(records: Sequence[Mapping[str, Any]], role_definitions: Sequence
         if row.get("kind") == ROW_KIND and row.get("counted") and row.get("enabled") is not False
     ]
     guests = summary.get("guest_admin_count")
+    principal_roles = {
+        _key(row.get("principal_id")): frozenset(
+            _key(role.get("role_definition_id")) for role in row.get("roles") or [] if role.get("role_definition_id")
+        )
+        for row in rows
+        if row.get("principal_id")
+    }
+    group_members: dict[str, set[str]] = defaultdict(set)
+    for edge in membership_edges:
+        if edge.get("relationship") == "member" and edge.get("group_id") and edge.get("member_id"):
+            group_members[_key(edge["group_id"])].add(_key(edge["member_id"]))
     return AdminScope(
         complete=summary.get("state") == STATE_COMPLETE,
         privileged_role_ids=frozenset(_privileged_roles(role_definitions)),
-        held_role_ids=frozenset(
-            _key(role.get("role_definition_id")) for row in rows for role in row.get("roles") or [] if role.get("role_definition_id")
-        ),
-        admin_principal_ids=frozenset(_key(row.get("principal_id")) for row in rows if row.get("principal_id")),
+        held_role_ids=frozenset(role for roles in principal_roles.values() for role in roles),
+        admin_principal_ids=frozenset(principal_roles),
         guest_admin_count=guests if isinstance(guests, int) and not isinstance(guests, bool) else None,
+        principal_roles=principal_roles,
+        group_members={group: frozenset(members) for group, members in group_members.items()},
+        guest_principal_ids=frozenset(
+            _key(row.get("principal_id")) for row in rows if row.get("principal_id") and row.get("is_guest") is True
+        ),
     )
 
 

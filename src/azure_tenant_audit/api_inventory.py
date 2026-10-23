@@ -504,12 +504,18 @@ def observe_audit_events(
             graph_content.setdefault((method, template), {"method": method, "endpoint": template, "reason": reason})
         return entry
 
+    replayed_from: str | None = None
+    replayed = False
     for event in events:
         if not isinstance(event, Mapping):
             continue
         name = event.get("event")
         details = event.get("details") if isinstance(event.get("details"), Mapping) else {}
-        if name == "graph.request.started":
+        if name == "run.started" and _text(details.get("mode")) == "offline":
+            # An offline run replays a saved sample: it has no transport, so its log cannot observe anything.
+            replayed = True
+            replayed_from = Path(_text(details.get("sample"))).name or replayed_from
+        elif name == "graph.request.started":
             method = _text(details.get("method")).upper()
             url = _text(details.get("url"))
             attempts += 1
@@ -632,9 +638,11 @@ def observe_audit_events(
             for row in _sorted_entries(commands)
             if (row["adapter"], row["family"]) not in declared_families
         ]
+    basis = "offline_replay" if replayed else ("transport_audit_log" if instrumented else "not_instrumented")
     return {
         "source": LEDGER_SOURCE,
-        "basis": "transport_audit_log" if instrumented else "not_instrumented",
+        "basis": basis,
+        **({"replay": {"source_file": replayed_from, "tenant_contact": False}} if replayed else {}),
         "instrumentation": {"graph": instrumented, "commands": instrumented, "google_api": False},
         "log": {"readable": log_readable, "malformed_lines": malformed_lines},
         "graph": {
@@ -675,7 +683,12 @@ def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str
     content_calls = list(graph["content_read_calls"])
     safety = dict(inventory.get("safety") or {})
     counts = dict(inventory.get("counts") or {})
-    safety["observation_basis"] = "transport_audit_log" if ledger["basis"] == "transport_audit_log" else "coverage_ledger_only"
+    safety["observation_basis"] = (
+        ledger["basis"] if ledger["basis"] in {"transport_audit_log", "offline_replay"} else "coverage_ledger_only"
+    )
+    replay = ledger.get("replay")
+    if isinstance(replay, Mapping):
+        safety["replay_source"] = replay.get("source_file")
     safety["observed_methods"] = list(graph["data_methods_seen"])
     safety["observed_write_calls"] = write_calls
     safety["observed_content_read_calls"] = content_calls

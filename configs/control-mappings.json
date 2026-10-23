@@ -2236,6 +2236,43 @@
       "ce.uac.mfa_admin_accounts"
     ]
   },
+  "ca.admin_mfa_role_set_incomplete": {
+    "cis_m365_v7": [
+      "5.2.2.1"
+    ],
+    "cisa_scuba": [
+      "MS.AAD.3.6v1"
+    ],
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "IM-6",
+      "PA-1"
+    ],
+    "nist_800_53": [
+      "IA-2",
+      "IA-2(1)",
+      "AC-6"
+    ],
+    "iso_27001": [
+      "A.5.17",
+      "A.5.18"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.2"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004"
+    ]
+  },
   "ca.admin_phishing_resistant_mfa_not_enforced": {
     "cisa_scuba": [
       "MS.AAD.3.6v1"
@@ -3231,6 +3268,42 @@
       "ce.uac.special_access_privileges"
     ]
   },
+  "identity.service_principal_privileged_role": {
+    "ms_zero_trust": [
+      "identities"
+    ],
+    "mcsb": [
+      "PA-1",
+      "PA-7"
+    ],
+    "nist_800_53": [
+      "AC-2",
+      "AC-6",
+      "AC-6(5)"
+    ],
+    "iso_27001": [
+      "A.5.15",
+      "A.5.18",
+      "A.8.2"
+    ],
+    "soc2": [
+      "CC6.1",
+      "CC6.3"
+    ],
+    "nis2": [
+      "Article 21(2)(d)"
+    ],
+    "dora": [
+      "Article 9(4)(a)"
+    ],
+    "mitre_attack": [
+      "T1078.004",
+      "T1098.003"
+    ],
+    "cyber_essentials": [
+      "ce.uac.special_access_privileges"
+    ]
+  },
   "_cyber_essentials_confidence": {
     "attack_path.no_mfa_to_tier0": {
       "ce.uac.mfa_admin_accounts": "partial"
@@ -3333,6 +3406,9 @@
       "ce.uac.remove_unused_accounts": "partial",
       "ce.uac.special_access_privileges": "partial"
     },
+    "identity.service_principal_privileged_role": {
+      "ce.uac.special_access_privileges": "supporting"
+    },
     "identity.stale_enabled_account": {
       "ce.sc.unnecessary_accounts": "partial",
       "ce.uac.remove_unused_accounts": "partial"
@@ -3371,6 +3447,42 @@
     },
     "sharepoint.external_sharing_broad": {
       "ce.sc.user_authentication": "supporting"
+    }
+  },
+  "_verdict_basis_requirements": {
+    "_documentation": "Verdict basis policy (auditex 2026-10-23): CIS 5.2.2.1 to 5.2.2.3 and the SCuBA Conditional Access controls audit a Conditional Access policy, and ScubaGear and Prowler evaluate Conditional Access policies only. An identity control verdict that rests on security defaults alone (basis lists security_defaults but not conditional_access_policy) keeps the tenant verdict, and Cyber Essentials, Zero Trust and Secure Score keep reading it as enforcement, but the listed benchmark control reads not_assessed (conditional_access_policy_required) instead of pass. Each entry names the rule, the verdict control whose basis is read, the basis the control needs, and the controls of each framework it applies to.",
+    "ca.mfa_not_enforced": {
+      "control": "effective_mfa",
+      "requires": "conditional_access_policy",
+      "frameworks": {
+        "cis_m365_v7": [
+          "5.2.2.2"
+        ],
+        "cisa_scuba": [
+          "MS.AAD.3.2v1"
+        ]
+      }
+    },
+    "ca.admin_mfa_not_enforced": {
+      "control": "administrator_mfa",
+      "requires": "conditional_access_policy",
+      "frameworks": {
+        "cis_m365_v7": [
+          "5.2.2.1"
+        ]
+      }
+    },
+    "ca.legacy_auth_not_blocked": {
+      "control": "legacy_authentication_block",
+      "requires": "conditional_access_policy",
+      "frameworks": {
+        "cis_m365_v7": [
+          "5.2.2.3"
+        ],
+        "cisa_scuba": [
+          "MS.AAD.1.1v1"
+        ]
+      }
     }
   },
   "_rule_thresholds": {

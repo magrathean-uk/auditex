@@ -7,7 +7,9 @@ from collections.abc import Iterable, Mapping
 from contextlib import closing
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
+from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
 from .perf_runtime import sqlite_bulk_pragmas
 from .tenant_identity import decode_identity_metadata
 
@@ -186,13 +188,40 @@ def build_run_evidence_index(run_dir: str | Path, db_path: str | Path | None = N
     return target
 
 
+def _read_only_uri(db_path: str | Path, *, immutable: bool) -> str:
+    return f"file:{quote(str(Path(db_path).absolute()), safe='/')}?mode=ro" + ("&immutable=1" if immutable else "")
+
+
+def open_index_read_only(db_path: str | Path, *, immutable: bool = True) -> sqlite3.Connection:
+    """Open an evidence index without being able to change it.
+
+    ``immutable`` (the default) makes SQLite read the main file as it is: it takes no lock, writes nothing,
+    never creates ``-wal`` or ``-shm`` (so an index on read-only media opens) and ignores a ``-wal`` file
+    that sits beside it. A plain connection to a WAL-mode index replays such a file over the main file and,
+    when it closes, checkpoints it into the main file. Pass ``immutable=False`` only for a legacy index
+    whose data may still sit in its ``-wal`` file.
+    """
+    return sqlite3.connect(_read_only_uri(db_path, immutable=immutable), uri=True)
+
+
 def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
+    """The run metadata held in ``index/evidence.sqlite``, or ``{}`` when it cannot be trusted or read.
+
+    The index is opened immutable, so reading it neither changes it nor creates a sidecar. When
+    ``bundle-hashes.json`` lists the index, a sidecar beside it makes this return ``{}``: the sidecar is not
+    covered by the hash, so whatever it holds was not part of the run as finalized, and callers fall back to
+    the manifest. Only an index no hash manifest covers (a bundle from before it existed) is read together
+    with a sidecar, because its data may still sit there.
+    """
     db_path = Path(run_dir) / "index" / "evidence.sqlite"
     if not db_path.exists():
         return {}
+    sidecars = evidence_sidecars(run_dir)
+    if sidecars and evidence_index_is_hashed(run_dir):
+        return {}
 
     try:
-        with sqlite3.connect(db_path) as conn:
+        with closing(open_index_read_only(db_path, immutable=not sidecars)) as conn:
             meta = dict(conn.execute("SELECT key, value FROM run_meta").fetchall())
             stats = [
                 {"name": row[0], "item_count": row[1], "source_path": row[2]}

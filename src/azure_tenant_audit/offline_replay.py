@@ -7,16 +7,32 @@ collector status and to coverage rows. Otherwise the replay reads every collecto
 that depends on a blocked or cut list reads ``pass`` in a bundle that validates. A section with no marker
 needs no row: a clean sample stays ``ok`` exactly as before.
 
+A replay also records what it was replayed from (``replay_source`` in ``run-manifest.json``: the sample's file
+name and SHA-256), so that a report can say "replayed from <file>, no tenant contact" instead of presenting
+the replay's flags as something observed on a tenant.
+
 Nothing here reads a tenant. The helper is shared by the Microsoft 365 and Google Workspace replays.
 """
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from .collection_gaps import REASON_OPERATOR_LIMIT, REASON_UNKNOWN, TRUNCATION_ERROR_CLASS, section_was_cut
 
 OFFLINE_ROW_TYPE = "offline_sample"
+
+
+def replay_source(sample_path: str | Path) -> dict[str, Any]:
+    """What a replay was run from: the sample's file name (never its directory) and the SHA-256 of its bytes."""
+    path = Path(sample_path)
+    try:
+        digest: str | None = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        digest = None
+    return {"file": path.name, "sha256": digest}
 
 
 def _row_count(section: Mapping[str, Any]) -> int:

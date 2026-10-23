@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from azure_tenant_audit.baselines import rule_inputs_gap, rule_judged_on_inputs, unmet_rule_collectors
-from azure_tenant_audit.bundle_integrity import integrity_failed
+from azure_tenant_audit.bundle_integrity import integrity_failed, manifest_digest_problem, normalize_digest
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.rule_parameters import recorded_rule_parameters, rule_parameter_gap
@@ -32,12 +33,32 @@ def _parse_utc(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _run_metadata(run_dir: Path) -> dict[str, Any]:
+def _run_metadata(run_dir: Path, expected_digest: str | None = None) -> dict[str, Any]:
     bundle = RunBundle(run_dir)
     metadata = bundle.metadata()
     metadata["_created_at"] = _parse_utc(metadata.get("created_utc"))
-    metadata["verification"] = run_verification(bundle)
+    metadata["verification"] = run_verification(bundle, expected_digest)
     return metadata
+
+
+def _expected_digests(run_dirs: list[Path], expected: Mapping[str, str] | None) -> list[str | None]:
+    """The expected ``bundle-hashes.json`` digest of each run, in order; a digest naming no compared run is an error.
+
+    A digest that silently matched nothing would leave its run unchecked, so it raises ``ValueError``.
+    """
+    if not expected:
+        return [None] * len(run_dirs)
+    resolved = [os.path.realpath(run_dir) for run_dir in run_dirs]
+    digests: list[str | None] = [None] * len(run_dirs)
+    for run_dir, digest in expected.items():
+        wanted = normalize_digest(digest)
+        key = os.path.realpath(run_dir)
+        if key not in resolved:
+            raise ValueError(f"an expected manifest digest names {run_dir}, which is not one of the runs being compared")
+        for position, candidate in enumerate(resolved):
+            if candidate == key:
+                digests[position] = wanted
+    return digests
 
 
 def _tenant_gate(runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -178,8 +199,22 @@ def _compare_pair(
     return diff
 
 
-def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
-    runs = [_run_metadata(Path(run_dir)) for run_dir in run_dirs]
+def compare_run_directories(
+    run_dirs: Iterable[str | Path],
+    *,
+    allow_cross_tenant: bool = False,
+    classic: bool = False,
+    expect_manifest_sha256: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Compare the runs in time order.
+
+    ``expect_manifest_sha256`` maps a run directory to the SHA-256 of its ``bundle-hashes.json``, received
+    separately. A run whose manifest has another digest, or none, is unverified
+    (``expected_manifest_sha256_mismatch``) and no comparison involving it calls a finding resolved.
+    """
+    paths = [Path(run_dir) for run_dir in run_dirs]
+    digests = _expected_digests(paths, expect_manifest_sha256)
+    runs = [_run_metadata(path, digest) for path, digest in zip(paths, digests)]
     ordered_runs = _sort_runs(runs)
     compare_context = _tenant_gate(ordered_runs)
     ordered_runs_public = [_public_run(run) for run in ordered_runs]
@@ -245,8 +280,19 @@ def compare_run_directories(run_dirs: Iterable[str | Path], *, allow_cross_tenan
     }
 
 
-def compare_runs(run_dirs: Iterable[str | Path], *, allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
-    return compare_run_directories(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)
+def compare_runs(
+    run_dirs: Iterable[str | Path],
+    *,
+    allow_cross_tenant: bool = False,
+    classic: bool = False,
+    expect_manifest_sha256: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    return compare_run_directories(
+        run_dirs,
+        allow_cross_tenant=allow_cross_tenant,
+        classic=classic,
+        expect_manifest_sha256=expect_manifest_sha256,
+    )
 
 
 _SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
@@ -425,23 +471,32 @@ def reassessment_gap(
     return None
 
 
-def run_verification(bundle: RunBundle) -> dict[str, Any]:
+def run_verification(bundle: RunBundle, expected_digest: str | None = None) -> dict[str, Any]:
     """Whether a run is the bundle that was finalized: its hash manifest and its recorded contract.
 
-    ``problem`` is ``bundle_integrity_mismatch``, ``bundle_integrity_invalid`` or ``contract_invalid``
-    when the run cannot be trusted as written, else ``None``. A bundle finalized before the hash
-    manifest existed reads ``absent`` (unverified, not a problem). Comparison does not recompute the
-    structural validation; ``auditex gate-drift`` does.
+    ``problem`` is ``expected_manifest_sha256_mismatch`` (the manifest is not the one the caller was sent the
+    digest of, or is missing), ``bundle_integrity_mismatch``, ``bundle_integrity_invalid`` or
+    ``contract_invalid`` when the run cannot be trusted as written, else ``None``. A bundle finalized before
+    the hash manifest existed reads ``absent`` (unverified, not a problem); one finalized under the contract
+    that writes it and found without it is ``invalid``. Comparison does not recompute the structural
+    validation; ``auditex gate-drift`` does.
     """
     integrity = bundle.integrity()
     _, validation = bundle.validation()
     recorded_invalid = isinstance(validation, Mapping) and validation.get("valid") is False
     problem: str | None = None
-    if integrity_failed(integrity):
+    digest_problem = manifest_digest_problem(integrity, expected_digest)
+    if digest_problem:
+        problem = "expected_manifest_sha256_mismatch"
+    elif integrity_failed(integrity):
         problem = f"bundle_integrity_{integrity.get('status')}"
     elif recorded_invalid or bundle.manifest().get("contract_status") == "invalid":
         problem = "contract_invalid"
-    return {"integrity": integrity.get("status"), "problem": problem}
+    result: dict[str, Any] = {"integrity": integrity.get("status"), "problem": problem}
+    if expected_digest:
+        result["expected_manifest_sha256"] = normalize_digest(expected_digest)
+        result["expected_manifest_sha256_matched"] = digest_problem is None
+    return result
 
 
 def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> dict[str, Any]:
@@ -457,8 +512,11 @@ def build_finding_delta(left_run: dict[str, Any], right_run: dict[str, Any]) -> 
     right_bundle = RunBundle(Path(str(right_run.get("path")))) if right_run.get("path") else None
     right_rows = right_bundle.finding_rows() if right_bundle else []
     verification = {
-        "baseline": run_verification(left_bundle) if left_bundle else {"integrity": None, "problem": None},
-        "current": run_verification(right_bundle) if right_bundle else {"integrity": None, "problem": None},
+        # A run that came out of ``compare_runs`` already carries its verification (with any expected digest).
+        "baseline": left_run.get("verification")
+        or (run_verification(left_bundle) if left_bundle else {"integrity": None, "problem": None}),
+        "current": right_run.get("verification")
+        or (run_verification(right_bundle) if right_bundle else {"integrity": None, "problem": None}),
     }
     unverified = next(
         (f"run_unverified:{side}:{item['problem']}" for side, item in verification.items() if item["problem"]), None

@@ -82,7 +82,7 @@ class IdentityCollector(Collector):
             },
             "roleAssignments": {
                 "endpoint": "/roleManagement/directory/roleAssignments",
-                "params": {"$select": "id,principalId,roleDefinitionId"},
+                "params": {"$select": "id,principalId,roleDefinitionId,directoryScopeId"},
             },
         }
         payload, coverage = run_graph_endpoints(

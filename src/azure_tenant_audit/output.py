@@ -580,6 +580,7 @@ class AuditWriter:
             "sample_truncated",
             "truncated_sections",
             "rule_parameters",
+            "replay_source",
         ):
             value = metadata.get(key)
             if value is not None:

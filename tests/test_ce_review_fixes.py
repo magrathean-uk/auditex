@@ -307,11 +307,13 @@ def test_a_refused_sign_in_read_does_not_stop_the_administrator_rules_being_eval
 
     for rule_id in ("identity.global_admin_disabled", "identity.global_admin_sprawl", "identity.guest_with_privileged_role"):
         assert _rule(row, rule_id)["status"] == "pass", rule_id
-    # The rules that read the refused section are still not assessed, and say why.
+    # The rules that read the refused section are still not assessed, and say why: the documented reason, not a
+    # generic "the identity collector is not complete".
     stale = _rule(row, "identity.privileged_stale_account")
-    assert stale["status"] == "not_assessed" and stale["reason"] == "collector_not_complete:identity"
+    assert stale["status"] == "not_assessed" and stale["reason"] == "signin_activity_unavailable"
     unnecessary = _row(alignment, "ce.sc.unnecessary_accounts")
-    assert _rule(unnecessary, "identity.stale_enabled_account")["reason"] == "collector_not_complete:identity"
+    assert _rule(unnecessary, "identity.stale_enabled_account")["reason"] == "signin_activity_unavailable"
+    assert _rule(_row(alignment, "ce.uac.remove_unused_accounts"), "identity.stale_guest")["reason"] == "signin_activity_unavailable"
 
 
 def test_a_refused_sign_in_read_is_a_gap_in_the_stale_rules_even_when_identity_counts_as_complete() -> None:

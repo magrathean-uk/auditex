@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.autopilot import build_basic_license_intelligence
-from azure_tenant_audit.bundle_integrity import integrity_failed, is_post_finalization_output
+from azure_tenant_audit.bundle_integrity import (
+    BUNDLE_HASHES_SCHEMA_VERSION,
+    integrity_failed,
+    is_post_finalization_output,
+    listed_artifact_paths,
+)
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.private_io import copy_private_file, harden_tree, make_private_dirs, write_private_text
 from azure_tenant_audit.resources import resolve_resource_path
@@ -148,24 +153,44 @@ def _provider_label(platform: str) -> str:
 
 _TRANSPORT_BASIS = "transport_audit_log"
 _DECLARED_BASIS = "coverage_ledger_only"
+_REPLAY_BASIS = "offline_replay"
 
 
 def _observation_basis(safety: Mapping[str, Any]) -> str:
-    """``transport_audit_log`` when the safety flags were re-derived from the run's audit log, else the declared basis."""
-    return _TRANSPORT_BASIS if str(safety.get("observation_basis") or "") == _TRANSPORT_BASIS else _DECLARED_BASIS
+    """``transport_audit_log`` when the safety flags were re-derived from the run's audit log, ``offline_replay``
+    when the run replayed a saved sample (no tenant, so nothing was observed), else the declared basis."""
+    basis = str(safety.get("observation_basis") or "")
+    return basis if basis in {_TRANSPORT_BASIS, _REPLAY_BASIS} else _DECLARED_BASIS
 
 
-def _flag_text(value: Any, basis: str) -> str:
-    """A safety flag with what it rests on, so a declaration never reads as an observed fact."""
-    qualifier = "observed in the transport audit log" if basis == _TRANSPORT_BASIS else "declared, not observed"
+def _replay_text(safety: Mapping[str, Any]) -> str:
+    """What an offline replay says about itself: where the evidence came from and that no tenant was contacted."""
+    source = _text(safety.get("replay_source")).strip()
+    origin = f"replayed from {source}" if source else "replayed from an offline sample file"
+    return f"{origin}, no tenant contact"
+
+
+def _flag_text(value: Any, basis: str, safety: Mapping[str, Any] | None = None) -> str:
+    """A safety flag with what it rests on, so a declaration or a replay never reads as an observed fact."""
+    if basis == _TRANSPORT_BASIS:
+        qualifier = "observed in the transport audit log"
+    elif basis == _REPLAY_BASIS:
+        qualifier = _replay_text(safety or {})
+    else:
+        qualifier = "declared, not observed"
     return f"{_markdown_cell(value)} ({qualifier})"
 
 
-def _basis_text(basis: str) -> str:
+def _basis_text(basis: str, safety: Mapping[str, Any] | None = None) -> str:
     if basis == _TRANSPORT_BASIS:
         return (
             "transport_audit_log: Graph requests and tenant commands only. DNS, exposure and Power Platform "
             "lookups are outside the ledger."
+        )
+    if basis == _REPLAY_BASIS:
+        return (
+            f"offline_replay: the evidence was {_replay_text(safety or {})}. No transport ledger observed any "
+            "call, so the flags describe the replay and say nothing about how a tenant was read."
         )
     return (
         "coverage_ledger_only: the flags rest on declared collector rows and scopes. No transport ledger "
@@ -176,9 +201,9 @@ def _basis_text(basis: str) -> str:
 def _safety_lines(safety: Mapping[str, Any]) -> list[str]:
     basis = _observation_basis(safety)
     return [
-        f"- Read-only: {_flag_text(safety.get('read_only'), basis)}",
-        f"- No content reads: {_flag_text(safety.get('no_content_reads'), basis)}",
-        f"- Observation basis: {_basis_text(basis)}",
+        f"- Read-only: {_flag_text(safety.get('read_only'), basis, safety)}",
+        f"- No content reads: {_flag_text(safety.get('no_content_reads'), basis, safety)}",
+        f"- Observation basis: {_basis_text(basis, safety)}",
     ]
 
 
@@ -205,6 +230,11 @@ def _scope_risk_limitation(
         closing = "reviewers should confirm the scope set matches the intended audit surface."
     if read_only is False:
         observation = "The recorded safety flags say the run was not read-only, so do not rely on read-only behaviour;"
+    elif basis == _REPLAY_BASIS:
+        observation = (
+            f"The evidence was {_replay_text(safety or {})}, so nothing was observed about calls to a tenant "
+            "and the scope set describes the replayed sample;"
+        )
     elif basis == _TRANSPORT_BASIS:
         observation = (
             "The transport audit log recorded no write, refused or content-reading Graph request or tenant command "
@@ -532,11 +562,40 @@ def analyze_report(run_dir: str | Path) -> dict[str, Any]:
     }
 
 
+def _replay_source_file(bundle: RunBundle, inventory: Mapping[str, Any] | None = None) -> str | None:
+    """The sample file name an offline run was replayed from (``""`` when the run was a replay but it is not recorded).
+
+    ``None`` for a run that was not a replay. Taken from ``run-manifest.json`` (``replay_source``), then the
+    ledger's safety block, then the audit log's ``run.started`` event, so a bundle written before the manifest
+    recorded it still says what it was replayed from.
+    """
+    manifest = bundle.manifest()
+    source = _mapping(manifest.get("replay_source"))
+    if _text(manifest.get("mode")) != "offline" and not source:
+        return None
+    name = _text(source.get("file")) or _text(_mapping(_mapping(inventory).get("safety")).get("replay_source"))
+    if not name:
+        from azure_tenant_audit.api_inventory import read_audit_events
+
+        for event in read_audit_events(bundle.path("audit-log.jsonl")):
+            if event.get("event") == "run.started":
+                name = Path(_text(_mapping(event.get("details")).get("sample"))).name
+                break
+    return Path(name).name if name else ""
+
+
 def api_call_inventory(run_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     bundle = RunBundle(run_path)
     path, payload = bundle.api_inventory()
     inventory = _mapping(payload)
+    replay_file = _replay_source_file(bundle, inventory)
+    if replay_file is not None and inventory:
+        # A replay has no tenant traffic: whatever basis an older bundle recorded, it never counts as observed.
+        inventory = {
+            **inventory,
+            "safety": {**_mapping(inventory.get("safety")), "observation_basis": _REPLAY_BASIS, "replay_source": replay_file},
+        }
     citations = (
         [_citation(_relative_source(path, run_path), reason="API call ledger for this completed run.")]
         if path is not None
@@ -868,6 +927,7 @@ def _integrity_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "unlisted_count": result.get("unlisted_count"),
         "symlink_count": result.get("symlink_count"),
         "unexpected_count": result.get("unexpected_count"),
+        "manifest_missing": bool(result.get("manifest_missing")),
         "modified_paths": modified,
         "missing_paths": missing,
         "unlisted_paths": [str(item) for item in result.get("unlisted") or []],
@@ -940,7 +1000,26 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
                 ][:10],
             }
         )
-    else:
+    # Reports the tooling wrote into the run after it was finalized (the explorer page, rendered reports, the
+    # handoff and its companions) are readable by an assessor but not hashed: writing them into the manifest
+    # would change its digest after it was handed over. They are named so nobody mistakes them for evidence.
+    unhashed_outputs = [path for path in integrity["unlisted_paths"] if is_post_finalization_output(path)]
+    if unhashed_outputs:
+        limitations.append(
+            {
+                "surface": "bundle_integrity",
+                "status": "unhashed_outputs",
+                "message": (
+                    f"{len(unhashed_outputs)} report file(s) in the run were written after it was finalized and are not "
+                    f"in bundle-hashes.json ({', '.join(unhashed_outputs[:5])}"
+                    + (f" and {len(unhashed_outputs) - 5} more" if len(unhashed_outputs) > 5 else "")
+                    + "): nothing proves they match the run's evidence, and they are not copied into a customer pack. "
+                    "Regenerate them from the run before relying on them."
+                ),
+                "paths": unhashed_outputs[:10],
+            }
+        )
+    if not integrity_failed(integrity):
         # Files the hash manifest does not name, other than the outputs the tooling writes on request, were not
         # checked and are not copied into a customer pack.
         unlisted_files = [path for path in integrity["unlisted_paths"] if not is_post_finalization_output(path)]
@@ -1079,6 +1158,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "scope_risk": scope_risk,
             "write_capable_scopes": write_capable_scopes,
             "observation_basis": _observation_basis(api_safety),
+            "replay_source": api_safety.get("replay_source") if _observation_basis(api_safety) == _REPLAY_BASIS else None,
             "observed_log_complete": api_safety.get("observed_log_complete"),
         },
         "quality": {
@@ -1128,6 +1208,8 @@ def _ledger_summary_lines(inventory: Mapping[str, Any]) -> list[str]:
     ledger = _mapping(inventory.get("observed_ledger"))
     counts = _mapping(inventory.get("counts"))
     safety = _mapping(inventory.get("safety"))
+    if _observation_basis(safety) == _REPLAY_BASIS:
+        return [f"- Observed calls: none ({_replay_text(safety)}; there was no tenant traffic to observe)"]
     if not ledger:
         return ["- Observed calls: no transport ledger in this bundle (the call list is declared, not observed)"]
     if _observation_basis(safety) != _TRANSPORT_BASIS:
@@ -1145,6 +1227,12 @@ def _observed_ledger_markdown(inventory: Mapping[str, Any], *, level: str = "##"
     ledger = _mapping(inventory.get("observed_ledger"))
     safety = _mapping(inventory.get("safety"))
     lines = ["", f"{level} Observed calls (transport ledger)", ""]
+    if _observation_basis(safety) == _REPLAY_BASIS:
+        lines.append(
+            f"No transport ledger applies: the evidence was {_replay_text(safety)}. The declared call list above is "
+            "what the collectors report for the replayed sample, not a record of requests sent."
+        )
+        return lines
     if not ledger:
         lines.append(
             "No transport ledger in this bundle: the call list above is declared by the collectors, not observed. "
@@ -1315,7 +1403,9 @@ def render_permissions_ledger_markdown(payload: Mapping[str, Any]) -> str:
 def _handoff_call_lines(counts: Mapping[str, Any], safety: Mapping[str, Any]) -> list[str]:
     declared = counts.get("declared_calls", counts.get("api_calls"))
     lines = [f"- Declared calls: {_markdown_cell(declared)} (collector coverage rows, not a record of what was sent)"]
-    if _observation_basis(safety) == _TRANSPORT_BASIS and counts.get("observed_graph_requests") is not None:
+    if _observation_basis(safety) == _REPLAY_BASIS:
+        lines.append(f"- Observed calls: none ({_replay_text(safety)})")
+    elif _observation_basis(safety) == _TRANSPORT_BASIS and counts.get("observed_graph_requests") is not None:
         lines.extend(
             [
                 f"- Observed Graph requests: {_markdown_cell(counts.get('observed_graph_requests'))}",
@@ -1508,16 +1598,37 @@ def _plain_run_file(run_path: Path, relative: str) -> tuple[Path | None, str | N
     return candidate, None
 
 
-def _listed_artifact_paths(run_path: Path) -> set[str] | None:
-    """The paths ``bundle-hashes.json`` lists, or ``None`` for a bundle that has no manifest to copy by."""
-    try:
-        payload = json.loads((run_path / "bundle-hashes.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    rows = payload.get("artifacts") if isinstance(payload, Mapping) else None
-    if not isinstance(rows, list):
-        return None
-    return {str(row.get("path")) for row in rows if isinstance(row, Mapping) and isinstance(row.get("path"), str)}
+# The one source artifact that records where the operator ran the audit. It is copied with those paths made
+# pack-relative, and says so (``transformed``), so ``verify-pack`` can still tie it to ``bundle-hashes.json``.
+_PACK_RELATIVE_PATHS = "pack_relative_paths"
+_LOCAL_PATH_LABEL = "<local-path>"
+
+
+_LOCAL_ABSOLUTE_PATH = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
+
+
+def _local_path_label(value: Any) -> Any:
+    """An absolute path of the operator's machine as ``<local-path>/<name>``; anything else unchanged."""
+    if isinstance(value, str) and _LOCAL_ABSOLUTE_PATH.match(value):
+        name = re.split(r"[\\/]", value.rstrip("\\/"))[-1]
+        return f"{_LOCAL_PATH_LABEL}/{name}" if name else _LOCAL_PATH_LABEL
+    return value
+
+
+def _pack_relative_run_manifest(payload: Mapping[str, Any], run_path: Path) -> dict[str, Any]:
+    """``run-manifest.json`` for a customer: no absolute path of the machine that ran the audit.
+
+    Paths below the run become run-relative and ``run_dir`` the run folder name (as in the handoff). Paths the
+    run was given elsewhere (the waiver file, the command line) keep only their file name.
+    """
+    safe = _pack_payload(payload, run_path)
+    if "run_dir" in payload:
+        safe["run_dir"] = run_path.name
+    if isinstance(safe.get("waiver_path"), str):
+        safe["waiver_path"] = _local_path_label(safe["waiver_path"])
+    if isinstance(safe.get("command_line"), list):
+        safe["command_line"] = [_local_path_label(item) for item in safe["command_line"]]
+    return safe
 
 
 def _copy_source_artifact(
@@ -1531,6 +1642,10 @@ def _copy_source_artifact(
 
     A link is never followed. When the run has a hash manifest (``listed`` is its path set), only a file the
     manifest names is copied: the pack vouches for what the run produced, not for what was added later.
+    ``run-manifest.json`` is the exception to "byte for byte": it records the operator's absolute run path, which
+    a pack for a customer must not carry, so the copy has paths made pack-relative. Its row then has
+    ``transformed: "pack_relative_paths"`` and ``source_sha256``, the digest of the run's own file (the one
+    ``bundle-hashes.json`` lists), and ``sha256``, the digest of the copy.
     """
     source, reason = _plain_run_file(run_path, relative)
     row: dict[str, Any] = {
@@ -1547,7 +1662,13 @@ def _copy_source_artifact(
         row["skipped_reason"] = "not_in_bundle_hashes"
         return row
     destination = output_root / relative
-    copy_private_file(source, destination)
+    payload = _read_json(source, None) if relative == "run-manifest.json" else None
+    if isinstance(payload, Mapping):
+        row["source_sha256"] = _sha256_file(source)
+        row["transformed"] = _PACK_RELATIVE_PATHS
+        write_private_text(destination, json.dumps(_pack_relative_run_manifest(payload, run_path), indent=2, ensure_ascii=False) + "\n")
+    else:
+        copy_private_file(source, destination)
     row.update(
         {
             "present": True,
@@ -1649,6 +1770,16 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
                 ]
             )
             + " |"
+        )
+    transformed = [row for row in sources if row.get("transformed")]
+    if transformed:
+        lines.extend(
+            [
+                "",
+                "`source-artifacts/run-manifest.json` is the run's manifest with the paths of the machine that ran the audit "
+                "made pack-relative. `pack-manifest.json` records the SHA-256 of the run's own file as `source_sha256` (the "
+                "value `bundle-hashes.json` lists); as copied, the file is covered by `checksums.sha256`.",
+            ]
         )
     return "\n".join(lines) + "\n"
 
@@ -1780,7 +1911,7 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         generated_row("proof-table.json", _json(proof_payload) + "\n"),
     ]
     source_dir = target_dir / "source-artifacts"
-    listed = _listed_artifact_paths(run_path)
+    listed = listed_artifact_paths(run_path)
     source_artifacts = []
     for relative, purpose in _CUSTOMER_SAFE_SOURCE_ARTIFACTS:
         row = _copy_source_artifact(run_path, source_dir, relative, purpose, listed)
@@ -2263,44 +2394,74 @@ def verify_enterprise_handoff_pack(
 
     # The hash manifest the pack carries says what every run artifact was when the run was finalized. The pack's
     # own manifest and checksums sit in the same directory and can be re-hashed together; this cannot, without
-    # also changing the manifest digest that was sent separately.
+    # also changing the manifest digest that was sent separately. It is checked whenever the pack carries it,
+    # whatever status the (editable) pack manifest and handoff.json claim: otherwise a pack edited to say its run
+    # was "absent" or "mismatch" would skip the one check that the genuine digest makes decisive.
     integrity_status = str(_mapping(source_payload.get("integrity")).get("status") or _mapping(handoff_payload.get("integrity")).get("status") or "")
     bundle_hashes_path = pack_path / "source-artifacts" / "bundle-hashes.json"
     bundle_hashes_sha256 = _sha256_file(bundle_hashes_path) if bundle_hashes_path.is_file() else None
-    if integrity_status == "verified":
-        recorded_digest = _text(
-            _mapping(source_payload.get("integrity")).get("manifest_sha256")
-            or _mapping(handoff_payload.get("integrity")).get("manifest_sha256")
-        )
-        if bundle_hashes_sha256 is None:
+    transformed_sources: list[str] = []
+    if bundle_hashes_sha256 is None:
+        copied_manifest = _mapping(_read_json(pack_path / "source-artifacts" / "run-manifest.json", {}))
+        copied_version = copied_manifest.get("schema_contract_version")
+        if integrity_status == "verified":
             add_issue(
                 "missing_bundle_hashes",
                 "The run was verified against bundle-hashes.json, but the pack carries no copy of it.",
                 path=str(bundle_hashes_path),
             )
+        elif isinstance(copied_version, str) and copied_version >= BUNDLE_HASHES_SCHEMA_VERSION:
+            add_issue(
+                "missing_bundle_hashes",
+                f"The run was finalized under contract {copied_version}, which writes bundle-hashes.json, "
+                "but the pack carries no copy of it.",
+                path=str(bundle_hashes_path),
+            )
+    else:
+        if integrity_status != "verified":
+            add_issue(
+                "source_integrity_status_inconsistent",
+                f"The pack carries bundle-hashes.json but its manifest says the run's integrity was "
+                f"{integrity_status or 'not recorded'}, not verified.",
+                path=str(manifest_path),
+                actual=integrity_status or None,
+            )
+        recorded_digest = _text(
+            _mapping(source_payload.get("integrity")).get("manifest_sha256")
+            or _mapping(handoff_payload.get("integrity")).get("manifest_sha256")
+        )
+        if recorded_digest and bundle_hashes_sha256 != recorded_digest:
+            add_issue(
+                "bundle_hashes_digest_mismatch",
+                "source-artifacts/bundle-hashes.json is not the manifest the run was verified against.",
+                path=str(bundle_hashes_path),
+                expected=recorded_digest,
+                actual=bundle_hashes_sha256,
+            )
+        hash_rows = _bundle_hash_rows(bundle_hashes_path)
+        if hash_rows is None:
+            add_issue(
+                "invalid_bundle_hashes",
+                "source-artifacts/bundle-hashes.json cannot be read as a hash manifest.",
+                path=str(bundle_hashes_path),
+            )
         else:
-            if recorded_digest and bundle_hashes_sha256 != recorded_digest:
-                add_issue(
-                    "bundle_hashes_digest_mismatch",
-                    "source-artifacts/bundle-hashes.json is not the manifest the run was verified against.",
-                    path=str(bundle_hashes_path),
-                    expected=recorded_digest,
-                    actual=bundle_hashes_sha256,
-                )
-            hash_rows = _bundle_hash_rows(bundle_hashes_path)
-            if hash_rows is None:
-                add_issue(
-                    "invalid_bundle_hashes",
-                    "source-artifacts/bundle-hashes.json cannot be read as a hash manifest.",
-                    path=str(bundle_hashes_path),
-                )
-            else:
-                for row in sources:
-                    relative = _text(row.get("source_path"))
-                    if row.get("present") is False or not relative or relative == "bundle-hashes.json":
-                        continue
-                    copied = _pack_file_path(pack_path, manifest_output_dir, row.get("path"))
-                    if copied is None or not copied.is_file():
+            source_root = pack_path / "source-artifacts"
+            rows_by_file = {
+                file.resolve(): row
+                for row in sources
+                if (file := _pack_file_path(pack_path, manifest_output_dir, row.get("path"))) is not None
+            }
+            # Every file under source-artifacts/ is checked, by where it sits and not by what the pack manifest
+            # says it is: a copy is the run's artifact only when its bytes are the ones the run was finalized with.
+            for current, directories, names in os.walk(str(source_root), followlinks=False):
+                directories.sort()
+                for name in sorted(names):
+                    copied = Path(current) / name
+                    if copied.is_symlink() or copied.resolve() not in listed_paths:
+                        continue  # a link or an unlisted file is reported as unexpected_file
+                    relative = copied.relative_to(source_root).as_posix()
+                    if relative == "bundle-hashes.json":
                         continue
                     expected_hash = hash_rows.get(relative)
                     if expected_hash is None:
@@ -2312,15 +2473,26 @@ def verify_enterprise_handoff_pack(
                         )
                         continue
                     actual_hash = _sha256_file(copied)
-                    if actual_hash != expected_hash:
-                        add_issue(
-                            "source_artifact_bundle_hash_mismatch",
-                            "A copied source artifact differs from the hash recorded when the run was finalized.",
-                            path=str(copied),
-                            source_path=relative,
-                            expected=expected_hash,
-                            actual=actual_hash,
-                        )
+                    if actual_hash == expected_hash:
+                        continue
+                    row = rows_by_file.get(copied.resolve(), {})
+                    if (
+                        relative == "run-manifest.json"
+                        and row.get("transformed") == _PACK_RELATIVE_PATHS
+                        and row.get("source_sha256") == expected_hash
+                    ):
+                        # The copy has its local paths made pack-relative; the run's own file is the one hashed.
+                        # The copy itself is bound only by checksums.sha256 (see --expect-checksums-sha256).
+                        transformed_sources.append(relative)
+                        continue
+                    add_issue(
+                        "source_artifact_bundle_hash_mismatch",
+                        "A copied source artifact differs from the hash recorded when the run was finalized.",
+                        path=str(copied),
+                        source_path=relative,
+                        expected=expected_hash,
+                        actual=actual_hash,
+                    )
     checksums_sha256 = _sha256_file(checksum_path) if checksum_path.is_file() else None
     for label, expected_digest, actual_digest, code in (
         ("bundle-hashes.json", expect_manifest_sha256, bundle_hashes_sha256, "expected_manifest_sha256_mismatch"),
@@ -2358,6 +2530,9 @@ def verify_enterprise_handoff_pack(
         "generated_file_count": len(generated),
         "source_artifact_count": len(sources),
         "source_integrity_status": integrity_status or None,
+        # Source artifacts copied with their local paths made pack-relative: tied to the run's file by
+        # ``source_sha256`` and, as copied, covered by ``checksums.sha256`` only.
+        "transformed_source_artifacts": transformed_sources,
         # Send these through a separate channel; pass them back as --expect-manifest-sha256 / --expect-checksums-sha256.
         "digests": {
             "bundle_hashes_sha256": bundle_hashes_sha256,

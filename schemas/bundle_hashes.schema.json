@@ -24,7 +24,7 @@
     },
     "excluded": {
       "type": "array",
-      "description": "Files that change after finalization by design and are therefore named but not hashed.",
+      "description": "Files that change after finalization by design and are therefore named but not hashed. The sqlite_sidecar reason is no longer written: the evidence index is closed before it is hashed, and a sidecar that appears later is an unlisted file the check refuses.",
       "items": {
         "type": "object",
         "required": ["path", "reason"],

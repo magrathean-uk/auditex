@@ -70,7 +70,13 @@ def _bundle_hashes(run_dir: Path) -> dict[str, str]:
 def test_read_only_validation_preserves_original_wal_database_and_uses_committed_wal(
     tmp_path: Path, monkeypatch,
 ) -> None:
+    """A bundle no hash manifest covers (finalized before it existed) may keep committed data in its WAL.
+
+    When ``bundle-hashes.json`` lists the index, a sidecar is not read at all; see
+    ``test_integrity_gate_followups.py`` for that case.
+    """
     run_dir = _offline_contract_run(tmp_path)
+    (run_dir / "bundle-hashes.json").unlink()
     scratch = tmp_path / "validation-scratch"
     scratch.mkdir()
     monkeypatch.setenv("TMPDIR", str(scratch))

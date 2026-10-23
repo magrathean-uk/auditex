@@ -340,9 +340,16 @@ def _edit_manifest(run_dir: Path, edit) -> None:
 
 
 def _as_finalized_before_the_hash_manifest(run_dir: Path) -> None:
-    """What a bundle from before bundle-hashes.json looks like: no file, and no entry for it in the run manifest."""
+    """What a bundle from before bundle-hashes.json looks like: no file, no entry for it in the run manifest, and
+    the contract version it was finalized under (a bundle finalized under 2026-10-22 or later that lacks the file is
+    ``invalid``, not ``absent``)."""
     (run_dir / BUNDLE_HASHES_PATH).unlink()
-    _edit_manifest(run_dir, lambda manifest: manifest["artifacts"].remove(BUNDLE_HASHES_PATH))
+
+    def edit(manifest: dict[str, Any]) -> None:
+        manifest["artifacts"].remove(BUNDLE_HASHES_PATH)
+        manifest["schema_contract_version"] = "2026-10-20"
+
+    _edit_manifest(run_dir, edit)
 
 
 def _rehash(run_dir: Path) -> None:

@@ -122,7 +122,10 @@ def test_google_offline_bundle_is_private_and_marked_not_instrumented(tmp_path: 
     assert {name for name, mode in dirs.items() if mode != 0o700} == set()
     assert {name for name, mode in files.items() if mode != 0o600} == set()
     inventory = json.loads((run_dir / "api-inventory.json").read_text(encoding="utf-8"))
-    assert inventory["safety"]["observation_basis"] == "coverage_ledger_only"
-    assert inventory["observed_ledger"]["basis"] == "not_instrumented"
+    # A replay has no tenant traffic, so its basis says so; the provider is still not instrumented.
+    assert inventory["safety"]["observation_basis"] == "offline_replay"
+    assert inventory["safety"]["replay_source"] == "google_workspace_sample.json"
+    assert inventory["observed_ledger"]["basis"] == "offline_replay"
+    assert inventory["observed_ledger"]["instrumentation"] == {"graph": False, "commands": False, "google_api": False}
     validation = json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))
     assert validation["valid"] is True, validation["issues"]

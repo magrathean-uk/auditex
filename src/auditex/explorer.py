@@ -818,7 +818,7 @@ def _banners(
                     )
                     + ". What this page shows may not be what the run produced."
                     if integrity.get("status") == "mismatch"
-                    else "bundle-hashes.json cannot be read, so the artifacts behind this page cannot be checked."
+                    else "bundle-hashes.json cannot be read or is missing, so the artifacts behind this page cannot be checked."
                 ),
             }
         )

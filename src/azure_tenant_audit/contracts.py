@@ -12,6 +12,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from .bundle_integrity import evidence_index_is_hashed
 from .collection_gaps import list_truncations
 from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .resources import list_resource_files, resolve_resource_path
@@ -544,9 +545,13 @@ def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_o
             # Even SELECT against a WAL database can modify its shared-memory
             # sidecar. Inspect only a private copy, including committed data
             # still in the WAL, without opening the original through SQLite.
+            # When bundle-hashes.json lists the index, only the hashed main file is copied: a sidecar
+            # beside it is not covered by the hash, and SQLite would replay it over the hashed file.
+            # (verify_bundle_hashes reports the sidecar as an unexpected file.)
+            suffixes = ("",) if evidence_index_is_hashed(run_dir) else ("", "-wal", "-shm")
             with tempfile.TemporaryDirectory(prefix="auditex-validation-", dir=os.environ.get("TMPDIR")) as temporary:
                 copied_path = Path(temporary) / db_path.name
-                for suffix in ("", "-wal", "-shm"):
+                for suffix in suffixes:
                     source = db_path.with_name(db_path.name + suffix)
                     if source.exists():
                         shutil.copy2(source, copied_path.with_name(copied_path.name + suffix))

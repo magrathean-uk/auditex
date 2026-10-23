@@ -303,6 +303,14 @@ def make_contract_valid(run_dir: Path) -> Path:
     report = build_validation_report(run_dir=run_dir, read_only=True)
     if not report["valid"]:
         raise AssertionError(f"hand-built bundle still fails validation: {json.dumps(report['issues'], indent=2)}")
+    # Finalization writes the hash manifest last. The bundle says it was finalized under the current contract, and a
+    # current-contract bundle without bundle-hashes.json is missing it (invalid), not from before it existed.
+    from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, build_bundle_hash_manifest
+
+    write_json(
+        run_dir / BUNDLE_HASHES_PATH,
+        build_bundle_hash_manifest(run_dir, run_id=run_id, created_utc=manifest.get("created_utc")),
+    )
     return run_dir
 
 

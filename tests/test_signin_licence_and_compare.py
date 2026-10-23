@@ -262,12 +262,13 @@ def _run_with_findings(
     findings: list[dict[str, Any]],
     grade: str,
     collectors: dict[str, str] | None = None,
+    rule_parameters: dict[str, Any] | None = None,
 ) -> Path:
     """A run whose summary lists these collectors (default: identity completed)."""
     statuses = {"identity": "ok"} if collectors is None else collectors
     return (
         RunBundleBuilder(tmp_path, name=name)
-        .manifest(run_id=name, created_utc=created)
+        .manifest(run_id=name, created_utc=created, **({"rule_parameters": rule_parameters} if rule_parameters else {}))
         .summary(collectors=[{"name": key, "status": value, "item_count": 1} for key, value in statuses.items()])
         .report_pack(
             summary={"tenant_name": "acme", "overall_status": "ok", "finding_count": len(findings), "risk": {"grade": grade, "score": 10}},
@@ -451,18 +452,25 @@ def test_a_conditional_access_finding_is_not_resolved_when_the_mfa_verdict_becam
         "collector": "conditional_access",
     }
     collectors = {"identity": "ok", "conditional_access": "ok"}
-    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [finding_row], "high", collectors)
-    unknown = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean", collectors)
-    enforced = _run_with_findings(tmp_path, "run-c", "2026-09-21T00:00:00Z", [], "clean", collectors)
-    _write_normalized(unknown, "identity_control_verdicts", _verdict_section("unknown"))
-    _write_normalized(enforced, "identity_control_verdicts", _verdict_section("enforced"))
+    # The verdict rules read the emergency-access list, so each run records the list it judged with.
+    recorded = {"break_glass_accounts": []}
+    before = _run_with_findings(tmp_path, "run-a", "2026-09-01T00:00:00Z", [finding_row], "high", collectors, recorded)
+    unknown = _run_with_findings(tmp_path, "run-b", "2026-09-20T00:00:00Z", [], "clean", collectors, recorded)
+    enforced = _run_with_findings(tmp_path, "run-c", "2026-09-21T00:00:00Z", [], "clean", collectors, recorded)
+    unrecorded = _run_with_findings(tmp_path, "run-d", "2026-09-22T00:00:00Z", [], "clean", collectors)
+    for run, verdict in ((unknown, "unknown"), (enforced, "enforced"), (unrecorded, "enforced")):
+        _write_normalized(run, "identity_control_verdicts", _verdict_section(verdict))
 
     gone_unknown = build_finding_delta({"path": str(before)}, {"path": str(unknown)})
     gone_enforced = build_finding_delta({"path": str(before)}, {"path": str(enforced)})
+    gone_unrecorded = build_finding_delta({"path": str(before)}, {"path": str(unrecorded)})
 
     assert gone_unknown["resolved"] == []
     assert gone_unknown["not_reassessed"][0]["reason"] == "rule_inputs:verdict_unknown:effective_mfa"
     assert [row["id"] for row in gone_enforced["resolved"]] == [finding_row["id"]]
+    # A later run that did not record the list it judged with cannot say the finding was fixed.
+    assert gone_unrecorded["resolved"] == []
+    assert gone_unrecorded["not_reassessed"][0]["reason"] == "rule_parameters_unrecorded:break_glass_accounts"
 
 
 def test_reassessment_gap_without_the_later_snapshot_is_not_reassessed_for_a_rule_with_an_input_check() -> None:

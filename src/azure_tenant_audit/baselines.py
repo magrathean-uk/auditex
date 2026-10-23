@@ -145,6 +145,7 @@ _RULE_VERDICT_CONTROLS = {
     "ca.mfa_not_enforced": (CONTROL_EFFECTIVE_MFA,),
     "ca.admin_mfa_not_enforced": (CONTROL_ADMIN_MFA,),
     "ca.admin_phishing_resistant_mfa_not_enforced": (CONTROL_ADMIN_MFA,),
+    "ca.admin_mfa_role_set_incomplete": (CONTROL_ADMIN_MFA,),
     "ca.legacy_auth_not_blocked": (CONTROL_LEGACY_AUTH,),
     "ca.enforcement_unverified": (CONTROL_EFFECTIVE_MFA, CONTROL_ADMIN_MFA, CONTROL_LEGACY_AUTH),
     "consent_policy.user_consent_unrestricted": (CONTROL_USER_CONSENT,),
@@ -167,6 +168,7 @@ _ADMIN_SET_RULES = frozenset(
         "identity.privileged_stale_account",
         "identity.admin_holds_productivity_licence",
         "identity.guest_with_privileged_role",
+        "identity.service_principal_privileged_role",
         "identity.admin_set_unverified",
         "attack_path.no_mfa_to_tier0",
     }
@@ -237,6 +239,59 @@ def _shipped_cyber_essentials_confidence() -> dict[str, dict[str, str]]:
         for rule_id, requirements in table.items()
         if isinstance(requirements, Mapping)
     }
+
+
+@lru_cache(maxsize=1)
+def _shipped_verdict_basis_requirements() -> dict[str, dict[str, Any]]:
+    """``rule id -> {control, requires, frameworks}`` from ``_verdict_basis_requirements`` in the control mappings.
+
+    A benchmark control listed here is met only when the rule's identity control verdict rests on ``requires`` (a
+    qualifying Conditional Access policy), not on security defaults alone: CIS 5.2.2.x and the SCuBA Conditional
+    Access controls audit a policy, and security defaults are not one. Cyber Essentials, Zero Trust and Secure Score
+    are not listed and keep reading the verdict as it is.
+    """
+    payload = _read_json(_CONTROL_MAPPINGS_PATH)
+    table = payload.get("_verdict_basis_requirements") if isinstance(payload, Mapping) else None
+    if not isinstance(table, Mapping):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for rule_id, spec in table.items():
+        if not isinstance(spec, Mapping) or not spec.get("control") or not spec.get("requires"):
+            continue
+        frameworks = spec.get("frameworks")
+        result[str(rule_id)] = {
+            "control": str(spec["control"]),
+            "requires": str(spec["requires"]),
+            "frameworks": {
+                str(framework): [str(item) for item in controls]
+                for framework, controls in (frameworks.items() if isinstance(frameworks, Mapping) else ())
+                if isinstance(controls, list)
+            },
+        }
+    return result
+
+
+def _basis_requirement_gap(
+    rule_id: str,
+    framework: str,
+    control_id: str,
+    snapshot: Mapping[str, Any] | None,
+    requirements: Mapping[str, Mapping[str, Any]],
+) -> str | None:
+    """Why a passing rule does not meet this benchmark control: its verdict rests on a basis the control does not accept."""
+    requirement = requirements.get(rule_id)
+    if requirement is None or control_id not in (requirement["frameworks"].get(framework) or []) or snapshot is None:
+        return None
+    verdict = next(
+        (record for record in _records(snapshot, _IDENTITY_CONTROL_SECTION) if record.get("control") == requirement["control"]),
+        None,
+    )
+    if verdict is None:
+        return None
+    basis = [str(item) for item in verdict.get("basis") or []]
+    if requirement["requires"] in basis:
+        return None
+    return f"{requirement['requires']}_required:basis_{'+'.join(basis) or 'none'}"
 
 
 def framework_entry(framework: str) -> dict[str, Any]:
@@ -923,8 +978,9 @@ def _rule_evaluation(
     """Status of one rule. ``pass`` needs the rule to have been evaluated, not just no finding.
 
     ``licence_limited_collectors`` are collectors that are partial only because a licence refused a gated section
-    (see ``_licence_limited_collectors``): ``identity`` then counts as complete for every rule except the sign-in
-    rules, which read the refused section, and ``identity_governance`` as not applicable. ``unevaluated`` maps a
+    (see ``_licence_limited_collectors``): ``identity`` then counts as complete, and ``identity_governance`` as not
+    applicable. The sign-in rules, which read the refused section, are then judged on their inputs: they read
+    ``not_assessed`` with ``signin_activity_unavailable`` for an account that has no sign-in data. ``unevaluated`` maps a
     rule to a reason it could not be judged that the findings themselves give (a Google check whose evidence
     Google did not return).
     """
@@ -935,7 +991,7 @@ def _rule_evaluation(
     collectors = rule_evidence_collectors(rule_id)
     complete_for_rule = set(complete_collectors)
     not_applicable_for_rule = set(not_applicable_collectors or ())
-    if "identity" in licence_limited_collectors and rule_id not in _SIGNIN_ACTIVITY_RULES:
+    if "identity" in licence_limited_collectors:
         complete_for_rule.add("identity")
     if "identity_governance" in licence_limited_collectors:
         not_applicable_for_rule.add("identity_governance")
@@ -946,6 +1002,10 @@ def _rule_evaluation(
     else:
         incomplete = unmet_rule_collectors(rule_id, complete=complete_for_rule, not_applicable=not_applicable_for_rule)
         reason = f"collector_not_complete:{','.join(incomplete)}" if incomplete else _inputs_gap(rule_id, snapshot)
+    if reason is None and "identity" in licence_limited_collectors and rule_id in _SIGNIN_ACTIVITY_RULES:
+        # The sign-in read itself was refused (no Microsoft Entra ID P1): even a tenant with no account to judge
+        # has no sign-in data, so a stale-account rule is never a pass here.
+        reason = "signin_activity_unavailable"
     if reason is None and unevaluated:
         reason = unevaluated.get(rule_id)
     if reason is not None:
@@ -1045,6 +1105,7 @@ def build_baseline_alignment(
     licence_limited = _licence_limited_collectors(coverage_ledger)
     platform = _bundle_platform(normalized_snapshot, findings, coverage_ledger)
     unevaluated = _findings_unevaluated_rules(findings)
+    basis_requirements = _shipped_verdict_basis_requirements() if mappings is None else {}
 
     frameworks: dict[str, Any] = {}
     for framework in BASELINE_FRAMEWORK_KEYS:
@@ -1102,6 +1163,14 @@ def build_baseline_alignment(
                 )
                 for rule_id in rule_ids
             ]
+            for index, evaluation in enumerate(evaluations):
+                gap = (
+                    _basis_requirement_gap(evaluation["rule_id"], framework, control_id, normalized_snapshot, basis_requirements)
+                    if evaluation["status"] == "pass"
+                    else None
+                )
+                if gap:
+                    evaluations[index] = {"rule_id": evaluation["rule_id"], "status": _NOT_ASSESSED, "evaluated": False, "reason": gap}
             statuses = [evaluation["status"] for evaluation in evaluations]
             finding_ids = sorted({fid for rule_id in rule_ids for fid in open_by_rule.get(rule_id, [])})
             controls.append(
