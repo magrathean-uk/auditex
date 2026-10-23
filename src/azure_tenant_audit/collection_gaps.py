@@ -20,6 +20,11 @@ from typing import Any
 # Error class of the coverage row for a list cut at the operator's row limit.
 TRUNCATION_ERROR_CLASS = "collection_limit"
 
+# Coverage rows of a read whose gap belongs to its own section alone carry this flag: the collector's status comes from
+# its base reads, so a cut or refused section-scoped read does not make the collector partial (the rules that read the
+# section say so themselves). Such a gap is still named: in the manifest, ``collection_gaps`` and the gates.
+SECTION_SCOPED = "section_scoped"
+
 # Why a list stopped before its last row. These strings are part of the output contract.
 REASON_OPERATOR_LIMIT = "operator_limit"
 REASON_PAGINATION_FAILED = "pagination_failed"
@@ -31,6 +36,8 @@ REASON_FANOUT_LIMIT = "fanout_limit"
 # A derived result was built from a list that was itself cut short.
 REASON_INPUT_LIMITED = "input_limited"
 REASON_UNKNOWN = "unknown"
+# A section-scoped read that was refused or failed (no list was cut): the section has no rows to judge.
+REASON_READ_FAILED = "read_failed"
 TRUNCATION_REASONS = (
     REASON_OPERATOR_LIMIT,
     REASON_PAGINATION_FAILED,
@@ -51,6 +58,10 @@ BOUNDED_SAMPLE_GAP_PREFIX = "bounded_sample"
 SAMPLE_JUDGED_RULES: dict[str, tuple[str, str]] = {
     "security.risky_signin": ("security", "signIns"),
     "security.privilege_change_event": ("security", "directoryAudits"),
+    # The Drive crawl reads the first files the delegated admin can list (500 by default): a file past the bound was
+    # never checked for an anyone-with-the-link share.
+    "google.drive_anyone_with_link": ("google_drive_posture", "driveFiles"),
+    "google.drive_public_discoverable": ("google_drive_posture", "driveFiles"),
 }
 
 _SAMPLE_ONLY: ContextVar[bool] = ContextVar("auditex_sample_only", default=False)
@@ -183,10 +194,13 @@ def list_truncations(coverage_rows: Iterable[Any], *, require_reason: bool = Fal
 
     ``require_reason`` keeps only rows that name why they were cut. Bundles from before gaps were
     recorded flagged ``collection_truncated`` on an ``ok`` row with no reason; they stay valid.
+
+    A section-scoped row is left out whatever it flags: its cut does not make the collector partial, so it is not a
+    truncation of the collector (see :func:`section_gap_records`, which names it as a section gap instead).
     """
     records: list[dict[str, Any]] = []
     for row in latest_coverage(coverage_rows):
-        if row.get("collection_truncated") is not True:
+        if row.get("collection_truncated") is not True or row.get(SECTION_SCOPED) is True:
             continue
         if require_reason and not row.get("truncation_reason"):
             continue
@@ -204,6 +218,52 @@ def list_truncations(coverage_rows: Iterable[Any], *, require_reason: bool = Fal
             record["result_limit"] = limit
         records.append(record)
     return sorted(records, key=lambda item: (item["collector"], item["list"], item.get("endpoint", "")))
+
+
+def _section_name(name: str) -> str:
+    """The section a coverage row belongs to: a derived ``<section>Fanout`` row restates its section."""
+    return name[: -len("Fanout")] if name.endswith("Fanout") and len(name) > len("Fanout") else name
+
+
+def section_gap_records(coverage_rows: Iterable[Any]) -> list[dict[str, Any]]:
+    """One record per section whose section-scoped read did not finish: cut by a bound or refused.
+
+    ``section_scoped`` coverage rows (the Defender state, the Intune policy assignments, the beta update profiles) keep
+    the collector ``ok``. Their gap is real all the same, so it is listed here for the manifest's ``coverage_gaps``, the
+    normalized ``collection_gaps``, the handoff limitations and the gates. The aggregate row of a read and its derived
+    ``<section>Fanout`` row are one section gap: ``status`` is ``failed`` when the read itself (a row that is not derived)
+    failed, else ``partial``; ``reason`` is the truncation reason, or ``read_failed`` when nothing was cut.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in latest_coverage(coverage_rows):
+        if row.get(SECTION_SCOPED) is not True or row.get("status") == "ok":
+            continue
+        collector = str(row.get("collector") or "")
+        section = _section_name(str(row.get("name") or ""))
+        if collector and section:
+            groups.setdefault((collector, section), []).append(row)
+    records: list[dict[str, Any]] = []
+    for (collector, section), rows in sorted(groups.items()):
+        reasons = [str(row["truncation_reason"]) for row in rows if row.get("truncation_reason")]
+        classes = sorted({str(row["error_class"]) for row in rows if row.get("error_class") and row.get("error_class") != TRUNCATION_ERROR_CLASS})
+        record: dict[str, Any] = {
+            "collector": collector,
+            "section": section,
+            "status": "failed" if any(row.get("type") != "derived" and row.get("status") == "failed" for row in rows) else "partial",
+            "reason": reasons[0] if reasons else REASON_READ_FAILED,
+            "rows_collected": max(_row_count(row) for row in rows),
+        }
+        if classes:
+            record["error_classes"] = classes
+        total = next((row["fanout_total"] for row in rows if isinstance(row.get("fanout_total"), int)), None)
+        if total is not None:
+            record["fanout_total"] = total
+        records.append(record)
+    return records
+
+
+def section_gap_summary(records: Iterable[Mapping[str, Any]]) -> str:
+    return ", ".join(f"{item['collector']}.{item['section']} ({item['status']}, {item['reason']})" for item in records)
 
 
 def truncations_from_payloads(

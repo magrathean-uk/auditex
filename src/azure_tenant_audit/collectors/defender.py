@@ -8,6 +8,8 @@ from .base import Collector, CollectorResult, run_graph_endpoints
 
 class DefenderCollector(Collector):
     name = "defender"
+    # Reads alerts created between ``--since`` and ``--until``: a resumed run under another window re-runs it.
+    time_windowed = True
     description = "Defender alerts, incidents, and security score posture from Microsoft Graph."
     required_permissions = [
         "SecurityAlert.Read.All",

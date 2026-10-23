@@ -38,6 +38,17 @@ FALLBACK_DKIM_SELECTORS = ("s1", "s2", "google", "default", "k1", "mail")
 MAX_PUBLIC_LOOKUP_DOMAINS = 25
 
 
+def _policy_fetch_failed(policy: dict[str, Any]) -> bool:
+    """Whether the MTA-STS policy read itself failed: no answer at all, or a throttling or server error status.
+
+    A 404 or an unparseable file is an answer (the policy is not served, or is invalid) and stays a finding.
+    """
+    if policy.get("fetch_status") == "unreachable":
+        return True
+    status = policy.get("http_status")
+    return policy.get("fetch_status") == "http_error" and isinstance(status, int) and (status == 429 or status >= 500)
+
+
 class DnsPostureCollector(Collector):
     name = "dns_posture"
     description = (
@@ -152,7 +163,14 @@ class DnsPostureCollector(Collector):
                 and (posture.get("mta_sts") or {}).get("dns_present")
                 and not posture.get("managed_by_microsoft")
             ):
-                posture["mta_sts"]["policy"] = fetch_mta_sts_policy(domain_name, https_fetcher)
+                policy = fetch_mta_sts_policy(domain_name, https_fetcher)
+                posture["mta_sts"]["policy"] = policy
+                if _policy_fetch_failed(policy):
+                    # The policy file could not be read (no answer, or a server error): whatever the findings say about
+                    # it, the read did not succeed, so its row fails and the collector is partial.
+                    status = "failed"
+                    error_class = "public_lookup_error"
+                    error = str(policy.get("error") or f"mta-sts policy fetch {policy.get('fetch_status')}")
             posture.setdefault("isDefault", entry.get("isDefault"))
             posture.setdefault("authentication_type", entry.get("authenticationType"))
             assessments.append(posture)

@@ -39,7 +39,10 @@ def build_diagnostics(
 
     for row in result_rows:
         collector_name = row["name"]
-        if row["status"] in {"ok", "skipped"}:
+        # A collector the preflight skipped as known blocked is a blocked collector with a cause, not a collector the
+        # tenant cannot have the data for: it raises a blocker like any failure.
+        preflight_blocked = row["status"] == "skipped" and row.get("error_class") == "preflight_blocked"
+        if row["status"] in {"ok", "skipped"} and not preflight_blocked:
             continue
         hints = permission_hints.get(collector_name, {})
         recommended_scopes = hints.get("graph_scopes", [])
@@ -53,9 +56,9 @@ def build_diagnostics(
             failures.append(
                 {
                     "collector": collector_name,
-                    "status": row["status"],
+                    "status": "blocked" if preflight_blocked else row["status"],
                     "error": row.get("error"),
-                    "error_class": "unknown",
+                    "error_class": (row.get("cause_error_class") or "preflight_blocked") if preflight_blocked else "unknown",
                     "evidence": {"message": row.get("message")},
                     "recommendations": {
                         "required_graph_scopes": sorted(set(recommended_scopes)),

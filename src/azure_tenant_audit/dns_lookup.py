@@ -53,10 +53,18 @@ class DohClient:
             raise DohError(f"DoH query failed for {record_type} {name}: {exc}") from exc
         if not isinstance(payload, dict):
             raise DohError(f"DoH response was not an object for {record_type} {name}")
+        # A response with no ``Status`` (or one that is not a number) is not a statement about the record: only an
+        # explicit NOERROR or NXDOMAIN says "absent".
+        status = payload.get("Status")
         try:
-            rcode = int(payload.get("Status", 0))
+            if status is None or isinstance(status, bool):
+                raise ValueError("no status")
+            rcode = int(status)
         except (TypeError, ValueError) as exc:
             raise DohError(f"DoH response carried no usable status for {record_type} {name}") from exc
+        if payload.get("TC") is True:
+            # The resolver cut the answer short: records may be missing from it, so nothing can be called absent.
+            raise DohError(f"DoH response was truncated (TC) for {record_type} {name}")
         if rcode not in _ABSENT_RCODES and not payload.get("Answer"):
             # SERVFAIL (2), REFUSED (5) and the other failure codes say the resolver could not answer; they
             # are not evidence that the record does not exist, so the domain reads unknown, never "missing".
@@ -359,6 +367,9 @@ def _summarize_dkim(records: list[str]) -> dict[str, Any] | None:
         text = record.strip()
         if "v=dkim1" in text.lower() or "k=" in text.lower():
             tags = _split_semicolon_tags(text)
+            if "p" in tags and not tags["p"].strip():
+                # RFC 6376 section 3.6.1: an empty ``p=`` revokes the key. The selector no longer signs anything.
+                continue
             return {
                 "present": True,
                 "key_type": tags.get("k"),

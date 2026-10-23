@@ -148,6 +148,7 @@ cmdlets use, with the Global Reader role.
 | `intune_depth` | `GET /beta/deviceManagement/windowsQualityUpdateProfiles`, `windowsFeatureUpdateProfiles` and their `/{id}/assignments` | Update profiles and their assignments | `DeviceManagementConfiguration.Read.All` |
 | `exchange_policy` | `Get-MalwareFilterPolicy` | `IsDefault`, `EnableFileFilter`, `ZapEnabled` of each anti-malware policy | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-TransportConfig` | `SmtpClientAuthenticationDisabled` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-CASMailbox -ResultSize Unlimited \| Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } \| Measure-Object \| Select-Object Count` | Count of mailboxes that switch SMTP AUTH back on (no address is kept) | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-DkimSigningConfig` | `Domain`, `Enabled`, `Status` per domain | Exchange Online, Global Reader |
 
 What could not be collected read-only: the Intune reports API for Defender state (a POST export job), the Windows

@@ -246,6 +246,11 @@ def build_coverage_ledger(
         elif actual_status == "partial":
             coverage_status = "partial_success"
             coverage_reason = "collector_returned_partial"
+        elif actual_status == "skipped" and result.get("error_class") == "preflight_blocked":
+            # The preflight found every read refused or empty and did not run the collector: that is a blocked
+            # collector, never "not applicable" (a licence or capability skip, which carries no such marker).
+            coverage_status = "blocked_permission"
+            coverage_reason = "preflight_blocked"
         elif actual_status == "skipped":
             coverage_status = "not_applicable" if expected_status not in {"blocked_by_scope", "blocked_by_role"} else "blocked_permission"
             coverage_reason = "collector_skipped"
@@ -342,17 +347,24 @@ def run_preflight_probe(
             has_ok = any(item.get("status") == "ok" for item in coverage)
             decision = "run" if include_blocked or result.item_count > 0 or has_ok else "skip"
             reason = "supported" if decision == "run" else "known_blocked"
-            rows.append(
-                {
-                    "collector": name,
-                    "decision": decision,
-                    "reason": reason,
-                    "status": result.status,
-                    "item_count": result.item_count,
-                    "coverage_rows": len(coverage),
-                    "message": result.message,
-                }
-            )
+            row: dict[str, Any] = {
+                "collector": name,
+                "decision": decision,
+                "reason": reason,
+                "status": result.status,
+                "item_count": result.item_count,
+                "coverage_rows": len(coverage),
+                "message": result.message,
+            }
+            if decision == "skip":
+                # Why the collector is blocked: the first read that did not succeed, so the run can raise a blocker for it.
+                cause = next((item for item in coverage if item.get("status") != "ok"), None)
+                if cause is not None:
+                    row["error"] = cause.get("error") or result.error
+                    row["cause_error_class"] = cause.get("error_class")
+                elif result.error:
+                    row["error"] = result.error
+            rows.append(row)
             if decision == "run":
                 runnable.append(name)
             writer.log_event(

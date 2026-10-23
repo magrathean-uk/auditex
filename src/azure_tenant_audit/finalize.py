@@ -233,7 +233,7 @@ def finalize_bundle_contract(
         _append_report_evidence_path(writer, metadata["live_readiness_path"])
     collector_rows = [dict(row) for row in writer.summary.get("collectors", []) if isinstance(row, dict)]
     coverage_rows = [dict(row) for row in writer.coverage if isinstance(row, dict)]
-    surface_coverage = build_surface_coverage_map(collector_rows=collector_rows, platform=platform)
+    surface_coverage = build_surface_coverage_map(collector_rows=collector_rows, platform=platform, coverage_rows=coverage_rows)
     computed_coverage_gaps = build_coverage_gap_summary(
         surface_coverage=surface_coverage,
         collector_rows=collector_rows,

@@ -423,7 +423,9 @@ def test_a_failed_assignment_read_leaves_every_other_intune_rule_assessed() -> N
     # Only the rule that reads the assignments is not assessed, with its own reason.
     assert rules["intune.compliance_policy_missing_platform"]["status"] == "not_assessed"
     assert rules["intune.compliance_policy_missing_platform"]["reason"] == "policy_assignments_not_read_for_every_policy"
-    assert not [row for row in snapshot.get("collection_gaps", {}).get("records", []) if row["collector"] == "intune"]
+    # The refused read is no truncation, but it is a section-scoped gap and the run names it (section gap, not collector gap).
+    (gap,) = [row for row in snapshot.get("collection_gaps", {}).get("records", []) if row["collector"] == "intune"]
+    assert gap["list"] == "deviceCompliancePolicyAssignments" and gap["section_scoped"] is True and gap["reason"] == "read_failed"
 
 
 def test_a_failed_base_list_still_makes_the_collector_partial() -> None:

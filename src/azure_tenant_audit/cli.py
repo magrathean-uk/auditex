@@ -5,7 +5,7 @@ import json
 import importlib
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Any, Callable
 import sys
@@ -29,7 +29,7 @@ from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
 from .graph import GraphClient
 from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
-from .offline_replay import replay_collector_status, replay_coverage_rows, replay_source
+from .offline_replay import absent_section_rows, planned_sections, replay_collector_status, replay_coverage_rows, replay_source
 from .output import AuditWriter
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
@@ -253,7 +253,11 @@ def run_offline(
             continue
         if isinstance(value, dict):
             collector_payloads[str(key)] = value
-        replayed = replay_coverage_rows(str(key), value) if isinstance(value, dict) else []
+        replayed = [
+            *(replay_coverage_rows(str(key), value) if isinstance(value, dict) else []),
+            # A collector that delivered none of its sections has no evidence: it replays as the failed read it is.
+            *absent_section_rows(str(key), value, planned_sections(str(key))),
+        ]
         coverage_rows.extend(replayed)
         row: dict[str, Any] = {
             "name": str(key),
@@ -262,7 +266,7 @@ def run_offline(
             "message": (
                 "offline simulation"
                 if not replayed
-                else f"offline simulation; {len(replayed)} section(s) recorded as failed or cut short"
+                else f"offline simulation; {len(replayed)} section(s) recorded as failed, absent or cut short"
             ),
             "coverage_rows": len(replayed),
         }
@@ -383,8 +387,24 @@ def _is_preflight_skip(state: dict[str, Any]) -> bool:
     return state.get("error_class") == _PREFLIGHT_BLOCKED or state.get("message") == _PREFLIGHT_SKIP_MESSAGE
 
 
+def _window_changed(state: dict[str, Any], since: str | None, until: str | None) -> bool:
+    """Whether a checkpoint was read over another time window than this session's.
+
+    A checkpoint written before windows were recorded has no ``since`` or ``until`` key: its window is unknown,
+    which only a session with no window of its own can accept.
+    """
+    if "since" not in state and "until" not in state:
+        return bool(since or until)
+    return (state.get("since") or None) != (since or None) or (state.get("until") or None) != (until or None)
+
+
 def _resume_carried_collectors(
-    writer: AuditWriter, checkpoint_state: dict[str, dict[str, Any]]
+    writer: AuditWriter,
+    checkpoint_state: dict[str, dict[str, Any]],
+    *,
+    windowed: Collection[str] = (),
+    since: str | None = None,
+    until: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """The checkpointed collectors a resumed run keeps as they were: ``{name: raw payload}``.
 
@@ -392,10 +412,14 @@ def _resume_carried_collectors(
     or ``skipped`` because the tenant cannot have the data (a licence or capability skip, which carries no
     payload). A ``partial`` or ``failed`` collector, a collector the preflight skipped as blocked, and an
     ``ok`` collector whose raw payload is gone are all re-run: carrying them forward as finished would let
-    the resumed run read ``ok`` over evidence that was never complete.
+    the resumed run read ``ok`` over evidence that was never complete. A ``windowed`` collector (one that reads
+    events between ``since`` and ``until``) that was read over another window is re-run too: the bundle records
+    one time window, so carried evidence from a different one would be mislabelled.
     """
     carried: dict[str, dict[str, Any]] = {}
     for name, state in checkpoint_state.items():
+        if name in windowed and _window_changed(state, since, until):
+            continue
         status = state.get("status")
         if status == "ok":
             payload = writer._safe_load_json(writer.raw_dir / f"{name}.json")
@@ -475,8 +499,24 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     operation_checkpoint_state = writer.load_operation_checkpoint_state() if resume_from else {}
     # Collectors that finished are carried forward with the status they finished with; every other
     # checkpointed collector is re-run (see _resume_carried_collectors).
-    carried_payloads = _resume_carried_collectors(writer, collector_checkpoint_state) if resume_from else {}
+    windowed_collectors = {name for name, collector in REGISTRY.items() if getattr(collector, "time_windowed", False)}
+    carried_payloads = (
+        _resume_carried_collectors(
+            writer,
+            collector_checkpoint_state,
+            windowed=windowed_collectors,
+            since=run_cfg.since,
+            until=run_cfg.until,
+        )
+        if resume_from
+        else {}
+    )
     completed_collectors = set(carried_payloads)
+    if resume_from:
+        # Every collector that finished in an earlier session is part of this run's evidence, whatever this session
+        # selected: the run folder holds its raw data, and dropping it would leave the report, the findings and the
+        # normalized sections describing half a bundle (or leave the earlier session's behind).
+        selected = [*selected, *(name for name in carried_payloads if name not in selected and name in REGISTRY)]
     if resume_from:
         writer.log_event(
             "run.resume",
@@ -661,6 +701,8 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
             "message": _PREFLIGHT_SKIP_MESSAGE,
             "error": skip.get("error"),
             "error_class": _PREFLIGHT_BLOCKED,
+            # What the preflight read: the error class of the first read that failed (a 403 is ``insufficient_permissions``).
+            "cause_error_class": skip.get("cause_error_class"),
             "coverage_rows": 0,
         }
         result_rows.append(skip_row)
@@ -685,7 +727,13 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
             previous_state = collector_checkpoint_state.get(name, {})
             # The collector finished in the earlier session: keep its status, error and coverage rows. Marking
             # it ``skipped`` here would read as "not applicable" in the ledger and hide a gap the checkpoint holds.
-            result_rows.append(_resumed_row(name, previous_state, coverage_rows))
+            carried_row = _resumed_row(name, previous_state, coverage_rows)
+            result_rows.append(carried_row)
+            if not any(
+                isinstance(item, dict) and item.get("name") == name for item in writer.summary.get("collectors", [])
+            ):
+                # An interrupted session never wrote summary.json: the carried collector is added to this one.
+                summary_rows.append(carried_row)
             if previous_state.get("status") == "ok":
                 collector_payloads[name] = carried_payloads[name]
             writer.log_event(
@@ -724,6 +772,8 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
             name=name,
         )
         coverage_rows.extend(output.coverage_rows)
+        # The window this collector was read over, so a resume under another window re-runs it (see _window_changed).
+        writer.write_checkpoint(name, {**output.result_row, "since": run_cfg.since, "until": run_cfg.until})
         if output.result.status != "ok":
             failures += 1
         if output.result.error:
@@ -744,10 +794,10 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     # A collector that was checkpointed incomplete and is not part of this session keeps the run partial:
     # its gap is in the bundle's coverage rows and summary, so the headline status must not read ok over it.
     selected_names = set(selected)
+    # A checkpointed collector that is not part of this session is carried when it finished; any other is a gap: partial,
+    # failed, skipped by the preflight, an ``ok`` whose raw payload is gone, or one read over another time window.
     resumed_incomplete = sorted(
-        name
-        for name, state in collector_checkpoint_state.items()
-        if name not in selected_names and (state.get("status") not in {"ok", "skipped"} or _is_preflight_skip(state))
+        name for name in collector_checkpoint_state if name not in selected_names and name not in carried_payloads
     )
     if resumed_incomplete:
         writer.log_event(
@@ -783,9 +833,16 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     )
     normalization_diagnostics = build_normalization_diagnostics(normalized_snapshot)
     diagnostics.extend(normalization_diagnostics)
+    # A resumed run rewrites diagnostics, blockers and findings whatever this session found: a collector that succeeded
+    # this time must not keep the blocker an earlier session wrote. With nothing left to report the files are removed,
+    # as a fresh run that has nothing to report never writes them.
     if diagnostics:
         writer.write_diagnostics(diagnostics)
         writer.write_blockers(diagnostics)
+    elif resume_from:
+        writer.clear_result_file("diagnostics.json", "diagnostics_path", "diagnostics_count")
+        writer.clear_result_file("blockers/blockers.json", "blockers_path", "blocker_count")
+    if diagnostics:
         writer.log_event(
             "run.diagnostics.generated",
             "Failure diagnostics generated",
@@ -803,11 +860,17 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     )
     if waiver_rows:
         findings = apply_waivers(findings, waiver_rows)
+    if resume_from:
+        # Sections an earlier session normalized and this one did not (a collector that was dropped, a section that
+        # no longer has rows) would describe evidence this run no longer holds.
+        writer.prune_normalized({"auth_context", "capability_matrix", "coverage_ledger", *normalized_snapshot})
     writer.write_normalized("auth_context", auth_context_payload)
     writer.write_normalized("capability_matrix", {"kind": "capability_matrix", "records": capability_rows})
     writer.write_normalized("coverage_ledger", {"kind": "coverage_ledger", "records": coverage_ledger})
     if findings:
         writer.write_findings(findings)
+    elif resume_from:
+        writer.clear_result_file("findings/findings.json", "findings_path", "findings_count")
     for name, payload in normalized_snapshot.items():
         writer.write_normalized(name, payload)
     writer.write_ai_safe("run_summary", build_ai_safe_summary(normalized_snapshot, findings=findings))

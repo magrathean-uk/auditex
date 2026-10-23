@@ -165,6 +165,10 @@ was not evaluated also has a `reason`:
   inputs could not be checked.
 - `no_domain_records`, `resolver_error`: DNS rules need every verified domain resolved. A resolver failure (SERVFAIL, REFUSED) is unknown, never a missing record: the `dns_posture` collector is `partial` and the rules read `collector_not_complete:dns_posture` (`resolver_error` for an offline bundle whose collector is complete).
 - `bounded_sample:<collector>.<list>`: a rule whose question cannot be answered from a sample (`security.risky_signin` reads the newest 500 sign-ins, `security.privilege_change_event` the newest 500 directory audit events) reads `not_assessed` when no finding was raised and the list was cut at the bound. A finding raised from the sample still reads `fail`.
+- `registration_report_incomplete:<n>`: the MFA registration rules judge only the rows the registration report returned; `<n>` enabled users and counted administrators have no row (or no `isMfaRegistered` answer), so the rule is `not_assessed` and an empty report no longer passes CIS `5.2.3.4`.
+- `tenant_domains_unknown`: `sharepoint.external_principal` needs the verified domain list `domains_hybrid` reads (the rule is gated on that collector).
+- `risk_detail_hidden`: every sampled sign-in hides its risk level, so `security.risky_signin` judged nothing.
+- `collector_not_complete:<collectors>` also applies to `attack_path.app_owner_to_tier0` and `attack_path.privilege_escalation`, which need `identity`, `app_consent`, `directory_relationships` and (unless `not_applicable`) `identity_governance`.
 - `mta_sts_policy_not_fetched`: the MTA-STS policy rules need the policy file fetched (public
   lookups off, or the fetch skipped).
 - `tls_rpt_not_collected`: the bundle predates TLS-RPT collection.

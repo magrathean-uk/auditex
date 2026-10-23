@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from azure_tenant_audit import cli
-from azure_tenant_audit.baselines import build_baseline_alignment
+from azure_tenant_audit.baselines import build_baseline_alignment, rule_inputs_gap
 from azure_tenant_audit.collection_gaps import (
     REASON_NEXT_LINK_REFUSED,
     REASON_OPERATOR_LIMIT,
@@ -423,7 +423,11 @@ def test_baselines_pass_a_complete_collection_and_not_assess_a_cut_one(collector
     def status(top: int | None) -> dict[str, Any]:
         ledger, _row = _ledger_and_status(collector, name, {"top": top})
         # A user with sign-in data: the stale-account rule also needs the inputs it reads, not only its collector.
-        snapshot = {"users": {"records": [{"id": "u1", "enabled": True, "signin_data_available": True}]}}
+        snapshot = {
+            "users": {"records": [{"id": "u1", "enabled": True, "signin_data_available": True}]},
+            # The MFA registration rule also needs the report to cover the user.
+            "auth_method_registration_objects": {"records": [{"id": "u1", "is_mfa_registered": True}]},
+        }
         alignment = build_baseline_alignment([], normalized_snapshot=snapshot, coverage_ledger=ledger, mappings=mappings)
         (control,) = alignment["frameworks"]["cis_m365_v7"]["controls"]
         (rule,) = control["rule_statuses"]
@@ -840,7 +844,6 @@ class _Fanout:
     ("collector", "endpoint", "fanout"),
     [
         ("sharepoint_access", "/sites", "sitePermissionsFanout"),
-        ("intune_depth", "/deviceManagement/deviceConfigurations", "deviceConfigurationAssignmentsFanout"),
         ("teams", "/groups", "teamChannelsFanout"),
     ],
 )
@@ -868,6 +871,39 @@ def test_a_fanout_that_expands_only_ten_objects_is_a_gap(collector: str, endpoin
         result_rows=[{"name": collector, "status": "partial", "item_count": sampled.item_count}],
     )
     assert f"{collector}.{fanout}" in {item["source"] for item in snapshot["collection_gaps"]["records"]}
+
+
+def test_the_ten_profile_assignment_fanout_of_intune_depth_is_a_section_gap_not_a_partial_collector() -> None:
+    """Device configuration assignments feed the unassigned-policy rule alone: their fan-out gap is section-scoped."""
+    from azure_tenant_audit.collection_gaps import section_gap_records
+    from azure_tenant_audit.collectors import REGISTRY
+
+    endpoint, section = "/deviceManagement/deviceConfigurations", "deviceConfigurationAssignments"
+
+    def run(count: int) -> Any:
+        rows = [{"id": f"o-{i}", "displayName": f"O{i}"} for i in range(count)]
+        return REGISTRY["intune_depth"].run({"client": _Fanout({endpoint: rows}), "top": None})
+
+    complete, sampled = run(10), run(11)
+
+    assert complete.status == "ok" and not section_gap_records(complete.coverage)
+    assert sampled.status == "ok", "the collector's own status comes from its base reads"
+    row = next(row for row in sampled.coverage if row["name"] == f"{section}Fanout")
+    assert (row["status"], row["truncation_reason"], row["section_scoped"]) == ("partial", "fanout_limit", True)
+    assert (row["fanout_total"], row["fanout_limit"]) == (11, 10)
+    assert list_truncations(sampled.coverage) == []
+    (gap,) = section_gap_records(sampled.coverage)
+    assert (gap["collector"], gap["section"], gap["reason"], gap["fanout_total"]) == ("intune_depth", section, "fanout_limit", 11)
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="r", collector_payloads={"intune_depth": sampled.payload}, coverage_rows=sampled.coverage,
+        result_rows=[{"name": "intune_depth", "status": "ok", "item_count": sampled.item_count}],
+    )
+    assert f"intune_depth.{section}" in {item["source"] for item in snapshot["collection_gaps"]["records"]}
+    assert rule_inputs_gap("intune_depth.policies_without_assignments", snapshot) in {
+        "policy_assignments_not_read_for_every_policy",
+        "device_configurations_not_read_in_full",
+        "policy_assignments_not_read_in_full",
+    }
 
 
 def test_a_site_ownership_rule_is_not_assessed_when_only_ten_sites_were_read() -> None:

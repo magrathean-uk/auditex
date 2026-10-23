@@ -32,6 +32,8 @@ def _malware(*policies: dict[str, Any]) -> dict[str, Any]:
 
 
 DEFAULT_OK = {"Identity": "Default", "Name": "Default", "IsDefault": True, "EnableFileFilter": True, "ZapEnabled": True}
+# The count of mailboxes that switch SMTP AUTH back on for themselves: none.
+NO_MAILBOX_OVERRIDES = {"value": [{"Count": 0}]}
 
 
 def _snapshot(collectors: dict[str, Any]) -> dict[str, Any]:
@@ -57,12 +59,14 @@ def _dns(domain: str, selectors: list[str], *, managed: bool = False) -> dict[st
 
 def test_the_three_commands_are_read_only_get_cmdlets_that_pass_the_shared_guard() -> None:
     commands = dict(ExchangePolicyCollector.command_collectors)
-    for name in ("malwareFilterPolicy", "transportConfig", "dkimSigningConfig"):
+    for name in ("malwareFilterPolicy", "transportConfig", "casMailboxSmtpAuth", "dkimSigningConfig"):
         classification = classify_command("powershell_graph", commands[name])
         assert classification.read_only, (name, classification.reason)
         assert check_command("powershell_graph", commands[name])[0].startswith("Get-")
     assert commands["malwareFilterPolicy"].startswith("Get-MalwareFilterPolicy |")
     assert commands["transportConfig"].startswith("Get-TransportConfig |")
+    # An aggregate: no mailbox is named and the answer is never empty (an empty output reads as a failed command).
+    assert commands["casMailboxSmtpAuth"].startswith("Get-CASMailbox ") and commands["casMailboxSmtpAuth"].endswith("Measure-Object | Select-Object Count")
     assert commands["dkimSigningConfig"].startswith("Get-DkimSigningConfig |")
     # A write cmdlet the remediation text names is refused by the same guard.
     assert not classify_command("powershell_graph", "Set-TransportConfig -SmtpClientAuthenticationDisabled $true").read_only
@@ -76,9 +80,9 @@ def test_every_declared_command_is_in_the_collector_definitions_and_the_permissi
     declared = {row["name"]: row["commands"] for row in definition["command_collectors"]}
     for name, command in ExchangePolicyCollector.command_collectors:
         assert name in definition["query_plan"], name
-        if name in {"malwareFilterPolicy", "transportConfig", "dkimSigningConfig"}:
+        if name in {"malwareFilterPolicy", "transportConfig", "casMailboxSmtpAuth", "dkimSigningConfig"}:
             assert declared[name] == [command], name
-    for cmdlet in ("Get-MalwareFilterPolicy", "Get-TransportConfig", "Get-DkimSigningConfig"):
+    for cmdlet in ("Get-MalwareFilterPolicy", "Get-TransportConfig", "Get-CASMailbox", "Get-DkimSigningConfig"):
         assert cmdlet in permissions["optional_commands"]
 
 
@@ -89,6 +93,10 @@ def test_protection_fields_read_booleans_from_their_text_and_leave_other_values_
     assert xp.protection_fields("malwareFilterPolicy", {"IsDefault": "True", "EnableFileFilter": False, "ZapEnabled": "maybe"}) == {
         "is_default": True, "enable_file_filter": False, "zap_enabled": None}
     assert xp.protection_fields("transportConfig", {"SmtpClientAuthenticationDisabled": "False"}) == {"smtp_client_auth_disabled": False}
+    assert xp.protection_fields("casMailboxSmtpAuth", {"Count": 3}) == {"smtp_auth_enabled_mailbox_count": 3}
+    assert xp.protection_fields("casMailboxSmtpAuth", {"Count": "2"}) == {"smtp_auth_enabled_mailbox_count": 2}
+    assert xp.protection_fields("casMailboxSmtpAuth", {"Count": -1}) == {"smtp_auth_enabled_mailbox_count": None}
+    assert xp.protection_fields("casMailboxSmtpAuth", {}) == {"smtp_auth_enabled_mailbox_count": None}
     assert xp.protection_fields("dkimSigningConfig", {"Enabled": True, "Status": "CnameMissing"}) == {"dkim_enabled": True, "dkim_status": "CnameMissing"}
     assert xp.protection_fields("acceptedDomains", {"DomainType": "Authoritative", "Default": True}) == {"domain_type": "Authoritative", "default_domain": True}
     assert xp.protection_fields("transportRules", {"Name": "x"}) == {}
@@ -109,11 +117,33 @@ def test_a_default_malware_policy_with_protections_off_is_a_finding() -> None:
     assert one["exchange.malware_filter_weakened"][0]["evidence"]["weaknesses"] == ["zero_hour_auto_purge_off"]
 
 
-def test_only_the_default_policy_is_judged_and_a_clean_default_is_not_a_finding() -> None:
+def test_every_malware_policy_is_judged_not_only_the_default() -> None:
     custom_weak = {"Identity": "Contractors", "Name": "Contractors", "IsDefault": False, "EnableFileFilter": False, "ZapEnabled": False}
     snapshot = _snapshot(_exchange(malwareFilterPolicy=_malware(DEFAULT_OK, custom_weak)))
+    (item,) = _rules(snapshot)["exchange.malware_filter_weakened"]
+    assert item["id"] == "exchange_policy:malware_filter:Contractors:weakened" and item["severity"] == "high"
+    assert item["title"] == "A custom anti-malware policy has protections switched off"
+    assert item["affected_objects"] == ["Contractors"]
+    assert item["evidence"]["weaknesses"] == ["common_attachment_filter_off", "zero_hour_auto_purge_off"]
+    assert item["evidence_refs"][0]["artifact_path"] == "normalized/exchange_policy_objects.json"
+    # The default policy keeps its own finding id when it is weak too.
+    both = _snapshot(_exchange(malwareFilterPolicy=_malware({**DEFAULT_OK, "ZapEnabled": False}, custom_weak)))
+    assert sorted(item["id"] for item in _rules(both)["exchange.malware_filter_weakened"]) == [
+        "exchange_policy:malware_filter:Contractors:weakened",
+        "exchange_policy:malware_filter:default_weakened",
+    ]
+    # A clean default next to clean custom policies is no finding.
+    clean_custom = {**custom_weak, "EnableFileFilter": True, "ZapEnabled": True}
+    clean = _snapshot(_exchange(malwareFilterPolicy=_malware(DEFAULT_OK, clean_custom)))
+    assert "exchange.malware_filter_weakened" not in _rules(clean)
+    assert rule_inputs_gap("exchange.malware_filter_weakened", clean) is None
+
+
+def test_a_custom_malware_policy_that_returned_no_setting_makes_the_rule_not_assessed() -> None:
+    unknown_custom = {"Identity": "Contractors", "Name": "Contractors", "IsDefault": False, "EnableFileFilter": True}
+    snapshot = _snapshot(_exchange(malwareFilterPolicy=_malware(DEFAULT_OK, unknown_custom)))
     assert "exchange.malware_filter_weakened" not in _rules(snapshot)
-    assert rule_inputs_gap("exchange.malware_filter_weakened", snapshot) is None
+    assert rule_inputs_gap("exchange.malware_filter_weakened", snapshot) == "malware_filter_settings_not_returned"
 
 
 def test_a_malware_policy_that_cannot_be_judged_is_not_assessed_never_clean() -> None:
@@ -137,15 +167,53 @@ def test_a_malware_policy_that_cannot_be_judged_is_not_assessed_never_clean() ->
 
 
 def test_smtp_auth_enabled_for_the_tenant_is_a_finding() -> None:
-    snapshot = _snapshot(_exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": False}]}))
+    snapshot = _snapshot(
+        _exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": False}]}, casMailboxSmtpAuth=NO_MAILBOX_OVERRIDES)
+    )
     (item,) = _rules(snapshot)["exchange.smtp_auth_enabled_tenant_wide"]
     assert item["id"] == "exchange_policy:transport_config:smtp_auth_enabled" and item["severity"] == "medium"
     assert item["returned_value"] is False
     assert rule_inputs_gap("exchange.smtp_auth_enabled_tenant_wide", snapshot) is None
 
-    disabled = _snapshot(_exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": True}]}))
+    disabled = _snapshot(
+        _exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": True}]}, casMailboxSmtpAuth=NO_MAILBOX_OVERRIDES)
+    )
     assert "exchange.smtp_auth_enabled_tenant_wide" not in _rules(disabled)
     assert rule_inputs_gap("exchange.smtp_auth_enabled_tenant_wide", disabled) is None
+
+
+def test_mailboxes_that_switch_smtp_auth_back_on_are_a_finding_when_the_tenant_default_is_off() -> None:
+    off = {"value": [{"SmtpClientAuthenticationDisabled": True}]}
+    snapshot = _snapshot(_exchange(transportConfig=off, casMailboxSmtpAuth={"value": [{"Count": 4}]}))
+    (item,) = _rules(snapshot)["exchange.smtp_auth_enabled_tenant_wide"]
+    assert item["id"] == "exchange_policy:cas_mailbox:smtp_auth_enabled" and item["severity"] == "medium"
+    assert item["returned_value"] == {"mailboxes_with_smtp_auth_enabled": 4}
+    assert item["evidence"]["smtp_auth_enabled_mailbox_count"] == 4 and item["evidence"]["tenant_default_smtp_client_auth_disabled"] is True
+    assert item["evidence_refs"][0]["artifact_path"] == "normalized/exchange_policy_objects.json"
+    assert "mailbox" not in json.dumps(item["evidence"]).replace("smtp_auth_enabled_mailbox_count", ""), "no address is kept"
+    # The tenant default is on: the tenant-wide finding already says so, one gap one finding.
+    on = _snapshot(
+        _exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": False}]}, casMailboxSmtpAuth={"value": [{"Count": 4}]})
+    )
+    assert [row["id"] for row in _rules(on)["exchange.smtp_auth_enabled_tenant_wide"]] == [
+        "exchange_policy:transport_config:smtp_auth_enabled"
+    ]
+
+
+def test_the_smtp_auth_rule_is_not_assessed_until_the_per_mailbox_setting_was_read() -> None:
+    off = {"value": [{"SmtpClientAuthenticationDisabled": True}]}
+    for sections, gap in (
+        ({"transportConfig": off}, "casMailboxSmtpAuth_not_read_in_full"),
+        ({"transportConfig": off, "casMailboxSmtpAuth": BLOCKED}, "casMailboxSmtpAuth_not_read_in_full"),
+        ({"transportConfig": off, "casMailboxSmtpAuth": {"value": [{}]}}, "mailbox_smtp_auth_count_not_returned"),
+        ({"transportConfig": off, "casMailboxSmtpAuth": {"value": [{"Count": "many"}]}}, "mailbox_smtp_auth_count_not_returned"),
+    ):
+        snapshot = _snapshot(_exchange(**sections))
+        assert "exchange.smtp_auth_enabled_tenant_wide" not in _rules(snapshot)
+        assert rule_inputs_gap("exchange.smtp_auth_enabled_tenant_wide", snapshot) == gap
+    # A tenant-wide finding is still a failure: the per-mailbox read cannot make it better.
+    on = _snapshot(_exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": False}]}))
+    assert "exchange.smtp_auth_enabled_tenant_wide" in _rules(on)
 
 
 def test_an_smtp_auth_setting_that_was_not_returned_is_unknown() -> None:
@@ -229,6 +297,7 @@ def test_the_rules_are_attributed_to_the_exchange_policy_collector_and_the_cyber
     complete = _snapshot(_exchange(
         malwareFilterPolicy=_malware(DEFAULT_OK),
         transportConfig={"value": [{"SmtpClientAuthenticationDisabled": True}]},
+        casMailboxSmtpAuth=NO_MAILBOX_OVERRIDES,
         acceptedDomains=_domains(("contoso.example", "Authoritative")),
         dkimSigningConfig=_dkim(**{"contoso.example": True}),
     ))
@@ -257,6 +326,7 @@ def _complete_mail_protection() -> dict[str, Any]:
     return _exchange(
         malwareFilterPolicy=_malware(DEFAULT_OK),
         transportConfig={"value": [{"SmtpClientAuthenticationDisabled": True}]},
+        casMailboxSmtpAuth=NO_MAILBOX_OVERRIDES,
         acceptedDomains=_domains(("contoso.example", "Authoritative")),
         dkimSigningConfig=_dkim(**{"contoso.example": True}),
     )
@@ -316,7 +386,9 @@ def test_comparison_reassesses_a_mail_finding_when_its_rows_were_read_in_the_lat
 
     finding = {"collector": "exchange_policy", "rule_id": "exchange.smtp_auth_enabled_tenant_wide"}
     partial = {"exchange_policy": {"complete": False, "status": "partial"}}
-    fixed = _snapshot(_exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": True}]}))
+    fixed = _snapshot(
+        _exchange(transportConfig={"value": [{"SmtpClientAuthenticationDisabled": True}]}, casMailboxSmtpAuth=NO_MAILBOX_OVERRIDES)
+    )
     assert reassessment_gap(finding, partial, fixed) is None, "the setting was read and is now off, so the finding is resolved"
     unread = _snapshot(_exchange(transportConfig=BLOCKED))
     assert reassessment_gap(finding, partial, unread) == "rule_inputs:transportConfig_not_read_in_full"

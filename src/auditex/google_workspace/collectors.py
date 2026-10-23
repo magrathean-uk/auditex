@@ -876,6 +876,21 @@ class GoogleCalendarPostureCollector:
         )
 
 
+# The sections each collector's live run records: what an offline replay checks a sample against, so a collector the
+# sample holds but delivered none of (``{}``, ``null``, a list) replays as the failed read it is and not as ``ok``.
+COLLECTOR_SECTIONS: dict[str, tuple[str, ...]] = {
+    "google_directory": ("users", "groups", "domains", "roles", "roleAssignments", "groupMembers", "orgUnits", "oauthGrants"),
+    "google_reports": ("loginActivities", "adminActivities"),
+    "google_alert_center": ("alerts",),
+    "google_policies": ("twoStepVerificationPolicies",),
+    "google_gmail_settings": ("mailboxSettings",),
+    "google_devices": ("mobileDevices", "chromeosDevices"),
+    "google_dns_posture": ("domains", "domainPosture"),
+    "google_drive_posture": ("driveFiles", "sharedDrives"),
+    "google_groups_settings": ("groupSettings",),
+    "google_calendar_posture": ("calendarResources", "calendars", "calendarAcls"),
+}
+
 REGISTRY = {
     "google_directory": GoogleDirectoryCollector(),
     "google_reports": GoogleReportsCollector(),

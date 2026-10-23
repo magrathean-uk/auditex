@@ -435,7 +435,50 @@ def _assess_coverage(bundle: RunBundle) -> dict[str, Any]:
         "not_applicable_collectors": sorted(
             name for name, row in coverage.items() if row["status"] in _NEUTRAL_COVERAGE
         ),
+        "section_gaps": _manifest_section_gaps(bundle),
     }
+
+
+def _manifest_section_gaps(bundle: RunBundle) -> list[dict[str, Any]]:
+    """The section-scoped gaps the manifest's ``coverage_gaps`` name: reads that were cut or refused while their collector stayed ``ok``."""
+    gaps: list[dict[str, Any]] = []
+    for gap in bundle.manifest().get("coverage_gaps") or []:
+        if not isinstance(gap, Mapping):
+            continue
+        for item in gap.get("section_gaps") or []:
+            if isinstance(item, Mapping) and item.get("collector") and item.get("section"):
+                gaps.append({key: item[key] for key in ("collector", "section", "status", "reason", "rows_collected") if key in item})
+    return gaps
+
+
+def _section_gap_warning(label: str, gaps: list[dict[str, Any]]) -> str | None:
+    """A warning, never a block: the collectors are complete, so the gate accepts the run, but the rules that read the cut section are not assessed."""
+    if not gaps:
+        return None
+    named = ", ".join(f"{item['collector']}.{item['section']} ({item.get('status')}, {item.get('reason')})" for item in gaps[:5])
+    more = f" and {len(gaps) - 5} more" if len(gaps) > 5 else ""
+    return (
+        f"{label} has {len(gaps)} section-scoped read(s) that were cut or refused while their collector stayed ok "
+        f"({named}{more}); the rules that read them are not assessed"
+    )
+
+
+def _outside_declared_warning(bundle: RunBundle, label: str) -> str | None:
+    """A warning when the transport log shows calls the run's collectors never declared (a block would be too blunt:
+    a collector may legitimately reach an endpoint its declaration did not name, but the difference has to be seen)."""
+    _, inventory = bundle.api_inventory()
+    ledger = inventory.get("observed_ledger") if isinstance(inventory, Mapping) else None
+    outside = ledger.get("outside_declared") if isinstance(ledger, Mapping) else None
+    count = outside.get("count") if isinstance(outside, Mapping) else None
+    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+        return None
+    named = [
+        *(f"{row.get('method')} {row.get('endpoint')}" for row in outside.get("graph") or [] if isinstance(row, Mapping)),
+        *(f"{row.get('adapter')}: {row.get('command')}" for row in outside.get("commands") or [] if isinstance(row, Mapping)),
+    ]
+    shown = ", ".join(named[:3])
+    more = f" and {count - 3} more" if count > 3 else ""
+    return f"{label} observed {count} call(s) outside the declared set ({shown}{more})"
 
 
 def _describe_incomplete(coverage: Mapping[str, Any]) -> str:
@@ -484,7 +527,14 @@ def _verified_run(
     if expected:
         integrity = {**integrity, "expected_manifest_sha256": expected, "expected_manifest_sha256_matched": True}
     rows = _verify_findings(bundle, label)
-    return bundle, {**contract, "integrity": integrity}, rows, _assess_coverage(bundle), warnings
+    coverage = _assess_coverage(bundle)
+    section_warning = _section_gap_warning(label, coverage["section_gaps"])
+    if section_warning:
+        warnings = [*warnings, section_warning]
+    outside_warning = _outside_declared_warning(bundle, label)
+    if outside_warning:
+        warnings = [*warnings, outside_warning]
+    return bundle, {**contract, "integrity": integrity}, rows, coverage, warnings
 
 
 def gate_findings(

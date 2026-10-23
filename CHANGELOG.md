@@ -507,6 +507,70 @@ command spellings in `configs/collector-definitions.json` changed; packs use pac
   filter `query`, `negatedQuery` and `subject` are kept as counts and lengths. The guided Exchange module install no
   longer marks PSGallery as trusted.
 
+### Third CE+ product review, coverage lens (2026-10-23)
+
+Contract notes. Additive to `2026-10-22`, which is unreleased, so the contract version is unchanged:
+`coverage_gaps[].section_gaps` and `surface_coverage[].section_gap_collectors` in `run-manifest.json` and
+`summary.json`, section-scoped records (`section_scoped`, `status`, `error_classes`) in
+`normalized/collection_gaps.json`, the validation warnings `section_gap_not_recorded` and
+`observed_call_outside_declared`, `observed_ledger.log.empty`, the replay row error class `section_absent`, the
+per-collector `since` and `until` of a checkpoint, `normalized/bounded_samples.json` on Google Workspace, the
+`casMailboxSmtpAuth` section of `exchange_policy_objects` (a new read-only command, `Get-CASMailbox`, an aggregate
+count), and the rule input reasons `registration_report_incomplete:<n>`, `tenant_domains_unknown` and
+`risk_detail_hidden`. Changed behaviour a pipeline may notice: an empty or partial MFA registration report, a
+SharePoint external-principal check with no domain list and a sign-in sample that hides every risk level now read
+`not_assessed` where they read `pass`; a run with section-scoped gaps stays `ok` (exit 0) but its handoff reads
+`ready_with_limitations` and the gate warns; a resume now reports on every finished collector of the run folder.
+
+- **Fixed: the MFA registration rules passed on an empty report (high).** `identity.user_mfa_not_registered`,
+  `identity.privileged_mfa_not_registered`, `identity.global_admin_mfa_not_registered` and
+  `attack_path.no_mfa_to_tier0` judged only the rows the registration report returned, so an enabled user or counted
+  administrator with no row was never judged: an empty report passed CIS `5.2.3.4`, the Cyber Essentials MFA rows,
+  MCSB IM-6 and PA-1 and Zero Trust identities, live and in an offline replay of `auth_methods` as `{}`, `null` or `[]`.
+  The rules now read `not_assessed` with `registration_report_incomplete:<n>`.
+- **Fixed: section-scoped gaps were invisible to the run.** A Defender state read for 100 of 150 devices, refused
+  beta update profile lists, a refused compliance assignment read, `windowsProtectionState` refused on every device
+  and 111 compliance policies cut at 100 left `coverage_gaps` empty, the gate passing and the handoff clean. They are
+  now section gaps in the manifest, `collection_gaps.json`, the handoff limitations and a gate warning, without making
+  the collector or the run `partial`. A cut or failed beta update profile page no longer leaves a bundle that fails
+  validation (`truncated_list_reported_ok`) while the run reads `ok`: `list_truncations` leaves section-scoped rows out.
+  The 10-profile assignment fan-out of `intune_depth` is section-scoped, so a tenant with more than ten profiles keeps
+  its update ring rules.
+- **Fixed: the attack-path rules passed with their graph inputs partial.** `attack_path.app_owner_to_tier0` and
+  `attack_path.privilege_escalation` now need `identity`, `app_consent`, `directory_relationships` and
+  `identity_governance` (not applicable is tolerated).
+- **Fixed: `sharepoint.external_principal` passed with no domain list.** It is gated on `domains_hybrid` and reads
+  `tenant_domains_unknown` without a verified domain record; comparison no longer calls a finding resolved when the
+  later domain read failed. The tenant name alone is no longer a domain list.
+- **Fixed: the mail protection rules judged only the tenant defaults.** `exchange.malware_filter_weakened` judges every
+  anti-malware policy, and `exchange.smtp_auth_enabled_tenant_wide` counts mailboxes that switch SMTP AUTH back on
+  (`Get-CASMailbox`, a count and no address) and is `not_assessed` until that count was read.
+- **Fixed: `security.risky_signin` passed when every sampled sign-in hid its risk.** It reads `not_assessed` with
+  `risk_detail_hidden`.
+- **Fixed: an offline replay treated a collector that held nothing as complete.** A collector the sample holds as
+  `{}`, `null` or a list is `partial` with a failed `section_absent` row for every section of its live run; a domain
+  record with a `resolver_error` is a failed `dns_resolver_error` row; a Google Workspace replay is labelled
+  `complete_offline_sample`, never `complete_exact_scope`. A collector that holds any key is not second-guessed
+  section by section, because minimal fixtures omit sections on purpose.
+- **Fixed: a resume that narrowed the collector set reported on half a bundle.** Every finished collector of the run
+  folder is carried and judged whether or not it is selected; diagnostics, blockers and findings are rewritten (and
+  removed when empty), so a collector that succeeds on resume drops its old blocker; stale `normalized/` sections are
+  removed; a checkpointed collector that cannot be carried keeps the run `partial`.
+- **Fixed (low): resume coverage and windows.** The writer seeds coverage from `index/coverage.jsonl` as well as
+  `coverage.json`, so an interrupted session keeps its rows, and a carried collector with no summary row is added.
+  A checkpoint records `since` and `until`; `security` and `defender` are re-run when the resumed session's window differs.
+- **Fixed (low): a preflight-blocked collector read `not_applicable`.** It is `blocked_permission` in the ledger, raises a
+  blocker with the cause (a 403 is `insufficient_permissions`) and is named by the `--allow-partial` gate warning.
+- **Fixed (low): DNS edge cases.** A DoH answer with no `Status` or with `TC` is unknown, not absent; a revoked DKIM key
+  (empty `p=`) is an absent selector; an MTA-STS policy fetch that did not answer fails its row.
+- **Fixed (low): Google Drive 500-file crawl.** `google.drive_anyone_with_link` and `google.drive_public_discoverable`
+  are sample-judged rules (`bounded_sample:google_drive_posture.driveFiles`).
+- **Fixed (low): paging leftovers.** `riskyUsers` and the Power Platform environment and DLP policy lists follow their
+  next link; a failed page or a list past 50 pages is a marked cut.
+- **Fixed (low): API ledger.** An empty audit log next to declared calls is not `read_only`; the PowerShell adapter
+  logs the outcome and the command words (`command.completed` `status` and `error_class`, `command.failed` words);
+  a call outside the declared set is a validation warning and a gate warning.
+
 ### Added
 
 - Google Workspace rules `google.user_2sv_not_enforced`, `google.org_2sv_policy_not_enforced` (high when no

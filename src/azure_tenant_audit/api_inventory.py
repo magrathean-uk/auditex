@@ -506,9 +506,11 @@ def observe_audit_events(
 
     replayed_from: str | None = None
     replayed = False
+    events_seen = 0
     for event in events:
         if not isinstance(event, Mapping):
             continue
+        events_seen += 1
         name = event.get("event")
         details = event.get("details") if isinstance(event.get("details"), Mapping) else {}
         if name == "run.started" and _text(details.get("mode")) == "offline":
@@ -610,6 +612,12 @@ def observe_audit_events(
             waiting = command_pending.get(_text(details.get("command")))
             if waiting:
                 waiting.pop(0)["statuses"][_text(details.get("status")) or f"rc={details.get('return_code')}"] += 1
+        elif name == "command.failed":
+            # A command that timed out or raised never completed: its pending call ends as ``failed`` instead of
+            # staying without a status.
+            waiting = command_pending.get(_text(details.get("command")))
+            if waiting:
+                waiting.pop(0)["statuses"]["failed"] += 1
         elif name == "command.refused":
             command_refused.append(
                 {
@@ -639,12 +647,16 @@ def observe_audit_events(
             if (row["adapter"], row["family"]) not in declared_families
         ]
     basis = "offline_replay" if replayed else ("transport_audit_log" if instrumented else "not_instrumented")
+    # A log with no event at all (not even the run's own start and finish), next to calls the run declared, observed
+    # nothing: it was emptied or never written, so it cannot support "read only" on an observed basis, whatever it says
+    # about writes. A run that declared no call has nothing to observe.
+    silent_log = basis == "transport_audit_log" and events_seen == 0 and bool(declared)
     return {
         "source": LEDGER_SOURCE,
         "basis": basis,
         **({"replay": {"source_file": replayed_from, "tenant_contact": False}} if replayed else {}),
         "instrumentation": {"graph": instrumented, "commands": instrumented, "google_api": False},
-        "log": {"readable": log_readable, "malformed_lines": malformed_lines},
+        "log": {"readable": log_readable, "malformed_lines": malformed_lines, **({"empty": True} if silent_log else {})},
         "graph": {
             "request_attempts": attempts,
             "methods_seen": sorted(methods_seen),
@@ -695,7 +707,9 @@ def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str
     safety["refused_calls"] = int(graph["refused_count"]) + int(commands["refused_count"])
     safety["observed_outside_declared"] = int(ledger["outside_declared"]["count"])
     log = ledger.get("log") or {}
-    log_complete = bool(log.get("readable", True)) and int(log.get("malformed_lines", 0)) == 0
+    log_complete = (
+        bool(log.get("readable", True)) and int(log.get("malformed_lines", 0)) == 0 and not log.get("empty")
+    )
     safety["observed_log_complete"] = log_complete and graph["unverified_batch_requests"] == 0
     safety["malformed_log_lines"] = int(log.get("malformed_lines", 0))
     # A refused call is a call that tried something that is not a read: nothing reached the tenant (write_actions

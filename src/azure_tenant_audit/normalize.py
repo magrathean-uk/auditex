@@ -22,6 +22,7 @@ from .collection_gaps import (
     collection_gap_records,
     event_span,
     list_truncations,
+    section_gap_records,
     truncations_from_payloads,
 )
 from .data_minimisation import minimise_mailbox_settings
@@ -2075,6 +2076,7 @@ def build_normalized_snapshot(
         "protectionAlerts",
         exchange_protection.SOURCE_MALWARE,
         exchange_protection.SOURCE_TRANSPORT,
+        exchange_protection.SOURCE_CAS_SMTP,
         exchange_protection.SOURCE_DKIM,
     ):
         for item in _values(collector_payloads.get("exchange_policy", {}), source_name):
@@ -2959,6 +2961,24 @@ def build_normalized_snapshot(
             if row["result_limit"]:
                 gap["result_limit"] = row["result_limit"]
             gap_truncations.append(gap)
+    # A section-scoped read that was cut or refused keeps its collector ``ok`` and is named here all the same. A cut one
+    # is listed already (from its section); a refused or failed one has no truncation to list, so it is added.
+    gaps_by_key = {(item["collector"], item["list"]): item for item in gap_truncations}
+    for section_gap in section_gap_records(coverage_rows):
+        key = (section_gap["collector"], section_gap["section"])
+        extra = {"section_scoped": True, "status": section_gap["status"], "error_classes": section_gap.get("error_classes")}
+        if key in gaps_by_key:
+            gaps_by_key[key].update({name: value for name, value in extra.items() if value})
+            continue
+        gap_truncations.append(
+            {
+                "collector": section_gap["collector"],
+                "list": section_gap["section"],
+                "rows_collected": section_gap["rows_collected"],
+                "reason": section_gap["reason"],
+                **{name: value for name, value in extra.items() if value},
+            }
+        )
     collection_gaps = collection_gap_records(sorted(gap_truncations, key=lambda item: (item["collector"], item["list"])))
     if collection_gaps:
         records_by_section[COLLECTION_GAP_SECTION] = collection_gaps

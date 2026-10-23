@@ -25,6 +25,10 @@ Mail protection commands (Cyber Essentials malware protection and secure configu
 * ``Get-TransportConfig`` -> ``SmtpClientAuthenticationDisabled``: whether authenticated SMTP submission
   (a basic-authentication protocol) is switched off for the whole tenant.
   https://learn.microsoft.com/en-us/powershell/module/exchange/get-transportconfig
+* ``Get-CASMailbox`` -> a count of the mailboxes whose own ``SmtpClientAuthenticationDisabled`` is false. The tenant
+  default above can be switched off and still be overridden mailbox by mailbox, so the count says whether the
+  default is the whole picture. Only the count is kept, never an address.
+  https://learn.microsoft.com/en-us/powershell/module/exchange/get-casmailbox
 * ``Get-DkimSigningConfig`` -> ``Domain``, ``Enabled`` and ``Status`` per domain: whether Exchange Online
   signs outbound mail with DKIM, which the DNS lookup in ``dns_posture`` cannot show.
   https://learn.microsoft.com/en-us/powershell/module/exchange/get-dkimsigningconfig
@@ -102,6 +106,11 @@ class ExchangePolicyCollector(Collector):
         ("protectionAlerts", "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"),
         ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled"),
         ("transportConfig", "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled"),
+        # An aggregate, so the answer is never empty (an empty output is read as a failed command) and no mailbox is named.
+        (
+            "casMailboxSmtpAuth",
+            "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count",
+        ),
         ("dkimSigningConfig", "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"),
     ]
 

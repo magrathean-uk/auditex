@@ -409,7 +409,7 @@
         "Exchange Administrator",
         "Global Reader"
       ],
-      "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert is available only in Security & Compliance PowerShell (Connect-IPPSSession). Mail protection cmdlets Get-MalwareFilterPolicy, Get-TransportConfig and Get-DkimSigningConfig run in the same Exchange Online session and are readable with the Global Reader role the other Exchange cmdlets already use; they need no Graph scope and no further role. None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal and 'not_assessed' mail protection rules, never 'off' or a pass.",
+      "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert is available only in Security & Compliance PowerShell (Connect-IPPSSession). Mail protection cmdlets Get-MalwareFilterPolicy, Get-TransportConfig, Get-CASMailbox (a count of the mailboxes that switch SMTP AUTH back on, never an address) and Get-DkimSigningConfig run in the same Exchange Online session and are readable with the Global Reader role the other Exchange cmdlets already use; they need no Graph scope and no further role. None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal and 'not_assessed' mail protection rules, never 'off' or a pass.",
       "command_tools": [
         "pwsh",
         "powershell_graph"
@@ -427,6 +427,7 @@
         "Get-ProtectionAlert",
         "Get-MalwareFilterPolicy",
         "Get-TransportConfig",
+        "Get-CASMailbox",
         "Get-DkimSigningConfig"
       ]
     }

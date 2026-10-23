@@ -39,6 +39,8 @@ def _prepare(
     completed: bool = False,
 ) -> tuple[AuditWriter, ProviderFinalizePlan]:
     writer = AuditWriter(root, tenant_name=label, run_name="audit")
+    # A run always logs something; a log with no event at all cannot support "read only" (see the observed ledger).
+    writer.log_event("test.fixture", "Fixture bundle prepared")
     if organization:
         payload = {"organization": {"value": [{
             "id": organization, "displayName": label,

@@ -555,12 +555,19 @@ _SPO_CONTROLS = {
 
 def _control_statuses(settings: dict[str, Any]) -> dict[str, str]:
     """Baseline status of each SharePoint sharing control, from the shipped mappings, for these settings."""
-    snapshot = _snapshot(sharepoint_access={"sharePointSettings": settings})
+    # The tenant's domain list is an input of the external-principal rule these controls also map.
+    snapshot = _snapshot(
+        sharepoint_access={"sharePointSettings": settings},
+        domains_hybrid={"domains": {"value": [{"id": "contoso.example", "isVerified": True}]}},
+    )
     findings = build_findings([], normalized_snapshot=snapshot)
     alignment = build_baseline_alignment(
         findings,
         normalized_snapshot=snapshot,
-        coverage_ledger=[{"collector": "sharepoint_access", "coverage_status": "complete_exact_scope"}],
+        coverage_ledger=[
+            {"collector": "sharepoint_access", "coverage_status": "complete_exact_scope"},
+            {"collector": "domains_hybrid", "coverage_status": "complete_exact_scope"},
+        ],
     )
     statuses: dict[str, str] = {}
     for framework, controls in _SPO_CONTROLS.items():

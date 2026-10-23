@@ -11,6 +11,7 @@ import time
 
 from .api_inventory import API_INVENTORY_ARTIFACT, read_audit_events, with_observed_ledger
 from .assurance import build_assurance_summary, build_coverage_gap_summary, build_provider_scorecard, build_surface_coverage_map
+from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
 from .findings import apply_coverage_gaps_to_report_pack
 from .tenant_identity import IDENTITY_FIELDS
@@ -248,12 +249,31 @@ class AuditWriter:
                 self.summary["collectors"] = [item for item in existing_collectors if isinstance(item, dict)]
 
         existing_coverage = self._safe_load_json(self.run_dir / "coverage.json")
-        if isinstance(existing_coverage, list):
-            self.coverage = [item for item in existing_coverage if isinstance(item, dict)]
+        rows = [item for item in existing_coverage if isinstance(item, dict)] if isinstance(existing_coverage, list) else []
+        # ``coverage.json`` is written when a run is finalized; the rows of a session that was interrupted are only in
+        # the index, which every read appends to. The newest observation of an endpoint wins.
+        rows.extend(self._indexed_coverage())
+        self.coverage = latest_coverage(rows)
 
         existing_state = self._safe_load_json(self.checkpoint_state_path)
         if isinstance(existing_state, dict):
             self._checkpoint_state = self._normalize_checkpoint_payload(existing_state)
+
+    def _indexed_coverage(self) -> list[dict[str, Any]]:
+        """Coverage rows from ``index/coverage.jsonl`` (one JSON object per line); an unreadable line is skipped."""
+        try:
+            lines = self.coverage_index_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        rows: list[dict[str, Any]] = []
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+        return rows
 
     @staticmethod
     def _normalize_checkpoint_payload(payload: Any) -> dict[str, dict[str, Any]]:
@@ -375,6 +395,9 @@ class AuditWriter:
             "error_class": payload.get("error_class"),
             "ts_utc": _now_iso(),
         }
+        if "since" in payload or "until" in payload:
+            # The time window the collector was read over: a resumed run under another window re-runs a windowed one.
+            collectors[str(collector_name)].update(since=payload.get("since"), until=payload.get("until"))
         self._checkpoint_state = {"collectors": collectors, "operations": operations}
         checkpoint_payload = {
             "run_dir": str(self.run_dir),
@@ -491,6 +514,45 @@ class AuditWriter:
         self._write_json_atomic(path, minimise_user_text(payload))
         self._record_artifact(path)
         return path
+
+    def clear_result_file(self, relative: str, *manifest_keys: str) -> bool:
+        """Remove a result file an earlier session wrote (findings, blockers, diagnostics) and the manifest fields about it.
+
+        A fresh run that has nothing to report writes no such file, so a resumed run that has nothing left to report
+        must not keep the last session's. Returns whether a file was removed.
+        """
+        path = self.run_dir / relative
+        removed = False
+        if path.exists():
+            try:
+                path.unlink()
+                removed = True
+            except OSError:
+                LOG.debug("Could not remove stale %s", path)
+        for key in manifest_keys:
+            self._manifest.pop(key, None)
+        self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != relative]
+        return removed
+
+    def prune_normalized(self, keep: set[str]) -> list[str]:
+        """Remove ``normalized/<name>.json`` files this run does not write, and their artifact entries.
+
+        A resumed run reuses its folder, so a section an earlier session normalized stays on disk unless it is
+        removed here. Returns the names removed.
+        """
+        removed: list[str] = []
+        for path in sorted(self.normalized_dir.glob("*.json")):
+            if path.stem in keep:
+                continue
+            try:
+                path.unlink()
+            except OSError:
+                LOG.debug("Could not remove stale normalized section %s", path)
+                continue
+            removed.append(path.stem)
+            relative = str(path.relative_to(self.run_dir))
+            self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != relative]
+        return removed
 
     def write_ai_safe(self, name: str, payload: dict[str, Any]) -> Path:
         path = self.ai_safe_dir / f"{name}.json"
@@ -615,6 +677,7 @@ class AuditWriter:
         surface_coverage = build_surface_coverage_map(
             collector_rows=[dict(row) for row in self.summary.get("collectors", []) if isinstance(row, dict)],
             platform=str(metadata.get("platform") or self._manifest.get("platform") or "m365"),
+            coverage_rows=[dict(row) for row in self.coverage if isinstance(row, dict)],
         )
         coverage_gaps = build_coverage_gap_summary(
             surface_coverage=surface_coverage,

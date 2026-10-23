@@ -3,15 +3,21 @@
 Capability-gated by design: if the tenant has no Power Platform admin token
 configured, the collector emits structured `service_not_available` diagnostics
 rather than failing the whole run. With a token, it enumerates environments,
-DLP policies, and tenant-level Power Platform settings.
+DLP policies, and tenant-level Power Platform settings. The environment and policy lists are
+followed through their ``nextLink`` to the last page; a page that cannot be read, or a list longer
+than ``MAX_LIST_PAGES`` pages, leaves the list cut and marked as a coverage gap.
 """
 from __future__ import annotations
 
 import time
 from typing import Any, Callable, Optional
 
+from ..collection_gaps import REASON_PAGINATION_FAILED, REASON_PAGINATION_NOT_FOLLOWED
 from ..power_platform import PowerPlatformClient, PowerPlatformError
-from .base import Collector, CollectorResult
+from .base import Collector, CollectorResult, record_truncation
+
+# A list this long is not read to its end: the cut is recorded, never passed over.
+MAX_LIST_PAGES = 50
 
 
 class PowerPlatformCollector(Collector):
@@ -66,6 +72,10 @@ class PowerPlatformCollector(Collector):
 
         dlp_policies = self._fetch_dlp_policies(client, coverage, log_event)
         payload["dlpPolicies"] = {"value": dlp_policies}
+        for list_name in ("environments", "dlpPolicies"):
+            cut = next((row for row in coverage if row["name"] == list_name and row.get("collection_truncated")), None)
+            if cut is not None:
+                payload[list_name].update({"collection_truncated": True, "truncation_reason": cut["truncation_reason"]})
 
         settings = self._fetch_tenant_settings(client, coverage, log_event)
         if settings:
@@ -88,10 +98,10 @@ class PowerPlatformCollector(Collector):
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
     ) -> list[dict[str, Any]]:
         path = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments"
-        raw, status = self._safe_get(client, path)
+        items, status, cut_reason = self._safe_get_all(client, path)
         rows: list[dict[str, Any]] = []
-        if isinstance(raw, dict):
-            for env in raw.get("value", []) or []:
+        if items is not None:
+            for env in items:
                 if not isinstance(env, dict):
                     continue
                 properties = env.get("properties") or {}
@@ -106,9 +116,9 @@ class PowerPlatformCollector(Collector):
                         "linked_environment_metadata": properties.get("linkedEnvironmentMetadata"),
                     }
                 )
-        coverage.append(self._coverage_row("environments", path, status, len(rows)))
+        coverage.append(self._list_row("environments", path, status, len(rows), cut_reason))
         if log_event:
-            self._log(log_event, "environments", status, len(rows))
+            self._log(log_event, "environments", coverage[-1], len(rows))
         return rows
 
     def _fetch_dlp_policies(
@@ -118,10 +128,10 @@ class PowerPlatformCollector(Collector):
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
     ) -> list[dict[str, Any]]:
         path = "/providers/PowerPlatform.Governance/v2/policies"
-        raw, status = self._safe_get(client, path)
+        items, status, cut_reason = self._safe_get_all(client, path)
         rows: list[dict[str, Any]] = []
-        if isinstance(raw, dict):
-            for policy in raw.get("value", []) or []:
+        if items is not None:
+            for policy in items:
                 if not isinstance(policy, dict):
                     continue
                 business = 0
@@ -148,9 +158,9 @@ class PowerPlatformCollector(Collector):
                         "blocked_connector_count": blocked,
                     }
                 )
-        coverage.append(self._coverage_row("dlpPolicies", path, status, len(rows)))
+        coverage.append(self._list_row("dlpPolicies", path, status, len(rows), cut_reason))
         if log_event:
-            self._log(log_event, "dlpPolicies", status, len(rows))
+            self._log(log_event, "dlpPolicies", coverage[-1], len(rows))
         return rows
 
     def _fetch_tenant_settings(
@@ -201,6 +211,40 @@ class PowerPlatformCollector(Collector):
                 "error_class": "client_error",
                 "error": str(exc),
             }
+
+    @classmethod
+    def _safe_get_all(
+        cls, client: PowerPlatformClient, path: str
+    ) -> tuple[list[Any] | None, dict[str, Any], str | None]:
+        """Every ``value`` row of a list, following ``nextLink``: ``(rows, status, cut_reason)``.
+
+        ``rows`` is ``None`` when the first page failed. ``cut_reason`` says why the list stopped before its last row:
+        a later page failed (``pagination_failed``) or the list went on past ``MAX_LIST_PAGES`` pages.
+        """
+        raw, status = cls._safe_get(client, path)
+        if not isinstance(raw, dict):
+            return None, status, None
+        items: list[Any] = list(raw.get("value") or [])
+        next_link = raw.get("nextLink") or raw.get("@odata.nextLink")
+        pages = 1
+        while isinstance(next_link, str) and next_link:
+            if pages >= MAX_LIST_PAGES:
+                return items, status, REASON_PAGINATION_NOT_FOLLOWED
+            page, page_status = cls._safe_get(client, next_link)
+            if not isinstance(page, dict):
+                return items, {**page_status, "status": "failed"}, REASON_PAGINATION_FAILED
+            items.extend(page.get("value") or [])
+            next_link = page.get("nextLink") or page.get("@odata.nextLink")
+            pages += 1
+        return items, status, None
+
+    def _list_row(
+        self, name: str, endpoint: str, status: dict[str, Any], item_count: int, cut_reason: str | None
+    ) -> dict[str, Any]:
+        row = self._coverage_row(name, endpoint, status, item_count)
+        if cut_reason:
+            record_truncation(row, list_name=name, rows=item_count, limit=None, reason=cut_reason)
+        return row
 
     def _coverage_row(self, name: str, endpoint: str, status: dict[str, Any], item_count: int) -> dict[str, Any]:
         return {

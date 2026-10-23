@@ -1,7 +1,8 @@
 """Exchange Online mail protection settings, read the way the Cyber Essentials malware rules need them.
 
-Three read-only cmdlets feed this module (see ``collectors/exchange_policy.py``): ``Get-MalwareFilterPolicy``,
-``Get-TransportConfig`` and ``Get-DkimSigningConfig``. Their rows are normalized into ``exchange_policy_objects``
+Four read-only cmdlets feed this module (see ``collectors/exchange_policy.py``): ``Get-MalwareFilterPolicy``,
+``Get-TransportConfig``, ``Get-CASMailbox`` (a count of the mailboxes that switch SMTP AUTH back on) and
+``Get-DkimSigningConfig``. Their rows are normalized into ``exchange_policy_objects``
 records; this module judges those records. A setting that was not returned (a blocked session, a property that
 is absent, a value that is not a boolean) is unknown and never reads as a pass or a failure.
 
@@ -18,6 +19,9 @@ SOURCE_MALWARE = "malwareFilterPolicy"
 SOURCE_TRANSPORT = "transportConfig"
 SOURCE_DKIM = "dkimSigningConfig"
 SOURCE_DOMAINS = "acceptedDomains"
+# A count of mailboxes whose own ``SmtpClientAuthenticationDisabled`` is false: the tenant default can be switched off and
+# still be overridden mailbox by mailbox. No address is kept.
+SOURCE_CAS_SMTP = "casMailboxSmtpAuth"
 
 RULE_MALWARE = "exchange.malware_filter_weakened"
 RULE_SMTP_AUTH = "exchange.smtp_auth_enabled_tenant_wide"
@@ -33,6 +37,16 @@ def _bool(value: Any) -> bool | None:
         return value
     if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
         return value.strip().lower() == "true"
+    return None
+
+
+def _count(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
     return None
 
 
@@ -96,6 +110,8 @@ def protection_fields(source_name: str, item: Mapping[str, Any]) -> dict[str, An
         return {"smtp_client_auth_disabled": _bool(item.get("SmtpClientAuthenticationDisabled"))}
     if source_name == SOURCE_DKIM:
         return {"dkim_enabled": _bool(item.get("Enabled")), "dkim_status": _status_text(item.get("Status"))}
+    if source_name == SOURCE_CAS_SMTP:
+        return {"smtp_auth_enabled_mailbox_count": _count(item.get("Count"))}
     if source_name == SOURCE_DOMAINS:
         return {"domain_type": domain_type_text(item.get("DomainType")), "default_domain": _bool(item.get("Default"))}
     return {}
@@ -125,13 +141,20 @@ def default_malware_policy(records: Iterable[Mapping[str, Any]]) -> Mapping[str,
 
 
 def malware_filter_weaknesses(policy: Mapping[str, Any]) -> list[str]:
-    """What the default malware policy has switched off: the common attachment filter, zero-hour auto purge."""
+    """What a malware policy has switched off: the common attachment filter, zero-hour auto purge."""
     weaknesses = []
     if policy.get("enable_file_filter") is False:
         weaknesses.append("common_attachment_filter_off")
     if policy.get("zap_enabled") is False:
         weaknesses.append("zero_hour_auto_purge_off")
     return weaknesses
+
+
+def smtp_auth_enabled_mailbox_count(snapshot: Mapping[str, Any] | None) -> int | None:
+    """How many mailboxes switch SMTP AUTH back on for themselves, or ``None`` when the count was not returned."""
+    counts = [row.get("smtp_auth_enabled_mailbox_count") for row in source_records(snapshot, SOURCE_CAS_SMTP)]
+    known = [count for count in counts if isinstance(count, int) and not isinstance(count, bool)]
+    return max(known) if known else None
 
 
 def custom_domains(snapshot: Mapping[str, Any] | None) -> list[str]:
@@ -179,10 +202,14 @@ def inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         return f"{_SOURCE_BY_RULE[rule_id]}_not_read_in_full"
     records = source_records(snapshot, _SOURCE_BY_RULE[rule_id])
     if rule_id == RULE_MALWARE:
-        policy = default_malware_policy(records)
-        if policy is None:
+        if default_malware_policy(records) is None:
             return "default_malware_policy_not_identified"
-        if not isinstance(policy.get("enable_file_filter"), bool) or not isinstance(policy.get("zap_enabled"), bool):
+        # Every policy is judged, not only the default: a custom policy that covers some recipients with the file filter
+        # or zero-hour auto purge off weakens protection for them whatever the default says.
+        if any(
+            not isinstance(row.get("enable_file_filter"), bool) or not isinstance(row.get("zap_enabled"), bool)
+            for row in records
+        ):
             return "malware_filter_settings_not_returned"
         return None
     if rule_id == RULE_SMTP_AUTH:
@@ -190,6 +217,12 @@ def inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
             return "transport_config_not_returned"
         if any(not isinstance(row.get("smtp_client_auth_disabled"), bool) for row in records):
             return "smtp_auth_setting_not_returned"
+        # The tenant default can be off while a mailbox switches SMTP AUTH back on for itself: the per-mailbox
+        # settings have to be read too, or a clean tenant default proves nothing.
+        if not source_read_in_full(snapshot, SOURCE_CAS_SMTP):
+            return f"{SOURCE_CAS_SMTP}_not_read_in_full"
+        if smtp_auth_enabled_mailbox_count(snapshot) is None:
+            return "mailbox_smtp_auth_count_not_returned"
         return None
     if not source_read_in_full(snapshot, SOURCE_DOMAINS):
         return "acceptedDomains_not_read_in_full"

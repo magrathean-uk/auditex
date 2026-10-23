@@ -4,7 +4,7 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-from .collection_gaps import list_truncations, truncation_summary
+from .collection_gaps import list_truncations, section_gap_records, section_gap_summary, truncation_summary
 from .evidence_gates import build_evidence_gate_summary
 
 
@@ -191,7 +191,14 @@ def build_surface_coverage_map(
     *,
     collector_rows: list[dict[str, Any]],
     platform: str = "m365",
+    coverage_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    """Per-surface coverage from the collector statuses.
+
+    A surface whose collectors are all ``ok`` is still ``partial`` when one of them has a section-scoped read that was
+    cut or refused (``coverage_rows``): that gap leaves the collector ``ok`` but not the surface complete.
+    """
+    section_gap_collectors = {item["collector"] for item in section_gap_records(coverage_rows or [])}
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in collector_rows:
         name = str(row.get("name") or row.get("collector") or "")
@@ -204,15 +211,21 @@ def build_surface_coverage_map(
     for surface in sorted(grouped):
         rows = grouped[surface]
         counts = _status_counts(rows)
-        records.append(
-            {
-                "surface": surface,
-                "status": _surface_status(counts),
-                "collector_count": len(rows),
-                "collectors": [str(row.get("name") or row.get("collector")) for row in rows],
-                "status_counts": counts,
-            }
-        )
+        collectors = [str(row.get("name") or row.get("collector")) for row in rows]
+        status = _surface_status(counts)
+        record: dict[str, Any] = {
+            "surface": surface,
+            "status": status,
+            "collector_count": len(rows),
+            "collectors": collectors,
+            "status_counts": counts,
+        }
+        scoped = sorted(name for name in collectors if name in section_gap_collectors)
+        if scoped:
+            record["section_gap_collectors"] = scoped
+            if status == "complete":
+                record["status"] = "partial"
+        records.append(record)
     return records
 
 
@@ -231,12 +244,14 @@ def build_coverage_gap_summary(
             rows_by_collector.setdefault(name, []).append(dict(row))
 
     truncations = list_truncations(coverage_rows)
+    section_gaps = section_gap_records(coverage_rows)
     gaps: list[dict[str, Any]] = []
     for surface in surface_coverage:
         status = str(surface.get("status") or "unknown")
         if status == "complete":
             continue
         collectors = [str(item) for item in surface.get("collectors") or [] if str(item)]
+        own_section_gaps = [item for item in section_gaps if item["collector"] in collectors]
         error_classes = sorted(
             {
                 str(row.get("error_class"))
@@ -244,6 +259,7 @@ def build_coverage_gap_summary(
                 for row in rows_by_collector.get(collector, [])
                 if row.get("error_class")
             }
+            | {error_class for item in own_section_gaps for error_class in item.get("error_classes", [])}
         )
         surface_name = str(surface.get("surface") or "unknown")
         message = f"{surface_name} coverage is {status}; affected collectors: {', '.join(collectors) if collectors else 'unknown'}"
@@ -259,6 +275,17 @@ def build_coverage_gap_summary(
         if truncated_lists:
             gap["truncated_lists"] = truncated_lists
             message += f"; truncated lists: {truncation_summary(truncated_lists)}"
+        # A section-scoped read that was cut or refused leaves its collector ``ok``; it is named here all the same.
+        if own_section_gaps:
+            gap["section_gaps"] = own_section_gaps
+            if not (surface.get("status_counts") or {}).get("partial") and not (surface.get("status_counts") or {}).get("failed"):
+                gap["scope"] = "section"
+                message = (
+                    f"{surface_name} collectors completed, but section-scoped reads did not: "
+                    f"{section_gap_summary(own_section_gaps)}"
+                )
+            else:
+                message += f"; section-scoped reads not completed: {section_gap_summary(own_section_gaps)}"
         gap["message"] = message
         gaps.append(gap)
     return gaps

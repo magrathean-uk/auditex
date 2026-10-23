@@ -10,7 +10,9 @@ the list was streamed to disk), expand at most ``limit`` of them, and say plainl
   ``section_scoped``: the gap belongs to this section alone. The collector's own status comes from its base
   reads (:func:`collector_partial`), so a cut Defender read or one failed assignment read does not make every
   rule of the collector ``not_assessed``. The rules that read the section report the gap themselves
-  (``defender_state_truncated``, ``policy_assignments_not_read_for_every_policy``) and never pass on it.
+  (``defender_state_truncated``, ``policy_assignments_not_read_for_every_policy``) and never pass on it. The run
+  names the gap too (``collection_gaps.section_gap_records``): in the manifest's ``coverage_gaps``, the normalized
+  ``collection_gaps``, the handoff limitations and a gate warning.
 
 Every request is a GET; v1.0 reads go through ``$batch`` (GET-only inner requests) when the client has it.
 Beta endpoints are read one at a time because ``$batch`` here targets v1.0.
@@ -23,7 +25,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..chunk_reader import iter_endpoint_records
-from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_INPUT_LIMITED, TRUNCATION_ERROR_CLASS, section_was_cut
+from ..collection_gaps import (
+    REASON_FANOUT_LIMIT,
+    REASON_INPUT_LIMITED,
+    SECTION_SCOPED,
+    TRUNCATION_ERROR_CLASS,
+    section_was_cut,
+)
 from ..endpoint_posture import PROTECTION_FIELDS, READ_FAILED, READ_NOT_REPORTED, READ_OK, project
 from ..graph import GraphError, graph_url
 from .base import _classify_graph_error
@@ -36,7 +44,6 @@ DEFENDER_FANOUT_LIMIT = 100
 STATUS_OK = "ok"
 STATUS_NOT_FOUND = "not_found"
 STATUS_FAILED = "failed"
-SECTION_SCOPED = "section_scoped"
 
 
 def mark_section_scoped(rows: Sequence[dict[str, Any]]) -> None:

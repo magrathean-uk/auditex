@@ -456,9 +456,9 @@
   },
   "exchange.malware_filter_weakened": {
     "risk_rating": "high",
-    "description": "The default Exchange Online anti-malware policy has the common attachment types filter or zero-hour auto purge switched off.",
+    "description": "An Exchange Online anti-malware policy (the default one or a custom one) has the common attachment types filter or zero-hour auto purge switched off.",
     "impact": "Messages with executable attachments are not filtered by type, or malware found after delivery is not removed from mailboxes, so malicious code reaches users that the policy was meant to protect.",
-    "remediation": "Turn on the common attachment types filter and zero-hour auto purge in the default anti-malware policy, or apply the Standard or Strict preset security policy. Only the default policy is judged; custom policies and the recipients they cover are not read.",
+    "remediation": "Turn on the common attachment types filter and zero-hour auto purge in every anti-malware policy, or apply the Standard or Strict preset security policy. Every policy is judged on its settings; the recipients a custom policy covers (its malware filter rule) are not read.",
     "references": [
       "Microsoft Defender for Office 365 anti-malware policies",
       "Get-MalwareFilterPolicy (Exchange Online PowerShell)"
@@ -466,21 +466,22 @@
     "control_ids": [
       "AUDITEX-EXO-MALWARE-FILTER-WEAKENED"
     ],
-    "expected_value": "The default anti-malware policy has the common attachment types filter and zero-hour auto purge on."
+    "expected_value": "Every anti-malware policy has the common attachment types filter and zero-hour auto purge on."
   },
   "exchange.smtp_auth_enabled_tenant_wide": {
     "risk_rating": "medium",
-    "description": "Authenticated SMTP client submission (SMTP AUTH) is enabled for the whole Exchange Online tenant.",
+    "description": "Authenticated SMTP client submission (SMTP AUTH) is enabled for the whole Exchange Online tenant, or switched back on for individual mailboxes while the tenant default is off.",
     "impact": "SMTP AUTH uses basic authentication, which cannot enforce MFA, so a guessed or leaked password is enough to send mail as the user.",
     "remediation": "Disable SMTP AUTH for the organisation (Set-TransportConfig -SmtpClientAuthenticationDisabled $true) and enable it per mailbox only for the devices and applications that need it, ideally replaced by OAuth.",
     "references": [
       "Microsoft Exchange Online deprecation of basic authentication for client submission",
-      "Get-TransportConfig (Exchange Online PowerShell)"
+      "Get-TransportConfig (Exchange Online PowerShell)",
+      "Get-CASMailbox (Exchange Online PowerShell)"
     ],
     "control_ids": [
       "AUDITEX-EXO-SMTP-AUTH-ENABLED"
     ],
-    "expected_value": "SmtpClientAuthenticationDisabled is true for the organisation."
+    "expected_value": "SmtpClientAuthenticationDisabled is true for the organisation and no mailbox switches it back on."
   },
   "exchange.dkim_signing_disabled": {
     "risk_rating": "medium",

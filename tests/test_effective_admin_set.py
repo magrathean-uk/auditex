@@ -166,9 +166,26 @@ def _signed_in(names: list[str]) -> dict[str, Any]:
     }
 
 
+def _registered(names: list[str]) -> dict[str, Any]:
+    """The authentication method registration report, with an MFA answer for each user."""
+    return {
+        "auth_methods": {
+            "userRegistrationDetails": {
+                "value": [
+                    {"id": name, "userPrincipalName": f"{name}@contoso.test", "userType": "member", "isMfaRegistered": True}
+                    for name in names
+                ]
+            }
+        }
+    }
+
+
 def _global_admins(count: int, *, signin: bool = False) -> dict[str, Any]:
     names = [f"ga-{index}" for index in range(count)]
-    return _snapshot(_identity(names, [_assignment(name) for name in names], extra=_signed_in(names) if signin else None))
+    return _snapshot(
+        _identity(names, [_assignment(name) for name in names], extra=_signed_in(names) if signin else None),
+        **_registered(names),
+    )
 
 
 # --- set construction -------------------------------------------------------------------------------

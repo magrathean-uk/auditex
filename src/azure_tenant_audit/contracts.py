@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .bundle_integrity import evidence_index_is_hashed
-from .collection_gaps import list_truncations
+from .collection_gaps import list_truncations, section_gap_records
 from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .resources import list_resource_files, resolve_resource_path
 from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
@@ -608,9 +608,28 @@ def _validate_collection_gaps(run_dir: Path, manifest: Mapping[str, Any], issues
     if not coverage_path:
         return
     coverage = _read_json(run_dir / str(coverage_path), fallback=[])
+    coverage_rows = coverage if isinstance(coverage, list) else []
+    # A section-scoped read that was cut or refused leaves its collector ok; the manifest still has to name it. A
+    # warning, not an error: bundles from before section gaps were recorded stay valid.
+    unrecorded_sections = [
+        item
+        for item in section_gap_records(coverage_rows)
+        if (item["collector"], item["section"])
+        not in {
+            (str(entry.get("collector")), str(entry.get("section")))
+            for gap in manifest.get("coverage_gaps") or []
+            if isinstance(gap, Mapping)
+            for entry in gap.get("section_gaps") or []
+            if isinstance(entry, Mapping)
+        }
+    ]
+    if unrecorded_sections:
+        issues.append(
+            _issue("section_gap_not_recorded", path="run-manifest.json", details=unrecorded_sections[:25], severity="warning")
+        )
     # Only rows that name a reason were written by a version that records gaps; bundles from before
     # flagged a cut on an ``ok`` row with no reason and stay valid.
-    truncations = list_truncations(coverage if isinstance(coverage, list) else [], require_reason=True)
+    truncations = list_truncations(coverage_rows, require_reason=True)
     if not truncations:
         return
     if manifest.get("overall_status") == "ok":
@@ -720,6 +739,19 @@ def _validate_api_inventory(run_dir: Path, manifest: Mapping[str, Any], issues: 
         safety.get("write_actions") is True or safety.get("read_only") is False
     ):
         issues.append(_issue("invalid_api_inventory_safety", path=str(relative), details="write_actions_in_audit_plane"))
+    ledger = payload.get("observed_ledger")
+    outside = ledger.get("outside_declared") if isinstance(ledger, Mapping) else None
+    outside_count = outside.get("count") if isinstance(outside, Mapping) else None
+    if isinstance(outside_count, int) and not isinstance(outside_count, bool) and outside_count > 0:
+        # A warning, not an error: the call may be a read the declaration did not name, but it has to be seen.
+        issues.append(
+            _issue(
+                "observed_call_outside_declared",
+                path=str(relative),
+                details={"count": outside_count, "graph": (outside.get("graph") or [])[:5], "commands": (outside.get("commands") or [])[:5]},
+                severity="warning",
+            )
+        )
     for index, call in enumerate(payload.get("observed_calls") or []):
         if not isinstance(call, Mapping):
             issues.append(_issue("invalid_api_inventory_shape", path=str(relative), details={"observed_call_index": index}))

@@ -2425,6 +2425,11 @@ def _build_inbox_rule_findings(item: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _tenant_domains(normalized_snapshot: dict[str, Any]) -> set[str]:
+    """The tenant's verified domains from the ``domains`` read; empty when that list was not read.
+
+    The run's tenant name is added only next to a domain list that was read: on its own it would call every other
+    domain external. The rule that depends on this set reads ``not_assessed`` with ``tenant_domains_unknown`` otherwise.
+    """
     domains: set[str] = set()
     for item in ((normalized_snapshot.get("domain_hybrid_objects") or {}).get("records") or []):
         if item.get("is_verified") is False:
@@ -2433,6 +2438,8 @@ def _tenant_domains(normalized_snapshot: dict[str, Any]) -> set[str]:
             value = str(item.get(key) or "").strip().lower()
             if "." in value and "@" not in value:
                 domains.add(value)
+    if not domains:
+        return domains
     tenant_name = str((normalized_snapshot.get("snapshot") or {}).get("tenant_name") or "").strip().lower()
     if "." in tenant_name and "@" not in tenant_name:
         domains.add(tenant_name)
@@ -3215,26 +3222,37 @@ def _build_defender_av_findings(normalized_snapshot: dict[str, Any]) -> list[dic
 
 
 def _build_exchange_protection_findings(normalized_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    """Weakened default malware policy, tenant-wide SMTP AUTH, and DKIM signing switched off for a custom domain."""
+    """Weakened malware policies, SMTP AUTH on tenant-wide or per mailbox, and DKIM signing switched off for a custom domain."""
     findings: list[dict[str, Any]] = []
 
     def refs(record: dict[str, Any]) -> list[dict[str, Any]]:
         return _normalized_evidence_refs("exchange_policy_objects", record, "exchange_policy")
 
-    policy = exchange_protection.default_malware_policy(exchange_protection.source_records(normalized_snapshot, exchange_protection.SOURCE_MALWARE))
-    weaknesses = exchange_protection.malware_filter_weaknesses(policy) if policy else []
-    if policy and weaknesses:
+    malware_policies = exchange_protection.source_records(normalized_snapshot, exchange_protection.SOURCE_MALWARE)
+    # Every policy is judged on its own settings. The default policy keeps its original finding id; a custom policy
+    # (which covers the recipients of its malware filter rule) gets one finding of its own.
+    for policy in malware_policies:
+        weaknesses = exchange_protection.malware_filter_weaknesses(policy)
+        if not weaknesses:
+            continue
+        is_default = policy.get("is_default") is True
         findings.append(
             _finalize_finding(
                 {
-                    "id": "exchange_policy:malware_filter:default_weakened",
+                    "id": "exchange_policy:malware_filter:default_weakened"
+                    if is_default
+                    else f"exchange_policy:malware_filter:{policy.get('id')}:weakened",
                     "rule_id": "exchange.malware_filter_weakened",
                     "severity": "high" if len(weaknesses) > 1 else "medium",
                     "category": "mail_flow",
-                    "title": "The default anti-malware policy has protections switched off",
+                    "title": "The default anti-malware policy has protections switched off"
+                    if is_default
+                    else "A custom anti-malware policy has protections switched off",
                     "status": "open",
                     "collector": "exchange_policy",
-                    "affected_objects": [policy.get("display_name") or "Default malware filter policy"],
+                    "affected_objects": [
+                        policy.get("display_name") or ("Default malware filter policy" if is_default else policy.get("id"))
+                    ],
                     "evidence": {**policy, "weaknesses": weaknesses},
                     "returned_value": {"enable_file_filter": policy.get("enable_file_filter"), "zap_enabled": policy.get("zap_enabled")},
                     "evidence_refs": refs(policy),
@@ -3263,6 +3281,34 @@ def _build_exchange_protection_findings(normalized_snapshot: dict[str, Any]) -> 
                 )
             )
             break
+    # The tenant default is off, yet some mailboxes switch SMTP AUTH back on for themselves: the default is not the
+    # whole picture. When the default is on as well, the tenant-wide finding already covers it.
+    transport = exchange_protection.source_records(normalized_snapshot, exchange_protection.SOURCE_TRANSPORT)
+    enabled_mailboxes = exchange_protection.smtp_auth_enabled_mailbox_count(normalized_snapshot)
+    if enabled_mailboxes and transport and all(row.get("smtp_client_auth_disabled") is True for row in transport):
+        cas_record = next(
+            row
+            for row in exchange_protection.source_records(normalized_snapshot, exchange_protection.SOURCE_CAS_SMTP)
+            if row.get("smtp_auth_enabled_mailbox_count") == enabled_mailboxes
+        )
+        findings.append(
+            _finalize_finding(
+                {
+                    "id": "exchange_policy:cas_mailbox:smtp_auth_enabled",
+                    "rule_id": "exchange.smtp_auth_enabled_tenant_wide",
+                    "severity": "medium",
+                    "category": "mail_flow",
+                    "title": "Authenticated SMTP submission is switched back on for individual mailboxes",
+                    "status": "open",
+                    "collector": "exchange_policy",
+                    "affected_objects": [f"{enabled_mailboxes} mailbox(es) with SMTP AUTH enabled"],
+                    "evidence": {**cas_record, "tenant_default_smtp_client_auth_disabled": True},
+                    "returned_value": {"mailboxes_with_smtp_auth_enabled": enabled_mailboxes},
+                    "evidence_refs": refs(cas_record),
+                    **_metadata_for("exchange.smtp_auth_enabled_tenant_wide"),
+                }
+            )
+        )
     dkim = exchange_protection.dkim_by_domain(normalized_snapshot)
     covered = exchange_protection.dns_dkim_domains(normalized_snapshot)
     for domain in exchange_protection.dkim_disabled_domains(normalized_snapshot):

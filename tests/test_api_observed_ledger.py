@@ -189,7 +189,24 @@ def test_each_kind_of_refusal_alone_clears_read_only() -> None:
 
     assert with_observed_ledger(_inventory(), graph_only)["safety"]["read_only"] is False
     assert with_observed_ledger(_inventory(), command_only)["safety"]["read_only"] is False
-    assert with_observed_ledger(_inventory(), [])["safety"]["read_only"] is True
+    assert with_observed_ledger(_inventory(), _get(f"{GRAPH_ROOT}/users"))["safety"]["read_only"] is True
+
+
+def test_an_empty_log_next_to_declared_calls_observed_nothing_so_it_is_not_read_only(tmp_path: Path) -> None:
+    from_list = with_observed_ledger(_inventory(), [])
+    empty_file = tmp_path / "audit-log.jsonl"
+    empty_file.write_text("", encoding="utf-8")
+    from_file = with_observed_ledger(_inventory(), read_audit_events(empty_file))
+
+    for inventory in (from_list, from_file):
+        assert inventory["observed_ledger"]["log"] == {"readable": True, "malformed_lines": 0, "empty": True}
+        assert inventory["safety"]["observation_basis"] == "transport_audit_log"
+        assert inventory["safety"]["observed_log_complete"] is False
+        assert inventory["safety"]["read_only"] is False
+    # A run that declared no call has nothing to observe; an offline replay never observed a transport at all.
+    assert with_observed_ledger(_inventory(calls=[]), [])["safety"]["read_only"] is True
+    replay = with_observed_ledger(_inventory(), [_event("run.started", mode="offline", sample="s.json")])
+    assert replay["safety"]["observation_basis"] == "offline_replay" and replay["safety"]["read_only"] is True
 
 
 def test_command_events_are_classified_by_the_read_rules_not_trusted() -> None:
@@ -326,7 +343,7 @@ def test_finalize_writes_an_observed_ledger_for_an_offline_run(tmp_path: Path) -
 def test_writer_replaces_a_ledger_the_caller_supplied(tmp_path: Path) -> None:
     writer = AuditWriter(tmp_path, tenant_name="contoso", run_name="r1")
     writer.log_event("graph.request.started", "x", {"method": "DELETE", "url": f"{GRAPH_ROOT}/users/{GUID}", "attempt": 1, "params": {}})
-    forged = with_observed_ledger(_inventory(), [])  # a clean ledger built from no events
+    forged = with_observed_ledger(_inventory(), _get(f"{GRAPH_ROOT}/users"))  # a clean ledger built from a clean log
     assert forged["safety"]["read_only"] is True
 
     written = json.loads(writer.write_json_artifact("api-inventory.json", forged).read_text(encoding="utf-8"))
@@ -400,7 +417,7 @@ def test_a_clean_log_and_a_plain_event_list_are_complete(tmp_path: Path) -> None
     log.write_text(json.dumps(_event("graph.request.started", method="GET", url=f"{GRAPH_ROOT}/users", attempt=1, params={})) + "\n", encoding="utf-8")
 
     from_file = with_observed_ledger(_inventory(), read_audit_events(log))
-    from_list = with_observed_ledger(_inventory(), [])
+    from_list = with_observed_ledger(_inventory(), _get(f"{GRAPH_ROOT}/users")[:1])
 
     for inventory in (from_file, from_list):
         assert inventory["observed_ledger"]["log"] == {"readable": True, "malformed_lines": 0}

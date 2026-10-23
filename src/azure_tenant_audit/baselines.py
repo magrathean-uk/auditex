@@ -87,6 +87,11 @@ _RULE_COLLECTORS = {
     "identity.privileged_mfa_not_registered": ("auth_methods", "identity"),
     "identity.user_mfa_not_registered": ("auth_methods",),
     "attack_path.no_mfa_to_tier0": ("identity", "auth_methods"),
+    # The graph these paths walk is built from more than the role assignments: application and service principal
+    # ownership and grants (app_consent), group membership and application owners (directory_relationships) and
+    # PIM-eligible assignments (identity_governance). A path hidden by a gap in any of them is not a clean result.
+    "attack_path.app_owner_to_tier0": ("identity", "app_consent", "directory_relationships"),
+    "attack_path.privilege_escalation": ("identity", "app_consent", "directory_relationships"),
     # The licence flags of an administrator come from the licensing collector.
     "identity.admin_holds_productivity_licence": ("identity", "licensing"),
     "detection.unified_audit_log_disabled": ("exchange_policy",),
@@ -95,6 +100,8 @@ _RULE_COLLECTORS = {
     "detection.no_alert_policies": ("exchange_policy",),
     "detection.no_risk_based_policies": ("conditional_access",),
     "detection.signin_logs_unavailable": ("security",),
+    # An external principal is one outside the tenant's own domains, which domains_hybrid reads.
+    "sharepoint.external_principal": ("sharepoint_access", "domains_hybrid"),
 }
 # Collectors a rule also needs, where "complete" or "not_applicable" (skipped because the tenant
 # cannot have the data, for example no licence) both mean the evidence is as complete as it can be.
@@ -102,6 +109,9 @@ _RULE_COLLECTORS = {
 _RULE_COLLECTORS_NOT_APPLICABLE_OK = {
     # PIM-eligible administrators come from identity governance.
     "identity.privileged_mfa_not_registered": ("identity_governance",),
+    # The attack-path graph reads PIM-eligible assignments from identity governance too.
+    "attack_path.app_owner_to_tier0": ("identity_governance",),
+    "attack_path.privilege_escalation": ("identity_governance",),
 }
 _NAMESPACE_COLLECTORS = {
     "app_consent": "app_consent",
@@ -695,6 +705,95 @@ def _signin_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str 
     return None
 
 
+# Rules that read the authentication method registration report -> the people whose registration they judge:
+# ``everyone`` every enabled member user and every counted administrator (a report that misses a user says nothing
+# about the user rule, and the attack graph may start from any of them), ``privileged`` the counted administrators who
+# are not Global Administrators, ``global_admin`` the Global Administrators.
+_MFA_REGISTRATION_RULE_SCOPES = {
+    "identity.user_mfa_not_registered": "everyone",
+    "identity.privileged_mfa_not_registered": "privileged",
+    "identity.global_admin_mfa_not_registered": "global_admin",
+    "attack_path.no_mfa_to_tier0": "everyone",
+}
+MFA_REGISTRATION_GAP_PREFIX = "registration_report_incomplete"
+
+
+def _lower(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _mfa_registration_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
+    """``registration_report_incomplete:<n>`` when the registration report does not cover the people this rule judges.
+
+    The rules read the report's rows only, so an enabled user or a counted administrator the report has no row for (or a
+    row without a MFA registration answer) is never judged: an empty report would read as a pass. Every such principal
+    is counted from the user list and the effective administrator set; a count above zero is a gap, not a pass.
+    """
+    if snapshot is None:
+        return "inputs_not_available"
+    scope = _MFA_REGISTRATION_RULE_SCOPES[rule_id]
+    answered: set[str] = set()
+    for row in _records(snapshot, "auth_method_registration_objects"):
+        if isinstance(row.get("is_mfa_registered"), bool):
+            answered.update(key for key in (_lower(row.get("id")), _lower(row.get("user_principal_name"))) if key)
+    admins = [
+        row
+        for row in _records(snapshot, _ADMIN_SET_SECTION)
+        if row.get("kind") == "effective_admin" and row.get("counted") and row.get("principal_id") and row.get("enabled") is not False
+    ]
+    uncovered: set[str] = set()
+
+    def consider(principal_id: Any, principal_name: Any) -> None:
+        keys = {_lower(principal_id), _lower(principal_name)} - {""}
+        if keys and not keys & answered:
+            uncovered.add(_lower(principal_id) or _lower(principal_name))
+
+    if scope == "everyone":
+        for user in _records(snapshot, "users"):
+            if user.get("enabled") is not False and _lower(user.get("user_type")) in {"", "member"}:
+                consider(user.get("id"), user.get("principal_name"))
+    for row in admins:
+        if scope == "privileged" and row.get("global_administrator"):
+            continue
+        if scope == "global_admin" and not row.get("global_administrator"):
+            continue
+        consider(row.get("principal_id"), row.get("principal_name"))
+    return f"{MFA_REGISTRATION_GAP_PREFIX}:{len(uncovered)}" if uncovered else None
+
+
+def _risky_signin_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    """Sign-ins whose risk level is ``hidden`` (no Microsoft Entra ID P2) carry no risk detail to judge.
+
+    The rule skips a sign-in that reports no risk, so a sample in which every sign-in hides its risk raises nothing
+    and would read as a pass. ``risk_detail_hidden`` when every sampled sign-in is hidden.
+    """
+    if snapshot is None:
+        return "inputs_not_available"
+    events = _records(snapshot, "security_signin_events")
+    if not events:
+        return None
+    for event in events:
+        levels = {_lower(event.get("risk_level_aggregated")), _lower(event.get("risk_level_during_signin"))} - {""}
+        if not levels or "hidden" not in levels:
+            return None
+    return "risk_detail_hidden"
+
+
+def _sharepoint_external_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | None:
+    """Telling an external principal from an internal one needs the tenant's own domain list."""
+    if snapshot is None:
+        return "inputs_not_available"
+    for record in _records(snapshot, "domain_hybrid_objects"):
+        if record.get("is_verified") is False:
+            continue
+        if any(
+            "." in value and "@" not in value
+            for value in (_lower(record.get(key)) for key in ("id", "domain", "name"))
+        ):
+            return None
+    return "tenant_domains_unknown"
+
+
 def _google_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str | None:
     """A clean Google rule is a pass only when the list it reads was read in full (and, for the organisation 2-step policy, known)."""
     if snapshot is None:
@@ -706,11 +805,15 @@ def _google_inputs_gap(snapshot: Mapping[str, Any] | None, rule_id: str) -> str 
     list_name = _GOOGLE_RULE_LISTS.get((_GOOGLE_RULE_COLLECTORS.get(rule_id) or ("",))[0])
     if list_name and list_name in (state.get("truncated_sections") or []):
         return f"{list_name.split('.', 1)[1]}_truncated"
-    return None
+    # A crawl read as a sample by design (the Drive files) and cut at its bound proves nothing about the files past it.
+    return bounded_sample_gap(rule_id, snapshot)
 
 
 # Coverage row the intune_depth collector writes when it expanded only its first policies.
-_INTUNE_ASSIGNMENT_FANOUT_SOURCE = "intune_depth.deviceConfigurationAssignmentsFanout"
+# The read is a section-scoped gap (see ``collection_gaps.section_gap_records``), listed under its section's name.
+_INTUNE_ASSIGNMENT_FANOUT_SOURCES = frozenset(
+    {"intune_depth.deviceConfigurationAssignments", "intune_depth.deviceConfigurationAssignmentsFanout"}
+)
 
 
 def intune_assignments_are_a_sample(snapshot: Mapping[str, Any] | None) -> bool:
@@ -723,7 +826,7 @@ def intune_assignments_are_a_sample(snapshot: Mapping[str, Any] | None) -> bool:
     """
     if snapshot is None:
         return False
-    if any(record.get("source") == _INTUNE_ASSIGNMENT_FANOUT_SOURCE for record in _records(snapshot, "collection_gaps")):
+    if any(record.get("source") in _INTUNE_ASSIGNMENT_FANOUT_SOURCES for record in _records(snapshot, "collection_gaps")):
         return True
     expanded = len(_records(snapshot, "intune_policy_assignment_objects"))
     configurations = {str(record.get("source")): record for record in _records(snapshot, "normalization_coverage")}.get(
@@ -754,6 +857,8 @@ def _intune_assignment_inputs_gap(snapshot: Mapping[str, Any] | None) -> str | N
 
 
 _TEAMS_FEDERATION_RULE = "teams.external_federation_open"
+_SHAREPOINT_EXTERNAL_RULE = "sharepoint.external_principal"
+_RISKY_SIGNIN_RULE = "security.risky_signin"
 _BREAK_GLASS_RULE = "ca.break_glass_exclusion_missing"
 
 # Device rules -> the device_posture count of devices the check says nothing about. A rule is evaluated
@@ -939,8 +1044,15 @@ def _inputs_gap(rule_id: str, snapshot: Mapping[str, Any] | None) -> str | None:
         return _verdict_inputs_gap(snapshot, rule_id)
     if rule_id in _SIGNIN_ACTIVITY_RULES:
         return _signin_inputs_gap(snapshot, rule_id)
+    if rule_id in _MFA_REGISTRATION_RULE_SCOPES:
+        gap = _admin_set_inputs_gap(snapshot, rule_id) if rule_id in _ADMIN_SET_RULES else None
+        return gap or _mfa_registration_inputs_gap(snapshot, rule_id)
     if rule_id in _ADMIN_SET_RULES:
         return _admin_set_inputs_gap(snapshot, rule_id)
+    if rule_id == _SHAREPOINT_EXTERNAL_RULE:
+        return _sharepoint_external_inputs_gap(snapshot)
+    if rule_id == _RISKY_SIGNIN_RULE:
+        return _risky_signin_inputs_gap(snapshot) or bounded_sample_gap(rule_id, snapshot)
     if rule_id in _GOOGLE_RULE_COLLECTORS:
         return _google_inputs_gap(snapshot, rule_id)
     if rule_id in _DETECTION_RULE_SIGNALS:

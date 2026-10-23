@@ -70,6 +70,8 @@ def _prepare_bundle_for_finalize(out_dir: Path) -> tuple[AuditWriter, dict]:
     )
 
     writer = AuditWriter(out_dir, tenant_name="ci-idem", run_name="contract")
+    # A run always logs something; a log with no event at all cannot support "read only" (see the observed ledger).
+    writer.log_event("test.fixture", "Fixture bundle prepared")
 
     collector_payloads: dict[str, dict] = {}
     result_rows: list[dict] = []

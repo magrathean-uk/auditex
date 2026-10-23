@@ -749,6 +749,9 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled": {
                 "value": [{"SmtpClientAuthenticationDisabled": True}]
             },
+            "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count": {
+                "value": [{"Count": 0}]
+            },
             "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status": {
                 "value": [{"Domain": "contoso.com", "Enabled": True, "Status": "Valid"}]
             },

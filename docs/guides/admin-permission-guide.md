@@ -77,7 +77,7 @@ Exchange posture can use Microsoft 365 CLI and PowerShell adapters where Graph h
 
 Detection coverage reads `Get-AdminAuditLogConfig`, `Get-OrganizationConfig`, and `Get-MailboxAuditBypassAssociation` in Exchange Online PowerShell, and `Get-ProtectionAlert` in Security & Compliance PowerShell (`Connect-IPPSSession`). These are read-only `Get-*` cmdlets; View-Only Organization Management or Global Reader is sufficient. Without the session the signal is reported as `unknown`, not `off`.
 
-Mail protection reads `Get-MalwareFilterPolicy` (the default policy's common attachment types filter and zero-hour auto purge), `Get-TransportConfig` (`SmtpClientAuthenticationDisabled`) and `Get-DkimSigningConfig` (DKIM signing per domain) in the same Exchange Online session. They are read-only `Get-*` cmdlets that pass the shared read guard and need no role beyond Global Reader. Without the session the matching rules read `not_assessed`, never a pass.
+Mail protection reads `Get-MalwareFilterPolicy` (the common attachment types filter and zero-hour auto purge of every policy, the default one and custom ones), `Get-TransportConfig` (`SmtpClientAuthenticationDisabled`), `Get-CASMailbox` (only a count of the mailboxes that switch SMTP AUTH back on for themselves; it enumerates every mailbox, which takes longer in a large tenant) and `Get-DkimSigningConfig` (DKIM signing per domain) in the same Exchange Online session. They are read-only `Get-*` cmdlets that pass the shared read guard and need no role beyond Global Reader. Without the session the matching rules read `not_assessed`, never a pass.
 
 ## Google Workspace Access Models
 

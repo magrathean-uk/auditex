@@ -388,6 +388,9 @@ class Collector:
     description: str = ""
     required_permissions: list[str] = []
     command_collectors: list[dict[str, str]] | None = None
+    # True for a collector that reads events between ``--since`` and ``--until``. Its checkpoint records the window,
+    # and a resumed run under another window re-runs it instead of carrying evidence of a different one.
+    time_windowed: bool = False
 
     def run(self, context: "CollectorRunContext | dict[str, Any]") -> CollectorResult:
         raise NotImplementedError

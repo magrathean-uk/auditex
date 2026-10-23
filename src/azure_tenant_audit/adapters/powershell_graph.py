@@ -125,7 +125,11 @@ class PowerShellGraphAdapter(Adapter):
         exe = shutil.which("pwsh")
         if exe is None:
             if log_event:
-                log_event("command.failed", "PowerShell executable not found", {"command": safe_command})
+                log_event(
+                    "command.failed",
+                    "PowerShell executable not found",
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error_class": "command_not_found"},
+                )
             return {"error": "command_not_found:pwsh", "error_class": "command_not_found", "command": safe_command}
 
         env = dict(os.environ)
@@ -157,21 +161,26 @@ class PowerShellGraphAdapter(Adapter):
             stderr = result.stderr or ""
             combined = f"{stdout}\n{stderr}".lower()
 
-            if log_event:
-                log_event(
-                    "command.completed",
-                    "PowerShell command completed",
-                    {
-                        "adapter": adapter_label,
-                        "command": safe_command,
-                        "command_words": list(command_words),
-                        "return_code": result.returncode,
-                        "duration_ms": duration_ms,
-                        "stdout_bytes": len(stdout),
-                        "stderr_bytes": len(stderr),
-                        "stdout_sample": redact_text(stdout)[:500],  # redact first: a secret cut at the sample edge is not recognised
-                    },
-                )
+            def completed(error_class: str | None) -> None:
+                # The outcome is logged with the command words, not only the return code: a command can exit 0 and
+                # still return nothing usable, and the observed ledger tells the two apart by ``status``.
+                if log_event:
+                    log_event(
+                        "command.completed",
+                        "PowerShell command completed",
+                        {
+                            "adapter": adapter_label,
+                            "command": safe_command,
+                            "command_words": list(command_words),
+                            "return_code": result.returncode,
+                            "status": "ok" if error_class is None else "failed",
+                            "error_class": error_class,
+                            "duration_ms": duration_ms,
+                            "stdout_bytes": len(stdout),
+                            "stderr_bytes": len(stderr),
+                            "stdout_sample": redact_text(stdout)[:500],  # redact first: a secret cut at the sample edge is not recognised
+                        },
+                    )
 
             if result.returncode != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
                 if self._looks_like_not_found(combined) and session is not None and not prelude:
@@ -183,6 +192,7 @@ class PowerShellGraphAdapter(Adapter):
                     error_class = "command_not_authenticated"
                 else:
                     error_class = "command_error"
+                completed(error_class)
                 return {
                     "error": f"command_failed:{result.returncode}",
                     "error_class": error_class,
@@ -193,6 +203,7 @@ class PowerShellGraphAdapter(Adapter):
                 }
 
             if not stdout.strip():
+                completed("command_output_empty")
                 return {
                     "error": "command_output_empty",
                     "error_class": "command_output_empty",
@@ -204,6 +215,7 @@ class PowerShellGraphAdapter(Adapter):
             try:
                 parsed = json.loads(stdout)
             except json.JSONDecodeError:
+                completed("command_parse_error")
                 return {
                     "error": "command_output_parse_error",
                     "error_class": "command_parse_error",
@@ -212,18 +224,31 @@ class PowerShellGraphAdapter(Adapter):
                     "stderr": redact_text(stderr),
                 }
 
+            completed(None)
             response = self._normalize_payload(parsed)
             response["command"] = safe_command
             return response
         except subprocess.TimeoutExpired:
             if log_event:
-                log_event("command.failed", "PowerShell command timed out", {"command": safe_command})
+                log_event(
+                    "command.failed",
+                    "PowerShell command timed out",
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error_class": "command_timeout"},
+                )
             return {"error": "command_timeout", "error_class": "command_timeout", "command": safe_command}
         except subprocess.CalledProcessError as exc:  # noqa: BLE001
             if log_event:
-                log_event("command.failed", "PowerShell command failed", {"command": safe_command, "error": str(exc)})
+                log_event(
+                    "command.failed",
+                    "PowerShell command failed",
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": str(exc)},
+                )
             return {"error": f"command_failed:{exc.returncode}", "error_class": "command_error", "command": safe_command}
         except Exception as exc:  # noqa: BLE001
             if log_event:
-                log_event("command.failed", "PowerShell command exception", {"command": safe_command, "error": str(exc)})
+                log_event(
+                    "command.failed",
+                    "PowerShell command exception",
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": str(exc)},
+                )
             return {"error": redact_text(str(exc)), "error_class": "command_exception", "command": safe_command}

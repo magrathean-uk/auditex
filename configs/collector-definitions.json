@@ -652,6 +652,7 @@
         "protectionAlerts",
         "malwareFilterPolicy",
         "transportConfig",
+        "casMailboxSmtpAuth",
         "dkimSigningConfig"
       ],
       "command_collectors": [
@@ -737,6 +738,13 @@
           "category": "policy",
           "commands": [
             "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled"
+          ]
+        },
+        {
+          "name": "casMailboxSmtpAuth",
+          "category": "policy",
+          "commands": [
+            "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count"
           ]
         },
         {

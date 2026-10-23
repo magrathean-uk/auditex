@@ -11,6 +11,8 @@ LOG_SAMPLE_LIMIT = 500
 
 class SecurityCollector(Collector):
     name = "security"
+    # Reads events between ``--since`` and ``--until``: a resumed run under another window re-runs it.
+    time_windowed = True
     description = "Sign-in and directory audit signals from Microsoft Graph."
     required_permissions = [
         "AuditLog.Read.All",

@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from azure_tenant_audit.collection_gaps import (
+    BOUNDED_SAMPLE_SECTION,
     COLLECTION_GAP_SECTION,
+    bounded_sample_records,
     collection_gap_records,
     list_truncations,
     truncations_from_payloads,
@@ -701,6 +703,11 @@ def build_google_normalized_snapshot(
     collection_gaps = collection_gap_records(sorted(truncations, key=lambda item: (item["collector"], item["list"])))
     if collection_gaps:
         sections[COLLECTION_GAP_SECTION] = collection_gaps
+    # A list read as a sample by design (the Drive crawl, the event logs) and cut at that bound is not a gap, but the
+    # rules that read it cannot call "no finding" a pass.
+    bounded_samples = bounded_sample_records(coverage_rows, collector_payloads)
+    if bounded_samples:
+        sections[BOUNDED_SAMPLE_SECTION] = bounded_samples
     object_counts = {name: len(records) for name, records in sections.items()}
     status_counts = Counter(str(row.get("status") or "unknown") for row in result_rows if isinstance(row, dict))
     truncated_sections = sorted({f"{item['collector']}.{item['list']}" for item in truncations})

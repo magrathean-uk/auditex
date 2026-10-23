@@ -12,7 +12,7 @@ from azure_tenant_audit.assurance import build_live_readiness_summary
 from azure_tenant_audit.ai_context import build_privacy_block
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
-from azure_tenant_audit.offline_replay import replay_collector_status, replay_coverage_rows, replay_source
+from azure_tenant_audit.offline_replay import absent_section_rows, replay_collector_status, replay_coverage_rows, replay_source
 from azure_tenant_audit.output import AuditWriter
 from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from azure_tenant_audit.resources import resolve_resource_path
@@ -31,7 +31,15 @@ from .auth import (
 )
 from .client import GoogleWorkspaceClient
 from .client import classify_google_error
-from .collectors import DEFAULT_ORDER, PRESETS, REGISTRY, SUBJECT_SCOPE_ADMIN, SUBJECT_SCOPE_USER, SUBJECT_SCOPED_COLLECTORS
+from .collectors import (
+    COLLECTOR_SECTIONS,
+    DEFAULT_ORDER,
+    PRESETS,
+    REGISTRY,
+    SUBJECT_SCOPE_ADMIN,
+    SUBJECT_SCOPE_USER,
+    SUBJECT_SCOPED_COLLECTORS,
+)
 from .findings import DEFAULT_STALE_DEVICE_DAYS, DEFAULT_STALE_USER_DAYS, build_google_findings
 from .normalize import build_google_normalized_snapshot
 
@@ -198,6 +206,10 @@ def build_google_capability_rows(
             else:
                 row_status = "partial"
                 row_reason = "runtime_endpoint_block"
+        if auth_mode == "offline" and not failures:
+            # A replay observed nothing on a tenant: it is an offline sample, not an exact-scope read.
+            row_status = "offline_sample"
+            row_reason = "offline_bundle"
         capability: dict[str, Any] = {
             "collector": name,
             "status": row_status,
@@ -514,22 +526,26 @@ def run_google_offline(
         "Google Workspace offline run started",
         {"mode": "offline", "platform": "google_workspace", "sample": str(target)},
     )
-    collector_payloads = {
-        str(key): value
-        for key, value in sample.items()
-        if key not in _OFFLINE_SAMPLE_METADATA_KEYS and isinstance(value, dict)
+    # ``null``, a list or an empty object under a collector's name is a collector that delivered nothing, not one that is
+    # absent from the sample: it stays in the run, with every section it should have carried recorded as absent.
+    sample_collectors = {
+        str(key): value for key, value in sample.items() if key not in _OFFLINE_SAMPLE_METADATA_KEYS
     }
+    collector_payloads = {name: value for name, value in sample_collectors.items() if isinstance(value, dict)}
     result_rows: list[dict[str, Any]] = []
     # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was,
     # with the same blocker a live run raises, so the replay cannot read complete over it.
     coverage_rows: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
-    for name, payload in collector_payloads.items():
+    for name, held in sample_collectors.items():
+        if name not in COLLECTOR_SECTIONS and not isinstance(held, dict):
+            continue
+        payload = held if isinstance(held, dict) else {}
         item_count = 0
         for section in payload.values():
             if isinstance(section, dict) and isinstance(section.get("value"), list):
                 item_count += len(section["value"])
-        replayed = replay_coverage_rows(name, payload)
+        replayed = [*replay_coverage_rows(name, payload), *absent_section_rows(name, held, COLLECTOR_SECTIONS.get(name, ()))]
         coverage_rows.extend(replayed)
         diagnostics.extend(dict(row) for row in replayed if row.get("status") != "ok")
         row = {
@@ -538,7 +554,7 @@ def run_google_offline(
             "item_count": item_count,
             "message": "offline simulation"
             if not replayed
-            else f"offline simulation; {len(replayed)} section(s) recorded as failed or cut short",
+            else f"offline simulation; {len(replayed)} section(s) recorded as failed, absent or cut short",
             "coverage_rows": len(replayed),
         }
         result_rows.append(row)
@@ -550,7 +566,7 @@ def run_google_offline(
         writer.write_diagnostics(diagnostics)
         writer.write_blockers(diagnostics)
     capability_rows = _capability_rows(
-        list(collector_payloads), auth_mode="offline", dependency_status={"available": True}, coverage_rows=coverage_rows
+        [row["name"] for row in result_rows], auth_mode="offline", dependency_status={"available": True}, coverage_rows=coverage_rows
     )
     return _write_google_bundle(
         writer=writer,

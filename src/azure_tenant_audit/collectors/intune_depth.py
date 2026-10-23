@@ -33,6 +33,9 @@ _UPDATE_PROFILES = (
     ("windowsFeatureUpdateProfiles", "windowsFeatureUpdateProfileAssignments", "feature_update_profiles"),
 )
 _UPDATE_PROFILE_LISTS = frozenset(list_name for list_name, _assignments, _scope in _UPDATE_PROFILES)
+# The per-policy assignment reads of the first device configuration profiles (and the fan-out gap past them) belong to the
+# unassigned-policy rule alone: a tenant with more than ten profiles must not lose its update ring rules over them.
+_POLICY_ASSIGNMENT_SECTIONS = frozenset({"deviceConfigurationAssignments", "deviceConfigurationAssignmentsFanout"})
 
 
 class IntuneDepthCollector(Collector):
@@ -256,8 +259,11 @@ class IntuneDepthCollector(Collector):
         payload["deviceConfigurationAssignments"] = {"value": assignment_rows}
         # The beta update profile lists and everything derived from the update rings are evidence of their own:
         # a failed or cut one stays in its section (the update rules and the summary read it) and does not make
-        # the rest of the collector, such as the unassigned-policy rule, not assessed.
-        mark_section_scoped([row for row in coverage if row.get("name") in _UPDATE_PROFILE_LISTS])
+        # the rest of the collector, such as the unassigned-policy rule, not assessed. The converse holds for the
+        # policy assignment reads: they feed the unassigned-policy rule only, which reports their gap itself.
+        mark_section_scoped(
+            [row for row in coverage if row.get("name") in _UPDATE_PROFILE_LISTS | _POLICY_ASSIGNMENT_SECTIONS]
+        )
         coverage.extend(self._update_management(client, context.get("run_dir"), payload))
         total = sum(item.get("item_count", 0) for item in coverage)
         partial = collector_partial(coverage)
