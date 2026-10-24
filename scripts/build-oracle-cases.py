@@ -50,6 +50,18 @@ id, test name, OPA version, input hash, CISA ReportDetails), a `template` key `<
 for grouping by reasoning template, and `distinct_prompt_sha256` for duplicate detection. Cases are written
 `unreviewed` in `train`; use scripts/split-oracle-cases.py to assign splits and (optionally) record the oracle as reviewer.
 
+Conditional Access bases (`--ca-bases`, AAD only). ScubaGear's unit-test base policy combines block, a phishing-resistant strength, user
+risk high AND sign-in risk high, legacy-only client app types and the registration user action next to All applications; Entra ANDs the
+assignments of a policy, so a `met` label on it describes a policy that meets none of the baseline texts it is checked against.
+`single-purpose` (default) drops the `met` cases of the CA items (CA_ITEMS) whose every passing policy carries a condition the item does not
+name (ca_extras; OPA decides which policy passes) and adds cases from a single-purpose policy per item: only what the baseline text requires,
+every other condition neutral, realistic values, one tenant per near miss. The not_met cases of the unit-test variants stay (narrowing cannot make
+them wrong). Added variants are evaluated by the same Rego and ScubaGear's verdict is the label; each declares the verdict the baseline text
+implies and the run fails if the engine disagrees. Their ids are salted SP_SALT (`conv3-sp`) and their templates start `single_purpose:`.
+`combined` is the earlier behaviour and reproduces oracle pack v4 exactly. MS.AAD.3.2v2 gets no variant that needs a scuba_config allow-list: its
+Rego reads the allow-list under MS.AAD.3.2v1 (finding F2 of the 24 Oct adjudication). MS.AAD.9.1v1 and MS.AAD.3.3v2 (whose not-applicable gate
+reads CA policies) are not covered.
+
 With `--expression-patches` (default) the input of each unit test is the one OPA builds for it: the statements before
 its `Output := <package>.tests` line, then `input` under its `with` clauses, evaluated next to the fixture and helpers,
 so sprintf paths, helper functions, variables and nested `with input.scuba_config...` paths mean what they mean to CISA.
@@ -1200,7 +1212,7 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                 masks: dict[str, list[str]] | None = None, applicability: dict[str, str] | None = None,
                 gates: dict[str, dict[tuple, set[str]]] | None = None,
                 fields: dict[str, set[tuple[str, tuple[str, ...]]]] | None = None,
-                fields_added: dict[str, set[str]] | None = None) -> tuple[list[dict], Counter]:
+                fields_added: dict[str, set[str]] | None = None, id_salt: str | None = None) -> tuple[list[dict], Counter]:
     """Turn evaluated variants into one case per distinct (policy, evidence view); pure, no OPA needed.
 
     `methods` is the evidence-view method per policy (`provenance.evidence_view`), `masks` the sections a not-collected
@@ -1213,7 +1225,10 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
     verdict whose view sections are all absent (null) is no case (`empty_tenant_input`) unless the view is the policy's
     single section, which is then labelled unknown like a missing input. The id hashes the view with
     CONVENTION, so a pack built under another labelling convention never shares an id with this one, while the hidden
-    section of a not-collected case is picked with MASK_ID_SALT, so it does not depend on the convention.
+    section of a not-collected case is picked with MASK_ID_SALT, so it does not depend on the convention. `id_salt` replaces
+    CONVENTION in the id when given (the single-purpose Conditional Access cases use SP_SALT). A variant that carries `policies` yields
+    cases only for those policy ids (counted as `policy_not_targeted` for the rest); one that carries `base` has its mutation
+    family computed against that base instead of `base_input`, and `template_prefix` is put in front of the family.
 
     How the evidence is rendered, with the label unchanged. Where the engine did not fail closed, `fields` (per policy, the
     (section, field path) pairs it reads, see rego_ast_field_reads) are shown as an explicit null in every object that lacks them
@@ -1230,6 +1245,9 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
             pid = result.get("PolicyId")
             if not pid or pid not in sections:
                 stats["policy_skipped"] += 1
+                continue
+            if "policies" in variant and pid not in variant["policies"]:
+                stats["policy_not_targeted"] += 1
                 continue
             if not is_verdict(result):
                 stats["not_a_verdict"] += 1
@@ -1269,8 +1287,10 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
             if applicability and pid in applicability:
                 policy_observed["applicability"] = applicability[pid]
             policy_evidence = {"id": "e0", "section": "policy", "observed": policy_observed}
-            case_id = view_case_id(prefix, pid, view, CONVENTION)
-            mutation = mutation_family(base_input, variant["input"], view_sections)
+            case_id = view_case_id(prefix, pid, view, id_salt or CONVENTION)
+            mutation = mutation_family(variant.get("base", base_input), variant["input"], view_sections)
+            if variant.get("template_prefix"):
+                mutation = f"{variant['template_prefix']}:{mutation}"
             if masks is None:
                 candidates = view_sections[:1]
             elif len(view_sections) > 1:   # a section the policy reads that holds data here; never the whole of a one-section view
@@ -1341,8 +1361,294 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
     return cases, stats
 
 
+# --- single-purpose Conditional Access bases (decision D11, 25 Oct 2026) ----------------------------------------------------
+#
+# ScubaGear's unit-test base policy (Testing/Unit/Rego/AAD/AADBaseConfig.rego) is one policy that carries block plus a
+# phishing-resistant strength, user risk high AND sign-in risk high, legacy-only client app types and the registration user action
+# next to All applications. Both engines ignore conditions the checked item does not name, but Entra ANDs the assignments of a
+# policy, so a `met` label on that fixture describes a policy that covers a sliver of the tenant. For the AAD items below the miner
+# therefore (a) drops the `met` cases whose passing policy carries conditions the item does not name (not_met cannot be made
+# wrong by narrowing, so those stay) and (b) adds cases from a realistic single-purpose policy per item: only what the baseline
+# text requires, every other condition at its neutral value. Each added variant is evaluated by ScubaGear's Rego like any other and
+# its verdict is the label; the intent declared here must agree with that verdict or the run fails. Added case ids are salted SP_SALT.
+SP_SALT = "conv3-sp"
+CA_BASES = ("single-purpose", "combined")
+CA_SECTION = "conditional_access_policies"
+LEGACY_CLIENT_TYPES = {"other", "exchangeActiveSync"}
+DEVICE_CONTROLS = ["compliantDevice", "domainJoinedDevice"]
+PHISHING_RESISTANT = ["windowsHelloForBusiness", "fido2", "x509CertificateMultiFactor"]
+MFA_STRENGTH = ["windowsHelloForBusiness", "fido2", "x509CertificateMultiFactor", "deviceBasedPush", "temporaryAccessPassOneTime",
+                "temporaryAccessPassMultiUse", "password,microsoftAuthenticatorPush", "password,softwareOath", "password,hardwareOath",
+                "password,sms", "password,voice", "federatedMultiFactor", "microsoftAuthenticatorPush,federatedSingleFactor",
+                "softwareOath,federatedSingleFactor", "hardwareOath,federatedSingleFactor", "sms,federatedSingleFactor",
+                "voice,federatedSingleFactor"]   # Entra's built-in "Multifactor authentication" strength, as in ScubaGear's own fixture
+PASSWORDLESS_STRENGTH = ["windowsHelloForBusiness", "fido2", "deviceBasedPush"]   # Entra's built-in "Passwordless MFA" strength
+REGISTRATION = "urn:user:registersecurityinfo"
+USER, USER2 = "5f1d3c52-9a6e-4b07-8d2e-6c1f0a7b94e3", "c82e91a4-7b3d-4f65-a1d0-3e9b2f4c8d17"
+GROUP, APP = "0b7a64d9-2c15-4e8f-9a36-d4f1e85c7b20", "a3c9d5e1-6f28-4b74-8e0a-1d7b3c9f5a62"
+GLOBAL_ADMIN_ROLE = "62e90394-69f5-4237-9190-012177145e10"
+GUEST_EXCLUSION = {"GuestOrExternalUserTypes": "b2bCollaborationGuest", "ExternalTenants": {"MembershipKind": "all"}}
+# kind -> (policy path of the exclusion, its value, key of the scuba_config allow-list, the allow-list that approves it)
+EXCLUSIONS = {
+    "user": (("Conditions", "Users", "ExcludeUsers"), [USER], "Users", [USER]),
+    "group": (("Conditions", "Users", "ExcludeGroups"), [GROUP], "Groups", [GROUP]),
+    "application": (("Conditions", "Applications", "ExcludeApplications"), [APP], "Applications", [APP]),
+    "guest": (("Conditions", "Users", "ExcludeGuestsOrExternalUsers"), GUEST_EXCLUSION, "GuestUserTypes", ["b2bCollaborationGuest"]),
+}
+# Per item: what the item names (risk: the one risk dimension it names, legacy: the legacy client types, action: the registration
+# user action, transfer: the transfer method, grant: the grant control it asks for); `apps`: its Rego reads application exclusions;
+# `allow_lists`: False for MS.AAD.3.2v2 (its Rego reads the allow-list of MS.AAD.3.2v1, finding F2, so an allow-list written under
+# the documented key is ignored and no variant that depends on one is generated); `not_decoys`: items whose policy would itself
+# satisfy this one in reality and so cannot stand in as an unrelated policy.
+CA_ITEMS = {
+    "MS.AAD.1.1v1": {"name": "Block legacy authentication", "risk": None, "legacy": True, "action": False, "transfer": False, "grant": "block", "apps": True, "allow_lists": True, "not_decoys": ()},
+    "MS.AAD.2.1v1": {"name": "Block high-risk users", "risk": "user", "legacy": False, "action": False, "transfer": False, "grant": "block", "apps": True, "allow_lists": True, "not_decoys": ()},
+    "MS.AAD.2.3v1": {"name": "Block high-risk sign-ins", "risk": "signin", "legacy": False, "action": False, "transfer": False, "grant": "block", "apps": True, "allow_lists": True, "not_decoys": ()},
+    "MS.AAD.3.1v1": {"name": "Require phishing-resistant MFA for all users", "risk": None, "legacy": False, "action": False, "transfer": False, "grant": "strength", "apps": True, "allow_lists": True, "not_decoys": ()},
+    "MS.AAD.3.2v2": {"name": "Require MFA for all users", "risk": None, "legacy": False, "action": False, "transfer": False, "grant": "mfa", "apps": True, "allow_lists": False, "not_decoys": ("MS.AAD.3.1v1", "MS.AAD.3.6v1")},
+    "MS.AAD.3.6v1": {"name": "Require phishing-resistant MFA for privileged roles", "risk": None, "legacy": False, "action": False, "transfer": False, "grant": "strength", "apps": True, "allow_lists": True, "not_decoys": ("MS.AAD.3.1v1",)},
+    "MS.AAD.3.7v1": {"name": "Require a managed device for all sign-ins", "risk": None, "legacy": False, "action": False, "transfer": False, "grant": "device", "apps": True, "allow_lists": True, "not_decoys": ()},
+    "MS.AAD.3.8v1": {"name": "Require a managed device to register security information", "risk": None, "legacy": False, "action": True, "transfer": False, "grant": "device", "apps": False, "allow_lists": True, "not_decoys": ("MS.AAD.3.7v1",)},
+    "MS.AAD.3.9v1": {"name": "Block device code flow", "risk": None, "legacy": False, "action": False, "transfer": True, "grant": "block", "apps": True, "allow_lists": True, "not_decoys": ()},
+}
+
+
+def _blank(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple)):
+        return all(_blank(item) for item in value)
+    return False
+
+
+def ca_extras(item: str, policy: dict) -> list[str]:
+    """The conditions `policy` carries that baseline item `item` does not name: empty for a single-purpose policy, non-empty for a policy
+    whose assignments (ANDed by Entra) narrow it. Risk levels of the dimension the item does not name, client app types that do not
+    include `all` (the legacy types for 1.1), a user action (3.8 only), transfer methods (3.9 only), applications next to a user action,
+    and grant controls beyond the one the item asks for (a strength next to `block` or a device control, built-in controls next to a strength)."""
+    spec, out = CA_ITEMS[item], []
+    conditions, grant = policy.get("Conditions") or {}, policy.get("GrantControls") or {}
+    apps = conditions.get("Applications") or {}
+    builtin, strength = list(grant.get("BuiltInControls") or []), grant.get("AuthenticationStrength")
+    if not _blank(conditions.get("UserRiskLevels")) and spec["risk"] != "user":
+        out.append("user_risk_levels")
+    if not _blank(conditions.get("SignInRiskLevels")) and spec["risk"] != "signin":
+        out.append("sign_in_risk_levels")
+    if spec["risk"] == "user" and not _blank(conditions.get("SignInRiskLevels")):
+        out.append("second_risk_level")
+    client = conditions.get("ClientAppTypes") or []
+    if spec["legacy"]:
+        if not LEGACY_CLIENT_TYPES <= set(client):
+            out.append("client_app_types")
+    elif "all" not in client:
+        out.append("client_app_types_narrowed")
+    if not _blank(apps.get("IncludeUserActions")) and not spec["action"]:
+        out.append("user_action")
+    if spec["action"] and not _blank(apps.get("IncludeApplications")):
+        out.append("applications_alongside_user_action")
+    if not _blank((conditions.get("AuthenticationFlows") or {}).get("TransferMethods")) and not spec["transfer"]:
+        out.append("transfer_methods")
+    if spec["grant"] == "block":
+        if strength is not None:
+            out.append("authentication_strength_with_block")
+        if set(builtin) - {"block"}:
+            out.append("extra_grant_controls")
+    elif spec["grant"] == "strength":
+        if builtin:
+            out.append("built_in_controls_with_strength")
+    elif spec["grant"] == "mfa":
+        if strength is not None and builtin:
+            out.append("strength_and_built_in_controls")
+        if set(builtin) - {"mfa"}:
+            out.append("extra_grant_controls")
+    elif spec["grant"] == "device":
+        if strength is not None:
+            out.append("authentication_strength_with_device")
+        if set(builtin) - set(DEVICE_CONTROLS):
+            out.append("extra_grant_controls")
+    return out
+
+
+def ca_policy(name: str, *, users=("All",), roles=None, apps=("All",), actions=(), user_risk=(), sign_in_risk=(), client_types=("all",),
+              transfer=None, builtin=(), strength=None, operator=None, state="enabled") -> dict:
+    """A CA policy in the shape of ScubaGear's fixture, every condition at its neutral value unless given: all client app types, no
+    risk level, no user action, no transfer method, no strength, nobody excluded."""
+    users_condition = {"ExcludeGroups": [], "ExcludeGuestsOrExternalUsers": None, "ExcludeRoles": [], "ExcludeUsers": [], "IncludeUsers": list(users)}
+    if roles is not None:
+        users_condition["IncludeRoles"] = list(roles)
+    grant = {"AuthenticationStrength": strength, "BuiltInControls": list(builtin)}
+    if operator is not None:
+        grant["Operator"] = operator
+    return {"Conditions": {"Applications": {"ExcludeApplications": [], "IncludeApplications": list(apps), "IncludeUserActions": list(actions)},
+                           "AuthenticationFlows": {"TransferMethods": transfer}, "ClientAppTypes": list(client_types),
+                           "SignInRiskLevels": list(sign_in_risk), "UserRiskLevels": list(user_risk), "Users": users_condition},
+            "DisplayName": name, "GrantControls": grant, "State": state}
+
+
+def single_purpose_policy(item: str, role_ids: list[str]) -> dict:
+    """The policy that meets `item` and nothing else: enabled, what the baseline text requires, nothing extra."""
+    name = CA_ITEMS[item]["name"]
+    kwargs = {
+        "MS.AAD.1.1v1": {"client_types": ["other", "exchangeActiveSync"], "builtin": ["block"]},
+        "MS.AAD.2.1v1": {"user_risk": ["high"], "builtin": ["block"]},
+        "MS.AAD.2.3v1": {"sign_in_risk": ["high"], "builtin": ["block"]},
+        "MS.AAD.3.1v1": {"strength": {"AllowedCombinations": list(PHISHING_RESISTANT)}},
+        "MS.AAD.3.2v2": {"builtin": ["mfa"]},
+        "MS.AAD.3.6v1": {"users": [], "roles": list(role_ids), "strength": {"AllowedCombinations": list(PHISHING_RESISTANT)}},
+        "MS.AAD.3.7v1": {"builtin": list(DEVICE_CONTROLS), "operator": "OR"},
+        "MS.AAD.3.8v1": {"apps": [], "actions": [REGISTRATION], "builtin": list(DEVICE_CONTROLS), "operator": "OR"},
+        "MS.AAD.3.9v1": {"transfer": "deviceCodeFlow", "builtin": ["block"]},
+    }[item]
+    return ca_policy(name, **kwargs)
+
+
+def _edit(policy: dict, edits) -> dict:
+    """A deep copy of `policy` with each (path, value) of `edits` set."""
+    out = json.loads(json.dumps(policy))
+    for path, value in edits:
+        target = out
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = json.loads(json.dumps(value))
+    return out
+
+
+_APPLICATIONS, _USERS, _GRANT = ("Conditions", "Applications"), ("Conditions", "Users"), ("GrantControls",)
+_STRENGTH, _BUILTIN = _GRANT + ("AuthenticationStrength",), _GRANT + ("BuiltInControls",)
+_WEAKER = {"AllowedCombinations": [*PHISHING_RESISTANT, "password,microsoftAuthenticatorPush"]}
+# Item-specific variants: name -> edits. `met`: other realistic ways to meet the item; `not_met`: exactly one named requirement broken.
+SPECIFIC = {
+    "MS.AAD.1.1v1": {"not_met": {"only_exchange_activesync": [(("Conditions", "ClientAppTypes"), ["exchangeActiveSync"])],
+                                 "only_other_clients": [(("Conditions", "ClientAppTypes"), ["other"])],
+                                 "grant_mfa_instead_of_block": [(_BUILTIN, ["mfa"])]}},
+    "MS.AAD.2.1v1": {"not_met": {"user_risk_medium_only": [(("Conditions", "UserRiskLevels"), ["medium"])],
+                                 "grant_mfa_instead_of_block": [(_BUILTIN, ["mfa"])],
+                                 "sign_in_risk_instead_of_user_risk": [(("Conditions", "UserRiskLevels"), []), (("Conditions", "SignInRiskLevels"), ["high"])]}},
+    "MS.AAD.2.3v1": {"not_met": {"sign_in_risk_medium_only": [(("Conditions", "SignInRiskLevels"), ["medium"])],
+                                 "grant_mfa_instead_of_block": [(_BUILTIN, ["mfa"])],
+                                 "user_risk_instead_of_sign_in_risk": [(("Conditions", "SignInRiskLevels"), []), (("Conditions", "UserRiskLevels"), ["high"])]}},
+    "MS.AAD.3.1v1": {"met": {"custom_strength_fido2_only": [(_STRENGTH, {"AllowedCombinations": ["fido2"]})]},
+                     "not_met": {"mfa_control_without_strength": [(_STRENGTH, None), (_BUILTIN, ["mfa"])],
+                                 "strength_allows_password_methods": [(_STRENGTH, _WEAKER)]}},
+    "MS.AAD.3.2v2": {"met": {"strength_multifactor": [(_BUILTIN, []), (_STRENGTH, {"AllowedCombinations": list(MFA_STRENGTH)})],
+                             "strength_passwordless": [(_BUILTIN, []), (_STRENGTH, {"AllowedCombinations": list(PASSWORDLESS_STRENGTH)})],
+                             "custom_strength_authenticator_push": [(_BUILTIN, []), (_STRENGTH, {"AllowedCombinations": ["password,microsoftAuthenticatorPush", "fido2"]})]},
+                     "not_met": {"device_control_instead_of_mfa": [(_BUILTIN, ["compliantDevice"])],
+                                 "block_instead_of_mfa": [(_BUILTIN, ["block"])]}},
+    "MS.AAD.3.6v1": {"met": {"custom_strength_fido2_only": [(_STRENGTH, {"AllowedCombinations": ["fido2"]})]},
+                     "not_met": {"strength_allows_password_methods": [(_STRENGTH, _WEAKER)],
+                                 "mfa_control_without_strength": [(_STRENGTH, None), (_BUILTIN, ["mfa"])]}},
+    "MS.AAD.3.7v1": {"not_met": {"mfa_instead_of_device": [(_BUILTIN, ["mfa"])],
+                                 "scoped_to_registration_action": [(_APPLICATIONS + ("IncludeApplications",), []), (_APPLICATIONS + ("IncludeUserActions",), [REGISTRATION])]}},
+    "MS.AAD.3.8v1": {"not_met": {"mfa_instead_of_device": [(_BUILTIN, ["mfa"])],
+                                 "all_applications_instead_of_action": [(_APPLICATIONS + ("IncludeApplications",), ["All"]), (_APPLICATIONS + ("IncludeUserActions",), [])]}},
+    "MS.AAD.3.9v1": {"not_met": {"transfer_authentication_transfer": [(("Conditions", "AuthenticationFlows", "TransferMethods"), "authenticationTransfer")],
+                                 "grant_mfa_instead_of_block": [(_BUILTIN, ["mfa"])]}},
+}
+
+
+def _tenant(base_input: dict, policies: list[dict], item: str, allow: dict | None = None) -> dict:
+    tenant = json.loads(json.dumps(base_input))
+    tenant[CA_SECTION] = json.loads(json.dumps(policies))
+    if allow:   # the shape CISA's own tests give it: scuba_config.Aad[<item>] = ScubaConfig with one CapExclusions list filled
+        capped = {"Applications": [], "Groups": [], "GuestUserTypes": [], "Users": []}
+        capped.update(allow)
+        tenant["scuba_config"] = {**tenant.get("scuba_config", {}), "Aad": {item: {"CapExclusions": capped, "RoleExclusions": {"Groups": [], "Users": []}}}}
+    return tenant
+
+
+def single_purpose_variants(base_input: dict) -> list[dict]:
+    """The single-purpose tenants for every item of CA_ITEMS, built on the base input (its service plans, privileged roles and scuba_config).
+
+    Each variant is `{"name", "input", "policies": [item], "intent": "met" | "not_met", "base", "template_prefix"}`; only the item's own case is
+    emitted from it. `base` is the item's single-purpose tenant, so the mutation family says what the variant changes relative to it.
+    Variants: the policy alone; each exclusion kind allow-listed (met) and not allow-listed or partly listed (not_met, the near misses);
+    a role exclusion, a disabled and a report-only policy, a policy scoped to one user or one application (not_met); item-specific ways to
+    meet it or to break exactly one requirement (SPECIFIC); the policy next to unrelated single-purpose policies (met, three tenants) and a
+    tenant that has only unrelated policies (not_met). The intents are what the baseline text says; ScubaGear's verdict is the label and must agree."""
+    roles = [role["RoleTemplateId"] for role in base_input.get("privileged_roles") or []]
+    if len(roles) < 2:
+        raise ValueError("the base input needs at least two privileged roles for the MS.AAD.3.6v1 base policy")
+    items = list(CA_ITEMS)
+    policies = {item: single_purpose_policy(item, roles) for item in items}
+    variants: list[dict] = []
+    for index, item in enumerate(items):
+        spec, policy = CA_ITEMS[item], policies[item]
+        base = _tenant(base_input, [policy], item)
+        rotated = items[index + 1:] + items[:index]
+        decoys = [policies[other] for other in rotated if other not in spec["not_decoys"]]
+
+        def add(name: str, intent: str, listed: list[dict], allow: dict | None = None) -> None:
+            variants.append({"name": f"single_purpose:{item}:{name}", "input": _tenant(base_input, listed, item, allow), "policies": [item],
+                             "intent": intent, "base": base, "template_prefix": "single_purpose"})
+
+        kinds = [kind for kind in EXCLUSIONS if kind != "application" or spec["apps"]]
+        add("policy_alone", "met", [policy])
+        for kind in kinds:
+            path, value, key, approved = EXCLUSIONS[kind]
+            if spec["allow_lists"]:
+                add(f"exclude_{kind}_allow_listed", "met", [_edit(policy, [(path, value)])], {key: approved})
+            add(f"exclude_{kind}_not_listed", "not_met", [_edit(policy, [(path, value)])])
+        if spec["allow_lists"]:
+            both = [(EXCLUSIONS["user"][0], [USER]), (EXCLUSIONS["group"][0], [GROUP])]
+            add("exclude_user_and_group_allow_listed", "met", [_edit(policy, both)], {"Users": [USER], "Groups": [GROUP]})
+            add("exclude_two_users_one_listed", "not_met", [_edit(policy, [(EXCLUSIONS["user"][0], [USER, USER2])])], {"Users": [USER]})
+        add("exclude_privileged_role", "not_met", [_edit(policy, [(_USERS + ("ExcludeRoles",), [GLOBAL_ADMIN_ROLE])])])
+        add("policy_disabled", "not_met", [_edit(policy, [(("State",), "disabled")])])
+        add("policy_report_only", "not_met", [_edit(policy, [(("State",), "enabledForReportingButNotEnforced")])])
+        if item != "MS.AAD.3.6v1":
+            add("scoped_to_one_user", "not_met", [_edit(policy, [(_USERS + ("IncludeUsers",), [USER])])])
+        if item != "MS.AAD.3.8v1":
+            add("scoped_to_one_application", "not_met", [_edit(policy, [(_APPLICATIONS + ("IncludeApplications",), [APP])])])
+        for intent in ("met", "not_met"):
+            for name, edits in SPECIFIC.get(item, {}).get(intent, {}).items():
+                add(name, intent, [_edit(policy, edits)])
+        if item == "MS.AAD.3.6v1":
+            add("one_privileged_role_missing", "not_met", [_edit(policy, [(_USERS + ("IncludeRoles",), roles[:1])])])
+        add("alongside_unrelated_policies_a", "met", [decoys[0], policy, decoys[1]])
+        add("alongside_unrelated_policies_b", "met", [decoys[2], decoys[3], policy])
+        add("alongside_unrelated_policies_c", "met", [decoys[4], policy])
+        add("only_unrelated_policies", "not_met", [decoys[0], decoys[1]])
+    return variants
+
+
+def passing_ca_policies(opa: Path, meta: dict, item: str, tenant: dict) -> list[dict]:
+    """The CA policies of `tenant` that ScubaGear's Rego passes for `item`, each judged alone (OPA decides, not a reimplementation)."""
+    passing = []
+    for policy in tenant[CA_SECTION]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "input.json"
+            path.write_text(canonical({**tenant, CA_SECTION: [policy]}), encoding="utf-8")
+            results = opa_json(opa, ["-d", str(meta["config"]), "-d", str(meta["config"].parent / "Utils"), "-i", str(path), f"data.{meta['package']}.tests"])
+        if any(r.get("PolicyId") == item and r.get("RequirementMet") is True for r in results):
+            passing.append(policy)
+    return passing
+
+
+def contaminated_met_case_ids(opa: Path, meta: dict, evaluations: list[tuple[dict, list[dict]]], sections: dict[str, list[str]], prefix: str) -> set[str]:
+    """Ids (under CONVENTION) of the `met` cases of CA_ITEMS whose every passing policy carries conditions the item does not name.
+    The verdict is a function of the view, so one check per (policy, view) decides every variant that shows it."""
+    found: set[str] = set()
+    seen: dict[tuple[str, str], bool] = {}
+    for variant, results in evaluations:
+        for result in results:
+            pid = result.get("PolicyId")
+            if pid not in CA_ITEMS or pid not in sections or not is_verdict(result) or result["RequirementMet"] is not True or oracle_outcome(result) != "evaluated":
+                continue
+            view = canonical({s: variant["input"].get(s) for s in sections[pid]})
+            if (pid, view) not in seen:
+                passing = passing_ca_policies(opa, meta, pid, variant["input"])
+                seen[(pid, view)] = bool(passing) and all(ca_extras(pid, policy) for policy in passing)
+            if seen[(pid, view)]:
+                found.add(view_case_id(prefix, pid, view, CONVENTION))
+    return found
+
+
 def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_every: int, *, commit: str, opa_version: str,
-                 template: bool = True, evidence_view: str = "rego_ast", expression_patches: bool = True) -> tuple[list[dict], dict]:
+                 template: bool = True, evidence_view: str = "rego_ast", expression_patches: bool = True,
+                 ca_bases: str = "single-purpose") -> tuple[list[dict], dict]:
     meta = product_meta(scuba, name)
     base_input, base_objects, mapping = load_base(opa, meta)
     resolved: Counter = Counter()
@@ -1364,6 +1670,20 @@ def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_eve
             continue
         variant["sha256"] = sha(inp_path.read_bytes())
         evaluations.append((variant, results))
+    sp_evaluations: list[tuple[dict, list[dict]]] = []
+    if name == "AAD" and ca_bases == "single-purpose":
+        # The single-purpose tenants are evaluated like any other variant but kept apart: views, gates and applicability are learned from
+        # the unit-test variants alone, so the combined cases come out exactly as under `--ca-bases combined`.
+        for vi, variant in enumerate(single_purpose_variants(base_input), start=len(variants)):
+            inp_path = vdir / f"variant-{vi:04d}.json"
+            inp_path.write_text(canonical(variant["input"]), encoding="utf-8")
+            results = opa_json(opa, ["-d", str(meta["config"]), "-d", str(scuba / "Rego/Utils"), "-i", str(inp_path), f"data.{meta['package']}.tests"])
+            target = variant["policies"][0]
+            verdicts = [r["RequirementMet"] for r in results if r.get("PolicyId") == target and is_verdict(r)]
+            if verdicts != [variant["intent"] == "met"]:
+                raise ValueError(f"{variant['name']}: expected {variant['intent']} but ScubaGear's Rego says {verdicts}")
+            variant["sha256"] = sha(inp_path.read_bytes())
+            sp_evaluations.append((variant, results))
     all_keys = sorted(set(base_input) | {key for variant, _ in evaluations for key in variant["input"]})
     ast_deps = rego_ast_dependencies(opa, meta) if evidence_view == "rego_ast" else {}
     field_reads = rego_ast_field_reads(opa, meta) if evidence_view == "rego_ast" else None
@@ -1380,6 +1700,22 @@ def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_eve
                                template=template, variants_failed=failed, methods=methods, masks=masks,
                                applicability=applicability_sentences(evaluations), gates=gates,
                                fields=fields, fields_added=null_fields)
+    sp_summary = None
+    if name == "AAD" and ca_bases == "single-purpose":
+        before = len(cases)
+        contaminated = contaminated_met_case_ids(opa, meta, evaluations, sections, f"scuba-{name.lower()}")
+        cases = [case for case in cases if case["id"] not in contaminated]
+        dropped = before - len(cases)
+        sp_cases, sp_stats = build_cases(name, sp_evaluations, sections, texts, base_input, commit=commit, opa_version=opa_version,
+                                         config_name=meta["config"].name, not_collected_every=not_collected_every, template=template,
+                                         methods=methods, masks=masks, applicability=applicability_sentences(evaluations), gates=gates,
+                                         fields=fields, fields_added=null_fields, id_salt=SP_SALT)
+        cases += sp_cases
+        sp_summary = {"id_salt": SP_SALT, "items": sorted(CA_ITEMS), "variants": len(sp_evaluations),
+                      "dropped_contaminated_met_cases": dropped, "cases": len(sp_cases), "stats": dict(sp_stats),
+                      "outcomes_per_item": {item: dict(sorted(Counter(c["provenance"]["oracle_outcome"] for c in sp_cases
+                                                                      if json.loads(c["messages"][1]["content"])["policy_id"] == item).items()))
+                                            for item in sorted(CA_ITEMS)}}
     summary = {"product": name, "package": meta["package"], "scubagear_commit": commit, "opa_version": opa_version, "input_keys": all_keys,
                "absent_keys": sorted(set(meta["keys"]) - set(base_input)), "fixture_mapping": mapping, "variants": len(variants),
                "harvest_skipped": dict(skipped),
@@ -1392,6 +1728,8 @@ def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_eve
                "families": dict(Counter(c["family"] for c in cases))}
     if template:
         summary["templates"] = len({c["provenance"]["template"] for c in cases})
+    if sp_summary is not None:
+        summary["single_purpose_ca"] = sp_summary
     return cases, summary
 
 
@@ -1433,6 +1771,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence-view", choices=EVIDENCE_VIEWS, default="rego_ast",
                         help="rego_ast: the sections the parsed Rego reads, widened only where verdicts conflict (default); "
                              "widened: the earlier method. Packs built with the two methods must not be mixed")
+    parser.add_argument("--ca-bases", choices=CA_BASES, default="single-purpose",
+                        help="single-purpose: for the AAD Conditional Access items drop the `met` cases built on ScubaGear's combined unit-test policy "
+                             "and add cases from one single-purpose policy per item (ids salted conv3-sp; default); combined: the earlier behaviour, "
+                             "which reproduces oracle pack v4 exactly")
     parser.add_argument("--expression-patches", action=argparse.BooleanOptionalAction, default=True,
                         help="let OPA evaluate unit tests whose patches use Rego expressions (default on)")
     args = parser.parse_args(argv)
@@ -1475,7 +1817,8 @@ def run_products(args: argparse.Namespace, *, commit: str, commit_full: str, cle
         try:
             cases, summary = mine_product(name, args.scuba, args.opa, args.output_dir, args.not_collected_every,
                                           commit=commit, opa_version=opa_version, template=args.template_key,
-                                          evidence_view=args.evidence_view, expression_patches=args.expression_patches)
+                                          evidence_view=args.evidence_view, expression_patches=args.expression_patches,
+                                          ca_bases=args.ca_bases)
             validated = validate_cases(cases)
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             summaries[name] = {"error": f"{type(exc).__name__}: {exc}"[:400]}
@@ -1492,7 +1835,7 @@ def run_products(args: argparse.Namespace, *, commit: str, commit_full: str, cle
     (args.output_dir / "summary.json").write_text(
         json.dumps({"total_cases": len(all_cases), "oracle": oracle, "not_collected_every": args.not_collected_every,
                     "template_key": args.template_key, "labelling_convention": CONVENTION, "evidence_view": args.evidence_view,
-                    "expression_patches": args.expression_patches, "products": summaries}, indent=1), encoding="utf-8")
+                    "expression_patches": args.expression_patches, "ca_bases": args.ca_bases, "products": summaries}, indent=1), encoding="utf-8")
     print(json.dumps({"total_cases": len(all_cases), "per_product": {k: (v.get("cases") or v.get("error")) for k, v in summaries.items()}}))
     return [name for name, summary in summaries.items() if "error" in summary]
 

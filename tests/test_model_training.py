@@ -288,6 +288,24 @@ def test_provenance_accepts_template_and_prompt_digest_and_rejects_other_keys() 
             validate_case(broken)
 
 
+def test_provenance_accepts_consensus_weight_and_adjudication_and_validates_them() -> None:
+    case = _case("a")
+    case["provenance"].update(consensus_weight="scubagear_only",
+                              adjudication={"source": "reviews/20261024-disagreement-adjudication", "ruling": "scuba_right"})
+    assert validate_case(copy.deepcopy(case)) == case
+    for key, value, message in (("consensus_weight", "consensus", "consensus_weight must be one of"), ("consensus_weight", None, "consensus_weight must be one of"),
+                                ("consensus_weight", ["scubagear_only"], "consensus_weight must be one of"),
+                                ("adjudication", "scuba_right", "adjudication requires only source and ruling"),
+                                ("adjudication", {"source": "x"}, "adjudication requires only source and ruling"),
+                                ("adjudication", {"source": "x", "ruling": "y", "extra": "z"}, "adjudication requires only source and ruling"),
+                                ("adjudication", {"source": " ", "ruling": "y"}, "adjudication source"),
+                                ("adjudication", {"source": "x", "ruling": 1}, "adjudication ruling")):
+        broken = copy.deepcopy(case)
+        broken["provenance"][key] = value
+        with pytest.raises(ValueError, match=message):
+            validate_case(broken)
+
+
 def test_provenance_accepts_every_evidence_view_and_oracle_outcome() -> None:
     for view in ("rego_ast", "widened"):
         for outcome in ("met", "not_met", "fail_closed_missing_input", "not_applicable", "not_collected"):

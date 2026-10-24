@@ -31,7 +31,11 @@ _PROVENANCE_REQUIRED = {"source", "synthetic", "review_status"}
 # optional curation aids written by scripts/build-oracle-cases.py and read by scripts/split-oracle-cases.py.
 # evidence_view and oracle_outcome record how an oracle-labelled case was derived; oracle_provenance() also
 # reads them from the evidence_view= and oracle_outcome= pairs that older miner output keeps in source.
-_PROVENANCE_OPTIONAL = {"reviewer", "template", "distinct_prompt_sha256", "evidence_view", "oracle_outcome"}
+# consensus_weight marks an oracle row whose second-engine agreement says nothing (the other engine never changes its verdict across
+# the fixture family), so the row weighs as a ScubaGear-only one; adjudication records the ruling of a written adjudication of a
+# disagreement that kept the ScubaGear label. Neither changes a label or an export.
+_PROVENANCE_OPTIONAL = {"reviewer", "template", "distinct_prompt_sha256", "evidence_view", "oracle_outcome", "consensus_weight", "adjudication"}
+_CONSENSUS_WEIGHTS = ("scubagear_only",)
 _EVIDENCE_VIEWS = ("rego_ast", "widened")
 _ORACLE_OUTCOMES = ("met", "not_met", "fail_closed_missing_input", "not_applicable", "not_collected")
 _ORACLE_PROVENANCE_FIELDS = ("evidence_view", "oracle_outcome")
@@ -91,7 +95,7 @@ def validate_case(payload: Any) -> dict[str, Any]:
     provenance = payload["provenance"]
     if not isinstance(provenance, dict) or not _PROVENANCE_REQUIRED <= set(provenance) <= _PROVENANCE_REQUIRED | _PROVENANCE_OPTIONAL:
         raise ValueError("provenance requires source, synthetic, review_status and optional reviewer, template, "
-                         "distinct_prompt_sha256, evidence_view and oracle_outcome")
+                         "distinct_prompt_sha256, evidence_view, oracle_outcome, consensus_weight and adjudication")
     _text(provenance["source"], "provenance source")
     if type(provenance["synthetic"]) is not bool:
         raise ValueError("provenance synthetic must be a boolean")
@@ -106,6 +110,14 @@ def validate_case(payload: Any) -> dict[str, Any]:
     for field, allowed_values in (("evidence_view", _EVIDENCE_VIEWS), ("oracle_outcome", _ORACLE_OUTCOMES)):
         if field in provenance and not (isinstance(provenance[field], str) and provenance[field] in allowed_values):
             raise ValueError(f"{field} must be one of {', '.join(allowed_values)}")
+    if "consensus_weight" in provenance and not (isinstance(provenance["consensus_weight"], str) and provenance["consensus_weight"] in _CONSENSUS_WEIGHTS):
+        raise ValueError(f"consensus_weight must be one of {', '.join(_CONSENSUS_WEIGHTS)}")
+    if "adjudication" in provenance:
+        adjudication = provenance["adjudication"]
+        if not isinstance(adjudication, dict) or set(adjudication) != {"source", "ruling"}:
+            raise ValueError("adjudication requires only source and ruling")
+        _text(adjudication["source"], "adjudication source")
+        _text(adjudication["ruling"], "adjudication ruling")
     messages = payload["messages"]
     if not isinstance(messages, list) or len(messages) < 2:
         raise ValueError("messages require a prompt and final assistant response")

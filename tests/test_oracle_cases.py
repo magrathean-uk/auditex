@@ -1522,7 +1522,8 @@ def fake_oracle(tmp_path, miner, monkeypatch):
     opa.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr(miner, "tool_versions", lambda scuba_dir, opa_bin: ("abcdef123456", "a" * 40, True, "1.20.2"))
 
-    def fake_mine(name, scuba_dir, opa_bin, out, every, *, commit, opa_version, template=True, evidence_view="rego_ast", expression_patches=True):
+    def fake_mine(name, scuba_dir, opa_bin, out, every, *, commit, opa_version, template=True, evidence_view="rego_ast", expression_patches=True,
+                  ca_bases="single-purpose"):
         if name == "EXO":
             raise ValueError("boom")
         cases = _mined(miner, name.lower(), 1)
@@ -1608,20 +1609,22 @@ def test_the_evidence_view_and_expression_patches_are_options_recorded_in_summar
     scuba, opa = fake_oracle
     seen = []
 
-    def fake_mine(name, scuba_dir, opa_bin, out, every, *, commit, opa_version, template, evidence_view, expression_patches):
-        seen.append((evidence_view, expression_patches))
+    def fake_mine(name, scuba_dir, opa_bin, out, every, *, commit, opa_version, template, evidence_view, expression_patches, ca_bases):
+        seen.append((evidence_view, expression_patches, ca_bases))
         cases = _mined(miner, name.lower(), 1)
         return cases, {"product": name, "variants": 2, "harvest_skipped": {}, "harvest_resolved": {}, "cases": len(cases), "stats": {},
                        "evidence_view_methods": {evidence_view: 1}}
 
     monkeypatch.setattr(miner, "mine_product", fake_mine)
     assert miner.main(_miner_args(scuba, opa, tmp_path / "default", "--products", "AAD")) == 0
-    assert miner.main(_miner_args(scuba, opa, tmp_path / "earlier", "--products", "AAD", "--evidence-view", "widened", "--no-expression-patches")) == 0
-    assert seen == [("rego_ast", True), ("widened", False)]
+    assert miner.main(_miner_args(scuba, opa, tmp_path / "earlier", "--products", "AAD", "--evidence-view", "widened", "--no-expression-patches",
+                                  "--ca-bases", "combined")) == 0
+    assert seen == [("rego_ast", True, "single-purpose"), ("widened", False, "combined")]
     default = json.loads((tmp_path / "default" / "summary.json").read_text(encoding="utf-8"))
     earlier = json.loads((tmp_path / "earlier" / "summary.json").read_text(encoding="utf-8"))
     assert (default["evidence_view"], default["expression_patches"], default["labelling_convention"]) == ("rego_ast", True, "conv3")
     assert (earlier["evidence_view"], earlier["expression_patches"]) == ("widened", False)
+    assert (default["ca_bases"], earlier["ca_bases"]) == ("single-purpose", "combined")
     with pytest.raises(SystemExit) as exc:
         miner.main(_miner_args(scuba, opa, tmp_path / "bad", "--evidence-view", "guess"))
     assert exc.value.code == 2 and not (tmp_path / "bad").exists()
@@ -2176,3 +2179,166 @@ def test_powerplatform_reference_differs_only_where_it_dropped_the_tenant_id(pow
             if label["value"] != was["value"]:
                 mismatched.append(key)
     assert agreed >= 100 and mismatched and {policy for policy, _ in mismatched} <= {"MS.POWERPLATFORM.2.1v1", "MS.POWERPLATFORM.2.3v1"}
+
+
+# --- single-purpose Conditional Access bases (decision D11) ------------------------------------------------------------------
+
+COMBINED_FIXTURE_POLICY = {   # ScubaGear's Testing/Unit/Rego/AAD/AADBaseConfig.rego ConditionalAccessPolicies, as the miner mines it
+    "Conditions": {"Applications": {"ExcludeApplications": [], "IncludeApplications": ["All"], "IncludeUserActions": ["urn:user:registersecurityinfo"]},
+                   "AuthenticationFlows": {"TransferMethods": None}, "ClientAppTypes": ["other", "exchangeActiveSync"],
+                   "SignInRiskLevels": ["high"], "UserRiskLevels": ["high"],
+                   "Users": {"ExcludeGroups": [], "ExcludeGuestsOrExternalUsers": None, "ExcludeRoles": [], "ExcludeUsers": [], "IncludeUsers": ["All"]}},
+    "DisplayName": "Test Policy", "State": "enabled",
+    "GrantControls": {"AuthenticationStrength": {"AllowedCombinations": ["windowsHelloForBusiness", "fido2", "x509CertificateMultiFactor"]}, "BuiltInControls": ["block"]},
+}
+SP_ITEMS = ["MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1", "MS.AAD.3.7v1", "MS.AAD.3.8v1", "MS.AAD.3.9v1"]
+SP_ROLES = ["Role1", "Role2"]
+CA_SECTION = "conditional_access_policies"
+SP_BASE_INPUT = {CA_SECTION: [], "scuba_config": {"CapExclusions": {"Users": []}, "RoleExclusions": {"Users": []}},
+                 "service_plans": [{"ServicePlanName": "AAD_PREMIUM_P2"}], "privileged_roles": [{"RoleTemplateId": r} for r in SP_ROLES]}
+
+
+def test_every_single_purpose_base_names_only_what_its_item_requires(miner):
+    expected = {   # item: (non-neutral conditions the baseline text asks for)
+        "MS.AAD.1.1v1": {"ClientAppTypes": ["other", "exchangeActiveSync"], "builtin": ["block"]},
+        "MS.AAD.2.1v1": {"UserRiskLevels": ["high"], "builtin": ["block"]},
+        "MS.AAD.2.3v1": {"SignInRiskLevels": ["high"], "builtin": ["block"]},
+        "MS.AAD.3.1v1": {"strength": ["windowsHelloForBusiness", "fido2", "x509CertificateMultiFactor"], "builtin": []},
+        "MS.AAD.3.2v2": {"builtin": ["mfa"]},
+        "MS.AAD.3.6v1": {"IncludeRoles": SP_ROLES, "IncludeUsers": [], "strength": ["windowsHelloForBusiness", "fido2", "x509CertificateMultiFactor"], "builtin": []},
+        "MS.AAD.3.7v1": {"builtin": ["compliantDevice", "domainJoinedDevice"], "Operator": "OR"},
+        "MS.AAD.3.8v1": {"IncludeUserActions": ["urn:user:registersecurityinfo"], "IncludeApplications": [], "builtin": ["compliantDevice", "domainJoinedDevice"], "Operator": "OR"},
+        "MS.AAD.3.9v1": {"TransferMethods": "deviceCodeFlow", "builtin": ["block"]},
+    }
+    assert sorted(miner.CA_ITEMS) == sorted(expected) == sorted(SP_ITEMS)
+    neutral = {"IncludeUsers": ["All"], "IncludeApplications": ["All"], "IncludeUserActions": [], "UserRiskLevels": [], "SignInRiskLevels": [],
+               "ClientAppTypes": ["all"], "TransferMethods": None, "strength": None, "builtin": [], "Operator": None}
+    for item in SP_ITEMS:
+        policy = miner.single_purpose_policy(item, SP_ROLES)
+        conditions, grant = policy["Conditions"], policy["GrantControls"]
+        seen = {"IncludeUsers": conditions["Users"]["IncludeUsers"], "IncludeApplications": conditions["Applications"]["IncludeApplications"],
+                "IncludeUserActions": conditions["Applications"]["IncludeUserActions"], "UserRiskLevels": conditions["UserRiskLevels"],
+                "SignInRiskLevels": conditions["SignInRiskLevels"], "ClientAppTypes": conditions["ClientAppTypes"],
+                "TransferMethods": conditions["AuthenticationFlows"]["TransferMethods"], "builtin": grant["BuiltInControls"],
+                "strength": (grant["AuthenticationStrength"] or {}).get("AllowedCombinations"), "Operator": grant.get("Operator"),
+                "IncludeRoles": conditions["Users"].get("IncludeRoles")}
+        wanted = {**neutral, "IncludeRoles": None, **expected[item]}
+        assert seen == wanted, item
+        assert policy["State"] == "enabled" and conditions["Applications"]["ExcludeApplications"] == [] and conditions["Users"]["ExcludeUsers"] == []
+        assert conditions["Users"]["ExcludeGroups"] == [] and conditions["Users"]["ExcludeRoles"] == [] and conditions["Users"]["ExcludeGuestsOrExternalUsers"] is None
+        assert miner.ca_extras(item, policy) == [], item
+
+
+def test_the_combined_unit_test_policy_carries_extra_conditions_for_every_item_and_each_narrowing_is_named(miner):
+    for item in SP_ITEMS:
+        assert miner.ca_extras(item, COMBINED_FIXTURE_POLICY), item
+    block_users = miner.single_purpose_policy("MS.AAD.2.1v1", SP_ROLES)
+    for edits, flag in (([(("Conditions", "SignInRiskLevels"), ["high"])], "sign_in_risk_levels"),
+                        ([(("Conditions", "SignInRiskLevels"), ["high"])], "second_risk_level"),
+                        ([(("Conditions", "ClientAppTypes"), ["other", "exchangeActiveSync"])], "client_app_types_narrowed"),
+                        ([(("Conditions", "Applications", "IncludeUserActions"), ["urn:user:registersecurityinfo"])], "user_action"),
+                        ([(("Conditions", "AuthenticationFlows", "TransferMethods"), "deviceCodeFlow")], "transfer_methods"),
+                        ([(("GrantControls", "AuthenticationStrength"), {"AllowedCombinations": ["fido2"]})], "authentication_strength_with_block")):
+        assert flag in miner.ca_extras("MS.AAD.2.1v1", miner._edit(block_users, edits)), flag
+    assert miner.ca_extras("MS.AAD.2.1v1", miner._edit(block_users, [(("Conditions", "UserRiskLevels"), ["high", "medium"])])) == []   # a wider list of the item's own dimension
+    assert miner.ca_extras("MS.AAD.2.1v1", miner._edit(block_users, [(("Conditions", "SignInRiskLevels"), [""])])) == []   # a blank string is no level
+    legacy = miner.single_purpose_policy("MS.AAD.1.1v1", SP_ROLES)
+    assert miner.ca_extras("MS.AAD.1.1v1", miner._edit(legacy, [(("Conditions", "ClientAppTypes"), ["all"])])) == ["client_app_types"]
+    registration = miner.single_purpose_policy("MS.AAD.3.8v1", SP_ROLES)
+    assert miner.ca_extras("MS.AAD.3.8v1", miner._edit(registration, [(("Conditions", "Applications", "IncludeApplications"), ["All"])])) == ["applications_alongside_user_action"]
+    mfa = miner.single_purpose_policy("MS.AAD.3.2v2", SP_ROLES)
+    strength_mfa = miner._edit(mfa, [(("GrantControls", "BuiltInControls"), []), (("GrantControls", "AuthenticationStrength"), {"AllowedCombinations": miner.MFA_STRENGTH})])
+    assert miner.ca_extras("MS.AAD.3.2v2", strength_mfa) == []   # a strength is how that policy asks for MFA when no built-in control does
+    assert miner.ca_extras("MS.AAD.3.2v2", miner._edit(strength_mfa, [(("GrantControls", "BuiltInControls"), ["mfa"])])) == ["strength_and_built_in_controls"]
+
+
+def test_single_purpose_variants_cover_every_item_and_only_target_their_own_policy(miner):
+    variants = miner.single_purpose_variants(SP_BASE_INPUT)
+    assert len({v["name"] for v in variants}) == len(variants) and miner.single_purpose_variants(SP_BASE_INPUT) == variants
+    for item in SP_ITEMS:
+        own = [v for v in variants if v["policies"] == [item]]
+        assert own and all(v["name"].startswith(f"single_purpose:{item}:") and v["template_prefix"] == "single_purpose" for v in own)
+        assert len([v for v in own if v["intent"] == "met"]) >= 5 and len([v for v in own if v["intent"] == "not_met"]) >= 8
+        assert own[0]["name"].endswith(":policy_alone") and own[0]["intent"] == "met" and own[0]["input"] == own[0]["base"]
+        for v in own:
+            assert v["intent"] in ("met", "not_met") and all(k in v["input"] for k in SP_BASE_INPUT)
+            assert {k: v["input"][k] for k in SP_BASE_INPUT if k not in (CA_SECTION, "scuba_config")} == {k: SP_BASE_INPUT[k] for k in SP_BASE_INPUT if k not in (CA_SECTION, "scuba_config")}
+    # MS.AAD.3.2v2 reads its allow-list under MS.AAD.3.2v1 (finding F2), so nothing there depends on an allow-list; MS.AAD.3.8v1 never reads application exclusions
+    assert not any("allow_listed" in v["name"] or "Aad" in v["input"]["scuba_config"] for v in variants if v["policies"] == ["MS.AAD.3.2v2"])
+    assert not any("exclude_application" in v["name"] for v in variants if v["policies"] == ["MS.AAD.3.8v1"])
+    allow = next(v for v in variants if v["name"] == "single_purpose:MS.AAD.2.1v1:exclude_user_allow_listed")
+    assert allow["input"]["scuba_config"]["Aad"]["MS.AAD.2.1v1"]["CapExclusions"]["Users"] == [miner.USER]
+    assert allow["input"]["scuba_config"]["CapExclusions"] == SP_BASE_INPUT["scuba_config"]["CapExclusions"]
+    assert next(v for v in variants if v["name"].endswith("MS.AAD.3.6v1:one_privileged_role_missing"))["input"][CA_SECTION][0]["Conditions"]["Users"]["IncludeRoles"] == ["Role1"]
+    # an unrelated policy never stands in for one that would meet the item in reality
+    for item, banned in (("MS.AAD.3.2v2", ("MS.AAD.3.1v1", "MS.AAD.3.6v1")), ("MS.AAD.3.6v1", ("MS.AAD.3.1v1",)), ("MS.AAD.3.8v1", ("MS.AAD.3.7v1",))):
+        names = {p["DisplayName"] for v in variants if v["name"].endswith(f"{item}:only_unrelated_policies") for p in v["input"][CA_SECTION]}
+        assert names and not names & {miner.CA_ITEMS[other]["name"] for other in banned}, item
+
+
+def test_a_variant_that_targets_a_policy_salts_the_id_and_prefixes_the_template(miner):
+    pids = ["MS.SP.1.1v1", "MS.SP.1.2v1"]
+    base = {"sec_a": {"enabled": True}}
+    sp_base = {"sec_a": {"enabled": False}}
+    inputs = [{"sec_a": {"enabled": True, "n": 1}}, {"sec_a": {"enabled": False, "n": 2}}]
+    evaluations = []
+    for index, value in enumerate(inputs):
+        variant = {"name": f"single_purpose:x:{index}", "input": value, "sha256": f"{index:064x}", "policies": [pids[0]], "base": sp_base, "template_prefix": "single_purpose"}
+        evaluations.append((variant, [{"PolicyId": pid, "Criticality": "Shall", "RequirementMet": index == 0, "ReportDetails": "d"} for pid in pids]))
+    sections = {pid: ["sec_a"] for pid in pids}
+    cases, stats = miner.build_cases("aad", evaluations, sections, {}, base, commit="abcdef123456", opa_version="1.20.2", config_name="AADConfig.rego",
+                                     not_collected_every=1000, id_salt=miner.SP_SALT)
+    assert stats["policy_not_targeted"] == 2 and len(cases) == 2 and miner.SP_SALT == "conv3-sp" != miner.CONVENTION
+    assert {json.loads(c["messages"][1]["content"])["policy_id"] for c in cases} == {pids[0]}
+    plain, _ = miner.build_cases("aad", [({"name": "t", "input": v["input"], "sha256": v["sha256"]}, r) for v, r in evaluations], sections, {}, base,
+                                 commit="abcdef123456", opa_version="1.20.2", config_name="AADConfig.rego", not_collected_every=1000)
+    salted = {c["id"] for c in cases}
+    assert not salted & {c["id"] for c in plain}   # the salt keeps the single-purpose ids apart from the combined ones
+    for case in cases:
+        digest = miner.sha(f"conv3-sp:{canonical_view(miner, case)}".encode())[:10]
+        assert case["id"] == f"scuba-aad-ms-sp-1-1v1-{digest}"
+        assert case["provenance"]["template"].startswith("aad/MS.SP.1.1v1/single_purpose:")
+    validate_cases(cases)
+
+
+def canonical_view(miner, case) -> str:
+    user = json.loads(case["messages"][1]["content"])
+    return miner.canonical({e["section"]: e["observed"] for e in user["evidence"][1:]})
+
+
+@pytest.fixture(scope="module")
+def aad_single_purpose_run(miner, tmp_path_factory):
+    _pinned_tools()
+    out = tmp_path_factory.mktemp("oracle") / "mined"
+    assert miner.main(["--scuba", str(SCUBA), "--opa", str(OPA), "--output-dir", str(out), "--products", "AAD"]) == 0
+    return out
+
+
+@needs_oracle
+def test_aad_single_purpose_run_gives_every_item_met_cases_that_meet_the_text_with_no_extra_condition(miner, aad_single_purpose_run):
+    out = aad_single_purpose_run
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert summary["ca_bases"] == "single-purpose"
+    sp = summary["products"]["AAD"]["single_purpose_ca"]
+    assert sp["id_salt"] == "conv3-sp" and sp["items"] == SP_ITEMS and sp["dropped_contaminated_met_cases"] > 0 and sp["variants"] >= 9 * 15
+    rows = _rows(out / "cases-aad.jsonl")
+    validate_cases(rows)
+    meta = miner.product_meta(SCUBA, "AAD")
+    met_by_item: Counter = Counter()
+    for row in rows:
+        user = json.loads(row["messages"][1]["content"])
+        item = user["policy_id"]
+        evidence = {e["section"]: e["observed"] for e in user["evidence"][1:]}
+        is_sp = "variant=single_purpose:" in row["provenance"]["source"]
+        if row["provenance"]["oracle_outcome"] != "met" or item not in miner.CA_ITEMS:
+            continue
+        passing = miner.passing_ca_policies(OPA, meta, item, evidence)
+        assert passing, row["id"]
+        assert any(not miner.ca_extras(item, policy) for policy in passing), f"a met case on a policy with extra conditions: {row['id']}"
+        assert is_sp, f"a met CA case that does not come from a single-purpose policy: {row['id']}"
+        met_by_item[item] += 1
+    assert all(met_by_item[item] >= 5 for item in SP_ITEMS), met_by_item
+    sp_rows = [r for r in rows if "variant=single_purpose:" in r["provenance"]["source"]]
+    assert sp_rows and all("single_purpose:" in r["provenance"]["template"] or r["id"].endswith("-nc") for r in sp_rows)
+    assert len({r["id"] for r in sp_rows}) == len(sp_rows) and {r["provenance"]["oracle_outcome"] for r in sp_rows} == {"met", "not_met", "not_collected"}
+    assert summary["products"]["AAD"]["single_purpose_ca"]["cases"] == len(sp_rows)

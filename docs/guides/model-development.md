@@ -90,7 +90,9 @@ Oracle-labelled cases may also record `evidence_view` (`rego_ast` or `widened`) 
 (`met`, `not_met`, `fail_closed_missing_input`, `not_applicable` or `not_collected`) as optional fields; other values
 are rejected and `source` stays free text. `auditex.model_training.oracle_provenance(case)` returns both fields and
 falls back to the `evidence_view=` and `oracle_outcome=` pairs in `source` when the fields are absent, so scripts can
-read either form (a fallback value is not enum-checked).
+read either form (a fallback value is not enum-checked). Two further optional provenance keys exist: `consensus_weight`
+(`scubagear_only`: a consensus-approved row whose second oracle gives a constant verdict across the fixture family, so
+the agreement corroborates nothing) and `adjudication` (`{source, ruling}`: a disagreement-queue row kept after review).
 Messages contain string `role`/`content` fields and finish with an assistant
 response. Approval describes an actual review; scripts never grant it.
 
@@ -155,7 +157,9 @@ exported, and the end-to-end ones when `AUDITEX_TEST_SCUBAGEAR` is exported as w
 clean-development run --session session-only -- .venv/bin/python scripts/build-oracle-cases.py \
   --scuba /absolute/path/to/ScubaGear/PowerShell/ScubaGear --opa /absolute/path/to/opa-1.20.2 \
   --output-dir /absolute/path/to/new-oracle-cases [--products PowerPlatform ...] [--not-collected-every 4] \
-  [--evidence-view rego_ast|widened] [--no-expression-patches]
+  [--evidence-view rego_ast|widened] [--no-expression-patches] [--ca-bases single-purpose|combined]
+# --ca-bases single-purpose (default) drops Conditional Access `met` cases mined from ScubaGear's combined unit-test
+# base policy and generates per-item single-purpose bases (ids salted conv3-sp); `combined` reproduces the pre-25 Oct output.
 clean-development run --session session-only -- .venv/bin/python scripts/split-oracle-cases.py \
   --cases /absolute/path/to/new-oracle-cases/cases.jsonl \
   --output /absolute/path/to/new-oracle-split/cases.jsonl --approve-as-oracle
