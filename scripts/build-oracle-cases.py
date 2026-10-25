@@ -1398,8 +1398,11 @@ EXCLUSIONS = {
 # Per item: what the item names (risk: the one risk dimension it names, legacy: the legacy client types, action: the registration
 # user action, transfer: the transfer method, grant: the grant control it asks for); `apps`: its Rego reads application exclusions;
 # `allow_lists`: False for MS.AAD.3.2v2 (its Rego reads the allow-list of MS.AAD.3.2v1, finding F2, so an allow-list written under
-# the documented key is ignored and no variant that depends on one is generated); `not_decoys`: items whose policy would itself
-# satisfy this one in reality and so cannot stand in as an unrelated policy.
+# the documented key is ignored and no variant that depends on one is generated); `not_decoys`: items whose policy cannot stand in as an
+# unrelated policy next to this one, either because it would itself satisfy this one in reality or because it asks for the same control on
+# a neighbouring scope. MS.AAD.3.8v1 keeps MS.AAD.3.7v1 out for the second reason only: an All-cloud-apps policy does not cover the
+# register-security-info user action in Entra (the action is targeted instead of applications, not as one of them), so 3.7's policy does
+# not satisfy 3.8 and the not_met label of `all_applications_instead_of_action` stands.
 CA_ITEMS = {
     "MS.AAD.1.1v1": {"name": "Block legacy authentication", "risk": None, "legacy": True, "action": False, "transfer": False, "grant": "block", "apps": True, "allow_lists": True, "not_decoys": ()},
     "MS.AAD.2.1v1": {"name": "Block high-risk users", "risk": "user", "legacy": False, "action": False, "transfer": False, "grant": "block", "apps": True, "allow_lists": True, "not_decoys": ()},
@@ -1595,7 +1598,10 @@ def single_purpose_variants(base_input: dict) -> list[dict]:
             both = [(EXCLUSIONS["user"][0], [USER]), (EXCLUSIONS["group"][0], [GROUP])]
             add("exclude_user_and_group_allow_listed", "met", [_edit(policy, both)], {"Users": [USER], "Groups": [GROUP]})
             add("exclude_two_users_one_listed", "not_met", [_edit(policy, [(EXCLUSIONS["user"][0], [USER, USER2])])], {"Users": [USER]})
-        add("exclude_privileged_role", "not_met", [_edit(policy, [(_USERS + ("ExcludeRoles",), [GLOBAL_ADMIN_ROLE])])])
+        # MS.AAD.3.6v1 includes the base input's own privileged roles, so the role it excludes is the first of them and the evidence stays
+        # self-consistent (the fixture names them Role1 and Role2, never the real template id); no other item names a role
+        excluded_role = roles[0] if item == "MS.AAD.3.6v1" else GLOBAL_ADMIN_ROLE
+        add("exclude_privileged_role", "not_met", [_edit(policy, [(_USERS + ("ExcludeRoles",), [excluded_role])])])
         add("policy_disabled", "not_met", [_edit(policy, [(("State",), "disabled")])])
         add("policy_report_only", "not_met", [_edit(policy, [(("State",), "enabledForReportingButNotEnforced")])])
         if item != "MS.AAD.3.6v1":

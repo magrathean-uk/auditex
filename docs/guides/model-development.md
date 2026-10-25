@@ -151,7 +151,7 @@ checkout (`PowerShell/ScubaGear`, pinned commit in `configs/assessment-sources.j
 the version ScubaGear pins; OPA 1.21 rejects a helper in `Rego/Utils/TestAssertions.rego`. The
 tests in `tests/test_oracle_cases.py` that parse and evaluate Rego run when `AUDITEX_TEST_OPA` is
 exported, and the end-to-end ones when `AUDITEX_TEST_SCUBAGEAR` is exported as well (optionally
-`AUDITEX_TEST_ORACLE_REFERENCE` for a label comparison); otherwise they are skipped.
+`AUDITEX_TEST_ORACLE_REFERENCE` for a label comparison, `AUDITEX_TEST_ORACLE_V4_AAD` for a byte comparison of the `combined` AAD run with a stored v4 `cases-aad.jsonl`); otherwise they are skipped.
 
 ```sh
 clean-development run --session session-only -- .venv/bin/python scripts/build-oracle-cases.py \

@@ -6,6 +6,7 @@ binary) and `needs_oracle` (the full miner against ScubaGear). They run only whe
     AUDITEX_TEST_OPA                OPA 1.20.2 binary
     AUDITEX_TEST_SCUBAGEAR          PowerShell/ScubaGear directory of a ScubaGear checkout at the pinned commit
     AUDITEX_TEST_ORACLE_REFERENCE   optional: a prototype cases-powerplatform.jsonl to compare labels against
+    AUDITEX_TEST_ORACLE_V4_AAD      optional: the stored v4 miner output cases-aad.jsonl; the `combined` AAD run must reproduce it byte for byte
 
 Unset or missing, those tests are skipped; there are no machine-specific defaults.
 """
@@ -38,6 +39,7 @@ def _env_path(name: str) -> Path | None:
 OPA = _env_path("AUDITEX_TEST_OPA")
 SCUBA = _env_path("AUDITEX_TEST_SCUBAGEAR")
 REFERENCE = _env_path("AUDITEX_TEST_ORACLE_REFERENCE")
+V4_AAD = _env_path("AUDITEX_TEST_ORACLE_V4_AAD")
 PINNED_COMMIT = "2446ad723b7f55031cc02c8aca244d731d468cba"
 PINNED_OPA = "1.20.2"
 needs_oracle = pytest.mark.skipif(
@@ -2342,3 +2344,59 @@ def test_aad_single_purpose_run_gives_every_item_met_cases_that_meet_the_text_wi
     assert sp_rows and all("single_purpose:" in r["provenance"]["template"] or r["id"].endswith("-nc") for r in sp_rows)
     assert len({r["id"] for r in sp_rows}) == len(sp_rows) and {r["provenance"]["oracle_outcome"] for r in sp_rows} == {"met", "not_met", "not_collected"}
     assert summary["products"]["AAD"]["single_purpose_ca"]["cases"] == len(sp_rows)
+
+
+def test_the_3_6_role_exclusion_names_one_of_the_fixtures_privileged_roles(miner):
+    variants = miner.single_purpose_variants(SP_BASE_INPUT)
+
+    def excluded(item: str) -> list[str]:
+        found = [v for v in variants if v["name"] == f"single_purpose:{item}:exclude_privileged_role"]
+        assert len(found) == 1, item
+        return found[0]["input"][CA_SECTION][0]["Conditions"]["Users"]["ExcludeRoles"]
+
+    fixture_roles = {role["RoleTemplateId"] for role in SP_BASE_INPUT["privileged_roles"]}
+    assert excluded("MS.AAD.3.6v1") == [SP_ROLES[0]] and set(excluded("MS.AAD.3.6v1")) <= fixture_roles and miner.GLOBAL_ADMIN_ROLE not in fixture_roles
+    assert all(excluded(item) == [miner.GLOBAL_ADMIN_ROLE] for item in SP_ITEMS if item != "MS.AAD.3.6v1")   # the other items name no role
+
+
+@needs_oracle
+def test_the_real_fixtures_3_6_role_exclusion_is_one_of_its_privileged_roles(miner):
+    _pinned_tools()
+    base_input, _, _ = miner.load_base(OPA, miner.product_meta(SCUBA, "AAD"))
+    roles = [role["RoleTemplateId"] for role in base_input["privileged_roles"]]
+    assert len(roles) >= 2
+    variant = next(v for v in miner.single_purpose_variants(base_input) if v["name"] == "single_purpose:MS.AAD.3.6v1:exclude_privileged_role")
+    policy = variant["input"][CA_SECTION][0]
+    assert policy["Conditions"]["Users"]["ExcludeRoles"] == [roles[0]] and set(policy["Conditions"]["Users"]["IncludeRoles"]) == set(roles)
+    assert variant["input"]["privileged_roles"] == base_input["privileged_roles"]
+
+
+AAD_COMBINED_CASES = 2552
+AAD_COMBINED_SHA256 = "2e3a24aefa4fb952388a1d4ee92400e07bc1511333a0b39edb351e53149794a9"   # cases-aad.jsonl of the v4 miner output (ScubaGear 2446ad723b7f, OPA 1.20.2)
+
+
+@pytest.fixture(scope="module")
+def aad_combined_run(miner, tmp_path_factory):
+    _pinned_tools()
+    out = tmp_path_factory.mktemp("oracle") / "mined"
+    assert miner.main(["--scuba", str(SCUBA), "--opa", str(OPA), "--output-dir", str(out), "--products", "AAD", "--ca-bases", "combined"]) == 0
+    return out
+
+
+@needs_oracle
+def test_the_combined_ca_bases_reproduce_the_earlier_aad_cases_with_no_single_purpose_id(miner, aad_combined_run, aad_single_purpose_run):
+    out = aad_combined_run
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert summary["ca_bases"] == "combined" and "single_purpose_ca" not in summary["products"]["AAD"]
+    raw = (out / "cases-aad.jsonl").read_bytes()
+    rows = _rows(out / "cases-aad.jsonl")
+    validate_cases(rows)
+    for row in rows:
+        assert "variant=single_purpose:" not in row["provenance"]["source"] and "single_purpose:" not in row["provenance"]["template"]
+    # the conv3-sp ids are exactly the ids of the single-purpose rows of the default run (the salt is hashed into the id, so it is not a substring)
+    sp_ids = {row["id"] for row in _rows(aad_single_purpose_run / "cases-aad.jsonl") if "variant=single_purpose:" in row["provenance"]["source"]}
+    assert sp_ids and not sp_ids & {row["id"] for row in rows}
+    assert len(rows) == len({row["id"] for row in rows}) == AAD_COMBINED_CASES
+    assert hashlib.sha256(raw).hexdigest() == AAD_COMBINED_SHA256
+    if V4_AAD and V4_AAD.is_file():
+        assert raw == V4_AAD.read_bytes()

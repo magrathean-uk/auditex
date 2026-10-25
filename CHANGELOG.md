@@ -9,6 +9,35 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 Nothing yet.
 
+## [1.2.1] - 2026-10-25
+
+Model-development tooling only. `CONTRACT_VERSION` stays `2026-10-22`, and the audit, report, export and
+MCP surfaces are unchanged.
+
+### Model development
+
+- **Single-purpose Conditional Access oracle bases.** `scripts/build-oracle-cases.py` takes `--ca-bases`
+  (default `single-purpose`; `combined` is the earlier behaviour and reproduces its AAD cases byte for
+  byte). ScubaGear's unit-test base policy ANDs block, a phishing-resistant strength, user and sign-in
+  risk, legacy-only client apps and a user action, so a `met` label mined from it fails the baseline text
+  under Entra's AND semantics. The default drops those `met` cases and adds cases from one single-purpose
+  policy for each of MS.AAD.1.1, 2.1, 2.3, 3.1, 3.2, 3.6, 3.7, 3.8 and 3.9, with ids salted `conv3-sp`.
+  Each variant's label is ScubaGear's own Rego verdict, and the run fails if the verdict disagrees with the
+  intent the baseline text implies.
+- **Provenance keys.** Oracle case provenance accepts `consensus_weight` (only `scubagear_only`) and
+  `adjudication` (`source` and `ruling`). `validate_case` and `validate_training_pack` in 1.2.0 reject a
+  training pack that carries either, which blocked a pack built with the new miner.
+- **MS.AAD.3.6v1 role exclusion.** The `exclude_privileged_role` variant now excludes the first of the
+  base input's own privileged roles. Before, it excluded the real Global Administrator template id while
+  the fixture names its roles `Role1` and `Role2`, so the evidence contradicted itself. One case id
+  changes. The comment on `not_decoys` now says why MS.AAD.3.7v1's policy is kept out of the 3.8 decoys: an
+  All-cloud-apps policy does not cover the register-security-info user action in Entra, so it does not
+  satisfy 3.8, and the `not_met` label of `all_applications_instead_of_action` stands.
+- **Tests.** An oracle test mines AAD with `--ca-bases combined` and asserts no `conv3-sp` id, a stable
+  digest of the cases and, when `AUDITEX_TEST_ORACLE_V4_AAD` names a stored v4 `cases-aad.jsonl`, a byte
+  comparison with it. Two more tests assert that the 3.6 excluded role is one of the fixture's privileged
+  roles.
+
 ## [1.2.0] - 2026-10-23
 
 ### Bundle compatibility
@@ -749,7 +778,8 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/magrathean-uk/auditex/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/magrathean-uk/auditex/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/magrathean-uk/auditex/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/magrathean-uk/auditex/releases/tag/v1.0.0
