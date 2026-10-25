@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 audit-output/
 outputs/
+build/
 .secrets/
 *.tar.gz
 tenant-bootstrap/runs/

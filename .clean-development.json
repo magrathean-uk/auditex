@@ -3,7 +3,9 @@
   "schemaVersion": 2,
   "enabled": true,
   "heavy": false,
-  "buildDirs": [],
+  "buildDirs": [
+    "build"
+  ],
   "depDirs": [
     ".venv"
   ]
