@@ -93,6 +93,9 @@ falls back to the `evidence_view=` and `oracle_outcome=` pairs in `source` when 
 read either form (a fallback value is not enum-checked). Two further optional provenance keys exist: `consensus_weight`
 (`scubagear_only`: a consensus-approved row whose second oracle gives a constant verdict across the fixture family, so
 the agreement corroborates nothing) and `adjudication` (`{source, ruling}`: a disagreement-queue row kept after review).
+The optional `prompt_convention` records the prompt rendering convention; its only
+accepted value is `named-enums-v1`. It is recorded on every newly mined row,
+including products with no enum annotations. Unknown or non-string values are rejected.
 Messages contain string `role`/`content` fields and finish with an assistant
 response. Approval describes an actual review; scripts never grant it.
 
@@ -179,6 +182,46 @@ carries the commit, policy id, test name, OPA version, input hash and CISA's Rep
 `provenance.template` of `<product>/<policy id>/<mutation family>` (which fields of its evidence the
 variant changes; `not_collected:<section>` for gap cases) and `provenance.distinct_prompt_sha256`. Cases are
 written `unreviewed` in `train`.
+
+From prompt convention `named-enums-v1`, recognised integer enums in the ScubaGear
+`SPO_tenant` evidence section carry a companion `<Key>_name` string. The seven
+exact keys are `SharingCapability`, `ODBSharingCapability`, `DefaultSharingLinkType`,
+`DefaultLinkPermission`, `SharingDomainRestrictionMode`, `FileAnonymousLinkType`
+and `FolderAnonymousLinkType`. Capability names combine the API name and the
+admin-centre slider label, for example `"SharingCapability":2` alongside
+`"SharingCapability_name":"externalUserAndGuestSharing (Anyone)"`; disabled is
+`disabled (Only people in your organization)`. The other five keys use the API
+enum name alone (for example `anonymous`, `view` or `allowList`). Unknown values
+and booleans receive no name; numeric strings also receive no name, while integral
+floats are recognised. Annotations are rendered after not-collected masks,
+outside the hashed evidence view, so case IDs and labels stay unchanged.
+
+Convert an existing case pack without re-mining:
+
+```sh
+.venv/bin/python scripts/annotate-oracle-cases.py old-cases.jsonl named-cases.jsonl \
+  --report named-cases-report.json
+```
+
+The transform adds names only to evidence with a `section` key, records
+`provenance.prompt_convention` on every row and recomputes `distinct_prompt_sha256`
+from the non-answer prompt where present, adding it where absent. IDs, families,
+splits, expected answers and system messages stay unchanged. Changed user messages
+use the miner's canonical JSON encoding;
+user messages with no added names retain their exact bytes. JSONL rows use
+`json.dumps(case, ensure_ascii=False) + "\n"`, matching the miner and splitter:
+rows with unchanged prompts and current provenance remain byte-identical at line
+level; legacy rows with unchanged prompts differ only within `provenance`.
+The transform checks that only string-valued `*_name` keys were added; stale names requiring replacement
+are rejected. Non-JSON user messages or messages without an evidence list are
+errors. All rows are validated and all output bytes encoded before any file is
+created; new output and optional report files are created exclusively with mode
+`0600`, refusing existing files, symlinks
+and destinations inside finalized audit runs. Created files are rolled back on failure.
+The JSON summary reports `rows`, `rows_changed`, per-key `keys_added` and
+`unchanged_rows`, plus `digests_added` (rows previously lacking a digest) and
+`prompt_convention_set` (all rows). Changed counts refer to user messages,
+excluding provenance updates.
 
 Case ids. The id is the policy and a hash of the evidence view salted with the labelling convention
 (`conv3`, recorded as `labelling_convention` in `summary.json`), so an id never names two different cases
@@ -352,6 +395,20 @@ written, which freezes the holdout. The hash changes if approval is toggled; `te
 not. Both files are new: created exclusively with mode 0600 (new parent directories 0700), and an
 existing file, a symlink, the same path for output and report, or a location inside a finalized audit
 run is refused.
+
+Two options refine a re-split of an existing case set. `--sub-family <policy_id>=<family>` (repeatable)
+relabels one policy's rows to their own family before the atoms are formed, so that policy can be sent
+to validation or test on its own with `--validation-families` or `--holdout-families`; the new name must
+start with the source family followed by `-` (so it sorts directly after its source and cannot become
+the product's last atom by accident) and the report records the move under `sub_families`.
+`--previous-report <split-report.json>` compares the new split with an earlier one: the run fails before
+anything is written if a test id enters or leaves (`test_ids_sha256`), if a family not named on the
+command line changes split, or if a previous family disappears; `--sub-family` requires it. The report
+then carries `test_ids_frozen`, `family_split_changes`, `families_added`, `families_removed` and
+`test_content_frozen` (whether `test_sha256` is unchanged; a changed prompt convention such as
+`named-enums-v1` changes it on purpose, which is reported, not refused). Oracle pack v7 (26 Oct 2026)
+moved MS.SHAREPOINT.1.3v1 to `scuba-sharepoint-ms-sharepoint-1-3v1` in validation this way, with the
+435 test ids of v4/v6 unchanged.
 
 Deduplication matters for the holdout. At the pinned commit the deduplicated test split of the earlier (`widened`) packs has 280 rows.
 `auditex model prepare` removes id-only duplicates from train and validation only and writes

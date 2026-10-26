@@ -306,6 +306,20 @@ def test_provenance_accepts_consensus_weight_and_adjudication_and_validates_them
             validate_case(broken)
 
 
+def test_provenance_accepts_named_enums_prompt_convention() -> None:
+    case = _case("a")
+    case["provenance"]["prompt_convention"] = "named-enums-v1"
+    assert validate_case(copy.deepcopy(case)) == case
+
+
+@pytest.mark.parametrize("value", ["named-enums-v2", "", None, 1, True, ["named-enums-v1"], {"name": "named-enums-v1"}])
+def test_provenance_rejects_unknown_or_non_string_prompt_convention(value) -> None:
+    case = _case("a")
+    case["provenance"]["prompt_convention"] = value
+    with pytest.raises(ValueError, match="prompt_convention must be one of named-enums-v1"):
+        validate_case(case)
+
+
 def test_provenance_accepts_every_evidence_view_and_oracle_outcome() -> None:
     for view in ("rego_ast", "widened"):
         for outcome in ("met", "not_met", "fail_closed_missing_input", "not_applicable", "not_collected"):

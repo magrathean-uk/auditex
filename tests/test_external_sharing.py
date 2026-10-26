@@ -6,6 +6,7 @@ domain settings, and the Teams rule that fires only for federation with no allow
 """
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import pytest
@@ -18,6 +19,75 @@ from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
 ANYONE = "externalUserAndGuestSharing"
+
+
+@pytest.mark.parametrize("key", ["SharingCapability", "ODBSharingCapability"])
+@pytest.mark.parametrize("number, name", [
+    (0, "disabled (Only people in your organization)"),
+    (1, "externalUserSharingOnly (New and existing guests)"),
+    (2, "externalUserAndGuestSharing (Anyone)"),
+    (3, "existingExternalUserSharingOnly (Existing guests)"),
+])
+def test_annotated_capabilities_in_oracle_list(key, number, name):
+    observed = [{key: number}]
+    assert sharing.annotate_enum_names("SPO_tenant", observed) == [{key: number, f"{key}_name": name}]
+    assert observed == [{key: number}]
+
+
+def test_annotation_dict_names_all_seven_exact_keys_and_recomputes_stale_names():
+    observed = {"SharingCapability": 2, "ODBSharingCapability": 0, "DefaultSharingLinkType": 3,
+                "DefaultLinkPermission": 2, "SharingDomainRestrictionMode": 1,
+                "FileAnonymousLinkType": 1, "FolderAnonymousLinkType": 0,
+                "SharingCapability_name": "stale", "sharingCapability": 2, "OtherEnum": 1}
+    before = copy.deepcopy(observed)
+    result = sharing.annotate_enum_names("SPO_tenant", observed)
+    expected_names = {"SharingCapability": "externalUserAndGuestSharing (Anyone)",
+                      "ODBSharingCapability": "disabled (Only people in your organization)",
+                      "DefaultSharingLinkType": "anonymous", "DefaultLinkPermission": "edit",
+                      "SharingDomainRestrictionMode": "allowList", "FileAnonymousLinkType": "view",
+                      "FolderAnonymousLinkType": "none"}
+    assert set(sharing.ENUM_NAME_KEYS) == set(expected_names)
+    assert sharing.ANNOTATED_SECTIONS == ("SPO_tenant",)
+    assert result == {**observed, **{f"{key}_name": name for key, name in expected_names.items()}}
+    assert observed == before
+    assert sharing.annotate_enum_names("SPO_tenant", result) == result
+
+
+@pytest.mark.parametrize("key, names", list(sharing.ENUM_NAME_KEYS.items()))
+def test_annotation_covers_every_recognised_enum_value(key, names):
+    for number, name in names.items():
+        assert sharing.annotate_enum_names("SPO_tenant", {key: number})[f"{key}_name"] == name
+
+
+@pytest.mark.parametrize("value", [7, True, False, None, "unknown", "2", " 2 ", "-0", 1.5, {}, []])
+def test_annotation_does_not_guess_unknown_values_or_change_their_stale_names(value):
+    observed = [{key: value for key in sharing.ENUM_NAME_KEYS}]
+    assert sharing.annotate_enum_names("SPO_tenant", observed) == observed
+    observed[0]["SharingCapability_name"] = "existing unknown annotation"
+    assert sharing.annotate_enum_names("SPO_tenant", observed) == observed
+
+
+@pytest.mark.parametrize("value", [2, 2.0])
+def test_annotation_uses_the_existing_integer_parser_only_for_numbers(value):
+    result = sharing.annotate_enum_names("SPO_tenant", {"DefaultLinkPermission": value})
+    assert result == {
+        "DefaultLinkPermission": value, "DefaultLinkPermission_name": "edit"}
+    assert type(result["DefaultLinkPermission"]) is type(value)
+
+
+def test_annotation_deep_copies_and_visits_nested_dicts_in_allowed_sections_only():
+    observed = [{"nested": [{"SharingCapability": 0}]}]
+    result = sharing.annotate_enum_names("SPO_tenant", observed)
+    assert result[0]["nested"][0]["SharingCapability_name"] == "disabled (Only people in your organization)"
+    result[0]["nested"][0]["SharingCapability"] = 3
+    assert observed == [{"nested": [{"SharingCapability": 0}]}]
+    for section in ("sharepoint_tenant_settings", "SPO_sites", "policy", "spo_tenant"):
+        result = sharing.annotate_enum_names(section, observed)
+        assert result == observed and result is not observed
+        result[0]["nested"].append("new")
+        assert len(observed[0]["nested"]) == 1
+    for observed in (None, 2, "text", ({"SharingCapability": 0},)):
+        assert sharing.annotate_enum_names("SPO_tenant", observed) == observed
 
 
 # ---- reading the settings ----------------------------------------------------------------------------

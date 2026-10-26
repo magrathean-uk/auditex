@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
 SECTION = "sharepoint_tenant_settings"
@@ -56,6 +57,27 @@ _LINK_TYPES = {
 }
 _ANONYMOUS_LINK_TYPE_BY_NUMBER = {0: "none", 1: "view", 2: "edit"}
 _ANONYMOUS_LINK_TYPES = {"none": "none", "view": "view", "edit": "edit"}
+DEFAULT_LINK_PERMISSION_BY_NUMBER = {0: "none", 1: "view", 2: "edit"}
+SHARING_CAPABILITY_SLIDER_LABELS = {
+    0: "Only people in your organization",
+    1: "New and existing guests",
+    2: "Anyone",
+    3: "Existing guests",
+}
+ANNOTATED_SECTIONS = ("SPO_tenant",)
+_CAPABILITY_PROMPT_NAMES = {
+    number: f"{name} ({SHARING_CAPABILITY_SLIDER_LABELS[number]})"
+    for number, name in _CAPABILITY_BY_NUMBER.items()
+}
+ENUM_NAME_KEYS = {
+    "SharingCapability": _CAPABILITY_PROMPT_NAMES,
+    "ODBSharingCapability": _CAPABILITY_PROMPT_NAMES,
+    "DefaultSharingLinkType": _LINK_TYPE_BY_NUMBER,
+    "DefaultLinkPermission": DEFAULT_LINK_PERMISSION_BY_NUMBER,
+    "SharingDomainRestrictionMode": _DOMAIN_MODE_BY_NUMBER,
+    "FileAnonymousLinkType": _ANONYMOUS_LINK_TYPE_BY_NUMBER,
+    "FolderAnonymousLinkType": _ANONYMOUS_LINK_TYPE_BY_NUMBER,
+}
 
 # Anonymous links that expire within this many days, and cannot edit, are a reduced exposure.
 ANONYMOUS_LINK_EXPIRY_LIMIT_DAYS = 30
@@ -101,6 +123,35 @@ def _enum(value: Any, by_number: Mapping[int, str], by_name: Mapping[str, str]) 
         if number is not None:
             return by_number.get(number)
     return None
+
+
+def annotate_enum_names(section: str, observed: Any) -> Any:
+    """Copy export evidence and name recognised SharePoint enums for prompt readers.
+
+    Only exact export keys in SPO_tenant with integer or integral float values
+    are annotated. Unknown values (including booleans and strings) and their
+    existing annotations are preserved; recognised names are recomputed.
+    Dictionaries nested in dictionaries or lists are included.
+    """
+    result = deepcopy(observed)
+    if section not in ANNOTATED_SECTIONS or not isinstance(result, (dict, list)):
+        return result
+
+    def annotate(value: Any) -> None:
+        if isinstance(value, dict):
+            for child in list(value.values()):
+                annotate(child)
+            for key, names in ENUM_NAME_KEYS.items():
+                if key in value and isinstance(value[key], (int, float)):
+                    name = names.get(_integer(value[key]))
+                    if name is not None:
+                        value[f"{key}_name"] = name
+        elif isinstance(value, list):
+            for child in value:
+                annotate(child)
+
+    annotate(result)
+    return result
 
 
 def canonical_sharing_capability(value: Any) -> str | None:

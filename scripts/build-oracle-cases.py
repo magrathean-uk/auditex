@@ -58,7 +58,7 @@ name (ca_extras; OPA decides which policy passes) and adds cases from a single-p
 every other condition neutral, realistic values, one tenant per near miss. The not_met cases of the unit-test variants stay (narrowing cannot make
 them wrong). Added variants are evaluated by the same Rego and ScubaGear's verdict is the label; each declares the verdict the baseline text
 implies and the run fails if the engine disagrees. Their ids are salted SP_SALT (`conv3-sp`) and their templates start `single_purpose:`.
-`combined` is the earlier behaviour and reproduces oracle pack v4 exactly. MS.AAD.3.2v2 gets no variant that needs a scuba_config allow-list: its
+`combined` reproduces oracle pack v4's AAD prompts, labels and ids, adding only prompt_convention provenance. MS.AAD.3.2v2 gets no variant that needs a scuba_config allow-list: its
 Rego reads the allow-list under MS.AAD.3.2v1 (finding F2 of the 24 Oct adjudication). MS.AAD.9.1v1 and MS.AAD.3.3v2 (whose not-applicable gate
 reads CA policies) are not covered.
 
@@ -86,6 +86,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from auditex.model_training import _outside_audit_runs, distinct_prompt_sha256, validate_cases  # noqa: E402
+from azure_tenant_audit.external_sharing import annotate_enum_names  # noqa: E402
 
 ORACLE_REPO = "https://github.com/cisagov/ScubaGear"
 PRODUCT_DIRS = ["AAD", "EXO", "SecuritySuite", "Sharepoint", "Teams", "PowerPlatform", "PowerBI"]
@@ -1234,7 +1235,9 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
     (section, field path) pairs it reads, see rego_ast_field_reads) are shown as an explicit null in every object that lacks them
     (`fields_added` collects the paths per policy): the export holds no value for the field and the policy's default applies.
     Where the engine failed closed on a missing input, a field that is absent stays absent and a top-level key that the variant
-    removed from the base input is shown as the not-collected marker instead of null, and the label cites it."""
+    removed from the base input is shown as the not-collected marker instead of null, and the label cites it.
+    Under prompt convention named-enums-v1, recognised SPO_tenant integer enums carry a companion <Key>_name
+    string, rendered after masking and outside the hashed evidence view."""
     prefix = f"scuba-{name.lower()}"
     cases: list[dict] = []
     stats: Counter = Counter(variants_failed=variants_failed)
@@ -1339,13 +1342,18 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
             if fields_added is not None:
                 for _, text in nulled:
                     fields_added.setdefault(pid, set()).add(text)
-            all_evidence = [policy_evidence, *evidence]
+            # Render only after masking; the unannotated view above remains the case identity.
+            all_evidence = [
+                {**item, "observed": annotate_enum_names(item["section"], item["observed"])}
+                if "section" in item else item
+                for item in [policy_evidence, *evidence]
+            ]
             response = {"claims": claims, "limitations": limitations, "recommendations": recommendations}
             case = {
                 "id": case_id, "family": f"{prefix}-{group.lower().replace('.', '-')}", "split": "train",
                 "provenance": {"source": f"oracle:cisa-scubagear@{commit} {config_name} {pid}; variant={variant['name']}; opa={opa_version}; input_sha256={variant['sha256']}; sections={','.join(view_sections)}; report_details={json.dumps(result.get('ReportDetails'))[:240]}",
                                "synthetic": True, "review_status": "unreviewed", "evidence_view": (methods or {}).get(pid, "widened"),
-                               "oracle_outcome": outcome_label},
+                               "oracle_outcome": outcome_label, "prompt_convention": "named-enums-v1"},
                 "messages": [{"role": "system", "content": SYSTEM},
                              {"role": "user", "content": canonical({"case_id": case_id, "policy_id": pid, "evidence": all_evidence,
                                                                     "requested_claims": [{"id": "requirement_met", "question": f"Does this tenant meet {pid}?"},
@@ -1780,7 +1788,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ca-bases", choices=CA_BASES, default="single-purpose",
                         help="single-purpose: for the AAD Conditional Access items drop the `met` cases built on ScubaGear's combined unit-test policy "
                              "and add cases from one single-purpose policy per item (ids salted conv3-sp; default); combined: the earlier behaviour, "
-                             "which reproduces oracle pack v4 exactly")
+                             "which reproduces oracle pack v4 AAD cases apart from prompt_convention provenance")
     parser.add_argument("--expression-patches", action=argparse.BooleanOptionalAction, default=True,
                         help="let OPA evaluate unit tests whose patches use Rego expressions (default on)")
     args = parser.parse_args(argv)

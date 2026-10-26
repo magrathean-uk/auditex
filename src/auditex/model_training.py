@@ -34,7 +34,9 @@ _PROVENANCE_REQUIRED = {"source", "synthetic", "review_status"}
 # consensus_weight marks an oracle row whose second-engine agreement says nothing (the other engine never changes its verdict across
 # the fixture family), so the row weighs as a ScubaGear-only one; adjudication records the ruling of a written adjudication of a
 # disagreement that kept the ScubaGear label. Neither changes a label or an export.
-_PROVENANCE_OPTIONAL = {"reviewer", "template", "distinct_prompt_sha256", "evidence_view", "oracle_outcome", "consensus_weight", "adjudication"}
+# prompt_convention records rendering independently of the case-id labelling convention.
+_PROVENANCE_OPTIONAL = {"reviewer", "template", "distinct_prompt_sha256", "evidence_view", "oracle_outcome", "consensus_weight", "adjudication", "prompt_convention"}
+_PROMPT_CONVENTIONS = ("named-enums-v1",)
 _CONSENSUS_WEIGHTS = ("scubagear_only",)
 _EVIDENCE_VIEWS = ("rego_ast", "widened")
 _ORACLE_OUTCOMES = ("met", "not_met", "fail_closed_missing_input", "not_applicable", "not_collected")
@@ -95,7 +97,7 @@ def validate_case(payload: Any) -> dict[str, Any]:
     provenance = payload["provenance"]
     if not isinstance(provenance, dict) or not _PROVENANCE_REQUIRED <= set(provenance) <= _PROVENANCE_REQUIRED | _PROVENANCE_OPTIONAL:
         raise ValueError("provenance requires source, synthetic, review_status and optional reviewer, template, "
-                         "distinct_prompt_sha256, evidence_view, oracle_outcome, consensus_weight and adjudication")
+                         "distinct_prompt_sha256, evidence_view, oracle_outcome, consensus_weight, adjudication and prompt_convention")
     _text(provenance["source"], "provenance source")
     if type(provenance["synthetic"]) is not bool:
         raise ValueError("provenance synthetic must be a boolean")
@@ -107,7 +109,8 @@ def validate_case(payload: Any) -> dict[str, Any]:
     if "distinct_prompt_sha256" in provenance and not (
             isinstance(provenance["distinct_prompt_sha256"], str) and _SHA256.fullmatch(provenance["distinct_prompt_sha256"])):
         raise ValueError("distinct_prompt_sha256 must be a lowercase hex SHA-256 digest")
-    for field, allowed_values in (("evidence_view", _EVIDENCE_VIEWS), ("oracle_outcome", _ORACLE_OUTCOMES)):
+    for field, allowed_values in (("evidence_view", _EVIDENCE_VIEWS), ("oracle_outcome", _ORACLE_OUTCOMES),
+                                 ("prompt_convention", _PROMPT_CONVENTIONS)):
         if field in provenance and not (isinstance(provenance[field], str) and provenance[field] in allowed_values):
             raise ValueError(f"{field} must be one of {', '.join(allowed_values)}")
     if "consensus_weight" in provenance and not (isinstance(provenance["consensus_weight"], str) and provenance["consensus_weight"] in _CONSENSUS_WEIGHTS):

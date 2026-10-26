@@ -6,7 +6,7 @@ binary) and `needs_oracle` (the full miner against ScubaGear). They run only whe
     AUDITEX_TEST_OPA                OPA 1.20.2 binary
     AUDITEX_TEST_SCUBAGEAR          PowerShell/ScubaGear directory of a ScubaGear checkout at the pinned commit
     AUDITEX_TEST_ORACLE_REFERENCE   optional: a prototype cases-powerplatform.jsonl to compare labels against
-    AUDITEX_TEST_ORACLE_V4_AAD      optional: the stored v4 miner output cases-aad.jsonl; the `combined` AAD run must reproduce it byte for byte
+    AUDITEX_TEST_ORACLE_V4_AAD      optional: stored v4 cases-aad.jsonl; `combined` reproduces it after removing prompt_convention provenance
 
 Unset or missing, those tests are skipped; there are no machine-specific defaults.
 """
@@ -62,6 +62,11 @@ def miner():
 
 
 @pytest.fixture(scope="module")
+def annotator():
+    return _load("annotate_oracle_cases", "annotate-oracle-cases.py")
+
+
+@pytest.fixture(scope="module")
 def splitter():
     return _load("split_oracle_cases", "split-oracle-cases.py")
 
@@ -98,6 +103,264 @@ def _duplicate_prone(miner) -> list[dict]:
 
 
 # --- miner: pure functions --------------------------------------------------------------------------------------
+
+
+def _enum_cases(miner):
+    inputs = [{"SPO_tenant": [{"SharingCapability": 2, "DefaultLinkPermission": 1}]}]
+    pid = "MS.SHAREPOINT.1.1v1"
+    return miner.build_cases("sharepoint", _evaluations(inputs, {pid: [True]}), {pid: ["SPO_tenant"]}, {}, inputs[0],
+                             commit="abcdef123456", opa_version="1.20.2", config_name="SharePointConfig.rego",
+                             not_collected_every=1000)[0]
+
+
+def test_miner_names_enums_without_changing_the_hashed_view(miner, annotator, monkeypatch):
+    named = _enum_cases(miner)
+    monkeypatch.setattr(miner, "annotate_enum_names", lambda section, observed: observed)
+    plain = _enum_cases(miner)
+    assert [c["id"] for c in named] == [c["id"] for c in plain]
+    before, after = (json.loads(rows[0]["messages"][1]["content"]) for rows in (plain, named))
+    assert after["evidence"][1]["observed"][0]["SharingCapability_name"] == "externalUserAndGuestSharing (Anyone)"
+    assert before != after and annotator.only_name_keys_added(before, after)
+    assert named[0]["expected"] == plain[0]["expected"]
+    assert named[0]["provenance"]["distinct_prompt_sha256"] == distinct_prompt_sha256(named[0])
+    assert all(c["provenance"]["prompt_convention"] == "named-enums-v1" for c in named + _mined(miner, "other", 1))
+
+
+@pytest.mark.parametrize("value", [{"z": "é 中文", "a": [2, None, True]}, [], {"line": "a\nb", "quote": '"'}])
+def test_annotator_canonical_encoding_matches_the_miner(miner, annotator, value):
+    assert annotator.canonical(value) == miner.canonical(value)
+
+
+@pytest.mark.parametrize("before, after, expected", [
+    ({"x": [{"SharingCapability": 2}]}, {"x": [{"SharingCapability": 2, "SharingCapability_name": "Anyone"}]}, True),
+    ({"x": 1}, {"x": 1}, True), ({"x": 1}, {"x": True}, False),
+    ({"x": 1}, {"x": 1.0}, False), ({"x": 1}, {"x": 2, "x_name": "two"}, False),
+    ({"x": 1}, {"x": 1, "extra": "value"}, False), ({"x": 1}, {"x": 1, "x_name": 1}, False),
+    ({"x": 1}, {}, False), ([1, 2], [2, 1], False), ([1], [1, 2], False),
+    ({"x_name": "stale"}, {"x_name": "new"}, False),
+])
+def test_only_name_keys_added_is_strict(annotator, before, after, expected):
+    assert annotator.only_name_keys_added(before, after) is expected
+
+
+def test_annotator_preserves_identity_labels_and_unchanged_user_bytes(miner, annotator, monkeypatch):
+    monkeypatch.setattr(miner, "annotate_enum_names", lambda section, observed: observed)
+    cases = _enum_cases(miner) + _mined(miner, "other", 1)
+    # Rows from synthetic/live-lab exporters can have evidence without section.
+    user = {"case_id": cases[1]["id"], "evidence": [{"id": "e1", "observed": {"SharingCapability": 2}}]}
+    cases[1]["messages"][1]["content"] = json.dumps(user, indent=2, ensure_ascii=False)
+    before = copy.deepcopy(cases)
+    result, report = annotator.annotate_cases(cases)
+    assert cases == before
+    assert report == {"rows": 3, "rows_changed": 1, "keys_added": {"SharingCapability_name": 1, "DefaultLinkPermission_name": 1},
+                      "unchanged_rows": 2, "digests_added": 0, "prompt_convention_set": 3}
+    for old, new in zip(cases, result):
+        assert {k: old[k] for k in ("id", "family", "split", "expected")} == {k: new[k] for k in ("id", "family", "split", "expected")}
+        assert old["messages"][0] == new["messages"][0] and old["messages"][2:] == new["messages"][2:]
+        assert new["provenance"] == {**old["provenance"], "prompt_convention": "named-enums-v1",
+                                    "distinct_prompt_sha256": distinct_prompt_sha256(new)}
+        assert annotator.only_name_keys_added(json.loads(old["messages"][1]["content"]), json.loads(new["messages"][1]["content"]))
+    assert result[1]["messages"][1]["content"] == cases[1]["messages"][1]["content"]
+    again, report = annotator.annotate_cases(result)
+    assert again == result and report["rows_changed"] == 0 and report["unchanged_rows"] == 3 and report["keys_added"] == {}
+    validate_cases(result)
+
+
+def test_annotator_cli_writes_private_output_and_matching_report(miner, annotator, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(miner, "annotate_enum_names", lambda section, observed: observed)
+    source, output, report = (tmp_path / name for name in ("in.jsonl", "out.jsonl", "report.json"))
+    miner.write_jsonl(source, _enum_cases(miner))
+    assert annotator.main([str(source), str(output), "--report", str(report)]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary == json.loads(report.read_text()) and summary["rows_changed"] == 1
+    assert stat.S_IMODE(output.stat().st_mode) == stat.S_IMODE(report.stat().st_mode) == 0o600
+    validate_cases(_rows(output))
+    assert annotator.main([str(source), str(output)]) == 1
+    assert json.loads(report.read_text()) == summary
+
+
+@pytest.mark.parametrize("provenance_state", ["current", "v6", "no_digest"])
+def test_annotator_preserves_line_encoding_outside_provenance(miner, annotator, tmp_path, capsys, provenance_state):
+    cases = _mined(miner, "other", 1)
+    for case in cases:
+        # Exercise unescaped Unicode and original user-message whitespace too.
+        user = json.loads(case["messages"][1]["content"])
+        user["note"] = "é 中文"
+        case["messages"][1]["content"] = json.dumps(user, indent=2, ensure_ascii=False)
+        case["provenance"]["distinct_prompt_sha256"] = distinct_prompt_sha256(case)
+        if provenance_state != "current":
+            case["provenance"].pop("prompt_convention")
+        if provenance_state == "no_digest":
+            case["provenance"].pop("distinct_prompt_sha256")
+    source, output = tmp_path / "in.jsonl", tmp_path / "out.jsonl"
+    miner.write_jsonl(source, cases)
+    assert annotator.main([str(source), str(output)]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["rows_changed"] == 0
+    assert summary["digests_added"] == (len(cases) if provenance_state == "no_digest" else 0)
+    assert summary["prompt_convention_set"] == len(cases)
+    old_lines, new_lines = source.read_bytes().splitlines(keepends=True), output.read_bytes().splitlines(keepends=True)
+    assert len(old_lines) == len(new_lines) == len(cases)
+    for old, new in zip(old_lines, new_lines):
+        if provenance_state != "current":
+            old_case, new_case = json.loads(old), json.loads(new)
+            new_provenance = json.dumps(new_case["provenance"], ensure_ascii=False).encode("utf-8")
+            old_provenance = json.dumps(old_case["provenance"], ensure_ascii=False).encode("utf-8")
+            assert old != new
+            assert new.replace(new_provenance, old_provenance, 1) == old
+        else:
+            assert old == new
+
+
+def test_annotator_reports_added_and_recomputed_digests_on_all_rows(miner, annotator):
+    cases = _mined(miner, "other", 1)
+    cases[0]["provenance"] = {"source": "approved non-oracle fixture", "synthetic": True,
+                              "review_status": "approved", "reviewer": "fixture reviewer"}
+    cases[1]["provenance"].pop("prompt_convention")
+    cases[1]["provenance"]["distinct_prompt_sha256"] = "0" * 64
+    result, report = annotator.annotate_cases(cases)
+    assert report["digests_added"] == 1 and report["prompt_convention_set"] == 2
+    assert report["rows_changed"] == 0 and report["unchanged_rows"] == 2
+    for case in result:
+        assert case["provenance"]["distinct_prompt_sha256"] == distinct_prompt_sha256(case)
+        assert case["provenance"]["prompt_convention"] == "named-enums-v1"
+    _, again = annotator.annotate_cases(result)
+    assert again["digests_added"] == 0 and again["prompt_convention_set"] == 2
+
+
+def test_annotator_surrogate_user_message_leaves_no_files_and_can_be_rerun(miner, annotator, tmp_path):
+    cases = _mined(miner, "other", 1)
+    user = json.loads(cases[1]["messages"][1]["content"])
+    user["note"] = "\ud800"
+    cases[1]["messages"][1]["content"] = json.dumps(user, ensure_ascii=False)
+    source, output, report = (tmp_path / name for name in ("in.jsonl", "out.jsonl", "report.json"))
+    # The input is valid UTF-8 JSONL containing an escaped lone surrogate.
+    source.write_text("".join(json.dumps(case) + "\n" for case in cases), encoding="utf-8")
+    assert annotator.main([str(source), str(output), "--report", str(report)]) == 1
+    assert not output.exists() and not report.exists()
+    miner.write_jsonl(source, _mined(miner, "other", 1))
+    assert annotator.main([str(source), str(output), "--report", str(report)]) == 0
+
+
+@pytest.mark.parametrize("bad_payload", ["row", "report"])
+def test_annotator_encodes_all_payloads_before_opening_files(miner, annotator, tmp_path, monkeypatch, bad_payload):
+    cases, summary = _mined(miner, "other", 1), {}
+    if bad_payload == "row":
+        cases[-1]["messages"][1]["content"] = '{"evidence": [], "note": "\ud800"}'
+    else:
+        summary["note"] = "\ud800"
+    output, report = tmp_path / "out.jsonl", tmp_path / "report.json"
+    with monkeypatch.context() as patch:
+        patch.setattr(annotator.os, "open", lambda *a, **kw: pytest.fail("all payloads must encode before opening"))
+        with pytest.raises(UnicodeEncodeError):
+            annotator.write_outputs(output, report, cases, summary)
+    assert not output.exists() and not report.exists()
+    annotator.write_outputs(output, report, _mined(miner, "other", 1), {})
+    assert output.is_file() and report.is_file()
+
+
+def test_annotator_rolls_back_created_files_on_base_exception(miner, annotator, tmp_path, monkeypatch):
+    output, report = tmp_path / "out.jsonl", tmp_path / "report.json"
+    real_fdopen = annotator.os.fdopen
+
+    class InterruptedWriter:
+        def __init__(self, fd, *args, **kwargs):
+            self.handle = real_fdopen(fd, *args, **kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.handle.close()
+
+        def write(self, payload):
+            raise KeyboardInterrupt("interrupted write")
+
+    with monkeypatch.context() as patch:
+        def fdopen(fd, *args, **kwargs):
+            # Interrupt the report write after both files have been created.
+            return InterruptedWriter(fd, *args, **kwargs) if report.exists() else real_fdopen(fd, *args, **kwargs)
+
+        patch.setattr(annotator.os, "fdopen", fdopen)
+        with pytest.raises(KeyboardInterrupt, match="interrupted write"):
+            annotator.write_outputs(output, report, _mined(miner, "other", 1), {})
+    assert not output.exists() and not report.exists()
+    annotator.write_outputs(output, report, _mined(miner, "other", 1), {})
+
+
+@pytest.mark.parametrize("destination", ["output", "report"])
+@pytest.mark.parametrize("via_symlink", [False, True])
+def test_annotator_refuses_destinations_inside_finalized_audit_runs(miner, annotator, tmp_path, capsys, destination, via_symlink):
+    source = tmp_path / "in.jsonl"
+    miner.write_jsonl(source, _mined(miner, "other", 1))
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "run-manifest.json").write_text("{}", encoding="utf-8")
+    parent = run
+    if via_symlink:
+        parent = tmp_path / "alias"
+        parent.symlink_to(run, target_is_directory=True)
+    output, report = tmp_path / "out.jsonl", tmp_path / "report.json"
+    if destination == "output":
+        output = parent / "nested" / "out.jsonl"
+    else:
+        report = parent / "nested" / "report.json"
+    assert annotator.main([str(source), str(output), "--report", str(report)]) == 1
+    assert "outside finalized audit runs" in capsys.readouterr().err
+    assert not output.exists() and not report.exists()
+    assert sorted(path.name for path in run.iterdir()) == ["run-manifest.json"]
+
+
+@pytest.mark.parametrize("bad_user", ["not json", "[]", "{}", '{"evidence":{}}', '{"evidence":[null]}', '{"evidence":[{"section":"SPO_tenant"}]}'])
+def test_annotator_rejects_bad_prompts_before_writing_any_output(miner, annotator, tmp_path, bad_user):
+    cases = _enum_cases(miner)
+    # A valid first row must not be written when a later row is invalid.
+    cases += _mined(miner, "other", 1)[:1]
+    cases[1]["messages"][1]["content"] = bad_user
+    source, output, report = (tmp_path / name for name in ("in.jsonl", "out.jsonl", "report.json"))
+    miner.write_jsonl(source, cases)
+    assert annotator.main([str(source), str(output), "--report", str(report)]) == 1
+    assert not output.exists() and not report.exists()
+
+
+def test_annotator_checks_output_validation_before_writing(miner, annotator, tmp_path, monkeypatch):
+    source, output = tmp_path / "in.jsonl", tmp_path / "out.jsonl"
+    miner.write_jsonl(source, _enum_cases(miner))
+
+    def reject(cases):
+        raise ValueError("output validation failed")
+
+    monkeypatch.setattr(annotator, "validate_cases", reject)
+    assert annotator.main([str(source), str(output)]) == 1
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("existing", ["file", "symlink", "dangling_symlink"])
+@pytest.mark.parametrize("destination", ["output", "report"])
+def test_annotator_refuses_existing_destinations_and_rolls_back(miner, annotator, tmp_path, existing, destination):
+    source, output, report, target = (tmp_path / name for name in ("in.jsonl", "out.jsonl", "report.json", "target"))
+    miner.write_jsonl(source, _enum_cases(miner))
+    blocked = output if destination == "output" else report
+    if existing == "file":
+        blocked.write_text("keep")
+    else:
+        if existing == "symlink":
+            target.write_text("keep")
+        blocked.symlink_to(target)
+    assert annotator.main([str(source), str(output), "--report", str(report)]) == 1
+    assert blocked.is_symlink() if existing != "file" else blocked.read_text() == "keep"
+    if existing == "symlink":
+        assert target.read_text() == "keep"
+    assert not (report if destination == "output" else output).exists()
+
+
+def test_annotator_rejects_overwriting_a_stale_existing_name(miner, annotator):
+    cases = _enum_cases(miner)
+    user = json.loads(cases[0]["messages"][1]["content"])
+    user["evidence"][1]["observed"][0]["SharingCapability_name"] = "stale"
+    cases[0]["messages"][1]["content"] = miner.canonical(user)
+    with pytest.raises(ValueError, match="only added .*_name keys"):
+        annotator.annotate_cases(cases)
 
 
 def test_snake_keeps_acronyms_together(miner):
@@ -971,7 +1234,7 @@ def test_template_key_can_be_disabled_and_cases_still_validate(miner):
     cases, stats = miner.build_cases("aad", _evaluations(inputs, {"MS.AAD.1.1v1": [True]}), {"MS.AAD.1.1v1": ["sec_a"]}, {}, inputs[0],
                                      commit="abcdef123456", opa_version="1.20.2", config_name="AADConfig.rego",
                                      not_collected_every=4, template=False)
-    assert set(cases[0]["provenance"]) == {"source", "synthetic", "review_status", "evidence_view", "oracle_outcome"} and stats["met"] == 1
+    assert set(cases[0]["provenance"]) == {"source", "synthetic", "review_status", "evidence_view", "oracle_outcome", "prompt_convention"} and stats["met"] == 1
     validate_cases(cases)
 
 
@@ -1993,6 +2256,33 @@ def _by_policy_and_variant(rows: list[dict]) -> dict[tuple[str, str], dict]:
     return found
 
 
+@needs_oracle
+def test_sharepoint_end_to_end_named_enums_preserve_ids_and_only_add_names(miner, annotator, tmp_path, monkeypatch):
+    _pinned_tools()
+    named_dir, plain_dir = tmp_path / "named", tmp_path / "plain"
+    args = ["--scuba", str(SCUBA), "--opa", str(OPA), "--products", "Sharepoint"]
+    assert miner.main([*args, "--output-dir", str(named_dir)]) == 0
+    monkeypatch.setattr(miner, "annotate_enum_names", lambda section, observed: observed)
+    assert miner.main([*args, "--output-dir", str(plain_dir)]) == 0
+    named = {row["id"]: row for row in _rows(named_dir / "cases-sharepoint.jsonl")}
+    plain = {row["id"]: row for row in _rows(plain_dir / "cases-sharepoint.jsonl")}
+    assert named.keys() == plain.keys() and len(named) == 464
+    changed = 0
+    for case_id, row in named.items():
+        old = plain[case_id]
+        before, after = (json.loads(case["messages"][1]["content"]) for case in (old, row))
+        assert annotator.only_name_keys_added(before, after), case_id
+        changed += before != after
+        assert row["expected"] == old["expected"]
+        assert row["messages"][0] == old["messages"][0] and row["messages"][2:] == old["messages"][2:]
+        assert row["provenance"]["prompt_convention"] == "named-enums-v1"
+        assert row["provenance"]["distinct_prompt_sha256"] == distinct_prompt_sha256(row)
+    assert changed > 0
+    transformed, report = annotator.annotate_cases(list(plain.values()))
+    assert {row["id"]: row for row in transformed} == named
+    assert report["rows_changed"] == changed
+
+
 @pytest.fixture(scope="module")
 def powerplatform_run(miner, splitter, tmp_path_factory):
     _pinned_tools()
@@ -2388,7 +2678,6 @@ def test_the_combined_ca_bases_reproduce_the_earlier_aad_cases_with_no_single_pu
     out = aad_combined_run
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["ca_bases"] == "combined" and "single_purpose_ca" not in summary["products"]["AAD"]
-    raw = (out / "cases-aad.jsonl").read_bytes()
     rows = _rows(out / "cases-aad.jsonl")
     validate_cases(rows)
     for row in rows:
@@ -2397,6 +2686,12 @@ def test_the_combined_ca_bases_reproduce_the_earlier_aad_cases_with_no_single_pu
     sp_ids = {row["id"] for row in _rows(aad_single_purpose_run / "cases-aad.jsonl") if "variant=single_purpose:" in row["provenance"]["source"]}
     assert sp_ids and not sp_ids & {row["id"] for row in rows}
     assert len(rows) == len({row["id"] for row in rows}) == AAD_COMBINED_CASES
+    # The rendering convention is now recorded on every product; AAD prompt bytes
+    # and all other fields still reproduce v4 exactly after removing that new key.
+    legacy = copy.deepcopy(rows)
+    for row in legacy:
+        assert row["provenance"].pop("prompt_convention") == "named-enums-v1"
+    raw = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in legacy).encode("utf-8")
     assert hashlib.sha256(raw).hexdigest() == AAD_COMBINED_SHA256
     if V4_AAD and V4_AAD.is_file():
         assert raw == V4_AAD.read_bytes()
