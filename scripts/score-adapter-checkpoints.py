@@ -43,9 +43,9 @@ SELECTION_RULE = {
     "description": (
         "Highest strict pass rate (every claim status, typed value, evidence set and limitation/recommendation ID "
         "matches the reviewed rubric on greedy, thinking-off, strictly parsed JSON). Ties: lowest overconfidence "
-        "(claims expected unknown answered confirmed), then lowest over-abstention (claims expected confirmed or "
+        "(claims expected unknown answered confirmed or inferred), then lowest over-abstention (claims expected confirmed or "
         "inferred answered unknown), then the earliest training step, then name. A tie on the first three keys is "
-        "reported in tied_with rather than hidden."
+        "reported in tied_with rather than hidden. The unweighted per_policy_mean is reported beside the strict rate."
     ),
     "order": ["strict_pass_count desc", "overconfidence asc", "over_abstention asc", "step asc", "name asc"],
 }
@@ -226,7 +226,43 @@ def select_cases(case_paths: list[str], splits: list[str] | None, limit: int | N
 
 # --- scoring and selection ---------------------------------------------------------------------------------------
 
-def checkpoint_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], model_id: str) -> dict[str, Any]:
+def per_policy_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], model_id: str) -> dict[str, Any]:
+    """Use every approved case as the denominator, including cases without a scored result."""
+    policies = {}
+    table: dict[str, Any] = {}
+    for case in cases:
+        if case["provenance"]["review_status"] != "approved":
+            continue
+        user = next((message for message in case.get("messages", [])
+                     if message.get("role") == "user"), {})
+        try:
+            prompt = json.loads(user.get("content"))
+        except (ValueError, TypeError, RecursionError):
+            prompt = None
+        policy = prompt.get("policy_id") if isinstance(prompt, dict) else None
+        if not isinstance(policy, str) or not policy.strip():
+            policy = str(case["family"])
+        policies[case["id"]] = policy
+        counts = table.setdefault(policy, {"rows": 0, "strict_pass": 0, "missing": 0})
+        counts["rows"] += 1
+        counts["missing"] += 1
+    seen = set()
+    for row in evaluation["results"]:
+        if row["model_id"] != model_id or not row["scored"] or row["case_id"] not in policies:
+            continue
+        policy = policies[row["case_id"]]
+        counts = table[policy]
+        if row["case_id"] not in seen:
+            counts["missing"] -= 1
+            seen.add(row["case_id"])
+        counts["strict_pass"] += row["mechanical_pass"] is True
+    for counts in table.values():
+        counts["strict_pass_rate"] = counts["strict_pass"] / counts["rows"]
+    return dict(sorted(table.items()))
+
+
+def checkpoint_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], model_id: str,
+                       per_policy: dict[str, Any] | None = None) -> dict[str, Any]:
     """Derive the selection metrics for one model from the evaluator output; labels come from the cases."""
     score = next(item for item in evaluation["model_scores"] if item["model_id"] == model_id)
     rows = [row for row in evaluation["results"] if row["model_id"] == model_id]
@@ -239,15 +275,22 @@ def checkpoint_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], 
                 continue
             if issue["expected"] in ("confirmed", "inferred") and issue["observed"] == "unknown":
                 over_abstention += 1
-            elif issue["expected"] == "unknown" and issue["observed"] == "confirmed":
+            elif issue["expected"] == "unknown" and issue["observed"] in ("confirmed", "inferred"):
                 overconfidence += 1
     answered = sum(claim["status"] != "unknown" for case in cases for claim in case["expected"]["claims"])
     unknown = sum(claim["status"] == "unknown" for case in cases for claim in case["expected"]["claims"])
     scored = score["approved_case_count"]
     passes = score["mechanical_pass_count"]
+    if per_policy is None:
+        per_policy = per_policy_metrics(evaluation, cases, model_id)
+    case_ids = {case["id"] for case in cases}
     return {
         "strict_pass_count": passes, "scored_cases": scored,
         "strict_pass_rate": passes / scored if scored else None,
+        "per_policy_mean": sum(policy["strict_pass_rate"] for policy in per_policy.values()) / len(per_policy)
+        if per_policy else None,
+        "per_policy_count": len(per_policy),
+        "rows_without_case": sum(row["case_id"] not in case_ids for row in rows),
         "schema_error_count": sum(row["scored"] and row["schema_valid"] is False for row in rows),
         "over_abstention": over_abstention, "overconfidence": overconfidence,
         "expected_answered_claims": answered, "expected_unknown_claims": unknown,
@@ -279,10 +322,13 @@ def select_checkpoint(entries: list[dict[str, Any]]) -> dict[str, Any]:
 def evaluate_and_select(output_dir: Path, scored_cases: list[dict[str, Any]], run: dict[str, Any]) -> dict[str, Any]:
     """Run the recorded-answer evaluator over responses.jsonl, write evaluation.json and selection.json."""
     evaluation = evaluate_responses(output_dir / "scored-cases.jsonl", output_dir / "responses.jsonl")
+    evaluation["per_policy"] = {score["model_id"]: per_policy_metrics(evaluation, scored_cases, score["model_id"])
+                                for score in evaluation["model_scores"]}
     _write_json(output_dir / "evaluation.json", evaluation)
     entries = []
     for meta in run["checkpoints"]:
-        entries.append({**meta, **checkpoint_metrics(evaluation, scored_cases, meta["model_id"])})
+        entries.append({**meta, **checkpoint_metrics(evaluation, scored_cases, meta["model_id"],
+                                                    per_policy=evaluation["per_policy"][meta["model_id"]])})
     choice = select_checkpoint(entries)
     by_name = {entry["name"]: entry for entry in entries}
     warnings = []

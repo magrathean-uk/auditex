@@ -7,7 +7,33 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
-Nothing yet.
+Model-development tooling only (round 2 of the specialist-model programme). `CONTRACT_VERSION` stays
+`2026-10-22`; the audit, report, export and MCP surfaces are unchanged.
+
+### Model development
+
+- **Named enums in oracle evidence.** `azure_tenant_audit.external_sharing.annotate_enum_names(section, observed)`
+  adds `<Key>_name` beside the seven SharePoint integer enums of a `SPO_tenant` evidence item
+  (`SharingCapability` and `ODBSharingCapability` as `<apiName> (<admin-centre label>)`, `DefaultSharingLinkType`,
+  `DefaultLinkPermission`, `SharingDomainRestrictionMode`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`);
+  an unrecognised integer gets no name. `scripts/build-oracle-cases.py` applies it when the evidence is rendered
+  (case ids hash the raw view and do not change) and records `provenance.prompt_convention: named-enums-v1`;
+  `scripts/annotate-oracle-cases.py` applies the same rendering to an existing case file and recomputes (or adds)
+  `distinct_prompt_sha256`. The v6 adapter answered SharePoint 3.x applicability rows from a shortcut because no
+  prompt named the sharing slider values.
+- **Provenance key.** `validate_case` accepts `prompt_convention` (only `named-enums-v1`); a 1.2.1 wheel rejects
+  every row that carries it, so a pack built with this convention needs this version on the cluster.
+- **Checkpoint scorer.** `scripts/score-adapter-checkpoints.py` counts an expected-`unknown` claim answered
+  `inferred` as overconfidence (it counted `confirmed` only; the v6 figure was 3/80, the true one 5/80), writes a
+  per-model `per_policy` table into `evaluation.json` (policy id of the case, family when there is none) and reports
+  `per_policy_mean` and `per_policy_count` in `selection.json`. The selection order is unchanged, so earlier
+  `selection.json` overconfidence values are not comparable with new ones.
+- **Splitter sub-families and frozen ids.** `scripts/split-oracle-cases.py` takes `--sub-family <policy>=<family>`
+  (relabels one policy's rows to a family named `<source family>-...`, so a policy can be sent to validation on its
+  own with `--validation-families`) and `--previous-report <split-report.json>`, which refuses any change to the
+  test ids (`test_ids_sha256`) or to the split of a family not named on the command line; `--sub-family`
+  requires `--previous-report`. The report records `sub_families`, `test_ids_frozen`, `family_split_changes`
+  and whether the test content (`test_sha256`) is unchanged.
 
 ## [1.2.1] - 2026-10-25
 

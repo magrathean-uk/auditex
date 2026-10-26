@@ -324,6 +324,183 @@ def test_metrics_count_schema_errors_overconfidence_and_over_abstention(tmp_path
     assert metrics["issue_counts"]["response_schema_error"] == 1
 
 
+def test_per_policy_denominators_include_missing_cases_and_only_approved_cases(tmp_path):
+    cases = [make_case(name) for name in ("answered", "missing", "unscored", "other-policy")]
+    for case in cases[:3]:
+        prompt = json.loads(case["messages"][1]["content"])
+        prompt["policy_id"] = "shared-policy"
+        case["messages"][1]["content"] = json.dumps(prompt)
+    cases.append(make_case("unreviewed", approved=False))
+    cases_path = write_cases(tmp_path / "cases.jsonl", cases)
+    responses = tmp_path / "responses.jsonl"
+    responses.write_text("".join(json.dumps({"case_id": case["id"], "model_id": model,
+                                             "response": good(case)}) + "\n"
+                                 for model, subset in (("partial", [cases[0], cases[2], cases[4]]), ("full", cases))
+                                 for case in subset), encoding="utf-8")
+    evaluation = evaluate_responses(cases_path, responses)
+    # An unscored row must still leave its approved case missing from the policy's scored coverage.
+    unscored = next(row for row in evaluation["results"]
+                    if row["model_id"] == "partial" and row["case_id"] == "unscored")
+    unscored.update(scored=False, mechanical_pass=False)
+    table = sac.per_policy_metrics(evaluation, cases, "partial")
+    assert table == {
+        "family-other-policy": {"rows": 1, "strict_pass": 0, "missing": 1, "strict_pass_rate": 0.0},
+        "shared-policy": {"rows": 3, "strict_pass": 1, "missing": 2, "strict_pass_rate": 1 / 3},
+    }
+    metrics = sac.checkpoint_metrics(evaluation, cases, "partial")
+    assert metrics["per_policy_count"] == 2
+    assert metrics["per_policy_mean"] == pytest.approx(1 / 6)
+    assert all(counts["missing"] == 0 for counts in sac.per_policy_metrics(evaluation, cases, "full").values())
+
+
+@pytest.mark.parametrize("cases", [[], [make_case("unreviewed", approved=False)]])
+def test_per_policy_mean_is_none_without_approved_cases(cases):
+    evaluation = {"results": [], "model_scores": [{"model_id": "m", "approved_case_count": 0,
+                                                   "mechanical_pass_count": 0, "missing_case_count": 0}]}
+    assert sac.per_policy_metrics(evaluation, cases, "m") == {}
+    metrics = sac.checkpoint_metrics(evaluation, cases, "m")
+    assert metrics["per_policy_mean"] is None
+    assert metrics["strict_pass_rate"] is None
+    assert metrics["per_policy_count"] == 0
+
+
+@pytest.mark.parametrize("content", [
+    "not JSON", "[]", "null", "42", '"text"', "true", "{}",
+    '{"policy_id": null}', '{"policy_id": ""}', '{"policy_id": "   "}',
+    '{"policy_id": 42}', '{"policy_id": true}', '{"policy_id": []}', '{"policy_id": {}}',
+    None, {"policy_id": "unencoded"},
+])
+def test_policy_lookup_falls_back_to_family_for_invalid_user_content(content):
+    case = make_case("fallback")
+    case["messages"][1]["content"] = content
+    table = sac.per_policy_metrics({"results": []}, [case], "m")
+    assert table == {"family-fallback": {"rows": 1, "strict_pass": 0, "missing": 1, "strict_pass_rate": 0.0}}
+
+
+@pytest.mark.parametrize("user_index", [0, 2])
+def test_policy_lookup_uses_first_user_message_and_sorts_string_keys(user_index):
+    case = make_case("lookup")
+    user = {"role": "user", "content": '{"policy_id": "z-policy"}'}
+    case["messages"] = [{"role": "system", "content": '{"policy_id": "wrong-system"}'} for _ in range(user_index)]
+    case["messages"] += [user, {"role": "user", "content": '{"policy_id": "wrong-later-user"}'}]
+    fallback = make_case("fallback")
+    fallback["family"] = "a-family"
+    fallback["messages"] = []
+    table = sac.per_policy_metrics({"results": []}, [case, fallback], "m")
+    assert list(table) == ["a-family", "z-policy"]
+    assert all(isinstance(key, str) for key in table)
+
+
+@pytest.mark.parametrize("scored", [False, True])
+def test_metrics_count_rows_without_cases_and_skip_them_in_per_policy(tmp_path, scored):
+    case = make_case("known")
+    cases_path = write_cases(tmp_path / "cases.jsonl", [case])
+    responses = tmp_path / "responses.jsonl"
+    responses.write_text("".join(json.dumps({"case_id": case_id, "model_id": model, "response": good(case)}) + "\n"
+                                 for model, case_id in (("m", "known"), ("m", "absent"), ("other", "also-absent"))),
+                         encoding="utf-8")
+    evaluation = evaluate_responses(cases_path, responses)
+    absent = next(row for row in evaluation["results"] if row["case_id"] == "absent")
+    absent.update(scored=scored, mechanical_pass=True)
+    metrics = sac.checkpoint_metrics(evaluation, [case], "m")
+    assert type(metrics["rows_without_case"]) is int
+    assert metrics["rows_without_case"] == 1
+    assert metrics["per_policy_count"] == 1 and metrics["per_policy_mean"] == 1.0
+    assert sac.per_policy_metrics(evaluation, [case], "m") == {
+        "family-known": {"rows": 1, "strict_pass": 1, "missing": 0, "strict_pass_rate": 1.0},
+    }
+
+
+def test_checkpoint_metrics_accepts_precomputed_empty_policy_table(monkeypatch):
+    evaluation = {"results": [], "model_scores": [{"model_id": "m", "approved_case_count": 0,
+                                                   "mechanical_pass_count": 0, "missing_case_count": 0}]}
+
+    def unexpected_recompute(*args):
+        pytest.fail("a supplied empty policy table must not be recomputed")
+
+    monkeypatch.setattr(sac, "per_policy_metrics", unexpected_recompute)
+    metrics = sac.checkpoint_metrics(evaluation, [], "m", per_policy={})
+    assert metrics["per_policy_mean"] is None and metrics["per_policy_count"] == 0
+
+
+def test_per_policy_metrics_and_overconfidence_use_real_evaluator_without_changing_ranking(tmp_path, monkeypatch):
+    cases = [make_case(f"case-{index}") for index in range(6)]
+    for case, policy in zip(cases, ["policy-a"] * 3 + ["policy-b"] * 2):
+        prompt = json.loads(case["messages"][1]["content"])
+        prompt["policy_id"] = policy
+        case["messages"][1]["content"] = json.dumps(prompt)
+    cases[-1]["family"] = "immutable-tenant-identity"
+    cases_path = write_cases(tmp_path / "scored-cases.jsonl", cases)
+    answers = {model: [good(case) for case in cases] for model in ("model-25", "model-50")}
+    # Both models make one confirmed and one inferred assertion where the rubric requires unknown.
+    for model, indices in (("model-25", (3, 4)), ("model-50", (0, 1))):
+        for index, status in zip(indices, ("confirmed", "inferred")):
+            answers[model][index]["claims"][1].update(status=status, value=True)
+    answers["model-25"][5] = "invalid JSON"
+    answers["model-50"][3]["limitations"] = []
+    responses = tmp_path / "responses.jsonl"
+    responses.write_text("".join(json.dumps({"case_id": case["id"], "model_id": model, "response": answer}) + "\n"
+                                 for model, model_answers in answers.items()
+                                 for case, answer in zip(cases, model_answers)), encoding="utf-8")
+    evaluation = evaluate_responses(cases_path, responses)
+    direct_metrics = {model: sac.checkpoint_metrics(evaluation, load_cases([cases_path]), model) for model in answers}
+    run = {
+        "base_model": BASE, "base_revision": REVISION,
+        "checkpoints": [{"name": f"checkpoint-{step}", "step": step, "model_id": f"model-{step}",
+                         "path": str(tmp_path / f"checkpoint-{step}")} for step in (25, 50)],
+        "generation": {"limit": None}, "cases": {}, "runtime": {},
+    }
+    policy_calls = []
+    computed_tables = {}
+    original_per_policy = sac.per_policy_metrics
+    original_metrics = sac.checkpoint_metrics
+
+    def tracked_per_policy(evaluation, cases, model_id):
+        policy_calls.append(model_id)
+        computed_tables[model_id] = original_per_policy(evaluation, cases, model_id)
+        return computed_tables[model_id]
+
+    def checked_metrics(evaluation, cases, model_id, per_policy=None):
+        assert per_policy is computed_tables[model_id]
+        return original_metrics(evaluation, cases, model_id, per_policy=per_policy)
+
+    monkeypatch.setattr(sac, "per_policy_metrics", tracked_per_policy)
+    monkeypatch.setattr(sac, "checkpoint_metrics", checked_metrics)
+    sac.evaluate_and_select(tmp_path, load_cases([cases_path]), run)
+    assert sorted(policy_calls) == sorted(answers)
+    evaluation = json.loads((tmp_path / "evaluation.json").read_text())
+    selection = json.loads((tmp_path / "selection.json").read_text())
+    assert evaluation["per_policy"] == {
+        "model-25": {
+            "policy-a": {"rows": 3, "strict_pass": 3, "missing": 0, "strict_pass_rate": 1.0},
+            "policy-b": {"rows": 2, "strict_pass": 0, "missing": 0, "strict_pass_rate": 0.0},
+            "immutable-tenant-identity": {"rows": 1, "strict_pass": 0, "missing": 0, "strict_pass_rate": 0.0},
+        },
+        "model-50": {
+            "policy-a": {"rows": 3, "strict_pass": 1, "missing": 0, "strict_pass_rate": 1 / 3},
+            "policy-b": {"rows": 2, "strict_pass": 1, "missing": 0, "strict_pass_rate": 1 / 2},
+            "immutable-tenant-identity": {"rows": 1, "strict_pass": 1, "missing": 0, "strict_pass_rate": 1.0},
+        },
+    }
+    for checkpoint, mean in zip(selection["checkpoints"], (1 / 3, (1 / 3 + 1 / 2 + 1) / 3)):
+        metrics = direct_metrics[checkpoint["model_id"]]
+        assert all(checkpoint[key] == value for key, value in metrics.items())
+        assert checkpoint["overconfidence"] == 2 and checkpoint["overconfidence_rate"] == 2 / 6
+        assert checkpoint["over_abstention"] == 0
+        assert checkpoint["strict_pass_count"] == 3 and checkpoint["strict_pass_rate"] == 0.5
+        assert checkpoint["per_policy_count"] == 3
+        assert isinstance(checkpoint["per_policy_mean"], float)
+        assert checkpoint["per_policy_mean"] == pytest.approx(mean)
+    assert selection["selected"] == "checkpoint-25"
+    assert selection["ranking"] == ["checkpoint-25", "checkpoint-50"]
+    assert selection["tied_with"] == ["checkpoint-50"]
+    assert selection["selection_rule"]["order"] == [
+        "strict_pass_count desc", "overconfidence asc", "over_abstention asc", "step asc", "name asc",
+    ]
+    assert "claims expected unknown answered confirmed or inferred" in selection["selection_rule"]["description"]
+    assert "per_policy_mean" in selection["selection_rule"]["description"]
+
+
 # --- end to end with the stub generator ---------------------------------------------------------------------
 
 def test_end_to_end_ranks_checkpoints_by_generated_answers_and_writes_the_bundle(tmp_path, held_out):

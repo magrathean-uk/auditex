@@ -8,6 +8,12 @@ product the atoms are sorted by name: the last becomes test, the one before it v
 product with three or more atoms contributes to every split; products with fewer stay in train. Nothing here
 changes a label.
 
+`--sub-family POLICY_ID=FAMILY` moves a policy into its own family within the same product before deduplication
+and atom construction. Repeat it for several policies; the report records the original family and input row count.
+The CLI requires `--previous-report`. A target must differ from every original family, start with
+`<from_family>-` for every original family, with a suffix matching `[a-z0-9]+(?:[.-][a-z0-9]+)*`.
+This keeps a sub-family immediately after its source in the atom ordering rather than after the test atom.
+
 Before splitting, cases that share a `provenance.distinct_prompt_sha256` (the id-masked normalized prompt, which
 the validator treats as one example) are reduced to the first occurrence. The digest is recomputed from the case;
 a stale stored digest, or duplicates whose answers differ (claim order and evidence-id order do not count), are
@@ -24,6 +30,13 @@ yet. Anything else is an error. Cases that are already approved are left untouch
 distinct counts, an independent leakage check and the SHA-256 of the test split, the frozen holdout hash). Files
 are created exclusively with mode 0600 (parent directories 0700); an existing file, a symlink, the same path for
 both outputs, or a location inside a finalized audit run is refused.
+`--previous-report` checks the test-ID hash before writing either output. Reports include sorted test_ids for
+membership-change diagnostics; older hash-only reports enforce the same invariant without departed-ID details.
+When previous split families are available, existing families may change splits only when explicitly named by
+`--validation-families` or `--holdout-families`; family_split_changes records those moves. Removed families
+must be named by those options or a `--sub-family` target; families_removed and families_added record membership.
+test_sha256_previous and test_content_frozen report content equality; changed test content is allowed.
+Previous-run comparison fields are null until checked against `--previous-report`.
 """
 from __future__ import annotations
 
@@ -35,7 +48,7 @@ import os
 import re
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -45,13 +58,13 @@ from auditex.model_training import _answer_key, _outside_audit_runs, distinct_pr
 SPLITS = ("train", "validation", "test")
 ORACLE_SOURCE = re.compile(r"oracle:cisa-scubagear@([0-9a-f]{12,40}) ")
 OPA_VERSION = re.compile(r"; opa=(\d+\.\d+\.\d+);")
+ORACLE_FAMILY = re.compile(r"scuba-[a-z0-9]+-[a-z0-9]+(?:[.-][a-z0-9]+)*")
 
 
 def product_of(family: str) -> str:
-    parts = family.split("-")
-    if len(parts) < 3 or parts[0] != "scuba":
+    if not ORACLE_FAMILY.fullmatch(family):
         raise ValueError(f"not an oracle family (expected scuba-<product>-<group>): {family}")
-    return parts[1]
+    return family.split("-")[1]
 
 
 def oracle_reviewer(source: str) -> str:
@@ -86,6 +99,51 @@ def dedupe(cases: list[dict]) -> tuple[list[dict], list[dict[str, str]]]:
             raise ValueError(f"duplicate prompt with conflicting labels: {case['id']} vs {first['id']}")
         dropped.append({"dropped": case["id"], "kept": first["id"]})
     return list(kept.values()), dropped
+
+
+def apply_sub_families(cases: list[dict], sub_families: Mapping[str, str]) -> dict:
+    """Relabel policy rows before deduplication and atom construction; count input rows.
+
+    from_family is a name, or a sorted list if a policy already spans several families.
+    Targets must match ORACLE_FAMILY and start with each original family's name plus '-'
+    followed by a suffix matching [a-z0-9]+(?:[.-][a-z0-9]+)*.
+    All assignments are checked against the original families before any rows change.
+    """
+    if not sub_families:
+        return {}
+    by_policy: dict[str, list[dict]] = defaultdict(list)
+    family_policies: dict[str, set[str]] = defaultdict(set)
+    for case in cases:
+        try:
+            policy = json.loads(case["messages"][1]["content"])["policy_id"]
+            if not isinstance(policy, str) or not policy:
+                raise ValueError("policy_id must be non-empty text")
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"case {case.get('id')!r} requires oracle user-message JSON with policy_id") from exc
+        by_policy[policy].append(case)
+        family_policies[case["family"]].add(policy)
+    report = {}
+    targets: dict[str, str] = {}
+    for policy, family in sub_families.items():
+        product = product_of(family)
+        rows = by_policy.get(policy, [])
+        if not rows:
+            raise ValueError(f"unknown policy for sub-family: {policy}")
+        previous = sorted({case["family"] for case in rows})
+        if any(product_of(old) != product for old in previous):
+            raise ValueError(f"sub-family {family} has the wrong product for policy {policy} in {previous}")
+        if family in previous:
+            raise ValueError(f"no-op sub-family mapping for policy {policy}: {family}")
+        if family_policies.get(family, set()) - {policy} or targets.setdefault(family, policy) != policy:
+            raise ValueError(f"sub-family collision: {family} is used by another policy")
+        if any(not family.startswith(f"{old}-") for old in previous):
+            raise ValueError(f"sub-family {family} must start with <from_family>- for every source family: {previous}")
+        report[policy] = {"family": family, "from_family": previous[0] if len(previous) == 1 else previous,
+                          "rows": len(rows)}
+    for policy, family in sub_families.items():
+        for case in by_policy[policy]:
+            case["family"] = family
+    return report
 
 
 def split_atoms(cases: list[dict]) -> dict[str, str]:
@@ -158,6 +216,101 @@ def jsonl_line(case: dict) -> str:
     return json.dumps(case, ensure_ascii=False) + "\n"
 
 
+def _test_ids(cases: Iterable[dict]) -> list[str]:
+    return sorted(case["id"] for case in cases if case["split"] == "test")
+
+
+def _test_ids_sha256(ids: Iterable[str]) -> str:
+    return hashlib.sha256("\n".join(sorted(ids)).encode("utf-8")).hexdigest()
+
+
+def _test_sha256(cases: Iterable[dict]) -> str:
+    return hashlib.sha256("".join(jsonl_line(case) for case in cases if case["split"] == "test").encode("utf-8")).hexdigest()
+
+
+def check_frozen_test_ids(cases: Iterable[dict], previous_report: Mapping) -> dict:
+    """Check frozen test membership and return fields to merge into a new split report.
+
+    Older hash-only reports can still enforce the invariant, but cannot identify departed IDs.
+    New reports include test_ids so failures can show both directions of membership changes.
+    Content equality is reported separately and does not enforce frozen prompts.
+    """
+    cases = list(cases)
+    if not isinstance(previous_report, Mapping):
+        raise ValueError("previous report must be a JSON object")
+    previous_hash = previous_report.get("test_ids_sha256")
+    if not isinstance(previous_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", previous_hash):
+        raise ValueError("previous report requires a valid test_ids_sha256")
+    previous_ids = previous_report.get("test_ids")
+    if previous_ids is not None:
+        if not isinstance(previous_ids, list) or any(not isinstance(item, str) for item in previous_ids):
+            raise ValueError("previous report test_ids must be a list of strings")
+        if _test_ids_sha256(previous_ids) != previous_hash:
+            raise ValueError("previous report test_ids disagree with test_ids_sha256")
+    current_ids = _test_ids(cases)
+    if _test_ids_sha256(current_ids) != previous_hash:
+        if previous_ids is None:
+            previous_splits = previous_report.get("splits")
+            previous_test = previous_splits.get("test") if isinstance(previous_splits, Mapping) else None
+            previous_count = previous_test.get("cases", "unavailable") if isinstance(previous_test, Mapping) else "unavailable"
+            detail = (f"entered/left IDs unavailable (previous report has no test_ids); "
+                      f"current test cases: {len(current_ids)}; previous test cases: {previous_count}")
+        else:
+            entered = sorted(set(current_ids) - set(previous_ids))
+            left = sorted(set(previous_ids) - set(current_ids))
+            detail = f"entered test ({len(entered)}): {entered[:5]}; left test ({len(left)}): {left[:5]}"
+        raise ValueError(f"frozen test IDs changed: {detail}")
+    previous_content_hash = previous_report.get("test_sha256")
+    return {"test_ids_sha256_previous": previous_hash, "test_ids_frozen": True,
+            "test_sha256_previous": previous_content_hash,
+            "test_content_frozen": _test_sha256(cases) == previous_content_hash if previous_content_hash is not None else None}
+
+
+def check_family_split_changes(cases: Iterable[dict], previous_report: Mapping, *,
+                               sub_families: Mapping[str, str] | None = None,
+                               validation_families: Iterable[str] = (), holdout_families: Iterable[str] = ()) -> dict:
+    """Refuse unrequested moves of existing families; return report fields for kit callers.
+
+    Split changes require explicit validation/holdout selection. Removed families require
+    acknowledgement via those selections or a sub-family target. New families are allowed.
+    Older reports without families are supported.
+    """
+    if not isinstance(previous_report, Mapping):
+        raise ValueError("previous report must be a JSON object")
+    splits = previous_report.get("splits", {})
+    if not isinstance(splits, Mapping):
+        raise ValueError("previous report splits must be a JSON object")
+    previous = {}
+    for split in SPLITS:
+        data = splits.get(split, {})
+        if not isinstance(data, Mapping):
+            raise ValueError(f"previous report splits.{split} must be a JSON object")
+        families = data.get("families", [])
+        if not isinstance(families, list) or any(not isinstance(family, str) for family in families):
+            raise ValueError(f"previous report splits.{split}.families must be a list of strings")
+        for family in families:
+            if previous.setdefault(family, split) != split:
+                raise ValueError(f"previous report family {family} appears in multiple splits")
+    current = {}
+    for case in cases:
+        family, split = case["family"], case["split"]
+        if current.setdefault(family, split) != split:
+            raise ValueError(f"family {family} appears in multiple splits")
+    changes = [{"family": family, "from_split": previous[family], "to_split": current[family]}
+               for family in sorted(previous.keys() & current.keys()) if previous[family] != current[family]]
+    removed = sorted(previous.keys() - current.keys())
+    added = sorted(current.keys() - previous.keys())
+    allowed = set(validation_families) | set(holdout_families)
+    acknowledged = allowed | set((sub_families or {}).values())
+    unacknowledged = [family for family in removed if family not in acknowledged]
+    if unacknowledged:
+        raise ValueError(f"families removed without explicit selection: {unacknowledged}")
+    refused = [change for change in changes if change["family"] not in allowed]
+    if refused:
+        raise ValueError(f"family splits changed without explicit selection: {refused}")
+    return {"family_split_changes": changes, "families_removed": removed, "families_added": added}
+
+
 def _taken(path: Path) -> bool:
     return path.exists() or path.is_symlink()
 
@@ -196,10 +349,11 @@ def write_outputs(output: Path, report_path: Path, cases: list[dict], report: di
 
 
 def split_cases(cases: list[dict], *, approve_as_oracle: bool = False, holdout_families: Iterable[str] = (),
-                validation_families: Iterable[str] = ()) -> tuple[list[dict], dict]:
+                validation_families: Iterable[str] = (), sub_families: Mapping[str, str] | None = None) -> tuple[list[dict], dict]:
     """Dedupe, split, optionally approve and validate; returns the cases (input order) and the split report."""
     cases = copy.deepcopy(cases)
     input_count = len(cases)
+    relabelled = apply_sub_families(cases, sub_families or {})
     cases, dropped = dedupe(cases)
     split_of = assign_splits(cases, holdout_families, validation_families)
     already_approved = 0
@@ -222,7 +376,7 @@ def split_cases(cases: list[dict], *, approve_as_oracle: bool = False, holdout_f
     check = leakage(validated, digests)
     if any(check.values()):
         raise ValueError(f"split leakage: {check}")
-    test_lines = [jsonl_line(case) for case in validated if case["split"] == "test"]
+    test_ids = _test_ids(validated)
     per_split = {}
     for split in SPLITS:
         rows = [case for case in validated if case["split"] == split]
@@ -235,13 +389,19 @@ def split_cases(cases: list[dict], *, approve_as_oracle: bool = False, holdout_f
         "input_cases": input_count, "cases": len(validated),
         "duplicates_dropped": {"count": len(dropped), "pairs": dropped},
         "approve_as_oracle": approve_as_oracle, "already_approved_untouched": already_approved,
+        "sub_families": relabelled,
+        "family_split_changes": None, "families_removed": None, "families_added": None,
         "splits": per_split,
         "per_product": {product: dict(Counter(case["split"] for case in validated if product_of(case["family"]) == product))
                         for product in sorted({product_of(case["family"]) for case in validated})},
         "leakage": check,
-        "test_sha256": hashlib.sha256("".join(test_lines).encode("utf-8")).hexdigest(),
+        "test_sha256": _test_sha256(validated),
+        "test_sha256_previous": None,
+        "test_content_frozen": None,
+        "test_ids_sha256_previous": None, "test_ids_frozen": None,
         "test_sha256_basis": "SHA-256 of the test cases as written to the output JSONL (UTF-8 lines in output order)",
-        "test_ids_sha256": hashlib.sha256("\n".join(sorted(case["id"] for case in validated if case["split"] == "test")).encode("utf-8")).hexdigest(),
+        "test_ids": test_ids,
+        "test_ids_sha256": _test_ids_sha256(test_ids),
     }
     return validated, report
 
@@ -254,6 +414,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approve-as-oracle", action="store_true", help="record the oracle as reviewer of unreviewed cases")
     parser.add_argument("--holdout-families", nargs="*", default=[], help="families to put in test (their whole atom moves)")
     parser.add_argument("--validation-families", nargs="*", default=[], help="families to put in validation (their whole atom moves)")
+    parser.add_argument("--sub-family", action="append", default=[], metavar="POLICY_ID=FAMILY",
+                        help="move a policy into its own family; repeatable; requires --previous-report; "
+                             "FAMILY must start with <from_family>- for every source family, with a suffix matching "
+                             "[a-z0-9]+(?:[.-][a-z0-9]+)*")
+    parser.add_argument("--previous-report", type=Path,
+                        help="freeze test IDs and refuse unrequested family split changes; report test content equality")
     args = parser.parse_args(argv)
     report_path = args.report or args.output.with_name("split-report.json")
     if args.output.resolve() == report_path.resolve():
@@ -269,8 +435,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {path} is inside a finalized audit run; write model-development output elsewhere", file=sys.stderr)
             return 2
     try:
+        if args.sub_family and args.previous_report is None:
+            raise ValueError("--sub-family requires --previous-report to freeze test membership")
+        sub_families = {}
+        for assignment in args.sub_family:
+            policy, separator, family = assignment.partition("=")
+            if not separator or not policy.strip() or not family.strip():
+                raise ValueError("--sub-family requires POLICY_ID=FAMILY")
+            policy, family = policy.strip(), family.strip()
+            if sub_families.setdefault(policy, family) != family:
+                raise ValueError(f"conflicting --sub-family assignments for {policy}")
         cases, report = split_cases(load_cases(args.cases), approve_as_oracle=args.approve_as_oracle,
-                                    holdout_families=args.holdout_families, validation_families=args.validation_families)
+                                    holdout_families=args.holdout_families, validation_families=args.validation_families,
+                                    sub_families=sub_families)
+        if args.previous_report is not None:
+            previous_report = json.loads(args.previous_report.read_text(encoding="utf-8"))
+            report.update(check_frozen_test_ids(cases, previous_report))
+            report.update(check_family_split_changes(cases, previous_report, sub_families=sub_families,
+                                                    validation_families=args.validation_families,
+                                                    holdout_families=args.holdout_families))
     except (OSError, ValueError, KeyError) as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
