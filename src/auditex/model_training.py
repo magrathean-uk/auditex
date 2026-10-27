@@ -519,16 +519,36 @@ def validate_training_pack(pack_dir: str | Path) -> tuple[dict[str, Any], dict[s
     return manifest, config
 
 
+def _load_tokenizer(snapshot: str, *, transformers: Any) -> tuple[Any, dict[str, bool]]:
+    """Load the pinned local tokenizer with the same family fix in every runtime path."""
+    config = _parse_json((Path(snapshot) / "config.json").read_text(encoding="utf-8"))
+    fix_mistral_regex = config["model_type"] == "mistral3"
+    settings = {"local_files_only": True, "trust_remote_code": False}
+    if fix_mistral_regex:
+        settings["fix_mistral_regex"] = True
+    tokenizer = transformers.AutoTokenizer.from_pretrained(snapshot, **settings)
+    return tokenizer, {"tokenizer_fix_mistral_regex": fix_mistral_regex}
+
+
 def _load_text_model(snapshot: str, *, torch: Any, transformers: Any) -> Any:
-    """Use the explicit text backbone for Qwen's multimodal configuration."""
+    """Load explicit text backbones from supported multimodal checkpoints."""
     settings = {"local_files_only": True, "trust_remote_code": False}
     model_config = transformers.AutoConfig.from_pretrained(snapshot, **settings)
+    allowed_unexpected = ("model.visual.", "mtp.", "model.mtp.")
     if model_config.model_type == "qwen3_5":
         # Qwen3_5TextConfig extracts the checkpoint's nested text_config. The
         # explicit text class excludes vision modules from both loading and LoRA.
         model_config = transformers.Qwen3_5TextConfig.from_pretrained(snapshot, **settings)
         loader = transformers.Qwen3_5ForCausalLM
         settings["key_mapping"] = {r"^model\.language_model\.": "model."}
+    elif model_config.model_type == "mistral3":
+        model_config = transformers.Ministral3Config(**model_config.text_config.to_dict())
+        loader = transformers.Ministral3ForCausalLM
+        settings["key_mapping"] = {
+            r"^language_model\.model\.": "model.",
+            r"^language_model\.lm_head\.": "lm_head.",
+        }
+        allowed_unexpected = ("vision_tower.", "multi_modal_projector.")
     else:
         loader = transformers.AutoModelForCausalLM
     model, loading = loader.from_pretrained(
@@ -538,7 +558,7 @@ def _load_text_model(snapshot: str, *, torch: Any, transformers: Any) -> Any:
     if loading.get("missing_keys") or loading.get("mismatched_keys") or loading.get("error_msgs"):
         raise ValueError("text checkpoint did not load completely; qualify the loader before training")
     unexpected = loading.get("unexpected_keys") or []
-    if any(not name.startswith(("model.visual.", "mtp.", "model.mtp.")) for name in unexpected):
+    if any(not name.startswith(allowed_unexpected) for name in unexpected):
         raise ValueError("unexpected checkpoint weights require loader qualification")
     return model
 
@@ -618,7 +638,7 @@ def training_main(argv: list[str] | None = None) -> int:
     from huggingface_hub import snapshot_download
     from importlib.metadata import version
     from peft import LoraConfig
-    from transformers import AutoTokenizer, TrainerCallback
+    from transformers import TrainerCallback
     from trl import SFTConfig, SFTTrainer
 
     if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
@@ -626,8 +646,9 @@ def training_main(argv: list[str] | None = None) -> int:
     snapshot = snapshot_download(repo_id=config["base_model"], revision=config["revision"], local_files_only=True)
     if Path(snapshot).name != config["revision"]:
         raise ValueError("staged model snapshot does not resolve to the pinned revision")
-    tokenizer = AutoTokenizer.from_pretrained(snapshot, local_files_only=True, trust_remote_code=False)
+    tokenizer, tokenizer_settings = _load_tokenizer(snapshot, transformers=transformers)
     token_budget = _measure_training_tokens(load_cases(root / "approved-cases.jsonl"), tokenizer, config["sft"]["max_length"])
+    token_budget.update(tokenizer_settings)
     model = _load_text_model(snapshot, torch=torch, transformers=transformers)
     model.config.use_cache = False
     dataset = load_dataset("json", data_files={split: str(root / f"{split}.jsonl") for split in ("train", "validation")})
@@ -655,6 +676,7 @@ def training_main(argv: list[str] | None = None) -> int:
         trainable, total = trainer.model.get_nb_trainable_parameters()
         adapter_keys = [name for name, _ in trainer.model.named_parameters() if "lora_A" in name]
         _write_json(output / "auditex-training-run.json", {
+            **tokenizer_settings,
             "base_model": manifest["base_model"], "base_revision": manifest["base_revision"],
             "pack_manifest_sha256": _digest(root / "manifest.json"), "metrics": result.metrics,
             "runtime_package_versions": {name: version(name) for name in RUNTIME_PACKAGE_CANDIDATES},
@@ -662,9 +684,9 @@ def training_main(argv: list[str] | None = None) -> int:
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"), "world_size": int(os.environ.get("WORLD_SIZE", "1")),
             "trainable_parameters": trainable, "total_parameters": total,
             "adapter_key_prefix_sample": adapter_keys[:1],
-            "adapter_note": "LoRA keys follow the text-only Qwen3_5ForCausalLM module names (model.layers.*); "
-                            "loading into Qwen3_5ForConditionalGeneration or a serving runtime needs the "
-                            "model.language_model.* prefix mapped back and must be verified before deployment.",
+            "adapter_note": "LoRA keys follow the text-only causal LM module names (model.layers.*); "
+                            "loading into a multimodal class requires family-specific prefix mapping "
+                            "and must be verified before deployment.",
             "log_history": trainer.state.log_history,
             "evaluation_status": "independent_held_out_evaluation_required", "test_cases_used_for_training": False,
         })

@@ -47,6 +47,10 @@ Model-development tooling only (round 2 of the specialist-model programme). `CON
 
 ### Model development
 
+- **Ministral 3 bases.** Training and checkpoint scoring load only the `mistral3`
+  text backbone alongside `qwen3_5`, remap its language-model weights and reject
+  unexpected non-vision weights. A shared tokenizer loader applies the Mistral
+  regex fix only to `mistral3` snapshots and records it in runtime reports.
 - **Named enums in oracle evidence.** `azure_tenant_audit.external_sharing.annotate_enum_names(section, observed)`
   adds `<Key>_name` beside the seven SharePoint integer enums of a `SPO_tenant` evidence item
   (`SharingCapability` and `ODBSharingCapability` as `<apiName> (<admin-centre label>)`, `DefaultSharingLinkType`,

@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from auditex.model_eval import evaluate_responses  # noqa: E402
 from auditex.model_training import (  # noqa: E402
-    _MODEL_ID, _REVISION, _load_text_model, _outside_audit_runs, _parse_json, _trl_record, load_cases,
+    _MODEL_ID, _REVISION, _load_text_model, _load_tokenizer, _outside_audit_runs, _parse_json, _trl_record, load_cases,
 )
 
 SCHEMA_VERSION = "2026-10-27"
@@ -367,6 +367,8 @@ def select_checkpoint(entries: list[dict[str, Any]]) -> dict[str, Any]:
 def evaluate_and_select(output_dir: Path, scored_cases: list[dict[str, Any]], run: dict[str, Any]) -> dict[str, Any]:
     """Run the recorded-answer evaluator over responses.jsonl, write evaluation.json and selection.json."""
     evaluation = evaluate_responses(output_dir / "scored-cases.jsonl", output_dir / "responses.jsonl")
+    tokenizer_settings = {"tokenizer_fix_mistral_regex": run["runtime"].get("tokenizer_fix_mistral_regex", False)}
+    evaluation.update(tokenizer_settings)
     evaluation["per_policy"] = {score["model_id"]: per_policy_metrics(evaluation, scored_cases, score["model_id"])
                                 for score in evaluation["model_scores"]}
     _write_json(output_dir / "evaluation.json", evaluation)
@@ -385,6 +387,7 @@ def evaluate_and_select(output_dir: Path, scored_cases: list[dict[str, Any]], ru
         warnings.append(f"{choice['selected']} is tied with {', '.join(choice['tied_with'])} on applicability errors, "
                         "pass count, overconfidence and over-abstention; step then name broke the tie")
     selection = {
+        **tokenizer_settings,
         "schema_version": SCHEMA_VERSION, "kind": "checkpoint_selection_by_generation", "gate": "G3",
         "created": _now(),
         "base_model": run["base_model"], "base_revision": run["base_revision"],
@@ -494,7 +497,7 @@ class TransformersBackend:
         snapshot = snapshot_download(repo_id=args.base_model, revision=args.revision, local_files_only=True)
         if Path(snapshot).name != args.revision:
             raise ValueError("staged model snapshot does not resolve to the pinned revision")
-        self._tokenizer = transformers.AutoTokenizer.from_pretrained(snapshot, local_files_only=True, trust_remote_code=False)
+        self._tokenizer, self._tokenizer_settings = _load_tokenizer(snapshot, transformers=transformers)
         started = time.perf_counter()
         model = _load_text_model(snapshot, torch=torch, transformers=transformers)
         self._base = model.to(device=args.device, dtype=getattr(torch, args.dtype)).eval()
@@ -523,7 +526,7 @@ class TransformersBackend:
         return stop
 
     def describe(self) -> dict[str, Any]:
-        return {"backend": "transformers+peft", "packages": self._versions, "device": self._device,
+        return {**self._tokenizer_settings, "backend": "transformers+peft", "packages": self._versions, "device": self._device,
                 "device_name": self._device_name, "snapshot": self._snapshot, "stop_token_ids": sorted(self._stop_ids),
                 "base_load_seconds": self._load_seconds}
 

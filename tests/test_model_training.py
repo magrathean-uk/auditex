@@ -1,10 +1,11 @@
-"""Synthetic curation and recipe checks; no models, GPUs or teacher calls."""
+"""Synthetic recipe checks and optional tiny random models; no GPUs, downloads or teacher calls."""
 from __future__ import annotations
 
 import copy
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ import pytest
 
 from auditex.model_training import (
     _load_text_model,
+    _load_tokenizer,
     _measure_training_tokens,
     _record_checkpoint_input,
     _validate_resume_input,
@@ -486,6 +488,169 @@ def test_qwen_multimodal_config_uses_text_model_and_rejects_incomplete_loading()
     loading["missing_keys"] = ["model.layers.0.weight"]
     with pytest.raises(ValueError, match="did not load completely"):
         _load_text_model("staged", torch=SimpleNamespace(bfloat16="bf16"), transformers=runtime)
+
+
+@pytest.mark.parametrize("model_type", ["mistral3", "qwen3_5", "ministral3", "mistral"])
+def test_tokenizer_loader_fixes_only_mistral3_snapshots(tmp_path: Path, model_type: str) -> None:
+    (tmp_path / "config.json").write_text(json.dumps({"model_type": model_type}))
+    calls = []
+    tokenizer = object()
+
+    def load(snapshot, **kwargs):
+        calls.append((snapshot, kwargs))
+        return tokenizer
+
+    runtime = SimpleNamespace(AutoTokenizer=SimpleNamespace(from_pretrained=load))
+    loaded, settings = _load_tokenizer(str(tmp_path), transformers=runtime)
+    expected = {"local_files_only": True, "trust_remote_code": False}
+    if model_type == "mistral3":
+        expected["fix_mistral_regex"] = True
+    assert loaded is tokenizer
+    assert calls == [(str(tmp_path), expected)]
+    assert settings == {"tokenizer_fix_mistral_regex": model_type == "mistral3"}
+
+
+@pytest.mark.parametrize("model_type", ["mistral3", "qwen3_5"])
+def test_training_records_the_tokenizer_fix_used_for_its_token_budget(tmp_path: Path, monkeypatch, model_type: str) -> None:
+    import importlib.metadata
+    import auditex.model_training as training
+
+    pack = _ready_pack(tmp_path)
+    manifest_bytes = (pack / "manifest.json").read_bytes()
+    snapshot = tmp_path / REVISION
+    snapshot.mkdir()
+    (snapshot / "config.json").write_text(json.dumps({"model_type": model_type}))
+    calls = []
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            return list(range(10))
+
+        def save_pretrained(self, path):
+            pass
+
+    tokenizer = Tokenizer()
+
+    def load_tokenizer(path, **kwargs):
+        calls.append(kwargs)
+        return tokenizer
+
+    model = SimpleNamespace(config=SimpleNamespace(), get_nb_trainable_parameters=lambda: (14, 100),
+                            named_parameters=lambda: [("model.layers.0.mlp.lora_A", None)])
+
+    class Trainer:
+        def __init__(self, **kwargs):
+            assert kwargs["processing_class"] is tokenizer
+            self.model = kwargs["model"]
+            self.state = SimpleNamespace(log_history=[])
+
+        def is_world_process_zero(self):
+            return True
+
+        def train(self, **kwargs):
+            return SimpleNamespace(metrics={"train_loss": 1.0})
+
+        def save_model(self, path):
+            Path(path).mkdir()
+
+        def save_state(self):
+            pass
+
+    for name, module in {
+        "torch": SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: True, is_bf16_supported=lambda: True)),
+        "transformers": SimpleNamespace(AutoTokenizer=SimpleNamespace(from_pretrained=load_tokenizer), TrainerCallback=object),
+        "datasets": SimpleNamespace(load_dataset=lambda *a, **kw: {"train": [], "validation": []}),
+        "huggingface_hub": SimpleNamespace(snapshot_download=lambda **kw: str(snapshot)),
+        "peft": SimpleNamespace(LoraConfig=lambda **kw: kw),
+        "trl": SimpleNamespace(SFTConfig=lambda **kw: kw, SFTTrainer=Trainer),
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(training, "_load_text_model", lambda *a, **kw: model)
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "unit-test")
+    for name in ("HF_HOME", "XDG_CACHE_HOME", "TORCH_HOME", "TRITON_CACHE_DIR", "TMPDIR"):
+        monkeypatch.setenv(name, str(tmp_path))
+    monkeypatch.setenv("RANK", "0")
+    output = tmp_path / "trained"
+    assert training_main(["--pack-dir", str(pack), "--output-dir", str(output), "--runtime-qualified"]) == 0
+    fixed = model_type == "mistral3"
+    assert calls == [{"local_files_only": True, "trust_remote_code": False, **({"fix_mistral_regex": True} if fixed else {})}]
+    record = json.loads((output / "auditex-training-run.json").read_text())
+    assert record["tokenizer_fix_mistral_regex"] is fixed
+    assert record["token_budget"]["tokenizer_fix_mistral_regex"] is fixed
+    assert record["token_budget"]["tokens_per_pass"] == {"train": 10, "validation": 10}
+    assert (pack / "manifest.json").read_bytes() == manifest_bytes
+
+
+@pytest.mark.parametrize("loading", [
+    {"missing_keys": ["model.layers.0.self_attn.q_proj.weight"]},
+    {"mismatched_keys": ["lm_head.weight"]},
+    {"error_msgs": ["bad checkpoint"]},
+    {"unexpected_keys": ["language_model.unmapped.weight"]},
+    {"unexpected_keys": ["model.visual.weight"]},
+    {"unexpected_keys": ["mtp.weight"]},
+    {"unexpected_keys": ["vision_tower_extra.weight"]},
+    {"unexpected_keys": ["multi_modal_projector_extra.weight"]},
+])
+def test_mistral_loader_rejects_incomplete_or_unqualified_weights(loading: dict) -> None:
+    runtime = SimpleNamespace(
+        AutoConfig=SimpleNamespace(from_pretrained=lambda *a, **kw: SimpleNamespace(
+            model_type="mistral3", text_config=SimpleNamespace(to_dict=lambda: {"model_type": "ministral3"}))),
+        Ministral3Config=lambda **kw: SimpleNamespace(**kw),
+        Ministral3ForCausalLM=SimpleNamespace(from_pretrained=lambda *a, **kw: (object(), loading)),
+    )
+    with pytest.raises(ValueError, match="qualif"):
+        _load_text_model("staged", torch=SimpleNamespace(bfloat16="bf16"), transformers=runtime)
+
+
+def test_tiny_mistral_checkpoint_maps_text_weights_and_lora_stays_in_text(tmp_path: Path, monkeypatch) -> None:
+    # Optional model dependencies; the default CLI/test environment need not install them.
+    torch = pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    peft = pytest.importorskip("peft")
+    safetensors = pytest.importorskip("safetensors.torch")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+    config = transformers.Ministral3Config(
+        vocab_size=32, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
+        num_attention_heads=2, num_key_value_heads=1, head_dim=8, tie_word_embeddings=False,
+    )
+    original = transformers.Ministral3ForCausalLM(config)
+    expected = original.state_dict()
+    assert "model.embed_tokens.weight" in expected and "lm_head.weight" in expected
+    assert all(key.startswith(("model.", "lm_head.")) for key in expected)
+    checkpoint = {f"language_model.{key}": tensor.clone() for key, tensor in expected.items()}
+    checkpoint.update({"vision_tower.fake.weight": torch.ones(2, 2),
+                       "multi_modal_projector.fake.weight": torch.ones(2, 2)})
+    # Multimodal shape, but only a tiny random text model plus two discarded tensors on disk.
+    transformers.Mistral3Config(text_config=config.to_dict()).save_pretrained(tmp_path)
+    safetensors.save_file(checkpoint, str(tmp_path / "model.safetensors"))
+    loading_results = []
+    load = transformers.Ministral3ForCausalLM.from_pretrained
+
+    def capture_loading(*args, **kwargs):
+        assert kwargs["key_mapping"] == {r"^language_model\.model\.": "model.",
+                                         r"^language_model\.lm_head\.": "lm_head."}
+        result = load(*args, **kwargs)
+        loading_results.append(result[1])
+        return result
+
+    monkeypatch.setattr(transformers.Ministral3ForCausalLM, "from_pretrained", capture_loading)
+    model = _load_text_model(str(tmp_path), torch=torch, transformers=transformers)
+    assert set(loading_results[0]["unexpected_keys"]) == {"vision_tower.fake.weight", "multi_modal_projector.fake.weight"}
+    assert isinstance(model, transformers.Ministral3ForCausalLM)
+    assert model.config.hidden_size == 16 and model.config.num_hidden_layers == 1
+    assert set(model.state_dict()) == set(expected)
+    for key, tensor in model.state_dict().items():
+        torch.testing.assert_close(tensor, expected[key].to(torch.bfloat16), rtol=0, atol=0)
+    assert not any(any(part in name for part in ("vision", "projector", "language_model"))
+                   for name, _ in model.named_modules())
+    adapted = peft.get_peft_model(model, peft.LoraConfig(r=2, lora_alpha=4, target_modules="all-linear", task_type="CAUSAL_LM"))
+    lora = {name for name, _ in adapted.named_parameters() if ".lora_" in name}
+    assert len(lora) == 14  # seven text linears, A and B; lm_head is excluded by all-linear.
+    assert all(name.startswith("base_model.model.model.layers.0.") for name in lora)
+    assert all(any(f".{part}." in name for part in ("self_attn", "mlp")) for name in lora)
+    with torch.inference_mode():
+        assert adapted(input_ids=torch.tensor([[1, 3, 2]])).logits.shape == (1, 3, 32)
 
 
 def test_actual_tokenizer_preflight_excludes_test_and_refuses_silent_truncation() -> None:

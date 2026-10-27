@@ -723,7 +723,8 @@ def test_selection_bundle_records_band_and_warns_when_applicability_changes_the_
     assert by_name["checkpoint-150"]["applicability_errors"] == 0
 
 
-def test_end_to_end_ranks_checkpoints_by_generated_answers_and_writes_the_bundle(tmp_path, held_out):
+@pytest.mark.parametrize("fix_mistral_regex", [False, True])
+def test_end_to_end_ranks_checkpoints_by_generated_answers_and_writes_the_bundle(tmp_path, held_out, fix_mistral_regex):
     cases, cases_path = held_out
     root = tmp_path / "run"
     for name in ("checkpoint-100", "checkpoint-25", "checkpoint-50"):
@@ -734,6 +735,7 @@ def test_end_to_end_ranks_checkpoints_by_generated_answers_and_writes_the_bundle
     answers = {"checkpoint-25": one_bad, "checkpoint-50": {case["id"]: good(case) for case in cases},
                "checkpoint-100": fenced}
     backend = StubBackend(answers)
+    backend.describe = lambda: {"backend": "stub", "tokenizer_fix_mistral_regex": fix_mistral_regex}
     code, out = run_main(tmp_path, cases_path, root, backend)
     assert code == 0
     # Natural step order, one adapter at a time, always unloaded again.
@@ -754,10 +756,13 @@ def test_end_to_end_ranks_checkpoints_by_generated_answers_and_writes_the_bundle
     assert isinstance(fenced_row["response"], str) and fenced_row["response"].startswith("```json")
 
     evaluation = json.loads((out / "evaluation.json").read_text())
+    assert evaluation["tokenizer_fix_mistral_regex"] is fix_mistral_regex
     assert {item["model_id"] for item in evaluation["model_scores"]} == {row["model_id"] for row in rows}
     assert evaluation["missing_responses"] == [] and evaluation["invalid_records"] == []
 
     selection = json.loads((out / "selection.json").read_text())
+    assert selection["tokenizer_fix_mistral_regex"] is fix_mistral_regex
+    assert selection["runtime"]["tokenizer_fix_mistral_regex"] is fix_mistral_regex
     assert selection["selected"] == "checkpoint-50" and selection["gate"] == "G3"
     assert selection["selected_model_id"] == f"{BASE}@{REVISION}+checkpoint-50"
     assert selection["ranking"] == ["checkpoint-50", "checkpoint-25", "checkpoint-100"]

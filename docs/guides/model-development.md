@@ -8,6 +8,15 @@ findings and evidence references remain deterministic Auditex responsibilities.
 This workflow assembles review materials and supports local GGUF benchmarks.
 Training and JUPITER runtime qualification remain separate steps.
 
+### Supported base families
+
+The LoRA training and checkpoint-scoring loaders support `qwen3_5` and `mistral3`
+(Ministral 3) checkpoints through their text backbones only; vision towers and
+multimodal projectors are excluded. The shared tokenizer loader applies
+`fix_mistral_regex=True` only when the pinned snapshot's `model_type` is `mistral3`,
+keeping training, token budgets, scoring and serving checks consistent. Runtime
+reports record the applied `tokenizer_fix_mistral_regex` boolean.
+
 ## Available materials
 
 Run `auditex model sources` to inspect the pinned source inventory. The prepared
