@@ -5,8 +5,8 @@ Eval loss measures next-token fit to the teacher-forced answer; it does not say 
 generated JSON passes the reviewed rubric. This script loads the text-only base once, attaches each
 checkpoint's adapter in turn, renders every case prompt exactly as training did (thinking off), generates
 greedily, parses the raw text as strict JSON (no fence stripping, no repair), and scores the answers with the
-recorded-answer evaluator. The selected checkpoint is the one with the highest strict pass rate, never the
-lowest eval loss. Offline only: no installation, download, network or tenant call. Torch, transformers and
+recorded-answer evaluator. Selection minimises applicability errors within a noise band of the best strict
+pass count, never by eval loss. Offline only: no installation, download, network or tenant call. Torch, transformers and
 peft are imported lazily, so --help and the pure scoring and selection code run without them.
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import gc
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -31,23 +32,33 @@ from auditex.model_training import (  # noqa: E402
     _MODEL_ID, _REVISION, _load_text_model, _outside_audit_runs, _parse_json, _trl_record, load_cases,
 )
 
-SCHEMA_VERSION = "2026-10-20"
+SCHEMA_VERSION = "2026-10-27"
 HELD_OUT_SPLITS = ("validation", "test")
 DEVICES = ("cuda", "mps", "cpu")
 DTYPES = ("bfloat16", "float16", "float32")
 ADAPTER_WEIGHT_FILES = ("adapter_model.safetensors", "adapter_model.bin")
 _STEP = re.compile(r"checkpoint-(\d+)")
 SELECTION_RULE = {
-    "metric": "strict_pass_rate",
+    "version": "2026-10-27",
+    "metric": "strict_pass_count within a noise band, applicability errors first, base floor",
     "never_by": "eval_loss",
     "description": (
-        "Highest strict pass rate (every claim status, typed value, evidence set and limitation/recommendation ID "
-        "matches the reviewed rubric on greedy, thinking-off, strictly parsed JSON). Ties: lowest overconfidence "
+        "Keep checkpoints within band_width of the best strict pass count (every claim status, typed value, evidence "
+        "set and limitation/recommendation ID matches on greedy, thinking-off, strictly parsed JSON). "
+        "band_width = max(1, ceil(1.96 * sqrt(N * p * (1 - p)))), where N is scored_cases and p is the best strict rate: "
+        "1.96 binomial standard errors at the best point, expressed as a case count, not a paired significance test. "
+        "When a base (step 0 or name checkpoint-0) is present, only trained checkpoints strictly beating its pass "
+        "count are eligible; select the base if none do. Within the eligible band: lowest applicability_errors "
+        "(requirement_met status mismatches between confirmed and inferred in either direction; the rate divides "
+        "by expected requirement_met claims with confirmed or inferred status), then highest strict pass count, "
+        "then lowest overconfidence "
         "(claims expected unknown answered confirmed or inferred), then lowest over-abstention (claims expected confirmed or "
-        "inferred answered unknown), then the earliest training step, then name. A tie on the first three keys is "
-        "reported in tied_with rather than hidden. The unweighted per_policy_mean is reported beside the strict rate."
+        "inferred answered unknown), then the earliest training step, then name. "
+        "A tie on the four keys before step is reported in tied_with. Excluded checkpoints follow in strict-first order. "
+        "The unweighted per_policy_mean is reported beside the strict rate."
     ),
-    "order": ["strict_pass_count desc", "overconfidence asc", "over_abstention asc", "step asc", "name asc"],
+    "order": ["applicability_errors asc", "strict_pass_count desc", "overconfidence asc", "over_abstention asc",
+              "step asc", "name asc"],
 }
 CAVEATS = [
     "Structured checks only: claim IDs, statuses, typed values, evidence IDs and gap/recommendation IDs are compared mechanically; prose entailment is not verified.",
@@ -266,7 +277,7 @@ def checkpoint_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], 
     """Derive the selection metrics for one model from the evaluator output; labels come from the cases."""
     score = next(item for item in evaluation["model_scores"] if item["model_id"] == model_id)
     rows = [row for row in evaluation["results"] if row["model_id"] == model_id]
-    over_abstention = overconfidence = 0
+    over_abstention = overconfidence = applicability_errors = 0
     issue_counts: Counter[str] = Counter()
     for row in rows:
         for issue in row["issues"]:
@@ -277,7 +288,12 @@ def checkpoint_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], 
                 over_abstention += 1
             elif issue["expected"] == "unknown" and issue["observed"] in ("confirmed", "inferred"):
                 overconfidence += 1
-    answered = sum(claim["status"] != "unknown" for case in cases for claim in case["expected"]["claims"])
+            elif issue.get("claim_id") == "requirement_met" and (issue["expected"], issue["observed"]) in (
+                    ("confirmed", "inferred"), ("inferred", "confirmed")):
+                applicability_errors += 1
+    answered = sum(claim["status"] in ("confirmed", "inferred") for case in cases for claim in case["expected"]["claims"])
+    gates = sum(claim["id"] == "requirement_met" and claim["status"] in ("confirmed", "inferred")
+                for case in cases for claim in case["expected"]["claims"])
     unknown = sum(claim["status"] == "unknown" for case in cases for claim in case["expected"]["claims"])
     scored = score["approved_case_count"]
     passes = score["mechanical_pass_count"]
@@ -293,6 +309,8 @@ def checkpoint_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], 
         "rows_without_case": sum(row["case_id"] not in case_ids for row in rows),
         "schema_error_count": sum(row["scored"] and row["schema_valid"] is False for row in rows),
         "over_abstention": over_abstention, "overconfidence": overconfidence,
+        "applicability_errors": applicability_errors,
+        "applicability_errors_rate": applicability_errors / gates if gates else None,
         "expected_answered_claims": answered, "expected_unknown_claims": unknown,
         "over_abstention_rate": over_abstention / answered if answered else None,
         "overconfidence_rate": overconfidence / unknown if unknown else None,
@@ -302,6 +320,7 @@ def checkpoint_metrics(evaluation: dict[str, Any], cases: list[dict[str, Any]], 
 
 
 def _rank_key(entry: dict[str, Any]) -> tuple[Any, ...]:
+    """Legacy strict-first order, retained to make selection changes visible."""
     step = entry["step"]
     return (-entry["strict_pass_count"], entry["overconfidence"], entry["over_abstention"],
             step if step is not None else float("inf"), entry["name"])
@@ -311,12 +330,38 @@ def select_checkpoint(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """Apply SELECTION_RULE. `entries` carry name, step and the checkpoint_metrics fields; eval loss is not an input."""
     if not entries:
         raise ValueError("no checkpoints to select from")
-    ranked = sorted(entries, key=_rank_key)
+    strict_first = sorted(entries, key=_rank_key)
+    best_count = strict_first[0]["strict_pass_count"]
+    scored = strict_first[0]["scored_cases"]
+    if any(item["scored_cases"] != scored for item in entries):
+        raise ValueError("checkpoints must have the same scored_cases denominator")
+    p = best_count / scored if scored else 0
+    band_width = max(1, math.ceil(1.96 * math.sqrt(scored * p * (1 - p))))
+    threshold = best_count - band_width
+
+    def band_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        return (item["applicability_errors"], -item["strict_pass_count"], item["overconfidence"], item["over_abstention"],
+                item["step"] if item["step"] is not None else float("inf"), item["name"])
+
+    base = next((item for item in strict_first if item["step"] == 0 or item["name"] == "checkpoint-0"), None)
+    eligible = entries if base is None else [item for item in entries
+                                            if item["strict_pass_count"] > base["strict_pass_count"]]
+    if base is not None and not eligible:
+        eligible = [base]
+    members = sorted((item for item in eligible if item["strict_pass_count"] >= threshold), key=band_key)
+    member_names = {item["name"] for item in members}
+    ranked = members + [item for item in strict_first if item["name"] not in member_names]
     best = ranked[0]
-    first_three = lambda item: (item["strict_pass_count"], item["overconfidence"], item["over_abstention"])  # noqa: E731
-    tied = [item["name"] for item in ranked[1:] if first_three(item) == first_three(best)]
+    tied = [item["name"] for item in members[1:] if band_key(item)[:-2] == band_key(best)[:-2]]
+    previous = strict_first[0]["name"]
+    warnings = []
+    if best["name"] != previous:
+        warnings.append(f"noise-band selection chose {best['name']}; the previous strict-first rule would choose {previous}")
     return {"selected": best["name"], "ranking": [item["name"] for item in ranked],
-            "tied_with": tied}
+            "tied_with": tied, "band_width": band_width, "band_members": [item["name"] for item in members],
+            "best_strict_pass_count": best_count, "selected_by_strict_first": previous,
+            "base_strict_pass_count": base["strict_pass_count"] if base is not None else None,
+            "base_floor_applied": base is not None, "warnings": warnings}
 
 
 def evaluate_and_select(output_dir: Path, scored_cases: list[dict[str, Any]], run: dict[str, Any]) -> dict[str, Any]:
@@ -331,23 +376,23 @@ def evaluate_and_select(output_dir: Path, scored_cases: list[dict[str, Any]], ru
                                                     per_policy=evaluation["per_policy"][meta["model_id"]])})
     choice = select_checkpoint(entries)
     by_name = {entry["name"]: entry for entry in entries}
-    warnings = []
+    warnings = list(choice["warnings"])
     if run["generation"]["limit"]:
         warnings.append("smoke run: --limit restricted the cases, so this is not a selection result")
     if entries and by_name[choice["selected"]]["strict_pass_count"] == 0:
         warnings.append("the selected checkpoint passes no case; check the parse and schema errors before trusting any ranking")
     if choice["tied_with"]:
-        warnings.append(f"{choice['selected']} is tied with {', '.join(choice['tied_with'])} on pass count, overconfidence and "
-                        "over-abstention; the earliest step broke the tie")
+        warnings.append(f"{choice['selected']} is tied with {', '.join(choice['tied_with'])} on applicability errors, "
+                        "pass count, overconfidence and over-abstention; step then name broke the tie")
     selection = {
         "schema_version": SCHEMA_VERSION, "kind": "checkpoint_selection_by_generation", "gate": "G3",
         "created": _now(),
         "base_model": run["base_model"], "base_revision": run["base_revision"],
         "selection_rule": SELECTION_RULE,
-        "selected": choice["selected"],
+        **choice,
         "selected_model_id": by_name[choice["selected"]]["model_id"],
         "selected_path": by_name[choice["selected"]]["path"],
-        "ranking": choice["ranking"], "tied_with": choice["tied_with"], "warnings": warnings,
+        "warnings": warnings,
         "smoke": bool(run["generation"]["limit"]),
         "checkpoints": [by_name[name] for name in choice["ranking"]],
         "cases": run["cases"], "generation": run["generation"], "runtime": run["runtime"],

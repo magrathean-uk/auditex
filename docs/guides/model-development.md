@@ -798,11 +798,32 @@ unloaded (checked for leftover LoRA layers) and memory freed before the next che
 requested splits are generated for (default `validation` and `test`, never `train`); `--splits validation` is
 the recommended selection run, keeping `test` for one final report of the winner.
 
-The rule is recorded in `selection.json`: highest strict pass rate; ties go to the lowest overconfidence (claims
-expected `unknown` answered `confirmed`), then the lowest over-abstention (expected `confirmed` or `inferred`
-answered `unknown`), then the earliest step. A tie on the first three keys is listed under `tied_with` and in
-`warnings`, as is a zero pass rate or a `--limit` smoke. Each checkpoint also records schema errors, strict-JSON
-failures, token-limit hits, issue counts, adapter hashes and `seconds_per_case`.
+The rule and selection output schema recorded in `selection.json` are version `2026-10-27`. First find the best
+`strict_pass_count` and keep candidates with `strict_pass_count >= best_strict_pass_count - band_width`, where
+`band_width = max(1, ceil(1.96 * sqrt(N * p * (1 - p))))`, `N` is `scored_cases` and `p` is the best strict pass rate.
+This is 1.96 binomial standard errors at the best point, expressed as a case count; it is a noise-band heuristic,
+not a paired significance test. For 292/348 the band is 14 cases; for 249/290 it is 12. When a base entry (step 0
+or name `checkpoint-0`, the null adapter) is present, a trained checkpoint is eligible only if its strict pass count
+strictly exceeds the base's. If none do, select the base. Otherwise, exclude the base and trained checkpoints
+at or below its count from the band. Without a base entry, use the band unchanged. Within the eligible band, rank by
+lowest `applicability_errors`, highest strict pass count, lowest overconfidence, lowest over-abstention, earliest
+step, then name. Applicability errors are `status_mismatch` issues on the `requirement_met` claim between expected
+`inferred` and observed `confirmed`, or expected `confirmed` and observed `inferred`: a verdict asserted with a
+closed policy gate, or a closed gate asserted when a verdict was due. `applicability_errors_rate` divides these errors by the number of
+expected `requirement_met` claims whose status is `confirmed` or `inferred`; it is null when there are none.
+Confirmed/inferred swaps on other claims do not count as applicability errors. Unknown-related mismatches
+remain overconfidence (expected `unknown`, answered `confirmed` or `inferred`) or over-abstention (expected
+`confirmed` or `inferred`, answered `unknown`).
+
+`selection.json` records `band_width`, `band_members` (eligible names in selection order), `best_strict_pass_count`,
+`base_strict_pass_count` (null without a base), `base_floor_applied` (true when a base entry is present) and
+`selected_by_strict_first` (the previous rule's winner: highest strict pass count, then lowest overconfidence,
+lowest over-abstention, earliest step and name). A changed winner adds a `warnings` entry. The full `ranking`
+and `checkpoints` list eligible band members first, followed by excluded checkpoints in the previous strict-first
+order; neither is necessarily monotone in strict pass count. A tie on applicability errors, strict pass count,
+overconfidence and over-abstention is listed under `tied_with` and in `warnings`, as is a zero pass count or a
+`--limit` smoke. Each checkpoint also records schema errors, strict-JSON failures, token-limit hits, issue counts,
+adapter hashes and `seconds_per_case`.
 
 The output directory must be new and holds `responses.jsonl` (rows `{case_id, model_id, response}` with
 `model_id` `<base>@<revision>+<checkpoint name>`, exactly what `auditex model evaluate` reads),

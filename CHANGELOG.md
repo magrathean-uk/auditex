@@ -26,8 +26,17 @@ Model-development tooling only (round 2 of the specialist-model programme). `CON
 - **Checkpoint scorer.** `scripts/score-adapter-checkpoints.py` counts an expected-`unknown` claim answered
   `inferred` as overconfidence (it counted `confirmed` only; the v6 figure was 3/80, the true one 5/80), writes a
   per-model `per_policy` table into `evaluation.json` (policy id of the case, family when there is none) and reports
-  `per_policy_mean` and `per_policy_count` in `selection.json`. The selection order is unchanged, so earlier
-  `selection.json` overconfidence values are not comparable with new ones.
+  `per_policy_mean` and `per_policy_count` in `selection.json`. Rule `2026-10-27` counts confirmed/inferred status
+  swaps in both directions on the `requirement_met` policy-gate claim as `applicability_errors`, with a rate over
+  expected confirmed/inferred `requirement_met` claims, and
+  selects within a strict-pass noise band of `max(1, ceil(1.96 * sqrt(N * p * (1 - p))))` by lowest applicability
+  errors, highest strict pass count, lowest overconfidence and over-abstention, then earliest step and name. It records
+  the band width, member names, best strict pass count and previous strict-first winner, and warns when the
+  winner changes. The base floor makes trained checkpoints eligible only when they strictly beat the base
+  (step 0 / `checkpoint-0`); otherwise the base wins. Selection schema `2026-10-27` records
+  `base_strict_pass_count` and `base_floor_applied`. `ranking` and `checkpoints` are ordered band-first, so
+  neither is necessarily monotone in strict pass count; `tied_with` also requires equal applicability errors.
+  Earlier `selection.json` overconfidence values are not comparable with new ones.
 - **Splitter sub-families and frozen ids.** `scripts/split-oracle-cases.py` takes `--sub-family <policy>=<family>`
   (relabels one policy's rows to a family named `<source family>-...`, so a policy can be sent to validation on its
   own with `--validation-families`) and `--previous-report <split-report.json>`, which refuses any change to the

@@ -265,7 +265,7 @@ def entry(name, passes, over_confident=0, over_abstained=0, step="auto", **extra
     if step == "auto":
         step = sac._checkpoint_step(name)
     return {"name": name, "step": step, "strict_pass_count": passes, "overconfidence": over_confident,
-            "over_abstention": over_abstained, **extra}
+            "over_abstention": over_abstained, "scored_cases": 10, "applicability_errors": 0, **extra}
 
 
 def test_selection_takes_the_highest_strict_pass_rate():
@@ -303,7 +303,183 @@ def test_selection_needs_at_least_one_checkpoint():
         sac.select_checkpoint([])
 
 
+@pytest.mark.parametrize("scored,passes,width", [(348, 292, 14), (290, 249, 12), (10, 10, 1), (10, 0, 1), (0, 0, 1)])
+def test_selection_band_uses_binomial_standard_error_at_the_best_point(scored, passes, width):
+    result = sac.select_checkpoint([entry("checkpoint-25", passes, scored_cases=scored)])
+    assert result["band_width"] == width
+    assert result["best_strict_pass_count"] == passes
+    assert result["band_members"] == ["checkpoint-25"]
+
+
+def test_selection_prioritises_applicability_within_the_inclusive_band():
+    entries = [entry("checkpoint-125", 292, scored_cases=348, applicability_errors=20),
+               entry("checkpoint-150", 278, scored_cases=348, over_confident=5, over_abstained=5),
+               entry("checkpoint-175", 277, scored_cases=348)]
+    result = sac.select_checkpoint(entries)
+    assert result["selected"] == "checkpoint-150"
+    assert result["selected_by_strict_first"] == "checkpoint-125"
+    assert result["band_members"] == ["checkpoint-150", "checkpoint-125"]
+    assert result["ranking"] == ["checkpoint-150", "checkpoint-125", "checkpoint-175"]
+    assert result["tied_with"] == []
+    assert len(result["warnings"]) == 1
+    assert all(name in result["warnings"][0] for name in ("checkpoint-125", "checkpoint-150"))
+
+
+def test_selection_keeps_strict_first_winner_when_safer_checkpoint_is_outside_band():
+    result = sac.select_checkpoint([entry("checkpoint-150", 292, scored_cases=348, applicability_errors=20),
+                                    entry("checkpoint-175", 277, scored_cases=348)])
+    assert result["selected"] == result["selected_by_strict_first"] == "checkpoint-150"
+    assert result["band_members"] == ["checkpoint-150"]
+    assert result["warnings"] == []
+
+
+def test_selection_ties_include_applicability_and_pass_count_before_step():
+    entries = [entry("checkpoint-25", 9, applicability_errors=1), entry("checkpoint-50", 8),
+               entry("checkpoint-75", 8, applicability_errors=1), entry("checkpoint-100", 8),
+               entry("checkpoint-200", 7)]
+    result = sac.select_checkpoint(entries)
+    assert result["selected"] == "checkpoint-50"
+    assert result["tied_with"] == ["checkpoint-100"]
+    assert result["ranking"] == ["checkpoint-50", "checkpoint-100", "checkpoint-200", "checkpoint-25", "checkpoint-75"]
+    named = sac.select_checkpoint([entry("z-adapter", 8, step=None), entry("a-adapter", 8, step=None)])
+    assert named["selected"] == "a-adapter" and named["tied_with"] == ["z-adapter"]
+
+
+@pytest.mark.parametrize("extra", [{"over_confident": 1}, {"over_abstained": 1}])
+def test_selection_strict_count_precedes_unknown_related_error_counts_within_band(extra):
+    result = sac.select_checkpoint([entry("checkpoint-25", 8), entry("checkpoint-50", 9, **extra)])
+    assert result["selected"] == result["selected_by_strict_first"] == "checkpoint-50"
+    assert result["band_members"] == ["checkpoint-50", "checkpoint-25"]
+    assert result["warnings"] == []
+
+
+def test_selection_requires_comparable_case_counts():
+    with pytest.raises(ValueError, match="same scored_cases"):
+        sac.select_checkpoint([entry("checkpoint-25", 8), entry("checkpoint-50", 8, scored_cases=20)])
+
+
+@pytest.mark.parametrize("base_name,base_step", [("checkpoint-0", None), ("null-adapter", 0)])
+@pytest.mark.parametrize("base_passes,trained_passes,base_errors,trained_errors,winner", [
+    (280, 292, 0, 1, "checkpoint-150"),
+    (292, 280, 1, 0, "base"),
+    (292, 292, 1, 0, "base"),
+])
+def test_selection_requires_trained_checkpoints_to_strictly_beat_the_base(
+        base_name, base_step, base_passes, trained_passes, base_errors, trained_errors, winner):
+    result = sac.select_checkpoint([
+        entry(base_name, base_passes, step=base_step, scored_cases=348, applicability_errors=base_errors),
+        entry("checkpoint-150", trained_passes, scored_cases=348, applicability_errors=trained_errors),
+    ])
+    selected = base_name if winner == "base" else winner
+    assert result["selected"] == selected
+    assert result["band_members"] == [selected]
+    assert result["tied_with"] == []
+    assert result["base_strict_pass_count"] == base_passes
+    assert result["base_floor_applied"] is True
+
+
+def test_selection_excludes_trained_checkpoints_at_or_below_base_even_when_another_beats_it():
+    result = sac.select_checkpoint([
+        entry("checkpoint-0", 280, scored_cases=348),
+        entry("checkpoint-100", 280, scored_cases=348),
+        entry("checkpoint-125", 279, scored_cases=348),
+        entry("checkpoint-150", 292, scored_cases=348, applicability_errors=1),
+    ])
+    assert result["selected"] == "checkpoint-150"
+    assert result["band_members"] == ["checkpoint-150"]
+    assert result["ranking"] == ["checkpoint-150", "checkpoint-0", "checkpoint-100", "checkpoint-125"]
+
+
+def test_selection_without_base_keeps_noise_band_behaviour():
+    result = sac.select_checkpoint([entry("checkpoint-125", 292, scored_cases=348, applicability_errors=1),
+                                    entry("checkpoint-150", 280, scored_cases=348)])
+    assert result["selected"] == "checkpoint-150"
+    assert result["band_members"] == ["checkpoint-150", "checkpoint-125"]
+    assert result["base_strict_pass_count"] is None
+    assert result["base_floor_applied"] is False
+
+
+@pytest.mark.parametrize("relative,models,scored,width,previous", [
+    ("results-v7-20261026/real-v7-validation-20261026T150431Z", 13, 348, 14, "checkpoint-125"),
+    ("results-v6-20261025T225631Z/real-v6-validation-20261025T144736Z", 18, 290, 12, "checkpoint-150"),
+])
+def test_selection_on_real_validation_runs_when_present(relative, models, scored, width, previous):
+    root = Path(os.environ.get("AUDITEX_TEST_JUPITER_RESULTS",
+                               Path.home() / "dev/machine/work/auditex-data/development-kit/jupiter-results")) / relative
+    if not all((root / name).is_file() for name in ("evaluation.json", "scored-cases.jsonl")):
+        pytest.skip(f"local validation scoring files are absent: {root}")
+    evaluation = json.loads((root / "evaluation.json").read_text(encoding="utf-8"))
+    cases = load_cases([root / "scored-cases.jsonl"])
+    assert len(evaluation["model_scores"]) == models
+    assert len(cases) == scored and {case["split"] for case in cases} == {"validation"}
+    entries = []
+    for score in evaluation["model_scores"]:
+        model = score["model_id"]
+        name = model.rsplit("+", 1)[1]
+        entries.append({"name": name, "step": sac._checkpoint_step(name),
+                        **sac.checkpoint_metrics(evaluation, cases, model)})
+    result = sac.select_checkpoint(entries)
+    assert result["selected"] == "checkpoint-150"
+    assert result["selected_by_strict_first"] == previous
+    assert result["band_width"] == width
+    if scored == 348:
+        assert result["band_width"] == 14
+        assert result["band_members"] == [f"checkpoint-{step}" for step in (150, 175, 225, 125, 100)]
+    else:
+        assert result["band_width"] == 12
+    assert bool(result["warnings"]) == (previous != result["selected"])
+
+
 # --- metrics from the evaluator -----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("claim_id", ["requirement_met", "registered"])
+@pytest.mark.parametrize("expected,observed,applicability,confidence,abstention", [
+    ("inferred", "confirmed", 1, 0, 0), ("confirmed", "inferred", 1, 0, 0),
+    ("unknown", "confirmed", 0, 1, 0), ("unknown", "inferred", 0, 1, 0),
+    ("confirmed", "unknown", 0, 0, 1), ("inferred", "unknown", 0, 0, 1),
+    ("confirmed", "confirmed", 0, 0, 0), ("inferred", "inferred", 0, 0, 0),
+])
+def test_metrics_distinguish_applicability_from_unknown_mismatches(tmp_path, expected, observed,
+                                                                applicability, confidence, abstention, claim_id):
+    case = make_case("gate", unknown_claim=False)
+    claim = case["expected"]["claims"][0]
+    claim.update(id=claim_id, status=expected, value=None if expected == "unknown" else True)
+    case["messages"][-1]["content"] = json.dumps(good(case))
+    cases_path = write_cases(tmp_path / "cases.jsonl", [case])
+    answer = good(case)
+    answer["claims"][0].update(status=observed, value=None if observed == "unknown" else True)
+    responses = tmp_path / "responses.jsonl"
+    responses.write_text(json.dumps({"case_id": case["id"], "model_id": "m", "response": answer}) + "\n")
+    evaluation = evaluate_responses(cases_path, responses)
+    metrics = sac.checkpoint_metrics(evaluation, [case], "m")
+    assert metrics["applicability_errors"] == (applicability if claim_id == "requirement_met" else 0)
+    assert metrics["applicability_errors_rate"] == (
+        float(applicability) if claim_id == "requirement_met" and expected != "unknown" else None)
+    assert metrics["overconfidence"] == confidence
+    assert metrics["over_abstention"] == abstention
+
+
+def test_applicability_rate_counts_only_expected_confirmed_and_inferred_policy_gates(tmp_path):
+    cases = [make_case(f"gate-{status}") for status in ("confirmed", "inferred", "unknown")]
+    answers = []
+    for case, status in zip(cases, ("confirmed", "inferred", "unknown")):
+        case["expected"]["claims"].append({"id": "requirement_met", "status": status,
+                                           "value": None if status == "unknown" else True,
+                                           "evidence_ids": [f"{case['id']}:e1"]})
+        case["messages"][-1]["content"] = json.dumps(good(case))
+        answer = good(case)
+        answer["claims"][0]["status"] = "inferred"  # Non-gate swaps affect neither numerator nor denominator.
+        if status == "inferred":
+            answer["claims"][2]["status"] = "confirmed"
+        answers.append({"case_id": case["id"], "model_id": "m", "response": answer})
+    cases_path = write_cases(tmp_path / "cases.jsonl", cases)
+    responses = tmp_path / "responses.jsonl"
+    responses.write_text("".join(json.dumps(answer) + "\n" for answer in answers))
+    metrics = sac.checkpoint_metrics(evaluate_responses(cases_path, responses), cases, "m")
+    assert metrics["applicability_errors"] == 1
+    assert metrics["applicability_errors_rate"] == 0.5
+    assert metrics["expected_answered_claims"] == 5
+
 
 def test_metrics_count_schema_errors_overconfidence_and_over_abstention(tmp_path):
     cases = [make_case(f"case-{name}") for name in ("ok", "bold", "shy", "bad")]
@@ -362,6 +538,7 @@ def test_per_policy_mean_is_none_without_approved_cases(cases):
     assert metrics["per_policy_mean"] is None
     assert metrics["strict_pass_rate"] is None
     assert metrics["per_policy_count"] == 0
+    assert metrics["applicability_errors_rate"] is None
 
 
 @pytest.mark.parametrize("content", [
@@ -495,13 +672,56 @@ def test_per_policy_metrics_and_overconfidence_use_real_evaluator_without_changi
     assert selection["ranking"] == ["checkpoint-25", "checkpoint-50"]
     assert selection["tied_with"] == ["checkpoint-50"]
     assert selection["selection_rule"]["order"] == [
-        "strict_pass_count desc", "overconfidence asc", "over_abstention asc", "step asc", "name asc",
+        "applicability_errors asc", "strict_pass_count desc", "overconfidence asc", "over_abstention asc",
+        "step asc", "name asc",
     ]
+    assert selection["selection_rule"]["version"] == "2026-10-27"
     assert "claims expected unknown answered confirmed or inferred" in selection["selection_rule"]["description"]
     assert "per_policy_mean" in selection["selection_rule"]["description"]
 
 
 # --- end to end with the stub generator ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("base_passes", [None, 7])
+def test_selection_bundle_records_band_and_warns_when_applicability_changes_the_winner(tmp_path, base_passes):
+    cases = [make_case(f"gate-{index}", unknown_claim=False) for index in range(10)]
+    for case in cases:
+        case["expected"]["claims"][0]["id"] = "requirement_met"
+        case["messages"][-1]["content"] = json.dumps(good(case))
+    cases_path = write_cases(tmp_path / "cases.jsonl", cases)
+    root = tmp_path / "run"
+    answers = {}
+    for name in ("checkpoint-125", "checkpoint-150"):
+        make_checkpoint(root, name)
+        answers[name] = {case["id"]: good(case) for case in cases}
+    answers["checkpoint-125"][cases[0]["id"]]["claims"][0]["status"] = "inferred"
+    for case in cases[:2]:
+        answers["checkpoint-150"][case["id"]]["limitations"] = []
+    if base_passes is not None:
+        make_checkpoint(root, "checkpoint-0")
+        answers["checkpoint-0"] = {case["id"]: good(case) for case in cases}
+        for case in cases[base_passes:]:
+            answers["checkpoint-0"][case["id"]]["limitations"] = []
+    code, out = run_main(tmp_path, cases_path, root, StubBackend(answers))
+    assert code == 0
+    selection = json.loads((out / "selection.json").read_text())
+    assert selection["schema_version"] == "2026-10-27"
+    assert selection["selection_rule"]["metric"] == (
+        "strict_pass_count within a noise band, applicability errors first, base floor")
+    assert selection["base_strict_pass_count"] == base_passes
+    assert selection["base_floor_applied"] is (base_passes is not None)
+    assert selection["selected"] == "checkpoint-150"
+    assert selection["selected_by_strict_first"] == "checkpoint-125"
+    assert selection["band_width"] == 2 and selection["best_strict_pass_count"] == 9
+    assert selection["band_members"] == ["checkpoint-150", "checkpoint-125"]
+    expected_ranking = ["checkpoint-150", "checkpoint-125"] + (["checkpoint-0"] if base_passes is not None else [])
+    assert selection["ranking"] == [item["name"] for item in selection["checkpoints"]] == expected_ranking
+    assert len(selection["warnings"]) == 1 and "strict-first" in selection["warnings"][0]
+    by_name = {item["name"]: item for item in selection["checkpoints"]}
+    assert by_name["checkpoint-125"]["applicability_errors"] == 1
+    assert by_name["checkpoint-125"]["applicability_errors_rate"] == 0.1
+    assert by_name["checkpoint-150"]["applicability_errors"] == 0
+
 
 def test_end_to_end_ranks_checkpoints_by_generated_answers_and_writes_the_bundle(tmp_path, held_out):
     cases, cases_path = held_out
