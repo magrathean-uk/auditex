@@ -65,6 +65,7 @@ where = ["src"]
 auditex = ["explorer_assets/*.css", "explorer_assets/*.html", "explorer_assets/*.js", "explorer_assets/fonts/*.woff2", "explorer_assets/fonts/*.range", "explorer_assets/fonts/OFL.txt", "explorer_assets/LICENSE-lucide.txt"]
 
 [tool.setuptools.data-files]
+# Includes scuba-policy-sections.json and both current and legacy model_assessment schemas.
 "auditex/assets" = ["assets/*"]
 "auditex/configs" = ["configs/*.json"]
 "auditex/profiles" = ["profiles/*.md"]

@@ -66,7 +66,7 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   fixtures and their `json.patch` mutations (`Testing/Unit/Rego/`) and the baseline markdown
   (`baselines/*.md`). The policies are evaluated with Open Policy Agent 1.20.2 (Apache-2.0, the version
   ScubaGear pins; not redistributed) over fictional tenant configurations. No ScubaGear code, fixture
-  or baseline file is vendored or shipped in the product; the scripts read a local checkout supplied on
+  or complete baseline file is vendored or shipped in the product; the scripts read a local checkout supplied on
   the command line, and each case records the commit (the 12-character short commit, in `provenance.source` and
   in the oracle reviewer; the run's `summary.json` holds the full 40-character commit), policy id, test name, OPA
   version and input hash.
@@ -76,6 +76,7 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   otherwise strip the field before redistribution. CISA provides the baselines "as is", TLP:CLEAR,
   and does not endorse any product: nothing here implies CISA endorsement of Auditex, the dataset or
   any model trained on it.
+
 - **mmorris35/m365-sim**, commit `203d66163b089eec63af258d8142c171d982994c`, Apache-2.0. Reference only:
   it informed the idea of simulated tenant fixtures. No code, data or text from it is used, and it is
   not a label source.
@@ -90,6 +91,18 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
 - Labels are engine output, not human judgement. `scripts/split-oracle-cases.py --approve-as-oracle`
   records the engine and OPA version as reviewer so the pack preparer accepts the rows; see
   [Model development](../guides/model-development.md#oracle-labelled-cases).
+
+P1 serving ships `configs/scuba-policy-sections.json`: all 102 policy items and ordered
+section dependencies extracted from the local v7 oracle pack (source pack SHA-256 and
+ScubaGear revision recorded in the file). Policy items preserve the trained baseline
+excerpts verbatim, including eight applicability statements and the intentionally empty
+MS.POWERPLATFORM.2.3v1 excerpt. A 56-row synthetic pack extract is retained under
+`tests/fixtures/` for prompt-parity checks. Baseline prose is attributed to CISA and
+Microsoft: CISA SCuBA / ScubaGear, CC0 1.0 Universal, with portions adapted from
+Microsoft documentation under CC BY 4.0. The source is ScubaGear's `baselines/` at
+revision `2446ad723b7f55031cc02c8aca244d731d468cba`. The excerpts are unchanged;
+this use implies no endorsement. The training system prompt is embedded verbatim in
+`auditex/model_prompt.py` with its UTF-8 SHA-256 beside it.
 
 ## Framework identifiers
 

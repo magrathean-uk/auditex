@@ -42,6 +42,39 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 
 ## Evidence discipline
 
+`model_assessment.json` is an optional root artefact written by `auditex model assess`.
+Its schema is `schemas/model_assessment.schema.json` (version `2026-10-27.1`), listed
+by the schema manifest and checked when present by bundle validation. The known
+older version `2026-10-27` uses `schemas/model_assessment-2026-10-27.schema.json`.
+Malformed or unknown-version optional assessments produce warnings and never change
+the deterministic gate result. It contains
+`generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention
+`named-enums-v1`, the pinned `system_prompt_sha256`, totals and policy rows.
+Each row records claims, limitations, recommendations, `validation_status`, reason,
+`latency_ms`, HTTP POST `attempts` (including format and thinking negotiation),
+`thinking_disabled`, `thinking_stripped`, prompt and response
+hashes, and a comparison against mapped `cisa_scuba` baseline alignment in the report
+pack (`agree`, `disagree` or `not_assessed`), with `baseline_match` (`exact`,
+`version_mismatch` or `none`). Prompt hashes cover the canonical JSON
+system/user message array (UTF-8, sorted keys, compact separators, no newline).
+Response hashes cover the final attempt's assistant text used for JSON parsing,
+after removal of a leading thinking block. They are null when the final attempt
+failed at transport level or supplied no assistant text. Skips have no
+prompt or response hash. No raw invalid answer or API key is retained.
+
+Totals are disjoint: `answered` counts validated known requirement verdicts, `unknown`
+counts validated abstentions and endpoint failures, `invalid` counts exhausted answer
+validation retries (whose claims are unknown), and `skipped` counts policy IDs absent
+from the catalogue (`policy_not_in_catalogue`). All 102 shipped policy items preserve
+their training text, including the intentionally empty Power Platform excerpt.
+`model_assessment_prompts.jsonl` is the dry-run alternative, containing message/hash
+rows or explicit skip rows. Both are private, named post-finalisation outputs and may
+be unlisted by the original hash manifest; that manifest is never rewritten. They
+are reported as unlisted limitations, and an already sealed output cannot be replaced.
+Consumers should validate optional assessment JSON before using it. Model assessment
+never changes findings or the deterministic rule-based baseline alignment. See
+[Running the assessment](../guides/model-development.md#running-the-assessment).
+
 Findings must include `evidence_refs`. Each reference must identify at least `artifact_path`, `artifact_kind`, `collector`, and `record_key`. Bundle validation checks duplicate finding IDs, missing references, malformed references, references pointing at missing artifacts, and references whose record does not exist in the artifact they name (see "Evidence references and traceability").
 
 `reports/report-pack.json` includes `proof_table` for board, CLI, and MCP review. New proof rows flatten every finding evidence reference into `finding_id`, `rule_id`, `proof_status`, `collector`, `artifact_path`, `artifact_kind`, `record_key`, and optional JSON pointer or endpoint fields; from `2026-10-22` they also carry `collected_at`, `content_hash` and `unresolved_reason`, and `proof_status` is derived from resolution. A finding's `proof` summary gains `supported_count`, the number of its references that resolved. The same pack now also carries `reviewer_index` with `start_here`, `prove_this`, and `known_limits` rows so customer reviewers can move from posture to proof faster. The validator accepts older per-finding proof summaries, and validates the stricter row shape when the new fields are present. Operators can render the same rows with `auditex report proof-table <run-dir> --format md`. Enterprise handoff starts with `auditex report customer-pack <run-dir> --output-dir <dir>`, `auditex report verify-pack <dir>`, or `auditex report handoff <run-dir> --format md`. The pack writes a README, handoff, full report, API ledger, permission ledger, proof table, JSON copies, selected customer-safe source artifacts, `checksums.sha256`, and generated-file/source-artifact hashes. `pack-manifest.json` source now also carries `validation_summary` and `reviewer_summary`; `verify-pack` checks those against `handoff.json` so customer start-point truth cannot drift. The handoff, API call, permission, and proof-table commands all accept `--output <path>` for persisted customer packs.

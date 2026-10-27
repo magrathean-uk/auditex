@@ -78,6 +78,70 @@ approved prompt/completion records to `train.jsonl` and `validation.jsonl`,
 keeps `test.jsonl` separate and places unreviewed cases in `quarantine.jsonl`.
 The starter pack therefore has `job_ready: false` and no training rows.
 
+## Running the assessment
+
+P1 adds an optional assessment using an OpenAI-compatible chat-completions server.
+Start and configure the server separately; Auditex does not download or load weights.
+
+```sh
+export AUDITEX_MODEL_NAME='your-served-model'
+export AUDITEX_MODEL_ENDPOINT='http://127.0.0.1:8080/v1'
+.venv/bin/auditex model doctor
+.venv/bin/auditex model assess outputs/ci-contract/ci-contract --dry-run
+.venv/bin/auditex model assess outputs/ci-contract/ci-contract --policies MS.AAD.7.3v1,MS.SHAREPOINT.1.1v1
+```
+
+`--endpoint` and `--model` override the environment. `AUDITEX_MODEL_API_KEY` is
+optional and is sent only in the Authorization header; configuration output omits it.
+`AUDITEX_MODEL_TIMEOUT` defaults to 120 seconds per socket read, rather than a
+total request deadline. Doctor uses
+`GET /models`, checks that the configured model is listed, and exits 2 on failure.
+Assessment requires a model name; dry-run works without one and makes no endpoint call.
+A non-loopback endpoint prints one warning that evidence will leave the machine;
+the assessment records its host. An API key over non-loopback plain HTTP is
+refused unless `AUDITEX_MODEL_ALLOW_INSECURE=1`; use HTTPS for remote servers.
+HTTP proxies and redirects are disabled.
+
+Dry-run writes `model_assessment_prompts.jsonl`, with exact system/user messages and
+hashes for available policies, and explicit skip rows for IDs absent from the catalogue.
+Assessment writes `model_assessment.json`. Both files are private (0600) optional
+post-finalisation outputs. Repeated commands replace their own unsealed output;
+an output already covered by `bundle-hashes.json` is refused. Existing sealed
+artefacts and findings are never changed. Treat prompts and answers as confidential
+tenant evidence. **The model never changes findings.**
+
+The shipped map contains all 102 v7 pack policy items and ordered dependencies,
+including verbatim baseline excerpts and the `applicability` key on eight policies.
+MS.POWERPLATFORM.2.3v1 retains its trained empty `baseline_text`. Policy items are
+emitted in full, with sorted keys. Only IDs absent from the catalogue are skipped,
+as `policy_not_in_catalogue`. Case IDs are serving-generated and cannot reproduce
+pack row IDs; user prompts otherwise follow the training serialisation byte for byte.
+P1's `scuba_projection.project_run` returns `{}`; every dependent section is
+`{"collection_status": "not_collected"}`. P2 will project
+`normalized/*.json` evidence. A successful request is therefore not proof of tenant
+compliance or model quality. No live serving parity or model accuracy is claimed.
+
+Requests use the verbatim, SHA-256-pinned training system prompt, `named-enums-v1`,
+temperature 0, max_tokens 1024 and `chat_template_kwargs: {"enable_thinking": false}`,
+matching training. A 400 explicitly rejecting `response_format` causes a plain-format
+fallback; a 400 rejecting `chat_template_kwargs` retries without that field. Each
+fallback is remembered for the client session. Each policy records `thinking_disabled`
+(whether its final request sent the setting) and `thinking_stripped` (whether a leading
+`<think>...</think>` block was removed on any attempt before JSON parsing).
+Invalid JSON or a structurally invalid answer is
+retried once; a second failure yields unknown claims and `model_response_invalid`.
+Endpoint failures yield unknown claims and `model_endpoint_unavailable`.
+Answers are checked against requested claims, evidence IDs and candidate codes;
+known requirement verdicts require every dependent section to be collected, except
+an inferred not-applicable answer with `policy_not_applicable` and no recommendation.
+Verdict limitation and recommendation lists must match the system prompt exactly;
+these checks do not establish semantic entailment. Comparison with rule-based
+SCuBA alignment is informational: only confirmed model verdicts and rule `pass`/
+`fail` statuses can agree or disagree; other cases are `not_assessed`. Baseline IDs
+match exactly first, then by ID without the version suffix when there is one unique
+match; `baseline_match` records `exact`, `version_mismatch` or `none`. Malformed report
+pack data is ignored for comparison; dry-run does not read the report pack.
+
 ## Case and answer contract
 
 Each JSONL case has `id`, `family`, `split`, `provenance`, `messages` and

@@ -51,7 +51,7 @@ def _build_root_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("report", help="Preview or render reports from a run.")
     subparsers.add_parser("export", help="List and run exporters.")
     subparsers.add_parser("assessment", help="Import and compare local Microsoft assessment reports.")
-    subparsers.add_parser("model", help="Stage reference data, evaluate recorded answers, and prepare training packs offline.")
+    subparsers.add_parser("model", help="Prepare model data, evaluate answers, and assess runs using a configured endpoint.")
     subparsers.add_parser("notify", help="Build or send post-run notifications.")
     subparsers.add_parser("rules", help="Inspect built-in rule packs.")
     subparsers.add_parser("auth", help="Inspect and manage local auth state.")
@@ -597,10 +597,18 @@ def gate_findings(
 def _build_model_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="auditex model",
-        description="Prepare model-development materials locally; no inference, training or downloads.",
+        description="Prepare model-development materials and optionally assess runs using a model endpoint.",
     )
     commands = parser.add_subparsers(dest="model_command", required=True)
     commands.add_parser("sources", help="List pinned model and dataset reference metadata.")
+    assess = commands.add_parser("assess", help="Write an optional model assessment without changing findings.")
+    assess.add_argument("run_dir", help="Existing audit run directory.")
+    assess.add_argument("--policies", help="Comma-separated SCuBA policy IDs; defaults to the shipped policy set.")
+    assess.add_argument("--dry-run", action="store_true", help="Write prompts without calling the endpoint.")
+    doctor = commands.add_parser("doctor", help="Check the endpoint models and print configuration without the API key.")
+    for command in (assess, doctor):
+        command.add_argument("--endpoint", help="OpenAI-compatible base URL (AUDITEX_MODEL_ENDPOINT).")
+        command.add_argument("--model", help="Served model name (AUDITEX_MODEL_NAME).")
     stage = commands.add_parser("stage", help="Deduplicate public conversations into an unreviewed corpus.")
     stage.add_argument("--manifest", required=True, help="Pinned source manifest with training and evaluation paths.")
     stage.add_argument("--output-dir", required=True, help="New or empty destination outside finalized audit runs.")
@@ -882,6 +890,16 @@ def main(argv: list[str] | None = None) -> int:
                 from .model_sources import list_model_sources
 
                 payload = list_model_sources()
+            elif args.model_command in {"assess", "doctor"}:
+                from .model_serving import ModelClient, ModelConfig, assess_run
+
+                config = ModelConfig.from_environment(endpoint=args.endpoint, model=args.model)
+                if args.model_command == "doctor":
+                    payload = ModelClient(config).doctor()
+                    _emit_assessment(payload, None)
+                    return 0 if payload["ok"] else 2
+                payload = assess_run(args.run_dir, config, dry_run=args.dry_run,
+                                     policies=[pid.strip() for pid in args.policies.split(",")] if args.policies is not None else None)
             elif args.model_command == "stage":
                 from .model_corpus import stage_public_corpus
 
@@ -907,7 +925,7 @@ def main(argv: list[str] | None = None) -> int:
                 payload = combine_model_responses(args.cases, args.responses)
             _emit_assessment(payload, getattr(args, "output", None))
         except (OSError, ValueError, TypeError) as exc:
-            print(f"Model preparation failed: {exc}", file=sys.stderr)
+            print(f"Model command failed: {exc}", file=sys.stderr)
             return 2
         return 0
     if argv[0] == "demo":

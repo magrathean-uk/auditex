@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://magrathean.uk/solutions/auditex/schemas/model_assessment.schema.json",
+  "title": "Optional model assessment (does not change findings)",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-10-27"
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "endpoint_host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prompt_convention": {
+      "type": "string",
+      "const": "named-enums-v1"
+    },
+    "system_prompt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "totals": {
+      "type": "object",
+      "properties": {
+        "answered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "answered",
+        "unknown",
+        "invalid",
+        "skipped"
+      ],
+      "additionalProperties": false
+    },
+    "policies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/policy"
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "run_id",
+    "endpoint_host",
+    "model_name",
+    "prompt_convention",
+    "system_prompt_sha256",
+    "totals",
+    "policies"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "requirement_met",
+            "policy_criticality"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "confirmed",
+            "inferred",
+            "unknown"
+          ]
+        },
+        "value": {
+          "type": [
+            "boolean",
+            "string",
+            "null"
+          ]
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^e[0-9]+$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "value",
+        "evidence_ids"
+      ],
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "policy_id": {
+          "type": "string",
+          "pattern": "^MS\\.[A-Z]+\\.\\d+\\.\\d+v\\d+$"
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/claim"
+          },
+          "maxItems": 2
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "required_evidence_section_not_collected",
+              "policy_scope_depends_on_licence",
+              "policy_not_applicable",
+              "model_response_invalid",
+              "model_endpoint_unavailable"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "recommendations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "enum": [
+              "collect_missing_evidence_section",
+              "review_policy_against_baseline_text"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "validation_status": {
+          "type": "string",
+          "enum": [
+            "valid",
+            "invalid",
+            "unknown",
+            "skipped"
+          ]
+        },
+        "latency_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "prompt_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "response_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "policy_text_unavailable",
+            "model_response_invalid",
+            "model_endpoint_unavailable"
+          ]
+        },
+        "comparison": {
+          "type": "object",
+          "properties": {
+            "baseline_status": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "pass",
+                "fail",
+                "accepted_risk",
+                "not_assessed",
+                null
+              ]
+            },
+            "model_status": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "pass",
+                "fail",
+                null
+              ]
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "agree",
+                "disagree",
+                "not_assessed"
+              ]
+            }
+          },
+          "required": [
+            "baseline_status",
+            "model_status",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "policy_id",
+        "claims",
+        "limitations",
+        "recommendations",
+        "validation_status",
+        "latency_ms",
+        "attempts",
+        "prompt_sha256",
+        "response_sha256",
+        "reason",
+        "comparison"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

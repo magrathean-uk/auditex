@@ -43,7 +43,8 @@ EVIDENCE_DB_SIDECARS = tuple(f"{EVIDENCE_DB_PATH}{suffix}" for suffix in _SIDECA
 _IGNORED_NAMES = frozenset({".DS_Store"})
 _LIST_LIMIT = 100
 
-# Outputs the tooling writes into a finalized run on request. They are not evidence, and nothing reads them back.
+# Outputs written on request after finalisation, outside the original seal.
+# Optional model assessment JSON is checked by contract validation when present.
 _POST_FINALIZATION_OUTPUT = re.compile(
     r"^reports/(?:explorer\.html"
     r"|rendered-report\.(?:json|md|csv|html|sarif\.json|oscal\.json)"
@@ -55,7 +56,7 @@ _CONSUMED_DIRECTORIES = ("normalized/", "findings/", "blockers/", "reports/", "a
 
 def is_post_finalization_output(relative: str) -> bool:
     """Whether ``relative`` is a named output written into a run after it was finalized."""
-    return bool(_POST_FINALIZATION_OUTPUT.match(relative))
+    return relative in {"model_assessment.json", "model_assessment_prompts.jsonl"} or bool(_POST_FINALIZATION_OUTPUT.match(relative))
 
 
 def _read_by_consumers(relative: str) -> bool:

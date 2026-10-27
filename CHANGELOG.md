@@ -10,6 +10,41 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 Model-development tooling only (round 2 of the specialist-model programme). `CONTRACT_VERSION` stays
 `2026-10-22`; the audit, report, export and MCP surfaces are unchanged.
 
+### Model serving (new, optional)
+
+- **`auditex model assess <run-dir>`** writes `model_assessment.json` into a finalised run bundle: one row per
+  shipped CISA SCuBA policy with the model's claims, limitations and recommendations, validation status,
+  attempts, latency, prompt and response hashes, and a comparison with the rule-based `baseline_alignment`
+  status of `reports/report-pack.json` (`agree`, `disagree`, `not_assessed`; `baseline_match` records an exact
+  or version-suffix match). The model never changes findings, reports or the gate; a malformed or outdated
+  assessment file is a validation warning, not an error. `--dry-run` writes the assembled prompts to
+  `model_assessment_prompts.jsonl` without calling any endpoint; `--policies` restricts the set.
+- **`auditex model doctor`** checks the endpoint (`GET /models`), the served model name and prints the
+  configuration without the key.
+- **Transport.** `auditex.model_serving` is a standard-library client for any OpenAI-compatible
+  chat-completions server (llama.cpp, Ollama, LM Studio, vLLM): `AUDITEX_MODEL_ENDPOINT` (default
+  `http://127.0.0.1:8080/v1`), `AUDITEX_MODEL_NAME`, `AUDITEX_MODEL_API_KEY`, `AUDITEX_MODEL_TIMEOUT`
+  (seconds, per socket read). Temperature 0, 1,024 max tokens, `response_format` JSON with fallback on HTTP 400,
+  `chat_template_kwargs.enable_thinking=false` with the same fallback, a leading `<think>` block stripped and
+  recorded, one retry on an invalid answer, then every claim becomes `unknown` with limitation
+  `model_response_invalid`. A non-loopback endpoint prints one warning that evidence leaves the machine and the
+  host is recorded; an API key over plain HTTP to a non-loopback host is refused unless
+  `AUDITEX_MODEL_ALLOW_INSECURE=1`.
+- **Prompt fidelity.** `auditex.model_prompt` reproduces the `named-enums-v1` training serialisation byte for byte
+  (pinned system prompt with its SHA-256, sorted compact JSON, policy item as trained, not-collected sections as
+  `{"collection_status": "not_collected"}` from `azure_tenant_audit.model_evidence.NOT_COLLECTED`, shared with
+  `scripts/build-oracle-cases.py`). `configs/scuba-policy-sections.json` carries the 102 policies with their
+  dependent ScubaGear sections, criticality, baseline text and applicability (CISA ScubaGear CC0, Microsoft
+  CC BY 4.0; see provenance). A 56-row fixture across all seven products asserts byte equality.
+- **Evidence projection.** `auditex.scuba_projection.project_run` is a stub returning no sections, so every
+  dependent section is reported as not collected and the model answers `unknown`; the projection from
+  `normalized/*.json` is the next package.
+- **Validator.** The shared response validator (`auditex.model_eval`) now rejects a met or not-met verdict while any
+  dependent section is not collected (the inferred not-applicable answer excepted) and contradictory
+  limitation/recommendation sets; `evaluate` and `combine` outputs for the shipped fixtures are unchanged.
+- **Contract.** `schemas/model_assessment.schema.json` is shipped; `CONTRACT_VERSION` stays `2026-10-22` because
+  the artefact is optional and nothing existing changes.
+
 ### Model development
 
 - **Named enums in oracle evidence.** `azure_tenant_audit.external_sharing.annotate_enum_names(section, observed)`

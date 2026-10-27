@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.model_evidence import NOT_COLLECTED
 
 SCHEMA_VERSION = "2026-10-18"
 _STATUSES = {"confirmed", "inferred", "unknown"}
@@ -96,6 +97,57 @@ def _response_fingerprint(response: dict[str, Any]) -> str:
         "recommendations": sorted(response["recommendations"]),
     }
     return sha256(_json(canonical).encode("utf-8")).hexdigest()
+
+
+def validate_model_response(content: str, case: dict[str, Any]) -> dict[str, Any]:
+    """Validate a serving answer using the evaluator's unchanged structural checks.
+
+    Serving has no gold labels. Check the requested IDs and candidate vocabularies,
+    require typed values, and refuse a verdict on any uncollected dependency
+    except an explicitly not-applicable inferred answer.
+    This does not establish entailment for evidence that was collected.
+    """
+    response = _validate_response(json.loads(content, object_pairs_hook=_pairs, parse_constant=_invalid_constant))
+    requested = {claim["id"] for claim in case["requested_claims"]}
+    if {claim["id"] for claim in response["claims"]} != requested:
+        raise ValueError("response must answer exactly the requested claims")
+    rubric = {"expected": {"claims": case["requested_claims"],
+                           "allowed_evidence_ids": [item["id"] for item in case["evidence"]]}}
+    if _check_allowlists(rubric, response):
+        raise ValueError("response contains unsupported claim or evidence IDs")
+    for field, candidates in (("limitations", "limitation_ids"), ("recommendations", "recommendation_ids")):
+        if not set(response[field]) <= set(case[candidates]):
+            raise ValueError(f"response contains unsupported {field}")
+    sections = case["evidence"][1:]
+    any_missing = any(item["observed"] == NOT_COLLECTED for item in sections)
+    not_applicable = response["limitations"] == ["policy_not_applicable"] and not response["recommendations"]
+    for claim in response["claims"]:
+        if "value" not in claim or (claim["status"] == "unknown" and claim["value"] is not None):
+            raise ValueError("every claim requires a value; unknown values must be null")
+        if "e0" not in claim["evidence_ids"]:
+            raise ValueError("claims must cite the policy item")
+        if claim["status"] == "unknown":
+            continue
+        if claim["id"] == "requirement_met":
+            exception = not_applicable and claim["status"] == "inferred" and claim["value"] is True
+            if type(claim["value"]) is not bool or (any_missing and not exception):
+                raise ValueError("requirement verdict needs boolean value and collected evidence")
+            if set(claim["evidence_ids"]) != {item["id"] for item in case["evidence"]}:
+                raise ValueError("requirement verdict must cite every dependent section")
+        if claim["id"] == "policy_criticality" and (
+            claim["value"] != case["evidence"][0]["observed"]["criticality"] or claim["evidence_ids"] != ["e0"]
+        ):
+            raise ValueError("criticality must match and cite the policy item alone")
+    requirement = next(claim for claim in response["claims"] if claim["id"] == "requirement_met")
+    if requirement["status"] == "unknown":
+        expected_lists = (["required_evidence_section_not_collected"], ["collect_missing_evidence_section"])
+    elif not_applicable and requirement["status"] == "inferred" and requirement["value"] is True:
+        expected_lists = (["policy_not_applicable"], [])
+    else:
+        expected_lists = ([], [] if requirement["value"] is True else ["review_policy_against_baseline_text"])
+    if (response["limitations"], response["recommendations"]) != expected_lists:
+        raise ValueError("limitations and recommendations contradict the requirement verdict")
+    return response
 
 
 def _load_cases(path: str | Path) -> list[dict[str, Any]]:

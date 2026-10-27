@@ -13,6 +13,7 @@ class ShippedContentArea:
     release_label: str
 
 
+# The globs include scuba-policy-sections.json and current/legacy model_assessment schemas.
 SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
     ShippedContentArea("configs", "configs", "auditex/configs", ("configs/*.json",), "configs under `configs/`"),
     ShippedContentArea("assets", "assets", "auditex/assets", ("assets/*",), "product assets under `assets/`"),

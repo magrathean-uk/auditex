@@ -87,6 +87,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from auditex.model_training import _outside_audit_runs, distinct_prompt_sha256, validate_cases  # noqa: E402
 from azure_tenant_audit.external_sharing import annotate_enum_names  # noqa: E402
+from azure_tenant_audit.model_evidence import NOT_COLLECTED  # noqa: E402
 
 ORACLE_REPO = "https://github.com/cisagov/ScubaGear"
 PRODUCT_DIRS = ["AAD", "EXO", "SecuritySuite", "Sharepoint", "Teams", "PowerPlatform", "PowerBI"]
@@ -135,7 +136,6 @@ UNAVAILABLE_RE = re.compile(r"\bUnable to evaluate tenant setting\b")  # Power B
 CONVENTION = "conv3"  # labelling convention, salted into every case id so that a different convention never reuses an id
 MASK_ID_SALT = "conv2"  # the id salt the hidden section of a not-collected case is hashed with, whatever CONVENTION is: it is fixed so that
 #                         conventions differ only in labels and prompt text and a gap case keeps its evidence across them
-NOT_COLLECTED = {"collection_status": "not_collected"}
 STAR, WRAP = "*", "^"  # components of an input pointer: any item of a collection; a collection built from the pointed-at values
 MAX_FIELD_DEPTH = 16
 # The engine's applicability sentence, completed where its Rego has a condition the sentence omits. Audited against the pinned

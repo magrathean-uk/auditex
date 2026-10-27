@@ -1,0 +1,1151 @@
+{
+  "schema_version": "2026-10-27",
+  "prompt_convention": "named-enums-v1",
+  "source": {
+    "pack": "oracle-pack-v7",
+    "pack_sha256": "a551d9d37466bf06ced1e7a61c0f6564d6344f04c081d9e9c95d6d50fed5aab7",
+    "scubagear_revision": "2446ad723b7f55031cc02c8aca244d731d468cba",
+    "note": "102 IDs, ordered dependencies and full policy items (policy_id, criticality, baseline_text, applicability where the baseline states one) extracted from the v7 oracle cases; the policy item is reproduced byte for byte as trained.",
+    "attribution": "Baseline excerpts: CISA SCuBA / cisagov ScubaGear (CC0); portions adapted from Microsoft documentation (CC BY 4.0). No CISA or Microsoft endorsement."
+  },
+  "limitation_ids": [
+    "required_evidence_section_not_collected",
+    "policy_scope_depends_on_licence",
+    "policy_not_applicable"
+  ],
+  "recommendation_ids": [
+    "collect_missing_evidence_section",
+    "review_policy_against_baseline_text"
+  ],
+  "policies": {
+    "MS.AAD.1.1v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Legacy authentication SHALL be blocked. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.1.1v1"
+      }
+    },
+    "MS.AAD.2.1v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "Users detected as high risk SHALL be blocked. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.2.1v1"
+      }
+    },
+    "MS.AAD.2.3v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "Sign-ins detected as high-risk SHALL be blocked. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.2.3v1"
+      }
+    },
+    "MS.AAD.3.1v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Phishing-resistant MFA SHALL be enforced for all users. The phishing-resistant methods of **Microsoft Entra ID certificate-based authentication (CBA)**, **FIDO2 Security Key**, **Windows Hello for Business**, and **device-bound passkeys** (in the authenticator application of choice) are the recommended authentication options since they offer forms of MFA with the fewest weaknesses. For federal agencies, Microsoft Entra ID CBA supports federal PIV card authentication directly to Microsoft Entra ID. If on-premises PIV authentication and federation to Microsoft Entra ID is used, [enforce PIV logo",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.3.1v1"
+      }
+    },
+    "MS.AAD.3.2v2": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "MFA SHALL be enforced for all users. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.3.2v2"
+      }
+    },
+    "MS.AAD.3.3v2": {
+      "sections": [
+        "authentication_method",
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "applicability": "This policy is only applicable if MS Authenticator is enabled and no conditional access policy already enforces phishing-resistant MFA (the requirement of MS.AAD.3.1v1).",
+        "baseline_text": "If Microsoft Authenticator is enabled, it SHALL be configured to show login context information. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.3.3v2"
+      }
+    },
+    "MS.AAD.3.4v1": {
+      "sections": [
+        "authentication_method"
+      ],
+      "policy_item": {
+        "baseline_text": "The \"Authentication methods manage migration\" feature SHALL be set to \"Migration complete.\" [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.3.4v1"
+      }
+    },
+    "MS.AAD.3.5v2": {
+      "sections": [
+        "authentication_method"
+      ],
+      "policy_item": {
+        "baseline_text": "The authentication methods of short message service (SMS), voice call, and email one-time passcode (OTP) SHALL be disabled. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.3.5v2"
+      }
+    },
+    "MS.AAD.3.6v1": {
+      "sections": [
+        "conditional_access_policies",
+        "privileged_roles",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Phishing-resistant MFA SHALL be required for highly privileged roles. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.3.6v1"
+      }
+    },
+    "MS.AAD.3.7v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Managed devices SHOULD be required for authentication. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.3.7v1"
+      }
+    },
+    "MS.AAD.3.8v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Managed devices SHOULD be required to register MFA. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.3.8v1"
+      }
+    },
+    "MS.AAD.3.9v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Device code authentication SHOULD be blocked. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#conditional-access-policy-exclusions)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.3.9v1"
+      }
+    },
+    "MS.AAD.5.1v1": {
+      "sections": [
+        "authorization_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Only administrators SHALL be allowed to register applications. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.5.1v1"
+      }
+    },
+    "MS.AAD.5.2v1": {
+      "sections": [
+        "authorization_policies",
+        "risky_delegated_permission_classifications"
+      ],
+      "policy_item": {
+        "baseline_text": "User consent to applications SHALL be restricted. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.5.2v1"
+      }
+    },
+    "MS.AAD.5.3v1": {
+      "sections": [
+        "directory_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "An administrative consent workflow SHALL be configured for applications. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.5.3v1"
+      }
+    },
+    "MS.AAD.5.5v1": {
+      "sections": [
+        "app_management_policies",
+        "default_app_management_policy"
+      ],
+      "policy_item": {
+        "baseline_text": "Application password addition SHOULD be blocked. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.5.5v1"
+      }
+    },
+    "MS.AAD.5.6v1": {
+      "sections": [
+        "app_management_policies",
+        "default_app_management_policy"
+      ],
+      "policy_item": {
+        "baseline_text": "Application password lifetime SHOULD be restricted to 180 days or less. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.5.6v1"
+      }
+    },
+    "MS.AAD.5.7v1": {
+      "sections": [
+        "app_management_policies",
+        "default_app_management_policy"
+      ],
+      "policy_item": {
+        "baseline_text": "Application certificate lifetime SHOULD be restricted to 365 days or less. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.5.7v1"
+      }
+    },
+    "MS.AAD.6.1v1": {
+      "sections": [
+        "domain_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "User passwords SHALL NOT expire. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.6.1v1"
+      }
+    },
+    "MS.AAD.7.1v1": {
+      "sections": [
+        "privileged_users"
+      ],
+      "policy_item": {
+        "baseline_text": "A minimum of two users and a maximum of eight users SHALL be provisioned with the Global Administrator role. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.1v1"
+      }
+    },
+    "MS.AAD.7.2v1": {
+      "sections": [
+        "privileged_users"
+      ],
+      "policy_item": {
+        "baseline_text": "Privileged users SHALL be provisioned with finer-grained roles instead of the Global Administrator role. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.2v1"
+      }
+    },
+    "MS.AAD.7.3v1": {
+      "sections": [
+        "privileged_users"
+      ],
+      "policy_item": {
+        "baseline_text": "Privileged users SHALL be provisioned cloud-only accounts separate from an on-premises directory or other federated identity providers. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.3v1"
+      }
+    },
+    "MS.AAD.7.4v1": {
+      "sections": [
+        "privileged_roles",
+        "scuba_config",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "Permanent active role assignments SHALL NOT be allowed for highly privileged roles. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#privileged-user-policy-exclusions)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.4v1"
+      }
+    },
+    "MS.AAD.7.5v1": {
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "Provisioning users to highly privileged roles SHALL NOT occur outside of a PAM system. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.5v1"
+      }
+    },
+    "MS.AAD.7.6v1": {
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "Activation of the Global Administrator role SHALL require approval. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.6v1"
+      }
+    },
+    "MS.AAD.7.7v1": {
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "Eligible and active highly privileged role assignments SHALL trigger an alert. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.7v1"
+      }
+    },
+    "MS.AAD.7.8v1": {
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "User activation of the Global Administrator role SHALL trigger an alert. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.7.8v1"
+      }
+    },
+    "MS.AAD.7.9v1": {
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "User activation of other highly privileged roles SHOULD trigger an alert. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.7.9v1"
+      }
+    },
+    "MS.AAD.8.1v1": {
+      "sections": [
+        "authorization_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Guest users SHOULD have limited or restricted access to Microsoft Entra ID directory objects. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.8.1v1"
+      }
+    },
+    "MS.AAD.8.2v1": {
+      "sections": [
+        "authorization_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Only users with the \"Guest Inviter\" role SHOULD be able to invite guest users. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.AAD.8.2v1"
+      }
+    },
+    "MS.AAD.9.1v1": {
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config",
+        "service_plans"
+      ],
+      "policy_item": {
+        "baseline_text": "Risky AI agents SHALL be blocked. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.AAD.9.1v1"
+      }
+    },
+    "MS.EXO.1.1v2": {
+      "sections": [
+        "remote_domains",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Automatic forwarding to external domains SHALL be disabled. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/configuration.md#automatic-forwarding-to-remote-domains)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.1.1v2"
+      }
+    },
+    "MS.EXO.13.1v1": {
+      "sections": [
+        "org_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Mailbox auditing SHALL be enabled. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.13.1v1"
+      }
+    },
+    "MS.EXO.2.2v3": {
+      "sections": [
+        "spf_records"
+      ],
+      "policy_item": {
+        "baseline_text": "An SPF policy SHALL be published for each domain that fails all non-approved senders. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/parameters.md#preferreddnsresolvers)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.2.2v3"
+      }
+    },
+    "MS.EXO.3.1v1": {
+      "sections": [
+        "dkim_config",
+        "dkim_records",
+        "spf_records"
+      ],
+      "policy_item": {
+        "baseline_text": "DKIM SHOULD be enabled for all domains. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/parameters.md#preferreddnsresolvers)",
+        "criticality": "Should",
+        "policy_id": "MS.EXO.3.1v1"
+      }
+    },
+    "MS.EXO.4.1v1": {
+      "sections": [
+        "dmarc_records"
+      ],
+      "policy_item": {
+        "baseline_text": "A DMARC policy SHALL be published for every second-level domain. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/parameters.md#preferreddnsresolvers)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.4.1v1"
+      }
+    },
+    "MS.EXO.4.2v1": {
+      "sections": [
+        "dmarc_records"
+      ],
+      "policy_item": {
+        "baseline_text": "The DMARC message rejection option SHALL be p=reject. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/parameters.md#preferreddnsresolvers)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.4.2v1"
+      }
+    },
+    "MS.EXO.4.3v1": {
+      "sections": [
+        "dmarc_records"
+      ],
+      "policy_item": {
+        "baseline_text": "The DMARC point of contact for aggregate reports SHALL include `reports@dmarc.cyber.dhs.gov`. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/parameters.md#preferreddnsresolvers)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.4.3v1"
+      }
+    },
+    "MS.EXO.4.4v1": {
+      "sections": [
+        "dmarc_records"
+      ],
+      "policy_item": {
+        "baseline_text": "An agency point of contact SHOULD be included for aggregate and failure reports. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Configurable](https://img.shields.io/badge/Configurable-005288)](../../../docs/configuration/parameters.md#preferreddnsresolvers)",
+        "criticality": "Should",
+        "policy_id": "MS.EXO.4.4v1"
+      }
+    },
+    "MS.EXO.5.1v1": {
+      "sections": [
+        "transport_config"
+      ],
+      "policy_item": {
+        "baseline_text": "SMTP AUTH SHALL be disabled. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.5.1v1"
+      }
+    },
+    "MS.EXO.6.1v1": {
+      "sections": [
+        "sharing_policy"
+      ],
+      "policy_item": {
+        "baseline_text": "Contact folders SHALL NOT be shared with all domains. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.6.1v1"
+      }
+    },
+    "MS.EXO.6.2v1": {
+      "sections": [
+        "sharing_policy"
+      ],
+      "policy_item": {
+        "baseline_text": "Calendar details SHALL NOT be shared with all domains. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.6.2v1"
+      }
+    },
+    "MS.EXO.7.1v1": {
+      "sections": [
+        "transport_rule"
+      ],
+      "policy_item": {
+        "baseline_text": "External sender warnings SHALL be implemented. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.EXO.7.1v1"
+      }
+    },
+    "MS.POWERBI.1.1v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "The \"Publish to Web\" feature SHOULD be disabled unless the agency mission requires the capability. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.1.1v1"
+      }
+    },
+    "MS.POWERBI.2.1v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Guest user access to the Power BI tenant SHOULD be disabled unless the agency mission requires the capability. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.2.1v1"
+      }
+    },
+    "MS.POWERBI.3.1v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "The \"Invite external users to your organization\" feature SHOULD be disabled unless agency mission requires the capability. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.3.1v1"
+      }
+    },
+    "MS.POWERBI.4.1v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Service principals with access to APIs SHOULD be restricted to specific security groups. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.4.1v1"
+      }
+    },
+    "MS.POWERBI.4.2v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Service principals' ability to create and use profiles SHOULD be restricted to specific security groups. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.4.2v1"
+      }
+    },
+    "MS.POWERBI.5.1v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "ResourceKey-based authentication SHOULD be blocked unless a specific use case (e.g., streaming and/or \"push\" datasets) merits its use. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.5.1v1"
+      }
+    },
+    "MS.POWERBI.6.1v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Python and R interactions SHOULD be disabled. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.6.1v1"
+      }
+    },
+    "MS.POWERBI.7.1v1": {
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Sensitivity labels SHOULD be enabled for Power BI and employed for sensitive data per enterprise data protection policies. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERBI.7.1v1"
+      }
+    },
+    "MS.POWERPLATFORM.1.1v1": {
+      "sections": [
+        "environment_creation"
+      ],
+      "policy_item": {
+        "baseline_text": "The ability to create production and sandbox environments SHALL be restricted to administrators. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.POWERPLATFORM.1.1v1"
+      }
+    },
+    "MS.POWERPLATFORM.1.2v1": {
+      "sections": [
+        "environment_creation"
+      ],
+      "policy_item": {
+        "baseline_text": "The ability to create trial environments SHALL be restricted to administrators. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.POWERPLATFORM.1.2v1"
+      }
+    },
+    "MS.POWERPLATFORM.2.1v1": {
+      "sections": [
+        "dlp_policies",
+        "tenant_id"
+      ],
+      "policy_item": {
+        "baseline_text": "A DLP policy SHALL be created to restrict connector access in the default Power Platform environment. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.POWERPLATFORM.2.1v1"
+      }
+    },
+    "MS.POWERPLATFORM.2.2v1": {
+      "sections": [
+        "dlp_policies",
+        "environment_list"
+      ],
+      "policy_item": {
+        "baseline_text": "Non-default environments SHOULD have at least one DLP policy. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERPLATFORM.2.2v1"
+      }
+    },
+    "MS.POWERPLATFORM.2.3v1": {
+      "sections": [
+        "dlp_policies",
+        "tenant_id"
+      ],
+      "policy_item": {
+        "baseline_text": "",
+        "criticality": "Should",
+        "policy_id": "MS.POWERPLATFORM.2.3v1"
+      }
+    },
+    "MS.POWERPLATFORM.3.1v1": {
+      "sections": [
+        "tenant_isolation"
+      ],
+      "policy_item": {
+        "baseline_text": "Power Platform tenant isolation SHALL be enabled. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.POWERPLATFORM.3.1v1"
+      }
+    },
+    "MS.POWERPLATFORM.5.1v1": {
+      "sections": [
+        "environment_creation"
+      ],
+      "policy_item": {
+        "baseline_text": "The ability to create Power Pages sites SHOULD be restricted to administrators. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERPLATFORM.5.1v1"
+      }
+    },
+    "MS.POWERPLATFORM.6.1v1": {
+      "sections": [
+        "environment_creation"
+      ],
+      "policy_item": {
+        "baseline_text": "The \"Share with everyone\" feature SHOULD be disabled. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.POWERPLATFORM.6.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.1.1v1": {
+      "sections": [
+        "accepted_domains",
+        "anti_malware_policies",
+        "anti_malware_rules",
+        "protection_policy_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Emails with click-to-run file attachments SHALL be blocked including, at a minimum, .exe, .cmd, and .vbe files. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.1.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.1.2v1": {
+      "sections": [
+        "accepted_domains",
+        "anti_malware_policies",
+        "anti_malware_rules",
+        "protection_policy_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Email scanning SHALL be capable of reviewing emails after delivery. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.1.2v1"
+      }
+    },
+    "MS.SECURITYSUITE.1.3v1": {
+      "sections": [
+        "accepted_domains",
+        "atp_policy_rules",
+        "built_in_protection_rules",
+        "safe_attachment_policies",
+        "safe_attachment_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Emails identified as containing malware SHALL be quarantined or dropped. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.1.3v1"
+      }
+    },
+    "MS.SECURITYSUITE.1.4v1": {
+      "sections": [
+        "atp_policy_for_o365"
+      ],
+      "policy_item": {
+        "baseline_text": "SharePoint, OneDrive, and Teams message attachments SHOULD be scanned for malware. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.1.4v1"
+      }
+    },
+    "MS.SECURITYSUITE.2.1v1": {
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "defender_license",
+        "protection_policy_rules",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "User impersonation protection SHOULD be enabled for sensitive accounts. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Requires Configuration](https://img.shields.io/badge/Requires_Configuration-981D20)](../../../docs/configuration/configuration.md#security-suite-configuration)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.2.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.2.2v1": {
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "defender_license",
+        "protection_policy_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Domain impersonation protection SHOULD be enabled for domains owned by the agency. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.2.2v1"
+      }
+    },
+    "MS.SECURITYSUITE.2.3v1": {
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "defender_license",
+        "protection_policy_rules",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Domain impersonation protection SHOULD be added for key suppliers and partners. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology) [![Requires Configuration](https://img.shields.io/badge/Requires_Configuration-981D20)](../../../docs/configuration/configuration.md#security-suite-configuration)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.2.3v1"
+      }
+    },
+    "MS.SECURITYSUITE.2.4v1": {
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "defender_license",
+        "protection_policy_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "User warnings, comparable to the user safety tips included with EOP, SHOULD be displayed. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.2.4v1"
+      }
+    },
+    "MS.SECURITYSUITE.3.1v1": {
+      "sections": [
+        "dlp_compliance_policies",
+        "dlp_compliance_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "A DLP policy SHALL be configured to protect PII and sensitive information, as defined by the agency, blocking at a minimum: credit card numbers, U.S. Individual Taxpayer Identification Numbers (ITIN), and U.S. Social Security numbers (SSN). [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.3.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.3.2v1": {
+      "sections": [
+        "defender_dlp_license",
+        "dlp_compliance_policies",
+        "dlp_compliance_rules",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "baseline_text": "The DLP policy SHOULD be applied to Exchange, OneDrive, SharePoint, Teams chat, and Devices. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.3.2v1"
+      }
+    },
+    "MS.SECURITYSUITE.3.3v1": {
+      "sections": [
+        "dlp_compliance_policies",
+        "dlp_compliance_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "The action for the DLP policy SHOULD be set to block sharing sensitive information with everyone. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.3.3v1"
+      }
+    },
+    "MS.SECURITYSUITE.3.4v1": {
+      "sections": [
+        "dlp_compliance_policies",
+        "dlp_compliance_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Notifications to inform users and help educate them on the proper use of sensitive information SHOULD be enabled in the DLP policy. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.3.4v1"
+      }
+    },
+    "MS.SECURITYSUITE.4.1v1": {
+      "sections": [
+        "protection_alerts"
+      ],
+      "policy_item": {
+        "baseline_text": "At a minimum, the following alerts SHALL be enabled: a. **Suspicious email sending patterns detected.** b. **Suspicious Connector Activity.** c. **Suspicious Email Forwarding Activity.** d. **Messages have been delayed.** e. **Tenant restricted from sending unprovisioned email.** f. **Tenant restricted from sending email.** g. **A potentially malicious URL click was detected.**",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.4.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.5.1v1": {
+      "sections": [
+        "admin_audit_log_config"
+      ],
+      "policy_item": {
+        "baseline_text": "Unified audit logging SHALL be enabled. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.5.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.6.1v1": {
+      "sections": [
+        "accepted_domains",
+        "hosted_content_filter_policies",
+        "hosted_content_filter_rules",
+        "protection_policy_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Emails detected as spam and phishing SHALL NOT be delivered to the user's inbox. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.6.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.6.2v1": {
+      "sections": [
+        "accepted_domains",
+        "hosted_content_filter_policies",
+        "hosted_content_filter_rules",
+        "protection_policy_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Allowed domains SHALL NOT be added to inbound anti-spam protection policies. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SECURITYSUITE.6.2v1"
+      }
+    },
+    "MS.SECURITYSUITE.7.1v1": {
+      "sections": [
+        "protection_policy_rules",
+        "safe_links_policies",
+        "safe_links_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "URL comparison with a block-list SHOULD be enabled for URLs in emails, Teams messages, and Office documents. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.7.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.7.2v1": {
+      "sections": [
+        "protection_policy_rules",
+        "safe_links_policies",
+        "safe_links_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "Direct download links SHOULD be scanned for malware. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.7.2v1"
+      }
+    },
+    "MS.SECURITYSUITE.7.3v1": {
+      "sections": [
+        "protection_policy_rules",
+        "safe_links_policies",
+        "safe_links_rules"
+      ],
+      "policy_item": {
+        "baseline_text": "User click tracking SHOULD be enabled. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.7.3v1"
+      }
+    },
+    "MS.SECURITYSUITE.8.1v1": {
+      "sections": [
+        "conn_filter"
+      ],
+      "policy_item": {
+        "baseline_text": "IP allow lists SHOULD NOT be created. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.8.1v1"
+      }
+    },
+    "MS.SECURITYSUITE.8.2v1": {
+      "sections": [
+        "conn_filter"
+      ],
+      "policy_item": {
+        "baseline_text": "Safe lists SHOULD NOT be enabled. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.SECURITYSUITE.8.2v1"
+      }
+    },
+    "MS.SHAREPOINT.1.1v1": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "baseline_text": "External sharing for SharePoint SHALL be limited to \"Existing guests\" or \"Only people in your organization.\" [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.1.1v1"
+      }
+    },
+    "MS.SHAREPOINT.1.2v1": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "baseline_text": "External sharing for OneDrive SHALL be limited to \"Existing guests\" or \"Only people in your organization.\" [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.1.2v1"
+      }
+    },
+    "MS.SHAREPOINT.1.3v1": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "applicability": "This policy is only applicable if the external sharing slider in the SharePoint admin center is not set to Only People In Your Organization.",
+        "baseline_text": "External sharing SHALL be restricted to approved external domains and/or users in approved security groups per interagency collaboration needs. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.1.3v1"
+      }
+    },
+    "MS.SHAREPOINT.2.1v1": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "baseline_text": "File and folder default sharing scope SHALL be set to \"Specific people (only the people the user specifies).\" [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.2.1v1"
+      }
+    },
+    "MS.SHAREPOINT.2.2v1": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "baseline_text": "File and folder default sharing permissions SHALL be set to view only. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.2.2v1"
+      }
+    },
+    "MS.SHAREPOINT.3.1v1": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "applicability": "This policy is only applicable if the external sharing slider in the SharePoint admin center is set to Anyone.",
+        "baseline_text": "Expiration days for \"Anyone\" links SHALL be set to 30 days or less. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.3.1v1"
+      }
+    },
+    "MS.SHAREPOINT.3.2v1": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "applicability": "This policy is only applicable if the external sharing slider in the SharePoint admin center is set to Anyone.",
+        "baseline_text": "The allowable file and folder permissions for links SHALL be set to view only. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.3.2v1"
+      }
+    },
+    "MS.SHAREPOINT.3.3v2": {
+      "sections": [
+        "SPO_tenant"
+      ],
+      "policy_item": {
+        "applicability": "This policy is only applicable if the external sharing slider in the SharePoint admin center is set to Anyone or New and Existing Guests or Existing Guests.",
+        "baseline_text": "Reauthentication days for people who use a verification code SHALL be set to 30 days or less. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.SHAREPOINT.3.3v2"
+      }
+    },
+    "MS.TEAMS.1.1v1": {
+      "sections": [
+        "meeting_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "External meeting participants SHOULD NOT be enabled to request control of shared desktops or windows. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.1.1v1"
+      }
+    },
+    "MS.TEAMS.1.2v2": {
+      "sections": [
+        "meeting_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Anonymous users SHALL NOT be enabled to start Microsoft Teams meetings. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.TEAMS.1.2v2"
+      }
+    },
+    "MS.TEAMS.1.3v1": {
+      "sections": [
+        "meeting_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Anonymous users and dial-in callers SHOULD NOT be admitted automatically. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.1.3v1"
+      }
+    },
+    "MS.TEAMS.1.4v1": {
+      "sections": [
+        "meeting_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Internal users SHOULD be admitted to Microsoft Teams meetings automatically. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.1.4v1"
+      }
+    },
+    "MS.TEAMS.1.5v1": {
+      "sections": [
+        "meeting_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Dial-in users SHOULD NOT be enabled to bypass the lobby. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.1.5v1"
+      }
+    },
+    "MS.TEAMS.1.6v1": {
+      "sections": [
+        "meeting_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "Meeting recording SHOULD be disabled. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.1.6v1"
+      }
+    },
+    "MS.TEAMS.1.7v2": {
+      "sections": [
+        "broadcast_policies"
+      ],
+      "policy_item": {
+        "baseline_text": "\"Record an event\" SHOULD NOT be set to \"Always record.\" [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.1.7v2"
+      }
+    },
+    "MS.TEAMS.2.1v2": {
+      "sections": [
+        "federation_configuration"
+      ],
+      "policy_item": {
+        "baseline_text": "External access for users SHALL only be enabled on a per-domain basis. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.TEAMS.2.1v2"
+      }
+    },
+    "MS.TEAMS.2.2v2": {
+      "sections": [
+        "federation_configuration",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "applicability": "This policy is not applicable to GCC, GCC High, or DOD environments.",
+        "baseline_text": "Unmanaged users SHALL NOT be enabled to initiate contact with internal users. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.TEAMS.2.2v2"
+      }
+    },
+    "MS.TEAMS.2.3v2": {
+      "sections": [
+        "federation_configuration",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "applicability": "This policy is not applicable to GCC, GCC High, or DOD environments.",
+        "baseline_text": "Internal users SHOULD NOT be enabled to initiate contact with unmanaged users. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.2.3v2"
+      }
+    },
+    "MS.TEAMS.4.1v1": {
+      "sections": [
+        "client_configuration",
+        "scuba_config"
+      ],
+      "policy_item": {
+        "applicability": "This policy is not applicable to GCC, GCC High, or DOD environments.",
+        "baseline_text": "Microsoft Teams email integration SHALL be disabled. [![BOD 25-01 Requirement](https://img.shields.io/badge/BOD_25--01_Requirement-C41230)](https://www.cisa.gov/news-events/directives/bod-25-01-implementation-guidance-implementing-secure-practices-cloud-services) [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Shall",
+        "policy_id": "MS.TEAMS.4.1v1"
+      }
+    },
+    "MS.TEAMS.5.1v2": {
+      "sections": [
+        "app_policies",
+        "tenant_app_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Agencies SHOULD only allow installation of Microsoft applications approved by the agency. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.5.1v2"
+      }
+    },
+    "MS.TEAMS.5.2v2": {
+      "sections": [
+        "app_policies",
+        "tenant_app_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Agencies SHOULD only allow installation of third-party applications approved by the agency. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.5.2v2"
+      }
+    },
+    "MS.TEAMS.5.3v2": {
+      "sections": [
+        "app_policies",
+        "tenant_app_settings"
+      ],
+      "policy_item": {
+        "baseline_text": "Agencies SHOULD only allow installation of custom applications approved by the agency. [![Automated Check](https://img.shields.io/badge/Automated_Check-5E9732)](#key-terminology)",
+        "criticality": "Should",
+        "policy_id": "MS.TEAMS.5.3v2"
+      }
+    }
+  }
+}
