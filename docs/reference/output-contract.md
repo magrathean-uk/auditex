@@ -43,9 +43,9 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 ## Evidence discipline
 
 `model_assessment.json` is an optional root artefact written by `auditex model assess`.
-Its schema is `schemas/model_assessment.schema.json` (version `2026-10-27.1`), listed
+Its schema is `schemas/model_assessment.schema.json` (version `2026-10-28`), listed
 by the schema manifest and checked when present by bundle validation. The known
-older version `2026-10-27` uses `schemas/model_assessment-2026-10-27.schema.json`.
+older versions `2026-10-27` and `2026-10-27.1` use their date-named schema files.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention
@@ -62,11 +62,48 @@ after removal of a leading thinking block. They are null when the final attempt
 failed at transport level or supplied no assistant text. Skips have no
 prompt or response hash. No raw invalid answer or API key is retained.
 
-Totals are disjoint: `answered` counts validated known requirement verdicts, `unknown`
+The four verdict totals are disjoint: `answered` counts validated known requirement verdicts, `unknown`
 counts validated abstentions and endpoint failures, `invalid` counts exhausted answer
 validation retries (whose claims are unknown), and `skipped` counts policy IDs absent
 from the catalogue (`policy_not_in_catalogue`). All 102 shipped policy items preserve
 their training text, including the intentionally empty Power Platform excerpt.
+
+Version `2026-10-28` adds deterministic pre-checks from the shipped
+`configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
+The product and oracle generator use the same gate evaluator and data. A required
+section missing from a non-empty projection, or marked `not_collected`, produces
+an `unknown` requirement with null value, never an inferred answer. An unreadable,
+missing or invalid typed gate value also produces `unknown`. Explicit null sections
+retain their model/default semantics outside registered gate fields. An absent
+section takes priority over a closed gate in another section. A closed gate produces
+`inferred` true, limitations exactly `["policy_not_applicable"]` and no recommendations.
+
+Rule rows have `reason: "rule_precheck"`, `validation_status: "valid"`, zero attempts
+and latency, null prompt/response hashes, and false thinking flags. Their
+`rule_precheck` object contains `class` (`closed_gate` or `absent_section`), `rule_id`,
+`section` (an ordered array of affected section names), `field` (a path or null) and
+`value` (the normalised gate value or null). Missing gate inputs share the
+`absent_section` class and name the field. Absence rows carry
+`required_evidence_section_not_collected` plus one limitation per unavailable input,
+`required_evidence_section_not_collected:<section>[.<field>]`, and recommend
+`collect_missing_evidence_section`. Criticality remains confirmed from the policy item.
+`totals.rule_answered` counts both kinds, overlapping `answered` and `unknown`;
+the four verdict totals still sum to the policy count.
+
+The P1 projection remains an empty stub. When the whole projection is `{}`, serving
+bypasses pre-checks and retains the model assessment path; the envelope's new
+`limitations` array contains one `projection_not_implemented` entry. A non-empty
+projection has an empty envelope limitations array and enforces missing dependencies.
+Strict offline pack evaluation never applies this serving-only bypass. Dry-run still
+exports all selected prompts without inference.
+
+By default rule rows make zero model calls. `--shadow-model-on-precheck` records the
+ordinary model-client result under `model_shadow`, including failures and attempt
+hashes, without changing the rule verdict, comparison or totals. A shadow cannot
+contain another shadow or pre-check; its policy must match its parent. Invalid raw
+model text is not retained. Original model attempts and hashes belong to the nested
+shadow only; the parent remains a zero-attempt rule decision.
+
 `model_assessment_prompts.jsonl` is the dry-run alternative, containing message/hash
 rows or explicit skip rows. Both are private, named post-finalisation outputs and may
 be unlisted by the original hash manifest; that manifest is never rewritten. They

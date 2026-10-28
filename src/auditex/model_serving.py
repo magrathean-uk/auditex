@@ -25,9 +25,10 @@ from azure_tenant_audit.resources import open_text_resource
 
 from .model_eval import _invalid_constant, _pairs, validate_model_response
 from .model_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256
+from .model_precheck import precheck_case
 from .scuba_projection import project_run
 
-SCHEMA_VERSION = "2026-10-27.1"
+SCHEMA_VERSION = "2026-10-28"
 PROMPT_CONVENTION = "named-enums-v1"
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
@@ -299,7 +300,7 @@ def _baseline_statuses(pack_path: Path) -> dict[str, str]:
 
 
 def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] | None = None,
-               dry_run: bool = False) -> dict[str, Any]:
+               dry_run: bool = False, shadow_model_on_precheck: bool = False) -> dict[str, Any]:
     root = Path(run_dir).expanduser().resolve()
     manifest = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
     if not isinstance(manifest, dict) or not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
@@ -342,15 +343,20 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
                                 "prompt_sha256": sha256(canonical(messages).encode()).hexdigest(),
                                 "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
                 continue
-            record = client.assess(case)
+            record = precheck_case(case, skip_absent_sections=not projection)
+            if record is None:
+                record = client.assess(case)
+            elif shadow_model_on_precheck:
+                record["model_shadow"] = client.assess(case)
         record["comparison"] = _comparison(policy_id, record, baseline)
         records.append(record)
     if dry_run:
         write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
         return {"path": str(target), "dry_run": True, "prompts": sum("messages" in row for row in prompts),
                 "skipped": sum(row.get("skipped", False) for row in prompts)}
-    totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0}
+    totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0}
     for record in records:
+        totals["rule_answered"] += record["reason"] == "rule_precheck"
         state = record["validation_status"]
         if state in {"invalid", "skipped"}:
             totals[state] += 1
@@ -361,7 +367,8 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
     result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at, "run_id": manifest["run_id"],
               "endpoint_host": config.endpoint_host, "model_name": config.model_name,
               "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
-              "totals": totals, "policies": records}
+              "totals": totals, "policies": records,
+              "limitations": [] if projection else ["projection_not_implemented"]}
     from azure_tenant_audit.model_assessment import validate_assessment
     validate_assessment(result)
     write_private_text(target, json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n")

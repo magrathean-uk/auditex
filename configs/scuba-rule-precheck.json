@@ -1,0 +1,183 @@
+{
+  "schema_version": "2026-10-28",
+  "rules": [
+    {
+      "rule_id": "MS.SHAREPOINT.3.1v1.sharing_closed",
+      "policy_id": "MS.SHAREPOINT.3.1v1",
+      "section": "SPO_tenant",
+      "path": [
+        "SharingCapability"
+      ],
+      "value_type": "integer",
+      "allowed_values": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "closed_values": [
+        0,
+        1,
+        3
+      ],
+      "source": "oracle-pack-v7",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.3.2v1.sharing_closed",
+      "policy_id": "MS.SHAREPOINT.3.2v1",
+      "section": "SPO_tenant",
+      "path": [
+        "SharingCapability"
+      ],
+      "value_type": "integer",
+      "allowed_values": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "closed_values": [
+        0,
+        1,
+        3
+      ],
+      "source": "oracle-pack-v7",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.3.3v2.sharing_closed",
+      "policy_id": "MS.SHAREPOINT.3.3v2",
+      "section": "SPO_tenant",
+      "path": [
+        "SharingCapability"
+      ],
+      "value_type": "integer",
+      "allowed_values": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "closed_values": [
+        0
+      ],
+      "source": "oracle-pack-v7",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.1.3v1.sharing_closed",
+      "policy_id": "MS.SHAREPOINT.1.3v1",
+      "section": "SPO_tenant",
+      "path": [
+        "SharingCapability"
+      ],
+      "value_type": "integer",
+      "allowed_values": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "closed_values": [
+        0
+      ],
+      "source": "docs/guides/model-development.md (doc-sourced; no test-v7 rows)",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.TEAMS.2.2v2.environment_closed",
+      "policy_id": "MS.TEAMS.2.2v2",
+      "section": "scuba_config",
+      "path": [
+        "M365Environment"
+      ],
+      "value_type": "string",
+      "allowed_values": [
+        "commercial",
+        "gcc",
+        "gcchigh",
+        "dod"
+      ],
+      "closed_values": [
+        "gcc",
+        "gcchigh",
+        "dod"
+      ],
+      "source": "oracle-pack-v7 training prompts; policy applicability",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.TEAMS.2.3v2.environment_closed",
+      "policy_id": "MS.TEAMS.2.3v2",
+      "section": "scuba_config",
+      "path": [
+        "M365Environment"
+      ],
+      "value_type": "string",
+      "allowed_values": [
+        "commercial",
+        "gcc",
+        "gcchigh",
+        "dod"
+      ],
+      "closed_values": [
+        "gcc",
+        "gcchigh",
+        "dod"
+      ],
+      "source": "oracle-pack-v7 training prompts; policy applicability",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.TEAMS.4.1v1.environment_closed",
+      "policy_id": "MS.TEAMS.4.1v1",
+      "section": "scuba_config",
+      "path": [
+        "M365Environment"
+      ],
+      "value_type": "string",
+      "allowed_values": [
+        "commercial",
+        "gcc",
+        "gcchigh",
+        "dod"
+      ],
+      "closed_values": [
+        "gcc",
+        "gcchigh",
+        "dod"
+      ],
+      "source": "oracle-pack-v7 training prompts; policy applicability",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.3.3v2.authenticator_disabled",
+      "policy_id": "MS.AAD.3.3v2",
+      "section": "authentication_method",
+      "path": [
+        "authentication_method_feature_settings",
+        {
+          "Id": "MicrosoftAuthenticator"
+        },
+        "State"
+      ],
+      "value_type": "string",
+      "allowed_values": [
+        "enabled",
+        "disabled"
+      ],
+      "closed_values": [
+        "disabled"
+      ],
+      "source": "oracle-pack-v7 training prompts; policy applicability",
+      "complete": false
+    }
+  ],
+  "applicability_notes": {
+    "MS.AAD.3.3v2": "This policy is only applicable if MS Authenticator is enabled and no conditional access policy already enforces phishing-resistant MFA (the requirement of MS.AAD.3.1v1)."
+  },
+  "not_rule_gated": {
+    "MS.AAD.3.3v2:phishing_resistant_mfa": "no deterministic field; requires evaluation of conditional-access semantics and exclusions"
+  }
+}

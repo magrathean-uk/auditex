@@ -151,6 +151,69 @@ match exactly first, then by ID without the version suffix when there is one uni
 match; `baseline_match` records `exact`, `version_mismatch` or `none`. Malformed report
 pack data is ignored for comparison; dry-run does not read the report pack.
 
+### Rule pre-checks and offline product scoring
+
+Assessment pre-checks non-empty projections before inference. The shipped
+`configs/scuba-rule-precheck.json` is the shared authority for serving and oracle
+generation; `learn_gates` remains discovery for unregistered policies. Generation
+checks the evidence actually shown after removed sections become markers, rejects
+an oracle not-applicable result that contradicts a complete shipped gate, and treats
+unreadable gate inputs as unknown. Frozen packs are not rewritten.
+
+| Policies | Decisive field | Closed values |
+| --- | --- | --- |
+| MS.SHAREPOINT.3.1v1, 3.2v1 | `SPO_tenant.SharingCapability` | `0`, `1`, `3` |
+| MS.SHAREPOINT.3.3v2 | `SPO_tenant.SharingCapability` | `0` |
+| MS.SHAREPOINT.1.3v1 | `SPO_tenant.SharingCapability` | `0`; doc-sourced, no test-v7 rows |
+| MS.TEAMS.2.2v2, 2.3v2, 4.1v1 | `scuba_config.M365Environment` | `gcc`, `gcchigh`, `dod` |
+| MS.AAD.3.3v2 | `authentication_method.authentication_method_feature_settings[Id=MicrosoftAuthenticator].State` | `disabled` |
+
+Sharing values mean `0` organisation only, `1` new/existing guests, `2` anyone,
+`3` existing guests. Real integers and integral floats are accepted; booleans,
+numeric strings, fractional and out-of-range values cannot close a gate. String
+gates use exact exported values. Singleton object arrays and objects are supported;
+empty/ambiguous objects and missing, null or invalid gate fields produce unknown.
+AAD's separate phishing-resistant MFA applicability branch is **not rule-gated: no
+deterministic field**. It requires conditional-access semantics and exclusions;
+an enabled Authenticator leaves that branch to the model. All eight applicability
+policies have at least one deterministic gate; no whole policy in this group lacks one.
+
+A missing dependency key or a `not_collected` marker produces an unknown requirement
+and names every unavailable section in the row limitations; missing gate fields
+name the input path. Absence takes priority over a closed gate in another section.
+Rule answers make no model requests by default. `--shadow-model-on-precheck` opts
+into recording the normal model-client result in `model_shadow`; it cannot affect
+the verdict, comparison or totals. The entire empty P1 projection is exempt so demo
+bundles retain their model path, with one envelope limitation,
+`projection_not_implemented`. P2 projection is not implemented by this change.
+See the [assessment contract](../reference/output-contract.md) for version `2026-10-28`.
+
+Score a frozen case file locally, without loading a model or contacting an endpoint:
+
+```sh
+.venv/bin/python scripts/score-model-precheck.py --cases /path/to/test.jsonl
+.venv/bin/python scripts/score-model-precheck.py --cases /path/to/test.jsonl --responses /path/to/responses.jsonl
+```
+
+This reuses the checkpoint scorer's case loader, recorded-response format and strict
+mechanical scoring. Each supplied model gets a separate combined score; missing or
+invalid answers fail remaining cases. Without responses it reports rule coverage and
+leaves the combined score unmeasured. Scoring compares the original pack response
+vocabulary; the serving-only named limitation extensions and transport metadata are
+excluded. Expected labels and provenance do not enter pre-check decisions.
+
+Measured on frozen test-v7 (435 rows): closed gates answer 96, all 96 strict-correct;
+the absence class answers 71, 70 strict-correct; 268 remain for the model. The absence
+class comprises 15 missing gate inputs and 56 section markers. Of those markers, 54
+have provenance `not_collected` and two `fail_closed_missing_input`. Thus the expected
+15-row handover count describes missing SharePoint gate inputs, not every absent
+dependency. All rule answers total 167, with 166 strict-correct. The sole mismatch is
+`scuba-powerbi-ms-powerbi-7-1v1-621dd7e602`: both answers are unknown, but the pack cites
+the false licence flag (`e2`) as well as the missing tenant-settings section (`e3`);
+the pre-check cites the missing section alone. The pack stays unchanged. Nine remaining
+rows are unreadable Power BI inputs outside these rules; 89 are met and 170 not met.
+No combined score against a real model is claimed without recorded responses.
+
 ## Case and answer contract
 
 Each JSONL case has `id`, `family`, `split`, `provenance`, `messages` and
@@ -428,7 +491,7 @@ Engine outcomes that are not plain verdicts:
   conditions. `policy_not_applicable` is in every case's candidate limitations and the system prompt states the
   rules.
 - Precedence: a missing field does not make a case unknown when the applicability condition is visibly unmet. The
-  gate is learned from the engine's own answers: a field named in the policy's missing-input message whose values
+  gate was learned from the engine's own answers: a field named in the policy's missing-input message whose values
   in evaluated results never occur in not-applicable ones (SharePoint's `SharingCapability`: `{0}` for 1.3 and 3.3,
   `{0, 1, 3}` for 3.1 and 3.2, found automatically, `gates` in `summary.json`). A missing-input result whose evidence
   shows such a value is not applicable (7 SharePoint cases, formerly fail-closed); one that lacks the gate field

@@ -844,10 +844,13 @@ def test_engine_wording_decides_the_outcome(miner):
     assert miner.missing_sections("SPO_tenant or SharingCapability are missing from input JSON", ["SPO_tenant", "other"]) == ["SPO_tenant"]
     assert miner.missing_sections("nothing named is missing from input JSON", ["a", "b"]) == ["a", "b"]
     view = ["powerbi_access_denied_reason", "powerbi_license_found", "powerbi_tenant_settings"]
-    assert miner.unreadable_sections({"powerbi_license_found": False}, view) == ["powerbi_license_found"]
-    assert miner.unreadable_sections({}, view) == ["powerbi_license_found"]
-    assert miner.unreadable_sections({"powerbi_license_found": True, "powerbi_access_denied_reason": "403"}, view) == ["powerbi_access_denied_reason"]
-    assert miner.unreadable_sections({"powerbi_license_found": False}, ["other"]) == ["other"]
+    collected = dict.fromkeys(view)
+    assert miner.unavailable_input_sections({**collected, "powerbi_license_found": False}, view,
+                                            unreadable=True) == ["powerbi_license_found"]
+    assert miner.unavailable_input_sections(collected, view, unreadable=True) == ["powerbi_license_found"]
+    assert miner.unavailable_input_sections({**collected, "powerbi_license_found": True, "powerbi_access_denied_reason": "403"},
+                                            view, unreadable=True) == ["powerbi_access_denied_reason"]
+    assert miner.unavailable_input_sections({"powerbi_license_found": False}, ["other"], unreadable=True) == ["other"]
 
 
 def test_only_rows_that_state_a_verdict_count(miner):
@@ -920,6 +923,39 @@ def test_a_not_applicable_pass_is_inferred_true_with_a_limitation_and_the_gate_i
         assert "policy_not_applicable" in _user(case)["limitation_ids"]
     plain, _ = _outcome_cases(miner, rows[:1], ["SPO_tenant"])
     assert "applicability" not in _user(plain[0])["evidence"][0]["observed"]
+
+
+@pytest.mark.parametrize("met", [True, False])
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_oracle_evaluated_verdict_disagrees_with_closed_shipped_gate(miner, met, duplicate):
+    observed = {"SPO_tenant": [{"SharingCapability": 0, "Expiry": 30}]}
+    rows = [(observed, "Requirement met" if met else "Requirement not met", met)]
+    if duplicate:
+        rows.insert(0, (observed, GATE, True))
+    with pytest.raises(ValueError, match=rf"disagrees with shipped pre-check: MS.SHAREPOINT.3.1v1; "
+                                         rf"closed gate SharingCapability=0, evaluated RequirementMet={met}"):
+        _outcome_cases(miner, rows, ["SPO_tenant"], policy="MS.SHAREPOINT.3.1v1")
+
+
+def test_oracle_not_applicable_disagrees_with_open_shipped_gate(miner):
+    rows = [({"SPO_tenant": [{"SharingCapability": 2, "Expiry": 30}]}, GATE, True)]
+    with pytest.raises(ValueError, match="disagrees with shipped pre-check: MS.SHAREPOINT.3.1v1; open gate"):
+        _outcome_cases(miner, rows, ["SPO_tenant"], policy="MS.SHAREPOINT.3.1v1")
+
+
+@pytest.mark.parametrize("observed,details,met,outcome,status", [
+    ({"SharingCapability": 0}, MISSING, False, "not_applicable", "inferred"),
+    ({"SharingCapability": 2}, MISSING, False, "fail_closed_missing_input", "unknown"),
+    ({"Expiry": 30}, "Requirement met", True, "fail_closed_missing_input", "unknown"),
+    ({"Expiry": 30}, GATE, True, "fail_closed_missing_input", "unknown"),
+])
+def test_shipped_gate_preserves_justified_missing_input_overrides(miner, observed, details, met, outcome, status):
+    rows = [({"SPO_tenant": [observed]}, details, met)]
+    cases, _ = _outcome_cases(miner, rows, ["SPO_tenant"], policy="MS.SHAREPOINT.3.1v1")
+    assert cases[0]["provenance"]["oracle_outcome"] == outcome
+    requirement = cases[0]["expected"]["claims"][0]
+    assert requirement["status"] == status
+    assert requirement["value"] is (True if status == "inferred" else None)
 
 
 def test_a_policy_with_a_second_applicability_condition_quotes_both(miner):

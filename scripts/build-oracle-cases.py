@@ -88,6 +88,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from auditex.model_training import _outside_audit_runs, distinct_prompt_sha256, validate_cases  # noqa: E402
 from azure_tenant_audit.external_sharing import annotate_enum_names  # noqa: E402
 from azure_tenant_audit.model_evidence import NOT_COLLECTED  # noqa: E402
+from azure_tenant_audit.scuba_precheck import policy_rule, precheck_policy, rule_catalogue, unavailable_input_sections  # noqa: E402
 
 ORACLE_REPO = "https://github.com/cisagov/ScubaGear"
 PRODUCT_DIRS = ["AAD", "EXO", "SecuritySuite", "Sharepoint", "Teams", "PowerPlatform", "PowerBI"]
@@ -141,10 +142,7 @@ MAX_FIELD_DEPTH = 16
 # The engine's applicability sentence, completed where its Rego has a condition the sentence omits. Audited against the pinned
 # commit: SharePoint 1.3, 3.1, 3.2, 3.3 and Teams 2.2, 2.3, 4.1 behave as their sentence says (a slider value, the M365
 # environment); MS.AAD.3.3v2 is also not applicable whenever phishing-resistant MFA is enforced (AAD_3_3_Not_Applicable).
-APPLICABILITY_NOTES = {
-    "MS.AAD.3.3v2": "This policy is only applicable if MS Authenticator is enabled and no conditional access policy already "
-                    "enforces phishing-resistant MFA (the requirement of MS.AAD.3.1v1).",
-}
+APPLICABILITY_NOTES = rule_catalogue()["applicability_notes"]
 NOT_APPLICABLE_RE = re.compile(r"\b(?:only applicable|not applicable)\b", re.I)
 DETAILS_LINK_RE = re.compile(r"\s*See <a\b.*$", re.S)
 EVAL_LINE_RE = re.compile(r"^[ \t]*[A-Za-z_][A-Za-z0-9_]*\s*:=\s*[A-Za-z_][A-Za-z0-9_]*\.tests\b", re.M)
@@ -1200,13 +1198,6 @@ def missing_sections(details: str, view_sections: list[str]) -> list[str]:
     return [s for s in view_sections if s in named] or list(view_sections)
 
 
-def unreadable_sections(observed: dict, view_sections: list[str]) -> list[str]:
-    """The view section that explains an unreadable Power BI tenant: the licence flag when the licence was not found,
-    otherwise the access-denied reason; all of the view if neither is in it."""
-    reason = "powerbi_license_found" if observed.get("powerbi_license_found") is not True else "powerbi_access_denied_reason"
-    return [s for s in view_sections if s == reason] or list(view_sections)
-
-
 def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections: dict[str, list[str]], texts: dict[str, str],
                 base_input: dict, *, commit: str, opa_version: str, config_name: str, not_collected_every: int,
                 template: bool = True, variants_failed: int = 0, methods: dict[str, str] | None = None,
@@ -1257,21 +1248,19 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                 continue
             view_sections = sections[pid]
             view = canonical({s: variant["input"].get(s) for s in view_sections})
-            if (pid, view) in seen_views:
-                stats["duplicate_view"] += 1
-                continue
             observed = {s: variant["input"].get(s) for s in view_sections}
             outcome = engine_outcome = oracle_outcome(result)
             nothing_observed = outcome == "evaluated" and all(value is None for value in observed.values())
             if nothing_observed and len(view_sections) > 1:
                 stats["empty_tenant_input"] += 1   # a verdict on a tenant that holds none of the policy's sections is no case
                 continue
-            seen_views.add((pid, view))
             group = pid.rsplit(".", 1)[0]
             if nothing_observed:   # the policy's only section is absent: nothing was observed to judge
                 outcome = "fail_closed_missing_input"
-                stats["absent_dependency"] += 1
-            if outcome == "fail_closed_missing_input" and gates and gates.get(pid):
+            # Shipped rules are authoritative for registered policies. Learning
+            # remains a discovery aid for new policies, never a second table.
+            rule = policy_rule(pid)
+            if not rule and outcome == "fail_closed_missing_input" and gates and gates.get(pid):
                 held = leaves(observed)
                 if any(path in held and held[path] in answered for path, answered in gates[pid].items()):
                     outcome = "not_applicable"   # the gate is visibly unmet, which takes precedence over the missing field
@@ -1285,6 +1274,27 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                         shown[field_section], added = null_missing(shown[field_section], path)
                         if added:
                             nulled.append((field_section, ".".join((field_section, *path))))
+            # Check the evidence actually shown, after removed sections have
+            # become NOT_COLLECTED. Absence takes priority in both paths.
+            precheck = precheck_policy(pid, shown, view_sections) if rule else None
+            if precheck and precheck["class"] == "closed_gate" and engine_outcome == "evaluated":
+                raise ValueError(f"Oracle applicability disagrees with shipped pre-check: {pid}; "
+                                 f"closed gate {precheck['field']}={precheck['value']!r}, "
+                                 f"evaluated RequirementMet={result['RequirementMet']!r}")
+            if not precheck and rule and rule["complete"] and engine_outcome == "not_applicable":
+                raise ValueError(f"Oracle applicability disagrees with shipped pre-check: {pid}; "
+                                 "open gate, oracle not_applicable")
+            # Only missing/unusable inputs may override an oracle outcome:
+            # an explicit closed gate beats a missing setting, while an absent
+            # dependency or gate input remains unknown even for an oracle pass.
+            if precheck:
+                outcome = "not_applicable" if precheck["class"] == "closed_gate" else "fail_closed_missing_input"
+            if (pid, view) in seen_views:
+                stats["duplicate_view"] += 1
+                continue
+            seen_views.add((pid, view))
+            if nothing_observed:
+                stats["absent_dependency"] += 1
             evidence = [{"id": f"e{i + 1}", "section": s, "observed": shown[s]} for i, s in enumerate(view_sections)]
             policy_observed = {"policy_id": pid, "criticality": result["Criticality"], "baseline_text": texts.get(pid, "")}
             if applicability and pid in applicability:
@@ -1317,9 +1327,11 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                 outcome_label = "not_collected"
             else:
                 if outcome == "fail_closed_missing_input":
-                    cited = (list(view_sections) if nothing_observed else
-                             unreadable_sections(observed, view_sections) if UNAVAILABLE_RE.search(result["ReportDetails"])
-                             else missing_sections(result["ReportDetails"], view_sections))
+                    unreadable = bool(UNAVAILABLE_RE.search(result["ReportDetails"]))
+                    cited = unavailable_input_sections(shown, view_sections,
+                        additional=(precheck["section"] if precheck else list(view_sections) if nothing_observed else
+                                    [] if unreadable else missing_sections(result["ReportDetails"], view_sections)),
+                        unreadable=unreadable)
                     requirement = {"id": "requirement_met", "status": "unknown", "value": None,
                                    "evidence_ids": ["e0", *(e["id"] for e in evidence if e["section"] in cited or e["section"] in marked)]}
                     limitations, recommendations = ["required_evidence_section_not_collected"], ["collect_missing_evidence_section"]

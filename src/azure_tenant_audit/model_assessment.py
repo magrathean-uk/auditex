@@ -12,12 +12,14 @@ import re
 from typing import Any
 
 from .resources import open_text_resource
+from .scuba_precheck import field_name, policy_rule, precheck_response
 
 MODEL_ASSESSMENT_PATH = "model_assessment.json"
 MODEL_ASSESSMENT_SCHEMA = "schemas/model_assessment.schema.json"
 ASSESSMENT_SCHEMAS = {
     "2026-10-27": "schemas/model_assessment-2026-10-27.schema.json",
-    "2026-10-27.1": MODEL_ASSESSMENT_SCHEMA,
+    "2026-10-27.1": "schemas/model_assessment-2026-10-27.1.schema.json",
+    "2026-10-28": MODEL_ASSESSMENT_SCHEMA,
 }
 
 
@@ -73,6 +75,8 @@ def validate_assessment(payload: Any) -> None:
     _check(payload, schema, schema, "assessment")
     catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
     counts = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0}
+    if version == "2026-10-28":
+        counts["rule_answered"] = 0
     ids = set()
     for row in payload["policies"]:
         if row["policy_id"] in ids:
@@ -83,6 +87,11 @@ def validate_assessment(payload: Any) -> None:
         ):
             raise ValueError("Unsupported model assessment policy")
         policy = catalogue.get(row["policy_id"])
+        is_rule = row["reason"] == "rule_precheck"
+        if version == "2026-10-28":
+            counts["rule_answered"] += is_rule
+            if ("rule_precheck" in row) != is_rule or "model_shadow" in row and not is_rule:
+                raise ValueError("Invalid rule pre-check metadata")
         allowed_evidence = {f"e{index}" for index in range(len(policy["sections"]) + 1)} if policy else set()
         status = row["validation_status"]
         requirement = next((c for c in row["claims"] if c["id"] == "requirement_met"), {})
@@ -125,6 +134,50 @@ def validate_assessment(payload: Any) -> None:
                     claim["value"] != policy["policy_item"]["criticality"] or claim["evidence_ids"] != ["e0"]
                 ):
                     raise ValueError("Invalid policy criticality value")
+        if is_rule:
+            detail = row["rule_precheck"]
+            if (status != "valid" or row["attempts"] != 0 or row["latency_ms"] != 0 or
+                    row["prompt_sha256"] is not None or row["response_sha256"] is not None or
+                    row["thinking_disabled"] or row["thinking_stripped"]):
+                raise ValueError("Invalid rule pre-check provenance")
+            sections = policy["sections"]
+            if not set(detail["section"]) <= set(sections):
+                raise ValueError("Unsupported rule pre-check section")
+            if detail["rule_id"] == "required_sections_present":
+                if detail["class"] != "absent_section" or detail["field"] is not None or detail["value"] is not None:
+                    raise ValueError("Invalid absent-section pre-check")
+            else:
+                rule = policy_rule(row["policy_id"])
+                if (rule is None or detail["rule_id"] != rule["rule_id"] or
+                        detail["section"] != [rule["section"]] or detail["field"] != field_name(rule)):
+                    raise ValueError("Unsupported rule pre-check gate")
+                if detail["class"] == "closed_gate":
+                    if (type(detail["value"]) is not (int if rule["value_type"] == "integer" else str) or
+                            detail["value"] not in rule["closed_values"]):
+                        raise ValueError("Invalid closed-gate value")
+                elif detail["value"] is not None:
+                    raise ValueError("Absent gate input must have null value")
+            expected = precheck_response(detail, policy["policy_item"], sections)
+            if any(row[key] != expected[key] for key in expected):
+                raise ValueError("Invalid rule pre-check answer")
+            if "model_shadow" in row:
+                shadow = row["model_shadow"]
+                if shadow["policy_id"] != row["policy_id"]:
+                    raise ValueError("Shadow policy differs from rule policy")
+                # Reuse all model-answer semantic validation, including failures,
+                # without allowing it to participate in the product comparison.
+                req = next((c for c in shadow["claims"] if c["id"] == "requirement_met"), {})
+                known = shadow["validation_status"] == "valid" and req.get("status") == "confirmed"
+                comparison = {"baseline_status": None, "baseline_match": "none", "result": "not_assessed",
+                              "model_status": ("pass" if req.get("value") is True else "fail") if known else None}
+                state = shadow["validation_status"]
+                category = state if state in {"invalid", "unknown"} else (
+                    "unknown" if req.get("status") == "unknown" else "answered")
+                shadow_totals = dict.fromkeys(counts, 0)
+                shadow_totals[category] = 1
+                validate_assessment({**payload, "totals": shadow_totals,
+                                     "policies": [{**shadow, "comparison": comparison}]})
+            continue
         if row["attempts"] < 1 or row["prompt_sha256"] is None:
             raise ValueError("Missing model assessment attempt provenance")
         if status == "invalid" and (row["reason"] != "model_response_invalid" or "model_response_invalid" not in row["limitations"]):

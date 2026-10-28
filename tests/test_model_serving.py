@@ -385,7 +385,8 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
     monkeypatch.setattr(ModelClient, "_request", reply)
     before = snapshot(demo_bundle)
     result = assess_run(demo_bundle, ModelConfig(model_name="test-model"))
-    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0}
+    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 0}
+    assert result["limitations"] == ["projection_not_implemented"]
     assert result["endpoint_host"] == "127.0.0.1" and result["run_id"] == "demo"
     assert all(row["comparison"]["result"] == "not_assessed" for row in result["policies"])
     validate_assessment(result)
@@ -446,6 +447,8 @@ def test_sealed_or_symlink_output_is_refused(tmp_path):
 def test_assessment_resources_are_shipped_and_schema_is_registered():
     resources = shipped_resource_manifest()["resources"]
     assert "configs/scuba-policy-sections.json" in resources
+    assert "configs/scuba-rule-precheck.json" in resources
+    assert "schemas/model_assessment-2026-10-27.1.schema.json" in resources
     assert "schemas/model_assessment.schema.json" in resources
     assert "model_assessment.schema.json" in contract_schema_manifest()["schemas"]
 
@@ -685,6 +688,7 @@ def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monk
     monkeypatch.setattr(ModelClient, '_request', lambda *a: envelope(missing_answer()))
     result = assess_run(tmp_path, ModelConfig(model_name='test-model'), policies=[POLICY])
     result['schema_version'] = '2026-10-27'
+    del result['limitations'], result['totals']['rule_answered']
     row = result['policies'][0]
     del row['thinking_disabled'], row['thinking_stripped'], row['comparison']['baseline_match']
     validate_assessment(result)
