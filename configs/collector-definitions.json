@@ -388,7 +388,7 @@
     },
     "identity_governance": {
       "enabled": true,
-      "description": "Identity governance, entitlement management, and privileged schedule inventory",
+      "description": "Identity governance, entitlement management, privileged schedule and PIM role policy inventory (directory roles only; PIM for Groups is not read)",
       "required_permissions": [
         "AccessReview.Read.All",
         "EntitlementManagement.Read.All",
@@ -401,7 +401,9 @@
         "accessPackages",
         "roleAssignmentSchedules",
         "roleEligibilitySchedules",
-        "administrativeUnits"
+        "administrativeUnits",
+        "roleManagementPolicyAssignments",
+        "roleManagementPolicyRules"
       ]
     },
     "intune_depth": {

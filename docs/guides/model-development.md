@@ -667,9 +667,11 @@ observed-evidence collisions and prompt duplicates are checked by pack curation 
 derivation of the projection shape goldens (it was a test helper; `tests/test_scuba_projection.py` now calls it to reproduce the v7 fixture).
 It never replaces `tests/fixtures/scuba-projection-shapes-v7.json`: the shipped gate follows the model actually pinned.
 
-Known limits. The privileged-users `status` that withholds `privileged_users` and `privileged_roles` on the demo is the Graph role-schedule
-`status` (`Provisioned`), which `scuba_projection._healthy` reads as a collection-health flag; it is not an evidence enum, appears in no pack
-row, and needs no sweep, only a narrower health check. The adapter allow-lists (`DefaultSharingLinkType` {1, 2}, `DefaultLinkPermission` {1, 2},
+Known limits. `privileged_roles` is written from the `identity_governance` PIM policy reads (see the output contract) and, on the demo,
+is withheld by the whole-shape gate alone (`incomplete_shape`, detail `unseen_shape`): every frozen v7 row carries `NotificationRecipients` and
+`Setting` on its expiration rules, and `IsExpirationRequired`, `MaximumDuration` and `NotificationRecipients` on its approval rules, none of which Graph
+returns there, and the pack holds no null or empty form of them to copy. Its rows are ScubaGear Rego unit-test inputs, not exporter output (the
+pinned exporter pads nothing), so no Graph-faithful artefact matches. It needs a pack that holds the shape (or real exports), never padded fields. The adapter allow-lists (`DefaultSharingLinkType` {1, 2}, `DefaultLinkPermission` {1, 2},
 `SharingDomainRestrictionMode` {0, 1}, the CA key whitelist) and `PACK_ENUM_DOMAINS` follow a pack, never the other way round. The whole-section
 shape gate compares the set of distinct item shapes, so a multi-policy Conditional Access section is projected only when a pack holds that exact set.
 

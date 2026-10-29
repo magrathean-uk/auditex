@@ -8,8 +8,52 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 ## [Unreleased]
 
 Model-development tooling (round 2 of the specialist-model programme) and an internal
-engine/product boundary rework. `CONTRACT_VERSION` stays `2026-10-22`; audit, report,
-export and MCP behaviour is unchanged.
+engine/product boundary rework. `CONTRACT_VERSION` stays `2026-10-22`; report, export and
+MCP behaviour is unchanged. Audit collection is not: the `identity_governance` collector
+gains two GET-only reads (the PIM role policies, "Collection (1.2.2.dev5)" below) and the
+bundle gains the `privileged_roles` artefact, both additive.
+
+### Collection (1.2.2.dev5)
+
+- **PIM role policy collection (new reads, no new required scope).** The `identity_governance` collector reads the PIM role
+  policies of the directory roles with two GET-only operations: `roleManagementPolicyAssignments`
+  (`/policies/roleManagementPolicyAssignments`, Graph v1.0, with the `scopeId eq '/' and scopeType eq 'DirectoryRole'`
+  filter the API requires and no `$top`) and `roleManagementPolicyRules` (`/policies/roleManagementPolicies/{id}/rules`
+  once per distinct policy, through `$batch` when available, at most 250 policies; a rule row keeps only the fields the
+  artefacts read, never the approvers' names or ids). **No new required scope:** `RoleManagement.Read.Directory`, which
+  the collector already requires, covers these reads, so a registration that grants the existing set needs no change and
+  is not shown as `blocked_by_scope` or asked to consent again (scope names are compared exactly).
+  `RoleManagementPolicy.Read.Directory` is the least-privilege alternative for a new app registration and appears only in
+  the permission notes and the documentation. PIM for Groups (`RoleManagementPolicy.Read.AzureADGroup`) is not read.
+  - `normalized/governance_objects.json` gains `role_management_policy_assignment` and `role_management_policy_rule`
+    records (rule keys carry the policy id, since rule ids repeat across policies). `normalized/privileged_roles.json`
+    is now written, in the ScubaGear ProviderExport shape `auditex.scuba_projection` reads (one row per privileged
+    directory role with `Assignments` from the role assignment schedules in the pack's `/Date(ms)/` form and the
+    expiration, notification and approval `Rules`), with a `collection_status`/`complete` envelope. It is written only
+    when every read behind it succeeded in full and nothing is defaulted; each row also carries the normalized `key`
+    the bundle contract requires, which the projection accepts and never projects.
+  - A refused policy read (403) is `blocked_permission` in the coverage ledger and a `collection_gaps` record
+    (`read_failed`, with the error class); an HTTP 404 on the assignment list (or Graph's 400 "Resource not found for the
+    segment") is a gap with the new reason `endpoint_unavailable`. Either leaves no artefact, so `privileged_roles` is `missing_artifact`, never an empty list,
+    and the failure is listed under `ignored_failures` for the sections that do not read it. A licence refusal is a
+    licence-gated section like the PIM schedules; when every failed rule read was a licence refusal, the derived
+    `roleManagementPolicyRulesFanout` row carries `license_required` too, so the collector reads as licence-limited and not
+    as incomplete evidence. A policy id is percent-encoded as a path segment.
+  - When every read succeeded and the artefact is withheld all the same (an empty policy assignment list, a privileged role
+    without a policy, with a conflicting pair of policies, with no rules or with no exportable rule, an unreadable rule or an
+    unreadable schedule), `collection_gaps` gains one record `identity_governance.privileged_roles` with the new reason
+    `artefact_withheld` and `reasons` (for example `role_without_policy:<role definition id>`). The collector stays `ok`, the
+    projection still reports `missing_artifact` and lists the gap under `ignored_failures`.
+  - Inference to confirm on a live tenant before the shape gate opens: `Assignments` come from `roleAssignmentSchedules`,
+    which also lists administrative-unit scoped schedules (copied without their scope), whereas ScubaGear may read the
+    schedule instances.
+  - The demo carries the policies of the roles its schedules name (five policies, 85 rules), and its twin is regenerated.
+    The demo bundle now writes `privileged_roles.json` (four roles), but the section is still withheld: the whole-shape
+    gate of the frozen v7 pack holds no expiration rule without `NotificationRecipients` and `Setting` and no approval rule without
+    `IsExpirationRequired`, `MaximumDuration` and `NotificationRecipients`, which Graph does not return (the pack has no null or empty
+    form to stand in, and the rows are ScubaGear Rego test inputs, not exporter output; nothing is padded), so the status moves from `missing_artifact` to `incomplete_shape` (detail `unseen_shape`). The demo still
+    projects three sections, 99 rule rows and three model rows. Notification recipients are e-mail addresses, collected as
+    evidence and masked by the projection's redaction by default; `--no-redaction` (loopback endpoints only) sends them unmasked.
 
 ### Model serving (new, optional)
 

@@ -196,7 +196,17 @@ _SIGNIN_ACTIVITY_RULES = frozenset(
 # effective administrator set already reads as "no PIM") for the rules that tolerate it.
 _LICENCE_GATED_SECTIONS = {
     "identity": frozenset({"userSignInActivity"}),
-    "identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"}),
+    # The PIM role policy reads are licence-gated the same way (Microsoft Entra ID P2 or Governance). The rules fan-out row
+    # derives from the rule reads and carries their ``license_required`` when every failed read was refused for a licence.
+    "identity_governance": frozenset(
+        {
+            "roleAssignmentSchedules",
+            "roleEligibilitySchedules",
+            "roleManagementPolicyAssignments",
+            "roleManagementPolicyRules",
+            "roleManagementPolicyRulesFanout",
+        }
+    ),
 }
 _MTA_STS_POLICY_RULES = frozenset({"dns_posture.mta_sts_policy_invalid", "dns_posture.mta_sts_testing_mode"})
 # Rules judged on the rows they read, not on whether their whole collector completed. ``exchange_policy`` runs a dozen

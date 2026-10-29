@@ -38,6 +38,9 @@ REASON_INPUT_LIMITED = "input_limited"
 REASON_UNKNOWN = "unknown"
 # A section-scoped read that was refused or failed (no list was cut): the section has no rows to judge.
 REASON_READ_FAILED = "read_failed"
+# A read the service answered with HTTP 404 (``resource_not_found``): the endpoint is not served to this tenant or
+# API version, so there is nothing to judge and an empty list must not be assumed.
+REASON_ENDPOINT_UNAVAILABLE = "endpoint_unavailable"
 TRUNCATION_REASONS = (
     REASON_OPERATOR_LIMIT,
     REASON_PAGINATION_FAILED,
@@ -264,6 +267,61 @@ def section_gap_records(coverage_rows: Iterable[Any]) -> list[dict[str, Any]]:
 
 def section_gap_summary(records: Iterable[Mapping[str, Any]]) -> str:
     return ", ".join(f"{item['collector']}.{item['section']} ({item['status']}, {item['reason']})" for item in records)
+
+
+# Operations whose refused or failed read is named in ``collection_gaps`` although no list was cut. Unlike a section-scoped
+# read, a failure here still makes the collector ``partial`` (the coverage ledger reads ``blocked_permission`` for a refused
+# scope), and the gap says which operation to look at and why: ``endpoint_unavailable`` for an HTTP 404 (or Graph's HTTP 400
+# "Resource not found for the segment", its answer for a resource the API version does not serve), else ``read_failed``.
+# The PIM role policy reads (the ``privileged_roles`` artefact is built from them) are named here.
+REFUSAL_GAP_OPERATIONS: Mapping[str, frozenset[str]] = {
+    "identity_governance": frozenset({"roleManagementPolicyAssignments", "roleManagementPolicyRules"}),
+}
+_NOT_FOUND_ERROR_CLASS = "resource_not_found"
+# Graph answers a URL segment it does not serve (a resource that is not in this API version) with HTTP 400 and this text.
+_SEGMENT_NOT_FOUND = "resource not found for the segment"
+
+
+def refusal_gap_records(
+    coverage_rows: Iterable[Any], collector_payloads: Mapping[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """One record per ``REFUSAL_GAP_OPERATIONS`` read that failed or was refused, with the error class and the reason.
+
+    A read that was cut short is listed by :func:`list_truncations` already and is left out here, as is any read that was
+    marked section-scoped (:func:`section_gap_records` names it). A raw section that carries an ``error`` and has no
+    coverage row (a resumed or offline bundle) is named too.
+    """
+    records: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def add(collector: str, operation: str, status: str, error_class: Any, error: Any, rows: int) -> None:
+        classes = sorted({str(error_class)}) if error_class else []
+        unavailable = classes == [_NOT_FOUND_ERROR_CLASS] or _SEGMENT_NOT_FOUND in str(error or "").lower()
+        records[(collector, operation)] = {
+            "collector": collector,
+            "list": operation,
+            "rows_collected": rows,
+            "reason": REASON_ENDPOINT_UNAVAILABLE if unavailable else REASON_READ_FAILED,
+            "status": status,
+            **({"error_classes": classes} if classes else {}),
+        }
+
+    for row in latest_coverage(coverage_rows):
+        collector, operation = str(row.get("collector") or ""), str(row.get("name") or "")
+        if operation not in REFUSAL_GAP_OPERATIONS.get(collector, ()) or row.get("status") not in {"failed", "partial"}:
+            continue
+        if row.get("collection_truncated") is True or row.get(SECTION_SCOPED) is True:
+            continue
+        add(collector, operation, "failed" if row.get("status") == "failed" else "partial", row.get("error_class"), row.get("error"), _row_count(row))
+    for collector, payload in sorted((collector_payloads or {}).items()):
+        if not isinstance(payload, Mapping):
+            continue
+        for operation in sorted(REFUSAL_GAP_OPERATIONS.get(str(collector), ())):
+            section = payload.get(operation)
+            if (str(collector), operation) in records or not isinstance(section, Mapping):
+                continue
+            if section.get("error") or section.get("error_class"):
+                add(str(collector), operation, "failed", section.get("error_class"), section.get("error"), 0)
+    return sorted(records.values(), key=lambda item: (item["collector"], item["list"]))
 
 
 def truncations_from_payloads(

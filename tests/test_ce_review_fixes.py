@@ -363,6 +363,16 @@ def test_a_refused_pim_schedule_read_does_not_stop_the_privileged_mfa_rule() -> 
     assert _rule(row, "identity.privileged_mfa_not_registered")["status"] == "pass"
 
 
+def test_a_licence_refused_pim_policy_read_does_not_stop_the_privileged_mfa_rule() -> None:
+    # The PIM role policy reads (privileged_roles evidence) are licence-gated like the schedules: a tenant without the
+    # licence is not left with every identity_governance rule not assessed because they were refused.
+    ledger = _licensed_ledger("identity_governance", "roleManagementPolicyAssignments", "roleManagementPolicyRules")
+
+    assert baselines._licence_limited_collectors(ledger) == {"identity_governance"}
+    row = _row(build_baseline_alignment([], normalized_snapshot=_admin_set(), coverage_ledger=ledger), "ce.uac.mfa_admin_accounts")
+    assert _rule(row, "identity.privileged_mfa_not_registered")["status"] == "pass"
+
+
 def test_a_refused_pim_read_does_not_make_the_governance_rules_evaluated() -> None:
     ledger = _licensed_ledger("identity_governance", "roleAssignmentSchedules")
 

@@ -183,8 +183,16 @@ ADMIN_SET_READS = {
                            "roleAssignableGroupMembers", "privilegedGroupFanout", "groupMembers"}),
     "identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"}),
 }
-# Role policy rules come only from the supplied artefact; the schedules are the assignments it describes.
+# Role policy rules come only from the artefact; the schedules are the assignments it describes. The normaliser writes the
+# artefact only when the collector's policy reads (``roleManagementPolicyAssignments``, ``roleManagementPolicyRules``) and
+# the schedules all succeeded in full, so a failure of a policy read leaves no artefact (``missing_artifact``) and is
+# listed in ``ignored_failures`` like any other operation this section does not read.
 PRIVILEGED_ROLES_READS = {"identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"})}
+# Names a gap or coverage row may carry for a collector although the collector's payload has no operation of that name: the
+# normaliser records an artefact it withheld after every read succeeded (``collection_gaps``: ``identity_governance.
+# privileged_roles``, reason ``artefact_withheld``). Like a policy read, it is listed in ``ignored_failures`` and never
+# withholds a section that does not read it, the artefact's own section included (it stays ``missing_artifact``).
+DERIVED_NAMES = {"identity_governance": frozenset({"privileged_roles"})}
 _OPERATION_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _COVERAGE_OK = {"ok", "complete_exact_scope", "complete_effective_role", "complete_equivalent_scope",
                 "complete_offline_sample"}
@@ -424,7 +432,7 @@ class Bundle:
         """
         reads = frozenset(reads)
         payload, _ = self._collector_payload(collector)
-        self.coverage(collector, reads, frozenset(payload or ()), health=True)
+        self.coverage(collector, reads, frozenset(payload or ()) | DERIVED_NAMES.get(collector, frozenset()), health=True)
         if payload is None:
             return
         # The payload maps operation names to their envelopes; keys beside them are the collector's own metadata.
@@ -739,13 +747,14 @@ def _role_date(value: Any) -> bool:
 
 
 def _roles(bundle: Bundle) -> Any:
-    # No current collector obtains PIM policy Rules. Only an existing complete
-    # ProviderExport-shaped artefact can supply them, never policy defaults.
+    # PIM policy Rules come only from a complete ProviderExport-shaped artefact (the ``identity_governance`` policy reads
+    # write one), never from policy defaults.
     for collector, reads in PRIVILEGED_ROLES_READS.items():
         bundle.collector_health(collector, reads)
     result = []
     for row in bundle.normalised("privileged_roles"):
-        _known_fields(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules"})
+        # ``key`` is the normalized record's own identity (the bundle contract needs one); it is never projected.
+        _known_fields(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules", "key"})
         item = _fields(row, {"DisplayName": _text, "RoleTemplateId": _text})
         for key in ("Assignments", "Rules"):
             _require(key in row, key, "missing_field")

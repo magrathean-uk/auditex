@@ -551,6 +551,7 @@ def test_ca_unsupported_scope_withholds_entire_section_and_names_condition(compl
 
 @pytest.mark.parametrize('section,path,keys', [
     ('conditional_access_policies', 'raw/conditional_access.json', ('conditionalAccessPolicies', 'value', 0, 'conditions', 'applications')),
+    ('privileged_roles', 'normalized/privileged_roles.json', ('records', 0)),
     ('privileged_roles', 'normalized/privileged_roles.json', ('records', 0, 'Assignments', 0)),
     ('meeting_policies', 'raw/teams_policy.json', ('meetingPolicies', 'value', 0)),
 ])
@@ -1302,3 +1303,117 @@ def test_sign_in_activity_refusal_in_a_real_offline_run_does_not_withhold_privil
         assert p.report['sections'][section]['status'] == 'projected'
         assert p.report['sections'][section]['ignored_failures'] == ['identity.userSignInActivity']
     assert p.report['sections']['privileged_users']['scan']['rows'] == len(sample['identity']['users']['value'])
+
+
+# ---- privileged_roles from the identity_governance policy reads ---------------------------------------------------------
+
+
+def _demo_run(tmp_path, name, edit=None, *, expect=0):
+    from auditex.demo import DEMO_AS_OF, DEMO_SAMPLE
+    from azure_tenant_audit.cli import run_offline
+    sample = json.loads((ROOT / DEMO_SAMPLE).read_text())
+    if edit:
+        edit(sample['identity_governance'])
+    write(tmp_path, f'{name}.json', sample)
+    assert run_offline(tmp_path / f'{name}.json', tmp_path, 'pim', name, plane='full', as_of=DEMO_AS_OF) == expect
+    return tmp_path / f'pim-{name}'
+
+
+def _admit_shape(monkeypatch, rows):
+    """Add the whole shape of ``rows`` to the frozen set, as a pack that holds it would."""
+    from auditex import scuba_projection
+    digest = sha256(scuba_projection._json(scuba_projection._shape(rows)).encode()).hexdigest()
+    monkeypatch.setitem(scuba_projection.PACK_SHAPE_DIGESTS, 'privileged_roles',
+                        [*scuba_projection.PACK_SHAPE_DIGESTS['privileged_roles'], digest])
+
+
+def test_the_demo_policy_reads_write_an_artefact_that_only_the_frozen_shape_gate_withholds(tmp_path, monkeypatch):
+    root = _demo_run(tmp_path, 'demo')
+    artefact = json.loads((root / 'normalized/privileged_roles.json').read_text())
+    assert artefact['complete'] is True and artefact['collection_status'] == 'collected'
+    rows = [{k: v for k, v in row.items() if k != 'key'} for row in artefact['records']]
+    assert {r['DisplayName'] for r in rows} == {'Global Administrator', 'Exchange Administrator', 'Helpdesk Administrator',
+                                                 'Privileged Role Administrator'}
+    # Every field, enum and health check of the adapter holds. The whole-shape gate does not: no frozen v7 row holds an
+    # expiration rule without NotificationRecipients and Setting, and Graph returns neither on such a rule. A pack that
+    # holds this shape (the day one is frozen) changes PACK_SHAPE_DIGESTS and this expectation together.
+    withheld = project_run(root)
+    assert withheld['privileged_roles'] == NOT_COLLECTED
+    assert withheld.report['sections']['privileged_roles']['reason'] == 'incomplete_shape'
+    assert withheld.report['sections']['privileged_roles']['detail'] == {'field': '$', 'kind': 'unseen_shape'}
+    assert withheld.report['sections']['privileged_users']['status'] == 'projected'
+    _admit_shape(monkeypatch, rows)
+    p = project_run(root, redact=False)
+    assert p.report['sections']['privileged_roles']['status'] == 'projected'
+    assert p['privileged_roles'] == rows and all('key' not in row for row in p['privileged_roles'])
+    ga = next(r for r in p['privileged_roles'] if r['DisplayName'] == 'Global Administrator')
+    assert len(ga['Assignments']) == 6 and all(a['EndDateTime'] is None for a in ga['Assignments'])
+    notified = next(r for r in ga['Rules'] if r['Id'] == 'Notification_Admin_EndUser_Assignment')
+    assert notified['NotificationRecipients'] == ['it@halcyonfreight.example']
+    # E-mail recipients are masked by default (``redact=False``, as above, sends them unmasked); the local part is then not in the prompt.
+    masked = project_run(root)
+    assert 'it@halcyonfreight.example' not in canonical(masked['privileged_roles'])
+    assert '***@halcyonfreight.example' in canonical(masked['privileged_roles'])
+
+
+POLICY_REFUSALS = [
+    pytest.param('roleManagementPolicyAssignments', 'resource_not_found', 'partial_success', 'endpoint_unavailable', id='assignments-404'),
+    pytest.param('roleManagementPolicyAssignments', 'insufficient_permissions', 'blocked_permission', 'read_failed', id='assignments-403'),
+    pytest.param('roleManagementPolicyRules', 'insufficient_permissions', 'blocked_permission', 'read_failed', id='rules-403'),
+]
+
+
+@pytest.mark.parametrize('operation,error_class,ledger_status,reason', POLICY_REFUSALS)
+def test_a_refused_or_missing_policy_read_is_a_gap_and_never_an_empty_privileged_roles(tmp_path, operation, error_class, ledger_status, reason):
+    def refuse(governance):
+        governance[operation] = {'error': 'refused', 'error_class': error_class}
+        if operation == 'roleManagementPolicyAssignments':
+            governance.pop('roleManagementPolicyRules')
+
+    root = _demo_run(tmp_path, 'refused', refuse, expect=1)
+    ledger = {r['collector']: r for r in json.loads((root / 'normalized/coverage_ledger.json').read_text())['records']}
+    assert ledger['identity_governance']['coverage_status'] == ledger_status
+    gaps = {r['source']: r for r in json.loads((root / 'normalized/collection_gaps.json').read_text())['records']}
+    gap = gaps[f'identity_governance.{operation}']
+    assert (gap['reason'], gap['status'], gap['error_classes']) == (reason, 'failed', [error_class])
+    assert not (root / 'normalized/privileged_roles.json').exists()
+    p = project_run(root)
+    assert p['privileged_roles'] == NOT_COLLECTED
+    assert p.report['sections']['privileged_roles']['reason'] == 'missing_artifact'
+    # The failed policy read is not one privileged_users reads: it is listed and does not withhold that section.
+    assert p.report['sections']['privileged_users']['status'] == 'projected'
+    assert f'identity_governance.{operation}' in p.report['sections']['privileged_users']['ignored_failures']
+
+
+def test_policy_reads_of_a_tenant_with_a_cut_fan_out_never_become_the_artefact(tmp_path):
+    def cut(governance):
+        governance['roleManagementPolicyRules'].update(
+            collection_truncated=True, truncation_reason='fanout_limit',
+            fanout={**governance['roleManagementPolicyRules']['fanout'], 'fanout_complete': False, 'collection_truncated': True})
+
+    root = _demo_run(tmp_path, 'cut', cut, expect=1)
+    assert not (root / 'normalized/privileged_roles.json').exists()
+    assert project_run(root)['privileged_roles'] == NOT_COLLECTED
+
+
+def test_a_withheld_privileged_roles_artefact_names_its_reason_and_does_not_withhold_privileged_users(tmp_path):
+    exchange = '29232cdf-9323-42fd-ade2-1d097af3e4de'
+
+    def drop_a_policy(governance):
+        rows = governance['roleManagementPolicyAssignments']['value']
+        governance['roleManagementPolicyAssignments']['value'] = [row for row in rows if row['roleDefinitionId'] != exchange]
+
+    root = _demo_run(tmp_path, 'withheld', drop_a_policy)
+    assert not (root / 'normalized/privileged_roles.json').exists()
+    gaps = {r['source']: r for r in json.loads((root / 'normalized/collection_gaps.json').read_text())['records']}
+    gap = gaps['identity_governance.privileged_roles']
+    assert (gap['reason'], gap['reasons'], gap['rows_collected']) == ('artefact_withheld', [f'role_without_policy:{exchange}'], 0)
+    ledger = {r['collector']: r for r in json.loads((root / 'normalized/coverage_ledger.json').read_text())['records']}
+    assert ledger['identity_governance']['coverage_status'].startswith('complete'), 'the collector read in full: not partial'
+    p = project_run(root)
+    assert p['privileged_roles'] == NOT_COLLECTED
+    assert p.report['sections']['privileged_roles']['reason'] == 'missing_artifact'
+    assert p.report['sections']['privileged_roles']['ignored_failures'] == ['identity_governance.privileged_roles']
+    # The gap is about the artefact, not about a read privileged_users makes: it is listed there and does not withhold it.
+    assert p.report['sections']['privileged_users']['status'] == 'projected'
+    assert 'identity_governance.privileged_roles' in p.report['sections']['privileged_users']['ignored_failures']

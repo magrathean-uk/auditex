@@ -102,11 +102,11 @@ def _from_batch(result: Any, endpoint: str, *, rows: bool) -> ObjectRead:
     return _failure(status, message, error_code, endpoint)
 
 
-def _read_one(client: Any, endpoint: str, *, api_version: str, rows: bool) -> ObjectRead:
+def _read_one(client: Any, endpoint: str, *, api_version: str, rows: bool, top: str | None = "50") -> ObjectRead:
     try:
         if rows:
             target = graph_url(endpoint, api_version) if api_version != "v1.0" else endpoint
-            values = client.get_all(target, params={"$top": "50"})
+            values = client.get_all(target, params={"$top": top} if top else {})
             return ObjectRead(STATUS_OK, rows=[row for row in values if isinstance(row, dict)] if isinstance(values, list) else [])
         if api_version != "v1.0":
             return ObjectRead(STATUS_OK, body=client.get_json(graph_url(endpoint, api_version), full_url=True))
@@ -116,14 +116,19 @@ def _read_one(client: Any, endpoint: str, *, api_version: str, rows: bool) -> Ob
         return ObjectRead(STATUS_NOT_FOUND if getattr(exc, "status", None) == 404 else STATUS_FAILED, error_class=error_class, error=error)
 
 
-def read_endpoints(client: Any, endpoints: Sequence[str], *, rows: bool, api_version: str = "v1.0") -> list[ObjectRead]:
-    """GET every endpoint in order. ``rows`` reads a collection (following a next-page link); otherwise one object."""
+def read_endpoints(
+    client: Any, endpoints: Sequence[str], *, rows: bool, api_version: str = "v1.0", top: str | None = "50"
+) -> list[ObjectRead]:
+    """GET every endpoint in order. ``rows`` reads a collection (following a next-page link); otherwise one object.
+
+    ``top`` is the ``$top`` each collection read asks for; ``None`` sends none, for a collection that does not accept it.
+    """
     if not endpoints:
         return []
     results: list[ObjectRead] | None = None
     if api_version == "v1.0" and hasattr(client, "get_batch"):
         try:
-            batch = client.get_batch([{"path": endpoint, "params": {"$top": "50"} if rows else {}} for endpoint in endpoints])
+            batch = client.get_batch([{"path": endpoint, "params": {"$top": top} if rows and top else {}} for endpoint in endpoints])
         except Exception:  # noqa: BLE001
             batch = None
         if isinstance(batch, list) and len(batch) == len(endpoints):
@@ -138,7 +143,7 @@ def read_endpoints(client: Any, endpoints: Sequence[str], *, rows: bool, api_ver
                             result.status = STATUS_FAILED
                             result.error_class, result.error = _classify_graph_error(exc)
     if results is None:
-        results = [_read_one(client, endpoint, api_version=api_version, rows=rows) for endpoint in endpoints]
+        results = [_read_one(client, endpoint, api_version=api_version, rows=rows, top=top) for endpoint in endpoints]
     return results
 
 

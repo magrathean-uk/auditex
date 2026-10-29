@@ -24,6 +24,15 @@ personal data, including user names, email addresses, group membership, device
 metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
 Treat every bundle as confidential.
 
+The PIM role policy reads of the directory roles (`identity_governance`) collect the
+notification recipients of each policy rule: these are e-mail addresses, collected as
+evidence like the other directory identifiers (they sit in `raw/` and in
+`normalized/governance_objects.json` and `normalized/privileged_roles.json`, which stay local). The
+projection masks them by default (the local part of every e-mail address); `--no-redaction`, which is accepted
+only for a loopback endpoint, sends them unmasked to that endpoint.
+The approvers' names and ids of an approval rule are not stored. Nothing else of these reads
+leaves the machine, and the reads are GET-only.
+
 `data-handling.json` describes a run's declared plane, scope risk, read-only
 status, content-read status, and write actions; it is a declaration.
 `api-inventory.json` records declared collectors, the collectors' own call

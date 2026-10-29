@@ -354,7 +354,7 @@
         "Identity Governance Administrator",
         "Privileged Role Administrator"
       ],
-      "notes": "Governance and PIM schedule visibility depends on Entra ID Governance licensing and role-scoped APIs."
+      "notes": "Governance and PIM schedule visibility depends on Entra ID Governance licensing and role-scoped APIs. The PIM role policy reads of the directory roles are covered by RoleManagement.Read.Directory, so an existing registration needs no change; RoleManagementPolicy.Read.Directory is the least-privilege alternative for those policy reads on a new registration (the schedule reads still need RoleManagement.Read.Directory). PIM for Groups policies (RoleManagementPolicy.Read.AzureADGroup) are not read."
     },
     "intune_depth": {
       "graph_scopes": [

@@ -129,6 +129,30 @@ def _walk(value: Any, key: str = "") -> Iterator[tuple[str, Any]]:
         yield key, value
 
 
+def test_demo_carries_the_pim_role_policies_of_the_roles_its_schedules_name(tmp_path: Path) -> None:
+    governance = json.loads(FIXTURE.read_text(encoding="utf-8"))["identity_governance"]
+    scheduled = {row["roleDefinitionId"] for row in governance["roleAssignmentSchedules"]["value"]}
+    policies = {row["roleDefinitionId"]: row["policyId"] for row in governance["roleManagementPolicyAssignments"]["value"]}
+    rules = governance["roleManagementPolicyRules"]
+    # The same roles as the schedules: the demo's posture is unchanged, it only gains the policies that govern those roles.
+    assert scheduled == set(policies)
+    assert {row["policyId"] for row in rules["value"]} == set(policies.values())
+    assert rules["fanout"]["fanout_complete"] is True and rules["collection_truncated"] is False
+
+    run_dir = _run_demo(tmp_path)
+    assert _load(run_dir, "validation.json")["valid"] is True
+    objects = _load(run_dir, "normalized/governance_objects.json")["records"]
+    kinds = Counter(row["kind"] for row in objects)
+    assert (kinds["role_management_policy_assignment"], kinds["role_management_policy_rule"]) == (5, len(rules["value"]))
+    assert len({row["key"] for row in objects}) == len(objects)
+    artefact = _load(run_dir, "normalized/privileged_roles.json")
+    assert (artefact["collection_status"], artefact["complete"]) == ("collected", True)
+    # Security Reader holds a schedule and a policy, but is not a privileged role (its name does not say administrator).
+    assert {row["DisplayName"] for row in artefact["records"]} == {
+        "Global Administrator", "Exchange Administrator", "Helpdesk Administrator", "Privileged Role Administrator"}
+    assert not (run_dir / "normalized/collection_gaps.json").exists(), "the demo's policy reads are complete, so no gap is recorded"
+
+
 def test_demo_tenant_fixture_produces_valid_critical_bundle(tmp_path: Path) -> None:
     run_dir = _run_demo(tmp_path)
     manifest = _load(run_dir, "run-manifest.json")

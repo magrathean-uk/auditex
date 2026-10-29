@@ -191,7 +191,11 @@ class _LicensingClient:
 
 
 class _IdentityGovernanceClient:
-    def get_all(self, path, params=None):  # noqa: ANN001, ARG002
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, dict]] = []
+
+    def get_all(self, path, params=None):  # noqa: ANN001
+        self.requests.append((path, dict(params or {})))
         responses = {
             "/identityGovernance/accessReviews/definitions": [{"id": "review-1", "displayName": "Admins review"}],
             "/identityGovernance/entitlementManagement/catalogs": [{"id": "catalog-1", "displayName": "Main catalog"}],
@@ -199,6 +203,12 @@ class _IdentityGovernanceClient:
             "/roleManagement/directory/roleAssignmentSchedules": [{"id": "assignment-schedule-1"}],
             "/roleManagement/directory/roleEligibilitySchedules": [{"id": "eligibility-schedule-1"}],
             "/directory/administrativeUnits": [{"id": "au-1", "displayName": "EMEA"}],
+            "/policies/roleManagementPolicyAssignments": [
+                {"id": "assignment-1", "policyId": "policy-1", "roleDefinitionId": "role-1", "scopeId": "/", "scopeType": "DirectoryRole"}
+            ],
+            "/policies/roleManagementPolicies/policy-1/rules": [
+                {"id": "Expiration_Admin_Assignment", "isExpirationRequired": True, "maximumDuration": "P30D", "target": {"caller": "Admin"}}
+            ],
         }
         if path not in responses:
             raise AssertionError(f"unexpected path: {path}")
@@ -466,13 +476,22 @@ def test_licensing_collector_collects_subscribed_skus_and_license_assignments() 
 
 def test_identity_governance_collector_collects_reviews_packages_and_role_schedules() -> None:
     collector = IdentityGovernanceCollector()
-    result = collector.run({"client": _IdentityGovernanceClient(), "top": 100, "audit_logger": None})
+    client = _IdentityGovernanceClient()
+    result = collector.run({"client": client, "top": 100, "audit_logger": None})
 
     assert result.status == "ok"
     assert result.payload["accessReviews"]["value"][0]["id"] == "review-1"
     assert result.payload["entitlementCatalogs"]["value"][0]["id"] == "catalog-1"
     assert result.payload["roleEligibilitySchedules"]["value"][0]["id"] == "eligibility-schedule-1"
     assert result.payload["administrativeUnits"]["value"][0]["id"] == "au-1"
+    assert result.payload["roleManagementPolicyAssignments"]["value"][0]["policyId"] == "policy-1"
+    # The rules of each policy are read after the assignment list names it, and the policy id is recorded on each rule row.
+    assert result.payload["roleManagementPolicyRules"]["value"] == [
+        {"policyId": "policy-1", "id": "Expiration_Admin_Assignment", "isExpirationRequired": True, "maximumDuration": "P30D"}
+    ]
+    requests = dict(client.requests)
+    assert requests["/policies/roleManagementPolicyAssignments"] == {"$filter": "scopeId eq '/' and scopeType eq 'DirectoryRole'"}
+    assert requests["/policies/roleManagementPolicies/policy-1/rules"] == {}
 
 
 def test_intune_depth_collector_collects_configurations_scripts_and_assignments() -> None:

@@ -12,6 +12,7 @@ from . import break_glass
 from . import endpoint_posture
 from . import exchange_protection
 from . import external_sharing
+from . import privileged_roles as privileged_roles_artifact
 from .chunk_reader import iter_endpoint_records
 from .collection_gaps import (
     BOUNDED_SAMPLE_SECTION,
@@ -22,6 +23,7 @@ from .collection_gaps import (
     collection_gap_records,
     event_span,
     list_truncations,
+    refusal_gap_records,
     section_gap_records,
     truncations_from_payloads,
 )
@@ -2141,6 +2143,67 @@ def build_normalized_snapshot(
                     assignment_type=item.get("assignmentType"),
                 )
             )
+    # PIM role policies of the directory roles. A rule id repeats across policies, so a rule is keyed by its policy too.
+    governance_payload = collector_payloads.get("identity_governance", {})
+    policy_assignment_rows = _values(governance_payload, "roleManagementPolicyAssignments")
+    policy_rule_rows = _values(governance_payload, "roleManagementPolicyRules")
+    for item in policy_assignment_rows:
+        assignment_id = str(item.get("id") or item.get("policyId") or "")
+        if not assignment_id:
+            continue
+        governance_objects.append(
+            _record(
+                privileged_roles_artifact.KIND_POLICY_ASSIGNMENT,
+                "identity_governance.roleManagementPolicyAssignments",
+                assignment_id,
+                policy_id=item.get("policyId"),
+                role_definition_id=item.get("roleDefinitionId"),
+                scope_id=item.get("scopeId"),
+                scope_type=item.get("scopeType"),
+            )
+        )
+    for item in policy_rule_rows:
+        policy_id, rule_id = str(item.get("policyId") or ""), str(item.get("id") or "")
+        if not policy_id or not rule_id:
+            continue
+        setting = item.get("setting") if isinstance(item.get("setting"), dict) else {}
+        governance_objects.append(
+            _record(
+                privileged_roles_artifact.KIND_POLICY_RULE,
+                "identity_governance.roleManagementPolicyRules",
+                f"{policy_id}:{rule_id}",
+                policy_id=policy_id,
+                rule_id=rule_id,
+                rule_type=str(item.get("@odata.type") or "").removeprefix("#microsoft.graph.") or None,
+                is_expiration_required=item.get("isExpirationRequired"),
+                maximum_duration=item.get("maximumDuration"),
+                notification_type=item.get("notificationType"),
+                notification_recipients=item.get("notificationRecipients"),
+                is_approval_required=setting.get("isApprovalRequired"),
+            )
+        )
+    # The export-shaped artefact exists only when every read behind it succeeded in full: a missing file means "not
+    # collected", never an empty list. The schedules are read again for their dates (the governance records keep none).
+    # When those reads all succeeded and the artefact is withheld all the same, the reasons are recorded as a gap below.
+    privileged_role_rows: list[dict[str, Any]] | None = None
+    privileged_role_reasons: list[str] = []
+    policy_reports = [
+        sources.reports.get(f"identity_governance.{name}")
+        for name in ("roleManagementPolicyAssignments", "roleManagementPolicyRules", "roleAssignmentSchedules")
+    ]
+    rules_section = governance_payload.get("roleManagementPolicyRules") if isinstance(governance_payload, dict) else None
+    rules_fanout = rules_section.get("fanout") if isinstance(rules_section, dict) else None
+    if (
+        all(privileged_roles_artifact.read_in_full(report) for report in policy_reports)
+        and privileged_roles_artifact.read_in_full(sources.reports.get("identity.roleDefinitions"))
+        and not (isinstance(rules_fanout, dict) and rules_fanout.get("fanout_complete") is False)
+    ):
+        privileged_role_rows, privileged_role_reasons = privileged_roles_artifact.build_privileged_roles(
+            role_definitions=role_definitions,
+            policy_assignments=policy_assignment_rows,
+            policy_rules=policy_rule_rows,
+            assignment_schedules=_values(governance_payload, "roleAssignmentSchedules"),
+        )
     intune_assignment_objects: list[dict[str, Any]] = []
     # One row per policy the assignment read returned, with how many assignments it has. A policy with
     # none has no row in ``intune_assignment_objects``, so these rows are what shows it was read and empty.
@@ -2979,6 +3042,22 @@ def build_normalized_snapshot(
                 **{name: value for name, value in extra.items() if value},
             }
         )
+    # A refused or unavailable PIM policy read is a gap too (the collector is partial; the reason says which read and why).
+    for refusal in refusal_gap_records(coverage_rows, collector_payloads):
+        if (refusal["collector"], refusal["list"]) not in {(item["collector"], item["list"]) for item in gap_truncations}:
+            gap_truncations.append(refusal)
+    # Every read behind privileged_roles succeeded and the artefact is withheld all the same (a role without a policy, an
+    # unreadable schedule, ...): the collector is not partial, so the reasons are named here and the file is still absent.
+    if privileged_role_reasons:
+        gap_truncations.append(
+            {
+                "collector": "identity_governance",
+                "list": privileged_roles_artifact.GAP_LIST,
+                "rows_collected": 0,
+                "reason": privileged_roles_artifact.GAP_REASON,
+                "reasons": privileged_role_reasons,
+            }
+        )
     collection_gaps = collection_gap_records(sorted(gap_truncations, key=lambda item: (item["collector"], item["list"])))
     if collection_gaps:
         records_by_section[COLLECTION_GAP_SECTION] = collection_gaps
@@ -2995,6 +3074,8 @@ def build_normalized_snapshot(
     if bounded_samples:
         records_by_section[BOUNDED_SAMPLE_SECTION] = bounded_samples
 
+    if privileged_role_rows:
+        records_by_section[privileged_roles_artifact.SECTION] = privileged_role_rows
     object_counts = {name: len(records) for name, records in records_by_section.items() if records}
     full_counts, sample_counts, chunk_counts, truncated_sections, chunk_paths = _collector_count_summaries(
         collector_payloads,
@@ -3035,6 +3116,13 @@ def build_normalized_snapshot(
     for section, records in records_by_section.items():
         if records:
             normalized[section] = {"kind": section, "records": _ordered_value(records)}
+    if privileged_role_rows is not None:
+        # The envelope says the read succeeded, so an empty list (no privileged role) is a known empty one.
+        normalized[privileged_roles_artifact.SECTION] = {
+            "kind": privileged_roles_artifact.SECTION,
+            "records": privileged_role_rows,
+            **privileged_roles_artifact.ENVELOPE,
+        }
     return _ordered_value(normalized)
 
 
