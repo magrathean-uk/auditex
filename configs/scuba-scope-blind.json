@@ -1,0 +1,197 @@
+{
+  "schema_version": "2026-10-29",
+  "source": "Oracle pack v9 dataset card, 'What the Rego ignores, measured per policy' (CISA ScubaGear revision 2446ad723b7f55031cc02c8aca244d731d468cba, OPA 1.20.2) for 'ignored' (the scope conditions whose tested values never changed the label; the other groups are read by the Rego and are already part of its verdict) and for 'operator' (true where the grant operator never changed a label; MS.AAD.9.1v1 is added from its own Rego, which never reads the operator). 'grants', 'requires' and 'alongside' restate what the pinned PowerShell/ScubaGear/Rego/AADConfig.rego and Utils/AAD.rego require of a deciding policy. Every entry is a check the Rego itself makes, so a policy the Rego would accept is never dropped. A policy is a candidate for an item only when it carries one of the grants and at least one token of every group of 'requires'. A token path=value is a member of the Rego's list (the whole string, for 'exact'), a token path#n is the Rego's Count(path) == n, and the 'All' memberships are exact and case-sensitive as in the Rego. Common base checks (BaseCheck of every item but 3.6, 3.8 and 9.1, which skip the ones named below): includeUsers contains All, includeApplications contains All, Count(excludeRoles) == 0, State == enabled (applied before an entry is kept). Per item, in AADConfig.rego: MS.AAD.1.1v1 l50-62: all four common checks (l52-55), clientAppTypes contains both other (l59) and exchangeActiveSync (l60), builtInControls contains block (l61). MS.AAD.2.1v1 l133-144: all four (l135-138), userRiskLevels contains high (l142), block (l143). MS.AAD.2.3v1 l231-242: all four (l233-236), signInRiskLevels contains high (l240), block (l241). MS.AAD.3.1v1 l319-329: all four (l321-324), IsPhishingResistantMFA (l328; Utils/AAD.rego l190-196: allowedCombinations a non-empty subset of windowsHelloForBusiness, fido2 and x509CertificateMultiFactor). MS.AAD.3.2v2 l396-406: all four (l398-401), IsGeneralMFA (l405; Utils/AAD.rego l200-236: mfa among builtInControls, or an allowedCombinations set of MFA combinations only with at least one that is not phishing-resistant, so a phishing-resistant-only strength does not qualify although it may sit beside mfa in an OR, hence 'alongside'). MS.AAD.3.6v1 l610-622: includeApplications (l613), Count(excludeRoles) == 0 (l614) and State (l615) only, because l612 skips includeUsers for a role-based policy; IsPhishingResistantMFA (l621). The check that includeRoles covers every privileged role (l620) needs the privileged-role set and is not modelled, so an all-users policy also counts as a candidate. MS.AAD.3.7v1 l689-705: all four (l691-694), builtInControls contains compliantDevice (l698) and domainJoinedDevice (l699) with Count == 2 (l700), operator == OR (l701), Count(includeUserActions) == 0 (l704). MS.AAD.3.8v1 l771-787: includeUsers (l774), Count(excludeRoles) == 0 (l775) and State (l776) only, because l773 skips includeApplications; includeUserActions contains urn:user:registersecurityinfo (l780), compliantDevice or domainJoinedDevice (l783-786). MS.AAD.3.9v1 l852-863: all four (l854-857), transferMethods equal to the exact string deviceCodeFlow (l861, not a list member), block (l862). MS.AAD.9.1v1 l1948-1962: includeApplications (l1950) and State (l1951) only, so neither includeUsers nor excludeRoles is read; clientAppTypes contains all (l1955), agentIdRiskLevels as a trimmed list contains high (l1959), block (l1960), clientApplications.includeAgentIdServicePrincipals contains All (l1961). The grant operator of 9.1 is never read, so 'operator' is true; its excludeAgentIdServicePrincipals is never read either, so an excluded agent service principal is not a narrowing the Rego sees and is not reported as one. 'exclusions' lists the exclusion lists the Rego compares with the ScubaGear config's allow-list (Utils/AAD.rego l107-181: users, groups, applications, guest or external users). The allow-list is not in the evidence, so no exclusion is required away of a candidate; a candidate that has one is only never treated as a compliant unscoped policy that decides the item tenant-wide. 'alongside' lists controls an OR may offer beside the grants without letting a user skip them. A policy listed here is flagged only after a verdict of met, never to change it.",
+  "paths": {
+    "client_app_types": "conditions.clientAppTypes",
+    "client_applications": "conditions.clientApplications",
+    "devices": "conditions.devices",
+    "locations": "conditions.locations",
+    "operator": "grantControls.operator",
+    "platforms": "conditions.platforms"
+  },
+  "tracked": [
+    "conditions.agentIdRiskLevels",
+    "conditions.applications.includeUserActions",
+    "conditions.clientAppTypes",
+    "conditions.signInRiskLevels",
+    "conditions.userRiskLevels",
+    "grantControls.builtInControls",
+    "grantControls.customAuthenticationFactors",
+    "grantControls.operator",
+    "grantControls.termsOfUse"
+  ],
+  "members": {
+    "conditions.applications.includeApplications": ["All"],
+    "conditions.clientApplications.includeAgentIdServicePrincipals": ["All"],
+    "conditions.users.includeUsers": ["All"]
+  },
+  "exact": [
+    "conditions.authenticationFlows.transferMethods"
+  ],
+  "counted": [
+    "conditions.applications.excludeApplications",
+    "conditions.applications.includeUserActions",
+    "conditions.users.excludeGroups",
+    "conditions.users.excludeGuestsOrExternalUsers",
+    "conditions.users.excludeRoles",
+    "conditions.users.excludeUsers",
+    "grantControls.builtInControls"
+  ],
+  "exclusions": [
+    "conditions.applications.excludeApplications",
+    "conditions.users.excludeGroups",
+    "conditions.users.excludeGuestsOrExternalUsers",
+    "conditions.users.excludeUsers"
+  ],
+  "controls": [
+    "grantControls.authenticationStrength",
+    "grantControls.builtInControls",
+    "grantControls.customAuthenticationFactors",
+    "grantControls.termsOfUse"
+  ],
+  "authentication_strength": {
+    "path": "grantControls.authenticationStrength",
+    "phishing_resistant": ["fido2", "windowsHelloForBusiness", "x509CertificateMultiFactor"],
+    "mfa_combinations": [
+      "deviceBasedPush",
+      "federatedMultiFactor",
+      "fido2",
+      "hardwareOath,federatedSingleFactor",
+      "microsoftAuthenticatorPush,federatedSingleFactor",
+      "password,hardwareOath",
+      "password,microsoftAuthenticatorPush",
+      "password,sms",
+      "password,softwareOath",
+      "password,voice",
+      "sms,federatedSingleFactor",
+      "softwareOath,federatedSingleFactor",
+      "temporaryAccessPassMultiUse",
+      "temporaryAccessPassOneTime",
+      "voice,federatedSingleFactor",
+      "windowsHelloForBusiness",
+      "x509CertificateMultiFactor"
+    ]
+  },
+  "policies": {
+    "MS.AAD.1.1v1": {
+      "ignored": ["client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.builtInControls=block"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"],
+        ["conditions.clientAppTypes=other"],
+        ["conditions.clientAppTypes=exchangeActiveSync"]
+      ],
+      "alongside": [],
+      "operator": true
+    },
+    "MS.AAD.2.1v1": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.builtInControls=block"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"],
+        ["conditions.userRiskLevels=high"]
+      ],
+      "alongside": [],
+      "operator": true
+    },
+    "MS.AAD.2.3v1": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.builtInControls=block"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"],
+        ["conditions.signInRiskLevels=high"]
+      ],
+      "alongside": [],
+      "operator": true
+    },
+    "MS.AAD.3.1v1": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.authenticationStrength=phishingResistant"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"]
+      ],
+      "alongside": [],
+      "operator": true
+    },
+    "MS.AAD.3.2v2": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.authenticationStrength=generalMfa", "grantControls.builtInControls=mfa"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"]
+      ],
+      "alongside": ["grantControls.authenticationStrength=phishingResistant"],
+      "operator": true
+    },
+    "MS.AAD.3.6v1": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.authenticationStrength=phishingResistant"],
+      "requires": [
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"]
+      ],
+      "alongside": [],
+      "operator": true
+    },
+    "MS.AAD.3.7v1": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.builtInControls=compliantDevice", "grantControls.builtInControls=domainJoinedDevice"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"],
+        ["grantControls.builtInControls=compliantDevice"],
+        ["grantControls.builtInControls=domainJoinedDevice"],
+        ["grantControls.builtInControls#2"],
+        ["grantControls.operator=OR"],
+        ["conditions.applications.includeUserActions#0"]
+      ],
+      "alongside": [],
+      "operator": false
+    },
+    "MS.AAD.3.8v1": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.builtInControls=compliantDevice", "grantControls.builtInControls=domainJoinedDevice"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.users.excludeRoles#0"],
+        ["conditions.applications.includeUserActions=urn:user:registersecurityinfo"]
+      ],
+      "alongside": [],
+      "operator": true
+    },
+    "MS.AAD.3.9v1": {
+      "ignored": ["client_app_types", "client_applications", "devices", "locations", "platforms"],
+      "grants": ["grantControls.builtInControls=block"],
+      "requires": [
+        ["conditions.users.includeUsers=All"],
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.users.excludeRoles#0"],
+        ["conditions.authenticationFlows.transferMethods=deviceCodeFlow"]
+      ],
+      "alongside": [],
+      "operator": true
+    },
+    "MS.AAD.9.1v1": {
+      "ignored": ["devices", "locations", "platforms"],
+      "grants": ["grantControls.builtInControls=block"],
+      "requires": [
+        ["conditions.applications.includeApplications=All"],
+        ["conditions.clientAppTypes=all"],
+        ["conditions.agentIdRiskLevels=high"],
+        ["conditions.clientApplications.includeAgentIdServicePrincipals=All"]
+      ],
+      "alongside": [],
+      "operator": true
+    }
+  }
+}

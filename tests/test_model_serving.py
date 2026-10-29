@@ -400,7 +400,8 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
     monkeypatch.setattr(ModelClient, "_request", reply)
     before = snapshot(demo_bundle)
     result = assess_run(demo_bundle, ModelConfig(model_name="test-model"))
-    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 99}
+    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 99,
+                                "scope_narrowed": 0}
     assert result["limitations"] == []
     assert {name for name, detail in result["projection"]["sections"].items()
             if detail["status"] == "projected"} == {"service_plans", "tenant_id", "privileged_users"}
@@ -469,6 +470,7 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
     resources = shipped_resource_manifest()["resources"]
     assert "configs/scuba-policy-sections.json" in resources
     assert "configs/scuba-rule-precheck.json" in resources
+    assert "configs/scuba-scope-blind.json" in resources
     assert "schemas/model_assessment-2026-10-27.1.schema.json" in resources
     assert "schemas/model_assessment-2026-10-28.schema.json" in resources
     assert "schemas/model_assessment.schema.json" in resources
@@ -717,6 +719,7 @@ def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monk
     result = assess_run(tmp_path, ModelConfig(model_name='test-model'), policies=[POLICY])
     result['schema_version'] = '2026-10-27'
     del result['limitations'], result['projection'], result['totals']['rule_answered']
+    del result['scope_post_check'], result['totals']['scope_narrowed']
     row = result['policies'][0]
     del row['thinking_disabled'], row['thinking_stripped'], row['comparison']['baseline_match']
     validate_assessment(result)

@@ -54,6 +54,10 @@
         "rule_answered": {
           "type": "integer",
           "minimum": 0
+        },
+        "scope_narrowed": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -399,6 +403,9 @@
         "bounds"
       ],
       "additionalProperties": false
+    },
+    "scope_post_check": {
+      "$ref": "#/$defs/scope_post_check"
     }
   },
   "required": [
@@ -477,7 +484,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?:required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
+            "pattern": "^(?:required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|scope_narrowed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
           },
           "uniqueItems": true
         },
@@ -601,6 +608,9 @@
         },
         "model_shadow": {
           "$ref": "#/$defs/model_shadow"
+        },
+        "post_check": {
+          "$ref": "#/$defs/post_check"
         }
       },
       "required": [
@@ -765,6 +775,137 @@
         "reason",
         "thinking_disabled",
         "thinking_stripped"
+      ],
+      "additionalProperties": false
+    },
+    "post_check": {
+      "type": "object",
+      "description": "Deterministic scope post-check of a met verdict (kind scope_narrowed). The verdict is unchanged: ScubaGear's Rego ignores these conditions. policies are the distinct display names of the enabled Conditional Access policies that could have decided the item (they carry every check the Rego makes of a deciding policy) and carry a condition, when no compliant unscoped policy could have decided it as well (at most the projection item budget, sorted); count is how many such policies there are; conditions are the Graph condition paths found.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "scope_narrowed"
+        },
+        "policies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "conditions.clientAppTypes",
+              "conditions.clientApplications",
+              "conditions.devices",
+              "conditions.locations",
+              "conditions.platforms",
+              "grantControls.operator"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "kind",
+        "policies",
+        "conditions",
+        "count"
+      ],
+      "additionalProperties": false
+    },
+    "scope_post_check": {
+      "type": "object",
+      "description": "Envelope record of the scope post-check, whatever the verdicts: the enabled Conditional Access policies that carry a location, platform, device, client-application or client-application-type condition that some tabled item they could have decided ignores. source is the projected section when it was projected, else the bundle's raw payload; reason says why it was not evaluated.",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "evaluated",
+            "not_evaluated"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "projection",
+            "raw",
+            null
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "missing_artifact",
+            "incomplete_shape",
+            "oversize",
+            "not_applicable_to_platform"
+          ]
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "policies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scope_policy"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "source",
+        "reason",
+        "count",
+        "policies"
+      ],
+      "additionalProperties": false
+    },
+    "scope_policy": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "conditions.clientAppTypes",
+              "conditions.clientApplications",
+              "conditions.devices",
+              "conditions.locations",
+              "conditions.platforms"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "name",
+        "conditions"
       ],
       "additionalProperties": false
     },

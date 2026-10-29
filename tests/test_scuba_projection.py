@@ -385,7 +385,8 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
     assert sections['privileged_users']['status'] == 'projected'
     # The privileged-user section projects, so the three rules that read only it reach the model; the other
     # 99 rows stay rule answers with no model call.
-    assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 99}
+    assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 99,
+                                'scope_narrowed': 0}
     assert len(calls) == 3
     assert sum(r['attempts'] for r in result['policies']) == 3
     demo = json.loads((ROOT / DEMO_SAMPLE).read_text())
@@ -449,7 +450,7 @@ def test_effective_admin_set_requires_all_counted_users_and_redacts_immutable_id
 def test_2026_10_28_assessments_continue_to_validate(complete_bundle):
     payload = assess_run(complete_bundle, ModelConfig(model_name='unused'), policies=['MS.POWERBI.1.1v1'])
     payload['schema_version'] = '2026-10-28'
-    del payload['projection']
+    del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed']
     validate_assessment(payload)
     jsonschema.validate(payload, json.loads((ROOT / 'schemas/model_assessment-2026-10-28.schema.json').read_text()))
 

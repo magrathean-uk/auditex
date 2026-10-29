@@ -22,10 +22,12 @@ from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_na
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.resources import open_text_resource
+from azure_tenant_audit.scuba_scope import apply_post_check
 
 from .model_eval import _invalid_constant, _pairs, validate_model_response
 from .model_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256
 from .model_precheck import precheck_case
+from .scope_postcheck import collect_scope_evidence
 from .scuba_projection import (
     DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS,
     project_run,
@@ -335,6 +337,12 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
                              max_chars=projection_max_chars, scan_max_rows=projection_scan_max_rows,
                              scan_max_bytes=projection_scan_max_bytes, scan_max_chunks=projection_scan_max_chunks)
     baseline = {} if dry_run else _baseline_statuses(root / "reports" / "report-pack.json")
+    # Read-only and verdict-independent: which enabled Conditional Access policies carry a scope condition the
+    # pinned Rego ignores. A met row is marked after its verdict is known; nothing here reaches a prompt.
+    scope = None if dry_run else collect_scope_evidence(
+        root, projection, redact=not no_redaction, max_items=projection_max_items,
+        scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
+        scan_max_chunks=projection_scan_max_chunks)
     client = ModelClient(config) if not dry_run else None
     records, prompts = [], []
     for policy_id in selected:
@@ -359,13 +367,16 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
                 record = client.assess(case)
             elif shadow_model_on_precheck:
                 record["model_shadow"] = client.assess(case)
+        if scope is not None and scope.entries:
+            apply_post_check(record, scope.entries, max_items=projection_max_items)
         record["comparison"] = _comparison(policy_id, record, baseline)
         records.append(record)
     if dry_run:
         write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
         return {"path": str(target), "dry_run": True, "prompts": sum("messages" in row for row in prompts),
                 "skipped": sum(row.get("skipped", False) for row in prompts)}
-    totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0}
+    totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0,
+              "scope_narrowed": sum("post_check" in record for record in records)}
     for record in records:
         totals["rule_answered"] += record["reason"] == "rule_precheck"
         state = record["validation_status"]
@@ -379,7 +390,7 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
               "endpoint_host": config.endpoint_host, "model_name": config.model_name,
               "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
               "totals": totals, "policies": records,
-              "projection": projection.report,
+              "projection": projection.report, "scope_post_check": scope.summary,
               "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
     from azure_tenant_audit.model_assessment import validate_assessment
     validate_assessment(result)

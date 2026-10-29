@@ -13,6 +13,10 @@ from typing import Any
 
 from .resources import open_text_resource
 from .scuba_precheck import field_name, policy_rule, precheck_response
+from .scuba_scope import (
+    LIMITATION_ID as SCOPE_LIMITATION, NAME_LIMIT as SCOPE_NAME_LIMIT, SECTION as SCOPE_SECTION,
+    allowed_conditions, condition_paths, requirement_met, scope_rule,
+)
 
 MODEL_ASSESSMENT_PATH = "model_assessment.json"
 MODEL_ASSESSMENT_SCHEMA = "schemas/model_assessment.schema.json"
@@ -84,6 +88,36 @@ def _check(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str) 
             raise ValueError(f"Invalid model assessment number at {path}")
 
 
+def _sorted_unique(values: list[str]) -> bool:
+    return values == sorted(set(values))
+
+
+def _validate_scope_record(summary: dict[str, Any], section_projected: bool) -> None:
+    """The envelope's scope post-check record: where it was read from and which policies carry a scope condition."""
+    policies, count = summary["policies"], summary["count"]
+    names = [item["name"] for item in policies]
+    if summary["status"] == "evaluated":
+        consistent = summary["reason"] is None and summary["source"] == ("projection" if section_projected else "raw")
+    else:
+        consistent = summary["reason"] is not None and summary["source"] is None and count == 0 and not policies
+    scope_paths = set(condition_paths().values()) - {condition_paths()["operator"]}
+    if (not consistent or not _sorted_unique(names) or len(policies) > count or (count == 0) != (not policies)
+            or any(len(name) > SCOPE_NAME_LIMIT for name in names)
+            or any(not _sorted_unique(item["conditions"]) or not set(item["conditions"]) <= scope_paths
+                   for item in policies)):
+        raise ValueError("Invalid scope post-check record")
+
+
+def _validate_post_check(row: dict[str, Any], summary: Any) -> None:
+    """A row's scope_narrowed mark: a met verdict of a tabled policy, conditions the Rego is known to ignore."""
+    post, rule = row["post_check"], scope_rule(row["policy_id"])
+    if (rule is None or not requirement_met(row) or not isinstance(summary, dict) or summary["status"] != "evaluated"
+            or not _sorted_unique(post["policies"]) or not _sorted_unique(post["conditions"])
+            or not set(post["conditions"]) <= allowed_conditions(rule) or len(post["policies"]) > post["count"]
+            or any(len(name) > SCOPE_NAME_LIMIT for name in post["policies"])):
+        raise ValueError("Invalid scope post-check")
+
+
 def validate_assessment(payload: Any) -> None:
     version = payload.get("schema_version") if isinstance(payload, dict) else None
     if not isinstance(version, str) or version not in ASSESSMENT_SCHEMAS:
@@ -123,6 +157,8 @@ def validate_assessment(payload: Any) -> None:
         projected = any(s["status"] == "projected" for s in sections.values())
         if payload["limitations"] != ([] if projected else ["projection_not_implemented"]):
             raise ValueError("Inconsistent projection limitations")
+        if "scope_post_check" in payload:
+            _validate_scope_record(payload["scope_post_check"], sections[SCOPE_SECTION]["status"] == "projected")
         redaction = projection["redaction"]
         if not redaction["enabled"]:
             from ipaddress import ip_address
@@ -137,6 +173,7 @@ def validate_assessment(payload: Any) -> None:
     if version in {"2026-10-28", "2026-10-29"}:
         counts["rule_answered"] = 0
     ids = set()
+    scope_rows = 0
     for row in payload["policies"]:
         if row["policy_id"] in ids:
             raise ValueError("Duplicate model assessment policy")
@@ -163,6 +200,11 @@ def validate_assessment(payload: Any) -> None:
             agreement = "agree" if comparison["baseline_status"] == model_status else "disagree"
         if comparison["model_status"] != model_status or comparison["result"] != agreement:
             raise ValueError("Inconsistent model assessment comparison")
+        if ("post_check" in row) != (SCOPE_LIMITATION in row["limitations"]):
+            raise ValueError("Inconsistent scope post-check")
+        if "post_check" in row:
+            _validate_post_check(row, payload.get("scope_post_check"))
+            scope_rows += 1
         if status in {"invalid", "skipped"}:
             counts[status] += 1
         elif status == "unknown" or any(c["id"] == "requirement_met" and c["status"] == "unknown" for c in row["claims"]):
@@ -248,5 +290,8 @@ def validate_assessment(payload: Any) -> None:
             raise ValueError("Invalid validated model assessment provenance")
         if status in {"invalid", "unknown"} and any(c["status"] != "unknown" for c in claims):
             raise ValueError("Failed model responses must abstain")
-    if counts != payload["totals"]:
+    totals = dict(payload["totals"])
+    # Assessments written before the post-check carry no scope_narrowed total and no marked row.
+    if counts != {key: value for key, value in totals.items() if key != "scope_narrowed"} or (
+            scope_rows != totals.get("scope_narrowed", 0)):
         raise ValueError("Model assessment totals disagree with policies")

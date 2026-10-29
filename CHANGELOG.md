@@ -58,6 +58,31 @@ export and MCP behaviour is unchanged.
   - The synthetic demo now projects three sections (`service_plans`, `tenant_id`, `privileged_users`):
     99 rule rows and three model rows (`MS.AAD.7.1v1` to `MS.AAD.7.3v1`), where the earlier count
     was two sections, 102 rule rows and none.
+- **Scope post-check.** ScubaGear's Rego ignores the location, platform, device-filter, client-application
+  (and, for most policies, client-application-type) conditions of a Conditional Access policy, and the grant
+  operator of several, so the oracle labels the specialist model is trained on give a clean pass to a policy
+  applied to one office. `auditex model assess` now marks a met row of MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2,
+  3.6v1, 3.7v1, 3.8v1, 3.9v1 or 9.1v1 `scope_narrowed` when an enabled policy that could have decided it carries
+  such a condition and no compliant unscoped policy could have decided it as well (report-only and disabled
+  policies never count; an `OR` operator counts only for the policies whose operator the Rego ignores, and only when
+  the grant offers a control the item does not accept). A policy could have decided an item only when it carries
+  every check the Rego makes of a deciding policy: all users and all applications included and no role excluded
+  where the Rego reads them, both legacy client types for 1.1v1, a phishing-resistant-only authentication strength
+  for 3.1v1 and 3.6v1, the exact transfer method for 3.9v1, the risk level, user action or device controls; the
+  table cites the Rego line of each, and exclusions (which the ScubaGear allow-list may permit) never drop a
+  policy. The verdict, claims and comparison are unchanged; the row gains `post_check` (policies, condition paths,
+  count) and the limitation `scope_narrowed`, and `totals.scope_narrowed` counts them. The envelope gains
+  `scope_post_check`, which lists the scoped policies whatever the verdicts, for a condition only when the policy could
+  have decided an item that ignores it, and reads the bundle's raw `conditional_access` payload (through the
+  projection's bounded reader) when the projection withheld the section for a scope key. Reach today: the projection
+  withholds a Conditional Access section that carries a location, platform, device or service-principal key, so a
+  row can currently be marked only for a client-application-type set, a named agent principal or an `OR` grant; the
+  location, platform and device checks reach the envelope record now and the rows once the projection reads those
+  fields. The table is `configs/scuba-scope-blind.json`, taken from the v9 dataset card and the pinned Rego. Optional
+  additions to schema `2026-10-29` only; earlier assessments still validate, prompts and the limitation catalogue are
+  untouched, and no report or explorer surface renders assessment rows, so the "met per ScubaGear, scope narrowed"
+  wording is specified for renderers in the output contract. On the synthetic demo the raw payload is read and no
+  enabled policy is scoped (count 0).
 - **Deterministic pre-checks (1.2.2.dev3).** A shared, shipped SCuBA rule catalogue answers closed
   applicability gates as inferred true and unavailable inputs as unknown before inference, citing all
   blockers, including the Power BI licence flag alongside missing tenant settings. Oracle generation

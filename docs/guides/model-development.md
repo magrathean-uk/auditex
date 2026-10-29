@@ -652,6 +652,12 @@ against the allow-list, `State` and `ExcludeRoles`. The ignored conditions mean 
 passes in ScubaGear although Entra would not apply the control tenant-wide; the labels follow the oracle and the rows are tagged
 `ca_condition` with the axis in the template, so a stricter reading can drop them by template.
 
+The product does not rely on the model to flag this. `auditex model assess` runs a deterministic scope post-check after the verdict
+(`configs/scuba-scope-blind.json`, built from the table of ignored conditions in the v9 dataset card): a met row of one of those ten
+policies is marked `scope_narrowed`, with the policies and condition paths, when an enabled policy that could have decided it (one that
+carries every check the Rego makes of a deciding policy) is scoped and no compliant unscoped policy could have decided it too.
+The verdict stays the oracle's and the prompt is unchanged. See "Scope post-check" in the output contract.
+
 `assign_v9_splits(new_cases)` assigns whole templates to train or validation, about 85/15 within each source family, never test. It also keeps
 every swept value learnable: a template moves to validation only if each coverage key it holds (the swept value overall, the field group per policy)
 keeps at least two train templates (one where it has no more than two). Frozen test ids and bytes, literal user-prompt hashes, canonical

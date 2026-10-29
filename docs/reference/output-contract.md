@@ -298,6 +298,94 @@ contain another shadow or pre-check; its policy must match its parent. Invalid r
 model text is not retained. Original model attempts and hashes belong to the nested
 shadow only; the parent remains a zero-attempt rule decision.
 
+#### Scope post-check
+
+ScubaGear's Rego ignores the scoping of a Conditional Access policy, so a policy applied to one office,
+one platform, one device filter or one client-application set still gives a clean verdict (the v9 oracle
+pack records this per policy, and the model is trained on those labels). Schema `2026-10-29` therefore
+carries a deterministic post-check that runs after the verdict is known, in `auditex model assess` only
+(not in `--dry-run`). It reads no message bodies or file content, writes nothing and never changes a verdict.
+Every field below is optional or additive; assessments written without them still validate, and no schema
+version is bumped. The shipped table is `configs/scuba-scope-blind.json`
+(`azure_tenant_audit.scuba_scope`), shared by the serving layer, the validators and the tests.
+
+- **Which rows.** A model row whose requirement is `confirmed` or `inferred` true for one
+  of the ten policies the Rego reads blind: MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.7v1, 3.8v1,
+  3.9v1 and 9.1v1. A `policy_not_applicable` answer is not a clean pass and is never marked. MS.AAD.3.3v2
+  reads Conditional Access only for applicability and is not marked, but it inherits the blind spot of
+  MS.AAD.3.1v1: the Rego declares 3.3v2 not applicable whenever any policy counts as phishing-resistant MFA for
+  3.1v1, and that test ignores location, platform and device conditions as blindly as 3.1v1 does, so a
+  phishing-resistant policy scoped to one office makes 3.3v2 not applicable just as it satisfies 3.1v1. The
+  post-check does not look behind a not-applicable answer.
+- **Reach today.** The projection withholds the whole Conditional Access section when a policy carries a
+  `locations`, `platforms`, `devices` or service-principal key, so a verdict of met cannot yet rest on such a
+  policy: the model rows are `unknown` and no row is marked for them. Only a client-application-type set, a
+  named agent service principal or an `OR` grant can mark a row today. Location, platform and device scoping reach
+  the envelope record now, from the raw payload, and will mark rows as soon as the projection reads those fields.
+- **Which policies count.** An enabled policy (`State` `enabled`; report-only and disabled policies never
+  decide) that could have decided the item. It must carry a grant of the item (`block`; a phishing-resistant-only
+  authentication strength for 3.1v1 and 3.6v1; `mfa` or a general-MFA strength for 3.2v2; a compliant or
+  domain-joined device control for 3.7v1 and 3.8v1) and every check the Rego itself makes of a deciding
+  policy, each cited by Rego line in the table's `source`: all users and all applications included and no
+  excluded role (every item but 3.6v1, which is role based, 3.8v1, which skips the applications, and 9.1v1,
+  which reads neither the users nor the excluded roles); both `other` and `exchangeActiveSync` for 1.1v1; high user
+  risk for 2.1v1; high sign-in risk for 2.3v1; both device controls and no other, the `OR` operator and no user
+  action for 3.7v1; the registration user action for 3.8v1; the exact transfer method `deviceCodeFlow` for 3.9v1;
+  all client application types, a high agent risk level and all agent service principals for 9.1v1. A policy the
+  Rego would accept is never left out: an exclusion of users, groups, applications or guests is not required away,
+  because the ScubaGear config's allow-list is not in the evidence. The privileged-role coverage of 3.6v1 needs the
+  privileged-role set and is not modelled, so an all-users policy also counts for it. A policy that carries one of the
+  conditions below marks the row, unless a compliant unscoped candidate also exists: a candidate with none of the
+  conditions below and no exclusion of any kind applies the control everywhere, so the row is left unmarked and the
+  scoped policy appears in the envelope record only. A candidate with an exclusion does not suppress the mark (the
+  check errs towards flagging).
+- **Which conditions.** Only the groups the Rego was measured to ignore for that policy. All ten ignore
+  `conditions.locations`, `conditions.platforms`, `conditions.devices` and `conditions.clientApplications`
+  except MS.AAD.9.1v1, which reads `ClientApplications`; `conditions.clientAppTypes` is ignored by every
+  policy but MS.AAD.1.1v1 and 9.1v1. A condition narrows when it is present and is not the unscoped form: an
+  include of `All` (or `all` for platforms) with nothing excluded, or `ClientAppTypes` of exactly `all`, does not
+  narrow, nor does a condition with no include and nothing excluded (a null or empty location or platform
+  condition) or one that includes every agent identity (`IncludeAgentIdServicePrincipals` of `All`) and excludes no
+  agent; a named or trusted-locations include, an exclusion (such as trusted locations), a platform subset, a
+  device filter, a client-application condition and any other client-application-type set do.
+  `grantControls.operator` is added for MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.8v1, 3.9v1 and 9.1v1 (the
+  policies whose operator the Rego ignores; MS.AAD.3.7v1 reads it) when the operator is
+  `OR` and the grant also offers a control the item does not accept (for example `mfa` or `compliantApplication`
+  for 3.2v2, which lets a user pass without MFA; a phishing-resistant strength beside `mfa` is accepted there).
+  An `OR` over a single control, over controls that all satisfy the item, or `AND`, is not a narrowing. MS.AAD.9.1v1
+  never reads the operator, nor an excluded agent service principal, so neither can be reported as a
+  narrowing the Rego sees.
+- **Row fields.** A marked row keeps its claims, comparison and recommendations exactly as the verdict gave
+  them and gains `post_check`: `kind` (`scope_narrowed`), `policies` (the distinct display names, sorted and
+  at most the projection item budget, `--projection-max-items`), `conditions` (the sorted condition paths:
+  `conditions.locations`, `conditions.platforms`, `conditions.devices`, `conditions.clientApplications`,
+  `conditions.clientAppTypes`, `grantControls.operator`) and `count` (how many policies, so a truncated list
+  shows). The limitation `scope_narrowed` is appended to the row's `limitations`; it is an assessment-contract
+  extension of the row (like the named `required_evidence_section_not_collected:<section>` limitations), never
+  added to the catalogue's closed `limitation_ids`, to a prompt, to a pack row or to `model_shadow`.
+  `totals.scope_narrowed` counts the marked rows (it is written whenever the check ran, `0` included).
+  Names are display names from the saved bundle, masked for e-mail local parts like the projection unless
+  `--no-redaction` (the mask runs first, so a cut cannot leave part of an address), and then cut to 200 characters.
+- **Envelope record.** `scope_post_check`, whatever the verdicts: `status` (`evaluated` or `not_evaluated`),
+  `source` (`projection` when the Conditional Access section was projected, else `raw`: the bundle's own
+  `conditional_access` payload, read through the projection's reader with its health checks and scan bounds, so
+  a section withheld for a location, platform or device condition still yields the list; `null` when not
+  evaluated), `reason` (null, or `missing_artifact`, `incomplete_shape`, `oversize` or
+  `not_applicable_to_platform` when the raw payload could not be read within bounds, or more than 1,000
+  policies that could have decided a tabled item exist), `count` (enabled policies carrying a scope condition that
+  an item they could have decided ignores) and `policies` (`name` and sorted `conditions`, distinct names, at most
+  the item budget). A policy is listed for a condition only when some tabled item it could have decided ignores that
+  condition, so a textbook legacy-authentication block (client types `exchangeActiveSync` and `other`) or a compliant
+  agent block over all agents is not listed. The operator is judged per assessed policy, so it appears on rows only.
+- **Renderers.** No report, export or explorer surface renders `model_assessment.json` rows today, so none is
+  changed. A renderer must show a row with `post_check.kind` `scope_narrowed` as **met per ScubaGear, scope
+  narrowed** (never as a clean pass), name its `policies` and `conditions`, and may link the envelope's
+  `scope_post_check`.
+- **Validation.** The schema and `validate_assessment` reject a `post_check` on a row that is not a met
+  verdict of a tabled policy, a condition the table does not allow for that policy, unsorted or over-counted
+  lists, a mark without the limitation (or the reverse), totals that disagree with the rows, a marked row
+  without an `evaluated` envelope record, and a record whose `source` disagrees with the projection.
+
 `model_assessment_prompts.jsonl` is the dry-run alternative, containing message/hash
 rows or explicit skip rows. Both are private, named post-finalisation outputs and may
 be unlisted by the original hash manifest; that manifest is never rewritten. They
