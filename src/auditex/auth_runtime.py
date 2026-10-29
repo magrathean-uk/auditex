@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import os
 import platform
@@ -11,6 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from azure_tenant_audit.auth_context import (
+    b64url_json,
+    inspect_token_claims,
+    iso_from_epoch,
+    resolve_stored_auth_context,
+)
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.m365_home import m365_subprocess_kwargs
 from azure_tenant_audit.capability_gate import enrich_capability_row
@@ -23,7 +28,6 @@ from azure_tenant_audit.secret_hygiene import (
     token_freshness as safe_token_freshness,
     validate_token_claims,
 )
-from azure_tenant_audit.utils import parse_csv_list
 
 
 JsonCommand = Callable[[list[str]], dict[str, Any]]
@@ -375,31 +379,12 @@ class ProductAuthRuntime:
         return {"active_context": active, "contexts": contexts}
 
     def resolve_auth_context(self, name: str | None = None) -> dict[str, Any]:
-        store = self._auth_context_store()
-        selected_name = name or store.get("active_context")
-        if not selected_name:
-            raise RuntimeError("no saved auth context")
-        context = store.get("contexts", {}).get(selected_name)
-        if not isinstance(context, dict):
-            raise RuntimeError(f"auth context '{selected_name}' not found")
-
-        token = context.get("token")
-        if not token:
-            token_file = context.get("token_file")
-            if isinstance(token_file, str) and token_file:
-                token_path = self.adapters.resolve_token_path(selected_name, token_file)
-                if token_path is not None:
-                    token = self.adapters.read_token(token_path)
-                    if token:
-                        context = dict(context)
-                        context["token"] = token
-
-        validation = validate_token_claims(context.get("token_claims") or {}, tenant_id=context.get("tenant_id"))
-        if validation.get("blockers"):
-            raise RuntimeError(
-                f"auth context '{selected_name}' is not usable: {', '.join(validation['blockers'])}"
-            )
-        return context
+        return resolve_stored_auth_context(
+            self._auth_context_store(),
+            name,
+            resolve_token_path=self.adapters.resolve_token_path,
+            read_token=self.adapters.read_token,
+        )
 
     def capability_for_context(
         self,
@@ -437,23 +422,6 @@ def _safe_token_file_name(name: str) -> str:
     return f"{safe}.token"
 
 
-def b64url_json(segment: str) -> dict[str, Any]:
-    if not segment:
-        return {}
-    padding = "=" * ((4 - len(segment) % 4) % 4)
-    raw = base64.urlsafe_b64decode(segment + padding)
-    decoded = json.loads(raw.decode("utf-8"))
-    return decoded if isinstance(decoded, dict) else {}
-
-
-def iso_from_epoch(value: Any) -> str | None:
-    try:
-        epoch = int(value)
-    except (TypeError, ValueError):
-        return None
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def parse_utc(value: Any) -> datetime | None:
     if not value:
         return None
@@ -473,35 +441,6 @@ def parse_utc(value: Any) -> datetime | None:
 
 def token_freshness(token_claims: dict[str, Any]) -> dict[str, Any]:
     return safe_token_freshness(token_claims)
-
-
-def inspect_token_claims(token: str, *, include_raw_claims: bool = False) -> dict[str, Any]:
-    token = token.strip()
-    if token.lower().startswith("bearer "):
-        token = token.split(" ", 1)[1].strip()
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise ValueError("token is not a JWT")
-    if not all(parts):
-        raise ValueError("token is not a complete JWT")
-    payload = b64url_json(parts[1])
-    delegated_scopes = sorted(parse_csv_list(str(payload.get("scp", "")).replace(" ", ",")) or [])
-    app_roles = sorted(str(item) for item in payload.get("roles", []) if isinstance(item, str))
-    result = {
-        "tenant_id": payload.get("tid"),
-        "audience": payload.get("aud"),
-        "app_id": payload.get("appid") or payload.get("azp"),
-        "subject": payload.get("sub"),
-        "user_principal_name": payload.get("upn") or payload.get("preferred_username"),
-        "delegated_scopes": delegated_scopes,
-        "app_roles": app_roles,
-        "issued_at_utc": iso_from_epoch(payload.get("iat")),
-        "not_before_utc": iso_from_epoch(payload.get("nbf")),
-        "expires_at_utc": iso_from_epoch(payload.get("exp")),
-    }
-    if include_raw_claims:
-        result["raw_claims"] = payload
-    return sanitize_token_claims(result)
 
 
 def redacted_token_preview(token: str) -> str:

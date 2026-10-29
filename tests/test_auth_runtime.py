@@ -87,6 +87,31 @@ def test_auth_runtime_resolves_active_auth_context_from_fake_store() -> None:
     assert listed["contexts"][0]["tenant_id"] == "tenant-1"
 
 
+def test_product_and_engine_share_public_auth_readers(tmp_path: Path, monkeypatch) -> None:
+    from auditex import auth
+    from azure_tenant_audit import auth_context
+
+    token_path = tmp_path / "shared.token"
+    token_path.write_text("synthetic-token\n", encoding="utf-8")
+    store = {
+        "active_context": "shared",
+        "contexts": {"shared": {
+            "name": "shared",
+            "token_file": "shared.token",
+            "token_claims": {"expires_at_utc": "2099-01-01T00:00:00Z"},
+        }},
+    }
+    # Patch the shared public seam through the product module. Engine reads
+    # must see the same store and token path, even after both modules imported.
+    monkeypatch.setattr(auth.auth_context, "auth_context_store", lambda: store)
+    monkeypatch.setattr(auth.auth_context, "default_token_path", lambda name, token_file: token_path)
+
+    product_context = auth.resolve_auth_context()
+    engine_context = auth_context.resolve_auth_context()
+    assert product_context == engine_context
+    assert engine_context["token"] == "synthetic-token"
+
+
 def test_import_token_context_uses_token_file_when_available(tmp_path: Path) -> None:
     store: dict[str, Any] = {"active_context": None, "contexts": {}}
     saved_token_path: Path | None = None

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import importlib
 import logging
 import os
 from collections.abc import Collection, Sequence
@@ -12,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import auth_context
 from .auth_runtime import (
     acquire_azure_cli_access_token as _acquire_azure_cli_access_token,
     build_auth_context_payload as _build_auth_context_payload,
@@ -463,7 +463,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
 
     saved_auth_context: dict[str, Any] | None = None
     if args.auth_context:
-        saved_auth_context = importlib.import_module("auditex.auth").resolve_auth_context(args.auth_context)
+        saved_auth_context = auth_context.resolve_auth_context(args.auth_context)
         args.access_token = args.access_token or saved_auth_context.get("token")
         args.tenant_id = args.tenant_id or saved_auth_context.get("tenant_id")
 

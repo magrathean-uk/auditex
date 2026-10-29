@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,9 @@ from .evidence_refs import seal_findings
 from .output import AuditWriter
 from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
 from .tenant_identity import canonical_tenant_uuid, resolve_tenant_identity
+
+
+logger = logging.getLogger(__name__)
 
 
 def seal_run_findings(writer: AuditWriter, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -80,9 +84,15 @@ def _auth_scopes_from_capabilities(capability_rows: list[dict[str, Any]]) -> lis
 def _collector_scope_catalog(platform: str) -> dict[str, dict[str, Any]]:
     if platform == "google_workspace":
         try:
-            return build_google_scope_catalog()
+            catalog = build_google_scope_catalog()
         except Exception:  # noqa: BLE001
-            return {}
+            catalog = {}
+        if not catalog:
+            logger.warning(
+                "Empty google_workspace collector catalogue from "
+                "azure_tenant_audit.provider_registry; provider metadata is unavailable."
+            )
+        return catalog
     try:
         return load_m365_scope_catalog()
     except Exception:  # noqa: BLE001

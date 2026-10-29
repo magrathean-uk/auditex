@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import importlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from datetime import datetime
 
+from . import auth_context
 from .adapters import get_adapter
 from .adapters import ADAPTERS
 from .ai_context import build_privacy_block
@@ -151,8 +151,7 @@ def _planned_commands(action: ResponseAction, config: ResponseConfig) -> list[st
 
 
 def _resolve_saved_auth_context(name: str) -> dict[str, Any]:
-    auditex_auth = importlib.import_module("auditex.auth")
-    return auditex_auth.resolve_auth_context(name)
+    return auth_context.resolve_auth_context(name)
 
 
 def run_response(config: ResponseConfig, command_line: list[str] | None = None) -> int:

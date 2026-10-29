@@ -6,6 +6,7 @@ from typing import Any
 
 from .config import CollectorConfig
 from .diagnostics import load_permission_hints
+from .provider_registry import provider_collectors
 
 
 GOOGLE_SCOPE_NOTES: dict[str, dict[str, str]] = {
@@ -110,9 +111,7 @@ def build_google_scope_catalog(
     registry: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     if registry is None:
-        from auditex.google_workspace.collectors import REGISTRY
-
-        registry = REGISTRY
+        registry = provider_collectors("google_workspace")
     catalog: dict[str, dict[str, Any]] = {}
     for collector_name, collector in registry.items():
         required_permissions = _dedupe([str(item) for item in getattr(collector, "required_scopes", ())])

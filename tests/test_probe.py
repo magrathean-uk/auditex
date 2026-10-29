@@ -220,7 +220,7 @@ def test_probe_live_uses_saved_auth_context_and_writes_auth_artifact(tmp_path: P
     )
     monkeypatch.setattr("azure_tenant_audit.probe.REGISTRY", {"identity": _FakeCollector()})
     monkeypatch.setattr(
-        "auditex.auth.resolve_auth_context",
+        "azure_tenant_audit.auth_context.resolve_auth_context",
         lambda name=None: {
             "name": name or "customer-token",
             "auth_type": "imported_token",

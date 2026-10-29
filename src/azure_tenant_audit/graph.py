@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import random
 import time
-import importlib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, Optional
 from urllib.parse import urlencode, urljoin, urlparse
@@ -11,6 +10,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 import requests
 from requests.exceptions import RequestException
 
+from . import auth_context
 from .config import AuthConfig
 from .versioning import package_user_agent
 
@@ -449,8 +449,7 @@ class GraphClient:
             return dict(self._token_claims)
         try:
             token = self.ensure_token()
-            inspect_token_claims = importlib.import_module("auditex.auth").inspect_token_claims
-            self._token_claims = dict(inspect_token_claims(token))
+            self._token_claims = dict(auth_context.inspect_token_claims(token))
         except Exception:  # noqa: BLE001
             self._token_claims = {}
         return dict(self._token_claims)

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import importlib
 import json
 import subprocess
 import time
 from typing import Any, Callable, Optional
 
+from . import auth_context
 from .graph import GraphClient
 from .secret_hygiene import redact_argv, sanitize_token_claims
 
@@ -132,7 +132,7 @@ def capture_signed_in_context(
 
 
 def inspect_access_token(token: str) -> dict[str, Any]:
-    return importlib.import_module("auditex.auth").inspect_token_claims(token)
+    return auth_context.inspect_token_claims(token)
 
 
 def build_auth_context_payload(

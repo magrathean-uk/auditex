@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import shutil
@@ -10,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from . import auth_context
 from .adapters import get_adapter
 from .auth_runtime import (
     acquire_azure_cli_access_token as _acquire_azure_cli_access_token,
@@ -586,8 +586,7 @@ def run_live_probe(cfg: ProbeConfig) -> int:
         tenant_id = cfg.tenant_id
         access_token = cfg.access_token
         if cfg.auth_context:
-            auth_module = importlib.import_module("auditex.auth")
-            saved_context = auth_module.resolve_auth_context(cfg.auth_context)
+            saved_context = auth_context.resolve_auth_context(cfg.auth_context)
             saved_claims = sanitize_token_claims(saved_context.get("token_claims") or {})
             tenant_id = tenant_id or saved_context.get("tenant_id")
             access_token = access_token or saved_context.get("token")

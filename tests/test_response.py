@@ -114,7 +114,7 @@ def test_response_execute_uses_jwt_saved_auth_context_and_writes_auth_artifact(t
     monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
     monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant-saved"})
     monkeypatch.setattr(
-        "auditex.auth.resolve_auth_context",
+        "azure_tenant_audit.auth_context.resolve_auth_context",
         lambda name=None: {
             "name": name or "customer-token",
             "auth_type": "imported_token",
@@ -178,7 +178,7 @@ def test_response_execute_uses_saved_auth_context_and_writes_auth_artifact(tmp_p
     monkeypatch.setattr("azure_tenant_audit.response.get_adapter", lambda _name: adapter)
     monkeypatch.setattr("azure_tenant_audit.response._lab_tenant_ids", lambda: {"tenant-saved"})
     monkeypatch.setattr(
-        "auditex.auth.resolve_auth_context",
+        "azure_tenant_audit.auth_context.resolve_auth_context",
         lambda name=None: {
             "name": name or "customer-token",
             "auth_type": "imported_token",

@@ -7,8 +7,9 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
-Model-development tooling only (round 2 of the specialist-model programme). `CONTRACT_VERSION` stays
-`2026-10-22`; the audit, report, export and MCP surfaces are unchanged.
+Model-development tooling (round 2 of the specialist-model programme) and an internal
+engine/product boundary rework. `CONTRACT_VERSION` stays `2026-10-22`; audit, report,
+export and MCP behaviour is unchanged.
 
 ### Model serving (new, optional)
 
@@ -56,6 +57,10 @@ Model-development tooling only (round 2 of the specialist-model programme). `CON
   limitation/recommendation sets; `evaluate` and `combine` outputs for the shipped fixtures are unchanged.
 - **Contract.** `schemas/model_assessment.schema.json` is shipped; `CONTRACT_VERSION` stays `2026-10-22` because
   the artefact is optional and nothing existing changes.
+
+### Internal
+
+- Remove engine-to-product imports using an engine-owned provider registry and shared public auth readers; preserve product metadata and keep the engine usable on its own.
 
 ### Model development
 

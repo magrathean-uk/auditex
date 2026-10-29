@@ -15,6 +15,7 @@ from typing import Any
 from .bundle_integrity import evidence_index_is_hashed
 from .collection_gaps import list_truncations, section_gap_records
 from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
+from .provider_registry import provider_collectors
 from .resources import list_resource_files, resolve_resource_path
 from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
 from .waivers import has_matching_waiver, is_accepted_status
@@ -356,9 +357,7 @@ def _validate_finding_collectors(
         return
     known = set(_REGISTRY.keys()) | set(_KNOWN_NON_COLLECTOR_PROVENANCE)
     try:
-        from auditex.google_workspace.collectors import REGISTRY as _GOOGLE_REGISTRY
-
-        known.update(_GOOGLE_REGISTRY.keys())
+        known.update(provider_collectors("google_workspace"))
     except Exception:  # noqa: BLE001
         pass
     for finding in findings:
