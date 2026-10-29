@@ -80,13 +80,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from auditex.model_training import _outside_audit_runs, distinct_prompt_sha256, validate_cases  # noqa: E402
-from azure_tenant_audit.external_sharing import annotate_enum_names  # noqa: E402
+from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names  # noqa: E402
 from azure_tenant_audit.model_evidence import NOT_COLLECTED  # noqa: E402
 from azure_tenant_audit.scuba_precheck import policy_rule, precheck_policy, rule_catalogue, unavailable_input_sections  # noqa: E402
 
@@ -1875,6 +1876,413 @@ def contaminated_met_case_ids(opa: Path, meta: dict, evaluations: list[tuple[dic
             if seen[(pid, view)]:
                 found.add(view_case_id(prefix, pid, view, CONVENTION))
     return found
+
+
+# --- deterministic v9 extensions: enum sweeps and Conditional Access shapes (29 Oct 2026) ------------------------------------
+#
+# Opt-in like v8: the frozen miner path (and so the v7 regeneration parity) is untouched. Every shape below is a tenant built from a
+# harvested or single-purpose base; the pinned Rego, never an assumed answer, labels it. A v9 template reads
+# `v9:<generator>:<group>=<value>[:b<n>]` followed by the mutation family against the base. `<group>=<value>` is the coverage key that
+# assign_v9_splits keeps in train (every swept value must stay learnable); `b<n>` names the base tenant of an enum sweep.
+#
+# enum_sweep        one variant per documented value of every tier-1 field with a finite domain, on each clean base tenant: the policies that
+#                   read the field (they are labelled by it) and, for the other policies whose evidence shows the section, one deterministic
+#                   bystander row per value (the label must not move: that is what the model has to ignore).
+# ca_strength       GrantControls.AuthenticationStrength objects in the shape Graph returns (Id, DisplayName, PolicyType, RequirementsSatisfied,
+#                   AllowedCombinations) for every combination class the Rego tells apart (utils.aad IsPhishingResistantMFA, IsGeneralMFA).
+# ca_condition      Conditions.Locations, Platforms, Devices, ClientApplications, ClientAppTypes and the other finite CA enums on the
+#                   single-purpose policy of each item; whether the Rego reads or ignores a condition is measured, not assumed.
+# ca_authenticator  MS.AAD.3.3v2 applicability: a CA policy that counts as phishing-resistant MFA (as MS.AAD.3.1v1 judges it) makes it not
+#                   applicable; one that does not leaves the Authenticator configuration to decide.
+V9_GENERATORS = ("enum_sweep", "ca_strength", "ca_condition", "ca_authenticator")
+V9_ID_SALT = "conv3-v9"   # case ids hash the view with this salt, so a v9 id never repeats a v8 or a legacy one
+V9_GUEST_ROLES = {"restricted": "2af84b1e-32c8-42b7-82bc-daa82404023b", "limited": "10dae51f-b6af-4016-8d66-8c2a99b929b3",  # gitleaks:allow
+                  "member": "a0b1b346-4d3e-4e8b-98f8-753987be4970"}  # gitleaks:allow; Graph's guestUserRoleId constants, as AADConfig.rego
+V9_INVITE_VALUES = ["none", "adminsAndGuestInviters", "adminsGuestInvitersAndAllMembers", "everyone"]  # Graph allowInvitesFrom
+V9_BASES_PER_FIELD = 4
+
+
+def v9_enum_domains() -> list[dict]:
+    """The finite domains the v9 sweeps cover: field, values, the policies whose Rego reads the field, and the base-tenant fields that may
+    vary. SharePoint values come from the annotator tables (`external_sharing.ENUM_NAME_KEYS`), so they follow what the prompts name;
+    SharingCapability is already swept by the gate table (v8 `gate_sweep`)."""
+    spo = {"DefaultSharingLinkType": ["MS.SHAREPOINT.2.1v1"], "DefaultLinkPermission": ["MS.SHAREPOINT.2.2v1"],
+           "FileAnonymousLinkType": ["MS.SHAREPOINT.3.2v1"], "FolderAnonymousLinkType": ["MS.SHAREPOINT.3.2v1"],
+           "SharingDomainRestrictionMode": ["MS.SHAREPOINT.1.3v1"], "ODBSharingCapability": ["MS.SHAREPOINT.1.2v1"]}
+    domains = [{"product": "Sharepoint", "section": "SPO_tenant", "field": field, "values": sorted(ENUM_NAME_KEYS[field]),
+                "readers": readers, "vary": ("SharingCapability",), "source": "azure_tenant_audit.external_sharing.ENUM_NAME_KEYS"}
+               for field, readers in spo.items()]
+    authorization_vary = ("DefaultUserRolePermissions", "PermissionGrantPolicyIdsAssignedToDefaultUserRole")
+    domains.append({"product": "AAD", "section": "authorization_policies", "field": "AllowInvitesFrom", "values": list(V9_INVITE_VALUES),
+                    "readers": ["MS.AAD.8.2v1"], "vary": authorization_vary, "bystanders": 2,
+                    "source": "Microsoft Graph authorizationPolicy.allowInvitesFrom"})
+    domains.append({"product": "AAD", "section": "authorization_policies", "field": "GuestUserRoleId", "values": list(V9_GUEST_ROLES.values()),
+                    "readers": ["MS.AAD.8.1v1"], "vary": authorization_vary, "bystanders": 2,
+                    "source": "ScubaGear AADConfig.rego guest role constants"})
+    return domains
+
+
+def _v9_single_object(value):
+    """The one object of a section exported as a singleton list (or as the object itself); None for anything else."""
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return value if isinstance(value, dict) else None
+
+
+def _v9_set_field(tenant: dict, section: str, field: str, value) -> dict:
+    """A copy of `tenant` with `field` set on every object of `section` (the derived `<field>_name` companion is dropped, it is rendered later)."""
+    result = json.loads(canonical(tenant))
+    current = result[section]
+    for item in current if isinstance(current, list) else [current]:
+        item.pop(field + "_name", None)
+        item[field] = value
+    return result
+
+
+def _v9_clean_bases(harvested: list[dict], section: str, vary: tuple[str, ...], limit: int) -> list[dict]:
+    """Harvested tenants that differ from the first harvested tenant only inside `section`, and there only in the `vary` fields (and hold
+    every field of the first one's object): one per distinct combination of the vary fields, in harvest order. The cleaner the base, the more
+    plainly a swept value is the one thing that changed."""
+    if not harvested:
+        return []
+    first = _v9_single_object(harvested[0]["input"].get(section))
+    if first is None:
+        return []
+    rest = canonical({key: value for key, value in harvested[0]["input"].items() if key != section})
+    chosen, seen = [], set()
+    for item in harvested:
+        current = _v9_single_object(item["input"].get(section))
+        if current is None or not set(first) <= set(current) or set(current) - set(first):
+            continue
+        if canonical({key: value for key, value in item["input"].items() if key != section}) != rest:
+            continue
+        if any(canonical(current[key]) != canonical(first[key]) for key in first if key not in vary):
+            continue
+        combination = canonical({key: current[key] for key in vary})
+        if combination not in seen:
+            seen.add(combination)
+            chosen.append(item)
+    return chosen[:limit]
+
+
+def v9_enum_variants(name: str, harvested: list[dict], sections: dict[str, list[str]], *, bases: int = V9_BASES_PER_FIELD) -> list[dict]:
+    """One variant per documented value of each tier-1 enum field of product `name`, on each clean base tenant of the harvest.
+
+    A variant targets the policies that read the field plus every other policy whose view shows the section on `bystanders` bases per value
+    (one unless the domain says more; chosen by a hash of policy, field and value): the readers teach the label, the bystanders teach that
+    the label does not move."""
+    result = []
+    for domain in v9_enum_domains():
+        if domain["product"] != name:
+            continue
+        section, field = domain["section"], domain["field"]
+        chosen = _v9_clean_bases(harvested, section, domain["vary"], bases)
+        viewers = [pid for pid, shown in sorted(sections.items()) if section in shown]
+        for index, base in enumerate(chosen):
+            for value in domain["values"]:
+                token = canonical(value).strip('"')
+                bystanders = [pid for pid in viewers if pid not in domain["readers"]
+                              and index in {(int(sha(f"{pid}|{field}|{token}".encode())[:8], 16) + k) % len(chosen)
+                                            for k in range(domain.get("bystanders", 1))}]
+                targets = [pid for pid in [*domain["readers"], *bystanders] if pid in sections]
+                if targets:
+                    result.append({"name": f"v9:enum_sweep:{field}={token}; base={base['name']}", "input": _v9_set_field(base["input"], section, field, value),
+                                   "policies": targets, "base": base["input"], "template_prefix": f"v9:enum_sweep:{field}={token}:b{index}",
+                                   "split": "train"})
+    return result
+
+
+# Graph's built-in authentication strengths (documented constants); every other strength is custom with its own id.
+V9_BUILTIN_STRENGTHS = {"multifactor": ("00000000-0000-0000-0000-000000000002", "Multifactor authentication"),
+                        "passwordless": ("00000000-0000-0000-0000-000000000003", "Passwordless MFA"),
+                        "phishing_resistant": ("00000000-0000-0000-0000-000000000004", "Phishing-resistant MFA")}
+V9_STRENGTHS = {   # name -> AllowedCombinations; the class the Rego puts it in is measured, see v9_ca_variants
+    "phishing_resistant": list(PHISHING_RESISTANT),
+    "fido2_only": ["fido2"],
+    "hello_only": ["windowsHelloForBusiness"],
+    "certificate_only": ["x509CertificateMultiFactor"],
+    "hello_and_fido2": ["windowsHelloForBusiness", "fido2"],
+    "phishing_resistant_reordered": ["x509CertificateMultiFactor", "fido2", "windowsHelloForBusiness"],
+    "passwordless": list(PASSWORDLESS_STRENGTH),
+    "multifactor": list(MFA_STRENGTH),
+    "phishing_resistant_plus_push": [*PHISHING_RESISTANT, "password,microsoftAuthenticatorPush"],
+    "phishing_resistant_plus_tap": [*PHISHING_RESISTANT, "temporaryAccessPassOneTime"],
+    "federated_multifactor": ["federatedMultiFactor"],
+    "sms_and_voice": ["password,sms", "password,voice"],
+    "temporary_access_pass": ["temporaryAccessPassOneTime", "temporaryAccessPassMultiUse"],
+    "password_only": ["password"],
+    "phishing_resistant_plus_single_factor_certificate": ["fido2", "x509CertificateSingleFactor"],
+    "empty": [],
+    "null": None,
+}
+V9_STRENGTH_FLAVOURS = ("builtin", "custom_mfa", "custom_none", "lookalike")
+
+
+def v9_strength_object(combination: str, flavour: str) -> dict:
+    """An AuthenticationStrength in the shape Graph returns, PascalCase as in the ProviderExport: Id, DisplayName, PolicyType,
+    RequirementsSatisfied and AllowedCombinations. The Rego reads AllowedCombinations only; `flavour` varies the rest:
+    builtin (a built-in strength: only meaningful where the combinations are that strength's), custom_mfa and custom_none (a custom
+    strength whose requirementsSatisfied is mfa or none), lookalike (a custom strength that borrows a built-in strength's name)."""
+    combinations = V9_STRENGTHS[combination]
+    key = uuid.uuid5(uuid.NAMESPACE_URL, f"auditex/v9/strength/{combination}/{flavour}")
+    if flavour == "builtin":
+        identifier, display = V9_BUILTIN_STRENGTHS[combination]
+        meta = {"Id": identifier, "DisplayName": display, "PolicyType": "builtIn", "RequirementsSatisfied": "mfa"}
+    elif flavour == "lookalike":
+        meta = {"Id": str(key), "DisplayName": "Phishing-resistant MFA", "PolicyType": "custom", "RequirementsSatisfied": "mfa"}
+    else:
+        meta = {"Id": str(key), "DisplayName": "Contoso approved sign-in methods", "PolicyType": "custom",
+                "RequirementsSatisfied": "mfa" if flavour == "custom_mfa" else "none"}
+    return {**meta, "AllowedCombinations": None if combinations is None else list(combinations)}
+
+
+def v9_strength_flavours(combination: str) -> list[str]:
+    """Two flavours per combination set: the primary (the built-in strength where one is exactly this set, else a custom MFA strength) and one
+    other, picked by a hash so that every flavour is exercised across the sets. A built-in name never labels a set it is not."""
+    primary = "builtin" if combination in V9_BUILTIN_STRENGTHS else "custom_mfa"
+    others = [flavour for flavour in V9_STRENGTH_FLAVOURS if flavour != primary and flavour != "builtin"]
+    return [primary, others[int(sha(combination.encode())[:8], 16) % len(others)]]
+
+
+V9_LOCATION = "7c1e4b52-3a90-4d68-8f21-b5d0a6e93c14"   # a fictional named location
+V9_APPLICATION = "a3c9d5e1-6f28-4b74-8e0a-1d7b3c9f5a62"
+_CONDITIONS = ("Conditions",)
+# axis -> value -> edits of a single-purpose policy. Graph (ProviderExport) names: Conditions.Locations{IncludeLocations, ExcludeLocations},
+# Platforms{IncludePlatforms, ExcludePlatforms}, Devices{DeviceFilter{Mode, Rule}}, ClientApplications{IncludeServicePrincipals,
+# ExcludeServicePrincipals, ServicePrincipalFilter}, null where the policy sets none.
+V9_CA_AXES = {
+    "locations": {
+        "all_include_only": [(_CONDITIONS + ("Locations",), {"IncludeLocations": ["All"]})],   # an export that leaves the empty exclude list out
+        "all_except_trusted": [(_CONDITIONS + ("Locations",), {"IncludeLocations": ["All"], "ExcludeLocations": ["AllTrusted"]})],
+        "trusted_only": [(_CONDITIONS + ("Locations",), {"IncludeLocations": ["AllTrusted"], "ExcludeLocations": []})],
+        "named_location": [(_CONDITIONS + ("Locations",), {"IncludeLocations": [V9_LOCATION], "ExcludeLocations": []})],
+        "null": [(_CONDITIONS + ("Locations",), None)],
+    },
+    "platforms": {
+        "mobile_only": [(_CONDITIONS + ("Platforms",), {"IncludePlatforms": ["android", "iOS"], "ExcludePlatforms": []})],
+        "all_except_mobile": [(_CONDITIONS + ("Platforms",), {"IncludePlatforms": ["all"], "ExcludePlatforms": ["android", "iOS"]})],
+        "null": [(_CONDITIONS + ("Platforms",), None)],
+    },
+    "devices": {
+        "filter_include": [(_CONDITIONS + ("Devices",), {"DeviceFilter": {"Mode": "include", "Rule": 'device.trustType -eq "ServerAD" -or device.isCompliant -eq True'}})],
+        "filter_exclude": [(_CONDITIONS + ("Devices",), {"DeviceFilter": {"Mode": "exclude", "Rule": 'device.extensionAttribute1 -eq "KioskDevice"'}})],
+        "null": [(_CONDITIONS + ("Devices",), None)],
+    },
+    "client_applications": {
+        "null": [(_CONDITIONS + ("ClientApplications",), None)],
+        "service_principals": [(_CONDITIONS + ("ClientApplications",), {"IncludeServicePrincipals": ["ServicePrincipalsInMyTenant"],
+                                                                      "ExcludeServicePrincipals": [], "ServicePrincipalFilter": None})],
+    },
+}
+V9_CA_FAILING_AXES = {"locations": "named_location", "platforms": "mobile_only", "devices": "filter_include"}   # axis -> value, see v9_ca_variants
+V9_AI_AGENT_ITEM = "MS.AAD.9.1v1"
+V9_AI_AGENT_AXES = {   # MS.AAD.9.1v1 reads ClientApplications and AgentIdRiskLevels: the shapes it honours
+    "agent_service_principals": {
+        "all": [(_CONDITIONS + ("ClientApplications",), {"IncludeAgentIdServicePrincipals": ["All"]})],
+        "one_agent": [(_CONDITIONS + ("ClientApplications",), {"IncludeAgentIdServicePrincipals": [V9_APPLICATION]})],
+        "none_listed": [(_CONDITIONS + ("ClientApplications",), {"IncludeAgentIdServicePrincipals": []})],
+        "null": [(_CONDITIONS + ("ClientApplications",), None)],
+        "all_with_service_principals": [(_CONDITIONS + ("ClientApplications",), {"IncludeAgentIdServicePrincipals": ["All"],
+            "IncludeServicePrincipals": ["ServicePrincipalsInMyTenant"], "ExcludeServicePrincipals": [], "ServicePrincipalFilter": None})],
+    },
+    "agent_risk": {
+        "medium_and_high": [(_CONDITIONS + ("AgentIdRiskLevels",), "medium,high")],
+        "medium": [(_CONDITIONS + ("AgentIdRiskLevels",), "medium")],
+        "low": [(_CONDITIONS + ("AgentIdRiskLevels",), "low")],
+        "null": [(_CONDITIONS + ("AgentIdRiskLevels",), None)],
+    },
+}
+# Finite enums that real policies carry and the packs had not seen. `items` limits an axis to the items it can be applied to as written.
+V9_CA_ENUM_AXES = {
+    "client_app_types": {
+        "modern_clients": {"edits": [(_CONDITIONS + ("ClientAppTypes",), ["browser", "mobileAppsAndDesktopClients"])], "skip": ("MS.AAD.1.1v1",)},
+        "easSupported": {"edits": [(_CONDITIONS + ("ClientAppTypes",), ["easSupported"])], "skip": ("MS.AAD.1.1v1",)},
+        "legacy_and_modern": {"edits": [(_CONDITIONS + ("ClientAppTypes",), ["browser", "mobileAppsAndDesktopClients", "other", "exchangeActiveSync"])],
+                              "only": ("MS.AAD.1.1v1",)},
+        "modern_only": {"edits": [(_CONDITIONS + ("ClientAppTypes",), ["browser", "mobileAppsAndDesktopClients"])], "only": ("MS.AAD.1.1v1",)},
+    },
+    "operator": {
+        "and": {"edits": [(_GRANT + ("Operator",), "AND")], "skip": ()},
+        "or": {"edits": [(_GRANT + ("Operator",), "OR")], "skip": ()},
+    },
+    "built_in_controls": {
+        "mfa_and_password_change": {"edits": [(_BUILTIN, ["mfa", "passwordChange"]), (_GRANT + ("Operator",), "AND")], "only": ("MS.AAD.3.2v2",)},
+        "mfa_or_compliant_application": {"edits": [(_BUILTIN, ["mfa", "compliantApplication"]), (_GRANT + ("Operator",), "OR")], "only": ("MS.AAD.3.2v2",)},
+        "device_and_approved_application": {"edits": [(_BUILTIN, ["compliantDevice", "approvedApplication"]), (_GRANT + ("Operator",), "AND")],
+                                            "only": ("MS.AAD.3.7v1", "MS.AAD.3.8v1")},
+    },
+    "risk_levels": {
+        "user_medium_and_high": {"edits": [(_CONDITIONS + ("UserRiskLevels",), ["medium", "high"])], "only": ("MS.AAD.2.1v1",)},
+        "user_low_and_medium": {"edits": [(_CONDITIONS + ("UserRiskLevels",), ["low", "medium"])], "only": ("MS.AAD.2.1v1",)},
+        "sign_in_low_medium_high": {"edits": [(_CONDITIONS + ("SignInRiskLevels",), ["low", "medium", "high"])], "only": ("MS.AAD.2.3v1",)},
+        "sign_in_none": {"edits": [(_CONDITIONS + ("SignInRiskLevels",), ["none"])], "only": ("MS.AAD.2.3v1",)},
+    },
+    "transfer_methods": {
+        "both_flows": {"edits": [(_CONDITIONS + ("AuthenticationFlows", "TransferMethods"), "deviceCodeFlow,authenticationTransfer")], "only": ("MS.AAD.3.9v1",)},
+    },
+    "guest_types": {
+        "two_types_allow_listed": {"edits": [(_USERS + ("ExcludeGuestsOrExternalUsers",), {"GuestOrExternalUserTypes": "b2bCollaborationGuest,b2bCollaborationMember",
+                                                                                         "ExternalTenants": {"MembershipKind": "all"}})],
+                                   "allow": {"GuestUserTypes": ["b2bCollaborationGuest", "b2bCollaborationMember"]},
+                                   "skip": ("MS.AAD.3.2v2",)},
+        "two_types_one_listed": {"edits": [(_USERS + ("ExcludeGuestsOrExternalUsers",), {"GuestOrExternalUserTypes": "b2bCollaborationGuest,b2bCollaborationMember",
+                                                                                        "ExternalTenants": {"MembershipKind": "all"}})],
+                                 "allow": {"GuestUserTypes": ["b2bCollaborationGuest"]}, "skip": ("MS.AAD.3.2v2",)},
+    },
+}
+
+
+def _v9_ca_variant(generator: str, item: str, group: str, value: str, base: dict, tenant: dict, suffix: str = "") -> dict:
+    return {"name": f"v9:{generator}:{item}:{group}={value}{suffix}", "input": tenant, "policies": [item], "base": base,
+            "template_prefix": f"v9:{generator}:{group}={value}{suffix}", "split": "train", "intent": None}
+
+
+def v9_ca_variants(base_input: dict) -> list[dict]:
+    """The v9 Conditional Access variants on the single-purpose tenants of the base input (see single_purpose_variants).
+
+    ca_strength: for MS.AAD.3.1v1, 3.2v2 and 3.6v1 every combination set of V9_STRENGTHS in two flavours of the Graph strength object.
+    ca_condition: for every item of CA_ITEMS and MS.AAD.9.1v1 the location, platform, device and client-application axes and the finite enums of
+    V9_CA_ENUM_AXES that apply to it. MS.AAD.9.1v1 also gets the agent shapes it reads. `intent` is None: no baseline sentence says what a
+    location or a platform does, so the Rego's verdict is the label and the run measures whether it ignores the condition."""
+    roles = [role["RoleTemplateId"] for role in base_input.get("privileged_roles") or []]
+    if len(roles) < 2:
+        raise ValueError("the base input needs at least two privileged roles for the MS.AAD.3.6v1 base policy")
+    variants: list[dict] = []
+    policies = {item: single_purpose_policy(item, roles) for item in CA_ITEMS}
+    for item in ("MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1"):
+        policy, base = policies[item], _tenant(base_input, [policies[item]], item)
+        for combination in V9_STRENGTHS:
+            for flavour in v9_strength_flavours(combination):
+                edits = [(_BUILTIN, []), (_STRENGTH, v9_strength_object(combination, flavour))]
+                variants.append(_v9_ca_variant("ca_strength", item, "strength", f"{combination}.{flavour}", base, _tenant(base_input, [_edit(policy, edits)], item)))
+    for item in CA_ITEMS:
+        policy, base = policies[item], _tenant(base_input, [policies[item]], item)
+        for axis, values in V9_CA_AXES.items():
+            for value, edits in values.items():
+                variants.append(_v9_ca_variant("ca_condition", item, axis, value, base, _tenant(base_input, [_edit(policy, edits)], item)))
+        for axis, values in V9_CA_ENUM_AXES.items():
+            for value, spec in values.items():
+                if item in spec.get("skip", ()) or ("only" in spec and item not in spec["only"]):
+                    continue
+                variants.append(_v9_ca_variant("ca_condition", item, axis, value, base,
+                                               _tenant(base_input, [_edit(policy, spec["edits"])], item, spec.get("allow"))))
+    # MS.AAD.9.1v1: a compliant policy as the unit tests build it (block, all agent identities, high agent risk, all applications).
+    agent = _edit(ca_policy("Block risky AI agents", builtin=["block"]),
+                  [(_CONDITIONS + ("AgentIdRiskLevels",), "high"), (_CONDITIONS + ("ClientApplications",), {"IncludeAgentIdServicePrincipals": ["All"]})])
+    agent_base = _tenant({**base_input, "scuba_config": {**base_input.get("scuba_config", {}), "M365Environment": "commercial"}}, [agent], V9_AI_AGENT_ITEM)
+    for axis, values in {**V9_CA_AXES, **V9_AI_AGENT_AXES}.items():
+        for value, edits in values.items():
+            if axis == "client_applications":
+                continue   # the agent item reads ClientApplications itself: its own axis replaces the generic one
+            variants.append(_v9_ca_variant("ca_condition", V9_AI_AGENT_ITEM, axis, value, agent_base,
+                                           {**agent_base, CA_SECTION: [_edit(agent, edits)]}))
+    # The same conditions on a policy that fails the item for another reason (it is disabled): a condition the Rego ignores must not rescue it.
+    subjects = [(item, policies[item], _tenant(base_input, [policies[item]], item), lambda p, i=item: _tenant(base_input, [p], i)) for item in CA_ITEMS]
+    subjects.append((V9_AI_AGENT_ITEM, agent, agent_base, lambda p: {**agent_base, CA_SECTION: [p]}))
+    for item, policy, base, build in subjects:
+        broken = _edit(policy, [(("State",), "disabled")])
+        for axis, value in V9_CA_FAILING_AXES.items():
+            variants.append(_v9_ca_variant("ca_condition", item, f"{axis}_on_disabled_policy", value, base,
+                                           build(_edit(broken, V9_CA_AXES[axis][value]))))
+    return variants
+
+
+V9_AUTHENTICATOR_BASES = {   # name -> edits of the base authentication_method object (the MicrosoftAuthenticator configuration)
+    "configured": [],
+    "location_not_required": [(("FeatureSettings", "DisplayLocationInformationRequiredState", "State"), "disabled")],
+    "software_oath_enabled": [(("IsSoftwareOathEnabled",), True)],
+}
+
+
+def v9_authenticator_variants(base_input: dict) -> list[dict]:
+    """MS.AAD.3.3v2 tenants: the single-purpose MS.AAD.3.1v1 policy with each strength shape, next to each Authenticator configuration.
+    A strength the Rego accepts as phishing-resistant makes the item not applicable whatever the Authenticator says; the others, a
+    disabled or report-only policy, a role exclusion and conditions the Rego ignores leave the configuration to decide."""
+    roles = [role["RoleTemplateId"] for role in base_input.get("privileged_roles") or []]
+    item, source = "MS.AAD.3.3v2", "MS.AAD.3.1v1"
+    policy = single_purpose_policy(source, roles)
+    shapes = {f"{combination}.{flavour}": [(_STRENGTH, v9_strength_object(combination, flavour))]
+              for combination, flavour in (("phishing_resistant", "builtin"), ("fido2_only", "custom_mfa"), ("hello_and_fido2", "custom_mfa"),
+                                           ("passwordless", "builtin"), ("multifactor", "builtin"), ("phishing_resistant_plus_push", "lookalike"),
+                                           ("empty", "custom_none"))}
+    shapes.update({"state_disabled": [(("State",), "disabled")], "state_report_only": [(("State",), "enabledForReportingButNotEnforced")],
+                   "role_excluded": [(_USERS + ("ExcludeRoles",), [GLOBAL_ADMIN_ROLE])],
+                   "locations_named": V9_CA_AXES["locations"]["named_location"], "platforms_mobile_only": V9_CA_AXES["platforms"]["mobile_only"],
+                   "devices_filter_include": V9_CA_AXES["devices"]["filter_include"]})
+    variants = []
+    for setup, setup_edits in V9_AUTHENTICATOR_BASES.items():
+        configured = json.loads(canonical(base_input["authentication_method"]))
+        feature = next(entry for entry in configured[0]["authentication_method_feature_settings"] if entry.get("Id") == "MicrosoftAuthenticator")
+        for path, value in setup_edits:
+            target = feature
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+        for shape, edits in shapes.items():
+            # the full grid on the configured Authenticator; the other two set-ups see the strengths that decide applicability
+            if setup != "configured" and shape.split(".")[0] not in ("phishing_resistant", "fido2_only", "multifactor", "state_disabled"):
+                continue
+            tenant = _tenant({**base_input, "authentication_method": configured}, [_edit(policy, edits)], source)
+            variants.append(_v9_ca_variant("ca_authenticator", item, "authenticator", shape, _tenant(base_input, [policy], source), tenant,
+                                           suffix=f":s{setup}"))
+    return variants
+
+
+def v9_variants(name: str, harvested: list[dict], sections: dict[str, list[str]], base_input: dict | None = None) -> list[dict]:
+    """Every v9 variant of one product: the enum sweeps (SharePoint, AAD) and, for AAD, the Conditional Access shapes."""
+    variants = v9_enum_variants(name, harvested, sections)
+    if name == "AAD":
+        if base_input is None:
+            raise ValueError("the AAD v9 variants need the product base input")
+        variants += v9_ca_variants(base_input) + v9_authenticator_variants(base_input)
+    return variants
+
+
+def _v9_coverage_keys(row: dict) -> list[tuple]:
+    """What assign_v9_splits keeps learnable in train: each swept (generator, group, value) overall, and each group per policy."""
+    template = row["provenance"]["template"]
+    _, pid, rest = template.split("/", 2)
+    generator, shape = rest.removeprefix("v9:").split(":")[:2]
+    group, _, value = shape.partition("=")
+    return [(generator, group, value), (pid, generator, group)]
+
+
+def assign_v9_splits(cases: list[dict], *, ratio: float = 0.15) -> list[dict]:
+    """Assign v9 templates to train or validation (about 85/15 within each source family), never test; a template stays whole.
+
+    Within a family the templates are taken in hash order and the next one goes to validation while that brings the validation row count
+    nearer its target, unless the move would leave a coverage key (the swept value overall, the field group per policy) with fewer than two
+    train templates (one, where it has no more than two). Call after prompt deduplication and leakage filtering, like assign_v8_splits."""
+    result = json.loads(canonical(cases))
+    families: dict[str, list[dict]] = defaultdict(list)
+    keys_of: dict[str, set[tuple]] = defaultdict(set)
+    for row in result:
+        template = row["provenance"].get("template", "")
+        if "/v9:" not in template:
+            raise ValueError("v9 split assignment accepts only generated v9 rows")
+        if row["split"] == "test":
+            raise ValueError("new v9 rows must never be test")
+        families[row["family"]].append(row)
+        keys_of[template].update(_v9_coverage_keys(row))
+    train = Counter(key for keys in keys_of.values() for key in keys)
+    need = {key: 2 if count > 2 else 1 for key, count in train.items()}
+    for family, rows in sorted(families.items()):
+        size = Counter(row["provenance"]["template"] for row in rows)
+        target, moved = round(len(rows) * ratio), 0
+        validation = set()
+        for template in sorted(size, key=lambda key: sha(key.encode())):
+            if abs(moved + size[template] - target) >= abs(moved - target):
+                continue
+            if any(train[key] - 1 < need[key] for key in keys_of[template]):
+                continue
+            validation.add(template)
+            moved += size[template]
+            for key in keys_of[template]:
+                train[key] -= 1
+        for row in rows:
+            row["split"] = "validation" if row["provenance"]["template"] in validation else "train"
+            row["family"] = f"{family}-v9-{row['split']}"
+    return result
 
 
 def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_every: int, *, commit: str, opa_version: str,

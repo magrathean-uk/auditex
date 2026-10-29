@@ -626,82 +626,19 @@ def test_demo_original_sharepoint_settings_and_generated_twin():
 
 
 FROZEN_PACK = Path('/Volumes/4TB/dev/auditex-data/development-kit/20261026-oracle-pack-v7/training-pack-oracle-v7')
-PACK_ENUM_FIELDS = frozenset({
-    'State', 'Operator', 'BuiltInControls', 'ClientAppTypes', 'SignInRiskLevels', 'UserRiskLevels',
-    'AgentIdRiskLevels', 'TransferMethods', 'MembershipKind', 'GuestOrExternalUserTypes', 'AllowInvitesFrom',
-    'AutoAdmittedUsers', 'NotificationType', 'RuleSourceType', 'SharingCapability', 'ODBSharingCapability',
-    'DefaultLinkPermission', 'DefaultSharingLinkType', 'FileAnonymousLinkType', 'FolderAnonymousLinkType',
-    'SharingDomainRestrictionMode', 'M365Environment', 'IncludeUserActions', 'AllowedCombinations',
-})
 
 
 def _frozen_pack_goldens(pack):
     """Reconstruct complete shape witnesses directly from the two read-only JSONL files.
 
-    Array entries are canonical JSON strings of complete item shapes, sorted and
-    deduplicated. This preserves nested shape combinations without binding lengths.
-    No evidence values are retained except the explicitly named enum domains.
+    The derivation is scripts/derive-scuba-projection-shapes.py, the one used for any later pack too.
     """
-    from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS
-    from auditex.model_serving import policy_catalogue
-    sections = {s: {} for row in policy_catalogue()['policies'].values() for s in row['sections']}
-    domains = {s: {} for s in sections}
-    witnesses = {s: {} for s in sections}
-    def strip_names(value):
-        if isinstance(value, dict):
-            return {k: strip_names(v) for k, v in value.items() if k not in {f'{n}_name' for n in ENUM_NAME_KEYS}}
-        if isinstance(value, list):
-            return [strip_names(v) for v in value]
-        return value
-    def shape(value):
-        if isinstance(value, dict):
-            if value and all(k.startswith('User') and k[4:].isdigit() for k in value):
-                return {'users': sorted({canonical(shape(v)) for v in value.values()})}
-            return {'object': {k: shape(v) for k, v in value.items()}}
-        if isinstance(value, list):
-            return {'array': sorted({canonical(shape(v)) for v in value})}
-        return type(value).__name__
-    def enums(value, section, path=''):
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key in PACK_ENUM_FIELDS:
-                    domains[section].setdefault(path + '.' + key, set()).update(
-                        canonical(v) for v in (child if isinstance(child, list) else [child]))
-                enums(child, section, path + '.' + key)
-        elif isinstance(value, list):
-            for child in value:
-                enums(child, section, path + '[]')
-    source_files = {}
-    for filename in ('train.jsonl', 'test.jsonl'):
-        path = pack / filename
-        digest = sha256()
-        count = 0
-        with path.open('rb') as handle:
-            for count, line in enumerate(handle, 1):
-                digest.update(line)
-                row = json.loads(line)
-                for message in row.get('messages', row.get('prompt', [])):
-                    if message['role'] != 'user':
-                        continue
-                    for evidence in json.loads(message['content']).get('evidence', [])[1:]:
-                        section = evidence.get('section')
-                        if section not in sections or evidence['observed'] == NOT_COLLECTED:
-                            continue
-                        value = strip_names(evidence['observed'])
-                        structural = shape(value)
-                        encoded = canonical(structural)
-                        sections[section][encoded] = structural
-                        witnesses[section].setdefault(sha256(encoded.encode()).hexdigest(), {
-                            'file': filename, 'line': count, 'evidence_id': evidence['id']})
-                        enums(value, section)
-        source_files[filename] = {'sha256': digest.hexdigest(), 'rows': count}
-    return {
-        'canonicalisation': 'whole-section-v1; list cardinality ignored; empty/populated lists distinct; UserN collections preserve all item shapes; derived SharePoint enum names removed',
-        'source_files': source_files,
-        'sections': {s: [variants[k] for k in sorted(variants)] for s, variants in sorted(sections.items())},
-        'enum_domains': {s: {p: sorted(values) for p, values in sorted(paths.items())} for s, paths in sorted(domains.items())},
-        'witnesses': witnesses,
-    }
+    import importlib.util
+    path = ROOT / 'scripts/derive-scuba-projection-shapes.py'
+    spec = importlib.util.spec_from_file_location('derive_scuba_projection_shapes', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.derive(pack)
 
 
 def test_complete_shape_goldens_reproduce_both_frozen_packs():

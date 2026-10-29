@@ -622,6 +622,51 @@ Caveats:
   CC0 1.0 and is not vendored; CISA does not endorse Auditex or models trained on this data. See
   [Source provenance](../provenance/provenance.md#oracle-labelled-cases).
 
+### Oracle pack v9 generators: enum sweeps and Conditional Access shapes
+
+Real tenants carry values and shapes that ScubaGear's unit-test fixtures never held, and the projection's shape gate
+(`auditex.scuba_projection`) withholds a section whose whole shape or any enum value was not seen in the pack the pinned
+model was trained on. The opt-in v9 API in `scripts/build-oracle-cases.py` mines those gaps. Like v8 it leaves the default
+mining path, and so the v7 regeneration parity, untouched. Evaluate the returned inputs with the pinned OPA, pass the results
+to `build_cases` with `id_salt=V9_ID_SALT` and periodic masking disabled, then deduplicate and drop frozen-test collisions
+as for v8. The Rego, never an assumed answer, labels every row.
+
+`v9_variants(product, harvested, sections, base_input)` returns, for SharePoint and AAD, the variants of four generators.
+A v9 template reads `v9:<generator>:<group>=<value>[:b<n>]` and then the mutation family, and the source names the variant.
+
+| Generator | Variants |
+| --- | --- |
+| `enum_sweep` | One variant per documented value of every tier-1 field with a finite domain, on each clean base tenant (the first four harvested tenants that differ from the base only in the swept section and only in the fields allowed to vary): `SPO_tenant` `DefaultSharingLinkType` (0 to 3), `DefaultLinkPermission` (0 to 2), `FileAnonymousLinkType` and `FolderAnonymousLinkType` (0 to 2), `SharingDomainRestrictionMode` (0 to 2) and `ODBSharingCapability` (0 to 3), taken from the annotator tables in `external_sharing.ENUM_NAME_KEYS`; `authorization_policies` `AllowInvitesFrom` (`none`, `adminsAndGuestInviters`, `adminsGuestInvitersAndAllMembers`, `everyone`) and `GuestUserRoleId` (restricted, limited and same-as-member). `SharingCapability` stays with the v8 gate sweep. A variant targets the policies that read the field and, as bystanders, the other policies that show the section on one base per value (two for `authorization_policies`): the readers teach the label, the bystanders teach that the label does not move. |
+| `ca_strength` | `GrantControls.AuthenticationStrength` objects as Graph returns them (`Id`, `DisplayName`, `PolicyType`, `RequirementsSatisfied`, `AllowedCombinations`) for MS.AAD.3.1v1, 3.2v2 and 3.6v1: 17 combination sets (phishing-resistant subsets and reorderings, passwordless, multifactor, phishing-resistant plus a weaker method, temporary access pass, federated, SMS and voice, password only, an empty and a null list) in two flavours each (the built-in strength where one is exactly that set, otherwise a custom strength; a custom strength whose `RequirementsSatisfied` is `none`; a custom strength that borrows the name "Phishing-resistant MFA"). |
+| `ca_condition` | On the single-purpose policy of every item of `CA_ITEMS` and on a compliant MS.AAD.9.1v1 policy: `Conditions.Locations` (include and exclude, an include-only export, null), `Platforms`, `Devices` (device filter), `ClientApplications`, and the finite enums `ClientAppTypes`, `Operator`, `BuiltInControls`, risk levels, `TransferMethods` and guest exclusion types where they apply; MS.AAD.9.1v1 also gets the agent shapes it reads. Locations, platforms and devices are repeated on a disabled policy, so that a condition the Rego ignores cannot be mistaken for one that rescues a failing policy. |
+| `ca_authenticator` | MS.AAD.3.3v2 is not applicable whenever a Conditional Access policy counts as phishing-resistant MFA for MS.AAD.3.1v1, and otherwise depends on the Authenticator configuration. The 3.1 single-purpose policy with each strength shape (and a disabled, report-only, role-excluding or location, platform or device conditioned variant) next to three Authenticator configurations. |
+
+Measured against the pinned Rego, not assumed (`tests/test_oracle_v9.py` re-checks each statement when the pinned tools are exported).
+The Rego never reads `Conditions.Locations`, `Platforms`, `Devices` or `ClientApplications` (except the `IncludeAgentIdServicePrincipals`
+of MS.AAD.9.1v1), nor the `Id`, `DisplayName`, `PolicyType` and `RequirementsSatisfied` of an authentication strength: those rows carry
+the label of the plain policy, which is what the model has to learn to ignore. It does read `AllowedCombinations` (a strength counts as
+phishing-resistant only when it is a non-empty subset of `windowsHelloForBusiness`, `fido2` and `x509CertificateMultiFactor`; it counts as general
+MFA only when every combination is an MFA combination and at least one is not phishing-resistant, so a phishing-resistant strength does not satisfy
+MS.AAD.3.2v2), `ClientAppTypes` (MS.AAD.1.1v1 and 9.1), the risk levels, the grant `Operator` (MS.AAD.3.7v1), the transfer methods, guest exclusions
+against the allow-list, `State` and `ExcludeRoles`. The ignored conditions mean a policy scoped to one location, platform or device group still
+passes in ScubaGear although Entra would not apply the control tenant-wide; the labels follow the oracle and the rows are tagged
+`ca_condition` with the axis in the template, so a stricter reading can drop them by template.
+
+`assign_v9_splits(new_cases)` assigns whole templates to train or validation, about 85/15 within each source family, never test. It also keeps
+every swept value learnable: a template moves to validation only if each coverage key it holds (the swept value overall, the field group per policy)
+keeps at least two train templates (one where it has no more than two). Frozen test ids and bytes, literal user-prompt hashes, canonical
+observed-evidence collisions and prompt duplicates are checked by pack curation as for v8.
+
+`scripts/derive-scuba-projection-shapes.py --pack <pack> --output <fixture> [--baseline <fixture> --diff-output <report>]` is the one
+derivation of the projection shape goldens (it was a test helper; `tests/test_scuba_projection.py` now calls it to reproduce the v7 fixture).
+It never replaces `tests/fixtures/scuba-projection-shapes-v7.json`: the shipped gate follows the model actually pinned.
+
+Known limits. The privileged-users `status` that withholds `privileged_users` and `privileged_roles` on the demo is the Graph role-schedule
+`status` (`Provisioned`), which `scuba_projection._healthy` reads as a collection-health flag; it is not an evidence enum, appears in no pack
+row, and needs no sweep, only a narrower health check. The adapter allow-lists (`DefaultSharingLinkType` {1, 2}, `DefaultLinkPermission` {1, 2},
+`SharingDomainRestrictionMode` {0, 1}, the CA key whitelist) and `PACK_ENUM_DOMAINS` follow a pack, never the other way round. The whole-section
+shape gate compares the set of distinct item shapes, so a multi-policy Conditional Access section is projected only when a pack holds that exact set.
+
 ### Second oracle: Prowler consensus
 
 A second deterministic engine, the Microsoft 365 provider of Prowler, checks the same fictional tenants so that each

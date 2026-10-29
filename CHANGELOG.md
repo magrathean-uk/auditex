@@ -96,6 +96,15 @@ export and MCP behaviour is unchanged.
   `scripts/annotate-oracle-cases.py` applies the same rendering to an existing case file and recomputes (or adds)
   `distinct_prompt_sha256`. The v6 adapter answered SharePoint 3.x applicability rows from a shortcut because no
   prompt named the sharing slider values.
+- **Oracle pack v9 generators.** `scripts/build-oracle-cases.py` gains the opt-in `v9_variants` API: enum sweeps of the
+  finite SharePoint (`DefaultSharingLinkType`, `DefaultLinkPermission`, the anonymous-link types,
+  `SharingDomainRestrictionMode`, `ODBSharingCapability`) and authorization-policy (`AllowInvitesFrom`, `GuestUserRoleId`)
+  domains on clean base tenants, Graph `AuthenticationStrength` objects for every combination class the Rego tells apart,
+  location, platform, device, client-application and finite-enum conditions on the single-purpose Conditional Access
+  policies (also on a disabled one), and the MS.AAD.3.3v2 phishing-resistant applicability branch; `assign_v9_splits` keeps
+  new templates out of test and every swept value in train. The default miner output and the v7 parity are unchanged.
+  `scripts/derive-scuba-projection-shapes.py` is now the single derivation of the projection shape goldens (reproducing the
+  v7 fixture; the fixture and the shipped gate are untouched). No version bump.
 - **Provenance key.** `validate_case` accepts `prompt_convention` (only `named-enums-v1`); a 1.2.1 wheel rejects
   every row that carries it, so a pack built with this convention needs this version on the cluster.
 - **Checkpoint scorer.** `scripts/score-adapter-checkpoints.py` counts an expected-`unknown` claim answered
