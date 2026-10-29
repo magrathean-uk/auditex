@@ -24,6 +24,9 @@ ASSESSMENT_SCHEMAS = {
 }
 
 
+SCAN_BOUND_FIELDS = frozenset({"scan_max_rows", "scan_max_bytes", "scan_max_chunks"})
+
+
 def safe_projection_enum_value(field: str, value: Any) -> bool:
     """Only finite numbers and explicitly recognised enum tokens may be echoed.
 
@@ -103,7 +106,11 @@ def validate_assessment(payload: Any) -> None:
                 raise ValueError("Inconsistent unsupported projection conditions")
             diagnostic = detail.get("detail")
             if diagnostic is not None:
-                if detail["reason"] != "incomplete_shape" or detail["status"] != "not_collected":
+                # A scan bound that ran out is the one diagnostic an oversize section carries.
+                scan_bound = diagnostic["kind"] == "scan_bound"
+                if (detail["status"] != "not_collected"
+                        or detail["reason"] != ("oversize" if scan_bound else "incomplete_shape")
+                        or scan_bound and diagnostic["field"] not in SCAN_BOUND_FIELDS):
                     raise ValueError("Inconsistent projection diagnostic")
                 if "value" in diagnostic and (
                     diagnostic["kind"] != "unseen_enum_value"

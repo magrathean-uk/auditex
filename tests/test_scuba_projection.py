@@ -381,10 +381,13 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
     assert sections['SPO_tenant']['detail'] == {'field': 'FileAnonymousLinkType', 'kind': 'missing_field'}
     assert sections['authorization_policies']['detail'] == {
         'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value', 'value': 'everyone'}
-    assert sum(s['status'] == 'projected' for s in result['projection']['sections'].values()) == 2
-    assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 102}
-    assert len(calls) == 0
-    assert sum(r['attempts'] for r in result['policies']) == 0
+    assert sum(s['status'] == 'projected' for s in result['projection']['sections'].values()) == 3
+    assert sections['privileged_users']['status'] == 'projected'
+    # The privileged-user section projects, so the three rules that read only it reach the model; the other
+    # 99 rows stay rule answers with no model call.
+    assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 99}
+    assert len(calls) == 3
+    assert sum(r['attempts'] for r in result['policies']) == 3
     demo = json.loads((ROOT / DEMO_SAMPLE).read_text())
     prompts = canonical(calls)
     for user in demo['identity']['users']['value']:
@@ -609,7 +612,7 @@ def test_strict_chunk_json_rejects_duplicate_keys(complete_bundle):
     assert project_run(complete_bundle)['service_plans'] == NOT_COLLECTED
 
 
-def test_chunk_iteration_stops_at_item_and_line_bounds(complete_bundle, monkeypatch):
+def test_chunk_iteration_stops_at_scan_row_and_byte_bounds(complete_bundle, monkeypatch):
     import auditex.scuba_projection as projection
     from contextlib import contextmanager
     import io
@@ -634,15 +637,18 @@ def test_chunk_iteration_stops_at_item_and_line_bounds(complete_bundle, monkeypa
     monkeypatch.setattr(projection, '_open_chunk', opened)
     operation(complete_bundle, 'licensing', 'subscribedSkus', [],
               chunk_files=['raw/licensing/subscribedSkus/part-00001.jsonl'], item_count=100000)
-    p = project_run(complete_bundle, max_items=1)
-    assert p.report['sections']['service_plans']['reason'] == 'oversize'
+    p = project_run(complete_bundle, scan_max_rows=1)
+    section = p.report['sections']['service_plans']
+    assert section['reason'] == 'oversize' and section['detail'] == {'field': 'scan_max_rows', 'kind': 'scan_bound'}
+    assert section['scan']['rows'] == 1
     assert data.calls == 2 and data.tell() < 100
     data.calls = 0
     data.seek(0)
     data.write(b'x' * 10000)
     data.seek(0)
-    p = project_run(complete_bundle, max_chars=100)
-    assert p.report['sections']['service_plans']['reason'] == 'oversize'
+    p = project_run(complete_bundle, scan_max_bytes=400)
+    section = p.report['sections']['service_plans']
+    assert section['reason'] == 'oversize' and section['detail'] == {'field': 'scan_max_bytes', 'kind': 'scan_bound'}
     assert data.calls == 1 and data.tell() == 401
 
 
@@ -857,7 +863,7 @@ def test_failed_collector_envelope_overrides_populated_endpoint(complete_bundle,
     assert project_run(complete_bundle)['service_plans'] == NOT_COLLECTED
 
 
-def test_chunk_whitespace_and_manifest_count_are_bounded(complete_bundle, monkeypatch):
+def test_chunk_whitespace_and_chunk_count_are_scan_bounded(complete_bundle, monkeypatch):
     import auditex.scuba_projection as projection
     import io
     from contextlib import contextmanager
@@ -880,13 +886,15 @@ def test_chunk_whitespace_and_manifest_count_are_bounded(complete_bundle, monkey
     monkeypatch.setattr(projection, '_open_chunk', opened)
     operation(complete_bundle, 'licensing', 'subscribedSkus', [],
               chunk_files=['raw/licensing/subscribedSkus/a.jsonl'], item_count=1)
-    p = project_run(complete_bundle, max_chars=100)
-    assert p.report['sections']['service_plans']['reason'] == 'oversize'
+    p = project_run(complete_bundle, scan_max_bytes=400)
+    section = p.report['sections']['service_plans']
+    assert section['reason'] == 'oversize' and section['detail'] == {'field': 'scan_max_bytes', 'kind': 'scan_bound'}
     assert data.tell() == 401
     data.seek(0)
     operation(complete_bundle, 'licensing', 'subscribedSkus', [],
               chunk_files=['raw/licensing/subscribedSkus/a.jsonl', 'raw/licensing/subscribedSkus/b.jsonl'])
-    assert project_run(complete_bundle, max_items=1).report['sections']['service_plans']['reason'] == 'oversize'
+    section = project_run(complete_bundle, scan_max_chunks=1).report['sections']['service_plans']
+    assert section['reason'] == 'oversize' and section['detail'] == {'field': 'scan_max_chunks', 'kind': 'scan_bound'}
     assert data.tell() == 0
 
 
@@ -955,3 +963,341 @@ def test_missing_role_rule_field_diagnostic(complete_bundle):
     write(complete_bundle, 'normalized/privileged_roles.json', {'records': roles})
     assert project_run(complete_bundle).report['sections']['privileged_roles']['detail'] == {
         'field': 'Rules.RuleSourceType', 'kind': 'missing_field'}
+
+
+# --- Projection budget applies to the projected section; the source read has scan bounds ---------------------
+
+def many_users(root, count=500, admins=3, chunked=False):
+    """A large synthetic user list with a few administrators; returns the administrators' ids in sorted order."""
+    ids = [f'00000000-0000-4000-8000-{n:012d}' for n in range(count)]
+    users = [{'id': i, 'displayName': f'Synthetic Person {n}', 'userPrincipalName': f'person{n}@example.invalid',
+              'jobTitle': 'Synthetic analyst', 'department': 'Operations', 'userType': 'Member', 'accountEnabled': True,
+              'onPremisesImmutableId': None} for n, i in enumerate(ids)]
+    if chunked:
+        paths = []
+        for part, start in enumerate(range(0, count, count // 2), 1):
+            path = f'raw/identity/users/part-{part:05d}.jsonl'
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(''.join(canonical(u) + '\n' for u in users[start:start + count // 2]))
+            paths.append(path)
+        operation(root, 'identity', 'users', users[:5], chunk_files=paths, chunk_count=len(paths), item_count=count,
+                  sample_truncated=True)
+    else:
+        operation(root, 'identity', 'users', users)
+    admin_ids = ids[7::count // admins][:admins]
+    write(root, 'normalized/effective_admin_set.json', {'records': [
+        {'kind': 'effective_admin_set_summary', 'state': 'complete', 'unresolved_principal_count': 0, 'admin_count': admins},
+        *[{'kind': 'effective_admin', 'state': 'complete', 'is_user': True, 'principal_id': i,
+           'role_names': ['Global Administrator']} for i in admin_ids]]})
+    return admin_ids
+
+
+@pytest.mark.parametrize('chunked', [False, True])
+def test_privileged_users_projects_from_a_large_user_list_within_the_default_budget(complete_bundle, monkeypatch, chunked):
+    from auditex.scuba_projection import Bundle, DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS
+    admin_ids = many_users(complete_bundle, chunked=chunked)
+    original = Bundle.operation
+    def guarded(self, collector, name):
+        assert (collector, name) != ('identity', 'users'), 'the user list must be streamed, not materialised'
+        return original(self, collector, name)
+    monkeypatch.setattr(Bundle, 'operation', guarded)
+    p = project_run(complete_bundle, redact=False)
+    section = p.report['sections']['privileged_users']
+    assert section['status'] == 'projected' and section['reason'] is None
+    assert list(p['privileged_users']) == ['User1', 'User2', 'User3']
+    assert [u['DisplayName'] for u in p['privileged_users'].values()] == [
+        f'Synthetic Person {int(i[-12:])}' for i in admin_ids]
+    # The source is far over the budget; the projected section is well inside it.
+    assert section['scan']['rows'] == 500 > DEFAULT_MAX_ITEMS
+    assert section['scan']['bytes'] > DEFAULT_MAX_CHARS
+    assert section['scan']['chunks'] == (2 if chunked else 0)
+    assert len(canonical(p['privileged_users'])) < DEFAULT_MAX_CHARS
+    assert p.report['bounds'] == {'max_items': 40, 'max_chars': 12000, 'scan_max_rows': 250000,
+                                  'scan_max_bytes': 268435456, 'scan_max_chunks': 10000}
+    assert 'ignored_failures' not in section
+
+
+@pytest.mark.parametrize('chunked,bound,value', [
+    (False, 'scan_max_rows', 100), (False, 'scan_max_bytes', 5000),
+    (True, 'scan_max_rows', 100), (True, 'scan_max_bytes', 5000), (True, 'scan_max_chunks', 1)])
+def test_scan_bound_withholds_as_oversize_and_names_the_bound(complete_bundle, chunked, bound, value):
+    many_users(complete_bundle, chunked=chunked)
+    p = project_run(complete_bundle, **{bound: value})
+    section = p.report['sections']['privileged_users']
+    assert p['privileged_users'] == NOT_COLLECTED
+    assert section['status'] == 'not_collected' and section['reason'] == 'oversize'
+    assert section['detail'] == {'field': bound, 'kind': 'scan_bound'}
+    if bound == 'scan_max_rows':
+        assert section['scan']['rows'] == value
+    # Sections that never read the user list are unaffected.
+    assert p.report['sections']['service_plans']['status'] == 'projected'
+
+
+def test_a_user_row_without_an_id_or_a_duplicate_administrator_row_withholds(complete_bundle):
+    admin_ids = many_users(complete_bundle)
+    users = json.loads((complete_bundle / 'raw/identity.json').read_text())
+    rows = users['users']['value']
+    users['users']['value'] = rows + [dict(rows[int(admin_ids[0][-12:])])]
+    write(complete_bundle, 'raw/identity.json', users)
+    assert project_run(complete_bundle)['privileged_users'] == NOT_COLLECTED
+    users['users']['value'] = rows + [{k: v for k, v in rows[0].items() if k != 'id'}]
+    write(complete_bundle, 'raw/identity.json', users)
+    assert project_run(complete_bundle)['privileged_users'] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('bounds', [{'max_items': 2}, {'max_chars': 150}])
+def test_projected_object_bound_still_withholds_an_oversize_section(complete_bundle, bounds):
+    many_users(complete_bundle)
+    p = project_run(complete_bundle, redact=False, **bounds)
+    section = p.report['sections']['privileged_users']
+    assert p['privileged_users'] == NOT_COLLECTED
+    assert section['reason'] == 'oversize' and 'detail' not in section
+    assert section['scan']['rows'] == 500
+    assert p.report['sections']['tenant_id']['status'] == 'projected'
+
+
+def test_service_plans_stream_a_source_far_larger_than_the_budget(complete_bundle):
+    plans = [{'servicePlanId': f'00000000-0000-4000-8000-0000000000{n:02d}', 'servicePlanName': f'PLAN_{n}',
+              'provisioningStatus': 'Success', 'appliesTo': 'User'} for n in range(5)]
+    skus = [{'id': f'sku-{n}', 'skuPartNumber': f'SKU_{n}', 'consumedUnits': n, 'capabilityStatus': 'Enabled',
+             'prepaidUnits': {'enabled': 100, 'suspended': 0, 'warning': 0}, 'servicePlans': plans} for n in range(100)]
+    assert len(canonical(skus)) > 12000 and len(skus) > 40
+    operation(complete_bundle, 'licensing', 'subscribedSkus', skus)
+    p = project_run(complete_bundle)
+    assert [r['ServicePlanName'] for r in p['service_plans']] == [f'PLAN_{n}' for n in range(5)]
+    assert p.report['sections']['service_plans']['scan']['rows'] == 100
+
+
+@pytest.mark.parametrize('bounds', [{'scan_max_rows': 0}, {'scan_max_bytes': -1}, {'scan_max_chunks': True}])
+def test_invalid_scan_bounds_are_refused(complete_bundle, bounds):
+    with pytest.raises(ValueError, match='positive integers'):
+        project_run(complete_bundle, **bounds)
+
+
+def test_oversized_manifest_reports_the_scan_bound_not_a_shape_failure(complete_bundle):
+    p = project_run(complete_bundle, scan_max_bytes=50)
+    assert all(v == NOT_COLLECTED for v in p.values())
+    assert {s['detail']['kind'] for s in p.report['sections'].values()} == {'scan_bound'}
+
+
+def test_scan_fields_and_detail_validate_in_both_validators(complete_bundle):
+    many_users(complete_bundle)
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'],
+                        projection_scan_max_rows=100)
+    section = result['projection']['sections']['privileged_users']
+    assert section['detail'] == {'field': 'scan_max_rows', 'kind': 'scan_bound'} and section['scan']['rows'] == 100
+    assert result['projection']['bounds']['scan_max_rows'] == 100
+    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    validate_assessment(result)
+    jsonschema.validate(result, schema)
+    for mutation in ('reason', 'field', 'kind'):
+        broken = json.loads(json.dumps(result))
+        target = broken['projection']['sections']['privileged_users']
+        if mutation == 'reason':
+            target['reason'] = 'incomplete_shape'
+        elif mutation == 'field':
+            target['detail']['field'] = 'users'
+        else:
+            target['detail']['kind'] = 'unseen_shape'
+        with pytest.raises(ValueError):
+            validate_assessment(broken)
+        jsonschema.validate(broken, schema)
+    for key, value in (('scan', {'rows': -1, 'bytes': 0, 'chunks': 0}), ('ignored_failures', ['not a name'])):
+        broken = json.loads(json.dumps(result))
+        broken['projection']['sections']['privileged_users'][key] = value
+        with pytest.raises(ValueError):
+            validate_assessment(broken)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(broken, schema)
+    # An assessment written before the scan bounds existed carries neither bounds nor scan counts.
+    old = json.loads(json.dumps(result))
+    for key in ('scan_max_rows', 'scan_max_bytes', 'scan_max_chunks'):
+        del old['projection']['bounds'][key]
+    for section in old['projection']['sections'].values():
+        section.pop('scan', None)
+    old['projection']['sections']['privileged_users'].pop('detail')
+    old['projection']['sections']['privileged_users']['reason'] = 'oversize'
+    validate_assessment(old)
+    jsonschema.validate(old, schema)
+
+
+def test_scan_flags_reach_the_projection_and_defaults_match(complete_bundle, monkeypatch, capsys):
+    import auditex.model_serving as serving
+    from auditex.scuba_projection import DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS
+    seen = []
+    def spy(*args, **kwargs):
+        seen.append(kwargs)
+        return project_run(*args, **kwargs)
+    monkeypatch.setattr(serving, 'project_run', spy)
+    assert main(['model', 'assess', str(complete_bundle), '--dry-run']) == 0
+    assert (seen[-1]['scan_max_rows'], seen[-1]['scan_max_bytes'], seen[-1]['scan_max_chunks']) == (
+        DEFAULT_SCAN_MAX_ROWS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS)
+    assert (seen[-1]['max_items'], seen[-1]['max_chars']) == (40, 12000)
+    (complete_bundle / 'model_assessment_prompts.jsonl').unlink()
+    assert main(['model', 'assess', str(complete_bundle), '--dry-run', '--projection-scan-max-rows', '7',
+                 '--projection-scan-max-bytes', '9000000', '--projection-scan-max-chunks', '3']) == 0
+    assert (seen[-1]['scan_max_rows'], seen[-1]['scan_max_bytes'], seen[-1]['scan_max_chunks']) == (7, 9000000, 3)
+    with pytest.raises(SystemExit):
+        main(['model', 'assess', '--help'])
+    help_text = capsys.readouterr().out
+    for flag in ('--projection-scan-max-rows', '--projection-scan-max-bytes', '--projection-scan-max-chunks'):
+        assert flag in help_text
+
+
+# --- Collection health is judged per operation ----------------------------------------------------------------
+
+SIGNIN_REFUSED = {'error': 'Forbidden', 'error_class': 'license_required'}
+SIGNIN_COVERAGE = {'collector': 'identity', 'type': 'graph', 'name': 'userSignInActivity', 'status': 'failed',
+                   'error_class': 'license_required', 'error': 'Forbidden'}
+
+
+def diagnostic(item, collector='identity', error_class='license_required'):
+    return {'collector': collector, 'item': item, 'status': 'failed', 'error_class': error_class, 'error': 'refused'}
+
+
+def ledger_row(collector='identity', status='partial_success', reason='collector_returned_partial', diagnostics=()):
+    return {'collector': collector, 'coverage_status': status, 'coverage_reason': reason,
+            'actual_status': 'partial' if status == 'partial_success' else 'ok', 'diagnostics': list(diagnostics)}
+
+
+def refuse_signin(root, *, coverage=False, ledger=False, gap=False, manifest=False):
+    operation(root, 'identity', 'userSignInActivity', [], **SIGNIN_REFUSED)
+    if coverage or manifest:
+        write(root, 'coverage.json', [SIGNIN_COVERAGE])
+    if ledger or manifest:
+        write(root, 'normalized/coverage_ledger.json', {'records': [
+            ledger_row(diagnostics=[diagnostic('userSignInActivity')]),
+            ledger_row('identity_governance', 'complete_exact_scope', 'runtime_success_with_expected_scope')]})
+    if gap:
+        write(root, 'normalized/collection_gaps.json', {'records': [{
+            'collector': 'identity', 'id': 'identity.userSignInActivity', 'kind': 'collection_gap',
+            'list': 'userSignInActivity', 'reason': 'read_failed', 'source': 'identity.userSignInActivity'}]})
+    if manifest:
+        data = json.loads((root / 'run-manifest.json').read_text())
+        data['coverage_gaps'] = [{'surface': 'identity', 'status': 'partial', 'severity': 'medium',
+                                  'collectors': ['identity', 'auth_methods'], 'error_classes': ['license_required']}]
+        write(root, 'run-manifest.json', data)
+
+
+@pytest.mark.parametrize('evidence', [
+    {}, {'coverage': True}, {'ledger': True}, {'gap': True}, {'manifest': True},
+    {'coverage': True, 'ledger': True, 'gap': True, 'manifest': True}])
+def test_unrelated_operation_error_does_not_withhold_privileged_users(complete_bundle, evidence):
+    refuse_signin(complete_bundle, **evidence)
+    p = project_run(complete_bundle, redact=False)
+    section = p.report['sections']['privileged_users']
+    assert p['privileged_users'] == EXPECTED['privileged_users'] and section['status'] == 'projected'
+    assert section['ignored_failures'] == ['identity.userSignInActivity']
+    if evidence:
+        assert p['tenant_id'] == TENANT
+        assert p.report['sections']['tenant_id']['ignored_failures'] == ['identity.userSignInActivity']
+
+
+@pytest.mark.parametrize('collector,name', [
+    ('identity', 'users'), ('identity', 'groups'), ('identity', 'servicePrincipals'), ('identity', 'roleDefinitions'),
+    ('identity', 'roleAssignments'), ('identity', 'roleAssignableGroupMembers'),
+    ('identity_governance', 'roleAssignmentSchedules'), ('identity_governance', 'roleEligibilitySchedules')])
+def test_error_on_an_operation_the_section_reads_withholds(complete_bundle, collector, name):
+    refuse_signin(complete_bundle)
+    operation(complete_bundle, collector, name, [] if name != 'users' else [
+        {'id': TENANT, 'displayName': PERSON, 'onPremisesImmutableId': None}], **SIGNIN_REFUSED)
+    p = project_run(complete_bundle)
+    assert p['privileged_users'] == NOT_COLLECTED
+    assert p.report['sections']['privileged_users']['detail'] == {'field': 'error', 'kind': 'unseen_shape'}
+    assert 'ignored_failures' not in p.report['sections']['privileged_users'] or \
+        f'{collector}.{name}' not in p.report['sections']['privileged_users']['ignored_failures']
+
+
+def test_collector_envelope_failure_withholds_even_when_the_read_operation_is_healthy(complete_bundle):
+    refuse_signin(complete_bundle)
+    payload = json.loads((complete_bundle / 'raw/identity.json').read_text())
+    payload['error'] = 'Forbidden'
+    write(complete_bundle, 'raw/identity.json', payload)
+    assert project_run(complete_bundle)['privileged_users'] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('rows', [
+    [ledger_row(diagnostics=[diagnostic('users', error_class='collection_limit')])],
+    [ledger_row(diagnostics=[diagnostic('userSignInActivity'), diagnostic('roleAssignments')])],
+    [ledger_row(diagnostics=[diagnostic('userSignInActivity'), diagnostic('notAnOperation')])],
+    [ledger_row(diagnostics=[diagnostic('privilegedGroupFanout', error_class='incomplete_evidence')])],
+    [ledger_row(diagnostics=[diagnostic('userSignInActivity'), {'item': None}])],
+    [ledger_row(diagnostics=[])],
+    [ledger_row(status='failed_runtime', reason='collector_failed_runtime', diagnostics=[diagnostic('userSignInActivity')])],
+    [ledger_row('identity_governance', diagnostics=[diagnostic('roleEligibilitySchedules')])],
+])
+def test_coverage_ledger_failure_of_a_read_operation_withholds(complete_bundle, rows):
+    refuse_signin(complete_bundle)
+    write(complete_bundle, 'normalized/coverage_ledger.json', {'records': rows})
+    assert project_run(complete_bundle)['privileged_users'] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('path,rows', [
+    ('coverage.json', [{'collector': 'identity', 'name': 'users', 'status': 'failed', 'error': 'Forbidden'}]),
+    ('coverage.json', [{'collector': 'identity', 'name': 'roleAssignableGroupMembersFanout', 'type': 'derived',
+                        'status': 'partial'}]),
+    ('coverage.json', [{'collector': 'identity', 'status': 'failed', 'error': 'Forbidden'}]),
+    ('coverage.json', [{'collector': 'identity', 'name': 'unknownOperation', 'status': 'failed', 'error': 'Forbidden'}]),
+    ('normalized/collection_gaps.json', {'records': [{'collector': 'identity', 'list': 'users', 'source': 'identity.users',
+                                                      'reason': 'operator_limit'}]}),
+    ('normalized/collection_gaps.json', {'records': [{'collector': 'identity', 'reason': 'read_failed'}]}),
+])
+def test_coverage_and_gap_rows_for_a_read_operation_or_the_whole_collector_withhold(complete_bundle, path, rows):
+    refuse_signin(complete_bundle, coverage=True)
+    write(complete_bundle, path, rows)
+    assert project_run(complete_bundle)['privileged_users'] == NOT_COLLECTED
+
+
+def test_unrelated_failure_is_ignored_for_a_single_read_and_a_read_failure_is_not(complete_bundle):
+    operation(complete_bundle, 'licensing', 'licensedUsers', [], **SIGNIN_REFUSED)
+    write(complete_bundle, 'normalized/coverage_ledger.json', {'records': [
+        ledger_row('licensing', diagnostics=[diagnostic('licensedUsers', 'licensing')])]})
+    p = project_run(complete_bundle, redact=False)
+    assert p['service_plans'] == EXPECTED['service_plans']
+    assert p.report['sections']['service_plans']['ignored_failures'] == ['licensing.licensedUsers']
+    write(complete_bundle, 'normalized/coverage_ledger.json', {'records': [
+        ledger_row('licensing', diagnostics=[diagnostic('subscribedSkus', 'licensing')])]})
+    assert project_run(complete_bundle)['service_plans'] == NOT_COLLECTED
+
+
+def test_manifest_truncated_list_is_judged_by_its_operation(complete_bundle):
+    refuse_signin(complete_bundle, coverage=True, ledger=True)
+    manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
+    for name, withheld in (('userSignInActivity', False), ('users', True)):
+        manifest['coverage_gaps'] = [{'surface': 'identity', 'status': 'partial', 'collectors': ['identity'],
+                                      'truncated_lists': [{'collector': 'identity', 'list': name,
+                                                           'rows_collected': 7, 'reason': 'operator_limit'}]}]
+        write(complete_bundle, 'run-manifest.json', manifest)
+        assert (project_run(complete_bundle)['privileged_users'] == NOT_COLLECTED) is withheld
+
+
+def test_manifest_surface_summary_without_coverage_rows_still_withholds(complete_bundle):
+    manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
+    manifest['coverage_gaps'] = [{'surface': 'identity', 'status': 'partial', 'collectors': ['identity'],
+                                  'error_classes': ['license_required']}]
+    write(complete_bundle, 'run-manifest.json', manifest)
+    p = project_run(complete_bundle)
+    assert p['privileged_users'] == p['tenant_id'] == NOT_COLLECTED
+    assert p.report['sections']['tenant_id']['detail'] == {'field': 'coverage_gaps', 'kind': 'unseen_shape'}
+
+
+def test_sign_in_activity_refusal_in_a_real_offline_run_does_not_withhold_privileged_users(tmp_path):
+    from auditex.demo import DEMO_AS_OF, DEMO_SAMPLE
+    from azure_tenant_audit.cli import run_offline
+    sample = json.loads((ROOT / DEMO_SAMPLE).read_text())
+    sample['identity']['userSignInActivity'] = SIGNIN_REFUSED
+    write(tmp_path, 'sample.json', sample)
+    # The run is partial (exit status 1) and its coverage ledger, coverage rows and manifest all say so.
+    assert run_offline(tmp_path / 'sample.json', tmp_path, 'p2', 'signin', plane='full', as_of=DEMO_AS_OF) == 1
+    root = tmp_path / 'p2-signin'
+    ledger = json.loads((root / 'normalized/coverage_ledger.json').read_text())['records']
+    identity = next(r for r in ledger if r['collector'] == 'identity')
+    assert identity['coverage_status'] == 'partial_success'
+    assert [d['item'] for d in identity['diagnostics']] == ['userSignInActivity']
+    assert json.loads((root / 'run-manifest.json').read_text())['coverage_gaps']
+    p = project_run(root)
+    for section in ('privileged_users', 'tenant_id'):
+        assert p.report['sections'][section]['status'] == 'projected'
+        assert p.report['sections'][section]['ignored_failures'] == ['identity.userSignInActivity']
+    assert p.report['sections']['privileged_users']['scan']['rows'] == len(sample['identity']['users']['value'])

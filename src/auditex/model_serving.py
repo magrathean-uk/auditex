@@ -26,7 +26,10 @@ from azure_tenant_audit.resources import open_text_resource
 from .model_eval import _invalid_constant, _pairs, validate_model_response
 from .model_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256
 from .model_precheck import precheck_case
-from .scuba_projection import DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, project_run
+from .scuba_projection import (
+    DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS,
+    project_run,
+)
 
 SCHEMA_VERSION = "2026-10-29"
 PROMPT_CONVENTION = "named-enums-v1"
@@ -302,7 +305,9 @@ def _baseline_statuses(pack_path: Path) -> dict[str, str]:
 def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] | None = None,
                dry_run: bool = False, shadow_model_on_precheck: bool = False,
                no_redaction: bool = False, projection_max_items: int = DEFAULT_MAX_ITEMS,
-               projection_max_chars: int = DEFAULT_MAX_CHARS) -> dict[str, Any]:
+               projection_max_chars: int = DEFAULT_MAX_CHARS, projection_scan_max_rows: int = DEFAULT_SCAN_MAX_ROWS,
+               projection_scan_max_bytes: int = DEFAULT_SCAN_MAX_BYTES,
+               projection_scan_max_chunks: int = DEFAULT_SCAN_MAX_CHUNKS) -> dict[str, Any]:
     if no_redaction and not _is_loopback(config.endpoint_host):
         raise ValueError("--no-redaction requires a loopback model endpoint host")
     root = Path(run_dir).expanduser().resolve()
@@ -327,7 +332,8 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
         raise ValueError("Model output must not be a symbolic link")
     generated_at = datetime.now(timezone.utc).isoformat()
     projection = project_run(root, redact=not no_redaction, max_items=projection_max_items,
-                             max_chars=projection_max_chars)
+                             max_chars=projection_max_chars, scan_max_rows=projection_scan_max_rows,
+                             scan_max_bytes=projection_scan_max_bytes, scan_max_chunks=projection_scan_max_chunks)
     baseline = {} if dry_run else _baseline_statuses(root / "reports" / "report-pack.json")
     client = ModelClient(config) if not dry_run else None
     records, prompts = [], []

@@ -371,6 +371,18 @@
             "max_chars": {
               "type": "integer",
               "minimum": 1
+            },
+            "scan_max_rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scan_max_bytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scan_max_chunks": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [
@@ -798,6 +810,39 @@
         },
         "detail": {
           "$ref": "#/$defs/projection_detail"
+        },
+        "scan": {
+          "type": "object",
+          "description": "Rows examined, bytes read and chunk files opened to scan the section's source operations; present when anything was scanned.",
+          "properties": {
+            "rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "chunks": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "rows",
+            "bytes",
+            "chunks"
+          ],
+          "additionalProperties": false
+        },
+        "ignored_failures": {
+          "type": "array",
+          "description": "Operations of a read collector that reported a failure the section does not read; recorded, never withholding.",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*\\.[A-Za-z][A-Za-z0-9_]*$"
+          },
+          "uniqueItems": true
         }
       },
       "required": [
@@ -809,7 +854,7 @@
     },
     "projection_detail": {
       "type": "object",
-      "description": "First failed projection check; field paths omit array indices and mask unknown keys. $ denotes a whole-section shape failure. Values are diagnostic only, never evidence.",
+      "description": "First failed projection check; field paths omit array indices and mask unknown keys. $ denotes a whole-section shape failure. For kind scan_bound (reason oversize) field names the scan bound that ran out. Values are diagnostic only, never evidence.",
       "properties": {
         "field": {
           "type": "string",
@@ -822,7 +867,8 @@
             "unexpected_field",
             "unseen_enum_value",
             "unseen_shape",
-            "invalid_type"
+            "invalid_type",
+            "scan_bound"
           ]
         },
         "value": {

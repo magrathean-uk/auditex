@@ -5,6 +5,7 @@ No collection, network calls, defaults for unread settings or sidecar writes.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from copy import deepcopy
 from hashlib import sha256
 import json
@@ -21,8 +22,15 @@ from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
 PROJECTION_VERSION = "2026-10-29"
+# The projection budget: the most items and canonical JSON characters one projected section may hold.
 DEFAULT_MAX_ITEMS = 40
 DEFAULT_MAX_CHARS = 12_000
+# Scan safety bounds on one source read, whatever the projection budget: rows examined, bytes read (the chunk
+# lines, or the whole JSON file an inline list sits in) and chunk files listed. Exhausting one withholds the
+# section as ``oversize`` with detail kind ``scan_bound``.
+DEFAULT_SCAN_MAX_ROWS = 250_000
+DEFAULT_SCAN_MAX_BYTES = 256 * 1024 * 1024
+DEFAULT_SCAN_MAX_CHUNKS = 10_000
 
 
 class Projection(dict):
@@ -166,25 +174,78 @@ def _seen_shape(section: str, value: Any) -> None:
     validate(value)
 
 
+# Operations the privileged sections are built from, by collector. A failure on another operation of the same
+# collector that the payload also carries (a refused sign-in activity read, say) is recorded and never withholds.
+# ``privilegedGroupFanout`` is the derived coverage row of the group fan-out; ``groupMembers`` is not a name the
+# collector writes today, but a bundle that names the fan-out that way is read as the same dependency and fails closed.
+ADMIN_SET_READS = {
+    "identity": frozenset({"users", "groups", "servicePrincipals", "roleDefinitions", "roleAssignments",
+                           "roleAssignableGroupMembers", "privilegedGroupFanout", "groupMembers"}),
+    "identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"}),
+}
+# Role policy rules come only from the supplied artefact; the schedules are the assignments it describes.
+PRIVILEGED_ROLES_READS = {"identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"})}
+_OPERATION_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+_COVERAGE_OK = {"ok", "complete_exact_scope", "complete_effective_role", "complete_equivalent_scope",
+                "complete_offline_sample"}
+# A ledger row that is partial or blocked says which operations failed in its diagnostics.
+_LEDGER_ATTRIBUTABLE = _COVERAGE_OK | {"partial_success", "blocked_permission"}
+
+
+def _scan_bound(field: str) -> Unavailable:
+    return Unavailable("oversize", field=field, kind="scan_bound")
+
+
+def _names(name: Any) -> frozenset[str]:
+    """A coverage name, and the operation behind a derived ``<operation>Fanout`` row."""
+    if not isinstance(name, str) or not name:
+        return frozenset()
+    base = name[:-len("Fanout")] if name.endswith("Fanout") and len(name) > len("Fanout") else name
+    return frozenset({name, base})
+
+
 class Bundle:
-    def __init__(self, root: Path, max_items: int, max_chars: int):
+    def __init__(self, root: Path, scan_max_rows: int, scan_max_bytes: int, scan_max_chunks: int):
         self.root = root
-        self.max_items, self.max_chars = max_items, max_chars
+        self.scan_max_rows, self.scan_max_bytes, self.scan_max_chunks = scan_max_rows, scan_max_bytes, scan_max_chunks
+        self.manifest: dict[str, Any] = {}
+        self.reset()
+
+    def reset(self) -> None:
+        """Start a new section: provenance, completeness, scan counts and ignored failures are per section."""
         self.sources: list[str] = []
         self.complete = False
-        self.manifest: dict[str, Any] = {}
+        self.scan_rows = 0
+        self.scan_chunk_bytes = 0
+        self.scan_chunks: set[str] = set()
+        self.scan_inline: dict[str, int] = {}
+        self.sizes: dict[str, int] = {}
+        self.ignored: set[str] = set()
+
+    @property
+    def scan_counts(self) -> dict[str, int]:
+        return {"rows": self.scan_rows, "bytes": self.scan_chunk_bytes + sum(self.scan_inline.values()),
+                "chunks": len(self.scan_chunks)}
 
     def read(self, relative: str) -> Any:
-        # Reuse no-symlink, regular-file, beneath-root bundle opens.
+        # Reuse no-symlink, regular-file, beneath-root bundle opens. A file is read whole, so the byte bound
+        # applies before anything is parsed.
         try:
             with _open_chunk(self.root, relative) as handle:
-                value = json.load(handle, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant)
+                data = handle.read(self.scan_max_bytes + 1)
         except FileNotFoundError:
             raise Unavailable("missing_artifact") from None
         except (OSError, ValueError, UnicodeError):
             raise Unavailable() from None
+        if len(data) > self.scan_max_bytes:
+            raise _scan_bound("scan_max_bytes")
+        try:
+            value = json.loads(data, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant)
+        except (OSError, ValueError, UnicodeError):
+            raise Unavailable() from None
         if relative not in self.sources:
             self.sources.append(relative)
+        self.sizes[relative] = len(data)
         return value
 
     def normalised(self, name: str) -> list[dict[str, Any]]:
@@ -200,20 +261,51 @@ class Bundle:
         _require(bool(data["records"]) or self.complete, "records")
         return data["records"]
 
-    def coverage(self, collector: str, operation: str | None = None) -> bool:
-        complete = False
+    @staticmethod
+    def _attribution(row: dict[str, Any], collector: str) -> tuple[list[frozenset[str]] | None, bool]:
+        """The operations a coverage row attributes its status to, and whether it names them itself.
+
+        A row names its operation (``list`` or ``name``, else the operation of its ``source``). A
+        coverage-ledger row covers the whole collector and lists the failed operations in ``diagnostics``
+        (``item``). Without either (``None``) the row is about the collector as a whole.
+        """
+        name = row.get("list", row.get("name"))
+        if name:
+            return [_names(name)], True
+        source = row.get("source")
+        if isinstance(source, str) and source.startswith(collector + "."):
+            return [_names(source[len(collector) + 1:])], True
+        diagnostics = row.get("diagnostics")
+        if isinstance(diagnostics, list) and diagnostics:
+            return [_names(item.get("item")) if isinstance(item, dict) else frozenset() for item in diagnostics], False
+        return None, False
+
+    @staticmethod
+    def _unrelated(groups: list[frozenset[str]] | None, reads: frozenset[str], known: frozenset[str]) -> list[str] | None:
+        """The operations to record when each one is carried by the payload and none is read by the section."""
+        if not groups:
+            return None
+        found = []
+        for names in groups:
+            match = sorted(n for n in names if n in known and _OPERATION_NAME.fullmatch(n))
+            if not match or names & reads:
+                return None
+            found.append(match[0])
+        return found
+
+    def coverage(self, collector: str, reads: Any, known: frozenset[str] = frozenset(), *, health: bool = False) -> bool:
+        """Fail when coverage evidence for an operation the section reads reports a failure.
+
+        A row about another operation that the collector's payload also carries does not withhold; it is
+        recorded in ``ignored``. A row that cannot be attributed that way (the collector as a whole, or a name
+        the payload does not carry) still fails, except that a named row of a single read (``health`` False)
+        that names some other operation is skipped. Returns whether a complete coverage row was found.
+        """
+        reads = frozenset([reads]) if isinstance(reads, str) else frozenset(reads)
+        complete = surveyed = False
         gaps = self.manifest.get("coverage_gaps", [])
         _require(isinstance(gaps, (list, dict)), "coverage_gaps", "invalid_type")
-        # Manifest collector gaps may be broad or carry per-list truncations.
-        def relevant(value: Any) -> bool:
-            if isinstance(value, dict):
-                if value.get("collector") == collector or value.get("source") == f"{collector}.{operation}":
-                    return True
-                return any(relevant(v) for v in value.values())
-            if isinstance(value, list):
-                return any(relevant(v) for v in value)
-            return value == collector or value == f"{collector}.{operation}"
-        _require(not relevant(gaps), "coverage_gaps")
+        summary_only = self._manifest_gaps(gaps, collector, reads, known)
         for path in ("coverage.json", "normalized/coverage_ledger.json", "normalized/collection_gaps.json"):
             try:
                 data = self.read(path)
@@ -224,75 +316,148 @@ class Bundle:
             _healthy(data, recursive=False)
             rows = data.get("records") if isinstance(data, dict) else data
             _require(isinstance(rows, list))
+            gap_rows = path.endswith("collection_gaps.json")
             for row in rows:
                 _require(isinstance(row, dict))
                 source = row.get("source", "")
-                matches_source = isinstance(source, str) and (source == f"{collector}.{operation}" if operation
-                                                               else source.startswith(collector + "."))
-                if row.get("collector") != collector and not matches_source:
+                if row.get("collector") != collector and not (isinstance(source, str) and source.startswith(collector + ".")):
                     continue
-                name = row.get("list", row.get("name"))
-                if operation is not None and name and name != operation:
-                    continue
-                _healthy(row)
-                if path.endswith("collection_gaps.json"):
+                surveyed = surveyed or not gap_rows
+                groups, named = self._attribution(row, collector)
+                if groups and not any(names & reads for names in groups):
+                    ledger = "coverage_status" in row
+                    unrelated = None if ledger and row["coverage_status"] not in _LEDGER_ATTRIBUTABLE \
+                        else self._unrelated(groups, reads, known)
+                    if unrelated is not None:
+                        failed = gap_rows
+                        if not gap_rows:
+                            try:
+                                self._row_health(row)
+                            except Unavailable:
+                                failed = True
+                        if failed:
+                            self.ignored.update(f"{collector}.{name}" for name in unrelated)
+                        continue
+                    if named and not health:
+                        # A single read: a row naming some other operation is not about this read.
+                        continue
+                if gap_rows:
+                    _healthy(row)
                     raise Unavailable()
-                _require("actual_status" not in row or row["actual_status"] == "ok", "actual_status")
-                status = row.get("coverage_status", row.get("status"))
-                _require(status in {"ok", "complete_exact_scope", "complete_effective_role",
-                                   "complete_equivalent_scope", "complete_offline_sample"},
-                         "coverage_status" if "coverage_status" in row else "status")
+                self._row_health(row)
                 complete = True
+        if summary_only and not surveyed:
+            raise Unavailable(field="coverage_gaps")
         return complete
 
-    def collector_health(self, collector: str) -> None:
-        self.coverage(collector)
+    @staticmethod
+    def _row_health(row: dict[str, Any]) -> None:
+        _healthy(row)
+        _require("actual_status" not in row or row["actual_status"] == "ok", "actual_status")
+        status = row.get("coverage_status", row.get("status"))
+        _require(status in _COVERAGE_OK, "coverage_status" if "coverage_status" in row else "status")
+
+    def _manifest_gaps(self, gaps: Any, collector: str, reads: frozenset[str], known: frozenset[str]) -> bool:
+        """Check the manifest's coverage gaps; True when they only list the collector in a surface summary.
+
+        A gap that names this collector and an operation is judged like a coverage row. A surface summary that
+        merely lists the collector repeats the per-operation rows, so it stands only when no coverage row exists
+        to say which operation failed.
+        """
+        summary_only = False
+        def operation_gap(names: frozenset[str] | None) -> None:
+            if names and not names & reads:
+                unrelated = self._unrelated([names], reads, known)
+                if unrelated is not None:
+                    self.ignored.update(f"{collector}.{name}" for name in unrelated)
+                    return
+            raise Unavailable(field="coverage_gaps")
+        def walk(value: Any) -> None:
+            nonlocal summary_only
+            if isinstance(value, dict):
+                if value.get("collector") == collector:
+                    key = next((k for k in ("list", "section", "name", "item") if value.get(k)), None)
+                    operation_gap(_names(value[key]) if key else None)
+                    return
+                for child in value.values():
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+            elif isinstance(value, str):
+                if value == collector:
+                    summary_only = True
+                elif value.startswith(collector + "."):
+                    names = _names(value[len(collector) + 1:])
+                    if names & reads:
+                        raise Unavailable(field="coverage_gaps")
+                    unrelated = self._unrelated([names], reads, known)
+                    if unrelated is not None:
+                        self.ignored.update(f"{collector}.{name}" for name in unrelated)
+        walk(gaps)
+        return summary_only
+
+    def _collector_payload(self, collector: str) -> tuple[dict[str, Any] | None, str | None]:
+        """The collector's operation envelopes with the file they came from: its raw file, else the offline sample's entry."""
+        origin = f"raw/{collector}.json"
         try:
-            payload = self.read(f"raw/{collector}.json")
+            payload = self.read(origin)
         except Unavailable as exc:
             if exc.reason != "missing_artifact":
                 raise
+            origin = "raw/sample_input.json"
             try:
-                sample = self.read("raw/sample_input.json")
+                sample = self.read(origin)
             except Unavailable as sample_exc:
                 if sample_exc.reason != "missing_artifact":
                     raise
-                return
+                return None, None
             _require(isinstance(sample, dict))
             payload = sample.get(collector, {})
         _require(isinstance(payload, dict))
-        # The payload maps operation names to their envelopes; the envelopes are the metadata.
+        return payload, origin
+
+    def collector_health(self, collector: str, reads: Any) -> None:
+        """Withhold when an operation read from this collector, or the collector itself, reports a failure.
+
+        The failure of another operation is recorded in ``ignored`` and does not withhold.
+        """
+        reads = frozenset(reads)
+        payload, _ = self._collector_payload(collector)
+        self.coverage(collector, reads, frozenset(payload or ()), health=True)
+        if payload is None:
+            return
+        # The payload maps operation names to their envelopes; keys beside them are the collector's own metadata.
         _healthy(payload, recursive=False)
-        for envelope in payload.values():
-            _healthy(envelope)
+        for name, envelope in payload.items():
+            try:
+                _healthy(envelope)
+            except Unavailable:
+                if name in reads or not _OPERATION_NAME.fullmatch(name) or not isinstance(envelope, dict):
+                    raise
+                self.ignored.add(f"{collector}.{name}")
 
     def operation(self, collector: str, operation: str) -> list[dict[str, Any]]:
-        try:
-            payload = self.read(f"raw/{collector}.json")
-        except Unavailable as exc:
-            if exc.reason != "missing_artifact":
-                raise
-            try:
-                sample = self.read("raw/sample_input.json")
-            except Unavailable as sample_exc:
-                if sample_exc.reason != "missing_artifact":
-                    raise
-                section = self.read(f"raw/{collector}/{operation}/summary.json")
-            else:
-                _require(isinstance(sample, dict))
-                payload = sample.get(collector, {})
-                _require(isinstance(payload, dict))
-                _healthy(payload, recursive=False)
-                if operation not in payload:
-                    raise Unavailable("missing_artifact")
-                section = payload[operation]
+        return list(self.scan(collector, operation))
+
+    def scan(self, collector: str, operation: str) -> Iterator[dict[str, Any]]:
+        """Yield one operation's rows after its health checks, without keeping them.
+
+        The checks that need every row (the item count, an empty collection's completeness) run once the
+        iterator is exhausted, so a caller must consume it fully before it trusts what it kept. Source reads
+        are bounded by the scan bounds only; the section's projection budget applies to the projected object,
+        not to how many rows were read to build it.
+        """
+        payload, origin = self._collector_payload(collector)
+        if payload is None:
+            origin = f"raw/{collector}/{operation}/summary.json"
+            section = self.read(origin)
         else:
-            _require(isinstance(payload, dict))
             _healthy(payload, recursive=False)
             if operation not in payload:
                 raise Unavailable("missing_artifact")
             section = payload[operation]
-        complete = self.coverage(collector, operation)
+        complete = self.coverage(collector, operation, frozenset(payload or ()))
         _require(isinstance(section, dict))
         self.complete = complete or section.get("complete") is True or section.get("collection_status") == "collected" or section.get("status") in {"ok", "collected", "success"}
         _healthy(section)
@@ -302,30 +467,27 @@ class Bundle:
         _require(section.get("status", "ok") in {"ok", "success", "collected"})
         if not any(k in section for k in ("value", "chunk_files")):
             _require(bool(section) and not any(k in section for k in ("item_count", "sample_truncated")))
-            return [section]
+            self.scan_rows += 1
+            self.scan_inline[origin] = self.sizes[origin]
+            yield section
+            return
         chunks = section.get("chunk_files", [])
         _require(isinstance(chunks, list) and all(isinstance(p, str) for p in chunks), "chunk_files", "invalid_type")
         _require(all(p.startswith((f"raw/{collector}/{operation}/", f"chunks/{collector}/")) for p in chunks), "chunk_files")
         _require(all(not any(part == ".secrets" or part.startswith(".env") for part in Path(p).parts) for p in chunks), "chunk_files")
         _require(len(set(chunks)) == len(chunks), "chunk_files")
-        if len(chunks) > self.max_items:
-            raise Unavailable("oversize")
+        if len(chunks) > self.scan_max_chunks:
+            raise _scan_bound("scan_max_chunks")
         _require("chunk_count" not in section or type(section["chunk_count"]) is int
                  and section["chunk_count"] == len(chunks), "chunk_count")
-        rows = []
-        size = 0
-        def append(row: Any) -> None:
-            nonlocal size
+        count = 0
+        def valid(row: Any) -> Any:
             _require(isinstance(row, dict), "value", "invalid_type")
             _healthy(row, metadata=False)
-            size += len(_json(row))
-            if len(rows) >= self.max_items or size > self.max_chars:
-                raise Unavailable("oversize")
-            rows.append(row)
+            return row
         if chunks:
             seen = set()
             consumed_bytes = 0
-            byte_budget = self.max_chars * 4
             for path in chunks:
                 try:
                     with _open_chunk(self.root, path) as handle:
@@ -334,19 +496,24 @@ class Bundle:
                         seen.add((stat.st_dev, stat.st_ino))
                         if path not in self.sources:
                             self.sources.append(path)
+                        self.scan_chunks.add(path)
                         while True:
                             # Never materialise an unbounded line or the full collection.
-                            line = handle.readline(byte_budget - consumed_bytes + 1)
+                            line = handle.readline(self.scan_max_bytes - consumed_bytes + 1)
                             if not line:
                                 break
                             consumed_bytes += len(line)
-                            if consumed_bytes > byte_budget:
-                                raise Unavailable("oversize")
+                            self.scan_chunk_bytes += len(line)
+                            if consumed_bytes > self.scan_max_bytes:
+                                raise _scan_bound("scan_max_bytes")
                             if not line.strip():
                                 continue
-                            if len(rows) >= self.max_items:
-                                raise Unavailable("oversize")
-                            append(json.loads(line, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant))
+                            if count >= self.scan_max_rows:
+                                raise _scan_bound("scan_max_rows")
+                            row = valid(json.loads(line, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant))
+                            count += 1
+                            self.scan_rows += 1
+                            yield row
                 except Unavailable:
                     raise
                 except (OSError, ValueError, UnicodeError):
@@ -355,17 +522,21 @@ class Bundle:
             _require("value" in section, "value", "missing_field")
             _require(isinstance(section["value"], list), "value", "invalid_type")
             _require(not section.get("sample_truncated"), "sample_truncated")
+            self.scan_inline[origin] = self.sizes[origin]
             for row in section["value"]:
-                append(row)
+                if count >= self.scan_max_rows:
+                    raise _scan_bound("scan_max_rows")
+                row = valid(row)
+                count += 1
+                self.scan_rows += 1
+                yield row
         if "item_count" in section:
             _require(type(section["item_count"]) is int, "item_count", "invalid_type")
-            _require(section["item_count"] == len(rows), "item_count")
+            _require(section["item_count"] == count, "item_count")
         _require(not section.get("sample_truncated") or "item_count" in section, "item_count", "missing_field")
-        if not rows:
+        if not count:
             _require(complete or section.get("complete") is True
                      or section.get("collection_status") == "collected" or section.get("status") in {"ok", "collected", "success"})
-
-        return rows
 
     def alternatives(self, operations: list[tuple[str, str]]) -> list[dict[str, Any]]:
         found = []
@@ -503,8 +674,9 @@ def _authorization(bundle: Bundle) -> Any:
 
 
 def _plans(bundle: Bundle) -> Any:
+    # Each SKU row is far larger than the plan names kept from it: stream the rows, keep only the plans.
     result = {}
-    for row in bundle.operation("licensing", "subscribedSkus"):
+    for row in bundle.scan("licensing", "subscribedSkus"):
         _require("servicePlans" in row, "servicePlans", "missing_field")
         _require(isinstance(row.get("servicePlans"), list), "servicePlans", "invalid_type")
         for plan in row["servicePlans"]:
@@ -523,8 +695,8 @@ def _plans(bundle: Bundle) -> Any:
 
 
 def _users(bundle: Bundle) -> Any:
-    for collector in ("identity", "identity_governance"):
-        bundle.collector_health(collector)
+    for collector, reads in ADMIN_SET_READS.items():
+        bundle.collector_health(collector, reads)
     admins = bundle.normalised("effective_admin_set")
     summaries = [r for r in admins if r.get("kind") == "effective_admin_set_summary"]
     _require(len(summaries) == 1)
@@ -537,9 +709,15 @@ def _users(bundle: Bundle) -> Any:
     _require(type(summaries[0]["admin_count"]) is int, "admin_count", "invalid_type")
     _require(summaries[0]["admin_count"] == len(admin_rows), "admin_count")
     _require(len({r.get("principal_id") for r in admin_rows}) == len(admin_rows), "principal_id")
-    users = bundle.operation("identity", "users")
-    index = {r.get("id"): r for r in users}
-    _require(len(index) == len(users) and all(_text(k) for k in index), "id")
+    # The administrators are few and listed above; the user list is large. Stream it once and keep only
+    # the rows whose id is an administrator's, never the list or an index of it.
+    wanted = {r.get("principal_id") for r in admin_rows}
+    index: dict[str, dict[str, Any]] = {}
+    for row in bundle.scan("identity", "users"):
+        _require(_text(row.get("id")), "id")
+        if row["id"] in wanted:
+            _require(row["id"] not in index, "id")
+            index[row["id"]] = row
     result = {}
     for admin in sorted(admin_rows, key=lambda r: r.get("principal_id", "")):
         _require("state" in admin, "state", "missing_field")
@@ -563,7 +741,8 @@ def _role_date(value: Any) -> bool:
 def _roles(bundle: Bundle) -> Any:
     # No current collector obtains PIM policy Rules. Only an existing complete
     # ProviderExport-shaped artefact can supply them, never policy defaults.
-    bundle.collector_health("identity_governance")
+    for collector, reads in PRIVILEGED_ROLES_READS.items():
+        bundle.collector_health(collector, reads)
     result = []
     for row in bundle.normalised("privileged_roles"):
         _known_fields(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules"})
@@ -724,21 +903,27 @@ def _redact(projection: Projection, salt: str, enabled: bool) -> dict[str, Any]:
 
 
 def project_run(run_dir: str | Path, *, redact: bool = True,
-                max_items: int = DEFAULT_MAX_ITEMS, max_chars: int = DEFAULT_MAX_CHARS) -> Projection:
+                max_items: int = DEFAULT_MAX_ITEMS, max_chars: int = DEFAULT_MAX_CHARS,
+                scan_max_rows: int = DEFAULT_SCAN_MAX_ROWS, scan_max_bytes: int = DEFAULT_SCAN_MAX_BYTES,
+                scan_max_chunks: int = DEFAULT_SCAN_MAX_CHUNKS) -> Projection:
     """Read a bundle without writes; manifest digest supplies a stable per-run salt.
 
-    The salt stays in memory and is never persisted. Size bounds apply
-    before and after redaction, including nested lists and user dictionaries.
+    The salt stays in memory and is never persisted. ``max_items`` and ``max_chars`` budget the projected
+    section itself, before and after redaction and enum annotation, including nested lists and user
+    dictionaries; they do not limit how much source a section is built from. The scan bounds do that: a
+    source read that exhausts one withholds the section as ``oversize`` (detail kind ``scan_bound``).
     """
-    if type(max_items) is not int or max_items < 1 or type(max_chars) is not int or max_chars < 1:
+    bounds = {"max_items": max_items, "max_chars": max_chars, "scan_max_rows": scan_max_rows,
+              "scan_max_bytes": scan_max_bytes, "scan_max_chunks": scan_max_chunks}
+    if any(type(value) is not int or value < 1 for value in bounds.values()):
         raise ValueError("Projection bounds must be positive integers")
-    bundle = Bundle(Path(run_dir).resolve(), max_items, max_chars)
-    manifest_invalid = False
+    bundle = Bundle(Path(run_dir).resolve(), scan_max_rows, scan_max_bytes, scan_max_chunks)
+    manifest_error: Unavailable | None = None
     try:
         manifest = bundle.read("run-manifest.json")
         _require(isinstance(manifest, dict))
     except Unavailable as exc:
-        manifest_invalid = exc.reason != "missing_artifact"
+        manifest_error = None if exc.reason == "missing_artifact" else exc
         manifest = {}
     bundle.manifest = manifest
     sections = sorted({s for p in json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"].values()
@@ -748,10 +933,10 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
     adapters = {"SPO_tenant": _spo, "conditional_access_policies": _ca, "authorization_policies": _authorization,
                 "service_plans": _plans, "privileged_users": _users, "privileged_roles": _roles}
     for section in sections:
-        bundle.sources = []
-        bundle.complete = False
+        bundle.reset()
         try:
-            _require(not manifest_invalid)
+            if manifest_error is not None:
+                raise manifest_error
             if manifest.get("platform", "m365") != "m365":
                 raise Unavailable("not_applicable_to_platform")
             if section in {"scuba_config", "sharing_policy"}:
@@ -777,22 +962,29 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 raise Unavailable("oversize")
         except (Unavailable, ValueError, TypeError, KeyError, OverflowError) as exc:
             result[section] = dict(NOT_COLLECTED)
-            report[section] = {"status": "not_collected", "reason": getattr(exc, "reason", "incomplete_shape"),
-                               "source": list(bundle.sources)}
-            if report[section]["reason"] == "incomplete_shape":
-                report[section]["detail"] = getattr(exc, "detail", {"field": "$", "kind": "unseen_shape"})
+            reason = getattr(exc, "reason", "incomplete_shape")
+            detail = getattr(exc, "detail", {"field": "$", "kind": "unseen_shape"})
+            report[section] = {"status": "not_collected", "reason": reason, "source": list(bundle.sources)}
+            # A projected-object bound is plain ``oversize``; the scan bounds say which one ran out.
+            if reason == "incomplete_shape" or reason == "oversize" and detail["kind"] == "scan_bound":
+                report[section]["detail"] = detail
             if getattr(exc, "unsupported", None):
                 report[section]["unsupported_conditions"] = exc.unsupported
         else:
             result[section] = value
             report[section] = {"status": "projected", "reason": None, "source": list(bundle.sources)}
+        counts = bundle.scan_counts
+        if counts["rows"] or counts["bytes"]:
+            report[section]["scan"] = counts
+        if bundle.ignored:
+            report[section]["ignored_failures"] = sorted(bundle.ignored)
     redaction = _redact(result, sha256(_json(manifest).encode()).hexdigest(), redact)
     for section, value in result.items():
         if value != NOT_COLLECTED and _oversize(annotate_enum_names(section, value), max_items, max_chars):
             result[section] = dict(NOT_COLLECTED)
             report[section].update(status="not_collected", reason="oversize")
     result.report = {"schema_version": PROJECTION_VERSION, "sections": report, "redaction": redaction,
-                     "bounds": {"max_items": max_items, "max_chars": max_chars}}
+                     "bounds": bounds}
     return result
 
 

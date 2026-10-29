@@ -400,11 +400,14 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
     monkeypatch.setattr(ModelClient, "_request", reply)
     before = snapshot(demo_bundle)
     result = assess_run(demo_bundle, ModelConfig(model_name="test-model"))
-    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 102}
+    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 99}
     assert result["limitations"] == []
     assert {name for name, detail in result["projection"]["sections"].items()
-            if detail["status"] == "projected"} == {"service_plans", "tenant_id"}
-    assert all(row["reason"] == "rule_precheck" and row["attempts"] == 0 for row in result["policies"])
+            if detail["status"] == "projected"} == {"service_plans", "tenant_id", "privileged_users"}
+    # The three rules that read only the projected privileged users reach the model; the rest are rule answers.
+    model_rows = {row["policy_id"] for row in result["policies"] if row["reason"] != "rule_precheck"}
+    assert model_rows == {"MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"}
+    assert all(row["attempts"] == (0 if row["policy_id"] not in model_rows else 1) for row in result["policies"])
     assert result["endpoint_host"] == "127.0.0.1" and result["run_id"] == "demo"
     assert all(row["comparison"]["result"] == "not_assessed" for row in result["policies"])
     validate_assessment(result)

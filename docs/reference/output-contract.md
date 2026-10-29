@@ -135,6 +135,14 @@ The required `projection` envelope is separate from prompt evidence:
   not widen the frozen pack enum domain: `everyone` still withholds the section.
   `detail` is optional in schema `2026-10-29` for backwards compatibility, and is
   never included in prompt evidence. CA `unsupported_conditions` is unchanged.
+  An `oversize` section carries `detail` only when a scan bound ran out: `kind`
+  `scan_bound` and `field` the bound (`scan_max_rows`, `scan_max_bytes` or
+  `scan_max_chunks`); an `oversize` without `detail` exceeded the projection budget.
+  Optional `scan` (`rows`, `bytes`, `chunks`) reports how much source the section's
+  operation reads scanned, projected or not: rows examined, bytes read (chunk lines,
+  or the size of the inline payload file) and chunk files opened. Optional
+  `ignored_failures` lists the `<collector>.<operation>` names of operations that
+  reported a failure the section does not read (collection health, below).
   Sections outside this package's
   tier-1 adapters remain `not_collected` with `missing_artifact`, even if other
   Auditex summary artefacts exist for that surface. No summary count is treated as
@@ -148,13 +156,31 @@ The required `projection` envelope is separate from prompt evidence:
   role and policy names remain available. The salt stays in memory only and is
   rejected by the envelope schema and validator; counters never enter prompts. Hashes support
   pseudonymisation, not anonymisation or a disclosure guarantee.
-- `bounds`: `max_items` (default 40) and `max_chars` (default 12,000 canonical JSON
-  characters per section). `--projection-max-items` and `--projection-max-chars`
-  accept positive integers. The item bound covers top-level collections, user
-  dictionaries and nested lists. Bounds apply while consuming source rows, before
-  and after redaction, and after prompt enum annotation;
-  exceeding either replaces the whole section with the marker and reason
-  `oversize`. Nothing is silently sliced. Row-level pack limitation IDs are unchanged.
+- `bounds`: the projection budget `max_items` (default 40) and `max_chars` (default
+  12,000 canonical JSON characters), and the scan bounds `scan_max_rows` (default
+  250,000), `scan_max_bytes` (default 268,435,456, 256 MiB) and `scan_max_chunks`
+  (default 10,000). The scan bounds are absent from assessments written before they
+  existed. `--projection-max-items`, `--projection-max-chars`,
+  `--projection-scan-max-rows`, `--projection-scan-max-bytes` and
+  `--projection-scan-max-chunks` accept positive integers.
+  - The projection budget applies to the section that would reach the model, never
+    to the source read to build it. The item bound covers top-level collections, user
+    dictionaries and nested lists of the projected object; the character bound its
+    canonical JSON. Both are checked on the projected object, again after redaction
+    and after prompt enum annotation; exceeding either replaces the whole section
+    with the marker and reason `oversize` (no `detail`). Nothing is silently sliced.
+    A tenant with thousands of users still projects `privileged_users` when it has
+    a handful of administrators.
+  - The scan bounds are safety limits on one source read, whatever the budget: rows
+    examined in one operation, bytes read (the chunk lines of one operation, and the
+    size of any JSON artefact read whole, such as an inline payload or a normalised
+    file) and chunk files listed. Exhausting one withholds the section as `oversize`
+    with `detail` `{field: <bound>, kind: scan_bound}`. Raise them only for a tenant
+    that really exceeds them: a section that keeps its source rows (conditional
+    access, the PowerShell sections, DNS) holds up to the bound in memory, while
+    `privileged_users` and `service_plans` stream and keep only the administrators or
+    the distinct plans.
+  Row-level pack limitation IDs are unchanged.
 
 `--no-redaction` is accepted only for literal loopback IP addresses or
 `localhost` (case-insensitive, optional final dot), including dry-run. Other
@@ -167,10 +193,34 @@ Projection reads inline `raw/<collector>.json`, offline `raw/sample_input.json`,
 or export-only `raw/<collector>/<operation>/summary.json`. Non-empty `chunk_files`
 are authoritative; all chunks and counts must validate. Duplicate JSON keys and
 non-finite constants are rejected in both JSON and JSONL. Chunk iteration stops
-at the item or character budget; cumulative bytes, including whitespace, are capped
-at four times the character bound, and chunk count is capped by the item bound.
-Coverage rows, the coverage ledger, collection gaps and per-record failure metadata
-override apparently usable payloads. Empty collections require an explicit successful
+at a scan bound: cumulative bytes, including whitespace, at `scan_max_bytes`, rows
+at `scan_max_rows` and chunk files at `scan_max_chunks`; the projection budget is
+not involved. Source rows are streamed where the projection is small: `privileged_users`
+reads the effective admin set first, then scans `identity.users` once and keeps only
+the rows of those principal IDs (an administrator's ID on two user rows, or a user row
+without a text ID, withholds the section; a repeated ID of any other user is not
+checked, since no index of the list is kept), and `service_plans` streams
+`licensing.subscribedSkus` and keeps only the distinct plans.
+
+Collection health is judged per operation. Coverage rows, the coverage ledger,
+collection gaps, the manifest's coverage gaps and per-record failure metadata for an
+operation the section reads, or for the collector as a whole, override apparently
+usable payloads. A failure of another operation of a collector the section reads,
+one the collector's payload also carries (for example `identity.userSignInActivity`
+refused with `license_required`, which no adapter reads), does not withhold: it is
+listed in the section's `ignored_failures`. Attribution comes from a row's `list`,
+`name` or `source`, from a coverage-ledger row's `diagnostics[].item` (only a partial
+or blocked ledger row, or one that is complete, can be attributed that way), or from
+the operation key of a raw envelope; a derived `<operation>Fanout` row counts as its
+operation. A failure that cannot be attributed to such an unrelated operation (the
+collector as a whole, an unrecognised name, a diagnostic without an item) still
+withholds. `privileged_users` reads `identity` `users`, `groups`, `servicePrincipals`,
+`roleDefinitions`, `roleAssignments` and the privileged-group fan-out
+(`roleAssignableGroupMembers`, `privilegedGroupFanout`), and `identity_governance`
+`roleAssignmentSchedules` and `roleEligibilitySchedules`: the sources of the effective
+admin set. `privileged_roles` reads the two schedules. A manifest `coverage_gaps`
+surface summary that merely lists a collector stands only when no coverage row or
+ledger row exists to say which operation failed. Empty collections require an explicit successful
 collection status, completeness flag or complete coverage entry. A bare empty array
 or empty chunk manifest is insufficient; an empty shape must also occur in a frozen
 pack row. Chunk paths must remain
@@ -188,9 +238,9 @@ Graph camelCase is converted recursively for the selected fields.
 | `SPO_tenant` | `normalized/sharepoint_tenant_settings.json` with collected, agreeing canonical sharing and OneDrive capabilities; raw `sharepoint_access.sharePointSettings` or `onedrive_posture.sharePointSettings` with all remaining settings. Emits one dict with `SharingCapability`, `ODBSharingCapability`, `DefaultLinkPermission`, `DefaultSharingLinkType`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `SharingDomainRestrictionMode`, `RequireAnonymousLinksExpireInDays`, `EmailAttestationRequired`, `EmailAttestationReAuthDays`. Capabilities use the Management Shell mapping 0 disabled, 1 new/existing guests, 2 anyone, 3 existing guests; other enums use the shared numeric maps. Expiry -1 is retained. No `_name` companions are projected; prompt assembly adds them later. Graph-only settings are usually insufficient. |
 | `conditional_access_policies` | Full raw `conditional_access.conditionalAccessPolicies`, not `conditional_access_graph` counts. Requires `DisplayName`, `State`, selected `Conditions` applications, authentication flows, client app types/applications, sign-in/user/agent risks and all user inclusions/exclusions; `GrantControls` built-ins, operator and authentication strength, including `AllowedCombinations` when non-null. Every policy must match a whole observed pack shape. Non-empty unsupported conditions or controls, including locations, platforms, devices and session controls, withhold the entire section with `incomplete_shape`; their field paths appear in `unsupported_conditions`. No restriction is silently discarded. |
 | `authorization_policies` | Raw `external_identity.authorizationPolicy` or `consent_policy.authorizationPolicy`; singleton `Id`, `AllowInvitesFrom`, `GuestUserRoleId`, default-role `AllowedToCreateApps` and assigned permission grant policy IDs. Duplicate sources must agree. Graph `defaultUserRolePermissions.allowedToCreateSecurityGroups` and `allowedToReadOtherUsers` are accepted and dropped: dependent SCuBA policies do not read them and the pack shape has no such fields. Other unexpected default-role permission fields still withhold the section. |
-| `service_plans` | Full raw `licensing.subscribedSkus`, each `servicePlans` entry with `servicePlanId` and `servicePlanName`. Emits distinct `{ServicePlanId, ServicePlanName}` rows; conflicting duplicate IDs invalidate the section. Licence counts alone do not suffice. |
+| `service_plans` | Full raw `licensing.subscribedSkus`, streamed, each `servicePlans` entry with `servicePlanId` and `servicePlanName`. Emits distinct `{ServicePlanId, ServicePlanName}` rows; conflicting duplicate IDs invalidate the section. Licence counts alone do not suffice. |
 | `privileged_roles` | An existing `normalized/privileged_roles.json` with ProviderExport-shaped `records`: `DisplayName`, `RoleTemplateId`, complete assignments (`PrincipalId`, start/end timestamps when present, each null or `/Date(ms)/`) and PIM `Rules` with source metadata and typed expiration, notification or approval settings. Current collectors do not read PIM role-management policies/rules; ordinary runs therefore remain unavailable. No rule defaults are fabricated. |
-| `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus full raw `identity.users`. Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The current identity collector does not select the immutable ID, so ordinary live runs need a saved complete export including it; a hybrid sample is insufficient. |
+| `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus a complete scan of raw `identity.users` (streamed; only the administrators' rows are kept). Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The current identity collector does not select the immutable ID, so ordinary live runs need a saved complete export including it; a hybrid sample is insufficient. |
 | `tenant_id` | Canonical non-zero Entra UUID from the run identity in `run-manifest.json` or saved raw organisation evidence. Recorded and observed UUIDs must agree; a conflict or domain/authority alias cannot become a tenant ID. Synthetic demo UUIDs remain synthetic, without upgrading the run identity's verification status. |
 | `scuba_config` | Disabled with `incomplete_shape`: a Graph endpoint alone cannot reconstruct a complete observed SCuBA configuration, including operator exclusions. Empty `Exo` or `SecuritySuite` objects are never fabricated. |
 | `dmarc_records` | Saved raw `dns_posture.dmarc_records` with `{domain, rdata[]}` containing complete TXT answers. Parsed posture alone is insufficient. |
@@ -208,9 +258,13 @@ or `normalized/teams_policy_objects.json` records only when the matching `source
 retains every required ProviderExport field. The usual lossy normalisation does not;
 counts, shortened settings or renamed labels cannot recreate missing values.
 
-The synthetic offline demo projects `service_plans` and `tenant_id`. Across 102
-catalogue policies, 102 receive rule answers and zero reach the model without a
-shadow flag (previously seven sections, 88 rule rows and 14 model rows). Its original
+The synthetic offline demo projects `service_plans`, `tenant_id` and `privileged_users`
+(its 46 users are scanned, its seven administrators projected). Across 102 catalogue
+policies, 99 receive rule answers and three reach the model without a shadow flag:
+`MS.AAD.7.1v1`, `MS.AAD.7.2v1` and `MS.AAD.7.3v1`, which read only `privileged_users`
+(previously two sections, 102 rule rows and no model rows, while the projection budget
+applied to the 46-row source and withheld that section as `oversize`; before the shape
+gate, seven sections, 88 rule rows and 14 model rows). Its original
 anonymous SharePoint defaults, high-severity sharing findings and explorer score of
 65 remain intact. Missing SharePoint fields, unsupported CA scope, failed coverage,
 source bounds and sparse PowerShell records are withheld rather than upgraded.

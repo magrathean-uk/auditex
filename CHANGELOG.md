@@ -23,7 +23,8 @@ export and MCP behaviour is unchanged.
   preserved byte-for-byte. Complete object shapes and enum domains from the frozen
   v7 packs gate every projection; unsupported CA restrictions, failed evidence and
   unseen variants withhold the whole section. The salt stays in memory. Synthetic
-  demo evidence now projects two sections, with 102 rule rows and zero model rows;
+  demo evidence first projected two sections, with 102 rule rows and zero model rows
+  (three sections, 99 rule rows and three model rows after the P2 follow-up below);
   its original SharePoint findings and explorer score of 65 are preserved.
   No collectors or network reads are added.
 - **P2 projection follow-up.** Withheld `incomplete_shape` sections now identify the
@@ -36,6 +37,27 @@ export and MCP behaviour is unchanged.
     and coverage envelopes). A Graph record's own `status`, such as a role schedule's
     `Provisioned`, is data and no longer withholds the privileged sections as an unseen
     enum; failed envelopes and the other failure markers still do.
+  - **Projection budget and scan bounds.** `--projection-max-items` (40) and
+    `--projection-max-chars` (12,000) now budget the projected section, not the source read
+    to build it: a tenant with thousands of users still projects `privileged_users` when only
+    a handful are administrators. Source reads have their own safety bounds, `scan_max_rows`
+    (250,000), `scan_max_bytes` (256 MiB) and `scan_max_chunks` (10,000), set with
+    `--projection-scan-max-rows`, `--projection-scan-max-bytes` and
+    `--projection-scan-max-chunks`; exhausting one withholds the section as `oversize` with
+    detail kind `scan_bound` and the bound's name. `privileged_users` reads the effective
+    admin set first and streams `identity.users` keeping only the administrators' rows;
+    `service_plans` streams the SKU list and keeps the distinct plans. The section report gains
+    an optional `scan` (rows, bytes, chunks) and `bounds` the three scan bounds. Optional
+    schema additions only; `2026-10-29` is unchanged and earlier assessments still validate.
+  - **Collection health per operation.** A section withholds only for a failure of an operation
+    it reads, of the collector as a whole, or of its coverage-ledger, coverage and collection-gap
+    rows. A failure of another operation of the same collector (for example `identity.userSignInActivity`
+    refused with `license_required`, which no adapter reads) is listed in the section report's
+    optional `ignored_failures` and no longer withholds `privileged_users`, `tenant_id` or the
+    other sections. A failure that cannot be attributed to such an operation still withholds.
+  - The synthetic demo now projects three sections (`service_plans`, `tenant_id`, `privileged_users`):
+    99 rule rows and three model rows (`MS.AAD.7.1v1` to `MS.AAD.7.3v1`), where the earlier count
+    was two sections, 102 rule rows and none.
 - **Deterministic pre-checks (1.2.2.dev3).** A shared, shipped SCuBA rule catalogue answers closed
   applicability gates as inferred true and unavailable inputs as unknown before inference, citing all
   blockers, including the Power BI licence flag alongside missing tenant settings. Oracle generation
