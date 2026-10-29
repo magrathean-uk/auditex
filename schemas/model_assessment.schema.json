@@ -795,12 +795,47 @@
             "pattern": "^[A-Za-z][A-Za-z0-9.]*$"
           },
           "uniqueItems": true
+        },
+        "detail": {
+          "$ref": "#/$defs/projection_detail"
         }
       },
       "required": [
         "status",
         "reason",
         "source"
+      ],
+      "additionalProperties": false
+    },
+    "projection_detail": {
+      "type": "object",
+      "description": "First failed projection check; field paths omit array indices and mask unknown keys. $ denotes a whole-section shape failure. Values are diagnostic only, never evidence.",
+      "properties": {
+        "field": {
+          "type": "string",
+          "pattern": "^(?:\\$|[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*)$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "missing_field",
+            "unexpected_field",
+            "unseen_enum_value",
+            "unseen_shape",
+            "invalid_type"
+          ]
+        },
+        "value": {
+          "type": [
+            "string",
+            "number"
+          ],
+          "pattern": "^(?:everyone|none|adminsAndGuestInviters|adminsGuestInvitersAndAllMembers)$"
+        }
+      },
+      "required": [
+        "field",
+        "kind"
       ],
       "additionalProperties": false
     }

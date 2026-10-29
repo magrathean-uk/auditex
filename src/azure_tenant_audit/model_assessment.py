@@ -24,6 +24,19 @@ ASSESSMENT_SCHEMAS = {
 }
 
 
+def safe_projection_enum_value(field: str, value: Any) -> bool:
+    """Only finite numbers and explicitly recognised enum tokens may be echoed.
+
+    A token-shaped string can still be a person's name. This diagnostic allowlist
+    does not expand the frozen pack's accepted evidence domains.
+    """
+    if type(value) in (int, float):
+        return type(value) is int or math.isfinite(value)
+    return field == "AllowInvitesFrom" and isinstance(value, str) and value in {
+        "everyone", "none", "adminsAndGuestInviters", "adminsGuestInvitersAndAllMembers",
+    }
+
+
 def _check(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str) -> None:
     supported = {"$schema", "$id", "$defs", "title", "description", "$ref", "type", "const", "enum",
                  "required", "properties", "additionalProperties", "items", "uniqueItems", "pattern",
@@ -88,6 +101,15 @@ def validate_assessment(payload: Any) -> None:
             if unsupported and (section != "conditional_access_policies" or detail["reason"] != "incomplete_shape"
                                 or unsupported != sorted(set(unsupported))):
                 raise ValueError("Inconsistent unsupported projection conditions")
+            diagnostic = detail.get("detail")
+            if diagnostic is not None:
+                if detail["reason"] != "incomplete_shape" or detail["status"] != "not_collected":
+                    raise ValueError("Inconsistent projection diagnostic")
+                if "value" in diagnostic and (
+                    diagnostic["kind"] != "unseen_enum_value"
+                    or not safe_projection_enum_value(diagnostic["field"], diagnostic["value"])
+                ):
+                    raise ValueError("Unsafe projection diagnostic value")
             for source in detail["source"]:
                 if any(p in {"..", ".secrets"} or p.startswith(".env") for p in source.split("/")):
                     raise ValueError("Unsafe projection source")

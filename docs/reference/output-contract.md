@@ -120,7 +120,22 @@ The required `projection` envelope is separate from prompt evidence:
   `missing_artifact`, `incomplete_shape`, `oversize`, `powershell_only` or
   `not_applicable_to_platform` otherwise), optional `unsupported_conditions` (CA
   field paths that cannot be represented), and `source` (relative artefact paths
-  actually read, including authoritative chunks). Sections outside this package's
+  actually read, including authoritative chunks). New `incomplete_shape` results
+  also carry `detail`: `field` (the first failing check's dotted field path, without
+  array indices) and `kind` (`missing_field`, `unexpected_field`, `unseen_enum_value`,
+  `unseen_shape` or `invalid_type`). Paths use adapter/ProviderExport field names;
+  CA restriction paths retain their existing Graph spelling. `$` denotes a failure
+  of the whole section or source shape that cannot be attributed to a single field;
+  arbitrary unknown keys become `unrecognisedField`, since keys can contain personal
+  data. Enum failures may include `value` only for finite numbers or explicitly
+  recognised non-personal enum tokens. Currently the string allowlist is the
+  `AllowInvitesFrom` tokens `everyone`, `none`, `adminsAndGuestInviters` and
+  `adminsGuestInvitersAndAllMembers`; unfamiliar strings, display names, e-mails and
+  free text are omitted even with `--no-redaction`. This diagnostic allowlist does
+  not widen the frozen pack enum domain: `everyone` still withholds the section.
+  `detail` is optional in schema `2026-10-29` for backwards compatibility, and is
+  never included in prompt evidence. CA `unsupported_conditions` is unchanged.
+  Sections outside this package's
   tier-1 adapters remain `not_collected` with `missing_artifact`, even if other
   Auditex summary artefacts exist for that surface. No summary count is treated as
   a ProviderExport object. Non-M365 bundles use `not_applicable_to_platform`.
@@ -172,7 +187,7 @@ Graph camelCase is converted recursively for the selected fields.
 | --- | --- |
 | `SPO_tenant` | `normalized/sharepoint_tenant_settings.json` with collected, agreeing canonical sharing and OneDrive capabilities; raw `sharepoint_access.sharePointSettings` or `onedrive_posture.sharePointSettings` with all remaining settings. Emits one dict with `SharingCapability`, `ODBSharingCapability`, `DefaultLinkPermission`, `DefaultSharingLinkType`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `SharingDomainRestrictionMode`, `RequireAnonymousLinksExpireInDays`, `EmailAttestationRequired`, `EmailAttestationReAuthDays`. Capabilities use the Management Shell mapping 0 disabled, 1 new/existing guests, 2 anyone, 3 existing guests; other enums use the shared numeric maps. Expiry -1 is retained. No `_name` companions are projected; prompt assembly adds them later. Graph-only settings are usually insufficient. |
 | `conditional_access_policies` | Full raw `conditional_access.conditionalAccessPolicies`, not `conditional_access_graph` counts. Requires `DisplayName`, `State`, selected `Conditions` applications, authentication flows, client app types/applications, sign-in/user/agent risks and all user inclusions/exclusions; `GrantControls` built-ins, operator and authentication strength, including `AllowedCombinations` when non-null. Every policy must match a whole observed pack shape. Non-empty unsupported conditions or controls, including locations, platforms, devices and session controls, withhold the entire section with `incomplete_shape`; their field paths appear in `unsupported_conditions`. No restriction is silently discarded. |
-| `authorization_policies` | Raw `external_identity.authorizationPolicy` or `consent_policy.authorizationPolicy`; singleton `Id`, `AllowInvitesFrom`, `GuestUserRoleId`, default-role `AllowedToCreateApps` and assigned permission grant policy IDs. Duplicate sources must agree. |
+| `authorization_policies` | Raw `external_identity.authorizationPolicy` or `consent_policy.authorizationPolicy`; singleton `Id`, `AllowInvitesFrom`, `GuestUserRoleId`, default-role `AllowedToCreateApps` and assigned permission grant policy IDs. Duplicate sources must agree. Graph `defaultUserRolePermissions.allowedToCreateSecurityGroups` and `allowedToReadOtherUsers` are accepted and dropped: dependent SCuBA policies do not read them and the pack shape has no such fields. Other unexpected default-role permission fields still withhold the section. |
 | `service_plans` | Full raw `licensing.subscribedSkus`, each `servicePlans` entry with `servicePlanId` and `servicePlanName`. Emits distinct `{ServicePlanId, ServicePlanName}` rows; conflicting duplicate IDs invalidate the section. Licence counts alone do not suffice. |
 | `privileged_roles` | An existing `normalized/privileged_roles.json` with ProviderExport-shaped `records`: `DisplayName`, `RoleTemplateId`, complete assignments (`PrincipalId`, start/end timestamps when present, each null or `/Date(ms)/`) and PIM `Rules` with source metadata and typed expiration, notification or approval settings. Current collectors do not read PIM role-management policies/rules; ordinary runs therefore remain unavailable. No rule defaults are fabricated. |
 | `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus full raw `identity.users`. Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The current identity collector does not select the immutable ID, so ordinary live runs need a saved complete export including it; a hybrid sample is insufficient. |

@@ -15,6 +15,7 @@ from typing import Any
 
 from azure_tenant_audit.chunk_reader import _open_chunk
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
+from azure_tenant_audit.model_assessment import safe_projection_enum_value
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
@@ -31,15 +32,32 @@ class Projection(dict):
 
 
 class Unavailable(ValueError):
-    def __init__(self, reason: str = "incomplete_shape", unsupported: list[str] | None = None):
+    def __init__(self, reason: str = "incomplete_shape", unsupported: list[str] | None = None,
+                 *, field: str = "$", kind: str = "unseen_shape", value: Any = None):
         self.unsupported = unsupported or []
         self.reason = reason
+        self.detail = {"field": field, "kind": kind}
+        if kind == "unseen_enum_value" and safe_projection_enum_value(field, value):
+            self.detail["value"] = value
         super().__init__(reason)
 
 
-def _require(condition: bool) -> None:
+def _require(condition: bool, field: str = "$", kind: str = "unseen_shape") -> None:
     if not condition:
-        raise Unavailable()
+        raise Unavailable(field=field, kind=kind)
+
+
+def _known_fields(row: Any, allowed: set[str], path: str = "") -> None:
+    _require(isinstance(row, dict), path or "$", "invalid_type")
+    # Never echo arbitrary keys: even a single identifier can be a person's name.
+    _require(set(row) <= allowed, path + ".unrecognisedField" if path else "unrecognisedField",
+             "unexpected_field")
+
+
+def _enum(value: Any, domain: set[str], field: str) -> None:
+    _require(isinstance(value, str), field, "invalid_type")
+    if value not in domain:
+        raise Unavailable(field=field, kind="unseen_enum_value", value=value)
 
 
 def _json(value: Any) -> str:
@@ -74,20 +92,21 @@ def _invalid_constant(value: str) -> None:
     raise Unavailable()
 
 
-def _fields(row: Any, spec: dict[str, Any], *, graph: bool = False) -> dict[str, Any]:
-    _require(isinstance(row, dict))
-    _require(not row.get("error") and not row.get("error_class")
-             and row.get("read_state", "collected") == "collected"
-             and row.get("collection_status", "collected") == "collected")
+def _fields(row: Any, spec: dict[str, Any], *, graph: bool = False, path: str = "") -> dict[str, Any]:
+    _require(isinstance(row, dict), path or "$", "invalid_type")
+    for key in ("error", "error_class", "read_state", "collection_status"):
+        valid = not row.get(key) if key in {"error", "error_class"} else row.get(key, "collected") == "collected"
+        _require(valid, path + "." + key if path else key)
     result = {}
     for key, check in spec.items():
         source = key[0].lower() + key[1:] if graph else key
-        _require(source in row)
+        field = path + "." + key if path else key
+        _require(source in row, field, "missing_field")
         value = row[source]
         if isinstance(check, dict):
-            result[key] = _fields(value, check, graph=graph)
+            result[key] = _fields(value, check, graph=graph, path=field)
         else:
-            _require(check(value))
+            _require(check(value), field, "invalid_type")
             result[key] = deepcopy(value)
     return result
 
@@ -95,14 +114,15 @@ def _fields(row: Any, spec: dict[str, Any], *, graph: bool = False) -> dict[str,
 def _healthy(value: Any, *, recursive: bool = True) -> None:
     """Reject failure markers anywhere in an endpoint or normalised record."""
     if isinstance(value, dict):
-        _require(not any(value.get(k) for k in ("error", "error_class", "resolver_error", "collection_truncated",
-                 "bounded_sample", "@odata.nextLink", "truncation_reason", "incomplete", "partial")))
+        for key in ("error", "error_class", "resolver_error", "collection_truncated",
+                    "bounded_sample", "@odata.nextLink", "truncation_reason", "incomplete", "partial"):
+            _require(not value.get(key), "odata.nextLink" if key == "@odata.nextLink" else key)
         if "complete" in value:
-            _require(value["complete"] is True)
+            _require(value["complete"] is True, "complete")
         if "status" in value:
-            _require(value["status"] in {"ok", "success", "collected", "complete"})
+            _enum(value["status"], {"ok", "success", "collected", "complete"}, "status")
         for key in ("read_state", "collection_status"):
-            _require(key not in value or value[key] == "collected")
+            _require(key not in value or value[key] == "collected", key)
         if recursive:
             for child in value.values():
                 _healthy(child)
@@ -124,16 +144,19 @@ def _shape(value: Any) -> Any:
 def _seen_shape(section: str, value: Any) -> None:
     # Empty collections need both explicit completeness and an observed empty shape.
     _require(sha256(_json(_shape(value)).encode()).hexdigest() in PACK_SHAPE_DIGESTS.get(section, []))
-    def validate(item: Any, path: str = "") -> None:
+    def validate(item: Any, path: str = "", field: str = "") -> None:
         if isinstance(item, dict):
             for key, child in item.items():
                 domain = PACK_ENUM_DOMAINS.get(section, {}).get(path + "." + key)
+                child_field = field + "." + key if field else key
                 if domain is not None:
-                    _require(all(_json(v) in domain for v in (child if isinstance(child, list) else [child])))
-                validate(child, path + "." + key)
+                    for v in (child if isinstance(child, list) else [child]):
+                        if _json(v) not in domain:
+                            raise Unavailable(field=child_field, kind="unseen_enum_value", value=v)
+                validate(child, path + "." + key, child_field)
         elif isinstance(item, list):
             for child in item:
-                validate(child, path + "[]")
+                validate(child, path + "[]", field)
     validate(value)
 
 
@@ -160,18 +183,21 @@ class Bundle:
 
     def normalised(self, name: str) -> list[dict[str, Any]]:
         data = self.read(f"normalized/{name}.json")
-        _require(isinstance(data, dict) and isinstance(data.get("records"), list))
-        _require(not data.get("error") and data.get("collection_status", "collected") == "collected")
-        _require(all(isinstance(row, dict) for row in data["records"]))
+        _require(isinstance(data, dict), kind="invalid_type")
+        _require("records" in data, "records", "missing_field")
+        _require(isinstance(data["records"], list), "records", "invalid_type")
+        _require(not data.get("error"), "error")
+        _require(data.get("collection_status", "collected") == "collected", "collection_status")
+        _require(all(isinstance(row, dict) for row in data["records"]), "records", "invalid_type")
         _healthy(data)
         self.complete = data.get("complete") is True or data.get("collection_status") == "collected" or data.get("status") in {"ok", "collected", "complete"}
-        _require(bool(data["records"]) or self.complete)
+        _require(bool(data["records"]) or self.complete, "records")
         return data["records"]
 
     def coverage(self, collector: str, operation: str | None = None) -> bool:
         complete = False
         gaps = self.manifest.get("coverage_gaps", [])
-        _require(isinstance(gaps, (list, dict)))
+        _require(isinstance(gaps, (list, dict)), "coverage_gaps", "invalid_type")
         # Manifest collector gaps may be broad or carry per-list truncations.
         def relevant(value: Any) -> bool:
             if isinstance(value, dict):
@@ -181,7 +207,7 @@ class Bundle:
             if isinstance(value, list):
                 return any(relevant(v) for v in value)
             return value == collector or value == f"{collector}.{operation}"
-        _require(not relevant(gaps))
+        _require(not relevant(gaps), "coverage_gaps")
         for path in ("coverage.json", "normalized/coverage_ledger.json", "normalized/collection_gaps.json"):
             try:
                 data = self.read(path)
@@ -205,10 +231,11 @@ class Bundle:
                 _healthy(row)
                 if path.endswith("collection_gaps.json"):
                     raise Unavailable()
-                _require("actual_status" not in row or row["actual_status"] == "ok")
+                _require("actual_status" not in row or row["actual_status"] == "ok", "actual_status")
                 status = row.get("coverage_status", row.get("status"))
                 _require(status in {"ok", "complete_exact_scope", "complete_effective_role",
-                                   "complete_equivalent_scope", "complete_offline_sample"})
+                                   "complete_equivalent_scope", "complete_offline_sample"},
+                         "coverage_status" if "coverage_status" in row else "status")
                 complete = True
         return complete
 
@@ -268,19 +295,19 @@ class Bundle:
             _require(bool(section) and not any(k in section for k in ("item_count", "sample_truncated")))
             return [section]
         chunks = section.get("chunk_files", [])
-        _require(isinstance(chunks, list) and all(isinstance(p, str) for p in chunks))
-        _require(all(p.startswith((f"raw/{collector}/{operation}/", f"chunks/{collector}/")) for p in chunks))
-        _require(all(not any(part == ".secrets" or part.startswith(".env") for part in Path(p).parts) for p in chunks))
-        _require(len(set(chunks)) == len(chunks))
+        _require(isinstance(chunks, list) and all(isinstance(p, str) for p in chunks), "chunk_files", "invalid_type")
+        _require(all(p.startswith((f"raw/{collector}/{operation}/", f"chunks/{collector}/")) for p in chunks), "chunk_files")
+        _require(all(not any(part == ".secrets" or part.startswith(".env") for part in Path(p).parts) for p in chunks), "chunk_files")
+        _require(len(set(chunks)) == len(chunks), "chunk_files")
         if len(chunks) > self.max_items:
             raise Unavailable("oversize")
         _require("chunk_count" not in section or type(section["chunk_count"]) is int
-                 and section["chunk_count"] == len(chunks))
+                 and section["chunk_count"] == len(chunks), "chunk_count")
         rows = []
         size = 0
         def append(row: Any) -> None:
             nonlocal size
-            _require(isinstance(row, dict))
+            _require(isinstance(row, dict), "value", "invalid_type")
             _healthy(row)
             size += len(_json(row))
             if len(rows) >= self.max_items or size > self.max_chars:
@@ -311,15 +338,20 @@ class Bundle:
                             if len(rows) >= self.max_items:
                                 raise Unavailable("oversize")
                             append(json.loads(line, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant))
-                except (OSError, ValueError, UnicodeError) as exc:
-                    raise Unavailable(getattr(exc, "reason", "incomplete_shape")) from None
+                except Unavailable:
+                    raise
+                except (OSError, ValueError, UnicodeError):
+                    raise Unavailable(field="chunk_files") from None
         else:
-            _require(isinstance(section.get("value"), list) and not section.get("sample_truncated"))
+            _require("value" in section, "value", "missing_field")
+            _require(isinstance(section["value"], list), "value", "invalid_type")
+            _require(not section.get("sample_truncated"), "sample_truncated")
             for row in section["value"]:
                 append(row)
         if "item_count" in section:
-            _require(type(section["item_count"]) is int and section["item_count"] == len(rows))
-        _require(not section.get("sample_truncated") or "item_count" in section)
+            _require(type(section["item_count"]) is int, "item_count", "invalid_type")
+            _require(section["item_count"] == len(rows), "item_count")
+        _require(not section.get("sample_truncated") or "item_count" in section, "item_count", "missing_field")
         if not rows:
             _require(complete or section.get("complete") is True
                      or section.get("collection_status") == "collected" or section.get("status") in {"ok", "collected", "success"})
@@ -354,25 +386,34 @@ def _spo(bundle: Bundle) -> Any:
             value = raw.get(key, raw.get("oneDriveSharingCapability", raw.get("odbSharingCapability")))
         if key in canonical:
             values = [r[canonical[key]] for r in normal if r.get("read_state") == "collected" and canonical[key] in r]
-            _require(bool(values) and all(v == values[0] for v in values))
+            _require(bool(values), key, "missing_field")
+            _require(all(v == values[0] for v in values), key)
             reverse = {str(v).split(" (")[0]: n for n, v in names.items()}
-            _require(isinstance(values[0], str) and values[0] in reverse)
+            _require(isinstance(values[0], str), key, "invalid_type")
+            if values[0] not in reverse:
+                raise Unavailable(field=key, kind="unseen_enum_value", value=values[0])
             number = reverse[values[0]]
             if value is not None:
-                _require((type(value) is int and value == number) or value == values[0])
+                _require(type(value) in (int, str), key, "invalid_type")
+                _require((type(value) is int and value == number) or value == values[0], key)
         else:
+            _require(key in raw or key[0].lower() + key[1:] in raw, key, "missing_field")
+            _require(type(value) in (int, str), key, "invalid_type")
             reverse = {v: n for n, v in names.items()}
             number = value if type(value) is int else reverse.get(value) if isinstance(value, str) else None
-            _require(type(number) is int and number in names)
+            if type(number) is not int or number not in names:
+                raise Unavailable(field=key, kind="unseen_enum_value", value=value)
         result[key] = number
     for key, allowed in {"DefaultLinkPermission": {1, 2}, "DefaultSharingLinkType": {1, 2},
                          "SharingDomainRestrictionMode": {0, 1}}.items():
-        _require(result[key] in allowed)
+        if result[key] not in allowed:
+            raise Unavailable(field=key, kind="unseen_enum_value", value=result[key])
     for key in ("RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays"):
         value = raw.get(key, raw.get(key[0].lower() + key[1:]))
-        _require(type(value) is (bool if key == "EmailAttestationRequired" else int))
+        _require(key in raw or key[0].lower() + key[1:] in raw, key, "missing_field")
+        _require(type(value) is (bool if key == "EmailAttestationRequired" else int), key, "invalid_type")
         if key != "EmailAttestationRequired":
-            _require(value >= (-1 if key == "RequireAnonymousLinksExpireInDays" else 0))
+            _require(value >= (-1 if key == "RequireAnonymousLinksExpireInDays" else 0), key)
         result[key] = value
     return [result]
 
@@ -380,7 +421,7 @@ def _spo(bundle: Bundle) -> Any:
 def _ca(bundle: Bundle) -> Any:
     # Whitelists describe representable fields, not a union used to authorise shapes.
     spec = {
-        "DisplayName": _text, "State": lambda v: v in {"enabled", "disabled", "enabledForReportingButNotEnforced"},
+        "DisplayName": _text, "State": _text,
         "Conditions": {
             "Applications": {k: _strings for k in ("IncludeApplications", "ExcludeApplications", "IncludeUserActions")},
             "AuthenticationFlows": {"TransferMethods": _nullable_text},
@@ -399,8 +440,8 @@ def _ca(bundle: Bundle) -> Any:
                          "servicePrincipalRiskLevels", "customAuthenticationFactors", "termsOfUse",
                          "applicationFilter", "includeServicePrincipals", "excludeServicePrincipals",
                          "servicePrincipalFilter", "id", "displayName"}
-    def convert(row: Any, fields: dict, path: str = "") -> dict:
-        _require(isinstance(row, dict))
+    def convert(row: Any, fields: dict, path: str = "", field_path: str = "") -> dict:
+        _require(isinstance(row, dict), field_path or "$", "invalid_type")
         output = {}
         for key, value in row.items():
             if path == "" and key in {"id", "createdDateTime", "modifiedDateTime", "@odata.context", "@odata.type"}:
@@ -409,17 +450,21 @@ def _ca(bundle: Bundle) -> Any:
             if target not in fields:
                 unsupported.add(path + (key if key in restriction_names else "unrecognisedField"))
                 continue
-            _require(key == target[0].lower() + target[1:] and target not in output)
+            field = field_path + "." + target if field_path else target
+            _require(key == target[0].lower() + target[1:] and target not in output,
+                     field, "unexpected_field")
             check = fields[target]
             if isinstance(check, dict):
-                output[target] = None if value is None else convert(value, check, path + key + ".")
+                output[target] = None if value is None else convert(value, check, path + key + ".", field)
             else:
-                _require(check(value))
+                _require(check(value), field, "invalid_type")
+                if target == "State":
+                    _enum(value, {"enabled", "disabled", "enabledForReportingButNotEnforced"}, "State")
                 output[target] = deepcopy(value)
         return output
     result = [convert(row, spec) for row in bundle.operation("conditional_access", "conditionalAccessPolicies")]
     if unsupported:
-        raise Unavailable(unsupported=sorted(unsupported))
+        raise Unavailable(unsupported=sorted(unsupported), field=sorted(unsupported)[0], kind="unexpected_field")
     return result
 
 
@@ -428,14 +473,22 @@ def _authorization(bundle: Bundle) -> Any:
     _require(len(rows) == 1)
     row = rows[0]
     result = _fields(row, {"Id": _text, "AllowInvitesFrom": _text, "GuestUserRoleId": _text}, graph=True)
+    _require("defaultUserRolePermissions" in row, "DefaultUserRolePermissions", "missing_field")
     permissions = row.get("defaultUserRolePermissions")
-    _require(isinstance(permissions, dict) and set(permissions) <= {
-        "allowedToCreateApps", "permissionGrantPoliciesAssigned", "permissionGrantPolicyIdsAssignedToDefaultUserRole"})
-    result["DefaultUserRolePermissions"] = _fields(permissions, {"AllowedToCreateApps": _boolean}, graph=True)
+    _known_fields(permissions, {
+        "allowedToCreateApps", "permissionGrantPoliciesAssigned", "permissionGrantPolicyIdsAssignedToDefaultUserRole",
+        "allowedToCreateSecurityGroups", "allowedToReadOtherUsers"}, "DefaultUserRolePermissions")
+    # These two Graph settings are not read by the dependent SCuBA policies and
+    # have no corresponding field in the frozen ProviderExport shape.
+    result["DefaultUserRolePermissions"] = _fields(
+        permissions, {"AllowedToCreateApps": _boolean}, graph=True, path="DefaultUserRolePermissions")
     if "permissionGrantPoliciesAssigned" in permissions and "permissionGrantPolicyIdsAssignedToDefaultUserRole" in permissions:
-        _require(permissions["permissionGrantPoliciesAssigned"] == permissions["permissionGrantPolicyIdsAssignedToDefaultUserRole"])
+        _require(permissions["permissionGrantPoliciesAssigned"] == permissions["permissionGrantPolicyIdsAssignedToDefaultUserRole"],
+                 "PermissionGrantPolicyIdsAssignedToDefaultUserRole")
+    _require(any(k in permissions for k in ("permissionGrantPoliciesAssigned", "permissionGrantPolicyIdsAssignedToDefaultUserRole")),
+             "PermissionGrantPolicyIdsAssignedToDefaultUserRole", "missing_field")
     assigned = permissions.get("permissionGrantPoliciesAssigned", permissions.get("permissionGrantPolicyIdsAssignedToDefaultUserRole"))
-    _require(_strings(assigned))
+    _require(_strings(assigned), "PermissionGrantPolicyIdsAssignedToDefaultUserRole", "invalid_type")
     result["PermissionGrantPolicyIdsAssignedToDefaultUserRole"] = assigned
     return [result]
 
@@ -443,18 +496,19 @@ def _authorization(bundle: Bundle) -> Any:
 def _plans(bundle: Bundle) -> Any:
     result = {}
     for row in bundle.operation("licensing", "subscribedSkus"):
-        _require(isinstance(row.get("servicePlans"), list))
+        _require("servicePlans" in row, "servicePlans", "missing_field")
+        _require(isinstance(row.get("servicePlans"), list), "servicePlans", "invalid_type")
         for plan in row["servicePlans"]:
-            _require(isinstance(plan, dict) and set(plan) <= {
-                "servicePlanId", "servicePlanName", "provisioningStatus", "appliesTo"})
+            _known_fields(plan, {"servicePlanId", "servicePlanName", "provisioningStatus", "appliesTo"}, "servicePlans")
             if "provisioningStatus" in plan:
-                _require(plan["provisioningStatus"] in {
-                    "Success", "Disabled", "Error", "PendingInput", "PendingActivation", "PendingProvisioning"})
+                _enum(plan["provisioningStatus"], {
+                    "Success", "Disabled", "Error", "PendingInput", "PendingActivation", "PendingProvisioning"},
+                    "servicePlans.provisioningStatus")
             if "appliesTo" in plan:
-                _require(plan["appliesTo"] in {"User", "Company"})
+                _enum(plan["appliesTo"], {"User", "Company"}, "servicePlans.appliesTo")
             item = _fields(plan, {"ServicePlanId": _text, "ServicePlanName": _text}, graph=True)
             key = item["ServicePlanId"]
-            _require(key not in result or result[key] == item)
+            _require(key not in result or result[key] == item, "ServicePlanId")
             result[key] = item
     return list(result.values())
 
@@ -464,20 +518,30 @@ def _users(bundle: Bundle) -> Any:
         bundle.collector_health(collector)
     admins = bundle.normalised("effective_admin_set")
     summaries = [r for r in admins if r.get("kind") == "effective_admin_set_summary"]
-    _require(len(summaries) == 1 and summaries[0].get("state") == "complete")
-    _require(summaries[0].get("unresolved_principal_count") == 0)
+    _require(len(summaries) == 1)
+    _require("state" in summaries[0], "state", "missing_field")
+    _require(summaries[0]["state"] == "complete", "state")
+    _require("unresolved_principal_count" in summaries[0], "unresolved_principal_count", "missing_field")
+    _require(summaries[0]["unresolved_principal_count"] == 0, "unresolved_principal_count")
     admin_rows = [r for r in admins if r.get("is_user") is True]
-    _require(type(summaries[0].get("admin_count")) is int and summaries[0]["admin_count"] == len(admin_rows))
-    _require(len({r.get("principal_id") for r in admin_rows}) == len(admin_rows))
+    _require("admin_count" in summaries[0], "admin_count", "missing_field")
+    _require(type(summaries[0]["admin_count"]) is int, "admin_count", "invalid_type")
+    _require(summaries[0]["admin_count"] == len(admin_rows), "admin_count")
+    _require(len({r.get("principal_id") for r in admin_rows}) == len(admin_rows), "principal_id")
     users = bundle.operation("identity", "users")
     index = {r.get("id"): r for r in users}
-    _require(len(index) == len(users) and all(_text(k) for k in index))
+    _require(len(index) == len(users) and all(_text(k) for k in index), "id")
     result = {}
     for admin in sorted(admin_rows, key=lambda r: r.get("principal_id", "")):
-        _require(admin.get("state") == "complete" and admin.get("principal_id") in index)
+        _require("state" in admin, "state", "missing_field")
+        _require(admin["state"] == "complete", "state")
+        _require("principal_id" in admin, "principal_id", "missing_field")
+        _require(admin["principal_id"] in index, "principal_id")
         row = index[admin["principal_id"]]
         item = _fields(row, {"DisplayName": _text, "OnPremisesImmutableId": _nullable_text}, graph=True)
-        _require(_strings(admin.get("role_names")) and bool(admin["role_names"]))
+        _require("role_names" in admin, "role_names", "missing_field")
+        _require(_strings(admin["role_names"]), "role_names", "invalid_type")
+        _require(bool(admin["role_names"]), "role_names")
         item["roles"] = list(admin["role_names"])
         result[f"User{len(result) + 1}"] = item
     return result
@@ -493,41 +557,50 @@ def _roles(bundle: Bundle) -> Any:
     bundle.collector_health("identity_governance")
     result = []
     for row in bundle.normalised("privileged_roles"):
-        _require(set(row) <= {"DisplayName", "RoleTemplateId", "Assignments", "Rules"})
+        _known_fields(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules"})
         item = _fields(row, {"DisplayName": _text, "RoleTemplateId": _text})
-        _require(isinstance(row.get("Assignments"), list) and isinstance(row.get("Rules"), list) and bool(row["Rules"]))
+        for key in ("Assignments", "Rules"):
+            _require(key in row, key, "missing_field")
+            _require(isinstance(row[key], list), key, "invalid_type")
+        _require(bool(row["Rules"]), "Rules")
         item["Assignments"] = []
         assignment_fields = {"PrincipalId": _text, "StartDateTime": _role_date, "EndDateTime": _role_date}
         for assignment in row["Assignments"]:
-            _require(isinstance(assignment, dict) and "PrincipalId" in assignment and set(assignment) <= set(assignment_fields))
-            item["Assignments"].append(_fields(assignment, {k: assignment_fields[k] for k in assignment}))
+            _known_fields(assignment, set(assignment_fields), "Assignments")
+            _require("PrincipalId" in assignment, "Assignments.PrincipalId", "missing_field")
+            item["Assignments"].append(_fields(assignment, {k: assignment_fields[k] for k in assignment}, path="Assignments"))
         item["Rules"] = []
         rule_fields = {"Id": _text, "RuleSource": _text, "RuleSourceType": _text,
                        "IsExpirationRequired": _boolean, "MaximumDuration": _text,
                        "NotificationRecipients": _strings, "NotificationType": _nullable_text,
                        "Setting": {"IsApprovalRequired": _boolean}}
         for rule in row["Rules"]:
-            _require(isinstance(rule, dict) and set(rule) <= set(rule_fields))
-            _require({"Id", "RuleSource", "RuleSourceType"} <= set(rule))
-            _require(_text(rule["Id"]))
+            _known_fields(rule, set(rule_fields), "Rules")
+            for key in ("Id", "RuleSource", "RuleSourceType"):
+                _require(key in rule, "Rules." + key, "missing_field")
+            _require(_text(rule["Id"]), "Rules.Id", "invalid_type")
             if rule["Id"].startswith("Expiration_"):
-                _require({"IsExpirationRequired", "MaximumDuration"} <= set(rule))
+                for key in ("IsExpirationRequired", "MaximumDuration"):
+                    _require(key in rule, "Rules." + key, "missing_field")
             elif rule["Id"].startswith("Notification_"):
-                _require("NotificationRecipients" in rule)
+                _require("NotificationRecipients" in rule, "Rules.NotificationRecipients", "missing_field")
             elif rule["Id"].startswith("Approval_"):
-                _require("Setting" in rule)
+                _require("Setting" in rule, "Rules.Setting", "missing_field")
             else:
-                raise Unavailable()
+                raise Unavailable(field="Rules.Id", kind="unseen_enum_value")
             if "Setting" in rule:
-                _require(isinstance(rule["Setting"], dict) and set(rule["Setting"]) == {"IsApprovalRequired"})
-            item["Rules"].append(_fields(rule, {k: rule_fields[k] for k in rule}))
+                _known_fields(rule["Setting"], {"IsApprovalRequired"}, "Rules.Setting")
+                _require("IsApprovalRequired" in rule["Setting"], "Rules.Setting.IsApprovalRequired", "missing_field")
+            item["Rules"].append(_fields(rule, {k: rule_fields[k] for k in rule}, path="Rules"))
         result.append(item)
     return result
 
 
 def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
     identity = manifest.get("tenant_identity", {})
-    _require(isinstance(identity, dict) and identity.get("status") != "conflict" and not identity.get("conflicts"))
+    _require(isinstance(identity, dict), "tenant_identity", "invalid_type")
+    _require(identity.get("status") != "conflict", "tenant_identity.status")
+    _require(not identity.get("conflicts"), "tenant_identity.conflicts")
     observed = set()
     for collector in ("identity", "domains_hybrid"):
         try:
@@ -538,12 +611,13 @@ def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
             continue
         for row in rows:
             tenant = canonical_tenant_uuid(row.get("id"))
-            _require(tenant is not None)
+            _require("id" in row, "id", "missing_field")
+            _require(tenant is not None, "id", "invalid_type")
             observed.add(tenant)
     recorded = canonical_tenant_uuid(manifest.get("tenant_id"))
     if recorded:
         observed.add(recorded)
-    _require(len(observed) == 1)
+    _require(len(observed) == 1, "tenant_id")
     return next(iter(observed))
 
 
@@ -582,7 +656,7 @@ def _powershell(bundle: Bundle, section: str) -> Any:
     result = []
     for row in rows:
         item = _fields(row, fields)
-        _require(not (set(row) - set(fields) - {"source_name", "key", "kind", "@odata.context", "@odata.type"}))
+        _known_fields(row, set(fields) | {"source_name", "key", "kind", "@odata.context", "@odata.type"})
         result.append(item)
     return result
 
@@ -592,7 +666,7 @@ def _dns(bundle: Bundle, section: str) -> Any:
     result = []
     for row in bundle.operation("dns_posture", section):
         allowed = {"domain": _text, "doamin": _text, "rdata": _strings, "compliant": _boolean, "message": _text}
-        _require(set(row) <= set(allowed))
+        _known_fields(row, set(allowed))
         item = _fields(row, {k: allowed[k] for k in row})
         result.append(item)
     return result
@@ -696,6 +770,8 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             result[section] = dict(NOT_COLLECTED)
             report[section] = {"status": "not_collected", "reason": getattr(exc, "reason", "incomplete_shape"),
                                "source": list(bundle.sources)}
+            if report[section]["reason"] == "incomplete_shape":
+                report[section]["detail"] = getattr(exc, "detail", {"field": "$", "kind": "unseen_shape"})
             if getattr(exc, "unsupported", None):
                 report[section]["unsupported_conditions"] = exc.unsupported
         else:

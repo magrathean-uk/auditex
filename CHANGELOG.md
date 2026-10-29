@@ -26,6 +26,12 @@ export and MCP behaviour is unchanged.
   demo evidence now projects two sections, with 102 rule rows and zero model rows;
   its original SharePoint findings and explorer score of 65 are preserved.
   No collectors or network reads are added.
+- **P2 projection follow-up.** Withheld `incomplete_shape` sections now identify the
+  first failing field and failure kind, with only safe enum values in diagnostics.
+  The optional detail extends schema `2026-10-29` without a version bump. Known
+  Graph default-role security-group creation and user-read settings are accepted
+  and dropped; other unexpected permissions and unseen pack enums, including
+  `allowInvitesFrom=everyone`, still withhold the section.
 - **Deterministic pre-checks (1.2.2.dev3).** A shared, shipped SCuBA rule catalogue answers closed
   applicability gates as inferred true and unavailable inputs as unknown before inference, citing all
   blockers, including the Power BI licence flag alongside missing tenant settings. Oracle generation

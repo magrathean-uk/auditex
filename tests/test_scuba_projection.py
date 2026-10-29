@@ -377,6 +377,10 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
         return canonical({'choices': [{'message': {'content': canonical(answer)}}]}).encode()
     monkeypatch.setattr(ModelClient, '_request', reply)
     result = assess_run(root, ModelConfig(model_name='local-stub'))
+    sections = result['projection']['sections']
+    assert sections['SPO_tenant']['detail'] == {'field': 'FileAnonymousLinkType', 'kind': 'missing_field'}
+    assert sections['authorization_policies']['detail'] == {
+        'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value', 'value': 'everyone'}
     assert sum(s['status'] == 'projected' for s in result['projection']['sections'].values()) == 2
     assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 102}
     assert len(calls) == 0
@@ -739,14 +743,112 @@ def test_ca_enum_fields_reject_unseen_values_and_person_names(complete_bundle, p
     p = project_run(complete_bundle)
     assert p['conditional_access_policies'] == NOT_COLLECTED
     assert 'Injected Private Person' not in canonical(p)
+    diagnostic = p.report['sections']['conditional_access_policies']['detail']
+    assert diagnostic == {
+        'field': ('Conditions.Applications.IncludeUserActions' if path == 'applications'
+                  else 'GrantControls.AuthenticationStrength.AllowedCombinations'),
+        'kind': 'unseen_enum_value'}
 
 
 def test_authorisation_permissions_reject_unexpected_nested_fields(complete_bundle):
     path = 'raw/consent_policy.json'
     data = json.loads((complete_bundle / path).read_text())
-    data['authorizationPolicy']['value'][0]['defaultUserRolePermissions']['unexpectedPerson'] = PERSON
+    data['authorizationPolicy']['value'][0]['defaultUserRolePermissions'].update(
+        allowedToCreateSecurityGroups=True, allowedToReadOtherUsers=False, unexpectedPerson=PERSON)
     write(complete_bundle, path, data)
-    assert project_run(complete_bundle)['authorization_policies'] == NOT_COLLECTED
+    p = project_run(complete_bundle)
+    assert p['authorization_policies'] == NOT_COLLECTED
+    assert p.report['sections']['authorization_policies']['detail'] == {
+        'field': 'DefaultUserRolePermissions.unrecognisedField', 'kind': 'unexpected_field'}
+    assert PERSON not in canonical(p.report)
+
+
+def test_authorisation_known_irrelevant_permissions_are_dropped(complete_bundle):
+    path = 'raw/consent_policy.json'
+    data = json.loads((complete_bundle / path).read_text())
+    data['authorizationPolicy']['value'][0]['defaultUserRolePermissions'].update(
+        allowedToCreateSecurityGroups=True, allowedToReadOtherUsers=False)
+    write(complete_bundle, path, data)
+    p = project_run(complete_bundle)
+    assert p['authorization_policies'] == [AUTH]
+    assert 'detail' not in p.report['sections']['authorization_policies']
+
+
+@pytest.mark.parametrize('redact', [True, False])
+@pytest.mark.parametrize('value', [PERSON, EMAIL, 'Alice', 'Free text with confidential details'])
+def test_enum_diagnostic_never_echoes_person_or_free_text(complete_bundle, value, redact):
+    path = 'raw/consent_policy.json'
+    data = json.loads((complete_bundle / path).read_text())
+    data['authorizationPolicy']['value'][0]['allowInvitesFrom'] = value
+    write(complete_bundle, path, data)
+    p = project_run(complete_bundle, redact=redact)
+    assert p.report['sections']['authorization_policies']['detail'] == {
+        'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value'}
+    assert value not in canonical(p.report)
+
+
+@pytest.mark.parametrize('mutation,expected', [
+    ('missing', {'field': 'DefaultUserRolePermissions.AllowedToCreateApps', 'kind': 'missing_field'}),
+    ('type', {'field': 'DefaultUserRolePermissions.AllowedToCreateApps', 'kind': 'invalid_type'}),
+    ('key', {'field': 'DefaultUserRolePermissions.unrecognisedField', 'kind': 'unexpected_field'}),
+])
+def test_nested_diagnostic_paths_do_not_echo_person_data(complete_bundle, mutation, expected):
+    path = 'raw/consent_policy.json'
+    data = json.loads((complete_bundle / path).read_text())
+    permissions = data['authorizationPolicy']['value'][0]['defaultUserRolePermissions']
+    if mutation == 'missing':
+        del permissions['allowedToCreateApps']
+    elif mutation == 'type':
+        permissions['allowedToCreateApps'] = PERSON
+    else:
+        permissions[PERSON] = EMAIL
+    write(complete_bundle, path, data)
+    p = project_run(complete_bundle)
+    assert p.report['sections']['authorization_policies']['detail'] == expected
+    assert PERSON not in canonical(p.report) and EMAIL not in canonical(p.report)
+
+
+def test_numeric_enum_diagnostic_and_optional_detail_validate(complete_bundle):
+    operation(complete_bundle, 'sharepoint_access', 'sharePointSettings', [{**SPO, 'FileAnonymousLinkType': 99}])
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    assert result['projection']['sections']['SPO_tenant']['detail'] == {
+        'field': 'FileAnonymousLinkType', 'kind': 'unseen_enum_value', 'value': 99}
+    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    validate_assessment(result)
+    jsonschema.validate(result, schema)
+    for section in result['projection']['sections'].values():
+        section.pop('detail', None)
+    validate_assessment(result)
+    jsonschema.validate(result, schema)
+
+
+@pytest.mark.parametrize('diagnostic', [
+    {}, {'field': 'AllowInvitesFrom', 'kind': 'unknown'},
+    {'field': PERSON, 'kind': 'invalid_type'},
+    {'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value', 'value': PERSON},
+    {'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value', 'value': True},
+    {'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value', 'value': {'displayName': PERSON}},
+    {'field': 'AllowInvitesFrom', 'kind': 'missing_field', 'extra': PERSON},
+])
+def test_projection_diagnostic_both_validators_reject_malformed_detail(complete_bundle, diagnostic):
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result['projection']['sections']['scuba_config']['detail'] = diagnostic
+    with pytest.raises(ValueError):
+        validate_assessment(result)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+
+
+@pytest.mark.parametrize('section,diagnostic', [
+    ('SPO_tenant', {'field': 'FileAnonymousLinkType', 'kind': 'missing_field'}),
+    ('scuba_config', {'field': 'AllowInvitesFrom', 'kind': 'missing_field', 'value': 'everyone'}),
+    ('scuba_config', {'field': 'DisplayName', 'kind': 'unseen_enum_value', 'value': 'everyone'}),
+])
+def test_projection_diagnostic_validation_rejects_inconsistent_detail(complete_bundle, section, diagnostic):
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result['projection']['sections'][section]['detail'] = diagnostic
+    with pytest.raises(ValueError):
+        validate_assessment(result)
 
 
 @pytest.mark.parametrize('metadata', [{'complete': False}, {'status': 'failed'}, {'collection_status': 'not_collected'}])
@@ -858,4 +960,16 @@ def test_service_plan_nested_fields_are_explicitly_validated(complete_bundle, ex
     p = project_run(complete_bundle)
     assert p['service_plans'] == NOT_COLLECTED
     assert p.report['sections']['service_plans']['reason'] == 'incomplete_shape'
+    field = next(iter(extra))
+    assert p.report['sections']['service_plans']['detail'] == {
+        'field': 'servicePlans.' + ('unrecognisedField' if field == 'unexpectedPerson' else field),
+        'kind': 'unexpected_field' if field == 'unexpectedPerson' else 'unseen_enum_value'}
     assert 'Injected Private Person' not in canonical(p)
+
+
+def test_missing_role_rule_field_diagnostic(complete_bundle):
+    roles = json.loads(json.dumps(ROLES))
+    del roles[0]['Rules'][0]['RuleSourceType']
+    write(complete_bundle, 'normalized/privileged_roles.json', {'records': roles})
+    assert project_run(complete_bundle).report['sections']['privileged_roles']['detail'] == {
+        'field': 'Rules.RuleSourceType', 'kind': 'missing_field'}
