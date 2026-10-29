@@ -487,6 +487,51 @@ def test_coverage_failures_override_usable_payload(complete_bundle, path, rows):
     assert project_run(complete_bundle)['service_plans'] == NOT_COLLECTED
 
 
+SCHEDULE = {'id': TENANT, 'principalId': TENANT, 'roleDefinitionId': 'Role1', 'status': 'Provisioned',
+            'scheduleInfo': {'startDateTime': '2026-10-01T00:00:00Z'}}
+
+
+@pytest.mark.parametrize('section', ['privileged_users', 'privileged_roles'])
+def test_graph_record_status_is_data_not_collection_health(complete_bundle, section):
+    # A role schedule's own status is Graph data; no pack row carries it and no rule reads it.
+    operation(complete_bundle, 'identity_governance', 'roleAssignmentSchedules', [SCHEDULE])
+    operation(complete_bundle, 'identity', 'users', [
+        {'id': TENANT, 'displayName': PERSON, 'onPremisesImmutableId': None, 'status': 'Provisioned',
+         'nested': {'status': 'Provisioned'}}])
+    p = project_run(complete_bundle, redact=False)
+    assert p[section] == EXPECTED[section]
+    assert p.report['sections'][section]['status'] == 'projected'
+
+
+@pytest.mark.parametrize('section,collector,name,metadata', [
+    ('privileged_users', 'identity_governance', 'roleAssignmentSchedules', {'status': 'failed'}),
+    ('privileged_roles', 'identity_governance', 'roleAssignmentSchedules', {'status': 'partial_success'}),
+    ('privileged_users', 'identity', 'users', {'status': 'failed'}),
+    ('service_plans', 'licensing', 'subscribedSkus', {'status': 'failed'}),
+])
+def test_envelope_failure_status_still_withholds(complete_bundle, section, collector, name, metadata):
+    rows = {'identity_governance': [SCHEDULE], 'licensing': [{'servicePlans': []}],
+            'identity': [{'id': TENANT, 'displayName': PERSON, 'onPremisesImmutableId': None}]}[collector]
+    operation(complete_bundle, collector, name, rows, **metadata)
+    p = project_run(complete_bundle)
+    assert p[section] == NOT_COLLECTED
+    assert p.report['sections'][section]['detail'] == {'field': 'status', 'kind': 'unseen_enum_value'}
+
+
+def test_normalised_envelope_failure_status_still_withholds(complete_bundle):
+    write(complete_bundle, 'normalized/privileged_roles.json', {'records': ROLES, 'status': 'failed'})
+    p = project_run(complete_bundle)
+    assert p['privileged_roles'] == NOT_COLLECTED
+    assert p.report['sections']['privileged_roles']['detail'] == {'field': 'status', 'kind': 'unseen_enum_value'}
+
+
+def test_record_status_does_not_hide_an_envelope_error(complete_bundle):
+    operation(complete_bundle, 'identity_governance', 'roleAssignmentSchedules', [SCHEDULE], error='Forbidden')
+    p = project_run(complete_bundle)
+    assert p['privileged_users'] == NOT_COLLECTED and p['privileged_roles'] == NOT_COLLECTED
+    assert p.report['sections']['privileged_users']['detail'] == {'field': 'error', 'kind': 'unseen_shape'}
+
+
 @pytest.mark.parametrize('condition', ['locations', 'devices', 'platforms'])
 def test_ca_unsupported_scope_withholds_entire_section_and_names_condition(complete_bundle, condition):
     row = graph(CA)

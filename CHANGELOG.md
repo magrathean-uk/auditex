@@ -32,6 +32,10 @@ export and MCP behaviour is unchanged.
   Graph default-role security-group creation and user-read settings are accepted
   and dropped; other unexpected permissions and unseen pack enums, including
   `allowInvitesFrom=everyone`, still withhold the section.
+  - Collection health reads `status` only from collector metadata (operation, normalised
+    and coverage envelopes). A Graph record's own `status`, such as a role schedule's
+    `Provisioned`, is data and no longer withholds the privileged sections as an unseen
+    enum; failed envelopes and the other failure markers still do.
 - **Deterministic pre-checks (1.2.2.dev3).** A shared, shipped SCuBA rule catalogue answers closed
   applicability gates as inferred true and unavailable inputs as unknown before inference, citing all
   blockers, including the Power BI licence flag alongside missing tenant settings. Oracle generation

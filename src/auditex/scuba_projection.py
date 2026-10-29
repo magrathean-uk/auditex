@@ -111,24 +111,30 @@ def _fields(row: Any, spec: dict[str, Any], *, graph: bool = False, path: str = 
     return result
 
 
-def _healthy(value: Any, *, recursive: bool = True) -> None:
-    """Reject failure markers anywhere in an endpoint or normalised record."""
+def _healthy(value: Any, *, recursive: bool = True, metadata: bool = True) -> None:
+    """Reject failure markers anywhere in an endpoint or normalised record.
+
+    ``status`` is a collection-health flag only in the collector's own metadata: an operation
+    envelope, a normalised file envelope or a coverage row (``metadata``). Below that it is Graph
+    record data (a role schedule's ``Provisioned``) and is never read as health. The collector-owned
+    markers (``error``, ``read_state``, truncation flags and the rest) stay checked at every depth.
+    """
     if isinstance(value, dict):
         for key in ("error", "error_class", "resolver_error", "collection_truncated",
                     "bounded_sample", "@odata.nextLink", "truncation_reason", "incomplete", "partial"):
             _require(not value.get(key), "odata.nextLink" if key == "@odata.nextLink" else key)
         if "complete" in value:
             _require(value["complete"] is True, "complete")
-        if "status" in value:
+        if metadata and "status" in value:
             _enum(value["status"], {"ok", "success", "collected", "complete"}, "status")
         for key in ("read_state", "collection_status"):
             _require(key not in value or value[key] == "collected", key)
         if recursive:
             for child in value.values():
-                _healthy(child)
+                _healthy(child, metadata=False)
     elif recursive and isinstance(value, list):
         for child in value:
-            _healthy(child)
+            _healthy(child, metadata=False)
 
 
 def _shape(value: Any) -> Any:
@@ -255,7 +261,10 @@ class Bundle:
             _require(isinstance(sample, dict))
             payload = sample.get(collector, {})
         _require(isinstance(payload, dict))
-        _healthy(payload)
+        # The payload maps operation names to their envelopes; the envelopes are the metadata.
+        _healthy(payload, recursive=False)
+        for envelope in payload.values():
+            _healthy(envelope)
 
     def operation(self, collector: str, operation: str) -> list[dict[str, Any]]:
         try:
@@ -308,7 +317,7 @@ class Bundle:
         def append(row: Any) -> None:
             nonlocal size
             _require(isinstance(row, dict), "value", "invalid_type")
-            _healthy(row)
+            _healthy(row, metadata=False)
             size += len(_json(row))
             if len(rows) >= self.max_items or size > self.max_chars:
                 raise Unavailable("oversize")
