@@ -1275,18 +1275,20 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                         if added:
                             nulled.append((field_section, ".".join((field_section, *path))))
             # Check the evidence actually shown, after removed sections have
-            # become NOT_COLLECTED. Absence takes priority in both paths.
+            # become NOT_COLLECTED. A usable closed gate takes priority.
             precheck = precheck_policy(pid, shown, view_sections) if rule else None
-            if precheck and precheck["class"] == "closed_gate" and engine_outcome == "evaluated":
+            if (precheck and precheck["class"] == "closed_gate" and engine_outcome == "evaluated"
+                    and all(section in variant["input"] for section in view_sections)
+                    and not unavailable_input_sections(shown, view_sections)):
                 raise ValueError(f"Oracle applicability disagrees with shipped pre-check: {pid}; "
                                  f"closed gate {precheck['field']}={precheck['value']!r}, "
                                  f"evaluated RequirementMet={result['RequirementMet']!r}")
             if not precheck and rule and rule["complete"] and engine_outcome == "not_applicable":
                 raise ValueError(f"Oracle applicability disagrees with shipped pre-check: {pid}; "
                                  "open gate, oracle not_applicable")
-            # Only missing/unusable inputs may override an oracle outcome:
-            # an explicit closed gate beats a missing setting, while an absent
-            # dependency or gate input remains unknown even for an oracle pass.
+            # A closed gate makes missing dependencies moot, including an oracle
+            # default verdict on a partial input. With no closed gate, unavailable
+            # dependencies or gate inputs remain unknown even for an oracle pass.
             if precheck:
                 outcome = "not_applicable" if precheck["class"] == "closed_gate" else "fail_closed_missing_input"
             if (pid, view) in seen_views:
@@ -1379,6 +1381,209 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                 case["provenance"]["distinct_prompt_sha256"] = distinct_prompt_sha256(case)
             cases.append(case)
     return cases, stats
+
+
+# --- deterministic v8 extensions; opt-in, leaving the frozen miner path unchanged -------------------------------
+
+def _v8_gate_edit(tenant: dict, rule: dict, value, *, remove: bool = False) -> dict:
+    """Set/remove a gate through singleton exports and selector paths without changing the source tenant."""
+    result = json.loads(canonical(tenant))
+    current = result.setdefault(rule["section"], {})
+    if not isinstance(current, (dict, list)):
+        current = result[rule["section"]] = {}
+    for index, part in enumerate(rule["path"]):
+        last = index == len(rule["path"]) - 1
+        if isinstance(part, dict):
+            if not isinstance(current, list):
+                raise ValueError("gate selector requires a list")
+            matches = [obj for obj in current if isinstance(obj, dict) and all(obj.get(k) == v for k, v in part.items())]
+            if len(matches) > 1:
+                raise ValueError("ambiguous gate selector")
+            if not matches:
+                current.append(dict(part))
+                matches = [current[-1]]
+            current = matches[0]
+        else:
+            if isinstance(current, list):
+                if not current:
+                    current.append({})
+                if len(current) != 1 or not isinstance(current[0], dict):
+                    raise ValueError("gate field requires a singleton object")
+                current = current[0]
+            if last:
+                current.pop(part + "_name", None)
+                if remove:
+                    current.pop(part, None)
+                else:
+                    current[part] = value
+            else:
+                following = rule["path"][index + 1]
+                expected_type = list if isinstance(following, dict) else dict
+                if not isinstance(current.get(part), expected_type):
+                    current[part] = expected_type()
+                current = current[part]
+    return result
+
+
+def v8_value_variants(name: str, harvested: list[dict], sections: dict[str, list[str]]) -> list[dict]:
+    """All gate values on every harvested tenant; targeted value shapes from the pinned policy conditions.
+
+    Shapes carry a generator and template in their name/source. OPA, never an assumed answer, labels them.
+    Existing harvesting, ids, periodic masks and split assignment are unaffected by this opt-in API.
+    """
+    result = []
+
+    def add(pid, generator, shape, tenant, base_name):
+        result.append({"name": f"v8:{generator}:{shape}; base={base_name}", "input": tenant,
+                       "policies": [pid], "template_prefix": f"v8:{generator}:{shape}", "split": "train"})
+
+    for rule in rule_catalogue()["rules"]:
+        pid = rule["policy_id"]
+        if pid not in sections:
+            continue
+        for base in harvested:
+            for value in rule["allowed_values"]:
+                add(pid, "gate_sweep", canonical(value), _v8_gate_edit(base["input"], rule, value), base["name"])
+    base = harvested[0]["input"]
+    if name == "PowerBI":
+        pid = "MS.POWERBI.7.1v1"
+        # 7.1 reads enabled only; security-group restrictions must not be mistaken for enabling the setting.
+        groups = [{}, {"canSpecifySecurityGroups": False},
+                  {"canSpecifySecurityGroups": True, "enabledSecurityGroups": []},
+                  {"canSpecifySecurityGroups": True, "enabledSecurityGroups": [{"graphId": "10000000-0000-4000-8000-000000000001", "name": "Audit group A"}]},
+                  {"canSpecifySecurityGroups": True, "enabledSecurityGroups": [{"graphId": "10000000-0000-4000-8000-000000000001", "name": "Audit group A"},
+                       {"graphId": "10000000-0000-4000-8000-000000000002", "name": "Audit group B"}],
+                   "excludedSecurityGroups": [{"graphId": "10000000-0000-4000-8000-000000000003", "name": "Audit group C"}]}]
+        for licence in (True, False, None):
+            for enabled in (True, False):
+                for gi, group in enumerate(groups):
+                    for setting_shape in ("present", "absent", "empty", "null_element"):
+                        tenant = json.loads(canonical(base))
+                        if licence is None:
+                            tenant.pop("powerbi_license_found", None)
+                        else:
+                            tenant["powerbi_license_found"] = licence
+                        setting = {"settingName": "EimInformationProtectionEdit", "enabled": enabled, **group}
+                        other = {"settingName": "RScriptVisual", "enabled": not enabled}
+                        tenant["powerbi_tenant_settings"] = ([setting, other] if setting_shape == "present" else
+                                                             [other] if setting_shape == "absent" else
+                                                             [] if setting_shape == "empty" else [None])
+                        add(pid, "powerbi_7_1", f"licence_{licence}:enabled_{enabled}:groups_{gi}:{setting_shape}", tenant, "base")
+    if name == "EXO":
+        pid = "MS.EXO.7.1v1"
+        compliant = {"Name": "External warning", "State": "Enabled", "Mode": "Enforce",
+                     "PrependSubject": "[External]", "FromScope": "NotInOrganization"}
+        shapes = {"disabled": {"State": "Disabled"}, "audit": {"Mode": "Audit"},
+                  "audit_notify": {"Mode": "AuditAndNotify"}, "no_prefix": {"PrependSubject": ""},
+                  "internal": {"FromScope": "InOrganization"}, "all_scope": {"FromScope": "None"}}
+        for shape, edit in shapes.items():
+            for count in (1, 2, 3):
+                tenant = json.loads(canonical(base))
+                tenant["transport_rule"] = [{**compliant, **edit, "Name": f"External warning {i}"} for i in range(count)]
+                add(pid, "exo_7_1_not_met", f"{shape}:rules_{count}", tenant, "base")
+    if name == "Teams":
+        for pid, setting_name, field in (("MS.TEAMS.5.2v2", "GlobalApp", "GlobalCatalogAppsType"),
+                                          ("MS.TEAMS.5.3v2", "PrivateApp", "PrivateCatalogAppsType")):
+            for mode in ("Everyone", "SpecificUsers", "missing", "certificate"):
+                for count in (1, 2, 3):
+                    tenant = json.loads(canonical(base))
+                    tenant["app_policies"] = [{"Identity": f"Policy-{i}", "GlobalCatalogAppsType": "AllowedAppList",
+                                                "PrivateCatalogAppsType": "AllowedAppList", field: "BlockedAppList"}
+                                               for i in range(count)]
+                    tenant["tenant_app_settings"] = ([] if mode == "missing" else [{"CertificateBasedAuth": True}]
+                        if mode == "certificate" else [{"SettingName": setting_name, "SettingValue": mode}])
+                    add(pid, "teams_5_not_met", f"{setting_name}:{mode}:policies_{count}", tenant, "base")
+    return result
+
+
+def v8_section_cases(name: str, bases: list[dict], *, bases_per_policy: int = 4) -> list[dict]:
+    """Evidence-only section drops and gate-field removal on oracle-evaluated base tenants.
+
+    A marker represents collection absence, not a tenant value passed to Rego. Shared prechecks supply the
+    answer; closed gates remain not applicable despite another section's absence.
+    Provenance retains the evaluated source row and identifies this projection explicitly.
+    Include every dependent section even for single-section policies and visibly closed gates.
+    """
+    from azure_tenant_audit.scuba_precheck import precheck_response
+
+    by_policy = defaultdict(list)
+    for row in bases:
+        user = json.loads(row["messages"][1]["content"])
+        by_policy[user["policy_id"]].append(row)
+    result = []
+    for pid, policy_bases in sorted(by_policy.items()):
+        # Prefer a range of actual verdicts over repeated base-shaped masks.
+        policy_bases = sorted(policy_bases, key=lambda row: (row["provenance"]["oracle_outcome"], row["id"]))
+        selected = []
+        for outcome in sorted({row["provenance"]["oracle_outcome"] for row in policy_bases}):
+            selected.append(next(row for row in policy_bases if row["provenance"]["oracle_outcome"] == outcome))
+        selected += [row for row in policy_bases if row not in selected]
+        for base in selected[:bases_per_policy]:
+            original = json.loads(base["messages"][1]["content"])
+            sections = [e["section"] for e in original["evidence"] if e["section"] != "policy"]
+            rule = policy_rule(pid)
+            for section in [*sections, *([None] if rule else [])]:
+                user = json.loads(canonical(original))
+                projection = {e["section"]: e["observed"] for e in user["evidence"] if e["section"] != "policy"}
+                if section is None:
+                    projection = _v8_gate_edit(projection, rule, None, remove=True)
+                    generator, shape = "gate_missing", rule["section"] + "." + str(rule["path"])
+                else:
+                    projection[section] = dict(NOT_COLLECTED)
+                    generator, shape = "section_drop", section
+                detail = precheck_policy(pid, projection, sections)
+                if detail is None:
+                    raise ValueError(f"v8 {generator}: missing input not detected for {pid}")
+                for evidence in user["evidence"]:
+                    if evidence["section"] != "policy":
+                        evidence["observed"] = projection[evidence["section"]]
+                policy = user["evidence"][0]["observed"]
+                response = precheck_response(detail, policy, sections, named_limitations=False)
+                case = json.loads(canonical(base))
+                case_id = view_case_id(f"scuba-{name.lower()}", pid, canonical(projection), "conv3-v8-gap")
+                user["case_id"] = case_id
+                case.update(id=case_id, split="train", messages=[base["messages"][0], {"role": "user", "content": canonical(user)},
+                            {"role": "assistant", "content": canonical(response)}],
+                            expected={**response, "allowed_evidence_ids": [e["id"] for e in user["evidence"]]})
+                case["provenance"] = {k:v for k,v in base["provenance"].items() if k not in {"reviewer", "consensus_weight", "adjudication"}}
+                case["provenance"].update(review_status="unreviewed",
+                    oracle_outcome=("not_applicable" if detail["class"] == "closed_gate" else
+                                    "not_collected" if generator == "section_drop" else "fail_closed_missing_input"),
+                    source=base["provenance"]["source"] + f"; generator=v8:{generator}; shape={shape}; base_case={base['id']}; evidence_projection_only=true",
+                    template=template_key(name, pid, f"v8:{generator}:{shape}:{base['provenance']['oracle_outcome']}"))
+                case["provenance"]["distinct_prompt_sha256"] = distinct_prompt_sha256(case)
+                result.append(case)
+    return result
+
+
+def assign_v8_splits(cases: list[dict]) -> list[dict]:
+    """Assign new templates 85/15 within each source family, never test; keep templates in one split.
+
+    Explicit new family names let legacy frozen families retain their assignments while the closed catalogue
+    gets new in-distribution siblings. Call after prompt deduplication and leakage filtering.
+    """
+    grouped = defaultdict(list)
+    result = json.loads(canonical(cases))
+    for row in result:
+        if "v8:" not in row["provenance"].get("template", ""):
+            raise ValueError("v8 split assignment accepts only generated v8 rows")
+        if row["split"] == "test":
+            raise ValueError("new v8 rows must never be test")
+        grouped[row["family"]].append(row)
+    for family, rows in sorted(grouped.items()):
+        templates = sorted({row["provenance"]["template"] for row in rows}, key=lambda key: sha(key.encode()))
+        # Weighted template allocation minimises row-count error without dividing a reasoning template.
+        target = round(len(rows) * 0.15)
+        validation, count = set(), 0
+        for template in templates:
+            size = sum(row["provenance"]["template"] == template for row in rows)
+            if abs(count + size - target) < abs(count - target):
+                validation.add(template)
+                count += size
+        for row in rows:
+            row["split"] = "validation" if row["provenance"]["template"] in validation else "train"
+            row["family"] = f"{family}-v8-{row['split']}"
+    return result
 
 
 # --- single-purpose Conditional Access bases (decision D11, 25 Oct 2026) ----------------------------------------------------

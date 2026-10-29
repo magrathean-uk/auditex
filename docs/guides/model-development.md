@@ -178,9 +178,17 @@ deterministic field**. It requires conditional-access semantics and exclusions;
 an enabled Authenticator leaves that branch to the model. All eight applicability
 policies have at least one deterministic gate; no whole policy in this group lacks one.
 
-A missing dependency key or a `not_collected` marker produces an unknown requirement
-and names every unavailable section in the row limitations; missing gate fields
-name the input path. Absence takes priority over a closed gate in another section.
+Precedence matches the training system prompt: a present, usable gate section and
+field whose typed value is closed produces `closed_gate`, requirement `inferred`
+true, limitations exactly `["policy_not_applicable"]` and no recommendations, even
+when another dependent section is missing or marked `not_collected`. Otherwise a
+missing/unusable gate section or field, or any missing dependency for any policy,
+produces `absent_section`, requirement `unknown` with null value, and names the
+unavailable sections or field in the row limitations. Gate section markers are
+unusable. With neither condition there is no rule answer; the model decides.
+The generator permits a closed gate to override an oracle default on a partial
+input; it still rejects contradictory evaluated verdicts when all sections are
+available. Section-drop rows follow this same precedence.
 Rule answers make no model requests by default. `--shadow-model-on-precheck` opts
 into recording the normal model-client result in `model_shadow`; it cannot affect
 the verdict, comparison or totals. The entire empty P1 projection is exempt so demo
@@ -203,14 +211,14 @@ vocabulary; the serving-only named limitation extensions and transport metadata 
 excluded. Expected labels and provenance do not enter pre-check decisions.
 
 Measured on frozen test-v7 (435 rows): closed gates answer 96, all 96 strict-correct;
-the absence class answers 71, 70 strict-correct; 268 remain for the model. The absence
+the absence class answers 71, all 71 strict-correct; 268 remain for the model. The absence
 class comprises 15 missing gate inputs and 56 section markers. Of those markers, 54
 have provenance `not_collected` and two `fail_closed_missing_input`. Thus the expected
 15-row handover count describes missing SharePoint gate inputs, not every absent
-dependency. All rule answers total 167, with 166 strict-correct. The sole mismatch is
-`scuba-powerbi-ms-powerbi-7-1v1-621dd7e602`: both answers are unknown, but the pack cites
-the false licence flag (`e2`) as well as the missing tenant-settings section (`e3`);
-the pre-check cites the missing section alone. The pack stays unchanged. Nine remaining
+dependency. All rule answers total 167, with 167 strict-correct, both before and after
+the closed-gate precedence correction; no v7 row combines a closed gate with a
+missing dependent section. The Power BI licence blocker and missing tenant settings
+are both cited. The pack stays unchanged. Nine remaining
 rows are unreadable Power BI inputs outside these rules; 89 are met and 170 not met.
 No combined score against a real model is claimed without recorded responses.
 
@@ -318,6 +326,30 @@ carries the commit, policy id, test name, OPA version, input hash and CISA's Rep
 `provenance.template` of `<product>/<policy id>/<mutation family>` (which fields of its evidence the
 variant changes; `not_collected:<section>` for gap cases) and `provenance.distinct_prompt_sha256`. Cases are
 written `unreviewed` in `train`.
+
+The opt-in v8 generator API in the same script leaves that default mining path unchanged.
+`v8_value_variants(product, harvested, sections)` sweeps every allowed gate value from
+`configs/scuba-rule-precheck.json` on every harvested base tenant and generates Power BI
+7.1 licence/setting/enabled/security-group shapes, plus violating EXO 7.1 and Teams
+5.2v2/5.3v2 shapes. Evaluate these inputs with the pinned OPA and pass the results to
+`build_cases` with a separate id salt and periodic masking disabled; the existing shared
+precheck drift guard still applies. Power BI 7.1 reads `enabled`; security-group
+restrictions do not substitute for enabling the setting.
+
+`v8_section_cases(product, evaluated_cases)` projects each dependent section to the
+not-collected marker, including single-section policies, and removes only the gate field
+for gated policies. These are evidence-availability projections over evaluated tenants;
+the shared precheck supplies the response: unknown unless a usable closed gate makes
+the policy not applicable. Markers are not real tenant settings for Rego. Each extension names its generator in provenance source
+and template. Rows remain unreviewed until the oracle approval step.
+
+After deduplication and frozen-test collision removal, `assign_v8_splits(new_cases)`
+assigns whole new templates approximately 85/15 within each source family. It refuses
+legacy templates and any new row marked test. New families carry their explicit split;
+legacy rows and frozen test prompts are not relabelled. Pack curation must separately
+check frozen test ids, literal user-prompt hashes and canonical observed-evidence
+collisions, then validate the prepared training packs. These opt-in APIs do not change
+what the standalone miner CLI emits.
 
 From prompt convention `named-enums-v1`, recognised integer enums in the ScubaGear
 `SPO_tenant` evidence section carry a companion `<Key>_name` string. The seven

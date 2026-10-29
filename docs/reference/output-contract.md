@@ -70,13 +70,21 @@ their training text, including the intentionally empty Power Platform excerpt.
 
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
-The product and oracle generator use the same gate evaluator and data. A required
-section missing from a non-empty projection, or marked `not_collected`, produces
-an `unknown` requirement with null value, never an inferred answer. An unreadable,
-missing or invalid typed gate value also produces `unknown`. Explicit null sections
-retain their model/default semantics outside registered gate fields. An absent
-section takes priority over a closed gate in another section. A closed gate produces
-`inferred` true, limitations exactly `["policy_not_applicable"]` and no recommendations.
+The product and oracle generator use the same gate evaluator and data, in this order:
+
+1. A present, usable gate section and field with a typed value in the closed set
+   produces `closed_gate`: requirement `inferred` true, limitations exactly
+   `["policy_not_applicable"]` and no recommendations. This takes priority even
+   when another dependent section is absent or marked `not_collected`.
+2. Otherwise, a missing or unusable gate section/field for a gated policy, or any
+   missing dependent section for any policy, produces `absent_section`: requirement
+   `unknown` with null value, with limitations naming unavailable sections or fields.
+   A `not_collected` marker is unavailable, including a gate section marker.
+3. Otherwise there is no rule answer; the model decides.
+
+Explicit null sections retain their model/default semantics outside registered
+gate fields. A visibly closed gate makes the other dependent evidence moot, as
+required by the training system prompt.
 
 Rule rows have `reason: "rule_precheck"`, `validation_status: "valid"`, zero attempts
 and latency, null prompt/response hashes, and false thinking flags. Their

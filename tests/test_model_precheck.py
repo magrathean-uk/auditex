@@ -71,23 +71,50 @@ def test_authenticator_selects_the_named_method(state, expected):
 
 
 @pytest.mark.parametrize("projection", [{}, {"SPO_tenant": NOT_COLLECTED},
-    {"SPO_tenant": {**NOT_COLLECTED, "diagnostic": "unavailable"}}, {"unrelated": {}}])
+    {"SPO_tenant": {**NOT_COLLECTED, "diagnostic": "unavailable"}},
+    {"SPO_tenant": {**NOT_COLLECTED, "SharingCapability": 0}}, {"unrelated": {}}])
 def test_marker_missing_key_and_strict_empty_projection(projection):
     result = precheck_policy(SP, projection, ["SPO_tenant"])
     assert result == {"class": "absent_section", "rule_id": "required_sections_present",
                       "section": ["SPO_tenant"], "field": None, "value": None}
 
 
-def test_missing_sections_are_named_and_take_priority_over_closed_gate():
+@pytest.mark.parametrize("missing", [True, False])
+def test_closed_gate_takes_priority_over_missing_or_marked_dependency(missing):
     pid = "MS.TEAMS.2.2v2"
-    case = build_case(pid, {"scuba_config": {"M365Environment": "gcc"}}, "unused")
+    projection = {"scuba_config": {"M365Environment": "gcc"}}
+    if not missing:
+        projection["federation_configuration"] = NOT_COLLECTED
+    case = build_case(pid, projection, "unused")
     result = precheck_case(case)
-    assert result["claims"][0] == {"id": "requirement_met", "status": "unknown", "value": None,
-                                   "evidence_ids": ["e0", "e1"]}
-    assert result["rule_precheck"]["section"] == ["federation_configuration"]
-    assert result["limitations"][-1].endswith(":federation_configuration")
+    assert result["rule_precheck"]["class"] == "closed_gate"
+    assert result["claims"][0] == {"id": "requirement_met", "status": "inferred", "value": True,
+                                   "evidence_ids": ["e0", "e1", "e2"]}
+    assert result["limitations"] == ["policy_not_applicable"]
+    assert result["recommendations"] == []
+
+
+@pytest.mark.parametrize("projection,suffix", [
+    ({"federation_configuration": {}}, "scuba_config"),
+    ({"federation_configuration": {}, "scuba_config": {}}, "scuba_config.M365Environment"),
+    ({"federation_configuration": {}, "scuba_config": {"M365Environment": "invalid"}}, "scuba_config.M365Environment"),
+    ({"scuba_config": {"M365Environment": "commercial"}}, "federation_configuration"),
+])
+def test_gate_absence_or_unusable_field_and_open_gate_with_missing_dependency_are_unknown(projection, suffix):
+    result = precheck_case(build_case("MS.TEAMS.2.2v2", projection, "unused"))
+    assert result["rule_precheck"]["class"] == "absent_section"
+    assert (result["claims"][0]["status"], result["claims"][0]["value"]) == ("unknown", None)
+    assert result["limitations"] == ["required_evidence_section_not_collected",
+                                     "required_evidence_section_not_collected:" + suffix]
+    assert result["recommendations"] == ["collect_missing_evidence_section"]
+
+
+def test_ungated_missing_sections_are_named_and_null_retains_default():
     detail = precheck_policy("MS.AAD.1.1v1", {}, ["conditional_access_policies", "scuba_config"])
+    assert detail["class"] == "absent_section"
     assert detail["section"] == ["conditional_access_policies", "scuba_config"]
+    record = precheck_case(build_case("MS.AAD.1.1v1", {}, "unused"))
+    assert (record["claims"][0]["status"], record["claims"][0]["value"]) == ("unknown", None)
     # Explicit null is a collected default, not an absent section for ordinary policies.
     assert precheck_policy("MS.AAD.7.3v1", {"privileged_users": None}, ["privileged_users"]) is None
 
@@ -198,19 +225,22 @@ def test_generator_rejects_oracle_gate_drift_and_abstains_on_unusable_gate():
     assert cases[0]["expected"]["claims"][0]["status"] == "unknown"
 
 
-def test_generator_and_serving_agree_when_closed_gate_has_removed_dependency():
+@pytest.mark.parametrize("report", ["federation_configuration is missing from input JSON", "Requirement met"])
+def test_generator_and_serving_agree_when_closed_gate_has_removed_dependency(report):
     miner = runpy.run_path(str(ROOT / "scripts/build-oracle-cases.py"))
     pid = "MS.TEAMS.2.3v2"
     projection = {"scuba_config": {"M365Environment": "gcc"}}
     cases, _ = miner["build_cases"]("teams", [({"name": "test", "sha256": "a" * 64, "input": projection}, [
         {"PolicyId": pid, "Criticality": "Should", "RequirementMet": False,
-         "ReportDetails": "federation_configuration is missing from input JSON"}])],
+         "ReportDetails": report}])],
         {pid: ["federation_configuration", "scuba_config"]}, {}, {**projection, "federation_configuration": {}},
         commit="abcdef123456", opa_version="test", config_name="test.rego", not_collected_every=1000)
     case = json.loads(cases[0]["messages"][1]["content"])
     record = precheck_case(case, named_limitations=False)
     assert record["claims"] == cases[0]["expected"]["claims"]
-    assert record["claims"][0]["status"] == "unknown"
+    assert (record["claims"][0]["status"], record["claims"][0]["value"]) == ("inferred", True)
+    assert record["limitations"] == cases[0]["expected"]["limitations"] == ["policy_not_applicable"]
+    assert record["recommendations"] == cases[0]["expected"]["recommendations"] == []
 
 
 @pytest.mark.parametrize("licensed,denied,refs", [

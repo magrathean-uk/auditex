@@ -20,6 +20,10 @@ Model-development tooling only (round 2 of the specialist-model programme). `CON
   the rule verdict. `model_assessment` schema `2026-10-28` adds pre-check records, shadow results and totals;
   the older assessment schemas remain available. `scripts/score-model-precheck.py` scores pre-checks against
   frozen packs and can combine them with recorded model responses for the remaining cases.
+  - A present, usable closed gate now takes precedence over absent dependent evidence, matching
+    the training prompt: inferred true, exactly `policy_not_applicable`, no recommendations.
+    Missing or unusable gate inputs and other missing dependencies remain unknown when no gate
+    is visibly closed; serving and oracle generation share this order. Version stays `1.2.2.dev3`.
 - **`auditex model assess <run-dir>`** writes `model_assessment.json` into a finalised run bundle: one row per
   shipped CISA SCuBA policy with the model's claims, limitations and recommendations, validation status,
   attempts, latency, prompt and response hashes, and a comparison with the rule-based `baseline_alignment`

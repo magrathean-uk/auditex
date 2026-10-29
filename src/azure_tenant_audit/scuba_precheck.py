@@ -29,6 +29,8 @@ def field_name(rule: dict[str, Any]) -> str:
 
 def gate_value(rule: dict[str, Any], projection: dict[str, Any]) -> Any:
     value = projection.get(rule["section"])
+    if isinstance(value, dict) and value.get("collection_status") == NOT_COLLECTED["collection_status"]:
+        return None
     for part in rule["path"]:
         if isinstance(part, dict):
             if not isinstance(value, list):
@@ -91,7 +93,7 @@ def unavailable_input_sections(projection: dict[str, Any], sections: list[str], 
 
 def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[str], *,
                     skip_absent_sections: bool = False) -> dict[str, Any] | None:
-    """Absence wins over applicability; explicit null sections retain defaults.
+    """A usable closed gate wins over absent dependent evidence.
 
     The serving caller alone opts out for the entirely empty P1 projection.
     Pack evaluation never opts out. A missing gate is included in the absence
@@ -99,11 +101,14 @@ def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[s
     """
     if skip_absent_sections:
         return None
+    gate = check_gate(policy_id, projection)
+    if gate and gate["class"] == "closed_gate":
+        return gate
     missing = unavailable_input_sections(projection, sections)
     if missing:
         return {"class": "absent_section", "rule_id": "required_sections_present",
                 "section": missing, "field": None, "value": None}
-    return check_gate(policy_id, projection)
+    return gate
 
 
 def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], sections: list[str], *,
