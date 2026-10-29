@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditex"
-version = "1.2.2.dev3"
+version = "1.2.2.dev4"
 description = "Portable AI-first Microsoft 365 and Google Workspace audit toolkit for evidence collection"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -65,7 +65,7 @@ where = ["src"]
 auditex = ["explorer_assets/*.css", "explorer_assets/*.html", "explorer_assets/*.js", "explorer_assets/fonts/*.woff2", "explorer_assets/fonts/*.range", "explorer_assets/fonts/OFL.txt", "explorer_assets/LICENSE-lucide.txt"]
 
 [tool.setuptools.data-files]
-# Includes scuba-policy-sections.json, scuba-rule-precheck.json and current/legacy model_assessment schemas.
+# Includes SCuBA catalogues and current/legacy model_assessment schemas (including 2026-10-28).
 "auditex/assets" = ["assets/*"]
 "auditex/configs" = ["configs/*.json"]
 "auditex/profiles" = ["profiles/*.md"]

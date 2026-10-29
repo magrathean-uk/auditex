@@ -13,6 +13,19 @@ export and MCP behaviour is unchanged.
 
 ### Model serving (new, optional)
 
+- **Evidence projection (1.2.2.dev4).** `auditex model assess` reads saved bundle
+  evidence into complete tier-1 ScubaGear shapes, with fail-closed markers and
+  zero model calls for missing-section rule answers. Schema `2026-10-29` adds a
+  per-section projection/provenance report, privacy counters and configurable
+  bounds (40 items or 12,000 characters by default). Person names and immutable
+  IDs use stable run-salted pseudonyms; e-mail local parts are masked.
+  `--no-redaction` requires a loopback endpoint. The `2026-10-28` schema is
+  preserved byte-for-byte. Complete object shapes and enum domains from the frozen
+  v7 packs gate every projection; unsupported CA restrictions, failed evidence and
+  unseen variants withhold the whole section. The salt stays in memory. Synthetic
+  demo evidence now projects two sections, with 102 rule rows and zero model rows;
+  its original SharePoint findings and explorer score of 65 are preserved.
+  No collectors or network reads are added.
 - **Deterministic pre-checks (1.2.2.dev3).** A shared, shipped SCuBA rule catalogue answers closed
   applicability gates as inferred true and unavailable inputs as unknown before inference, citing all
   blockers, including the Power BI licence flag alongside missing tenant settings. Oracle generation

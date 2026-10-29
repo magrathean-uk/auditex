@@ -19,7 +19,8 @@ MODEL_ASSESSMENT_SCHEMA = "schemas/model_assessment.schema.json"
 ASSESSMENT_SCHEMAS = {
     "2026-10-27": "schemas/model_assessment-2026-10-27.schema.json",
     "2026-10-27.1": "schemas/model_assessment-2026-10-27.1.schema.json",
-    "2026-10-28": MODEL_ASSESSMENT_SCHEMA,
+    "2026-10-28": "schemas/model_assessment-2026-10-28.schema.json",
+    "2026-10-29": MODEL_ASSESSMENT_SCHEMA,
 }
 
 
@@ -74,8 +75,37 @@ def validate_assessment(payload: Any) -> None:
     schema = json.loads(open_text_resource(ASSESSMENT_SCHEMAS[version]))
     _check(payload, schema, schema, "assessment")
     catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
+    if version == "2026-10-29":
+        projection = payload["projection"]
+        sections = projection["sections"]
+        if set(sections) != {s for policy in catalogue.values() for s in policy["sections"]}:
+            raise ValueError("Invalid projection section catalogue")
+        for section, detail in sections.items():
+            if ((detail["status"] == "projected") != (detail["reason"] is None)
+                    or detail["status"] == "projected" and not detail["source"]):
+                raise ValueError("Inconsistent projection status or source")
+            unsupported = detail.get("unsupported_conditions", [])
+            if unsupported and (section != "conditional_access_policies" or detail["reason"] != "incomplete_shape"
+                                or unsupported != sorted(set(unsupported))):
+                raise ValueError("Inconsistent unsupported projection conditions")
+            for source in detail["source"]:
+                if any(p in {"..", ".secrets"} or p.startswith(".env") for p in source.split("/")):
+                    raise ValueError("Unsafe projection source")
+        projected = any(s["status"] == "projected" for s in sections.values())
+        if payload["limitations"] != ([] if projected else ["projection_not_implemented"]):
+            raise ValueError("Inconsistent projection limitations")
+        redaction = projection["redaction"]
+        if not redaction["enabled"]:
+            from ipaddress import ip_address
+            host = payload["endpoint_host"].lower().rstrip(".")
+            try:
+                loopback = ip_address(host).is_loopback
+            except ValueError:
+                loopback = host == "localhost"
+            if not loopback or any(redaction[k] for k in ("user_display_names", "email_addresses", "immutable_ids")):
+                raise ValueError("Invalid unredacted projection")
     counts = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0}
-    if version == "2026-10-28":
+    if version in {"2026-10-28", "2026-10-29"}:
         counts["rule_answered"] = 0
     ids = set()
     for row in payload["policies"]:
@@ -88,7 +118,7 @@ def validate_assessment(payload: Any) -> None:
             raise ValueError("Unsupported model assessment policy")
         policy = catalogue.get(row["policy_id"])
         is_rule = row["reason"] == "rule_precheck"
-        if version == "2026-10-28":
+        if version in {"2026-10-28", "2026-10-29"}:
             counts["rule_answered"] += is_rule
             if ("rule_precheck" in row) != is_rule or "model_shadow" in row and not is_rule:
                 raise ValueError("Invalid rule pre-check metadata")

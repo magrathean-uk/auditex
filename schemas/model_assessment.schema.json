@@ -6,7 +6,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "2026-10-28"
+      "const": "2026-10-29"
     },
     "generated_at": {
       "type": "string",
@@ -81,6 +81,312 @@
         ]
       },
       "uniqueItems": true
+    },
+    "projection": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "2026-10-29"
+        },
+        "sections": {
+          "type": "object",
+          "properties": {
+            "SPO_tenant": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "accepted_domains": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "admin_audit_log_config": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "anti_malware_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "anti_malware_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "anti_phish_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "anti_phish_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "app_management_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "app_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "atp_policy_for_o365": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "atp_policy_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "authentication_method": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "authorization_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "broadcast_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "built_in_protection_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "client_configuration": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "conditional_access_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "conn_filter": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "default_app_management_policy": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "defender_dlp_license": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "defender_license": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "directory_settings": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "dkim_config": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "dkim_records": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "dlp_compliance_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "dlp_compliance_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "dlp_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "dmarc_records": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "domain_settings": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "environment_creation": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "environment_list": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "federation_configuration": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "hosted_content_filter_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "hosted_content_filter_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "meeting_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "org_config": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "powerbi_access_denied_reason": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "powerbi_license_found": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "powerbi_tenant_settings": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "privileged_roles": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "privileged_users": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "protection_alerts": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "protection_policy_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "remote_domains": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "risky_delegated_permission_classifications": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "safe_attachment_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "safe_attachment_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "safe_links_policies": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "safe_links_rules": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "scuba_config": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "service_plans": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "sharing_policy": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "spf_records": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "tenant_app_settings": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "tenant_id": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "tenant_isolation": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "transport_config": {
+              "$ref": "#/$defs/projection_section"
+            },
+            "transport_rule": {
+              "$ref": "#/$defs/projection_section"
+            }
+          },
+          "required": [
+            "SPO_tenant",
+            "accepted_domains",
+            "admin_audit_log_config",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "app_management_policies",
+            "app_policies",
+            "atp_policy_for_o365",
+            "atp_policy_rules",
+            "authentication_method",
+            "authorization_policies",
+            "broadcast_policies",
+            "built_in_protection_rules",
+            "client_configuration",
+            "conditional_access_policies",
+            "conn_filter",
+            "default_app_management_policy",
+            "defender_dlp_license",
+            "defender_license",
+            "directory_settings",
+            "dkim_config",
+            "dkim_records",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules",
+            "dlp_policies",
+            "dmarc_records",
+            "domain_settings",
+            "environment_creation",
+            "environment_list",
+            "federation_configuration",
+            "hosted_content_filter_policies",
+            "hosted_content_filter_rules",
+            "meeting_policies",
+            "org_config",
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings",
+            "privileged_roles",
+            "privileged_users",
+            "protection_alerts",
+            "protection_policy_rules",
+            "remote_domains",
+            "risky_delegated_permission_classifications",
+            "safe_attachment_policies",
+            "safe_attachment_rules",
+            "safe_links_policies",
+            "safe_links_rules",
+            "scuba_config",
+            "service_plans",
+            "sharing_policy",
+            "spf_records",
+            "tenant_app_settings",
+            "tenant_id",
+            "tenant_isolation",
+            "transport_config",
+            "transport_rule"
+          ],
+          "additionalProperties": false
+        },
+        "redaction": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "strategy": {
+              "type": "string",
+              "const": "run-salted-sha256-v1"
+            },
+            "user_display_names": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "email_addresses": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "immutable_ids": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "enabled",
+            "strategy",
+            "user_display_names",
+            "email_addresses",
+            "immutable_ids"
+          ],
+          "additionalProperties": false
+        },
+        "bounds": {
+          "type": "object",
+          "properties": {
+            "max_items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "max_items",
+            "max_chars"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema_version",
+        "sections",
+        "redaction",
+        "bounds"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -93,7 +399,8 @@
     "system_prompt_sha256",
     "totals",
     "policies",
-    "limitations"
+    "limitations",
+    "projection"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -446,6 +753,54 @@
         "reason",
         "thinking_disabled",
         "thinking_stripped"
+      ],
+      "additionalProperties": false
+    },
+    "projection_section": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "projected",
+            "not_collected"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "missing_artifact",
+            "incomplete_shape",
+            "oversize",
+            "powershell_only",
+            "not_applicable_to_platform"
+          ]
+        },
+        "source": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:raw|normalized|chunks)/[^\\\\]+$|^(?:run-manifest|coverage)\\.json$"
+          },
+          "uniqueItems": true
+        },
+        "unsupported_conditions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.]*$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "source"
       ],
       "additionalProperties": false
     }

@@ -26,9 +26,9 @@ from azure_tenant_audit.resources import open_text_resource
 from .model_eval import _invalid_constant, _pairs, validate_model_response
 from .model_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256
 from .model_precheck import precheck_case
-from .scuba_projection import project_run
+from .scuba_projection import DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, project_run
 
-SCHEMA_VERSION = "2026-10-28"
+SCHEMA_VERSION = "2026-10-29"
 PROMPT_CONVENTION = "named-enums-v1"
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
@@ -300,7 +300,11 @@ def _baseline_statuses(pack_path: Path) -> dict[str, str]:
 
 
 def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] | None = None,
-               dry_run: bool = False, shadow_model_on_precheck: bool = False) -> dict[str, Any]:
+               dry_run: bool = False, shadow_model_on_precheck: bool = False,
+               no_redaction: bool = False, projection_max_items: int = DEFAULT_MAX_ITEMS,
+               projection_max_chars: int = DEFAULT_MAX_CHARS) -> dict[str, Any]:
+    if no_redaction and not _is_loopback(config.endpoint_host):
+        raise ValueError("--no-redaction requires a loopback model endpoint host")
     root = Path(run_dir).expanduser().resolve()
     manifest = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
     if not isinstance(manifest, dict) or not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
@@ -322,7 +326,8 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
     if target.is_symlink():
         raise ValueError("Model output must not be a symbolic link")
     generated_at = datetime.now(timezone.utc).isoformat()
-    projection = project_run(root)
+    projection = project_run(root, redact=not no_redaction, max_items=projection_max_items,
+                             max_chars=projection_max_chars)
     baseline = {} if dry_run else _baseline_statuses(root / "reports" / "report-pack.json")
     client = ModelClient(config) if not dry_run else None
     records, prompts = [], []
@@ -343,7 +348,7 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
                                 "prompt_sha256": sha256(canonical(messages).encode()).hexdigest(),
                                 "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
                 continue
-            record = precheck_case(case, skip_absent_sections=not projection)
+            record = precheck_case(case)
             if record is None:
                 record = client.assess(case)
             elif shadow_model_on_precheck:
@@ -368,7 +373,8 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
               "endpoint_host": config.endpoint_host, "model_name": config.model_name,
               "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
               "totals": totals, "policies": records,
-              "limitations": [] if projection else ["projection_not_implemented"]}
+              "projection": projection.report,
+              "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
     from azure_tenant_audit.model_assessment import validate_assessment
     validate_assessment(result)
     write_private_text(target, json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n")

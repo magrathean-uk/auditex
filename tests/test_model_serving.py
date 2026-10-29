@@ -42,6 +42,19 @@ def isolate_model_environment(monkeypatch):
         monkeypatch.delenv(f"AUDITEX_MODEL_{name}", raising=False)
 
 
+def fake_projection(root, values):
+    projection = project_run(root)
+    for key, value in values.items():
+        if key in projection:
+            projection[key] = value
+            projection.report["sections"][key] = {
+                "status": "projected" if value != NOT_COLLECTED else "not_collected",
+                "reason": None if value != NOT_COLLECTED else "incomplete_shape",
+                "source": ["raw/synthetic.json"],
+            }
+    return projection
+
+
 def sample_case():
     return json.loads(SAMPLES[0]["messages"][1]["content"])
 
@@ -76,8 +89,8 @@ def test_prompt_is_byte_equal_to_training_sample(row):
     assert sha256(SYSTEM_PROMPT.encode()).hexdigest() == SYSTEM_PROMPT_SHA256
 
 
-def test_projection_stub_missing_sections_and_explicit_null_are_distinct(tmp_path):
-    assert project_run(tmp_path) == {}
+def test_projection_missing_sections_and_explicit_null_are_distinct(tmp_path):
+    assert all(value == NOT_COLLECTED for value in project_run(tmp_path).values())
     case = build_case(POLICY, {}, "2026-10-27")
     assert case["evidence"][1]["observed"] == NOT_COLLECTED
     assert build_case(POLICY, {"privileged_users": None}, "2026-10-27")["evidence"][1]["observed"] is None
@@ -367,8 +380,10 @@ def test_dry_run_cli_on_demo_bundle_is_offline_private_and_preserves_seal(demo_b
     assert len(rows) == 102
     assert sum("messages" in row for row in rows) == 102
     assert sum(row.get("skipped", False) for row in rows) == 0
-    assert all(json.loads(row["messages"][1]["content"])["evidence"][1]["observed"] == NOT_COLLECTED
-               for row in rows if "messages" in row)
+    projection = project_run(demo_bundle)
+    for row in rows:
+        case = json.loads(row["messages"][1]["content"])
+        assert case == build_case(row["policy_id"], projection, "unused")
     assert (demo_bundle / "model_assessment_prompts.jsonl").stat().st_mode & 0o777 == 0o600
     after = snapshot(demo_bundle)
     assert all(after[path] == digest for path, digest in before.items())
@@ -385,8 +400,11 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
     monkeypatch.setattr(ModelClient, "_request", reply)
     before = snapshot(demo_bundle)
     result = assess_run(demo_bundle, ModelConfig(model_name="test-model"))
-    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 0}
-    assert result["limitations"] == ["projection_not_implemented"]
+    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 102}
+    assert result["limitations"] == []
+    assert {name for name, detail in result["projection"]["sections"].items()
+            if detail["status"] == "projected"} == {"service_plans", "tenant_id"}
+    assert all(row["reason"] == "rule_precheck" and row["attempts"] == 0 for row in result["policies"])
     assert result["endpoint_host"] == "127.0.0.1" and result["run_id"] == "demo"
     assert all(row["comparison"]["result"] == "not_assessed" for row in result["policies"])
     validate_assessment(result)
@@ -411,7 +429,7 @@ def test_assessment_baseline_comparison(tmp_path, monkeypatch, rule_status, valu
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports/report-pack.json").write_text(canonical({"baseline_alignment": {"frameworks": {
         "cisa_scuba": {"controls": [{"control_id": POLICY, "status": rule_status}]}}}}))
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root: {"privileged_users": {}})
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
     answer = sample_answer()
     answer["claims"][0]["value"] = value
     answer["recommendations"] = [] if value else ["review_policy_against_baseline_text"]
@@ -449,6 +467,7 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
     assert "configs/scuba-policy-sections.json" in resources
     assert "configs/scuba-rule-precheck.json" in resources
     assert "schemas/model_assessment-2026-10-27.1.schema.json" in resources
+    assert "schemas/model_assessment-2026-10-28.schema.json" in resources
     assert "schemas/model_assessment.schema.json" in resources
     assert "model_assessment.schema.json" in contract_schema_manifest()["schemas"]
 
@@ -456,7 +475,7 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
 @pytest.mark.parametrize("mutation", ["evidence", "criticality", "policy", "comparison", "nonfinite", "boolean_number"])
 def test_optional_artifact_validation_rejects_tampering(tmp_path, monkeypatch, mutation):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root: {"privileged_users": {}})
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
     monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(sample_answer()))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     row = result["policies"][0]
@@ -479,7 +498,10 @@ def test_optional_artifact_validation_rejects_tampering(tmp_path, monkeypatch, m
 def test_assessment_schema_checker_handles_large_json_integer(tmp_path, monkeypatch):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(missing_answer()))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=["MS.AAD.1.1v1"])
+    # This checks numeric range handling, independently of zero-latency rule provenance.
+    monkeypatch.setattr("auditex.model_serving.project_run",
+                        lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
+    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     result["policies"][0]["latency_ms"] = 10 ** 400
     validate_assessment(result)  # Finite integers must not overflow a float conversion.
 
@@ -686,9 +708,12 @@ def test_malformed_optional_assessment_warns_without_changing_gate(demo_bundle, 
 def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monkeypatch):
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"run"}')
     monkeypatch.setattr(ModelClient, '_request', lambda *a: envelope(missing_answer()))
+    # Legacy schema dispatch is checked using an actual model row.
+    monkeypatch.setattr('auditex.model_serving.project_run',
+                        lambda root, **kwargs: fake_projection(root, {'privileged_users': {}}))
     result = assess_run(tmp_path, ModelConfig(model_name='test-model'), policies=[POLICY])
     result['schema_version'] = '2026-10-27'
-    del result['limitations'], result['totals']['rule_answered']
+    del result['limitations'], result['projection'], result['totals']['rule_answered']
     row = result['policies'][0]
     del row['thinking_disabled'], row['thinking_stripped'], row['comparison']['baseline_match']
     validate_assessment(result)

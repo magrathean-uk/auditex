@@ -121,7 +121,8 @@ def test_ungated_missing_sections_are_named_and_null_retains_default():
 
 def run_assessment(tmp_path, monkeypatch, projection, **kwargs):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root: projection)
+    from test_model_serving import fake_projection
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, projection))
     return assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[SP], **kwargs)
 
 

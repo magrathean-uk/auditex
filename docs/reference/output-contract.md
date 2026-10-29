@@ -43,9 +43,10 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 ## Evidence discipline
 
 `model_assessment.json` is an optional root artefact written by `auditex model assess`.
-Its schema is `schemas/model_assessment.schema.json` (version `2026-10-28`), listed
+Its schema is `schemas/model_assessment.schema.json` (version `2026-10-29`), listed
 by the schema manifest and checked when present by bundle validation. The known
-older versions `2026-10-27` and `2026-10-27.1` use their date-named schema files.
+older versions `2026-10-27`, `2026-10-27.1` and `2026-10-28` use their byte-preserved,
+date-named schema files.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention
@@ -98,12 +99,128 @@ and latency, null prompt/response hashes, and false thinking flags. Their
 `totals.rule_answered` counts both kinds, overlapping `answered` and `unknown`;
 the four verdict totals still sum to the policy count.
 
-The P1 projection remains an empty stub. When the whole projection is `{}`, serving
-bypasses pre-checks and retains the model assessment path; the envelope's new
-`limitations` array contains one `projection_not_implemented` entry. A non-empty
-projection has an empty envelope limitations array and enforces missing dependencies.
-Strict offline pack evaluation never applies this serving-only bypass. Dry-run still
-exports all selected prompts without inference.
+Version `2026-10-29` replaces the P1 stub with a read-only tier-1 ScubaGear
+ProviderExport projection. Incomplete, failed, sampled, truncated, malformed or
+unavailable sections become exactly `{"collection_status":"not_collected"}`.
+No partial record, empty list or null stands for unknown collection. An explicitly
+complete empty source enumeration can still project as a known empty collection.
+Pre-checks
+always run, including when every section is unavailable; a dependent missing-section
+row makes zero model calls, subject to the closed-gate precedence above. The envelope
+retains `limitations: ["projection_not_implemented"]` only when no section can be
+projected at all, for compatibility. Otherwise envelope limitations are empty; there
+is no `projection_partial` limitation. Dry-run exports all selected prompts without
+inference, including markers, and applies the same redaction and bounds.
+
+The required `projection` envelope is separate from prompt evidence:
+
+- `schema_version: "2026-10-29"`.
+- `sections`: every section referenced by the shipped policy catalogue, with
+  `status` (`projected` or `not_collected`), `reason` (null for projected;
+  `missing_artifact`, `incomplete_shape`, `oversize`, `powershell_only` or
+  `not_applicable_to_platform` otherwise), optional `unsupported_conditions` (CA
+  field paths that cannot be represented), and `source` (relative artefact paths
+  actually read, including authoritative chunks). Sections outside this package's
+  tier-1 adapters remain `not_collected` with `missing_artifact`, even if other
+  Auditex summary artefacts exist for that surface. No summary count is treated as
+  a ProviderExport object. Non-M365 bundles use `not_applicable_to_platform`.
+- `redaction`: `enabled`, strategy `run-salted-sha256-v1`, and counts
+  `user_display_names`, `email_addresses`, `immutable_ids`. The salt is the SHA-256
+  of canonical manifest JSON, stable for the same saved run. User display names
+  become `User <salted hash>`; non-null immutable IDs become `Id <salted hash>`.
+  No identity-to-pseudonym table is persisted. E-mail local parts anywhere in
+  projected string values become `***`, retaining the domain. GUID principal IDs,
+  role and policy names remain available. The salt stays in memory only and is
+  rejected by the envelope schema and validator; counters never enter prompts. Hashes support
+  pseudonymisation, not anonymisation or a disclosure guarantee.
+- `bounds`: `max_items` (default 40) and `max_chars` (default 12,000 canonical JSON
+  characters per section). `--projection-max-items` and `--projection-max-chars`
+  accept positive integers. The item bound covers top-level collections, user
+  dictionaries and nested lists. Bounds apply while consuming source rows, before
+  and after redaction, and after prompt enum annotation;
+  exceeding either replaces the whole section with the marker and reason
+  `oversize`. Nothing is silently sliced. Row-level pack limitation IDs are unchanged.
+
+`--no-redaction` is accepted only for literal loopback IP addresses or
+`localhost` (case-insensitive, optional final dot), including dry-run. Other
+hosts are refused before bundle reads, output writes or endpoint calls. Redirects
+and proxy environment variables cannot move model requests to another destination.
+Default redaction also applies to model shadow requests. Prompt assembly, policy
+items and evidence-ID ordering retain the frozen v7 convention.
+
+Projection reads inline `raw/<collector>.json`, offline `raw/sample_input.json`,
+or export-only `raw/<collector>/<operation>/summary.json`. Non-empty `chunk_files`
+are authoritative; all chunks and counts must validate. Duplicate JSON keys and
+non-finite constants are rejected in both JSON and JSONL. Chunk iteration stops
+at the item or character budget; cumulative bytes, including whitespace, are capped
+at four times the character bound, and chunk count is capped by the item bound.
+Coverage rows, the coverage ledger, collection gaps and per-record failure metadata
+override apparently usable payloads. Empty collections require an explicit successful
+collection status, completeness flag or complete coverage entry. A bare empty array
+or empty chunk manifest is insufficient; an empty shape must also occur in a frozen
+pack row. Chunk paths must remain
+under that collector's raw operation or chunks directory. Symlinks and paths
+outside the bundle are refused. The projection performs no network, PowerShell,
+collection or file writes and adds no collectors. Only the existing assessment
+output is written. The original bundle seal and deterministic findings are unchanged.
+
+Complete inputs required for the tier-1 sections follow. Missing properties are
+never filled with assumed tenant settings. PascalCase denotes ProviderExport keys;
+Graph camelCase is converted recursively for the selected fields.
+
+| Section | Required saved evidence and projection |
+| --- | --- |
+| `SPO_tenant` | `normalized/sharepoint_tenant_settings.json` with collected, agreeing canonical sharing and OneDrive capabilities; raw `sharepoint_access.sharePointSettings` or `onedrive_posture.sharePointSettings` with all remaining settings. Emits one dict with `SharingCapability`, `ODBSharingCapability`, `DefaultLinkPermission`, `DefaultSharingLinkType`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `SharingDomainRestrictionMode`, `RequireAnonymousLinksExpireInDays`, `EmailAttestationRequired`, `EmailAttestationReAuthDays`. Capabilities use the Management Shell mapping 0 disabled, 1 new/existing guests, 2 anyone, 3 existing guests; other enums use the shared numeric maps. Expiry -1 is retained. No `_name` companions are projected; prompt assembly adds them later. Graph-only settings are usually insufficient. |
+| `conditional_access_policies` | Full raw `conditional_access.conditionalAccessPolicies`, not `conditional_access_graph` counts. Requires `DisplayName`, `State`, selected `Conditions` applications, authentication flows, client app types/applications, sign-in/user/agent risks and all user inclusions/exclusions; `GrantControls` built-ins, operator and authentication strength, including `AllowedCombinations` when non-null. Every policy must match a whole observed pack shape. Non-empty unsupported conditions or controls, including locations, platforms, devices and session controls, withhold the entire section with `incomplete_shape`; their field paths appear in `unsupported_conditions`. No restriction is silently discarded. |
+| `authorization_policies` | Raw `external_identity.authorizationPolicy` or `consent_policy.authorizationPolicy`; singleton `Id`, `AllowInvitesFrom`, `GuestUserRoleId`, default-role `AllowedToCreateApps` and assigned permission grant policy IDs. Duplicate sources must agree. |
+| `service_plans` | Full raw `licensing.subscribedSkus`, each `servicePlans` entry with `servicePlanId` and `servicePlanName`. Emits distinct `{ServicePlanId, ServicePlanName}` rows; conflicting duplicate IDs invalidate the section. Licence counts alone do not suffice. |
+| `privileged_roles` | An existing `normalized/privileged_roles.json` with ProviderExport-shaped `records`: `DisplayName`, `RoleTemplateId`, complete assignments (`PrincipalId`, start/end timestamps when present, each null or `/Date(ms)/`) and PIM `Rules` with source metadata and typed expiration, notification or approval settings. Current collectors do not read PIM role-management policies/rules; ordinary runs therefore remain unavailable. No rule defaults are fabricated. |
+| `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus full raw `identity.users`. Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The current identity collector does not select the immutable ID, so ordinary live runs need a saved complete export including it; a hybrid sample is insufficient. |
+| `tenant_id` | Canonical non-zero Entra UUID from the run identity in `run-manifest.json` or saved raw organisation evidence. Recorded and observed UUIDs must agree; a conflict or domain/authority alias cannot become a tenant ID. Synthetic demo UUIDs remain synthetic, without upgrading the run identity's verification status. |
+| `scuba_config` | Disabled with `incomplete_shape`: a Graph endpoint alone cannot reconstruct a complete observed SCuBA configuration, including operator exclusions. Empty `Exo` or `SecuritySuite` objects are never fabricated. |
+| `dmarc_records` | Saved raw `dns_posture.dmarc_records` with `{domain, rdata[]}` containing complete TXT answers. Parsed posture alone is insufficient. |
+| `spf_records` | Saved raw `dns_posture.spf_records` in a complete observed pack shape, including its `compliant`/`message` fields where present. Only explicit `domain`, historic `doamin`, `rdata`, `compliant` and `message` fields are permitted; missing values or spelling variants are never synthesised. |
+| `dkim_records` | Saved raw `dns_posture.dkim_records` with `{domain, rdata[]}` containing complete TXT answers. |
+| `dkim_config` | Exchange raw `exchange_policy.dkimSigningConfig`: `{Domain, Enabled}`. |
+| `accepted_domains` | Exchange raw `exchange_policy.acceptedDomains`: `{Name, DomainName}`. Graph verified domains are not a substitute for accepted-domain policy. |
+| `transport_config` | Exchange raw `exchange_policy.transportConfig`: `{Name, SmtpClientAuthenticationDisabled}`. The current command selects only the boolean, so its output alone is incomplete. |
+| `org_config` | Exchange raw `exchange_policy.organizationAuditConfig`: `{Identity, Name, AuditDisabled}`. The current command selects only `AuditDisabled`, which is insufficient. |
+| `meeting_policies` | Teams raw `teams_policy.meetingPolicies`: records containing only the validated fields `Identity`, `AllowAnonymousUsersToStartMeeting`, `AllowCloudRecording`, `AllowExternalParticipantGiveRequestControl`, `AllowPSTNUsersToBypassLobby`, `AutoAdmittedUsers`. Summary policy objects cannot supply missing fields. |
+| `sharing_policy` | Disabled with `incomplete_shape`: neither frozen v7 pack contains a populated example. Saved sharing-policy summaries cannot authorise an unseen shape. |
+
+PowerShell sections can also use existing `normalized/exchange_policy_objects.json`
+or `normalized/teams_policy_objects.json` records only when the matching `source_name`
+retains every required ProviderExport field. The usual lossy normalisation does not;
+counts, shortened settings or renamed labels cannot recreate missing values.
+
+The synthetic offline demo projects `service_plans` and `tenant_id`. Across 102
+catalogue policies, 102 receive rule answers and zero reach the model without a
+shadow flag (previously seven sections, 88 rule rows and 14 model rows). Its original
+anonymous SharePoint defaults, high-severity sharing findings and explorer score of
+65 remain intact. Missing SharePoint fields, unsupported CA scope, failed coverage,
+source bounds and sparse PowerShell records are withheld rather than upgraded.
+Portable tests assert each projected complete section matches one frozen pack shape;
+`tests/fixtures/scuba-projection-shapes-v7.json` pins whole-object keys, nesting,
+types and observed enum domains, with source-file SHA-256s, row counts and a row/evidence
+witness for every shape. List cardinality is ignored but empty lists and
+combinations of distinct item shapes remain distinct; numbered user keys represent
+a collection of complete user shapes. Derived SharePoint enum annotations are
+excluded from raw shapes and applied only during prompt assembly. All shape
+variants require a real train/test witness; paths or types from separate variants
+are never combined to authorise a new object.
+
+The other 41 catalogue sections have no adapter in this package. Collection alone
+does not enable them: they require a future complete-shape adapter and tests. The
+corresponding complete provider evidence, rather than summary counts, would be:
+
+| Surface | Sections awaiting adapters and saved evidence |
+| --- | --- |
+| Entra | `app_management_policies`, `default_app_management_policy`: application management policies/default policy; `authentication_method`: authentication method configuration; `directory_settings`: directory settings; `risky_delegated_permission_classifications`: permission classifications. |
+| Exchange | `admin_audit_log_config`: full admin audit log configuration; `remote_domains`: complete remote-domain settings; `transport_rule`: full transport rule records. |
+| Security Suite | `anti_malware_policies`, `anti_malware_rules`, `anti_phish_policies`, `anti_phish_rules`, `atp_policy_for_o365`, `atp_policy_rules`, `built_in_protection_rules`, `conn_filter`, `dlp_compliance_policies`, `dlp_compliance_rules`, `hosted_content_filter_policies`, `hosted_content_filter_rules`, `protection_alerts`, `protection_policy_rules`, `safe_attachment_policies`, `safe_attachment_rules`, `safe_links_policies`, `safe_links_rules`: complete Exchange/Security policy and rule exports; `defender_license`, `defender_dlp_license`: explicit, complete service-plan/licence evidence. |
+| Teams | `app_policies`, `broadcast_policies`, `client_configuration`, `federation_configuration`, `tenant_app_settings`: full Teams policy/configuration exports. |
+| Power Platform | `dlp_policies`, `domain_settings`, `environment_creation`, `environment_list`, `tenant_isolation`: full Power Platform tenant and environment administration exports. |
+| Power BI | `powerbi_access_denied_reason`, `powerbi_license_found`, `powerbi_tenant_settings`: explicit access/licence state and complete tenant settings exports. |
 
 By default rule rows make zero model calls. `--shadow-model-on-precheck` records the
 ordinary model-client result under `model_shadow`, including failures and attempt

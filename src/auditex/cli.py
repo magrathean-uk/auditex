@@ -605,6 +605,11 @@ def _build_model_parser() -> argparse.ArgumentParser:
     assess.add_argument("run_dir", help="Existing audit run directory.")
     assess.add_argument("--policies", help="Comma-separated SCuBA policy IDs; defaults to the shipped policy set.")
     assess.add_argument("--dry-run", action="store_true", help="Write prompts without calling the endpoint.")
+    assess.add_argument("--no-redaction", action="store_true", help="Keep personal values; requires a loopback endpoint host.")
+    assess.add_argument("--projection-max-items", type=int, default=40,
+                        help="Maximum items in each section/list (default: 40).")
+    assess.add_argument("--projection-max-chars", type=int, default=12000,
+                        help="Maximum canonical JSON characters per section (default: 12000).")
     assess.add_argument("--shadow-model-on-precheck", action="store_true",
                         help="Record model answers for rule-answered rows without using them for verdicts.")
     doctor = commands.add_parser("doctor", help="Check the endpoint models and print configuration without the API key.")
@@ -901,6 +906,8 @@ def main(argv: list[str] | None = None) -> int:
                     _emit_assessment(payload, None)
                     return 0 if payload["ok"] else 2
                 payload = assess_run(args.run_dir, config, dry_run=args.dry_run,
+                                     no_redaction=args.no_redaction, projection_max_items=args.projection_max_items,
+                                     projection_max_chars=args.projection_max_chars,
                                      shadow_model_on_precheck=args.shadow_model_on_precheck,
                                      policies=[pid.strip() for pid in args.policies.split(",")] if args.policies is not None else None)
             elif args.model_command == "stage":
