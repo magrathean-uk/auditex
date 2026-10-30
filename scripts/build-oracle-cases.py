@@ -2285,6 +2285,341 @@ def assign_v9_splits(cases: list[dict], *, ratio: float = 0.15) -> list[dict]:
     return result
 
 
+# --- deterministic v10 extensions: met / not-met rebalancing (round 4, 30 Oct 2026) -------------------------------------------
+#
+# Round 4 lost met rows of the frozen test in families whose train rows were all not met (or had no verdict at all): v8 added only
+# violating shapes for MS.EXO.7.1v1 and MS.TEAMS.5.2v2/5.3v2, and every legacy row of those families, of MS.TEAMS.5.1v2 and of
+# MS.SECURITYSUITE.8.2v1 sits in the frozen test. The v10 shapes vary what the Rego reads at its passing values next to decoys it must
+# ignore (a disabled or audit-mode warning rule, a BlockedAppList on the catalogue another 5.x item reads, an IP allow list that only
+# MS.SECURITYSUITE.8.1v1 judges), with failing twins where a family needs both classes. Each variant declares the label it expects
+# (`intent`); OPA labels the row and the miner fails when the two disagree, so the intent documents the shape and never replaces the oracle.
+# MS.SECURITYSUITE.8.2v1 decides on one boolean (EnableSafeList), so once v10_strict_key removes what its Rego does not read every
+# connection filter shape is a class twin of a frozen test row; pack curation keeps that family unaugmented and the shapes stay here only
+# as oracle checks of the documented rule.
+V10_GENERATORS = ("exo_7_1", "teams_5", "conn_filter_8_2", "powerbi_7_1")
+V10_ID_SALT = "conv3-v10"   # case ids hash the view with this salt, so a v10 id never repeats an earlier one
+V10_TEAMS_ITEMS = {"MS.TEAMS.5.1v2": ("DefaultCatalogAppsType", "DefaultApp"), "MS.TEAMS.5.2v2": ("GlobalCatalogAppsType", "GlobalApp"),
+                   "MS.TEAMS.5.3v2": ("PrivateCatalogAppsType", "PrivateApp")}   # item -> (app permission policy field, org-wide setting)
+
+
+def _v10_variant(generator: str, shape: str, pids: list[str], tenant: dict, base: dict, intent: dict[str, str]) -> dict:
+    return {"name": f"v10:{generator}:{shape}; base=product", "input": tenant, "policies": list(pids), "base": base,
+            "template_prefix": f"v10:{generator}:{shape}", "split": "train", "intent": dict(intent)}
+
+
+def _v10_rule(name: str, prefix, *, state: str = "Enabled", mode: str = "Enforce", scope: str = "NotInOrganization") -> dict:
+    return {"Name": name, "State": state, "Mode": mode, "PrependSubject": prefix, "FromScope": scope}
+
+
+V10_EXO_PREFIXES = {"bracket": "[External]", "upper": "[EXTERNAL]", "caution": "CAUTION: External email -", "short": "[EXT]"}
+V10_EXO_DECOYS = {   # rules next to the warning rule that MS.EXO.7.1v1 must not count
+    "alone": [],
+    "disclaimer": [_v10_rule("Outbound legal disclaimer", None, scope="InOrganization")],
+    "retired": [_v10_rule("External sender tag (retired)", "[External]", state="Disabled")],
+    "pilot": [_v10_rule("External banner pilot", "[Ext]", mode="Audit")],
+    "internal_tag": [_v10_rule("Internal mail tag", "[Internal]", scope="InOrganization")],
+    "two_decoys": [_v10_rule("External sender tag (retired)", "[External]", state="Disabled"),
+                   _v10_rule("External banner pilot", "[Ext]", mode="AuditAndNotify")],
+    "unscoped": [_v10_rule("All mail notice", "[Notice]", scope=None)],
+}
+# The failing edit of the warning rule in a not-met twin: the rule is off, only audited, scoped to internal mail or has no prefix.
+V10_EXO_BREAKS = {"disabled": {"State": "Disabled"}, "audit": {"Mode": "Audit"}, "internal": {"FromScope": "InOrganization"},
+                  "no_prefix": {"PrependSubject": ""}}
+V10_EXO_MET = [("bracket", "alone"), ("upper", "disclaimer"), ("caution", "retired"), ("short", "pilot"), ("bracket", "internal_tag"),
+               ("caution", "two_decoys"), ("upper", "unscoped"), ("short", "disclaimer"), ("bracket", "two_decoys"), ("upper", "pilot"),
+               ("caution", "internal_tag"), ("short", "retired"), ("bracket", "unscoped"), ("caution", "alone")]
+V10_EXO_NOT_MET = [("upper", "two_decoys", "audit"), ("short", "internal_tag", "disabled"), ("caution", "unscoped", "internal"),
+                   ("bracket", "pilot", "no_prefix"), ("short", "disclaimer", "audit"), ("bracket", "retired", "internal")]
+
+
+def v10_exo_variants(base_input: dict) -> list[dict]:
+    """MS.EXO.7.1v1 transport rule sets: a working external-sender warning rule (enabled, enforced, a subject prefix, mail from outside the
+    organisation) under four realistic prefixes, alone or after rules the Rego must not count; and failing twins where the warning rule
+    itself is broken next to the same decoys."""
+    result = []
+    for position, (prefix, decoys) in enumerate(V10_EXO_MET):
+        rules = [dict(r) for r in V10_EXO_DECOYS[decoys]]
+        rules.insert(position % (len(rules) + 1), _v10_rule("External sender warning", V10_EXO_PREFIXES[prefix]))
+        tenant = {**json.loads(canonical(base_input)), "transport_rule": rules}
+        result.append(_v10_variant("exo_7_1", f"met={prefix}_{decoys}", ["MS.EXO.7.1v1"], tenant, base_input, {"MS.EXO.7.1v1": "met"}))
+    for prefix, decoys, broken in V10_EXO_NOT_MET:
+        rules = [dict(r) for r in V10_EXO_DECOYS[decoys]] + [{**_v10_rule("External sender warning", V10_EXO_PREFIXES[prefix]), **V10_EXO_BREAKS[broken]}]
+        tenant = {**json.loads(canonical(base_input)), "transport_rule": rules}
+        result.append(_v10_variant("exo_7_1", f"not_met={prefix}_{decoys}_{broken}", ["MS.EXO.7.1v1"], tenant, base_input, {"MS.EXO.7.1v1": "not_met"}))
+    return result
+
+
+def _v10_app_policy(identity: str, default: str = "A", global_: str = "A", private: str = "A") -> dict:
+    kind = {"A": "AllowedAppList", "B": "BlockedAppList"}
+    return {"Identity": identity, "DefaultCatalogAppsType": kind[default], "GlobalCatalogAppsType": kind[global_], "PrivateCatalogAppsType": kind[private]}
+
+
+V10_TEAMS_POLICIES = {   # app permission policy sets; letters are (DefaultCatalogAppsType, GlobalCatalogAppsType, PrivateCatalogAppsType)
+    "allow_two": [("Global", "AAA"), ("Tag:FirstlineWorkers", "AAA")],
+    "global_blocked": [("Global", "ABA"), ("Tag:Developers", "AAA")],
+    "private_blocked": [("Global", "AAA"), ("Tag:Developers", "AAB")],
+    "default_blocked": [("Global", "BAA"), ("Tag:Executives", "AAA")],
+    "mixed_three": [("Global", "ABB"), ("Tag:Contractors", "AAA"), ("Tag:Developers", "BAA")],
+    "all_blocked": [("Global", "BBB"), ("Tag:Contractors", "BBB")],
+    "global_blocked_three": [("Global", "AAA"), ("Tag:Sales", "ABA"), ("Tag:Marketing", "ABA")],
+}
+# Org-wide app settings (Get-TeamsM365UnifiedTenantSettingsRest): absent, certificate authentication (settings unreadable), or the
+# value of DefaultApp, GlobalApp and PrivateApp ("-" leaves that setting out). Values are those ScubaGear's own Teams fixtures use.
+V10_TEAMS_SETTINGS = {"absent": None, "certificate": "certificate", "all_none": ("None", "None", "None"),
+                      "all_allowed": ("AllowedApps", "AllowedApps", "AllowedApps"), "global_allowed": ("None", "AllowedApps", "None"),
+                      "default_allowed": ("AllowedApps", "None", "None"), "private_allowed": ("None", "None", "AllowedApps"),
+                      "global_only_none": ("-", "None", "-"), "private_only_none": ("-", "-", "None")}
+V10_TEAMS_TENANTS = [("allow_two", "absent"), ("global_blocked", "absent"), ("private_blocked", "certificate"), ("default_blocked", "absent"),
+                     ("mixed_three", "certificate"), ("all_blocked", "all_none"), ("allow_two", "all_allowed"), ("global_blocked", "global_allowed"),
+                     ("private_blocked", "default_allowed"), ("mixed_three", "private_allowed"), ("default_blocked", "certificate"),
+                     ("global_blocked_three", "certificate"), ("all_blocked", "global_only_none"), ("private_blocked", "all_none"),
+                     ("all_blocked", "private_only_none"), ("private_blocked", "private_only_none"), ("default_blocked", "global_allowed")]
+
+
+def _v10_teams_intent(policies: list[dict], settings) -> dict[str, str]:
+    """The documented MS.TEAMS.5.xv2 rule: a readable org-wide setting decides (met when None); otherwise (absent, or certificate
+    authentication) the legacy app permission policies decide (met when none sets the item's catalogue to BlockedAppList)."""
+    intent = {}
+    for pid, (field, setting) in V10_TEAMS_ITEMS.items():
+        value = None
+        if isinstance(settings, tuple):
+            value = dict(zip(("DefaultApp", "GlobalApp", "PrivateApp"), settings)).get(setting)
+        if value not in (None, "-"):
+            intent[pid] = "met" if value == "None" else "not_met"
+        else:
+            intent[pid] = "not_met" if any(p[field] == "BlockedAppList" for p in policies) else "met"
+    return intent
+
+
+def v10_teams_variants(base_input: dict) -> list[dict]:
+    """Teams app permission policy sets with org-wide app settings absent, unreadable (certificate authentication) or set; every tenant
+    is labelled for MS.TEAMS.5.1v2, 5.2v2 and 5.3v2 together, so a BlockedAppList on one catalogue is shown not to fail the other two."""
+    result = []
+    for policy_set, setting_set in V10_TEAMS_TENANTS:
+        policies = [_v10_app_policy(identity, *letters) for identity, letters in V10_TEAMS_POLICIES[policy_set]]
+        settings = V10_TEAMS_SETTINGS[setting_set]
+        tenant = json.loads(canonical(base_input))
+        tenant["app_policies"] = policies
+        if settings == "certificate":
+            tenant["tenant_app_settings"] = [{"CertificateBasedAuth": True}]
+        elif settings is not None:
+            tenant["tenant_app_settings"] = [{"SettingName": name, "SettingValue": value}
+                                             for name, value in zip(("DefaultApp", "GlobalApp", "PrivateApp"), settings) if value != "-"]
+        else:
+            tenant.pop("tenant_app_settings", None)
+        result.append(_v10_variant("teams_5", f"tenant={policy_set}_{setting_set}", list(V10_TEAMS_ITEMS), tenant, base_input,
+                                   _v10_teams_intent(policies, settings)))
+    return result
+
+
+V10_CONN_FILTERS = {   # name -> [(policy name, EnableSafeList, IPAllowList)]; documentation address ranges only (RFC 5737)
+    "default_allow_range": [("Default", False, ["203.0.113.0/24"])],
+    "default_allow_hosts": [("Default", False, ["198.51.100.10", "198.51.100.11"])],
+    "partner_allow": [("Default", False, []), ("Partner relay", False, ["192.0.2.0/28"])],
+    "relay_after_default": [("Default", False, ["203.0.113.5"]), ("Scanner relay", False, [])],
+    "three_filters": [("Default", False, []), ("Partner relay", False, []), ("Legacy fax gateway", False, ["192.0.2.44"])],
+    "two_clean": [("Default", False, []), ("Scanner relay", False, [])],
+    "default_safe_list": [("Default", True, ["203.0.113.0/24"])],
+    "partner_safe_list": [("Default", False, []), ("Partner relay", True, ["192.0.2.0/28"])],
+    "default_safe_list_relay": [("Default", True, []), ("Scanner relay", False, ["198.51.100.10"])],
+    "safe_list_hosts": [("Default", True, ["198.51.100.10", "198.51.100.11"])],
+    "third_safe_list": [("Default", False, []), ("Partner relay", False, []), ("Legacy fax gateway", True, [])],
+}
+
+
+def v10_conn_filter_variants(base_input: dict) -> list[dict]:
+    """MS.SECURITYSUITE.8.2v1 connection filter policies: the safe list off on every policy (met), with and without IP allow lists (which
+    only MS.SECURITYSUITE.8.1v1 judges), and the safe list on in one policy among several (not met)."""
+    result = []
+    for shape, filters in V10_CONN_FILTERS.items():
+        tenant = json.loads(canonical(base_input))
+        tenant["conn_filter"] = [{"Name": name, "EnableSafeList": safe, "IPAllowList": list(allow)} for name, safe, allow in filters]
+        intent = "not_met" if any(entry[1] for entry in filters) else "met"
+        result.append(_v10_variant("conn_filter_8_2", f"{intent}={shape}", ["MS.SECURITYSUITE.8.2v1"], tenant, base_input,
+                                   {"MS.SECURITYSUITE.8.2v1": intent}))
+    return result
+
+
+V10_POWERBI_SETS = {   # settingName lists drawn from the product base tenant; EimInformationProtectionEdit is placed by the generator
+    "export_three": ["PublishToWeb", "RScriptVisual"],
+    "developer_four": ["ExternalSharingV2", "ServicePrincipalAccessPermissionAPIs", "BlockResourceKeyAuthentication"],
+    "sharing_five": ["AllowGuestUserToAccessSharedContent", "AllowServicePrincipalsCreateAndUseProfiles", "RScriptVisual", "PublishToWeb"],
+    "developer_two": ["AllowServicePrincipalsCreateAndUseProfiles"],
+}
+V10_POWERBI_GROUP = [{"graphId": "10000000-0000-4000-8000-000000000011", "name": "Sensitivity label publishers"}]
+
+
+def v10_powerbi_variants(base_input: dict) -> list[dict]:
+    """MS.POWERBI.7.1v1 on realistic subsets of the base tenant's settings: EimInformationProtectionEdit enabled (met) or disabled (not met),
+    for everyone or for one security group, at different positions in the list. The licence stays found and access is not denied."""
+    settings = {s["settingName"]: s for s in base_input["powerbi_tenant_settings"]}
+    eim = settings["EimInformationProtectionEdit"]
+    result = []
+    for index, (shape, names) in enumerate(V10_POWERBI_SETS.items()):
+        for enabled in (True, False):
+            target = {**eim, "enabled": enabled}
+            if index % 2:
+                target.update(canSpecifySecurityGroups=True, enabledSecurityGroups=[dict(g) for g in V10_POWERBI_GROUP])
+            listed = [json.loads(canonical(settings[name])) for name in names]
+            listed.insert(index % (len(listed) + 1), target)
+            tenant = json.loads(canonical(base_input))
+            tenant["powerbi_tenant_settings"] = listed
+            intent = "met" if enabled else "not_met"
+            result.append(_v10_variant("powerbi_7_1", f"{intent}={shape}{'_group' if index % 2 else ''}", ["MS.POWERBI.7.1v1"], tenant, base_input,
+                                       {"MS.POWERBI.7.1v1": intent}))
+    return result
+
+
+def v10_variants(name: str, base_input: dict) -> list[dict]:
+    """Every v10 variant of one product (EXO, Teams, SecuritySuite, PowerBI); other products have none."""
+    makers = {"EXO": v10_exo_variants, "Teams": v10_teams_variants, "SecuritySuite": v10_conn_filter_variants, "PowerBI": v10_powerbi_variants}
+    return makers[name](base_input) if name in makers else []
+
+
+V10_NEAR_IDENTIFIERS = frozenset({"Name", "Identity"})   # object names: a renamed rule or policy is the same rule or policy
+V10_NEAR_FREE_TEXT = frozenset({"PrependSubject", "IPAllowList", "name", "graphId", "title"})   # wording and addresses
+
+
+def _v10_abstract(value, free: bool = False):
+    if isinstance(value, list):
+        items = {canonical(item): item for item in (_v10_abstract(entry, free) for entry in value)}
+        return [items[key] for key in sorted(items)]
+    if isinstance(value, dict):
+        return {key: _v10_abstract(entry, key in V10_NEAR_FREE_TEXT) for key, entry in value.items()
+                if key not in V10_NEAR_IDENTIFIERS and not (key.endswith("_name") and key[:-5] in ENUM_NAME_KEYS)}
+    if free and isinstance(value, str):
+        return "text" if value else ""
+    if type(value) is float and value.is_integer():
+        return int(value)
+    return value
+
+
+def v10_near_key(case: dict) -> str:
+    """The near-duplicate key of a case: the policy id and the observed evidence (the policy item aside) with names and identities removed
+    at any depth, wording and addresses reduced to empty or non-empty, derived enum names dropped and every array taken as the set of its
+    distinct abstracted elements, so order and repetition do not count. The verdicts of the v10 families ask whether any rule, policy or
+    filter has a property, or what one named setting holds, so two cases with one key differ only in what those verdicts never read. Pack
+    curation drops a new row whose key a test row has; assign_v10_splits keeps every key in one split."""
+    user = json.loads(case["messages"][1]["content"])
+    observed = {e.get("section", e["id"]): _v10_abstract(e["observed"]) for e in user.get("evidence", []) if e.get("section") != "policy"}
+    return sha(canonical([user.get("policy_id"), observed]).encode())
+
+
+def _v10_read_only(value, paths):
+    """`value` keeping only what one of `paths` reaches (paths relative to it, as rego_ast_field_reads gives them: STAR is any item of a
+    list or any value of an object). A path that ends here, or a list met by field names, keeps the whole value."""
+    if not paths or any(not path for path in paths):
+        return value
+    if isinstance(value, list):
+        inner = [path[1:] for path in paths if path[0] == STAR]
+        return [_v10_read_only(item, inner) for item in value] if inner else value
+    if isinstance(value, dict):
+        kept = {}
+        for key, entry in value.items():
+            inner = [path[1:] for path in paths if path[0] in (STAR, key)]
+            if inner:
+                kept[key] = _v10_read_only(entry, inner)
+        return kept
+    return value
+
+
+def v10_strict_key(case: dict, reads: dict[str, dict[str, list[tuple[str, ...]]]]) -> str:
+    """The stricter near-duplicate key: v10_near_key after removing the fields the policy's Rego does not read. `reads` maps a policy id
+    to {section: field paths} (from v10_sound_reads); a section it does not list is kept whole. Two cases with one key differ only in
+    names, wording, order, repetition or fields the verdict never reads, so a new row with a test row's key is a class twin of it."""
+    user = json.loads(case["messages"][1]["content"])
+    paths = reads.get(user.get("policy_id"), {})
+    observed = {e.get("section", e["id"]): _v10_abstract(_v10_read_only(e["observed"], paths.get(e.get("section", e["id"]), ())))
+                for e in user.get("evidence", []) if e.get("section") != "policy"}
+    return sha(canonical(["read-fields", user.get("policy_id"), observed]).encode())
+
+
+def v10_sound_reads(cases: list[dict], field_reads: dict[str, set[tuple[str, tuple[str, ...]]]]) -> tuple[dict, dict]:
+    """Per policy, the sections v10_strict_key may reduce to the fields the Rego reads (`field_reads`: rego_ast_field_reads of every
+    product, merged). The AST walk can miss a read (a field reached through a partial object rule, say); then reducing its section puts
+    cases with different labels (oracle outcome and claims) under one key although v10_near_key keeps them apart. Such a section is kept
+    whole, one at a time, the one that removes most of those conflicts first (name order among equals), until none is left. Returns
+    (reads for v10_strict_key, a per-policy record of the sections reduced and kept whole)."""
+    by_policy: dict[str, list[dict]] = defaultdict(list)
+    for case in cases:
+        user = json.loads(case["messages"][1]["content"])
+        if "policy_id" in user:
+            by_policy[user["policy_id"]].append(case)
+
+    def conflicts(pid: str, rows: list[dict], kept: dict) -> int:
+        groups: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+        for row in rows:
+            label = canonical([row["provenance"].get("oracle_outcome"), row["expected"]["claims"]])
+            groups[v10_strict_key(row, {pid: kept})][label].add(v10_near_key(row))
+        return sum(1 for labels in groups.values() if len(labels) > 1 and len(set().union(*labels.values())) > 1)
+
+    reads, record = {}, {}
+    for pid in sorted(field_reads):
+        sections: dict[str, list[tuple[str, ...]]] = defaultdict(list)
+        for section, path in sorted(field_reads[pid]):
+            sections[section].append(tuple(path))
+        kept, whole, rows = dict(sections), [], by_policy.get(pid, [])
+        found = conflicts(pid, rows, kept)
+        while found:
+            best = min(sorted(kept), key=lambda s: conflicts(pid, rows, {k: v for k, v in kept.items() if k != s}))
+            whole.append(best)
+            kept.pop(best)
+            found = conflicts(pid, rows, kept)
+        reads[pid] = kept
+        record[pid] = {"rows": len(rows), "reduced_to_read_fields": sorted(kept), "kept_whole_read_missed": whole,
+                       "read_fields": {s: [list(p) for p in paths] for s, paths in sorted(sections.items())}}
+    return reads, record
+
+
+def assign_v10_splits(cases: list[dict], *, ratio: float = 0.15, existing: list[dict] = ()) -> list[dict]:
+    """Assign v10 rows to train or validation, never test. Rows are grouped by v10_near_key first, so cosmetic twins (rows that differ only
+    in names, wording, addresses, order or repetition) form one group and never straddle the two splits; a group whose key an `existing`
+    train or validation row has takes that row's split. The other groups are split about 85/15 within each policy and oracle outcome, which
+    keeps the met / not-met balance in both splits: smallest groups first (key order among equals), a group goes to validation when it is
+    the first to go or brings the validation row count nearer max(1, round(rows * ratio)), unless that would leave the policy and outcome
+    with fewer than two train groups (one, where it has no more than two). Call after prompt deduplication and leakage filtering."""
+    result = json.loads(canonical(cases))
+    pinned: dict[str, set[str]] = defaultdict(set)
+    for row in existing:
+        if row["split"] != "test":
+            pinned[v10_near_key(row)].add(row["split"])
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for row in result:
+        if "/v10:" not in row["provenance"].get("template", ""):
+            raise ValueError("v10 split assignment accepts only generated v10 rows")
+        if row["split"] == "test":
+            raise ValueError("new v10 rows must never be test")
+        groups[v10_near_key(row)].append(row)
+    strata: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for key, rows in groups.items():
+        outcomes = {row["provenance"]["oracle_outcome"] for row in rows}
+        if len(outcomes) != 1:
+            raise ValueError(f"near-duplicate v10 rows with different oracle outcomes: {sorted(row['id'] for row in rows)}")
+        if len(pinned.get(key, ())) > 1:
+            raise ValueError(f"existing rows of one near-duplicate group sit in train and validation: {sorted(row['id'] for row in rows)}")
+        strata[json.loads(rows[0]["messages"][1]["content"])["policy_id"], outcomes.pop()].append(key)
+    split_of: dict[str, str] = {}
+    for _, keys in sorted(strata.items()):
+        target = max(1, round(sum(len(groups[key]) for key in keys) * ratio))
+        need = 2 if len(keys) > 2 else 1
+        split_of.update({key: next(iter(pinned[key])) for key in keys if key in pinned})
+        moved = sum(len(groups[key]) for key in keys if split_of.get(key) == "validation")
+        train = sum(1 for key in keys if split_of.get(key, "train") == "train")
+        for key in sorted((key for key in keys if key not in pinned), key=lambda key: (len(groups[key]), key)):
+            size = len(groups[key])
+            if train - 1 < need or (moved and abs(moved + size - target) >= abs(moved - target)):
+                split_of[key] = "train"
+                continue
+            split_of[key] = "validation"
+            moved += size
+            train -= 1
+    for key, rows in groups.items():
+        for row in rows:
+            row["split"] = split_of[key]
+            row["family"] = f"{row['family']}-v10-{row['split']}"
+    return result
+
+
 def mine_product(name: str, scuba: Path, opa: Path, out: Path, not_collected_every: int, *, commit: str, opa_version: str,
                  template: bool = True, evidence_view: str = "rego_ast", expression_patches: bool = True,
                  ca_bases: str = "single-purpose") -> tuple[list[dict], dict]:

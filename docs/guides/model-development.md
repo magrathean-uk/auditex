@@ -675,6 +675,43 @@ pinned exporter pads nothing), so no Graph-faithful artefact matches. It needs a
 `SharingDomainRestrictionMode` {0, 1}, the CA key whitelist) and `PACK_ENUM_DOMAINS` follow a pack, never the other way round. The whole-section
 shape gate compares the set of distinct item shapes, so a multi-policy Conditional Access section is projected only when a pack holds that exact set.
 
+### Oracle pack v10 generators: met and not-met rebalancing
+
+Round 4 (Ministral 3 8B on pack v9) lost met rows of the frozen test in families whose train rows held one class only: v8 added only
+violating shapes for MS.EXO.7.1v1 and MS.TEAMS.5.2v2/5.3v2, and every legacy row of those families, of MS.TEAMS.5.1v2 and of
+MS.SECURITYSUITE.8.2v1 sits in the frozen test, so the train split held no met row for any of them. The opt-in v10 API in
+`scripts/build-oracle-cases.py` adds passing shapes, with failing twins where a family needs both classes. Like v8 and v9 it leaves the
+default mining path and the v7 regeneration parity untouched. Evaluate the returned inputs with the pinned OPA, pass the results to
+`build_cases` with `id_salt=V10_ID_SALT` and periodic masking disabled, then deduplicate and drop frozen-test collisions as for v9.
+
+`v10_variants(product, base_input)` returns the variants of one generator per product (none for other products). Each variant declares the
+label it expects in `intent`; the miner stops when OPA disagrees, and the OPA verdict is always the label. A v10 template reads
+`v10:<generator>:<outcome>=<shape>` (Teams: `tenant=<policies>_<settings>`) and then the mutation family.
+
+| Generator | Variants |
+| --- | --- |
+| `exo_7_1` | MS.EXO.7.1v1 transport rule sets: one working external-sender warning rule (enabled, enforced, a subject prefix, mail from outside the organisation) under four prefixes, alone or among rules the Rego must not count (an outbound disclaimer without a prefix, a disabled or audit-mode warning rule, an internal-mail tag, a rule with no sender scope), at varying positions; and six failing twins where the warning rule itself is broken next to the same decoys. |
+| `teams_5` | Teams app permission policy sets (two or three policies, `Global` plus tag policies) with org-wide app settings absent, unreadable (certificate authentication) or set (`DefaultApp`, `GlobalApp`, `PrivateApp` at `None` or `AllowedApps`, all three or only one). Each tenant is labelled for MS.TEAMS.5.1v2, 5.2v2 and 5.3v2, so a `BlockedAppList` on one catalogue is shown not to fail the items that read the other two, and a readable org-wide setting is shown to decide over the legacy policies. |
+| `conn_filter_8_2` | MS.SECURITYSUITE.8.2v1 connection filter policies (the default policy and up to two custom ones): the safe list off everywhere, with and without IP allow lists (which only MS.SECURITYSUITE.8.1v1 judges), and the safe list on in one policy among several. Addresses are documentation ranges only. The Rego decides on one boolean, so every shape is a decision-class twin of a frozen test row; pack v10 keeps the family unaugmented and these shapes only check the documented rule against the oracle. |
+| `powerbi_7_1` | MS.POWERBI.7.1v1 on subsets of the base tenant's settings: `EimInformationProtectionEdit` enabled or disabled, for everyone or one security group, at different list positions; licence found, access not denied. |
+
+`v10_near_key(case)` is the near-duplicate key: the policy id and the observed evidence with `Name` and `Identity` removed at any depth, free
+text and addresses (`PrependSubject`, `IPAllowList`, `name`, `graphId`, `title`) reduced to empty or non-empty, and every array
+taken as the set of its distinct elements, so order and repetition do not count. The verdicts of these families ask whether any rule, policy or
+filter has a property, so two cases with one key differ only in what the verdict never reads. Pack curation drops every train or validation row,
+inherited or new, whose key a test row has. `assign_v10_splits(new_cases, existing=rows)` groups the new rows by that key first, so cosmetic
+twins never straddle train and validation (an existing row's split pins its group), then splits the groups about 85/15 within each policy and
+oracle outcome, never into test: smallest groups first, at least one group to validation, and never fewer than two train groups of a policy and
+outcome (one where it has no more than two).
+
+`v10_strict_key(case, reads)` is the stricter key used as the gate for new rows: it first removes the fields of each evidence section that the
+policy's Rego does not read, then applies the `v10_near_key` normalisation, so an extra property the verdict ignores does not make a row
+independent of a test row. `reads` comes from `v10_sound_reads(cases, field_reads)`, where `field_reads` is `rego_ast_field_reads` of every
+product merged per policy. The AST walk can miss a read (Power BI reaches `enabled` through a partial object keyed by `settingName`, for
+example), so a section whose reduction would put cases with different labels under one key that `v10_near_key` keeps apart is kept whole,
+and the returned record says which. Pack curation drops a new row whose stricter key a test row has and reports inherited rows that share
+one without dropping them.
+
 ### Second oracle: Prowler consensus
 
 A second deterministic engine, the Microsoft 365 provider of Prowler, checks the same fictional tenants so that each

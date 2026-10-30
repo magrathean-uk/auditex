@@ -200,6 +200,15 @@ bundle gains the `privileged_roles` artefact, both additive.
   new templates out of test and every swept value in train. The default miner output and the v7 parity are unchanged.
   `scripts/derive-scuba-projection-shapes.py` is now the single derivation of the projection shape goldens (reproducing the
   v7 fixture; the fixture and the shipped gate are untouched). No version bump.
+- **Oracle pack v10 generators.** `scripts/build-oracle-cases.py` gains the opt-in `v10_variants` API for the families
+  whose train rows held one class only after round 4: MS.EXO.7.1v1 transport rule sets with a working warning rule among
+  decoys, Teams app permission policies with org-wide app settings labelled for MS.TEAMS.5.1v2, 5.2v2 and 5.3v2 together,
+  MS.SECURITYSUITE.8.2v1 connection filters and MS.POWERBI.7.1v1 setting lists, each with failing twins. Every variant
+  declares the label it expects and the miner stops when OPA disagrees. `v10_near_key` abstracts names, wording, addresses,
+  order and repetition; `v10_strict_key` first removes the fields the policy's Rego does not read (`v10_sound_reads` keeps a
+  section whole where the Rego-AST reads would mix labels); `assign_v10_splits` keeps each key in one split (an existing
+  row's split pins it) and splits the groups about 85/15 within policy and outcome, never into test. The default miner
+  output and the v7 parity are unchanged. No version bump.
 - **Provenance key.** `validate_case` accepts `prompt_convention` (only `named-enums-v1`); a 1.2.1 wheel rejects
   every row that carries it, so a pack built with this convention needs this version on the cluster.
 - **Checkpoint scorer.** `scripts/score-adapter-checkpoints.py` counts an expected-`unknown` claim answered
