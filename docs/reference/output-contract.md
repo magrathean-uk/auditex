@@ -89,7 +89,7 @@ required by the training system prompt.
 
 Rule rows have `reason: "rule_precheck"`, `validation_status: "valid"`, zero attempts
 and latency, null prompt/response hashes, and false thinking flags. Their
-`rule_precheck` object contains `class` (`closed_gate` or `absent_section`), `rule_id`,
+`rule_precheck` object contains `class` (`closed_gate`, `absent_section` or `absent_field`: a Rego-read field missing inside a collected section, answered unknown by a registered field rule), `rule_id`,
 `section` (an ordered array of affected section names), `field` (a path or null) and
 `value` (the normalised gate value or null). Missing gate inputs share the
 `absent_section` class and name the field. Absence rows carry
@@ -117,7 +117,7 @@ The required `projection` envelope is separate from prompt evidence:
 - `schema_version: "2026-10-29"`.
 - `sections`: every section referenced by the shipped policy catalogue, with
   `status` (`projected` or `not_collected`), `reason` (null for projected;
-  `missing_artifact`, `incomplete_shape`, `oversize`, `powershell_only`,
+  `missing_artifact`, `incomplete_shape`, `collector_error`, `oversize`, `powershell_only`,
   `not_applicable_to_platform`, or for the DNS sections `dns_posture_not_run` and
   `dns_records_not_saved` otherwise), optional `unsupported_conditions` (CA
   field paths that cannot be represented), and `source` (relative artefact paths
@@ -144,6 +144,49 @@ The required `projection` envelope is separate from prompt evidence:
   or the size of the inline payload file) and chunk files opened. Optional
   `ignored_failures` lists the `<collector>.<operation>` names of operations that
   reported a failure the section does not read (collection health, below).
+  A `collector_error` section read an operation the collector recorded as failed
+  (`error`, `error_class` on the envelope, coverage row, ledger diagnostic or collection
+  gap); its `detail` is `error_class` (the collector's class, never the error message)
+  and, when attributable, `operation` (`<collector>.<operation>`). The class is checked
+  against one vocabulary, `COLLECTOR_ERROR_CLASSES` in
+  `azure_tenant_audit/model_assessment.py`, shared by the projection and the validator: the
+  classes this engine's collectors, adapters, preflight and offline replay write, plus
+  `graph_http_<status>` for an HTTP status the Graph classifier does not name. Any other
+  value, however token-shaped (`alice_smith`), reads `unclassified`, and the validator
+  rejects an unknown class. Optional `ignored_fields` lists, sorted, the field paths the
+  source carried that the training shape does not know (names only, never values; a key
+  that is not an identifier is masked as `unrecognisedField`). Only OData annotations
+  (`@odata.type`, `authenticationStrength@odata.context`) are excluded; every other source
+  field an adapter does not project is listed, at every adapter boundary: the SharePoint
+  settings row, the authorization policy and its default-role permissions, each SKU row
+  and service plan, each administrator's user row, each Conditional Access policy
+  (including `id`, `createdDateTime` and `templateId`), the privileged role rows and the
+  PowerShell and DNS rows. The normalised records the product writes itself
+  (`effective_admin_set`, `sharepoint_tenant_settings`) are read by named field and not
+  listed. An extra field that cannot change the meaning of a projected one never
+  withholds: the adapter projects only the fields it selects and the projected object
+  passes the same frozen shape gate. Field presence depends on the token (a delegated
+  token returns `servicePlans[].servicePlanType`, an Azure CLI token does not), not on the
+  tenant. Unseen enum values, wrong types and missing fields still withhold. Where an
+  extra field can scope or qualify a kept one, only an empty or demonstrably harmless
+  value is ignored; a populated one withholds the section as `incomplete_shape` with
+  `detail` `{field: <path>, kind: unexpected_field}`. Conditional Access: a known
+  restriction (`unsupported_conditions`), or a populated unknown field inside
+  `conditions` or `grantControls` (`unrecognisedField`), withholds; an empty unknown
+  field there, or any unknown top-level field, is ignored. `privileged_roles`: on a role,
+  assignment, rule or rule `Setting`, a populated extra withholds unless it restates what
+  is kept: `DirectoryScopeId` `/` (tenant-wide), a `RoleDefinitionId` or `TemplateId` equal
+  to the row's `RoleTemplateId`, a rule `Target` whose caller and level are the ones the rule
+  `Id` names (operations `All`, no target objects, inherited or enforced settings), a
+  notification `RecipientType` the `Id` names, and identity or audit metadata (`Id`,
+  `Description`, `IsBuiltIn`, `CreatedDateTime`, `ModifiedDateTime`, `CreatedUsing`). An
+  administrative-unit `DirectoryScopeId`, any `AppScopeId`, `MemberType`, `Status`,
+  `NotificationLevel`, approval stages or an unknown field withholds, so a scoped
+  assignment is never read as tenant-wide. `privileged_users`: every role an administrator
+  is listed with must be held at directory scope `/` in the admin set's `roles`; a role held
+  only at another scope withholds (`roles.scope`, `unseen_enum_value`, the scope never
+  echoed), one whose scope is unknown too (`missing_field`), and a scoped assignment of a
+  role also held tenant-wide changes nothing.
   `scuba_config` alone carries `synthesis` (see its row below): `source`
   `synthesised:default-config`, `basis` `scubagear_default_config`, `m365_environment`
   (`value`, and `basis` `openid_discovery`, `licence_sku`, `assumed_default`, `ambiguous` or `unreadable`; the last two leave `value` null and withhold the environment-gated policies),
@@ -179,6 +222,16 @@ The required `projection` envelope is separate from prompt evidence:
     with the marker and reason `oversize` (no `detail`). Nothing is silently sliced.
     A tenant with thousands of users still projects `privileged_users` when it has
     a handful of administrators.
+  - A tenant whose administrator set exceeds the budget withholds `privileged_users` as
+    `oversize`: the budget counts each administrator's `roles` list as well as the
+    administrators, so one administrator holding more than 40 distinct privileged roles
+    (seen on a real tenant: 88, with 130 role assignments and 145 role definitions in the
+    authoritative chunks) is enough. Nothing is sliced to fit, since a partial role list
+    would read as a narrower admin set. There is no supported operator action today:
+    `--projection-max-items` would let the section through, but the default is the budget
+    the model is served with, and a larger section is outside it, so the default stays. Whether such a
+    tenant should get a rule-only answer, a summarised role list or a larger trained budget
+    is a product question recorded for G.
   - The scan bounds are safety limits on one source read, whatever the budget: rows
     examined in one operation, bytes read (the chunk lines of one operation, and the
     size of any JSON artefact read whole, such as an inline payload or a normalised
@@ -220,7 +273,8 @@ listed in the section's `ignored_failures`. Attribution comes from a row's `list
 `name` or `source`, from a coverage-ledger row's `diagnostics[].item` (only a partial
 or blocked ledger row, or one that is complete, can be attributed that way), or from
 the operation key of a raw envelope; a derived `<operation>Fanout` row counts as its
-operation. A failure that cannot be attributed to such an unrelated operation (the
+operation, and the identity collector's `privilegedGroupFanout` row is a derived name of that collector
+(so a failed fan-out is listed under `ignored_failures` for `tenant_id` and withholds `privileged_users`). A failure that cannot be attributed to such an unrelated operation (the
 collector as a whole, an unrecognised name, a diagnostic without an item) still
 withholds. `privileged_users` reads `identity` `users`, `groups`, `servicePrincipals`,
 `roleDefinitions`, `roleAssignments` and the privileged-group fan-out
@@ -245,10 +299,10 @@ Graph camelCase is converted recursively for the selected fields.
 | --- | --- |
 | `SPO_tenant` | `normalized/sharepoint_tenant_settings.json` with collected, agreeing canonical sharing and OneDrive capabilities; raw `sharepoint_access.sharePointSettings` or `onedrive_posture.sharePointSettings` with all remaining settings. Emits one dict with `SharingCapability`, `ODBSharingCapability`, `DefaultLinkPermission`, `DefaultSharingLinkType`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `SharingDomainRestrictionMode`, `RequireAnonymousLinksExpireInDays`, `EmailAttestationRequired`, `EmailAttestationReAuthDays`. Capabilities use the Management Shell mapping 0 disabled, 1 new/existing guests, 2 anyone, 3 existing guests; other enums use the shared numeric maps. Expiry -1 is retained. No `_name` companions are projected; prompt assembly adds them later. Graph-only settings are usually insufficient. |
 | `conditional_access_policies` | Full raw `conditional_access.conditionalAccessPolicies`, not `conditional_access_graph` counts. Requires `DisplayName`, `State`, selected `Conditions` applications, authentication flows, client app types/applications, sign-in/user/agent risks and all user inclusions/exclusions; `GrantControls` built-ins, operator and authentication strength, including `AllowedCombinations` when non-null. Every policy must match a whole observed pack shape. Non-empty unsupported conditions or controls, including locations, platforms, devices and session controls, withhold the entire section with `incomplete_shape`; their field paths appear in `unsupported_conditions`. No restriction is silently discarded. |
-| `authorization_policies` | Raw `external_identity.authorizationPolicy` or `consent_policy.authorizationPolicy`; singleton `Id`, `AllowInvitesFrom`, `GuestUserRoleId`, default-role `AllowedToCreateApps` and assigned permission grant policy IDs. Duplicate sources must agree. Graph `defaultUserRolePermissions.allowedToCreateSecurityGroups` and `allowedToReadOtherUsers` are accepted and dropped: dependent SCuBA policies do not read them and the pack shape has no such fields. Other unexpected default-role permission fields still withhold the section. |
-| `service_plans` | Full raw `licensing.subscribedSkus`, streamed, each `servicePlans` entry with `servicePlanId` and `servicePlanName`. Emits distinct `{ServicePlanId, ServicePlanName}` rows; conflicting duplicate IDs invalidate the section. Licence counts alone do not suffice. |
-| `privileged_roles` | An existing `normalized/privileged_roles.json` with ProviderExport-shaped `records`: `DisplayName`, `RoleTemplateId`, complete assignments (`PrincipalId`, start/end timestamps when present, each null or `/Date(ms)/`) and PIM `Rules` with source metadata and typed expiration, notification or approval settings. The `identity_governance` collector reads the PIM role policies of the directory roles and the normaliser writes this file when every read behind it succeeded in full ("PIM role policy reads" below); a refused, missing or cut read leaves no file, so the section is `missing_artifact`, never an empty list; so does an artefact the builder withholds although every read succeeded, which is named in `collection_gaps` as `identity_governance.privileged_roles` (reason `artefact_withheld`, see "PIM role policy reads"), and the section lists that gap under `ignored_failures`. Rows may carry the normalized `key`, which is never projected. No frozen v7 rule shape matches an expiration or an approval rule as Graph returns it: every frozen rule that carries `IsExpirationRequired` also carries `NotificationRecipients` and a `Setting` object, every frozen rule with a `Setting` object also carries `IsExpirationRequired`, `MaximumDuration` and `NotificationRecipients`, and the pack has no null or empty form of any of them on those rules. The pack rows are ScubaGear Rego unit-test inputs, not exporter output; the pinned exporter writes the properties Graph returns for each rule type and pads nothing. The normaliser does not pad either: a rule carries exactly the properties Graph returned for its type, so an artefact built from Graph rules matches no frozen whole shape and is withheld as `incomplete_shape` with detail `{field: "$", kind: "unseen_shape"}` until a pack that holds its shape (or real exports) is frozen (`PACK_SHAPE_DIGESTS` changes with the pinned model, never before). No rule defaults are fabricated, and no null or empty value stands in for a property Graph did not return. |
-| `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus a complete scan of raw `identity.users` (streamed; only the administrators' rows are kept). Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The current identity collector does not select the immutable ID, so ordinary live runs need a saved complete export including it; a hybrid sample is insufficient. |
+| `authorization_policies` | Raw `external_identity.authorizationPolicy` or `consent_policy.authorizationPolicy`; singleton `Id`, `AllowInvitesFrom`, `GuestUserRoleId`, default-role `AllowedToCreateApps` and assigned permission grant policy IDs. Duplicate sources must agree. Graph `defaultUserRolePermissions.allowedToCreateSecurityGroups` and `allowedToReadOtherUsers` are accepted and dropped: dependent SCuBA policies do not read them and the pack shape has no such fields. Other default-role permission fields (`allowedToCreateTenants`, `allowedToReadBitlockerKeysForOwnedDevice`) are dropped and listed in `ignored_fields`. |
+| `service_plans` | Full raw `licensing.subscribedSkus`, streamed, each `servicePlans` entry with `servicePlanId` and `servicePlanName`. Emits distinct `{ServicePlanId, ServicePlanName}` rows of the plans whose `provisioningStatus` is `Success`, as ScubaGear's exporter does (`ExportAADProvider.psm1`); a disabled or pending plan is left out, a plan without a status is kept, and a tenant with no provisioned plan projects an empty list. Conflicting duplicate IDs invalidate the section. Licence counts alone do not suffice. |
+| `privileged_roles` | An existing `normalized/privileged_roles.json` with ProviderExport-shaped `records`: `DisplayName`, `RoleTemplateId`, complete assignments (`PrincipalId`, start/end timestamps when present, each null or `/Date(ms)/`) and PIM `Rules` with source metadata and typed expiration, notification or approval settings. The `identity_governance` collector reads the PIM role policies of the directory roles and the normaliser writes this file when every read behind it succeeded in full ("PIM role policy reads" below); a refused, missing or cut read leaves no file, so the section is `missing_artifact`, never an empty list (a refused schedule read, which the section reads itself, is reported first as `collector_error`); so does an artefact the builder withholds although every read succeeded, which is named in `collection_gaps` as `identity_governance.privileged_roles` (reason `artefact_withheld`, see "PIM role policy reads"), and the section lists that gap under `ignored_failures`. Rows may carry the normalized `key`, which is never projected. No frozen v7 rule shape matches an expiration or an approval rule as Graph returns it: every frozen rule that carries `IsExpirationRequired` also carries `NotificationRecipients` and a `Setting` object, every frozen rule with a `Setting` object also carries `IsExpirationRequired`, `MaximumDuration` and `NotificationRecipients`, and the pack has no null or empty form of any of them on those rules. The pack rows are ScubaGear Rego unit-test inputs, not exporter output; the pinned exporter writes the properties Graph returns for each rule type and pads nothing. The normaliser does not pad either: a rule carries exactly the properties Graph returned for its type, so an artefact built from Graph rules matches no frozen whole shape and is withheld as `incomplete_shape` with detail `{field: "$", kind: "unseen_shape"}` until a pack that holds its shape (or real exports) is frozen (`PACK_SHAPE_DIGESTS` changes with the pinned model, never before). No rule defaults are fabricated, and no null or empty value stands in for a property Graph did not return. |
+| `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus a complete scan of raw `identity.users` (streamed; only the administrators' rows are kept). Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The current identity collector does not select the immutable ID; the value is then taken from `domains_hybrid.syncSampleUsers`, which selects it for the users it samples (the same Graph property; conflicting duplicates withhold). An administrator neither read holds withholds the section (`missing_field`). Without Entra ID P2 the PIM schedule reads are refused with `license_required`; such a refusal with no rows is the no-P2 case, the admin set comes from the directory role assignments (the effective admin set records the schedule sources `not_applicable`) and the refused reads are listed in `ignored_failures`. Any other refusal of a schedule read withholds (`collector_error`). `privileged_roles` has no such variant: every frozen shape carries PIM `Rules`, so a refused schedule read withholds it as `collector_error`. |
 | `tenant_id` | Canonical non-zero Entra UUID from the run identity in `run-manifest.json` or saved raw organisation evidence. Recorded and observed UUIDs must agree; a conflict or domain/authority alias cannot become a tenant ID. Synthetic demo UUIDs remain synthetic, without upgrading the run identity's verification status. |
 | `scuba_config` | **Synthesised, not collected** (ScubaGear's operator configuration file has no tenant source): ScubaGear's default configuration, the tenant's cloud and the run's emergency-access list (`rule_parameters.break_glass_accounts`), shown to each reading policy in the shape its training rows carry. AAD policies see `{"Aad": null, "CapExclusions": <empty lists>, "RoleExclusions": <empty lists>}`, MS.AAD.9.1v1 with `M365Environment`; MS.EXO.1.1v2 sees `null` (no allowed forwarding domains); Teams policies see `{"M365Environment": ...}`; the three SecuritySuite policies stay `not_collected` (`operator_input_required`): their rows carry the operator's sensitive users and partner domains, which Auditex does not take, and an empty list is a shape training never held. `M365Environment`: the public OpenID discovery `dns_posture` saves (`tenant_region_sub_scope` `GCC` is `gcc`; under the US Government scope, `DODCON` is `gcchigh` and `DOD` is `dod`), else licence SKUs sold only in a US Government cloud, else `commercial` (`assumed_default`); disagreeing signals withhold the four environment-gated policies (`environment_ambiguous`). An emergency-access list is resolved as `--break-glass-accounts` is, to object IDs (never the entered names), and placed under the `Aad[...]` entry the policy's Rego reads (for MS.AAD.3.2v2 that is `MS.AAD.3.2v1`, a shape the training data never held, so that policy is withheld as `unseen_shape` whenever an exclusion list exists) for the policies whose Rego honours an exclusion: `CapExclusions` for MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.7v1, 3.8v1, 3.9v1 and `RoleExclusions` for MS.AAD.7.4v1. An unresolved entry, an unreadable user or group list, or a manifest that did not record the list withholds those ten (`break_glass_unresolved`); a view whose whole shape training never held (users and groups together on MS.AAD.3.8v1 or 7.4v1) is withheld for that policy (`unseen_shape`). The section's top-level value is the AAD default; each policy's own view is what its prompt carries. |
 | `dmarc_records` | Saved raw `dns_posture.dmarc_records` with `{domain, rdata[]}` containing complete TXT answers. Parsed posture alone is insufficient. |

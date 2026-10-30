@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 from .resources import open_text_resource
-from .scuba_precheck import field_name, policy_rule, precheck_response
+from .scuba_precheck import field_name, policy_rule, precheck_response, rule_catalogue
 from .scuba_scope import (
     LIMITATION_ID as SCOPE_LIMITATION, NAME_LIMIT as SCOPE_NAME_LIMIT, SECTION as SCOPE_SECTION,
     allowed_conditions, condition_paths, requirement_met, scope_rule,
@@ -32,6 +32,32 @@ SCAN_BOUND_FIELDS = frozenset({"scan_max_rows", "scan_max_bytes", "scan_max_chun
 # What a policy that reads the synthesised scuba_config sees: its view, or why it was withheld.
 SCUBA_CONFIG_OUTCOMES = frozenset({"projected", "operator_input_required", "break_glass_unresolved",
                                    "environment_ambiguous", "unseen_shape", "oversize"})
+# The error classes this engine's collectors, adapters, preflight, offline replay and derived fan-out rows write
+# (``collectors/base.py`` ``_classify_graph_error`` and the literals elsewhere; a test keeps the two in step), plus the
+# classifier's fallback ``graph_http_<status>``. A projection diagnostic echoes only these: any other token, however
+# token-shaped, can be a person's name and reads ``unclassified``.
+COLLECTOR_ERROR_CLASSES = frozenset({
+    "app_missing_reply_url", "bad_request", "client_error", "collection_limit", "command_error", "command_exception",
+    "command_not_authenticated", "command_not_available", "command_not_found", "command_optional_failure",
+    "command_output_empty", "command_output_parse_error", "command_parse_error", "command_refused", "command_timeout",
+    "dns_resolver_error", "graph_transient", "incomplete_evidence", "insufficient_permissions", "invalid_object_id",
+    "lab_guard", "license_required", "missing_app_credentials", "missing_argument", "missing_intent",
+    "module_compatibility_unverified", "module_incompatible", "module_not_found", "next_link_refused",
+    "permission_stop", "preflight_blocked", "profile_not_allowed", "public_lookup_error", "query_page_minimum",
+    "resource_not_found", "response_adapter_override_disabled", "response_argument_malformed",
+    "response_argument_unsafe", "response_command_override_disabled", "response_invalid_adapter_override",
+    "response_write_guard", "section_absent", "service_not_available", "session_not_connected", "toolchain_unavailable",
+    "unauthenticated", "unknown", "unknown_action", "unsupported_query",
+})
+_GRAPH_HTTP_ERROR_CLASS = re.compile(r"graph_http_[1-5][0-9]{2}")
+UNCLASSIFIED_ERROR = "unclassified"
+
+
+def collector_error_class(value: Any) -> str:
+    """The collector error class to report: ``value`` when the collectors write it, else ``unclassified``."""
+    if isinstance(value, str) and (value in COLLECTOR_ERROR_CLASSES or _GRAPH_HTTP_ERROR_CLASS.fullmatch(value)):
+        return value
+    return UNCLASSIFIED_ERROR
 
 
 def safe_projection_enum_value(field: str, value: Any) -> bool:
@@ -50,9 +76,18 @@ def safe_projection_enum_value(field: str, value: Any) -> bool:
 def _check(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str) -> None:
     supported = {"$schema", "$id", "$defs", "title", "description", "$ref", "type", "const", "enum",
                  "required", "properties", "additionalProperties", "items", "uniqueItems", "pattern",
-                 "minimum", "maximum", "minLength", "minItems", "maxItems"}
+                 "minimum", "maximum", "minLength", "minItems", "maxItems", "anyOf"}
     if set(schema) - supported:
         raise ValueError("Unsupported model assessment schema keyword")
+    if "anyOf" in schema:
+        for option in schema["anyOf"]:
+            try:
+                _check(value, option, root, path)
+                break
+            except ValueError:
+                continue
+        else:
+            raise ValueError(f"Invalid model assessment value at {path}")
     if "$ref" in schema:
         name = schema["$ref"].removeprefix("#/$defs/")
         _check(value, root["$defs"][name], root, path)
@@ -150,8 +185,20 @@ def validate_assessment(payload: Any) -> None:
             if unsupported and (section != "conditional_access_policies" or detail["reason"] != "incomplete_shape"
                                 or unsupported != sorted(set(unsupported))):
                 raise ValueError("Inconsistent unsupported projection conditions")
+            ignored_fields = detail.get("ignored_fields", [])
+            if not _sorted_unique(ignored_fields):
+                raise ValueError("Unsorted ignored projection fields")
             diagnostic = detail.get("detail")
-            if diagnostic is not None:
+            if detail["reason"] == "collector_error":
+                # A failed read names its cause: the collector's error class, and the operation when known.
+                if (detail["status"] != "not_collected" or diagnostic is None or "error_class" not in diagnostic
+                        or not set(diagnostic) <= {"error_class", "operation"}):
+                    raise ValueError("Inconsistent projection diagnostic")
+                if diagnostic["error_class"] not in {collector_error_class(diagnostic["error_class"]), UNCLASSIFIED_ERROR}:
+                    raise ValueError("Unknown projection error class")
+            elif diagnostic is not None:
+                if "kind" not in diagnostic:
+                    raise ValueError("Inconsistent projection diagnostic")
                 # A scan bound that ran out is the one diagnostic an oversize section carries.
                 scan_bound = diagnostic["kind"] == "scan_bound"
                 if (detail["status"] != "not_collected"
@@ -259,6 +306,13 @@ def validate_assessment(payload: Any) -> None:
             if detail["rule_id"] == "required_sections_present":
                 if detail["class"] != "absent_section" or detail["field"] is not None or detail["value"] is not None:
                     raise ValueError("Invalid absent-section pre-check")
+            elif detail["class"] == "absent_field":
+                # A Rego-read field missing inside a collected section: the rule must be one of the registered field
+                # rules of this policy, name its section and field, and carry no value.
+                rule = next((r for r in rule_catalogue()["field_rules"] if r["rule_id"] == detail["rule_id"]), None)
+                if (rule is None or rule["policy_id"] != row["policy_id"] or detail["section"] != [rule["section"]]
+                        or detail["field"] != field_name(rule) or detail["value"] is not None):
+                    raise ValueError("Unsupported rule pre-check field rule")
             else:
                 rule = policy_rule(row["policy_id"])
                 if (rule is None or detail["rule_id"] != rule["rule_id"] or

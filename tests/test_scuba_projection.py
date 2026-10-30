@@ -32,6 +32,7 @@ AUTH = {'Id': 'authorizationPolicy', 'AllowInvitesFrom': 'adminsAndGuestInviters
         'PermissionGrantPolicyIdsAssignedToDefaultUserRole': ['ManagePermissionGrantsForSelf.test']}
 ROLES = [{'Assignments': [{'EndDateTime': '/Date(1691006065170)/', 'PrincipalId': 'ae71e61c-f465-4db6-8d26-5f3e52bdd800', 'StartDateTime': '/Date(1660328610000)/'}], 'DisplayName': 'Global Administrator', 'RoleTemplateId': 'Role1', 'Rules': [{'Id': 'Expiration_Admin_Assignment', 'IsExpirationRequired': True, 'MaximumDuration': 'P30D', 'NotificationRecipients': ['test@example.com'], 'NotificationType': 'Email', 'RuleSource': 'Global Administrator', 'RuleSourceType': 'Directory Role', 'Setting': {'IsApprovalRequired': True}}, {'Id': 'Notification_Admin_Admin_Eligibility', 'NotificationRecipients': ['test@example.com'], 'NotificationType': 'Email', 'RuleSource': 'Global Administrator', 'RuleSourceType': 'Directory Role'}]}, {'Assignments': [{'EndDateTime': '/Date(1691006065170)/', 'PrincipalId': 'e54ac846-1f5a-4afe-aa69-273b42c3b0c1'}], 'DisplayName': 'Privileged Role Administrator', 'RoleTemplateId': 'Role2', 'Rules': [{'Id': 'Expiration_Admin_Assignment', 'IsExpirationRequired': True, 'MaximumDuration': 'P30D', 'NotificationRecipients': ['test@example.com'], 'RuleSource': 'Global Administrator', 'RuleSourceType': 'Directory Role', 'Setting': {'IsApprovalRequired': True}}]}]
 ROLE = ROLES[0]
+GLOBAL_ADMIN_ROLE = {'role': 'Global Administrator', 'route': 'direct_active', 'scope': '/'}
 PS = {
     'accepted_domains': ('exchange_policy', 'acceptedDomains', {'Name': 'Example', 'DomainName': 'example.invalid'}),
     'dkim_config': ('exchange_policy', 'dkimSigningConfig', {'Domain': 'example.invalid', 'Enabled': True}),
@@ -83,7 +84,7 @@ def complete_bundle(tmp_path):
     write(tmp_path, 'normalized/effective_admin_set.json', {'records': [
         {'kind': 'effective_admin_set_summary', 'state': 'complete', 'unresolved_principal_count': 0, 'admin_count': 1},
         {'kind': 'effective_admin', 'state': 'complete', 'is_user': True, 'principal_id': TENANT,
-         'role_names': ['Global Administrator']}]})
+         'role_names': ['Global Administrator'], 'roles': [GLOBAL_ADMIN_ROLE]}]})
     write(tmp_path, 'normalized/sharepoint_tenant_settings.json', {'records': [{
         'read_state': 'collected', 'sharing_capability': 'externalUserAndGuestSharing',
         'onedrive_sharing_capability': 'existingExternalUserSharingOnly'}]})
@@ -93,7 +94,7 @@ def complete_bundle(tmp_path):
     assigned = auth.pop('permissionGrantPolicyIdsAssignedToDefaultUserRole')
     auth['defaultUserRolePermissions']['permissionGrantPoliciesAssigned'] = assigned
     operation(tmp_path, 'consent_policy', 'authorizationPolicy', [auth])
-    operation(tmp_path, 'licensing', 'subscribedSkus', [{'skuPartNumber': 'SPE_E5', 'servicePlans': [graph(EXPECTED['service_plans'][0])]}])
+    operation(tmp_path, 'licensing', 'subscribedSkus', [{'skuPartNumber': 'SPE_E5', 'servicePlans': [{**graph(EXPECTED['service_plans'][0]), 'provisioningStatus': 'Success'}]}])
     write(tmp_path, 'normalized/privileged_roles.json', {'records': ROLES})
     for collector, name, row in PS.values():
         operation(tmp_path, collector, name, [row])
@@ -382,8 +383,11 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
     assert sections['SPO_tenant']['detail'] == {'field': 'FileAnonymousLinkType', 'kind': 'missing_field'}
     assert sections['authorization_policies']['detail'] == {
         'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value', 'value': 'everyone'}
-    assert sum(s['status'] == 'projected' for s in result['projection']['sections'].values()) == 4
+    assert sum(s['status'] == 'projected' for s in result['projection']['sections'].values()) == 5
     assert sections['privileged_users']['status'] == 'projected' and sections['scuba_config']['status'] == 'projected'
+    # The sample's accepted domains carry fields the training shape does not know: ignored and named, never withholding.
+    assert sections['accepted_domains']['status'] == 'projected'
+    assert sections['accepted_domains']['ignored_fields'] == ['Default', 'DomainType', 'Identity']
     # The privileged-user section projects, so the three rules that read only it reach the model; the other
     # 99 rows stay rule answers with no model call.
     assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 99,
@@ -473,7 +477,7 @@ def test_failed_endpoint_and_sku_records_never_become_authoritative(complete_bun
     operation(complete_bundle, collector, name, rows)
     p = project_run(complete_bundle)
     assert p[section] == NOT_COLLECTED
-    assert p.report['sections'][section]['reason'] == 'incomplete_shape'
+    assert p.report['sections'][section]['reason'] == ('incomplete_shape' if 'error' not in metadata else 'collector_error')
 
 
 @pytest.mark.parametrize('payload', [{'chunk_files': []}, {'value': []}, {'chunk_files': [], 'item_count': 0}])
@@ -534,7 +538,9 @@ def test_record_status_does_not_hide_an_envelope_error(complete_bundle):
     operation(complete_bundle, 'identity_governance', 'roleAssignmentSchedules', [SCHEDULE], error='Forbidden')
     p = project_run(complete_bundle)
     assert p['privileged_users'] == NOT_COLLECTED and p['privileged_roles'] == NOT_COLLECTED
-    assert p.report['sections']['privileged_users']['detail'] == {'field': 'error', 'kind': 'unseen_shape'}
+    assert p.report['sections']['privileged_users']['reason'] == 'collector_error'
+    assert p.report['sections']['privileged_users']['detail'] == {
+        'error_class': 'unclassified', 'operation': 'identity_governance.roleAssignmentSchedules'}
 
 
 @pytest.mark.parametrize('condition', ['locations', 'devices', 'platforms'])
@@ -565,10 +571,23 @@ def test_unexpected_nested_person_field_cannot_reach_prompt(complete_bundle, mon
     row['UnexpectedPersonName'] = 'Injected Private Person'
     write(complete_bundle, path, data)
     p = project_run(complete_bundle)
-    assert p[section] == NOT_COLLECTED
-    assert p.report['sections'][section]['reason'] == 'incomplete_shape'
+    report = p.report['sections'][section]
+    if section == 'conditional_access_policies':
+        # A populated unknown field inside the conditions can narrow the policy: it still withholds.
+        assert p[section] == NOT_COLLECTED and report['reason'] == 'incomplete_shape'
+        assert report['unsupported_conditions'] == ['conditions.applications.unrecognisedField']
+    elif section == 'privileged_roles':
+        # A populated unknown field on a role or assignment can scope it: it withholds and is named, never its value.
+        prefix = 'Assignments.' if len(keys) > 2 else ''
+        assert p[section] == NOT_COLLECTED and report['reason'] == 'incomplete_shape'
+        assert report['detail'] == {'field': prefix + 'UnexpectedPersonName', 'kind': 'unexpected_field'}
+    else:
+        # Elsewhere an extra field is ignored: the section projects without it and the report names it, never its value.
+        assert p[section] != NOT_COLLECTED and report['status'] == 'projected'
+        assert report['ignored_fields'] == ['UnexpectedPersonName']
     assert 'Injected Private Person' not in canonical([
         build_case(pid, p, 'test') for pid in policy_catalogue()['policies']])
+    assert 'Injected Private Person' not in canonical(p.report)
 
 
 @pytest.mark.parametrize('field,value', [('state', 'tenant-wide'), ('state', 1), ('state', True)])
@@ -751,10 +770,10 @@ def test_authorisation_permissions_reject_unexpected_nested_fields(complete_bund
         allowedToCreateSecurityGroups=True, allowedToReadOtherUsers=False, unexpectedPerson=PERSON)
     write(complete_bundle, path, data)
     p = project_run(complete_bundle)
-    assert p['authorization_policies'] == NOT_COLLECTED
-    assert p.report['sections']['authorization_policies']['detail'] == {
-        'field': 'DefaultUserRolePermissions.unrecognisedField', 'kind': 'unexpected_field'}
-    assert PERSON not in canonical(p.report)
+    # An extra permission is ignored and named; a key that is not an identifier is masked, its value never echoed.
+    assert p['authorization_policies'] == [AUTH]
+    assert p.report['sections']['authorization_policies']['ignored_fields'] == ['DefaultUserRolePermissions.unexpectedPerson']
+    assert PERSON not in canonical(p.report) and PERSON not in canonical(p)
 
 
 def test_authorisation_known_irrelevant_permissions_are_dropped(complete_bundle):
@@ -784,7 +803,7 @@ def test_enum_diagnostic_never_echoes_person_or_free_text(complete_bundle, value
 @pytest.mark.parametrize('mutation,expected', [
     ('missing', {'field': 'DefaultUserRolePermissions.AllowedToCreateApps', 'kind': 'missing_field'}),
     ('type', {'field': 'DefaultUserRolePermissions.AllowedToCreateApps', 'kind': 'invalid_type'}),
-    ('key', {'field': 'DefaultUserRolePermissions.unrecognisedField', 'kind': 'unexpected_field'}),
+    ('key', None),
 ])
 def test_nested_diagnostic_paths_do_not_echo_person_data(complete_bundle, mutation, expected):
     path = 'raw/consent_policy.json'
@@ -798,7 +817,11 @@ def test_nested_diagnostic_paths_do_not_echo_person_data(complete_bundle, mutati
         permissions[PERSON] = EMAIL
     write(complete_bundle, path, data)
     p = project_run(complete_bundle)
-    assert p.report['sections']['authorization_policies']['detail'] == expected
+    assert p.report['sections']['authorization_policies'].get('detail') == expected
+    if mutation == 'key':
+        # A key that is not an identifier is ignored under a masked name.
+        assert p.report['sections']['authorization_policies']['ignored_fields'] == [
+            'DefaultUserRolePermissions.unrecognisedField']
     assert PERSON not in canonical(p.report) and EMAIL not in canonical(p.report)
 
 
@@ -950,18 +973,35 @@ def test_projected_enum_domains_reject_unseen_values(complete_bundle, section, p
     assert p.report['sections'][section]['reason'] == 'incomplete_shape'
 
 
-@pytest.mark.parametrize('extra', [{'unexpectedPerson': 'Injected Private Person'}, {'provisioningStatus': 'unseenStatus'}, {'appliesTo': 'unseenScope'}])
+@pytest.mark.parametrize('extra', [{'provisioningStatus': 'unseenStatus'}, {'appliesTo': 'unseenScope'}])
 def test_service_plan_nested_fields_are_explicitly_validated(complete_bundle, extra):
-    plan = {**graph(EXPECTED['service_plans'][0]), **extra}
+    plan = {**graph(EXPECTED['service_plans'][0]), 'provisioningStatus': 'Success', **extra}
     operation(complete_bundle, 'licensing', 'subscribedSkus', [{'servicePlans': [plan]}])
     p = project_run(complete_bundle)
     assert p['service_plans'] == NOT_COLLECTED
     assert p.report['sections']['service_plans']['reason'] == 'incomplete_shape'
     field = next(iter(extra))
-    assert p.report['sections']['service_plans']['detail'] == {
-        'field': 'servicePlans.' + ('unrecognisedField' if field == 'unexpectedPerson' else field),
-        'kind': 'unexpected_field' if field == 'unexpectedPerson' else 'unseen_enum_value'}
-    assert 'Injected Private Person' not in canonical(p)
+    assert p.report['sections']['service_plans']['detail'] == {'field': 'servicePlans.' + field, 'kind': 'unseen_enum_value'}
+
+
+@pytest.mark.parametrize('extra,ignored', [
+    ({'servicePlanType': 'Standard'}, ['servicePlans.servicePlanType']),
+    ({'unexpectedPerson': 'Injected Private Person'}, ['servicePlans.unexpectedPerson']),
+    ({PERSON: 'Injected Private Person', 'servicePlanType': 'Standard'}, ['servicePlans.servicePlanType', 'servicePlans.unrecognisedField']),
+])
+def test_service_plan_extra_fields_are_ignored_and_reported(complete_bundle, extra, ignored):
+    # Field presence depends on the token (a delegated token returns servicePlanType, the Azure CLI one does not): an extra
+    # field is not a tenant property, so it never withholds. Its name is recorded; its value never leaves the source.
+    plan = {**graph(EXPECTED['service_plans'][0]), 'provisioningStatus': 'Success', **extra}
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [{'servicePlans': [plan]}])
+    p = project_run(complete_bundle)
+    assert p['service_plans'] == EXPECTED['service_plans']
+    section = p.report['sections']['service_plans']
+    assert section['status'] == 'projected' and section['ignored_fields'] == ignored
+    assert 'Injected Private Person' not in canonical(p) and 'Injected Private Person' not in canonical(p.report)
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    assert result['projection']['sections']['service_plans']['ignored_fields'] == ignored
+    validate_assessment(result)
 
 
 def test_missing_role_rule_field_diagnostic(complete_bundle):
@@ -996,7 +1036,7 @@ def many_users(root, count=500, admins=3, chunked=False):
     write(root, 'normalized/effective_admin_set.json', {'records': [
         {'kind': 'effective_admin_set_summary', 'state': 'complete', 'unresolved_principal_count': 0, 'admin_count': admins},
         *[{'kind': 'effective_admin', 'state': 'complete', 'is_user': True, 'principal_id': i,
-           'role_names': ['Global Administrator']} for i in admin_ids]]})
+           'role_names': ['Global Administrator'], 'roles': [GLOBAL_ADMIN_ROLE]} for i in admin_ids]]})
     return admin_ids
 
 
@@ -1207,11 +1247,15 @@ def test_unrelated_operation_error_does_not_withhold_privileged_users(complete_b
     ('identity_governance', 'roleAssignmentSchedules'), ('identity_governance', 'roleEligibilitySchedules')])
 def test_error_on_an_operation_the_section_reads_withholds(complete_bundle, collector, name):
     refuse_signin(complete_bundle)
+    # A licence refusal of a PIM schedule read is the no-P2 case (test below); any other refusal withholds.
+    refusal = SIGNIN_REFUSED if collector == 'identity' else {'error': 'Forbidden', 'error_class': 'insufficient_permissions'}
     operation(complete_bundle, collector, name, [] if name != 'users' else [
-        {'id': TENANT, 'displayName': PERSON, 'onPremisesImmutableId': None}], **SIGNIN_REFUSED)
+        {'id': TENANT, 'displayName': PERSON, 'onPremisesImmutableId': None}], **refusal)
     p = project_run(complete_bundle)
     assert p['privileged_users'] == NOT_COLLECTED
-    assert p.report['sections']['privileged_users']['detail'] == {'field': 'error', 'kind': 'unseen_shape'}
+    assert p.report['sections']['privileged_users']['reason'] == 'collector_error'
+    assert p.report['sections']['privileged_users']['detail'] == {
+        'error_class': refusal['error_class'], 'operation': f'{collector}.{name}'}
     assert 'ignored_failures' not in p.report['sections']['privileged_users'] or \
         f'{collector}.{name}' not in p.report['sections']['privileged_users']['ignored_failures']
 
@@ -1662,3 +1706,411 @@ def test_dns_sections_say_why_they_are_missing(complete_bundle, selected, reason
         assert result['projection']['sections'][name]['reason'] == reason
     validate_assessment(result)
     jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+
+
+# --- Extra Graph fields never withhold; a failed read names its cause -----------------------------------------
+
+def test_authorization_extra_permissions_are_ignored_and_reported(complete_bundle):
+    # Graph added these to defaultUserRolePermissions; the training shape knows none of them and none is projected.
+    path = 'raw/consent_policy.json'
+    data = json.loads((complete_bundle / path).read_text())
+    data['authorizationPolicy']['value'][0]['defaultUserRolePermissions'].update(
+        allowedToCreateTenants=True, allowedToReadBitlockerKeysForOwnedDevice=True)
+    write(complete_bundle, path, data)
+    p = project_run(complete_bundle)
+    assert p['authorization_policies'] == [AUTH]
+    assert p.report['sections']['authorization_policies']['ignored_fields'] == [
+        'DefaultUserRolePermissions.allowedToCreateTenants', 'DefaultUserRolePermissions.allowedToReadBitlockerKeysForOwnedDevice']
+    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+
+
+@pytest.mark.parametrize('mutation,expected', [
+    ('enum', {'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value'}),
+    ('type', {'field': 'DefaultUserRolePermissions.AllowedToCreateApps', 'kind': 'invalid_type'}),
+    ('missing', {'field': 'DefaultUserRolePermissions.AllowedToCreateApps', 'kind': 'missing_field'}),
+])
+def test_extra_fields_do_not_excuse_enum_type_or_missing_fields(complete_bundle, mutation, expected):
+    path = 'raw/consent_policy.json'
+    data = json.loads((complete_bundle / path).read_text())
+    row = data['authorizationPolicy']['value'][0]
+    row['defaultUserRolePermissions']['allowedToCreateTenants'] = True
+    if mutation == 'enum':
+        row['allowInvitesFrom'] = 'unseenValue'
+    elif mutation == 'type':
+        row['defaultUserRolePermissions']['allowedToCreateApps'] = 'yes'
+    else:
+        del row['defaultUserRolePermissions']['allowedToCreateApps']
+    write(complete_bundle, path, data)
+    section = project_run(complete_bundle).report['sections']['authorization_policies']
+    assert section['status'] == 'not_collected' and section['reason'] == 'incomplete_shape' and section['detail'] == expected
+
+
+def test_ca_extra_fields_ignored_unless_populated_inside_conditions_or_controls(complete_bundle):
+    row = graph(CA)
+    row.update(templateId='template-1', deletedDateTime=None)
+    row['conditions']['insiderRiskLevels'] = None
+    row['grantControls']['newControls'] = []
+    operation(complete_bundle, 'conditional_access', 'conditionalAccessPolicies', [row])
+    p = project_run(complete_bundle, redact=False)
+    assert p['conditional_access_policies'] == EXPECTED['conditional_access_policies']
+    assert p.report['sections']['conditional_access_policies']['ignored_fields'] == [
+        'conditions.insiderRiskLevels', 'deletedDateTime', 'grantControls.newControls', 'templateId']
+    # A populated unknown condition can narrow who the policy covers: it withholds, as a known restriction does.
+    row['conditions']['insiderRiskLevels'] = 'elevated'
+    operation(complete_bundle, 'conditional_access', 'conditionalAccessPolicies', [row])
+    section = project_run(complete_bundle).report['sections']['conditional_access_policies']
+    assert section['status'] == 'not_collected'
+    assert section['unsupported_conditions'] == ['conditions.unrecognisedField']
+
+
+def test_collector_error_names_the_error_class_and_operation_never_the_message(complete_bundle):
+    message = f'Forbidden for {PERSON} ({EMAIL})'
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [], error=message, error_class='permission_stop')
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    section = result['projection']['sections']['service_plans']
+    assert section['status'] == 'not_collected' and section['reason'] == 'collector_error'
+    assert section['detail'] == {'error_class': 'permission_stop', 'operation': 'licensing.subscribedSkus'}
+    assert PERSON not in canonical(result) and EMAIL not in canonical(result)
+    validate_assessment(result)
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+
+
+@pytest.mark.parametrize('error_class', [None, 'Not A Class', PERSON])
+def test_collector_error_class_outside_the_vocabulary_is_not_echoed(complete_bundle, error_class):
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [], error='Forbidden', error_class=error_class)
+    section = project_run(complete_bundle).report['sections']['service_plans']
+    assert section['reason'] == 'collector_error'
+    assert section['detail'] == {'error_class': 'unclassified', 'operation': 'licensing.subscribedSkus'}
+
+
+def pim_refused(root, error_class='license_required'):
+    refuse_signin(root)
+    for name in ('roleAssignmentSchedules', 'roleEligibilitySchedules'):
+        operation(root, 'identity_governance', name, [], error='refused', error_class=error_class, item_count=0)
+    write(root, 'coverage.json', [SIGNIN_COVERAGE] + [
+        {'collector': 'identity_governance', 'type': 'graph', 'name': name, 'status': 'failed',
+         'error_class': error_class, 'error': 'refused'} for name in ('roleAssignmentSchedules', 'roleEligibilitySchedules')])
+    write(root, 'normalized/coverage_ledger.json', {'records': [
+        ledger_row(diagnostics=[diagnostic('userSignInActivity')]),
+        ledger_row('identity_governance', 'blocked_permission', 'permission_or_auth_blocker', diagnostics=[
+            diagnostic('roleAssignmentSchedules', 'identity_governance', error_class),
+            diagnostic('roleEligibilitySchedules', 'identity_governance', error_class)])]})
+    (root / 'normalized/privileged_roles.json').unlink()
+
+
+def test_no_p2_privileged_users_project_from_directory_roles(complete_bundle):
+    # Without Entra ID P2 the PIM schedules are refused for want of a licence: the admin set is the directory role
+    # assignments (the normaliser marks the schedule sources not_applicable) and the training shape has no PIM field.
+    pim_refused(complete_bundle)
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    p = project_run(complete_bundle, redact=False)
+    users = p.report['sections']['privileged_users']
+    assert p['privileged_users'] == EXPECTED['privileged_users'] and users['status'] == 'projected'
+    assert users['ignored_failures'] == [
+        'identity.userSignInActivity', 'identity_governance.roleAssignmentSchedules', 'identity_governance.roleEligibilitySchedules']
+    # Every frozen privileged_roles shape carries PIM rules: there is no no-P2 shape to project, so it is withheld and
+    # the report says why.
+    roles = p.report['sections']['privileged_roles']
+    assert p['privileged_roles'] == NOT_COLLECTED and roles['reason'] == 'collector_error'
+    assert roles['detail'] == {'error_class': 'license_required', 'operation': 'identity_governance.roleAssignmentSchedules'}
+    validate_assessment(result)
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+
+
+@pytest.mark.parametrize('error_class', ['permission_stop', 'insufficient_permissions'])
+def test_pim_refused_for_another_reason_withholds_privileged_users(complete_bundle, error_class):
+    # A refused permission can hide eligible assignments in a licensed tenant: only a licence refusal is the no-P2 case.
+    pim_refused(complete_bundle, error_class)
+    users = project_run(complete_bundle).report['sections']['privileged_users']
+    assert users['reason'] == 'collector_error'
+    assert users['detail'] == {'error_class': error_class, 'operation': 'identity_governance.roleAssignmentSchedules'}
+
+
+def test_licence_refusal_with_rows_is_not_the_no_p2_case(complete_bundle):
+    pim_refused(complete_bundle)
+    operation(complete_bundle, 'identity_governance', 'roleAssignmentSchedules', [SCHEDULE],
+              error='refused', error_class='license_required')
+    assert project_run(complete_bundle).report['sections']['privileged_users']['reason'] == 'collector_error'
+
+
+def test_ledger_collector_error_reports_the_failed_read_not_the_first_diagnostic(complete_bundle):
+    write(complete_bundle, 'normalized/coverage_ledger.json', {'records': [
+        ledger_row('identity_governance', 'blocked_permission', 'permission_or_auth_blocker', diagnostics=[
+            diagnostic('accessReviews', 'identity_governance', 'insufficient_permissions'),
+            diagnostic('roleEligibilitySchedules', 'identity_governance', 'permission_stop')])]})
+    operation(complete_bundle, 'identity_governance', 'accessReviews', [], error='refused', error_class='insufficient_permissions')
+    operation(complete_bundle, 'identity_governance', 'roleEligibilitySchedules', [])
+    users = project_run(complete_bundle).report['sections']['privileged_users']
+    assert users['detail'] == {'error_class': 'permission_stop', 'operation': 'identity_governance.roleEligibilitySchedules'}
+
+
+def test_failed_group_fanout_does_not_withhold_tenant_id(complete_bundle):
+    # The fan-out is a derived coverage row the identity payload has no operation for; tenant_id does not read it.
+    write(complete_bundle, 'normalized/coverage_ledger.json', {'records': [
+        ledger_row(diagnostics=[diagnostic('userSignInActivity'), diagnostic('privilegedGroupFanout', error_class='incomplete_evidence')])]})
+    refuse_signin(complete_bundle)
+    p = project_run(complete_bundle)
+    assert p['tenant_id'] == TENANT
+    assert p.report['sections']['tenant_id']['ignored_failures'] == ['identity.privilegedGroupFanout', 'identity.userSignInActivity']
+    # privileged_users reads the fan-out, so the same row withholds it.
+    users = p.report['sections']['privileged_users']
+    assert users['reason'] == 'collector_error' and users['detail']['operation'] == 'identity.privilegedGroupFanout'
+
+
+@pytest.mark.parametrize('sample,expected', [
+    ([{'id': TENANT, 'onPremisesImmutableId': None}], 'projected'),
+    ([{'id': 'someone-else', 'onPremisesImmutableId': None}], 'not_collected'),
+    (None, 'not_collected'),
+])
+def test_immutable_id_comes_from_the_sync_sample_when_the_user_read_lacks_it(complete_bundle, sample, expected):
+    operation(complete_bundle, 'identity', 'users', [{'id': TENANT, 'displayName': PERSON}])
+    if sample is not None:
+        operation(complete_bundle, 'domains_hybrid', 'syncSampleUsers', sample)
+    p = project_run(complete_bundle, redact=False)
+    users = p.report['sections']['privileged_users']
+    assert users['status'] == expected
+    if expected == 'projected':
+        assert p['privileged_users'] == EXPECTED['privileged_users']
+        assert 'chunks/domains_hybrid' not in canonical(users['source']) and 'raw/domains_hybrid.json' in users['source']
+    else:
+        assert users['detail'] == {'field': 'OnPremisesImmutableId', 'kind': 'missing_field'}
+
+
+@pytest.mark.parametrize('ignored', [['b', 'a'], ['a', 'a'], ['has space'], [PERSON]])
+def test_ignored_fields_validation(complete_bundle, ignored):
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result['projection']['sections']['service_plans']['ignored_fields'] = ['a', 'b.c']
+    validate_assessment(result)
+    result['projection']['sections']['service_plans']['ignored_fields'] = ignored
+    with pytest.raises(ValueError):
+        validate_assessment(result)
+
+
+@pytest.mark.parametrize('section,reason,diagnostic', [
+    ('service_plans', 'collector_error', {'field': 'error', 'kind': 'unseen_shape'}),
+    ('service_plans', 'collector_error', {'error_class': 'license_required', 'message': 'Forbidden'}),
+    ('service_plans', 'collector_error', None),
+    ('service_plans', 'incomplete_shape', {'error_class': 'license_required'}),
+    ('service_plans', 'collector_error', {'error_class': PERSON}),
+])
+def test_collector_error_detail_validation(complete_bundle, section, reason, diagnostic):
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [], error='Forbidden', error_class='license_required')
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    validate_assessment(result)
+    entry = result['projection']['sections'][section]
+    entry.update(status='not_collected', reason=reason)
+    entry.pop('detail', None)
+    if diagnostic is not None:
+        entry['detail'] = diagnostic
+    with pytest.raises(ValueError):
+        validate_assessment(result)
+
+
+# --- Qualifiers that can scope a kept field withhold; every ignored source field is recorded -----------------------
+
+def roles_with(mutate):
+    roles = json.loads(json.dumps(ROLES))
+    mutate(roles[0])
+    return roles
+
+
+TARGET = {'@odata.type': '#microsoft.graph.unifiedRoleManagementPolicyRuleTarget', 'caller': 'Admin', 'level': 'Assignment',
+          'operations': ['All'], 'inheritableSettings': [], 'enforcedSettings': [], 'targetObjects': None}
+
+
+@pytest.mark.parametrize('where,key,value,withheld', [
+    # A populated scope or applicability qualifier the frozen shape cannot carry withholds, naming the field.
+    ('Assignments', 'DirectoryScopeId', '/administrativeUnits/11111111-2222-4333-8444-555555555555', True),
+    ('Assignments', 'AppScopeId', '/apps/x', True),
+    ('Assignments', 'MemberType', 'Group', True),
+    ('Assignments', 'Status', 'Revoked', True),
+    ('Assignments', 'RoleDefinitionId', 'AnotherRole', True),
+    ('Rules', 'Target', {**TARGET, 'level': 'Eligibility'}, True),
+    ('Rules', 'Target', {**TARGET, 'targetObjects': ['restricted']}, True),
+    ('Rules', 'Target', {**TARGET, 'operations': ['selfActivate']}, True),
+    ('Rules', 'Target', {**TARGET, 'unknownQualifier': 'x'}, True),
+    ('Rules', 'NotificationLevel', 'Critical', True),
+    ('Rules.Setting', 'ApprovalStages', [{'primaryApprovers': ['x']}], True),
+    ('$', 'IsEnabled', False, True),
+    # Empty, tenant-wide or restating what is kept: ignored and reported.
+    ('Assignments', 'DirectoryScopeId', '/', False),
+    ('Assignments', 'DirectoryScopeId', None, False),
+    ('Assignments', 'AppScopeId', '', False),
+    ('Assignments', 'RoleDefinitionId', 'role1', False),
+    ('Rules', 'Target', TARGET, False),
+    ('Rules', 'Target', {'Caller': 'Admin', 'Level': 'Assignment', 'Operations': ['All']}, False),
+    ('Rules', 'Target', {}, False),
+    ('Rules.Setting', 'ApprovalStages', [], False),
+    ('$', 'IsBuiltIn', True, False),
+])
+def test_privileged_role_qualifiers_withhold_when_populated(complete_bundle, where, key, value, withheld):
+    def mutate(role):
+        target = {'$': role, 'Assignments': role['Assignments'][0], 'Rules': role['Rules'][0],
+                  'Rules.Setting': role['Rules'][0]['Setting']}[where]
+        target[key] = value
+    write(complete_bundle, 'normalized/privileged_roles.json', {'records': roles_with(mutate)})
+    p = project_run(complete_bundle, redact=False)
+    section = p.report['sections']['privileged_roles']
+    field = key if where == '$' else f'{where}.{key}'
+    if withheld:
+        assert p['privileged_roles'] == NOT_COLLECTED and section['reason'] == 'incomplete_shape'
+        assert section['detail'] == {'field': field, 'kind': 'unexpected_field'}
+        assert 'restricted' not in canonical(p.report) and '/administrativeUnits' not in canonical(p.report)
+    else:
+        assert p['privileged_roles'] == ROLES and section['ignored_fields'] == [field]
+    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+
+
+@pytest.mark.parametrize('rule_id,recipient,withheld', [
+    ('Notification_Admin_Admin_Eligibility', 'Admin', False),
+    ('Notification_Admin_Admin_Eligibility', 'Requestor', True),
+    ('Expiration_Admin_Assignment', 'Admin', True),
+])
+def test_notification_recipient_type_must_restate_the_rule_id(complete_bundle, rule_id, recipient, withheld):
+    def mutate(role):
+        next(rule for rule in role['Rules'] if rule['Id'] == rule_id)['RecipientType'] = recipient
+    write(complete_bundle, 'normalized/privileged_roles.json', {'records': roles_with(mutate)})
+    p = project_run(complete_bundle)
+    section = p.report['sections']['privileged_roles']
+    assert (p['privileged_roles'] == NOT_COLLECTED) is withheld
+    if withheld:
+        assert section['detail'] == {'field': 'Rules.RecipientType', 'kind': 'unexpected_field'}
+    else:
+        assert section['ignored_fields'] == ['Rules.RecipientType']
+
+
+@pytest.mark.parametrize('roles,detail', [
+    ([{'role': 'Global Administrator', 'scope': '/administrativeUnits/11111111-2222-4333-8444-555555555555'}],
+     {'field': 'roles.scope', 'kind': 'unseen_enum_value'}),
+    ([{'role': 'Global Administrator'}], {'field': 'roles.scope', 'kind': 'missing_field'}),
+    ([], {'field': 'roles.role', 'kind': 'missing_field'}),
+    (None, {'field': 'roles', 'kind': 'missing_field'}),
+    # A scoped assignment of a role also held tenant-wide changes nothing.
+    ([{'role': 'Global Administrator', 'scope': '/administrativeUnits/x'}, GLOBAL_ADMIN_ROLE], None),
+])
+def test_privileged_users_withhold_a_role_held_only_at_a_scope(complete_bundle, roles, detail):
+    data = json.loads((complete_bundle / 'normalized/effective_admin_set.json').read_text())
+    admin = data['records'][1]
+    if roles is None:
+        del admin['roles']
+    else:
+        admin['roles'] = roles
+    write(complete_bundle, 'normalized/effective_admin_set.json', data)
+    p = project_run(complete_bundle, redact=False)
+    section = p.report['sections']['privileged_users']
+    if detail is None:
+        assert p['privileged_users'] == EXPECTED['privileged_users']
+    else:
+        assert p['privileged_users'] == NOT_COLLECTED and section['detail'] == detail
+        assert 'administrativeUnits' not in canonical(p.report)
+    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+
+
+def test_service_plans_keep_only_provisioned_plans_as_scubagear_does(complete_bundle):
+    plan = graph(EXPECTED['service_plans'][0])
+    others = [{'servicePlanId': f'{n}1111111-1111-4111-8111-111111111111', 'servicePlanName': name, 'provisioningStatus': status}
+              for n, (name, status) in enumerate([('EXCHANGE_S_STANDARD', 'Disabled'), ('INTUNE_A', 'PendingActivation')])]
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [{'servicePlans': [{**plan, 'provisioningStatus': 'Success'}, *others]}])
+    assert project_run(complete_bundle)['service_plans'] == EXPECTED['service_plans']
+    # The same plan disabled in one SKU and provisioned in another is the tenant's.
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [
+        {'servicePlans': [{**plan, 'provisioningStatus': 'Disabled'}]}, {'servicePlans': [{**plan, 'provisioningStatus': 'Success'}]}])
+    assert project_run(complete_bundle)['service_plans'] == EXPECTED['service_plans']
+    # No provisioned plan at all: an empty list, as ScubaGear exports it, not a withheld section.
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [{'servicePlans': others}], item_count=1)
+    p = project_run(complete_bundle)
+    assert p['service_plans'] == [] and p.report['sections']['service_plans']['status'] == 'projected'
+
+
+@pytest.mark.parametrize('section,path,locate,ignored', [
+    ('SPO_tenant', 'raw/sharepoint_access.json', ('sharePointSettings', 'value', 0), ['newSetting']),
+    ('authorization_policies', 'raw/consent_policy.json', ('authorizationPolicy', 'value', 0), ['newSetting']),
+    ('service_plans', 'raw/licensing.json', ('subscribedSkus', 'value', 0), ['newSetting', 'skuPartNumber']),
+    ('privileged_users', 'raw/identity.json', ('users', 'value', 0), ['newSetting']),
+    ('conditional_access_policies', 'raw/conditional_access.json', ('conditionalAccessPolicies', 'value', 0), ['newSetting']),
+])
+def test_every_adapter_reports_a_new_source_field(complete_bundle, section, path, locate, ignored):
+    data = json.loads((complete_bundle / path).read_text())
+    row = data
+    for key in locate:
+        row = row[key]
+    row.update({'newSetting': 'Injected Private Person', '@odata.type': '#microsoft.graph.thing'})
+    write(complete_bundle, path, data)
+    p = project_run(complete_bundle, redact=False)
+    assert p[section] == EXPECTED[section] and p.report['sections'][section]['ignored_fields'] == ignored
+    assert 'Injected Private Person' not in canonical(p) and 'Injected Private Person' not in canonical(p.report)
+    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+
+
+def test_ca_records_policy_metadata_and_skips_nested_annotations(complete_bundle):
+    row = graph(CA)
+    row.update(id='policy-id', createdDateTime='2026-01-01T00:00:00Z', templateId=None)
+    row['grantControls']['authenticationStrength@odata.context'] = 'https://graph.microsoft.com/v1.0/$metadata#x'
+    row['conditions']['applications']['@odata.type'] = '#microsoft.graph.conditionalAccessApplications'
+    operation(complete_bundle, 'conditional_access', 'conditionalAccessPolicies', [row])
+    p = project_run(complete_bundle, redact=False)
+    assert p['conditional_access_policies'] == [CA]
+    assert p.report['sections']['conditional_access_policies']['ignored_fields'] == ['createdDateTime', 'id', 'templateId']
+
+
+@pytest.mark.parametrize('error_class,reported', [
+    ('alice_smith', 'unclassified'), ('graph_http_429', 'graph_http_429'), ('graph_http_None', 'unclassified'),
+    ('license_required', 'license_required'), ('section_absent', 'section_absent'),
+])
+def test_collector_error_class_is_checked_against_the_collector_vocabulary(complete_bundle, error_class, reported):
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [], error='Forbidden', error_class=error_class)
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    assert result['projection']['sections']['service_plans']['detail']['error_class'] == reported
+    validate_assessment(result)
+    result['projection']['sections']['service_plans']['detail']['error_class'] = 'alice_smith'
+    with pytest.raises(ValueError, match='error class'):
+        validate_assessment(result)
+
+
+def test_collector_error_vocabulary_covers_every_class_the_engine_writes():
+    # Every error class literal under src/azure_tenant_audit: classifier returns, ``error_class`` dict values and keyword
+    # arguments, and names ending in error_class. A new one must be added to COLLECTOR_ERROR_CLASSES or it reads unclassified.
+    import ast
+    from azure_tenant_audit.model_assessment import COLLECTOR_ERROR_CLASSES
+
+    def literals(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return {node.value}
+        if isinstance(node, ast.IfExp):
+            return literals(node.body) | literals(node.orelse)
+        if isinstance(node, ast.BoolOp):
+            return set().union(*(literals(v) for v in node.values))
+        return set()
+
+    found: dict[str, str] = {}
+    for path in sorted((ROOT / 'src/azure_tenant_audit').rglob('*.py')):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            values = set()
+            if isinstance(node, ast.FunctionDef) and 'classif' in node.name and 'error' in node.name:
+                values = set().union(*(literals(r.value.elts[0]) for r in ast.walk(node)
+                                       if isinstance(r, ast.Return) and isinstance(r.value, ast.Tuple)))
+            elif isinstance(node, ast.Dict):
+                values = set().union(*(literals(v) for k, v in zip(node.keys, node.values)
+                                       if isinstance(k, ast.Constant) and k.value == 'error_class'))
+            elif isinstance(node, ast.keyword) and node.arg and node.arg.endswith('error_class'):
+                values = literals(node.value)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
+                    if isinstance(target, ast.Name) and target.id.lower().endswith('error_class') and node.value is not None:
+                        values |= literals(node.value)
+            for value in values:
+                found.setdefault(value, f'{path.name}:{node.lineno}')
+    assert len(found) > 40
+    assert {k: v for k, v in found.items() if k not in COLLECTOR_ERROR_CLASSES} == {}
+
+
+def test_service_plan_without_provisioning_status_withholds_the_section(complete_bundle):
+    """A raw plan that does not say whether it is provisioned cannot assert a licence: the section is withheld, not defaulted."""
+    operation(complete_bundle, 'licensing', 'subscribedSkus',
+              [{'skuPartNumber': 'SPE_E5', 'servicePlans': [graph(EXPECTED['service_plans'][0])]}])
+    p = project_run(complete_bundle)
+    assert p['service_plans'] == NOT_COLLECTED
+    section = p.report['sections']['service_plans']
+    assert section['reason'] == 'incomplete_shape' and section['detail'] == {'field': 'servicePlans.provisioningStatus', 'kind': 'missing_field'}
+

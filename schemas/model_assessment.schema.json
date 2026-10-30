@@ -637,7 +637,8 @@
           "type": "string",
           "enum": [
             "closed_gate",
-            "absent_section"
+            "absent_section",
+            "absent_field"
           ]
         },
         "rule_id": {
@@ -932,7 +933,8 @@
             "powershell_only",
             "not_applicable_to_platform",
             "dns_posture_not_run",
-            "dns_records_not_saved"
+            "dns_records_not_saved",
+            "collector_error"
           ]
         },
         "source": {
@@ -952,7 +954,14 @@
           "uniqueItems": true
         },
         "detail": {
-          "$ref": "#/$defs/projection_detail"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/projection_detail"
+            },
+            {
+              "$ref": "#/$defs/projection_collector_error"
+            }
+          ]
         },
         "scan": {
           "type": "object",
@@ -984,6 +993,15 @@
           "items": {
             "type": "string",
             "pattern": "^[A-Za-z][A-Za-z0-9_]*\\.[A-Za-z][A-Za-z0-9_]*$"
+          },
+          "uniqueItems": true
+        },
+        "ignored_fields": {
+          "type": "array",
+          "description": "Field paths the source carried that the training shape does not know: names only, never values (a key that is not an identifier is masked as unrecognisedField), sorted. They are never projected and never withhold the section.",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$"
           },
           "uniqueItems": true
         },
@@ -1140,6 +1158,24 @@
       "required": [
         "field",
         "kind"
+      ],
+      "additionalProperties": false
+    },
+    "projection_collector_error": {
+      "type": "object",
+      "description": "Detail of reason collector_error: the collector recorded the read as failed. Only its error class (never its message) and, when known, the <collector>.<operation> that failed. The validator also checks the class against the collectors' vocabulary (COLLECTOR_ERROR_CLASSES, plus graph_http_<status>); any other class is reported as unclassified.",
+      "properties": {
+        "error_class": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*\\.[A-Za-z][A-Za-z0-9_]*$"
+        }
+      },
+      "required": [
+        "error_class"
       ],
       "additionalProperties": false
     }

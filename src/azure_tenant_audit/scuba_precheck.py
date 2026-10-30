@@ -91,13 +91,72 @@ def unavailable_input_sections(projection: dict[str, Any], sections: list[str], 
     return [section for section in sections if section in cited]
 
 
+def field_absent(rule: dict[str, Any], projection: dict[str, Any]) -> bool:
+    """True only when a collected section definitely lacks the rule's field.
+
+    Path parts follow ``gate_value``. A singleton list that is empty, a missing
+    key and a selector without a match are absent, as in the policy's Rego. A
+    field shown as null is a collected default; markers, null or non-object
+    sections, several tenant objects and duplicate selector matches are left
+    to the earlier classes or the model.
+    """
+    value = projection.get(rule["section"])
+    if isinstance(value, dict) and value.get("collection_status") == NOT_COLLECTED["collection_status"]:
+        return False
+    for part in rule["path"]:
+        if isinstance(part, dict):
+            if not isinstance(value, list):
+                return False
+            matches = [item for item in value if isinstance(item, dict)
+                       and all(item.get(key) == target for key, target in part.items())]
+            if not matches:
+                return True
+            if len(matches) != 1:
+                return False
+            value = matches[0]
+            continue
+        if isinstance(value, list):
+            if not value:
+                return True
+            if len(value) != 1:
+                return False
+            value = value[0]
+        if not isinstance(value, dict):
+            return False
+        if part not in value:
+            return True
+        value = value[part]
+    return False
+
+
+def check_fields(policy_id: str, projection: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the first registered field that a collected section lacks.
+
+    ``requires`` pins other sections to exact typed values (Power BI: licence
+    found, access not denied), because the oracle answers those blockers with
+    different evidence.
+    """
+    for rule in rule_catalogue()["field_rules"]:
+        if rule["policy_id"] != policy_id:
+            continue
+        if any(section not in projection or type(projection[section]) is not type(target)
+               or projection[section] != target for section, target in rule["requires"].items()):
+            continue
+        if field_absent(rule, projection):
+            return {"class": "absent_field", "rule_id": rule["rule_id"], "section": [rule["section"]],
+                    "field": field_name(rule), "value": None}
+    return None
+
+
 def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[str], *,
-                    skip_absent_sections: bool = False) -> dict[str, Any] | None:
+                    skip_absent_sections: bool = False, absent_fields: bool = False) -> dict[str, Any] | None:
     """A usable closed gate wins over absent dependent evidence.
 
     The serving caller alone opts out for the entirely empty P1 projection.
     Pack evaluation never opts out. A missing gate is included in the absence
-    class, with ``field`` naming the unavailable input.
+    class, with ``field`` naming the unavailable input. ``absent_fields`` adds
+    the field-level class after both; it is off until the assessment contract
+    accepts ``absent_field`` rows.
     """
     if skip_absent_sections:
         return None
@@ -108,6 +167,8 @@ def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[s
     if missing:
         return {"class": "absent_section", "rule_id": "required_sections_present",
                 "section": missing, "field": None, "value": None}
+    if gate is None and absent_fields:
+        return check_fields(policy_id, projection)
     return gate
 
 

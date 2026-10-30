@@ -412,7 +412,8 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
                                 "scope_narrowed": 0}
     assert result["limitations"] == []
     assert {name for name, detail in result["projection"]["sections"].items()
-            if detail["status"] == "projected"} == {"service_plans", "tenant_id", "privileged_users", "scuba_config"}
+            if detail["status"] == "projected"} == {"service_plans", "tenant_id", "privileged_users", "scuba_config",
+                                                    "accepted_domains"}
     # The three rules that read only the projected privileged users reach the model; the rest are rule answers.
     model_rows = {row["policy_id"] for row in result["policies"] if row["reason"] != "rule_precheck"}
     assert model_rows == {"MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"}
@@ -734,3 +735,33 @@ def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monk
     row['thinking_disabled'] = True
     with pytest.raises(ValueError, match='Unexpected'):
         validate_assessment(result)
+
+
+def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
+    """A Rego-read field missing inside a collected section is answered by the registered field rule, never by the model,
+    and the served row validates; a tampered class or a foreign rule id is rejected."""
+    import json as _json
+    from copy import deepcopy as _deepcopy
+    from pathlib import Path as _Path
+    import jsonschema as _jsonschema
+    from auditex.model_serving import ModelClient as _Client, ModelConfig as _Config, assess_run as _assess, policy_catalogue as _catalogue
+    from azure_tenant_audit.model_assessment import validate_assessment as _validate
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
+    values = {section: {} for section in _catalogue()["policies"]["MS.SHAREPOINT.1.1v1"]["sections"]}
+    values["SPO_tenant"] = [{"SharingDomainRestrictionMode": 0}]  # collected, but SharingCapability (Rego-read) is missing
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **options: fake_projection(root, values))
+    monkeypatch.setattr(_Client, "_request", lambda *args: pytest.fail("a rule row never calls the model"))
+    result = _assess(tmp_path, _Config(model_name="stub"), policies=["MS.SHAREPOINT.1.1v1"])
+    row = result["policies"][0]
+    assert row["reason"] == "rule_precheck" and row["rule_precheck"]["class"] == "absent_field"
+    assert row["rule_precheck"]["rule_id"] == "MS.SHAREPOINT.1.1v1.SharingCapability_absent"
+    assert row["rule_precheck"]["section"] == ["SPO_tenant"] and row["rule_precheck"]["value"] is None
+    assert next(c for c in row["claims"] if c["id"] == "requirement_met")["status"] == "unknown"
+    _validate(result)
+    _jsonschema.validate(result, _json.loads(_Path("schemas/model_assessment.schema.json").read_text(encoding="utf-8")))
+    tampered = _deepcopy(result); tampered["policies"][0]["rule_precheck"]["class"] = "closed_gate"
+    with pytest.raises(ValueError):
+        _validate(tampered)
+    tampered = _deepcopy(result); tampered["policies"][0]["rule_precheck"]["rule_id"] = "MS.SHAREPOINT.1.2v1.ODBSharingCapability_absent"
+    with pytest.raises(ValueError):
+        _validate(tampered)

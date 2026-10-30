@@ -11,11 +11,11 @@ from .model_eval import _evaluate, _invalid_constant, _load_cases, _load_respons
 
 
 def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
-                  named_limitations: bool = True) -> dict[str, Any] | None:
+                  named_limitations: bool = True, absent_fields: bool = False) -> dict[str, Any] | None:
     sections = [item["section"] for item in case["evidence"][1:]]
     projection = {item["section"]: item["observed"] for item in case["evidence"][1:]}
     detail = precheck_policy(case["policy_id"], projection, sections,
-                             skip_absent_sections=skip_absent_sections)
+                             skip_absent_sections=skip_absent_sections, absent_fields=absent_fields)
     if detail is None:
         return None
     return {**precheck_response(detail, case["evidence"][0]["observed"], sections,
@@ -26,14 +26,16 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
             "thinking_disabled": False, "thinking_stripped": False}
 
 
-def evaluate_precheck(cases_path: str, responses_path: str | None = None) -> dict[str, Any]:
+def evaluate_precheck(cases_path: str, responses_path: str | None = None, *,
+                      absent_fields: bool = False) -> dict[str, Any]:
     """Use the checkpoint scorer's loaders and strict mechanical comparison.
 
     Gold labels and provenance never enter pre-check decisions. Missing/invalid
     model answers fail their remaining cases; all supplied models are separate.
+    ``absent_fields`` scores the field-level class as serving emits it (off here by default for comparability).
     """
     cases = _load_cases(cases_path)
-    classes = {name: {"rule_answered": 0, "correct": 0} for name in ("closed_gate", "absent_section")}
+    classes = {name: {"rule_answered": 0, "correct": 0} for name in ("closed_gate", "absent_section", "absent_field")}
     left = Counter()
     details = Counter()
     outcomes = {}
@@ -44,7 +46,7 @@ def evaluate_precheck(cases_path: str, responses_path: str | None = None) -> dic
         outcome_count["rows"] += 1
         case = json.loads(next(m["content"] for m in row["messages"] if m["role"] == "user"),
                           object_pairs_hook=_pairs, parse_constant=_invalid_constant)
-        record = precheck_case(case, named_limitations=False)
+        record = precheck_case(case, named_limitations=False, absent_fields=absent_fields)
         if record is None:
             left[outcome] += 1
             outcome_count["left_to_model"] += 1
@@ -63,6 +65,7 @@ def evaluate_precheck(cases_path: str, responses_path: str | None = None) -> dic
               "outcome_classes": dict(sorted(outcomes.items())),
               "rule_answered": len(answered), "rule_correct": sum(answered.values()),
               "left_to_model": len(cases) - len(answered), "left_to_model_by_outcome": dict(sorted(left.items())),
+              "absent_fields": absent_fields,
               "scoring": "Strict pack claims, typed values, evidence sets and limitation/recommendation IDs; named serving limitations excluded.",
               "product_scores": []}
     if responses_path is not None:

@@ -16,7 +16,7 @@ from typing import Any
 
 from azure_tenant_audit.chunk_reader import _open_chunk
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
-from azure_tenant_audit.model_assessment import safe_projection_enum_value
+from azure_tenant_audit.model_assessment import collector_error_class, safe_projection_enum_value
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
@@ -60,11 +60,37 @@ def _require(condition: bool, field: str = "$", kind: str = "unseen_shape") -> N
         raise Unavailable(field=field, kind=kind)
 
 
-def _known_fields(row: Any, allowed: set[str], path: str = "") -> None:
-    _require(isinstance(row, dict), path or "$", "invalid_type")
-    # Never echo arbitrary keys: even a single identifier can be a person's name.
-    _require(set(row) <= allowed, path + ".unrecognisedField" if path else "unrecognisedField",
-             "unexpected_field")
+# A field name recorded under ``ignored_fields``: an identifier, else masked, since an arbitrary key can be a person's name.
+_FIELD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
+
+
+def _annotation(key: Any) -> bool:
+    """An OData annotation (``@odata.type``, ``authenticationStrength@odata.context``): metadata, never a field."""
+    return isinstance(key, str) and "@odata." in key
+
+
+def _empty(value: Any) -> bool:
+    return value is None or isinstance(value, (str, list, dict)) and not value
+
+
+def _collector_error(marker: dict[str, Any]) -> Unavailable:
+    """A failure the collector recorded (``{"error": ..., "error_class": ...}``): the cause, never the message."""
+    value = marker.get("error_class")
+    classes = marker.get("error_classes")
+    if not value and isinstance(classes, list) and len(set(map(str, classes))) == 1:
+        value = classes[0]
+    exc = Unavailable("collector_error")
+    # Only the collectors' own vocabulary is echoed (``COLLECTOR_ERROR_CLASSES``, shared with the validator).
+    exc.detail = {"error_class": collector_error_class(value)}
+    return exc
+
+
+def _attribute(exc: Unavailable, collector: str, operation: Any) -> Unavailable:
+    """Name the operation behind a collector error, when it is one the collector writes."""
+    if (exc.reason == "collector_error" and "operation" not in exc.detail and isinstance(operation, str)
+            and _OPERATION_NAME.fullmatch(collector) and _OPERATION_NAME.fullmatch(operation)):
+        exc.detail["operation"] = f"{collector}.{operation}"
+    return exc
 
 
 def _enum(value: Any, domain: set[str], field: str) -> None:
@@ -107,9 +133,10 @@ def _invalid_constant(value: str) -> None:
 
 def _fields(row: Any, spec: dict[str, Any], *, graph: bool = False, path: str = "") -> dict[str, Any]:
     _require(isinstance(row, dict), path or "$", "invalid_type")
-    for key in ("error", "error_class", "read_state", "collection_status"):
-        valid = not row.get(key) if key in {"error", "error_class"} else row.get(key, "collected") == "collected"
-        _require(valid, path + "." + key if path else key)
+    if row.get("error") or row.get("error_class"):
+        raise _collector_error(row)
+    for key in ("read_state", "collection_status"):
+        _require(row.get(key, "collected") == "collected", path + "." + key if path else key)
     result = {}
     for key, check in spec.items():
         source = key[0].lower() + key[1:] if graph else key
@@ -133,7 +160,9 @@ def _healthy(value: Any, *, recursive: bool = True, metadata: bool = True) -> No
     markers (``error``, ``read_state``, truncation flags and the rest) stay checked at every depth.
     """
     if isinstance(value, dict):
-        for key in ("error", "error_class", "resolver_error", "collection_truncated",
+        if value.get("error") or value.get("error_class"):
+            raise _collector_error(value)
+        for key in ("resolver_error", "collection_truncated",
                     "bounded_sample", "@odata.nextLink", "truncation_reason", "incomplete", "partial"):
             _require(not value.get(key), "odata.nextLink" if key == "@odata.nextLink" else key)
         if "complete" in value:
@@ -197,7 +226,13 @@ PRIVILEGED_ROLES_READS = {"identity_governance": frozenset({"roleAssignmentSched
 # normaliser records an artefact it withheld after every read succeeded (``collection_gaps``: ``identity_governance.
 # privileged_roles``, reason ``artefact_withheld``). Like a policy read, it is listed in ``ignored_failures`` and never
 # withholds a section that does not read it, the artefact's own section included (it stays ``missing_artifact``).
-DERIVED_NAMES = {"identity_governance": frozenset({"privileged_roles"})}
+# The identity collector's ``privilegedGroupFanout`` coverage row is derived the same way (a ledger diagnostic names it), so
+# a failed fan-out is recorded for the sections that do not read it (``tenant_id``) and withholds those that do.
+DERIVED_NAMES = {"identity_governance": frozenset({"privileged_roles"}), "identity": frozenset({"privilegedGroupFanout"})}
+# Reads a section can do without when the collector reports them refused for want of a licence (``license_required``) and
+# empty: privileged users come from the directory role assignments when PIM is not licensed, as the effective admin set
+# records (its schedule sources ``not_applicable``). The refused reads are listed under ``ignored_failures``.
+LICENCE_OPTIONAL_READS = {"identity_governance": frozenset({"roleAssignmentSchedules", "roleEligibilitySchedules"})}
 _OPERATION_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 _COVERAGE_OK = {"ok", "complete_exact_scope", "complete_effective_role", "complete_equivalent_scope",
                 "complete_offline_sample"}
@@ -217,6 +252,12 @@ def _names(name: Any) -> frozenset[str]:
     return frozenset({name, base})
 
 
+def _licence_refused(envelope: Any) -> bool:
+    """An operation envelope the collector wrote for a read refused for want of a licence, holding no rows."""
+    return (isinstance(envelope, dict) and envelope.get("error_class") == "license_required" and not envelope.get("value")
+            and not envelope.get("chunk_files") and envelope.get("item_count", 0) == 0)
+
+
 class Bundle:
     def __init__(self, root: Path, scan_max_rows: int, scan_max_bytes: int, scan_max_chunks: int):
         self.root = root
@@ -234,6 +275,33 @@ class Bundle:
         self.scan_inline: dict[str, int] = {}
         self.sizes: dict[str, int] = {}
         self.ignored: set[str] = set()
+        self.ignored_fields: set[str] = set()
+
+    def known_fields(self, row: Any, allowed: set[str], path: str = "") -> None:
+        """Require an object; record its fields the training shape does not know, which are never projected.
+
+        An extra field never withholds: the adapter projects only the fields it selects. Its name (never its value) is
+        recorded in ``ignored_fields`` so drift stays visible; OData annotations are not fields and are not recorded.
+        """
+        self.qualified_fields(row, allowed, path, lenient=True)
+
+    def qualified_fields(self, row: Any, allowed: set[str], path: str = "",
+                         harmless: dict[str, Any] | None = None, *, lenient: bool = False) -> None:
+        """:meth:`known_fields` for an object whose extra fields can qualify the ones kept: a scope, a target, a status.
+
+        Such an extra is ignored and recorded only when it is empty or ``harmless[name](value)`` shows it changes nothing
+        (a tenant-wide ``DirectoryScopeId`` of ``/``); a populated one withholds the section and names the field (kind
+        ``unexpected_field``), as a populated unknown Conditional Access condition does.
+        """
+        _require(isinstance(row, dict), path or "$", "invalid_type")
+        for key, value in row.items():
+            if key in allowed or _annotation(key):
+                continue
+            name = key if isinstance(key, str) and _FIELD_NAME.fullmatch(key) else "unrecognisedField"
+            field = path + "." + name if path else name
+            check = (harmless or {}).get(key)
+            _require(lenient or _empty(value) or check is not None and check(value), field, "unexpected_field")
+            self.ignored_fields.add(field)
 
     @property
     def scan_counts(self) -> dict[str, int]:
@@ -266,7 +334,8 @@ class Bundle:
         _require(isinstance(data, dict), kind="invalid_type")
         _require("records" in data, "records", "missing_field")
         _require(isinstance(data["records"], list), "records", "invalid_type")
-        _require(not data.get("error"), "error")
+        if data.get("error") or data.get("error_class"):
+            raise _collector_error(data)
         _require(data.get("collection_status", "collected") == "collected", "collection_status")
         _require(all(isinstance(row, dict) for row in data["records"]), "records", "invalid_type")
         _healthy(data)
@@ -354,14 +423,30 @@ class Bundle:
                     if named and not health:
                         # A single read: a row naming some other operation is not about this read.
                         continue
-                if gap_rows:
-                    _healthy(row)
-                    raise Unavailable()
-                self._row_health(row)
+                try:
+                    if gap_rows:
+                        _healthy(row)
+                        raise _collector_error(row) if row.get("error_classes") else Unavailable()
+                    self._row_health(row)
+                except Unavailable as exc:
+                    raise self._attribute_row(exc, row, groups, named, collector, reads)
                 complete = True
         if summary_only and not surveyed:
             raise Unavailable(field="coverage_gaps")
         return complete
+
+    @staticmethod
+    def _attribute_row(exc: Unavailable, row: dict[str, Any], groups: list[frozenset[str]] | None, named: bool,
+                       collector: str, reads: frozenset[str]) -> Unavailable:
+        """Name the read a failed coverage row is about; a ledger row reports the failed diagnostic of that read."""
+        if exc.reason != "collector_error" or not groups:
+            return exc
+        if named:
+            return _attribute(exc, collector, next(iter(sorted(n for n in groups[0] if n in reads) or [None])))
+        for item, names in zip(row.get("diagnostics", []), groups):
+            if names & reads and isinstance(item, dict) and (item.get("error") or item.get("error_class")):
+                return _attribute(_collector_error(item), collector, item.get("item"))
+        return exc
 
     @staticmethod
     def _row_health(row: dict[str, Any]) -> None:
@@ -430,13 +515,18 @@ class Bundle:
         _require(isinstance(payload, dict))
         return payload, origin
 
-    def collector_health(self, collector: str, reads: Any) -> None:
+    def collector_health(self, collector: str, reads: Any, licence_optional: frozenset[str] = frozenset()) -> None:
         """Withhold when an operation read from this collector, or the collector itself, reports a failure.
 
-        The failure of another operation is recorded in ``ignored`` and does not withhold.
+        The failure of another operation is recorded in ``ignored`` and does not withhold; so is a read in
+        ``licence_optional`` that the collector reports refused for want of a licence and empty.
         """
         reads = frozenset(reads)
         payload, _ = self._collector_payload(collector)
+        if payload is not None:
+            refused = {name for name in reads & licence_optional if _licence_refused(payload.get(name))}
+            self.ignored.update(f"{collector}.{name}" for name in refused)
+            reads -= refused
         self.coverage(collector, reads, frozenset(payload or ()) | DERIVED_NAMES.get(collector, frozenset()), health=True)
         if payload is None:
             return
@@ -445,9 +535,9 @@ class Bundle:
         for name, envelope in payload.items():
             try:
                 _healthy(envelope)
-            except Unavailable:
+            except Unavailable as exc:
                 if name in reads or not _OPERATION_NAME.fullmatch(name) or not isinstance(envelope, dict):
-                    raise
+                    raise _attribute(exc, collector, name)
                 self.ignored.add(f"{collector}.{name}")
 
     def operation(self, collector: str, operation: str) -> list[dict[str, Any]]:
@@ -470,10 +560,13 @@ class Bundle:
             if operation not in payload:
                 raise Unavailable("missing_artifact")
             section = payload[operation]
-        complete = self.coverage(collector, operation, frozenset(payload or ()))
+        complete = self.coverage(collector, operation, frozenset(payload or ()) | DERIVED_NAMES.get(collector, frozenset()))
         _require(isinstance(section, dict))
         self.complete = complete or section.get("complete") is True or section.get("collection_status") == "collected" or section.get("status") in {"ok", "collected", "success"}
-        _healthy(section)
+        try:
+            _healthy(section)
+        except Unavailable as exc:
+            raise _attribute(exc, collector, operation)
         _require(not any(section.get(k) for k in (
             "error", "error_class", "collection_truncated", "bounded_sample", "@odata.nextLink",
             "truncation_reason", "incomplete", "partial")))
@@ -567,11 +660,16 @@ class Bundle:
         return found[0]
 
 
+SPO_SCALARS = ("RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays")
+
+
 def _spo(bundle: Bundle) -> Any:
     normal = bundle.normalised("sharepoint_tenant_settings")
     rows = bundle.alternatives([("sharepoint_access", "sharePointSettings"), ("onedrive_posture", "sharePointSettings")])
     _require(len(rows) == 1)
     raw, result = rows[0], {}
+    read = [*ENUM_NAME_KEYS, *SPO_SCALARS]
+    bundle.known_fields(raw, {*read, *(k[0].lower() + k[1:] for k in read), "oneDriveSharingCapability", "odbSharingCapability"})
     canonical = {"SharingCapability": "sharing_capability", "ODBSharingCapability": "onedrive_sharing_capability"}
     for key, names in ENUM_NAME_KEYS.items():
         value = raw.get(key, raw.get(key[0].lower() + key[1:]))
@@ -601,7 +699,7 @@ def _spo(bundle: Bundle) -> Any:
                          "SharingDomainRestrictionMode": {0, 1}}.items():
         if result[key] not in allowed:
             raise Unavailable(field=key, kind="unseen_enum_value", value=result[key])
-    for key in ("RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays"):
+    for key in SPO_SCALARS:
         value = raw.get(key, raw.get(key[0].lower() + key[1:]))
         _require(key in raw or key[0].lower() + key[1:] in raw, key, "missing_field")
         _require(type(value) is (bool if key == "EmailAttestationRequired" else int), key, "invalid_type")
@@ -627,7 +725,9 @@ def _ca(bundle: Bundle) -> Any:
         "GrantControls": {"BuiltInControls": _strings, "Operator": _nullable_text,
                           "AuthenticationStrength": {"AllowedCombinations": lambda v: v is None or _strings(v)}}}
     unsupported = set()
-    # Only schema field names enter diagnostics; unknown keys can themselves contain PII.
+    # Only schema field names enter diagnostics; unknown keys can themselves contain PII. A known restriction withholds
+    # whatever its value. An unrecognised field is ignored (and recorded) when it is empty or outside the conditions and
+    # controls; a populated one inside them can narrow who or what the policy covers, so it still withholds.
     restriction_names = {"locations", "devices", "platforms", "sessionControls", "includeGroups",
                          "includeGuestsOrExternalUsers", "authenticationContextClassReferences",
                          "servicePrincipalRiskLevels", "customAuthenticationFactors", "termsOfUse",
@@ -637,11 +737,16 @@ def _ca(bundle: Bundle) -> Any:
         _require(isinstance(row, dict), field_path or "$", "invalid_type")
         output = {}
         for key, value in row.items():
-            if path == "" and key in {"id", "createdDateTime", "modifiedDateTime", "@odata.context", "@odata.type"}:
+            if _annotation(key):
                 continue
             target = key[0].upper() + key[1:] if key else ""
             if target not in fields:
-                unsupported.add(path + (key if key in restriction_names else "unrecognisedField"))
+                # The policy's own ``id`` (like createdDateTime and templateId) is recorded; a nested one is a restriction.
+                restricted = key in restriction_names and (path or key != "id")
+                if restricted or path and value not in (None, [], {}, ""):
+                    unsupported.add(path + (key if restricted else "unrecognisedField"))
+                else:
+                    bundle.known_fields({key: value}, set(), path.rstrip("."))
                 continue
             field = field_path + "." + target if field_path else target
             _require(key == target[0].lower() + target[1:] and target not in output,
@@ -665,10 +770,11 @@ def _authorization(bundle: Bundle) -> Any:
     rows = bundle.alternatives([("external_identity", "authorizationPolicy"), ("consent_policy", "authorizationPolicy")])
     _require(len(rows) == 1)
     row = rows[0]
+    bundle.known_fields(row, {"id", "allowInvitesFrom", "guestUserRoleId", "defaultUserRolePermissions"})
     result = _fields(row, {"Id": _text, "AllowInvitesFrom": _text, "GuestUserRoleId": _text}, graph=True)
     _require("defaultUserRolePermissions" in row, "DefaultUserRolePermissions", "missing_field")
     permissions = row.get("defaultUserRolePermissions")
-    _known_fields(permissions, {
+    bundle.known_fields(permissions, {
         "allowedToCreateApps", "permissionGrantPoliciesAssigned", "permissionGrantPolicyIdsAssignedToDefaultUserRole",
         "allowedToCreateSecurityGroups", "allowedToReadOtherUsers"}, "DefaultUserRolePermissions")
     # These two Graph settings are not read by the dependent SCuBA policies and
@@ -687,20 +793,27 @@ def _authorization(bundle: Bundle) -> Any:
 
 
 def _plans(bundle: Bundle) -> Any:
-    # Each SKU row is far larger than the plan names kept from it: stream the rows, keep only the plans.
+    # Each SKU row is far larger than the plan names kept from it: stream the rows, keep only the plans. ScubaGear keeps
+    # only the plans whose provisioningStatus is Success (ExportAADProvider.psm1): a disabled or pending plan is not one
+    # the tenant has, so it is left out, as there; a plan without a status cannot be called provisioned and withholds the section.
     result = {}
     for row in bundle.scan("licensing", "subscribedSkus"):
+        bundle.known_fields(row, {"servicePlans"})
         _require("servicePlans" in row, "servicePlans", "missing_field")
         _require(isinstance(row.get("servicePlans"), list), "servicePlans", "invalid_type")
         for plan in row["servicePlans"]:
-            _known_fields(plan, {"servicePlanId", "servicePlanName", "provisioningStatus", "appliesTo"}, "servicePlans")
-            if "provisioningStatus" in plan:
-                _enum(plan["provisioningStatus"], {
-                    "Success", "Disabled", "Error", "PendingInput", "PendingActivation", "PendingProvisioning"},
-                    "servicePlans.provisioningStatus")
+            bundle.known_fields(plan, {"servicePlanId", "servicePlanName", "provisioningStatus", "appliesTo"}, "servicePlans")
+            # A raw plan without a provisioning status cannot be called provisioned: ScubaGear's exporter keeps plans whose
+            # status is an explicit Success, so a status-less plan withholds the section rather than asserting a licence.
+            _require("provisioningStatus" in plan, "servicePlans.provisioningStatus", "missing_field")
+            _enum(plan["provisioningStatus"], {
+                "Success", "Disabled", "Error", "PendingInput", "PendingActivation", "PendingProvisioning"},
+                "servicePlans.provisioningStatus")
             if "appliesTo" in plan:
                 _enum(plan["appliesTo"], {"User", "Company"}, "servicePlans.appliesTo")
             item = _fields(plan, {"ServicePlanId": _text, "ServicePlanName": _text}, graph=True)
+            if plan["provisioningStatus"] != "Success":
+                continue
             key = item["ServicePlanId"]
             _require(key not in result or result[key] == item, "ServicePlanId")
             result[key] = item
@@ -709,7 +822,7 @@ def _plans(bundle: Bundle) -> Any:
 
 def _users(bundle: Bundle) -> Any:
     for collector, reads in ADMIN_SET_READS.items():
-        bundle.collector_health(collector, reads)
+        bundle.collector_health(collector, reads, LICENCE_OPTIONAL_READS.get(collector, frozenset()))
     admins = bundle.normalised("effective_admin_set")
     summaries = [r for r in admins if r.get("kind") == "effective_admin_set_summary"]
     _require(len(summaries) == 1)
@@ -731,6 +844,21 @@ def _users(bundle: Bundle) -> Any:
         if row["id"] in wanted:
             _require(row["id"] not in index, "id")
             index[row["id"]] = row
+    # The identity collector's user read does not select onPremisesImmutableId; the hybrid collector's sync read does, for
+    # the users it samples. An administrator neither read holds it for keeps the field missing and withholds the section.
+    missing = {key for key, row in index.items() if "onPremisesImmutableId" not in row}
+    if missing:
+        found: dict[str, Any] = {}
+        try:
+            for row in bundle.scan("domains_hybrid", "syncSampleUsers"):
+                if row.get("id") in missing and "onPremisesImmutableId" in row:
+                    _require(found.get(row["id"], row["onPremisesImmutableId"]) == row["onPremisesImmutableId"], "id")
+                    found[row["id"]] = row["onPremisesImmutableId"]
+        except Unavailable as exc:
+            if exc.reason != "missing_artifact":
+                raise
+        for key, value in found.items():
+            index[key] = {**index[key], "onPremisesImmutableId": value}
     result = {}
     for admin in sorted(admin_rows, key=lambda r: r.get("principal_id", "")):
         _require("state" in admin, "state", "missing_field")
@@ -738,17 +866,80 @@ def _users(bundle: Bundle) -> Any:
         _require("principal_id" in admin, "principal_id", "missing_field")
         _require(admin["principal_id"] in index, "principal_id")
         row = index[admin["principal_id"]]
+        bundle.known_fields(row, {"id", "displayName", "onPremisesImmutableId"})
         item = _fields(row, {"DisplayName": _text, "OnPremisesImmutableId": _nullable_text}, graph=True)
         _require("role_names" in admin, "role_names", "missing_field")
         _require(_strings(admin["role_names"]), "role_names", "invalid_type")
         _require(bool(admin["role_names"]), "role_names")
+        _tenant_wide_roles(admin)
         item["roles"] = list(admin["role_names"])
         result[f"User{len(result) + 1}"] = item
     return result
 
 
+def _tenant_wide_roles(admin: dict[str, Any]) -> None:
+    """Every role an administrator is listed with must be held tenant-wide (directory scope ``/``).
+
+    The frozen shape lists role names only, as ScubaGear does from the directory role members, which are tenant-wide. A
+    role held only at an administrative unit or another scope (or at a scope the admin set does not know) cannot be told
+    apart from a tenant-wide one there, so it withholds the section. A scoped assignment of a role also held tenant-wide
+    changes nothing and is allowed.
+    """
+    _require("roles" in admin, "roles", "missing_field")
+    _require(isinstance(admin["roles"], list), "roles", "invalid_type")
+    scopes: dict[str, set[Any]] = {}
+    for entry in admin["roles"]:
+        _require(isinstance(entry, dict) and _text(entry.get("role")), "roles.role", "invalid_type")
+        scopes.setdefault(entry["role"], set()).add(entry.get("scope"))
+    for name in admin["role_names"]:
+        held = scopes.get(name, set())
+        _require(bool(held), "roles.role", "missing_field")
+        if "/" not in held:
+            _require(held != {None}, "roles.scope", "missing_field")
+            raise Unavailable(field="roles.scope", kind="unseen_enum_value")
+
+
 def _role_date(value: Any) -> bool:
     return value is None or isinstance(value, str) and re.fullmatch(r"/Date\(-?[0-9]+\)/", value) is not None
+
+
+def _any(_value: Any) -> bool:
+    return True
+
+
+def _rule_target(rule_id: Any) -> Any:
+    """Whether a rule's ``Target`` says no more than its ``Id`` (``<Kind>_[<Recipient>_]<Caller>_<Level>``) does."""
+    parts = rule_id.split("_") if isinstance(rule_id, str) else []
+
+    def harmless(target: Any) -> bool:
+        if len(parts) < 3 or not isinstance(target, dict):
+            return False
+        fields = {k.lower(): v for k, v in target.items() if isinstance(k, str) and not _annotation(k)}
+        if len(fields) != len([k for k in target if not _annotation(k)]):
+            return False
+        expected = {"caller": parts[-2].lower(), "level": parts[-1].lower()}
+        for key, value in fields.items():
+            if key in expected:
+                if not isinstance(value, str) or value.lower() != expected[key]:
+                    return False
+            elif key == "operations":
+                if not (_empty(value) or _strings(value) and [v.lower() for v in value] == ["all"]):
+                    return False
+            elif not _empty(value):
+                # targetObjects, inheritableSettings, enforcedSettings or anything else: it narrows or shifts the rule.
+                return False
+        return True
+    return harmless
+
+
+# The privileged_roles qualifiers: an extra field on a role, assignment or rule is ignored only when it is empty or shown
+# to change nothing. A populated scope (``DirectoryScopeId`` other than ``/``, any ``AppScopeId``), a membership or status
+# qualifier (``MemberType``, ``AssignmentType``, ``Status``), a rule ``Target`` that says more than the rule id, notification
+# qualifiers (``NotificationLevel``, ``IsDefaultRecipientsEnabled``) or anything unknown withholds the section: the frozen
+# shape cannot say that an assignment is scoped, so projecting it would read as tenant-wide.
+ROLE_HARMLESS = {"Id": _any, "Description": _any, "IsBuiltIn": _any}
+ASSIGNMENT_HARMLESS = {"Id": _any, "CreatedDateTime": _any, "ModifiedDateTime": _any, "CreatedUsing": _any,
+                       "DirectoryScopeId": lambda value: value == "/"}
 
 
 def _roles(bundle: Bundle) -> Any:
@@ -758,8 +949,14 @@ def _roles(bundle: Bundle) -> Any:
         bundle.collector_health(collector, reads)
     result = []
     for row in bundle.normalised("privileged_roles"):
+        _require(isinstance(row, dict), "$", "invalid_type")
+        template = row.get("RoleTemplateId")
+        # A role id that is this role's template id says nothing new; another one would attribute the row elsewhere.
+        def same_role(value: Any) -> bool:
+            return isinstance(value, str) and isinstance(template, str) and value.lower() == template.lower()
         # ``key`` is the normalized record's own identity (the bundle contract needs one); it is never projected.
-        _known_fields(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules", "key"})
+        bundle.qualified_fields(row, {"DisplayName", "RoleTemplateId", "Assignments", "Rules", "key"}, "",
+                                {**ROLE_HARMLESS, "TemplateId": same_role})
         item = _fields(row, {"DisplayName": _text, "RoleTemplateId": _text})
         for key in ("Assignments", "Rules"):
             _require(key in row, key, "missing_field")
@@ -768,16 +965,23 @@ def _roles(bundle: Bundle) -> Any:
         item["Assignments"] = []
         assignment_fields = {"PrincipalId": _text, "StartDateTime": _role_date, "EndDateTime": _role_date}
         for assignment in row["Assignments"]:
-            _known_fields(assignment, set(assignment_fields), "Assignments")
+            bundle.qualified_fields(assignment, set(assignment_fields), "Assignments",
+                                    {**ASSIGNMENT_HARMLESS, "RoleDefinitionId": same_role})
             _require("PrincipalId" in assignment, "Assignments.PrincipalId", "missing_field")
-            item["Assignments"].append(_fields(assignment, {k: assignment_fields[k] for k in assignment}, path="Assignments"))
+            item["Assignments"].append(_fields(
+                assignment, {k: v for k, v in assignment_fields.items() if k in assignment}, path="Assignments"))
         item["Rules"] = []
         rule_fields = {"Id": _text, "RuleSource": _text, "RuleSourceType": _text,
                        "IsExpirationRequired": _boolean, "MaximumDuration": _text,
                        "NotificationRecipients": _strings, "NotificationType": _nullable_text,
                        "Setting": {"IsApprovalRequired": _boolean}}
         for rule in row["Rules"]:
-            _known_fields(rule, set(rule_fields), "Rules")
+            _require(isinstance(rule, dict), "Rules", "invalid_type")
+            parts = rule.get("Id").split("_") if isinstance(rule.get("Id"), str) else []
+            bundle.qualified_fields(rule, set(rule_fields), "Rules", {
+                "Target": _rule_target(rule.get("Id")),
+                # Notification_<Recipient>_<Caller>_<Level>: the recipient type the id already names.
+                "RecipientType": lambda value: len(parts) == 4 and isinstance(value, str) and value.lower() == parts[1].lower()})
             for key in ("Id", "RuleSource", "RuleSourceType"):
                 _require(key in rule, "Rules." + key, "missing_field")
             _require(_text(rule["Id"]), "Rules.Id", "invalid_type")
@@ -791,9 +995,10 @@ def _roles(bundle: Bundle) -> Any:
             else:
                 raise Unavailable(field="Rules.Id", kind="unseen_enum_value")
             if "Setting" in rule:
-                _known_fields(rule["Setting"], {"IsApprovalRequired"}, "Rules.Setting")
+                # Approval stages, mode and justification say how and by whom a request is approved: unrepresented.
+                bundle.qualified_fields(rule["Setting"], {"IsApprovalRequired"}, "Rules.Setting")
                 _require("IsApprovalRequired" in rule["Setting"], "Rules.Setting.IsApprovalRequired", "missing_field")
-            item["Rules"].append(_fields(rule, {k: rule_fields[k] for k in rule}, path="Rules"))
+            item["Rules"].append(_fields(rule, {k: v for k, v in rule_fields.items() if k in rule}, path="Rules"))
         result.append(item)
     return result
 
@@ -1061,7 +1266,7 @@ def _powershell(bundle: Bundle, section: str) -> Any:
     result = []
     for row in rows:
         item = _fields(row, fields)
-        _known_fields(row, set(fields) | {"source_name", "key", "kind", "@odata.context", "@odata.type"})
+        bundle.known_fields(row, set(fields) | {"source_name", "key", "kind"})
         result.append(item)
     return result
 
@@ -1079,8 +1284,8 @@ def _dns(bundle: Bundle, section: str, manifest: dict[str, Any]) -> Any:
     result = []
     for row in rows:
         allowed = {"domain": _text, "doamin": _text, "rdata": _strings, "compliant": _boolean, "message": _text}
-        _known_fields(row, set(allowed))
-        item = _fields(row, {k: allowed[k] for k in row})
+        bundle.known_fields(row, set(allowed))
+        item = _fields(row, {k: v for k, v in allowed.items() if k in row})
         result.append(item)
     return result
 
@@ -1200,7 +1405,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             detail = getattr(exc, "detail", {"field": "$", "kind": "unseen_shape"})
             report[section] = {"status": "not_collected", "reason": reason, "source": list(bundle.sources)}
             # A projected-object bound is plain ``oversize``; the scan bounds say which one ran out.
-            if reason == "incomplete_shape" or reason == "oversize" and detail["kind"] == "scan_bound":
+            if reason in {"incomplete_shape", "collector_error"} or reason == "oversize" and detail.get("kind") == "scan_bound":
                 report[section]["detail"] = detail
             if getattr(exc, "unsupported", None):
                 report[section]["unsupported_conditions"] = exc.unsupported
@@ -1218,6 +1423,8 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             report[section]["scan"] = counts
         if bundle.ignored:
             report[section]["ignored_failures"] = sorted(bundle.ignored)
+        if bundle.ignored_fields:
+            report[section]["ignored_fields"] = sorted(bundle.ignored_fields)
     redaction = _redact(result, sha256(_json(manifest).encode()).hexdigest(), redact)
     for section, value in result.items():
         if value != NOT_COLLECTED and _oversize(annotate_enum_names(section, value), max_items, max_chars):

@@ -174,6 +174,246 @@
       "complete": false
     }
   ],
+  "field_rules": [
+    {
+      "rule_id": "MS.SHAREPOINT.1.1v1.SharingCapability_absent",
+      "policy_id": "MS.SHAREPOINT.1.1v1",
+      "section": "SPO_tenant",
+      "path": [
+        "SharingCapability"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].SharingCapability; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.1.2v1.ODBSharingCapability_absent",
+      "policy_id": "MS.SHAREPOINT.1.2v1",
+      "section": "SPO_tenant",
+      "path": [
+        "ODBSharingCapability"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].ODBSharingCapability; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.1.3v1.SharingDomainRestrictionMode_absent",
+      "policy_id": "MS.SHAREPOINT.1.3v1",
+      "section": "SPO_tenant",
+      "path": [
+        "SharingDomainRestrictionMode"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].SharingDomainRestrictionMode; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.2.1v1.DefaultSharingLinkType_absent",
+      "policy_id": "MS.SHAREPOINT.2.1v1",
+      "section": "SPO_tenant",
+      "path": [
+        "DefaultSharingLinkType"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].DefaultSharingLinkType; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.2.2v1.DefaultLinkPermission_absent",
+      "policy_id": "MS.SHAREPOINT.2.2v1",
+      "section": "SPO_tenant",
+      "path": [
+        "DefaultLinkPermission"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].DefaultLinkPermission; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.3.1v1.RequireAnonymousLinksExpireInDays_absent",
+      "policy_id": "MS.SHAREPOINT.3.1v1",
+      "section": "SPO_tenant",
+      "path": [
+        "RequireAnonymousLinksExpireInDays"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].RequireAnonymousLinksExpireInDays; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.3.2v1.FileAnonymousLinkType_absent",
+      "policy_id": "MS.SHAREPOINT.3.2v1",
+      "section": "SPO_tenant",
+      "path": [
+        "FileAnonymousLinkType"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].FileAnonymousLinkType; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.3.2v1.FolderAnonymousLinkType_absent",
+      "policy_id": "MS.SHAREPOINT.3.2v1",
+      "section": "SPO_tenant",
+      "path": [
+        "FolderAnonymousLinkType"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].FolderAnonymousLinkType; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.3.3v2.EmailAttestationReAuthDays_absent",
+      "policy_id": "MS.SHAREPOINT.3.3v2",
+      "section": "SPO_tenant",
+      "path": [
+        "EmailAttestationReAuthDays"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].EmailAttestationReAuthDays; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.SHAREPOINT.3.3v2.EmailAttestationRequired_absent",
+      "policy_id": "MS.SHAREPOINT.3.3v2",
+      "section": "SPO_tenant",
+      "path": [
+        "EmailAttestationRequired"
+      ],
+      "requires": {},
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); SharePointConfig.rego reads SPO_tenant[_].EmailAttestationRequired; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.1.1v1.PublishToWeb_absent",
+      "policy_id": "MS.POWERBI.1.1v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "PublishToWeb"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports PublishToWeb missing from input; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.2.1v1.AllowGuestUserToAccessSharedContent_absent",
+      "policy_id": "MS.POWERBI.2.1v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "AllowGuestUserToAccessSharedContent"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports AllowGuestUserToAccessSharedContent missing from input; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.3.1v1.ExternalSharingV2_absent",
+      "policy_id": "MS.POWERBI.3.1v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "ExternalSharingV2"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports ExternalSharingV2 missing from input; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.4.1v1.ServicePrincipalAccessPermissionAPIs_absent",
+      "policy_id": "MS.POWERBI.4.1v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "ServicePrincipalAccessPermissionAPIs"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports ServicePrincipalAccessPermissionAPIs missing from input; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.4.2v1.AllowServicePrincipalsCreateAndUseProfiles_absent",
+      "policy_id": "MS.POWERBI.4.2v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "AllowServicePrincipalsCreateAndUseProfiles"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports AllowServicePrincipalsCreateAndUseProfiles missing from input; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.5.1v1.BlockResourceKeyAuthentication_absent",
+      "policy_id": "MS.POWERBI.5.1v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "BlockResourceKeyAuthentication"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports BlockResourceKeyAuthentication missing from input; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.6.1v1.RScriptVisual_absent",
+      "policy_id": "MS.POWERBI.6.1v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "RScriptVisual"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports RScriptVisual missing from input; oracle-pack-v10 labels",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.POWERBI.7.1v1.EimInformationProtectionEdit_absent",
+      "policy_id": "MS.POWERBI.7.1v1",
+      "section": "powerbi_tenant_settings",
+      "path": [
+        {
+          "settingName": "EimInformationProtectionEdit"
+        }
+      ],
+      "requires": {
+        "powerbi_license_found": true,
+        "powerbi_access_denied_reason": null
+      },
+      "source": "v10 leakage-report strict_key.per_policy read_fields (rego_ast_field_reads); PowerBIConfig.rego@2446ad7 keys powerbi_tenant_settings by settingName and reports EimInformationProtectionEdit missing from input; oracle-pack-v10 labels",
+      "complete": true
+    }
+  ],
   "applicability_notes": {
     "MS.AAD.3.3v2": "This policy is only applicable if MS Authenticator is enabled and no conditional access policy already enforces phishing-resistant MFA (the requirement of MS.AAD.3.1v1)."
   },

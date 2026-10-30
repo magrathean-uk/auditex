@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import runpy
 
@@ -13,7 +14,7 @@ from auditex.model_precheck import evaluate_precheck, precheck_case
 from auditex.model_serving import ModelClient, ModelConfig, assess_run, build_case, canonical, messages_for
 from azure_tenant_audit.model_assessment import validate_assessment
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
-from azure_tenant_audit.scuba_precheck import check_gate, policy_rule, precheck_policy, rule_catalogue
+from azure_tenant_audit.scuba_precheck import check_fields, check_gate, field_name, policy_rule, precheck_policy, rule_catalogue
 
 ROOT = Path(__file__).resolve().parents[1]
 SP = "MS.SHAREPOINT.3.1v1"
@@ -117,6 +118,132 @@ def test_ungated_missing_sections_are_named_and_null_retains_default():
     assert (record["claims"][0]["status"], record["claims"][0]["value"]) == ("unknown", None)
     # Explicit null is a collected default, not an absent section for ordinary policies.
     assert precheck_policy("MS.AAD.7.3v1", {"privileged_users": None}, ["privileged_users"]) is None
+
+
+PBI = "MS.POWERBI.7.1v1"
+PBI_SECTIONS = {"powerbi_access_denied_reason": None, "powerbi_license_found": True}
+
+
+def test_field_rules_are_well_formed_and_leave_gate_fields_to_the_gate():
+    rules = rule_catalogue()["field_rules"]
+    assert len({rule["rule_id"] for rule in rules}) == len(rules) == 18
+    gates = {(rule["policy_id"], rule["section"], field_name(rule)) for rule in rule_catalogue()["rules"]}
+    for rule in rules:
+        assert rule["path"] and rule["source"] and rule["complete"] is True
+        assert (rule["policy_id"], rule["section"], field_name(rule)) not in gates
+        assert all(type(value) in (bool, type(None)) for value in rule["requires"].values())
+
+
+@pytest.mark.parametrize("pid,field", [(SP, "RequireAnonymousLinksExpireInDays"),
+    ("MS.SHAREPOINT.3.2v1", "FolderAnonymousLinkType"), ("MS.SHAREPOINT.3.3v2", "EmailAttestationRequired"),
+    ("MS.SHAREPOINT.1.1v1", "SharingCapability")])
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_safe_sharepoint_field_absent_is_unknown_only_when_enabled(pid, field, wrapped):
+    observed = {"SharingCapability": 2, "RequireAnonymousLinksExpireInDays": 30, "FileAnonymousLinkType": 1,
+                "FolderAnonymousLinkType": 1, "EmailAttestationRequired": True, "EmailAttestationReAuthDays": 30}
+    del observed[field]
+    case = build_case(pid, {"SPO_tenant": [observed] if wrapped else observed}, "unused")
+    assert precheck_case(case) is None
+    record = precheck_case(case, absent_fields=True)
+    assert record["rule_precheck"] == {"class": "absent_field", "rule_id": f"{pid}.{field}_absent",
+                                       "section": ["SPO_tenant"], "field": field, "value": None}
+    assert record["claims"][0] == {"id": "requirement_met", "status": "unknown", "value": None,
+                                   "evidence_ids": ["e0", "e1"]}
+    assert record["limitations"] == ["required_evidence_section_not_collected",
+                                     f"required_evidence_section_not_collected:SPO_tenant.{field}"]
+    assert record["recommendations"] == ["collect_missing_evidence_section"]
+
+
+@pytest.mark.parametrize("settings", [[], [{"settingName": "PublishToWeb", "enabled": False}],
+    [{"title": "Allow users to apply sensitivity labels for content", "enabled": True}],
+    [{"settingName": "", "enabled": True}]])
+def test_powerbi_missing_policy_setting_is_unknown(settings):
+    case = build_case(PBI, {**PBI_SECTIONS, "powerbi_tenant_settings": settings}, "unused")
+    record = precheck_case(case, absent_fields=True, named_limitations=False)
+    assert record["rule_precheck"]["class"] == "absent_field"
+    assert record["rule_precheck"]["field"] == "[settingName=EimInformationProtectionEdit]"
+    assert record["claims"][0]["evidence_ids"] == ["e0", "e3"]
+
+
+@pytest.mark.parametrize("pid,projection", [
+    # Unregistered tuples: no v10 evidence that absence is always unknown.
+    ("MS.AAD.9.1v1", {"conditional_access_policies": [{"State": "enabled"}], "scuba_config": {}, "service_plans": []}),
+    ("MS.EXO.7.1v1", {"transport_rule": [{"Mode": "Enforce"}]}),
+    # The present-but-null field is a collected default.
+    (SP, {"SPO_tenant": [{"SharingCapability": 2, "RequireAnonymousLinksExpireInDays": None}]}),
+    # Several tenant objects or duplicate setting entries are ambiguous.
+    ("MS.SHAREPOINT.1.2v1", {"SPO_tenant": [{"SharingCapability": 2}, {"SharingCapability": 2}]}),
+    (PBI, {**PBI_SECTIONS, "powerbi_tenant_settings": [{"settingName": "EimInformationProtectionEdit", "enabled": True}] * 2}),
+    # Licence and access blockers are cited with other evidence by the oracle.
+    (PBI, {**PBI_SECTIONS, "powerbi_license_found": False, "powerbi_tenant_settings": []}),
+    (PBI, {**PBI_SECTIONS, "powerbi_access_denied_reason": "HTTP 403", "powerbi_tenant_settings": []}),
+    (PBI, {**PBI_SECTIONS, "powerbi_tenant_settings": None}),
+])
+def test_unregistered_null_ambiguous_or_blocked_fields_are_left_to_the_model(pid, projection):
+    assert check_fields(pid, projection) is None
+    assert precheck_case(build_case(pid, projection, "unused"), absent_fields=True) is None
+
+
+@pytest.mark.parametrize("projection,expected", [
+    ({"SPO_tenant": NOT_COLLECTED}, ("absent_section", "required_sections_present")),
+    ({"SPO_tenant": [{"SharingCapability": 0}]}, ("closed_gate", "MS.SHAREPOINT.3.1v1.sharing_closed")),
+    ({"SPO_tenant": [{}]}, ("absent_section", "MS.SHAREPOINT.3.1v1.sharing_closed")),
+    ({"SPO_tenant": []}, ("absent_section", "MS.SHAREPOINT.3.1v1.sharing_closed")),
+])
+def test_gate_and_section_absence_take_precedence_over_absent_field(projection, expected):
+    detail = precheck_case(build_case(SP, projection, "unused"), absent_fields=True)["rule_precheck"]
+    assert (detail["class"], detail["rule_id"]) == expected
+    pbi = {"powerbi_access_denied_reason": None, "powerbi_license_found": NOT_COLLECTED, "powerbi_tenant_settings": []}
+    assert precheck_case(build_case(PBI, pbi, "unused"), absent_fields=True)["rule_precheck"]["class"] == "absent_section"
+
+
+FROZEN_V10 = Path(os.environ.get("AUDITEX_TEST_PRECHECK_PACK", "/Volumes/4TB/dev/auditex-data/development-kit/"
+                                 "20261030-oracle-pack-v10/training-pack-oracle-v10-ministral3-8b"))
+
+
+@pytest.mark.parametrize("name", ["test.jsonl", "approved-cases.jsonl"])
+def test_absent_field_rows_are_unknown_in_every_frozen_v10_row(name):
+    path = FROZEN_V10 / name
+    if not path.is_file():
+        pytest.skip(f"frozen v10 pack not present ({path}); set AUDITEX_TEST_PRECHECK_PACK")
+    fired = 0
+    for line in path.read_text().splitlines():
+        row = json.loads(line)
+        case = json.loads(next(m["content"] for m in row["messages"] if m["role"] == "user"))
+        if "policy_id" not in case:
+            continue
+        record = precheck_case(case, absent_fields=True, named_limitations=False)
+        if record is None or record["rule_precheck"]["class"] != "absent_field":
+            continue
+        fired += 1
+        assert row["expected"]["claims"][0]["status"] == "unknown", row["id"]
+        assert {key: record[key] for key in ("claims", "limitations", "recommendations")} == {
+            key: row["expected"][key] for key in ("claims", "limitations", "recommendations")}, row["id"]
+    assert fired == (5 if name == "test.jsonl" else 69)
+
+
+def test_evaluator_scores_absent_field_only_on_request(tmp_path):
+    case = benchmark_row({"SPO_tenant": [{"SharingCapability": 2}]})
+    case["messages"][1]["content"] = canonical({**json.loads(case["messages"][1]["content"]), "policy_id": PBI})
+    path = tmp_path / "test.jsonl"
+    rows = []
+    for observed in ([], [{"settingName": "EimInformationProtectionEdit", "enabled": True}]):
+        built = build_case(PBI, {**PBI_SECTIONS, "powerbi_tenant_settings": observed}, "unused")
+        record = precheck_case(built, absent_fields=True, named_limitations=False) or {
+            "claims": [{"id": "requirement_met", "status": "confirmed", "value": True, "evidence_ids": ["e0", "e1", "e2", "e3"]},
+                       {"id": "policy_criticality", "status": "confirmed", "value": "Should", "evidence_ids": ["e0"]}],
+            "limitations": [], "recommendations": []}
+        response = {key: record[key] for key in ("claims", "limitations", "recommendations")}
+        rows.append({"id": built["case_id"], "family": "precheck-test", "split": "test",
+                     "provenance": {"source": "synthetic:precheck-test", "synthetic": True, "review_status": "approved",
+                                    "reviewer": "unit-test"},
+                     "messages": [*messages_for(built), {"role": "assistant", "content": canonical(response)}],
+                     "expected": {**response, "allowed_evidence_ids": ["e0", "e1", "e2", "e3"]}})
+    path.write_text("".join(canonical(row) + "\n" for row in rows))
+    assert evaluate_precheck(str(path))["rule_answered"] == 0
+    report = evaluate_precheck(str(path), absent_fields=True)
+    assert report["classes"]["absent_field"] == {"rule_answered": 1, "correct": 1}
+    assert report["left_to_model"] == 1
 
 
 def run_assessment(tmp_path, monkeypatch, projection, **kwargs):

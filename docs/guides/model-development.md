@@ -236,6 +236,50 @@ are both cited. The pack stays unchanged. Nine remaining
 rows are unreadable Power BI inputs outside these rules; 89 are met and 170 not met.
 No combined score against a real model is claimed without recorded responses.
 
+#### Field-level absence (`absent_field`)
+
+A third class covers a field the policy's Rego reads that is missing inside a collected
+section. Its rules are `field_rules` in `configs/scuba-rule-precheck.json`: one rule per
+(policy, section, field) tuple, with the gate-style `path`, `requires` (other sections
+pinned to exact typed values) and `source`/`complete` like the gates. The fields come
+from the v10 leakage report (`strict_key.per_policy.read_fields`, from
+`rego_ast_field_reads`); a tuple is registered only where every v10 row the rule would
+answer (train, validation and test) is labelled unknown. Precedence: closed gate, then
+`absent_section` (missing sections, then a missing or unusable gate input), then
+`absent_field` in config order. The answer is the `absent_section` shape citing the one
+section: unknown, `required_evidence_section_not_collected`,
+`collect_missing_evidence_section`, named field `section.path`.
+
+| Policies | Section | Absent field |
+| --- | --- | --- |
+| MS.SHAREPOINT.1.1v1 | `SPO_tenant` | `SharingCapability` (no gate on 1.1) |
+| MS.SHAREPOINT.1.2v1 | `SPO_tenant` | `ODBSharingCapability` |
+| MS.SHAREPOINT.1.3v1 | `SPO_tenant` | `SharingDomainRestrictionMode` |
+| MS.SHAREPOINT.2.1v1, 2.2v1 | `SPO_tenant` | `DefaultSharingLinkType`, `DefaultLinkPermission` |
+| MS.SHAREPOINT.3.1v1 | `SPO_tenant` | `RequireAnonymousLinksExpireInDays` |
+| MS.SHAREPOINT.3.2v1 | `SPO_tenant` | `FileAnonymousLinkType`, `FolderAnonymousLinkType` |
+| MS.SHAREPOINT.3.3v2 | `SPO_tenant` | `EmailAttestationReAuthDays`, `EmailAttestationRequired` |
+| MS.POWERBI.1.1v1 to 7.1v1 | `powerbi_tenant_settings` | `[settingName=<the policy's setting>]`, requires licence `true` and denial `null` |
+
+Absent means a missing key in the single tenant object, an empty singleton list, or no
+entry whose `settingName` equals the policy's setting (Power BI's Rego keys the list by
+`settingName` and reports the setting missing from input). A field shown as null, several
+tenant objects, duplicate setting entries, a null section and Power BI licence or access
+blockers are left to the earlier classes or the model, because the oracle cites other
+evidence for them. "`settingName` missing from any entry" was rejected: the v10 labels
+agree with it only because each variant removes the name from the policy's own entry.
+
+The class is **served**: `auditex model assess` calls `precheck_case(..., absent_fields=True)`,
+the assessment schema's `rule_precheck.class` enum carries `absent_field`, and
+`validate_assessment` accepts a row only when its rule is a registered field rule of the
+row's policy, naming that section and field, with a null value. Offline scoring opts in
+with `scripts/score-model-precheck.py --absent-fields`. Frozen v10 test (435 rows): rule rows
+167 to 172, all strict-correct; with the G4 8B Q5_K_M recorded answers the combined score
+moves from 417 to 419, the two Power BI 7.1 misses becoming rule rows. Over all 5,227
+v10 SCuBA rows the class answers 69, all unknown and strict-correct. The SharePoint
+"not applicable" misses with `SharingCapability` removed were already `absent_section`
+rows through the gate input.
+
 ## Case and answer contract
 
 Each JSONL case has `id`, `family`, `split`, `provenance`, `messages` and

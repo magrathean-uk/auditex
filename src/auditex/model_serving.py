@@ -362,7 +362,7 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
                                 "prompt_sha256": sha256(canonical(messages).encode()).hexdigest(),
                                 "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
                 continue
-            record = precheck_case(case)
+            record = precheck_case(case, absent_fields=True)
             if record is None:
                 record = client.assess(case)
             elif shadow_model_on_precheck:

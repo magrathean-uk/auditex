@@ -118,6 +118,55 @@ bundle gains the `privileged_roles` artefact, both additive.
   - The synthetic demo now projects three sections (`service_plans`, `tenant_id`, `privileged_users`):
     99 rule rows and three model rows (`MS.AAD.7.1v1` to `MS.AAD.7.3v1`), where the earlier count
     was two sections, 102 rule rows and none.
+- **P5 projection robustness (real-tenant runs of 2026-10-30).** Field presence depends on the token, not the tenant
+  (a delegated token returns `servicePlans[].servicePlanType`, the Azure CLI one does not), so an extra Graph field no
+  longer withholds a section: every adapter projects the fields the training shape knows and records the rest in the
+  section report's optional `ignored_fields` (sorted field paths, names only; a key that is not an identifier is
+  masked as `unrecognisedField`). Unseen enum values, wrong types and missing fields still withhold, and the projected
+  object still passes the unchanged frozen shape gate. Conditional Access keeps one exception: a known restriction, or a
+  populated unknown field inside `conditions` or `grantControls`, can narrow the policy and still withholds.
+  - **A failed read names its cause.** The collector's failure marker (`error`, `error_class`) in an operation envelope,
+    a coverage row, a ledger diagnostic or a collection gap now withholds with reason `collector_error` and `detail`
+    `{error_class, operation}` (the collector's class, `unclassified` outside its vocabulary; never the message), in
+    place of `incomplete_shape` / `unseen_shape` on field `error`.
+  - **No Entra ID P2.** A PIM schedule read refused with `license_required` and empty no longer withholds
+    `privileged_users`: the admin set comes from the directory role assignments, as the effective admin set already
+    records, and the refused reads are listed in `ignored_failures`. Any other refusal still withholds.
+    `privileged_roles` stays withheld (`collector_error`, `license_required`): every frozen shape carries PIM rules.
+  - `privileged_users` takes `onPremisesImmutableId` from `domains_hybrid.syncSampleUsers` when the identity user read
+    does not select it; an administrator neither read holds withholds as before. A failed privileged-group fan-out is
+    attributed to its operation, so it no longer withholds `tenant_id`.
+  - The synthetic demo projects `accepted_domains` too (five sections; totals unchanged). Schema `2026-10-29` gains the
+    optional `ignored_fields`, the reason `collector_error` and its detail (the assessment validator learns `anyOf`).
+  - **Qualifiers withhold (review round 2).** Where an extra field can scope or qualify a kept one, only an empty or
+    demonstrably harmless value is ignored; a populated one withholds as `incomplete_shape`, `detail`
+    `{field, kind: unexpected_field}`. `privileged_roles`: an administrative-unit `Assignments.DirectoryScopeId`, any
+    `AppScopeId`, `MemberType`, `Status`, a rule `Target` that says more than the rule id, `NotificationLevel`, approval
+    stages or any unknown populated field withholds, so a scoped assignment is never read as tenant-wide (`/`, a
+    matching role id, a `Target` restating the id and identity metadata are ignored and reported). `privileged_users`:
+    a role an administrator holds only below directory scope `/` withholds (`roles.scope`).
+  - **`service_plans` keeps only provisioned plans**, as ScubaGear's exporter does (`provisioningStatus` `Success`); a
+    disabled or pending plan was projected as one the tenant has. A tenant with none projects an empty list.
+  - **Error classes are vocabulary-checked.** One allowlist (`COLLECTOR_ERROR_CLASSES`, plus `graph_http_<status>`),
+    shared by the projection and the validator, replaces the lower-case-token check: `alice_smith` reads
+    `unclassified`, and the validator rejects an unknown class. A test keeps the list in step with every class literal
+    the engine writes.
+  - **Every ignored source field is recorded.** The SharePoint settings row, the top-level authorization policy, each SKU
+    row, each administrator's user row and the Conditional Access policy metadata (`id`, `createdDateTime`) now list
+    their unprojected fields; only OData annotations are excluded, at any depth (`authenticationStrength@odata.context`
+    no longer withholds a policy).
+  - Projection budgets: a tenant whose admin set exceeds the item budget (one real administrator holds 88 roles)
+    withholds `privileged_users` as `oversize`; there is no operator action today, and the budget is unchanged.
+- **Field-level absence pre-check (`absent_field`).** `configs/scuba-rule-precheck.json` gains
+  `field_rules`: 18 (policy, section, field) tuples whose Rego-read field (v10 leakage report, `rego_ast_field_reads`)
+  is missing inside a collected section, registered only where every v10 row the rule would answer is labelled
+  unknown (69 rows across train, validation and test, 100 %). Ten SharePoint `SPO_tenant` fields and the eight Power BI
+  policies' own `[settingName=...]` entry (with licence found and access not denied). Precedence is closed gate,
+  `absent_section`, then `absent_field`; the answer is unknown with `required_evidence_section_not_collected` and
+  `collect_missing_evidence_section`, as in the labels. Serving emits it (`precheck_case(..., absent_fields=True)`), the
+  assessment schema's `rule_precheck.class` enum and `validate_assessment` accept it (the rule must be a registered field
+  rule of the row's policy, naming its section and field, with a null value). `scripts/score-model-precheck.py --absent-fields` scores it; frozen
+  v10 test rule rows 167 to 172 (all correct), G4 8B Q5_K_M combined score 417 to 419/435.
 - **Scope post-check.** ScubaGear's Rego ignores the location, platform, device-filter, client-application
   (and, for most policies, client-application-type) conditions of a Conditional Access policy, and the grant
   operator of several, so the oracle labels the specialist model is trained on give a clean pass to a policy
