@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import re
 import sys
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -36,6 +36,10 @@ from .scuba_projection import (
 SCHEMA_VERSION = "2026-10-29"
 PROMPT_CONVENTION = "named-enums-v1"
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+# Pause before re-sending a request whose reply was lost in transit (P5: a relay dropped replies under load).
+_TRANSPORT_BACKOFF_SECONDS = 2.0
+# finish_reason is server text: keep it only when it is a plain token such as stop or length.
+_FINISH_REASON = re.compile(r"[a-z][a-z0-9_]{0,31}")
 
 
 def canonical(value: Any) -> str:
@@ -78,7 +82,7 @@ def build_case(policy_id: str, projection: dict[str, Any], as_of: str, *,
     observed = {section: policy_section(projection, policy_id, section) for section in entry["sections"]}
     identity = {section: _identity_view(value) if section == "SPO_tenant" else value
                 for section, value in observed.items()}
-    view_hash = sha256(f"conv3:{canonical(identity)}".encode()).hexdigest()[:10]
+    view_hash = sha256(f"conv3:{canonical(identity)}".encode("utf-8", "surrogatepass")).hexdigest()[:10]
     product = policy_id.split(".")[1].lower()
     case_id = f"scuba-{product}-{policy_id.lower().replace('.', '-')}-{view_hash}"
     evidence = [{"id": "e0", "observed": dict(item), "section": "policy"}]
@@ -155,7 +159,11 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class ModelEndpointError(ValueError):
-    """Sanitised transport failure, without response bodies or credentials."""
+    """Sanitised endpoint failure, without response bodies or credentials."""
+
+
+class ModelTransportError(ModelEndpointError):
+    """The request or its reply was lost in transit (connection, timeout, truncated read); worth one retry."""
 
 
 class ModelClient:
@@ -163,10 +171,16 @@ class ModelClient:
         self.config = config
         self._json_format = True
         self._thinking_disabled = True
+        self._cache_prompt_off = True
         # No proxy environment or redirects may silently move evidence elsewhere.
         self._opener = build_opener(ProxyHandler({}), _NoRedirect())
         if not _is_loopback(config.endpoint_host):
             print(f"Warning: model endpoint {config.endpoint_host} is not loopback; evidence will leave the machine.", file=sys.stderr)
+
+    def serving(self) -> dict[str, str]:
+        """The request settings this session sends after negotiation, for the assessment envelope."""
+        return {"cache_prompt": "disabled" if self._cache_prompt_off else "server_default",
+                "response_format": "json_object" if self._json_format else "not_sent"}
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> bytes:
         headers = {"Accept": "application/json"}
@@ -174,7 +188,7 @@ class ModelClient:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         data = None
         if payload is not None:
-            data = canonical(payload).encode()
+            data = canonical(payload).encode("utf-8", "surrogatepass")  # a lone surrogate in evidence must not abort the run
             headers["Content-Type"] = "application/json"
         request = Request(self.config.endpoint.rstrip("/") + path, data=data, headers=headers, method=method)
         try:
@@ -185,7 +199,9 @@ class ModelClient:
                 return body
         except HTTPError:
             raise
-        except (OSError, URLError, HTTPException, ValueError) as exc:
+        except (OSError, URLError, HTTPException):
+            raise ModelTransportError("Model endpoint unreachable, timed out or reply cut short") from None
+        except ValueError as exc:
             if isinstance(exc, ModelEndpointError):
                 raise
             raise ModelEndpointError("Model endpoint unavailable or timed out") from None
@@ -213,20 +229,27 @@ class ModelClient:
         messages = messages_for(case)
         record = {"policy_id": case["policy_id"], "claims": [], "limitations": [], "recommendations": [],
                   "validation_status": "invalid", "latency_ms": 0, "attempts": 0,
-                  "prompt_sha256": sha256(canonical(messages).encode()).hexdigest(), "response_sha256": None,
+                  "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(), "response_sha256": None,
                   "thinking_disabled": self._thinking_disabled, "thinking_stripped": False,
-                  "reason": None}
+                  "reason": None, "finish_reason": None}
         started = monotonic()
-        for _ in range(2):
+        for attempt in range(2):
+            if attempt and record["reason"] == "model_transport_failed":
+                sleep(_TRANSPORT_BACKOFF_SECONDS)
             payload = {"model": self.config.model_name, "messages": messages, "temperature": 0, "max_tokens": 1024}
             if self._json_format:
                 payload["response_format"] = {"type": "json_object"}
             if self._thinking_disabled:
                 payload["chat_template_kwargs"] = {"enable_thinking": False}
+            # llama-server reuses a cached prompt prefix by default; the validated protocol turns that off so greedy
+            # decoding does not depend on the previous request.
+            if self._cache_prompt_off:
+                payload["cache_prompt"] = False
             try:
                 while True:
                     record["attempts"] += 1
                     record["response_sha256"] = None
+                    record["finish_reason"] = None
                     record["thinking_disabled"] = "chat_template_kwargs" in payload
                     try:
                         raw = self._request("POST", "/chat/completions", payload)
@@ -246,21 +269,41 @@ class ModelClient:
                             self._thinking_disabled = False
                             payload.pop("chat_template_kwargs")
                             continue
+                        if exc.code == 400 and "cache_prompt" in payload and "cache_prompt" in body:
+                            self._cache_prompt_off = False
+                            payload.pop("cache_prompt")
+                            continue
                         raise ModelEndpointError(f"Model endpoint returned HTTP {exc.code}") from None
+            except ModelTransportError:
+                record.update(validation_status="unknown", reason="model_transport_failed")
+                continue
             except ModelEndpointError:
                 record.update(validation_status="unknown", reason="model_endpoint_unavailable")
                 break
+            # An empty, non-JSON or non-chat-completion body, or one without assistant text, is a reply lost in
+            # transit, not a model answer: it is retried like one and never hashed.
             try:
                 envelope = json.loads(raw, object_pairs_hook=_pairs, parse_constant=_invalid_constant)
-                content = envelope["choices"][0]["message"]["content"]
-                if not isinstance(content, str):
+                choice = envelope["choices"][0]
+                finish = choice.get("finish_reason")
+                record["finish_reason"] = finish if isinstance(finish, str) and _FINISH_REASON.fullmatch(finish) else None
+                content = choice["message"]["content"]
+                if not isinstance(content, str) or not content.strip():
                     raise ValueError("Missing assistant text")
-                content, stripped = re.subn(r"\A\s*<think>.*?</think>\s*", "", content, count=1, flags=re.DOTALL)
-                record["thinking_stripped"] = record["thinking_stripped"] or bool(stripped)
-                record["response_sha256"] = sha256(content.encode()).hexdigest()
+            except (ValueError, KeyError, IndexError, TypeError, AttributeError, OverflowError, RecursionError):
+                record.update(validation_status="unknown", reason="model_transport_failed")
+                continue
+            content, stripped = re.subn(r"\A\s*<think>.*?</think>\s*", "", content, count=1, flags=re.DOTALL)
+            record["thinking_stripped"] = record["thinking_stripped"] or bool(stripped)
+            # surrogatepass equals UTF-8 for any real text and hashes a lone surrogate (reachable only through a JSON
+            # escape such as \ud800) by its exact code point, so the hash never raises and never collides.
+            record["response_sha256"] = sha256(content.encode("utf-8", "surrogatepass")).hexdigest()
+            try:
+                # Text that is not valid Unicode is no answer: UnicodeEncodeError makes it model_response_invalid.
+                content.encode()
                 answer = validate_model_response(content, case)
             except (ValueError, KeyError, IndexError, TypeError, OverflowError, RecursionError):
-                record["reason"] = "model_response_invalid"
+                record.update(validation_status="invalid", reason="model_response_invalid")
                 continue
             record.update(answer, validation_status="valid", reason=None)
             break
@@ -359,7 +402,7 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
             if dry_run:
                 messages = messages_for(case)
                 prompts.append({"policy_id": policy_id, "messages": messages,
-                                "prompt_sha256": sha256(canonical(messages).encode()).hexdigest(),
+                                "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(),
                                 "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
                 continue
             record = precheck_case(case, absent_fields=True, empty_lists=True)
@@ -389,7 +432,7 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
     result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at, "run_id": manifest["run_id"],
               "endpoint_host": config.endpoint_host, "model_name": config.model_name,
               "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
-              "totals": totals, "policies": records,
+              "totals": totals, "policies": records, "serving": client.serving(),
               "projection": projection.report, "scope_post_check": scope.summary,
               "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
     from azure_tenant_audit.model_assessment import validate_assessment

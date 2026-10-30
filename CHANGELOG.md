@@ -55,6 +55,48 @@ bundle gains the `privileged_roles` artefact, both additive.
     projects three sections, 99 rule rows and three model rows. Notification recipients are e-mail addresses, collected as
     evidence and masked by the projection's redaction by default; `--no-redaction` (loopback endpoints only) sends them unmasked.
 
+### Shipped model and serving parity
+
+- **One shipped model, catalogued.** `configs/model-sources.json` (catalogue `schema_version` `2026-10-30`) gains
+  the `product_model` entry `auditex-ministral3-8b-scuba-v10`: Ministral 3 8B Instruct 2512 (BF16 base at
+  `f6fae979...`) with LoRA checkpoint-500 trained on oracle pack v10, merged and quantised Q5_K_M with llama.cpp
+  `620d2225...` (`model-Q5_K_M.gguf`, 6,058,747,104 bytes, sha256 `840fb447...`, two `split` parts with their
+  hashes), the adapter hash, training pack and card, the validated serving flags and request, four scores with their
+  definitions (product 419/435, model alone 403/435, twin-free 280/298, per-policy 88.6 %), the known weak classes, a
+  licence to verify on the base model card and its availability (public Hugging Face repository
+  `magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF` pending upload, `revision` null until then). The catalogue's
+  `inference_executed`, `training_executed` and `external_execution` flags are now true. `auditex model sources`
+  validates the catalogue and fails closed: unique ids, 64-hex hashes, 40-hex revisions for every other entry,
+  exactly one product model with all required keys, parts that sum to the artefact, scores as counts or rates.
+- **Serving matches the benchmark protocol more closely.** Requests send `cache_prompt: false` (a 400 rejecting it
+  is negotiated away like `response_format`). A reply lost in transit (connection error, timeout, cut-short, empty
+  or non-JSON body, no chat-completion choice or assistant text) is now retried once after a 2 s pause and, if lost
+  again, recorded as `unknown` with the new reason `model_transport_failed` and no response hash, instead of
+  `model_response_invalid` with the hash of an empty answer (the P5 real-tenant relay drops) or a single-attempt
+  `model_endpoint_unavailable`. That reason now means an HTTP error status or an oversized reply, not retried.
+  Model rows (and shadows) record `finish_reason`. Schema `2026-10-29` is extended in place, additively: the new
+  reason and limitation, the optional `finish_reason` (rejected on rule and skipped rows) and `attempts` up to 5.
+- **Review fix-ups.** The product entry's `serving` now separates `benchmark_protocol` (the recorded G4 benchmark
+  manifest's request verbatim, `max_tokens` 512, `seed` 42, `top_k` 1, no `response_format`) from
+  `production_request` (what `auditex model assess` sends, `max_tokens` 1024 and `response_format` `json_object`;
+  a test pins it to the client's payload), with `protocol_difference` stating that production parity was checked
+  only on the two P5 bundles. Catalogue validation is stricter: required fields must be non-empty and well typed,
+  nested `base`, `adapter`, `conversion`, `training`, `serving` and `parts` contracts are checked, part sizes must
+  be positive with unique names, and a malformed score (`scores: [null]`) is a clean `Model command failed` exit 2
+  instead of a traceback. Assistant text holding a lone surrogate (a JSON `\ud800` escape) no longer aborts the
+  assessment: it is hashed with `surrogatepass` and retried as `model_response_invalid`. The envelope gains the
+  optional `serving` record (`cache_prompt` `disabled`/`server_default`, `response_format` `json_object`/`not_sent`),
+  additive within schema `2026-10-29`, so a server that rejected `cache_prompt: false` is visible as a departure
+  from the measured protocol. The memory guidance is an estimate (about 7.5 to 8 GB free); laptop suitability is
+  unverified.
+  Evidence text containing a lone surrogate (a JSON `\ud800` escape) is refused by the projection's typed field checks
+  (the section withholds as an invalid type), and the serving client hashes prompts and encodes request bodies with
+  `surrogatepass` as defence in depth, so such a value records a row instead of aborting the assessment.
+- **Operator chapter.** `docs/guides/ai-assessment.md`: what rules and the model decide (four rule classes, scope
+  post-check, shadow mode), obtaining and verifying the model, serving it with `llama-server`, memory needs, running
+  and reading the assessment, the measured accuracy with its caveats and the January 2027 re-pick. README, index,
+  product manual, model-development guide, output contract and provenance notes point to it.
+
 ### Model serving (new, optional)
 
 - **`scuba_config` is synthesised, no longer withheld.** The 19 policies that read ScubaGear's operator

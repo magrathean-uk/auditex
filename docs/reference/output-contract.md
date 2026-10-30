@@ -52,7 +52,7 @@ the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention
 `named-enums-v1`, the pinned `system_prompt_sha256`, totals and policy rows.
 Each row records claims, limitations, recommendations, `validation_status`, reason,
-`latency_ms`, HTTP POST `attempts` (including format and thinking negotiation),
+`latency_ms`, HTTP POST `attempts` (including format, thinking and `cache_prompt` negotiation; at most 5),
 `thinking_disabled`, `thinking_stripped`, prompt and response
 hashes, and a comparison against mapped `cisa_scuba` baseline alignment in the report
 pack (`agree`, `disagree` or `not_assessed`), with `baseline_match` (`exact`,
@@ -63,8 +63,25 @@ after removal of a leading thinking block. They are null when the final attempt
 failed at transport level or supplied no assistant text. Skips have no
 prompt or response hash. No raw invalid answer or API key is retained.
 
+Within `2026-10-29`, two additive changes (older files still validate; the schema version is unchanged): model
+rows (and `model_shadow`) may carry `finish_reason`, the final reply's token (`stop`, `length`, ...) or null when
+no reply arrived or the server sent none or a non-token value; it is absent from rule and skipped rows, and the
+validator rejects it there. A row whose reply was lost in transit twice (connection error, timeout, cut-short,
+empty or non-JSON body, no chat-completion choice or no assistant text) is `unknown` with reason and sole
+limitation `model_transport_failed` and no response hash; `model_endpoint_unavailable` now means an HTTP error
+status or an oversized reply, not retried. Earlier `2026-10-29` files recorded such transport losses as
+`model_response_invalid` or `model_endpoint_unavailable`. A third additive change: the envelope may carry
+`serving`, the request settings the client sent after negotiation: `cache_prompt` is `disabled` (`cache_prompt:
+false` sent, as benchmarked) or `server_default` (the server rejected the field, so llama-server may reuse a
+cached prompt prefix and greedy answers can depend on the previous request), and `response_format` is
+`json_object` or `not_sent`. `server_default` departs from both the production request and the benchmark protocol
+(which sent `cache_prompt: false`); `not_sent` departs from the production request only, since the benchmark never sent a
+response format. Assistant text that is not valid Unicode (a lone surrogate sent as a JSON `\ud800` escape) is
+`model_response_invalid` and retried like any invalid answer; its response hash covers the text encoded as UTF-8
+with `surrogatepass`, which equals plain UTF-8 for valid text.
+
 The four verdict totals are disjoint: `answered` counts validated known requirement verdicts, `unknown`
-counts validated abstentions and endpoint failures, `invalid` counts exhausted answer
+counts validated abstentions, endpoint failures and transport losses, `invalid` counts exhausted answer
 validation retries (whose claims are unknown), and `skipped` counts policy IDs absent
 from the catalogue (`policy_not_in_catalogue`). All 102 shipped policy items preserve
 their training text, including the intentionally empty Power Platform excerpt.

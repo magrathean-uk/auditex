@@ -416,6 +416,14 @@ and the corresponding MCP tools preserve original source hashes and reject
 conflicting tenant identities. See [external assessment comparison](external-assessments.md)
 for supported exports, synthetic rehearsal files and control-mapping limits.
 
+## AI assessment
+
+`auditex model assess <run-dir>` adds an optional, advisory SCuBA second opinion to a finished Microsoft 365 run:
+deterministic rules answer what they can, the shipped Auditex model (`auditex-ministral3-8b-scuba-v10`, served
+locally with `llama-server`) answers the rest, and the result is compared with the findings baseline. It never
+changes findings. See [AI assessment](ai-assessment.md) for obtaining and verifying the model, serving it, reading
+`model_assessment.json` and the measured accuracy with its limits.
+
 ## Specialist model development
 
 `auditex model sources|stage|evaluate|combine|prepare` works on local model

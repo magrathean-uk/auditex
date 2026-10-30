@@ -270,6 +270,8 @@ def validate_assessment(payload: Any) -> None:
             counts["unknown"] += 1
         else:
             counts["answered"] += 1
+        if "finish_reason" in row and (is_rule or status == "skipped"):
+            raise ValueError("finish_reason belongs to model rows only")
         if status == "skipped":
             skip_reason = "policy_text_unavailable" if version == "2026-10-27" else "policy_not_in_catalogue"
             if (row["reason"] != skip_reason or row["attempts"] != 0 or row["claims"]
@@ -356,10 +358,16 @@ def validate_assessment(payload: Any) -> None:
             raise ValueError("Missing model assessment attempt provenance")
         if status == "invalid" and (row["reason"] != "model_response_invalid" or "model_response_invalid" not in row["limitations"]):
             raise ValueError("Missing model response failure limitation")
-        if status == "unknown" and (row["reason"] != "model_endpoint_unavailable" or row["limitations"] != ["model_endpoint_unavailable"]):
+        # A reply that never arrived intact (model_transport_failed) is unknown, like an unreachable endpoint; the
+        # schema admits that reason only from 2026-10-29.
+        if status == "unknown" and (row["reason"] not in {"model_endpoint_unavailable", "model_transport_failed"}
+                                    or row["limitations"] != [row["reason"]]):
             raise ValueError("Missing model endpoint failure limitation")
+        if status == "unknown" and row["response_sha256"] is not None:
+            raise ValueError("An unanswered model row carries no response hash")
         if status == "valid" and (row["reason"] is not None or row["response_sha256"] is None
-                                  or set(row["limitations"]) & {"model_response_invalid", "model_endpoint_unavailable"}):
+                                  or set(row["limitations"]) & {"model_response_invalid", "model_endpoint_unavailable",
+                                                                "model_transport_failed"}):
             raise ValueError("Invalid validated model assessment provenance")
         if status in {"invalid", "unknown"} and any(c["status"] != "unknown" for c in claims):
             raise ValueError("Failed model responses must abstain")

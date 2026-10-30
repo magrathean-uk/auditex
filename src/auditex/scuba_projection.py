@@ -103,12 +103,18 @@ def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
+def _clean_text(value: Any) -> bool:
+    """A str that is valid interchange text: no lone surrogate (a JSON \\ud800 escape decodes to one, and such a value
+    can neither be hashed nor sent as UTF-8 without special handling). Treated as an invalid type, so the section withholds."""
+    return isinstance(value, str) and not any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+
+
 def _strings(value: Any) -> bool:
-    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+    return isinstance(value, list) and all(_clean_text(v) for v in value)
 
 
 def _text(value: Any) -> bool:
-    return isinstance(value, str) and bool(value)
+    return _clean_text(value) and bool(value)
 
 
 def _boolean(value: Any) -> bool:
@@ -116,7 +122,7 @@ def _boolean(value: Any) -> bool:
 
 
 def _nullable_text(value: Any) -> bool:
-    return value is None or isinstance(value, str)
+    return value is None or _clean_text(value)
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

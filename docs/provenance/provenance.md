@@ -39,7 +39,8 @@ checkout or executes report content.
 
 ## Model-development references
 
-`configs/model-sources.json` pins the inspected OpenAdmin and M365 Expert
+`configs/model-sources.json` pins the shipped Auditex model (`product_model`: base revision, adapter and GGUF
+hashes, llama.cpp revision, training pack and scores) and the inspected OpenAdmin and M365 Expert
 model artifacts, OpenAdmin public dataset and source pipeline, and proposed
 base checkpoints. Reference models, original data and sparse source copies
 are retained outside the distributable tree under

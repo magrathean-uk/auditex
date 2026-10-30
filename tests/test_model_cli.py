@@ -3,19 +3,101 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from auditex.cli import main
+from auditex.model_sources import validate_model_sources
 
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "model_development"
+ROOT = Path(__file__).resolve().parents[1]
+EXAMPLES = ROOT / "examples" / "model_development"
 REVISION = "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
 
 
-def test_model_catalogue_is_pinned_without_runtime_execution(capsys):
+def test_model_catalogue_is_pinned_and_names_the_trained_product_model(capsys):
     assert main(["model", "sources"]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert result["tenant_access"] is result["inference_executed"] is result["training_executed"] is False
-    assert all(len(source["revision"]) == 40 for source in result["sources"])
+    assert result["tenant_access"] is False
+    assert result["inference_executed"] is result["training_executed"] is True
+    assert all(len(source["revision"]) == 40 for source in result["sources"] if source["role"] != "product_model")
     assert {source["role"] for source in result["sources"]} >= {"proposed_single_training_base", "unreviewed_reference_conversations"}
+    product, = [source for source in result["sources"] if source["role"] == "product_model"]
+    assert product["id"] == "auditex-ministral3-8b-scuba-v10" and product["revision"] is None
+    assert product["sha256"] == "840fb447eb062d7cae8ff1980d30548e1198138e8235e88e1bc0449bacead01a"
+    assert product["bytes"] == sum(part["bytes"] for part in product["parts"]["files"]) == 6058747104
+    assert product["base"]["revision"] == "f6fae9795746f63c9be8344932f01275f3c63734"
+    assert product["conversion"]["llama_cpp_revision"] == "620d2225cc436ab0b001e3200e590e3b286ef9ab"
+    assert {score["id"] for score in product["scores"]} == {
+        "strict_model_alone", "product", "product_twin_free", "product_policy_weighted"}
+    assert "pending" in product["availability"] and "verify" in product["licence"]
+
+
+def _catalogue():
+    return json.loads((ROOT / "configs" / "model-sources.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("mutate, message", [
+    (lambda d: d["sources"][0].update(sha256="840fb447"), "sha256"),
+    (lambda d: d["sources"][0]["adapter"].update(sha256="B477" * 16), "adapter"),
+    (lambda d: d["sources"][0]["base"].update(revision="main"), "base"),
+    (lambda d: d["sources"][0].pop("availability"), "missing availability"),
+    (lambda d: d["sources"][0]["parts"]["files"].pop(), "parts"),
+    (lambda d: d["sources"][0]["scores"].append({"id": "x", "definition": "y", "correct": 9, "total": 4}), "score x"),
+    (lambda d: d["sources"][0]["scores"].append({"id": "z", "definition": "y", "rate": 1.2}), "score z"),
+    (lambda d: d["sources"][1].update(revision=None), "40-character"),
+    (lambda d: d["sources"][1].update(role="product_model"), "exactly one"),
+    (lambda d: d["sources"].append(dict(d["sources"][1])), "unique"),
+    # Required metadata must be present and usable, not merely keyed.
+    (lambda d: d["sources"][0].update(repository=None), "repository"),
+    (lambda d: d["sources"][0].update(artifact=""), "artifact"),
+    (lambda d: d["sources"][0].update(url="http://example.invalid/model"), "url"),
+    (lambda d: d["sources"][0].update(evaluated_at="yesterday"), "evaluated_at"),
+    (lambda d: d["sources"][0].update(known_weaknesses=[]), "known_weaknesses"),
+    (lambda d: d["sources"][0].update(bytes=True), "bytes"),
+    (lambda d: d["sources"][0].update(revision="main"), "revision"),
+    (lambda d: d["sources"][0].update(serving=None), "serving"),
+    (lambda d: d["sources"][0].update(training=None), "training"),
+    (lambda d: d["sources"][0]["training"]["rows"].update(test=0), "training"),
+    (lambda d: d["sources"][0]["training"].update(pack_manifest_sha256="62908b22"), "training"),
+    (lambda d: d["sources"][0]["base"].update(repository=None), "base"),
+    (lambda d: d["sources"][0]["base"].pop("url"), "base"),
+    (lambda d: d["sources"][0]["adapter"].update(method=""), "adapter"),
+    (lambda d: d["sources"][0]["conversion"].update(tokeniser=7), "conversion"),
+    (lambda d: d["sources"][0]["parts"].update(reassemble=None), "parts"),
+    (lambda d: d["sources"][0].update(parts=[]), "parts"),
+    # Parts: positive sizes, unique names, summing to the whole.
+    (lambda d: d["sources"][0]["parts"]["files"].extend([
+        {**d["sources"][0]["parts"]["files"][1], "bytes": -5}, {**d["sources"][0]["parts"]["files"][1], "bytes": 5}]),
+     "parts"),
+    (lambda d: (d["sources"][0]["parts"]["files"][1].update(name=d["sources"][0]["parts"]["files"][0]["name"])), "parts"),
+    (lambda d: d["sources"][0]["parts"]["files"][0].update(bytes=0), "parts"),
+    # Serving: the measured protocol and the production request are both explicit and complete.
+    (lambda d: d["sources"][0]["serving"].update(request={"temperature": 0}), "ambiguous"),
+    (lambda d: d["sources"][0]["serving"].pop("benchmark_protocol"), "benchmark_protocol"),
+    (lambda d: d["sources"][0]["serving"]["benchmark_protocol"]["request"].pop("seed"), "benchmark_protocol"),
+    (lambda d: d["sources"][0]["serving"]["benchmark_protocol"]["request"].update(max_tokens=0), "benchmark_protocol"),
+    (lambda d: d["sources"][0]["serving"]["benchmark_protocol"].update(response_format=None), "benchmark_protocol"),
+    (lambda d: d["sources"][0]["serving"].pop("production_request"), "production_request"),
+    (lambda d: d["sources"][0]["serving"]["production_request"].update(cache_prompt="no"), "production_request"),
+    (lambda d: d["sources"][0]["serving"]["production_request"].update(chat_template_kwargs=None), "production_request"),
+    (lambda d: d["sources"][0]["serving"]["production_request"].update(seed=42), "production_request"),
+    (lambda d: d["sources"][0]["serving"].update(protocol_difference=""), "serving"),
+    # Scores: each an object with an id and definition, a count or a rate, ids unique.
+    (lambda d: d["sources"][0].update(scores=[None]), "score entry"),
+    (lambda d: d["sources"][0]["scores"].append("product"), "score entry"),
+    (lambda d: d["sources"][0]["scores"].append({"id": "w", "definition": "y", "rate": 0.5, "correct": 1, "total": 2}),
+     "score w"),
+    (lambda d: d["sources"][0]["scores"].append({"id": "v", "definition": None, "correct": 1, "total": 2}), "score v"),
+    (lambda d: d["sources"][0]["scores"].append(dict(d["sources"][0]["scores"][0])), "score ids must be unique"),
+    (lambda d: d["sources"].append(None), "Invalid model source catalogue"),
+    (lambda d: d["sources"][1].update(id=["x"]), "unique"),
+])
+def test_model_catalogue_invariants_fail_closed(mutate, message):
+    payload = _catalogue()
+    validate_model_sources(payload)
+    mutate(payload)
+    with pytest.raises(ValueError, match=message):
+        validate_model_sources(payload)
 
 
 def test_prepare_example_cases_does_not_invent_approval(tmp_path, capsys):
@@ -93,3 +175,15 @@ def test_invalid_revision_fails_before_output_creation(tmp_path, capsys):
     assert main(["model", "prepare", "--cases", str(EXAMPLES / "cases.jsonl"), "--output-dir", str(output), "--revision", "main"]) == 2
     assert not output.exists()
     assert "immutable" in capsys.readouterr().err
+
+
+def test_malformed_catalogue_fails_cleanly_in_the_cli(tmp_path, monkeypatch, capsys):
+    payload = _catalogue()
+    payload["sources"][0]["scores"] = [None]
+    path = tmp_path / "model-sources.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr("auditex.model_sources.resolve_resource_path", lambda relative: path)
+    assert main(["model", "sources"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and "Traceback" not in captured.err
+    assert captured.err.startswith("Model command failed: Invalid product model entry: score entry.")

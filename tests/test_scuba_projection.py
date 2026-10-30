@@ -455,7 +455,7 @@ def test_effective_admin_set_requires_all_counted_users_and_redacts_immutable_id
 def test_2026_10_28_assessments_continue_to_validate(complete_bundle):
     payload = assess_run(complete_bundle, ModelConfig(model_name='unused'), policies=['MS.POWERBI.1.1v1'])
     payload['schema_version'] = '2026-10-28'
-    del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed']
+    del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed'], payload['serving']
     validate_assessment(payload)
     jsonschema.validate(payload, json.loads((ROOT / 'schemas/model_assessment-2026-10-28.schema.json').read_text()))
 
@@ -2113,4 +2113,12 @@ def test_service_plan_without_provisioning_status_withholds_the_section(complete
     assert p['service_plans'] == NOT_COLLECTED
     section = p.report['sections']['service_plans']
     assert section['reason'] == 'incomplete_shape' and section['detail'] == {'field': 'servicePlans.provisioningStatus', 'kind': 'missing_field'}
+
+
+def test_text_validators_reject_lone_surrogates():
+    """Evidence text with a lone surrogate (a JSON \\ud800 escape) is not valid interchange text: the typed field checks
+    refuse it, so the section is withheld as an invalid type instead of reaching a hash or a request body."""
+    from auditex.scuba_projection import _nullable_text, _strings, _text
+    assert _text("Global Administrator") and _nullable_text(None) and _strings(["a", "b"])
+    assert not _text("x\ud800y") and not _nullable_text("\udfff") and not _strings(["ok", "\ud800"])
 

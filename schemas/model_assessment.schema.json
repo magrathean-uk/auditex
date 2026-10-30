@@ -76,6 +76,31 @@
       },
       "minItems": 1
     },
+    "serving": {
+      "type": "object",
+      "description": "Request settings the client sent after negotiation, for comparison with the measured benchmark protocol. cache_prompt is disabled (cache_prompt: false sent, as benchmarked) or server_default (the server rejected the field, so llama-server may reuse a cached prompt prefix); response_format is json_object or not_sent (the server rejected it). Absent from assessments written before it was recorded.",
+      "required": [
+        "cache_prompt",
+        "response_format"
+      ],
+      "properties": {
+        "cache_prompt": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "server_default"
+          ]
+        },
+        "response_format": {
+          "type": "string",
+          "enum": [
+            "json_object",
+            "not_sent"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "limitations": {
       "type": "array",
       "items": {
@@ -484,7 +509,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?:required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|scope_narrowed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
+            "pattern": "^(?:required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|model_transport_failed|scope_narrowed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
           },
           "uniqueItems": true
         },
@@ -516,7 +541,7 @@
         "attempts": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 4
+          "maximum": 5
         },
         "prompt_sha256": {
           "type": [
@@ -542,8 +567,17 @@
             "policy_not_in_catalogue",
             "model_response_invalid",
             "model_endpoint_unavailable",
+            "model_transport_failed",
             "rule_precheck"
           ]
+        },
+        "finish_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Model rows only: the finish_reason of the final chat-completions reply (stop, length, ...); null when no reply arrived or the server sent none or a non-token value. Absent from rule and skipped rows and from assessments written before it was recorded."
         },
         "comparison": {
           "type": "object",
@@ -698,7 +732,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?:required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
+            "pattern": "^(?:required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|model_transport_failed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
           },
           "uniqueItems": true
         },
@@ -729,7 +763,7 @@
         "attempts": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 4
+          "maximum": 5
         },
         "prompt_sha256": {
           "type": [
@@ -754,8 +788,17 @@
             null,
             "policy_not_in_catalogue",
             "model_response_invalid",
-            "model_endpoint_unavailable"
+            "model_endpoint_unavailable",
+            "model_transport_failed"
           ]
+        },
+        "finish_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Model rows only: the finish_reason of the final chat-completions reply (stop, length, ...); null when no reply arrived or the server sent none or a non-token value. Absent from rule and skipped rows and from assessments written before it was recorded."
         },
         "thinking_disabled": {
           "type": "boolean"

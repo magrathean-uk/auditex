@@ -40,6 +40,7 @@ POLICY = "MS.AAD.7.3v1"
 def isolate_model_environment(monkeypatch):
     for name in ("ENDPOINT", "NAME", "API_KEY", "TIMEOUT", "ALLOW_INSECURE"):
         monkeypatch.delenv(f"AUDITEX_MODEL_{name}", raising=False)
+    monkeypatch.setattr("auditex.model_serving.sleep", lambda seconds: None)
 
 
 def fake_projection(root, values):
@@ -220,17 +221,19 @@ def test_client_with_local_http_server(scenario):
     if scenario == "format_fallback":
         actions.insert(0, (400, b'{"error":"unsupported response_format"}', 0))
     if scenario == "timeout":
-        actions = [(200, envelope(sample_answer()), 0.1)]
+        actions = [(200, envelope(sample_answer()), 0.1), (200, envelope(sample_answer()), 0.1)]
     with stub_server(actions) as (endpoint, calls):
         client = ModelClient(ModelConfig(endpoint, "test-model", "private-key", 0.02 if scenario == "timeout" else 2))
         record = client.assess(sample_case())
-        assert record["attempts"] == (2 if scenario in {"invalid_json_retry", "schema_retry", "format_fallback"} else 1)
+        assert record["attempts"] == (1 if scenario == "success" else 2)
         assert record["validation_status"] == ("unknown" if scenario == "timeout" else "valid")
+        assert record["reason"] == ("model_transport_failed" if scenario == "timeout" else None)
         assert calls[0]["path"] == "/v1/chat/completions"
         request = calls[0]["body"]
         assert request["temperature"] == 0 and request["max_tokens"] == 1024
         assert request["response_format"] == {"type": "json_object"}
         assert request["chat_template_kwargs"] == {"enable_thinking": False}
+        assert request["cache_prompt"] is False
         assert "private-key" not in canonical(request)
         assert calls[0]["headers"]["Authorization"] == "Bearer private-key"
         if scenario == "format_fallback":
@@ -268,7 +271,7 @@ def test_request_retry_and_hashes_without_network():
 def test_exhausted_validation_never_retains_invalid_answer():
     bad = sample_answer()
     bad["recommendations"] = ["invented"]
-    record = client_with_responses([envelope(bad), b"broken"]).assess(sample_case())
+    record = client_with_responses([envelope(bad), envelope(bad)]).assess(sample_case())
     assert record["validation_status"] == "invalid" and record["attempts"] == 2
     assert record["limitations"] == ["model_response_invalid"]
     assert all(c["status"] == "unknown" and c["value"] is None for c in record["claims"])
@@ -298,16 +301,130 @@ def test_response_format_fallback_persists_without_using_validation_retry():
     assert all("response_format" not in body for body in bodies[1:])
 
 
-@pytest.mark.parametrize("failure", [socket.timeout(), IncompleteRead(b"short", 100),
-                                     HTTPError("http://localhost/v1", 400, "private", {}, io.BytesIO(b"unrelated invalid request")),
+@pytest.mark.parametrize("failure", [HTTPError("http://localhost/v1", 400, "private", {}, io.BytesIO(b"unrelated invalid request")),
                                      HTTPError("http://localhost/v1", 401, "private", {}, io.BytesIO(b"private response")),
                                      HTTPError("http://localhost/v1", 302, "redirect", {"Location": "https://elsewhere.invalid"}, io.BytesIO())])
-def test_transport_errors_abstain_without_retries_or_leaking_body(failure):
+def test_endpoint_errors_abstain_without_retries_or_leaking_body(failure):
     record = client_with_responses([failure]).assess(sample_case())
     assert record["validation_status"] == "unknown" and record["attempts"] == 1
     assert record["limitations"] == ["model_endpoint_unavailable"]
     assert "private" not in canonical(record)
 
+
+TRANSPORT_FAILURES = {
+    "timeout": socket.timeout("private diagnostic"), "reset": ConnectionResetError("private diagnostic"),
+    "short_read": IncompleteRead(b"private", 100), "empty_body": b"", "non_json": b"<html>private relay page</html>",
+    "no_choices": b'{"choices":[]}', "not_chat": b'{"error":"private"}', "null_text": canonical(
+        {"choices": [{"message": {"content": None}}]}).encode(),
+    "empty_text": canonical({"choices": [{"finish_reason": "stop", "message": {"content": " "}}]}).encode(),
+}
+
+
+@pytest.mark.parametrize("name", list(TRANSPORT_FAILURES))
+def test_transport_failures_are_retried_after_a_pause_and_told_apart_from_invalid_answers(name, monkeypatch):
+    pauses = []
+    monkeypatch.setattr("auditex.model_serving.sleep", pauses.append)
+    failure = TRANSPORT_FAILURES[name]
+    lost = client_with_responses([failure, failure]).assess(sample_case())
+    assert lost["validation_status"] == "unknown" and lost["attempts"] == 2
+    assert lost["reason"] == "model_transport_failed" and lost["limitations"] == ["model_transport_failed"]
+    assert lost["response_sha256"] is None
+    assert all(c["status"] == "unknown" and c["value"] is None for c in lost["claims"])
+    assert "private" not in canonical(lost)
+    assert pauses == [2.0]
+    recovered = client_with_responses([failure, envelope(sample_answer())]).assess(sample_case())
+    assert recovered["validation_status"] == "valid" and recovered["attempts"] == 2 and recovered["reason"] is None
+
+
+def test_invalid_answer_retry_does_not_pause_and_the_last_failure_names_the_row(monkeypatch):
+    pauses = []
+    monkeypatch.setattr("auditex.model_serving.sleep", pauses.append)
+    bad = sample_answer()
+    bad["recommendations"] = ["invented"]
+    then_lost = client_with_responses([envelope(bad), b""]).assess(sample_case())
+    assert (then_lost["validation_status"], then_lost["reason"]) == ("unknown", "model_transport_failed")
+    assert then_lost["response_sha256"] is None and pauses == []
+    lost_then_bad = client_with_responses([b"", envelope(bad)]).assess(sample_case())
+    assert (lost_then_bad["validation_status"], lost_then_bad["reason"]) == ("invalid", "model_response_invalid")
+    assert lost_then_bad["response_sha256"] == sha256(canonical(bad).encode()).hexdigest() and pauses == [2.0]
+
+
+@pytest.mark.parametrize("sent, recorded", [("stop", "stop"), ("length", "length"), (None, None),
+                                            ("<b>private</b>", None), (7, None), ("x" * 40, None)])
+def test_finish_reason_is_recorded_as_a_plain_token_only(sent, recorded):
+    choice = {"message": {"content": canonical(sample_answer())}}
+    if sent is not None:
+        choice["finish_reason"] = sent
+    record = client_with_responses([canonical({"choices": [choice]}).encode()]).assess(sample_case())
+    assert record["validation_status"] == "valid" and record["finish_reason"] == recorded
+    assert "private" not in canonical(record)
+    lost = client_with_responses([socket.timeout(), socket.timeout()]).assess(sample_case())
+    assert lost["finish_reason"] is None
+
+
+def test_cache_prompt_fallback_persists_for_servers_that_reject_it():
+    error = HTTPError("http://localhost/v1", 400, "bad request", {}, io.BytesIO(b"unknown field cache_prompt"))
+    client = client_with_responses([error, envelope(sample_answer()), envelope(sample_answer())])
+    first = client.assess(sample_case())
+    second = client.assess(sample_case())
+    assert first["validation_status"] == second["validation_status"] == "valid"
+    assert first["attempts"] == 2 and second["attempts"] == 1
+    bodies = [json.loads(req.data) for req, _timeout in client._opener.requests]
+    assert bodies[0]["cache_prompt"] is False
+    assert all("cache_prompt" not in body for body in bodies[1:])
+
+
+
+def test_catalogue_production_request_is_what_the_client_sends():
+    product, = [s for s in json.loads((ROOT / "configs/model-sources.json").read_text())["sources"]
+                if s["role"] == "product_model"]
+    client = client_with_responses([envelope(sample_answer())])
+    client.assess(sample_case())
+    body = json.loads(client._opener.requests[0][0].data)
+    assert {k: v for k, v in body.items() if k not in {"model", "messages"}} == product["serving"]["production_request"]
+    # Copied verbatim from the G4 benchmark manifest (results-20261030T0514Z, field protocol); the scores were measured so.
+    assert product["serving"]["benchmark_protocol"]["request"] == {
+        "cache_prompt": False, "chat_template_kwargs": {"enable_thinking": False}, "frequency_penalty": 0,
+        "max_tokens": 512, "min_p": 0, "n": 1, "presence_penalty": 0, "repeat_penalty": 1, "seed": 42, "stream": False,
+        "temperature": 0, "top_k": 1, "top_p": 1}
+    assert product["serving"]["benchmark_protocol"]["response_format"] == "none"
+
+
+def test_lone_surrogate_answer_is_invalid_retried_and_hashed_without_raising():
+    text = canonical(sample_answer())[:-1] + ',"note":"\ud800"}'
+    raw = json.dumps({"choices": [{"message": {"content": text}}]}).encode()  # ASCII escapes, as a server sends it
+    assert b"\\ud800" in raw
+    client = client_with_responses([raw, raw])
+    record = client.assess(sample_case())
+    assert (record["validation_status"], record["reason"], record["attempts"]) == ("invalid", "model_response_invalid", 2)
+    assert record["response_sha256"] == sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+    assert all(claim["status"] == "unknown" for claim in record["claims"])
+    recovered = client_with_responses([raw, envelope(sample_answer())]).assess(sample_case())
+    assert recovered["validation_status"] == "valid" and recovered["attempts"] == 2
+
+
+@pytest.mark.parametrize("rejected", [None, "cache_prompt", "response_format"])
+def test_assessment_records_negotiated_serving_settings(tmp_path, monkeypatch, rejected):
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
+
+    def reply(self, method, path, payload=None):
+        if rejected and rejected in payload:
+            raise HTTPError("http://localhost/v1", 400, "bad request", {}, io.BytesIO(f"unknown field {rejected}".encode()))
+        return envelope(sample_answer())
+
+    monkeypatch.setattr(ModelClient, "_request", reply)
+    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
+    assert result["serving"] == {"cache_prompt": "server_default" if rejected == "cache_prompt" else "disabled",
+                                 "response_format": "not_sent" if rejected == "response_format" else "json_object"}
+    assert result["policies"][0]["validation_status"] == "valid"
+    assert json.loads((tmp_path / "model_assessment.json").read_text())["serving"] == result["serving"]
+    for tampered in ({**result, "serving": {"cache_prompt": "enabled", "response_format": "json_object"}},
+                     {**result, "serving": {"cache_prompt": "disabled"}}):
+        with pytest.raises(ValueError):
+            validate_assessment(tampered)
+    legacy = {key: value for key, value in result.items() if key != "serving"}
+    validate_assessment(legacy)
 
 def test_nonloopback_warns_once_and_secrets_are_not_in_configuration(capsys):
     config = ModelConfig("https://model.example.invalid/v1", "test-model", "private-key")
@@ -506,6 +623,34 @@ def test_optional_artifact_validation_rejects_tampering(tmp_path, monkeypatch, m
     elif mutation == "boolean_number":
         row["attempts"] = True
     with pytest.raises(ValueError):
+        validate_assessment(result)
+
+
+def test_transport_failure_is_written_as_unknown_and_validated(tmp_path, monkeypatch):
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
+    monkeypatch.setattr(ModelClient, "_request", lambda *args: b"")
+    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
+    row = result["policies"][0]
+    assert (row["validation_status"], row["reason"], row["attempts"]) == ("unknown", "model_transport_failed", 2)
+    assert row["finish_reason"] is None and result["totals"]["unknown"] == 1 and result["totals"]["invalid"] == 0
+    assert json.loads((tmp_path / "model_assessment.json").read_text())["policies"][0]["reason"] == "model_transport_failed"
+    for mutate in (lambda r: r.update(response_sha256="0" * 64), lambda r: r.update(limitations=["model_endpoint_unavailable"]),
+                   lambda r: r.update(validation_status="invalid"), lambda r: r.update(finish_reason="<b>")):
+        tampered = deepcopy(result)
+        mutate(tampered["policies"][0])
+        with pytest.raises(ValueError):
+            validate_assessment(tampered)
+
+
+def test_rule_rows_carry_no_finish_reason(tmp_path, monkeypatch):
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
+    monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("a rule row never calls the model"))
+    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
+    row = result["policies"][0]
+    assert row["reason"] == "rule_precheck" and "finish_reason" not in row
+    row["finish_reason"] = "stop"
+    with pytest.raises(ValueError, match="model rows only"):
         validate_assessment(result)
 
 
@@ -728,9 +873,12 @@ def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monk
     result = assess_run(tmp_path, ModelConfig(model_name='test-model'), policies=[POLICY])
     result['schema_version'] = '2026-10-27'
     del result['limitations'], result['projection'], result['totals']['rule_answered']
-    del result['scope_post_check'], result['totals']['scope_narrowed']
+    del result['scope_post_check'], result['totals']['scope_narrowed'], result['serving']
     row = result['policies'][0]
     del row['thinking_disabled'], row['thinking_stripped'], row['comparison']['baseline_match']
+    with pytest.raises(ValueError, match='Unexpected'):
+        validate_assessment(result)  # finish_reason is newer than 2026-10-27
+    del row['finish_reason']
     validate_assessment(result)
     row['thinking_disabled'] = True
     with pytest.raises(ValueError, match='Unexpected'):
@@ -765,3 +913,17 @@ def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
     tampered = _deepcopy(result); tampered["policies"][0]["rule_precheck"]["rule_id"] = "MS.SHAREPOINT.1.2v1.ODBSharingCapability_absent"
     with pytest.raises(ValueError):
         _validate(tampered)
+
+
+def test_lone_surrogate_in_a_faked_section_does_not_abort_the_live_assessment(tmp_path, monkeypatch):
+    """The projection refuses text with a lone surrogate, so this cannot happen from a real bundle; as defence in depth the
+    serving path hashes and sends with surrogatepass, so even a faked section records a row instead of raising."""
+    from auditex.model_serving import ModelClient as _Client, ModelConfig as _Config, assess_run as _assess, policy_catalogue as _catalogue
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
+    values = {section: {} for section in _catalogue()["policies"]["MS.AAD.7.3v1"]["sections"]}
+    values["privileged_users"] = [{"DisplayName": "x\ud800y", "OnPremisesImmutableId": None, "roles": ["Global Administrator"]}]
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **options: fake_projection(root, values))
+    monkeypatch.setattr(_Client, "_request", lambda *args: envelope(sample_answer()))
+    result = _assess(tmp_path, _Config(model_name="stub"), policies=["MS.AAD.7.3v1"])
+    row = result["policies"][0]
+    assert row["validation_status"] in {"valid", "invalid"} and len(row["prompt_sha256"]) == 64

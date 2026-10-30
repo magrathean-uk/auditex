@@ -1,12 +1,149 @@
 {
-  "schema_version": "2026-10-18",
-  "verified_at": "2026-10-18",
+  "schema_version": "2026-10-30",
+  "verified_at": "2026-10-30",
   "tenant_access": false,
-  "external_execution": false,
-  "inference_executed": false,
-  "training_executed": false,
-  "assembly_method": "Review source data and recorded outputs; train one base-model adapter after approval and evaluation. No cross-architecture weight merge.",
+  "external_execution": true,
+  "inference_executed": true,
+  "training_executed": true,
+  "assembly_method": "One base, one LoRA adapter: Ministral 3 8B Instruct trained on the SCuBA oracle pack, merged into the BF16 base and quantised once for llama.cpp serving. Training, conversion and benchmarks ran on JUPITER; no tenant evidence was used. No cross-architecture weight merge. Listing this catalogue fetches and executes nothing.",
   "sources": [
+    {
+      "id": "auditex-ministral3-8b-scuba-v10",
+      "role": "product_model",
+      "repository": "magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF",
+      "url": "https://huggingface.co/magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF",
+      "revision": null,
+      "format": "GGUF Q5_K_M",
+      "artifact": "model-Q5_K_M.gguf",
+      "bytes": 6058747104,
+      "sha256": "840fb447eb062d7cae8ff1980d30548e1198138e8235e88e1bc0449bacead01a",
+      "quantisation": "Q5_K_M",
+      "parts": {
+        "split": "split -b 4G -d -a 2 model-Q5_K_M.gguf model-Q5_K_M.gguf.part-",
+        "reassemble": "cat model-Q5_K_M.gguf.part-00 model-Q5_K_M.gguf.part-01 > model-Q5_K_M.gguf",
+        "checksums": "SHA256SUMS",
+        "files": [
+          {
+            "name": "model-Q5_K_M.gguf.part-00",
+            "bytes": 4294967296,
+            "sha256": "a25b690aeb549b679993e8ead96e57bf023e209aa45546f8321d686bb5e9d44a"
+          },
+          {
+            "name": "model-Q5_K_M.gguf.part-01",
+            "bytes": 1763779808,
+            "sha256": "ef54b38d5fd9985717e613ab0a1fb921556be75c8a644d964e6c8d2e008c0d8b"
+          }
+        ]
+      },
+      "base": {
+        "repository": "mistralai/Ministral-3-8B-Instruct-2512-BF16",
+        "url": "https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-BF16",
+        "revision": "f6fae9795746f63c9be8344932f01275f3c63734",
+        "backbone": "text only; vision tower and multimodal projector excluded"
+      },
+      "adapter": {
+        "method": "LoRA r=16, alpha=32, dropout 0.05, all linear projections; completion-only loss, max length 4096",
+        "checkpoint": "checkpoint-500 of 537 (one epoch, lr 5e-05 cosine, seed 42)",
+        "selection": "Validation ranking: applicability errors first, then strict count within the noise band; never by eval loss",
+        "archive": "results-round5-adapter-ministral3-8b-20261030T0250Z.tar",
+        "sha256": "b477f2b60fe72b29207bac835811590706fc418aa2cbd6aa643465dd174be682"
+      },
+      "conversion": {
+        "tool": "llama.cpp",
+        "llama_cpp_revision": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+        "steps": "Merge the adapter into the BF16 base, convert to BF16 GGUF (conversion/mistral3.py), llama-quantize to Q5_K_M",
+        "tokeniser": "GGUF pre-tokeniser tekken, BOS added; token parity with training 435/435",
+        "chat_template": "Embedded in the GGUF, identical to training (sha256 f00cc9f7da404ac6b9e384d4d01d228ff205a1e229b31ddc3cabc8f586b19bfd)"
+      },
+      "training": {
+        "pack_id": "oracle-pack-v10",
+        "pack": "training-pack-oracle-v10-ministral3-8b",
+        "pack_manifest_sha256": "62908b22b09ec0c8c15024786c32937e78eb484e1d35cd00d25973fe515408ad",
+        "rows": {
+          "train": 4294,
+          "validation": 531,
+          "test": 435
+        },
+        "labels": "Synthetic cases built from ScubaGear Rego unit-test fixtures (commit 2446ad723b7f55031cc02c8aca244d731d468cba) and labelled by running the Rego with OPA; oracle output, not human review",
+        "dataset_card": "development-kit/20261030-oracle-pack-v10/DATASET-CARD.md",
+        "run": "round5-20261030T0250Z (JUPITER, 4 x GH200, 30 October 2026)",
+        "records": "development-kit/20261030-round5-v10/RESULTS-round5.md; development-kit/20261030-g4-8b/RESULTS-g4-8b.md"
+      },
+      "serving": {
+        "runtime": "llama-server at the conversion revision",
+        "server_flags": "-c 8192 -ngl 99 --seed 42 --parallel 1 --jinja --no-context-shift --alias auditex-ministral3-8b-scuba-v10",
+        "benchmark_protocol": {
+          "manifest": "development-kit/20261030-g4-8b/results-20261030T0514Z/benchmark/manifest.json (protocol, response_format)",
+          "request": {
+            "cache_prompt": false,
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            },
+            "frequency_penalty": 0,
+            "max_tokens": 512,
+            "min_p": 0,
+            "n": 1,
+            "presence_penalty": 0,
+            "repeat_penalty": 1,
+            "seed": 42,
+            "stream": false,
+            "temperature": 0,
+            "top_k": 1,
+            "top_p": 1
+          },
+          "response_format": "none"
+        },
+        "production_request": {
+          "temperature": 0,
+          "max_tokens": 1024,
+          "cache_prompt": false,
+          "chat_template_kwargs": {
+            "enable_thinking": false
+          },
+          "response_format": {
+            "type": "json_object"
+          }
+        },
+        "protocol_difference": "The scores were measured with benchmark_protocol; auditex model assess sends production_request. It leaves the other sampling fields at llama-server defaults (temperature 0 decodes greedily, so seed, top_k, top_p and min_p should not change the answer; inferred from llama.cpp behaviour, not measured), allows 1024 tokens instead of 512 (only an answer longer than 512 tokens, a benchmark failure, can differ) and asks for a JSON object (response_format), which the benchmark did not. A server that rejects response_format, chat_template_kwargs or cache_prompt is asked again without it, and model_assessment.json records what was sent (serving and per-row thinking_disabled). Production parity with the benchmark was checked only on the two P5 real-tenant bundles, not on the 435-row test set.",
+        "client": "auditex model assess (system prompt pinned by SYSTEM_PROMPT_SHA256, prompt convention named-enums-v1)",
+        "guide": "docs/guides/ai-assessment.md"
+      },
+      "evaluated_at": "2026-10-30",
+      "evaluation": "Independently run by Auditex on the frozen synthetic test-v7 (435 rows, 12 policies), greedy, one sample, strict JSON parse without repair. The test set also chose between candidate builds, so the scores are mildly optimistic. Synthetic cases say nothing direct about real tenants.",
+      "scores": [
+        {
+          "id": "strict_model_alone",
+          "correct": 403,
+          "total": 435,
+          "definition": "Model answers every row: each claim status, typed value, evidence set and limitation/recommendation id matches the oracle."
+        },
+        {
+          "id": "product",
+          "correct": 419,
+          "total": 435,
+          "definition": "What auditex model assess returns: 173 rows answered by the deterministic rule pre-check (all correct, four rule classes), the remaining 262 by the model, scored strictly."
+        },
+        {
+          "id": "product_twin_free",
+          "correct": 280,
+          "total": 298,
+          "definition": "Product score on test rows with no training twin (no train row with the same Rego-read evidence key); computed on the 417/435 product scoring before the absent_field and empty_required_list classes, not recomputed."
+        },
+        {
+          "id": "product_policy_weighted",
+          "rate": 0.886,
+          "definition": "Mean of the 12 per-policy product rates, each policy counting once (MS.AAD.9.1v1 alone is 171 of the 435 rows); computed on the 417/435 scoring."
+        }
+      ],
+      "known_weaknesses": [
+        "Confident 'met' on rules that need several fields at once (13 false passes on the test set), e.g. MS.EXO.7.1v1 judged on State alone (4/9 correct)",
+        "Teams app policies MS.TEAMS.5.1-5.3v1: one verdict reused across the three policies on shared evidence",
+        "Guesses 'not applicable' when SharePoint SharingCapability is absent; field-level absence inside a collected section abstains correctly only 4/20",
+        "Real tenant without Conditional Access policies: two false 'met' before the empty_required_list rule class took those rows"
+      ],
+      "licence": "Base model licence: verify on the mistralai/Ministral-3-8B-Instruct-2512-BF16 model card before redistribution (not confirmed offline). Training labels derive from ScubaGear, CC0 1.0.",
+      "availability": "Public Hugging Face repository proposed, upload pending; revision is null until it is published. Internal copy: Civo s3://gmodels/auditex/jupiter-results/gguf-round5-8b-ckpt500/ (two parts and SHA256SUMS). Re-pick the base model in January 2027."
+    },
     {
       "id": "openadmin-8b",
       "repository": "OpenAdminOS/openadmin-8b",

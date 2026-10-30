@@ -137,9 +137,18 @@ fallback; a 400 rejecting `chat_template_kwargs` retries without that field. Eac
 fallback is remembered for the client session. Each policy records `thinking_disabled`
 (whether its final request sent the setting) and `thinking_stripped` (whether a leading
 `<think>...</think>` block was removed on any attempt before JSON parsing).
-Invalid JSON or a structurally invalid answer is
-retried once; a second failure yields unknown claims and `model_response_invalid`.
-Endpoint failures yield unknown claims and `model_endpoint_unavailable`.
+Requests also send `cache_prompt: false`, as the benchmark protocol did, so llama-server does not reuse a cached
+prompt prefix. A 400 rejecting `cache_prompt` retries without it, remembered like the other fallbacks; the server
+default (prompt reuse) then applies, and the assessment envelope's `serving.cache_prompt` reads `server_default`
+instead of `disabled`, so that departure from the measured protocol is visible (`serving.response_format` records the
+format fallback the same way). Each request is
+tried at most twice (negotiation re-sends aside). Assistant text that fails the answer contract is retried at once; a
+second failure yields unknown claims, status `invalid` and `model_response_invalid`. A reply lost in transit (a
+connection error or timeout, a cut-short, empty or non-JSON body, a body without a chat-completion choice or without
+assistant text) is retried after a 2 s pause; a second loss yields unknown claims, status `unknown` and
+`model_transport_failed`, with no response hash. The last failure names the row. An HTTP error status or a reply over
+4 MiB yields unknown claims and `model_endpoint_unavailable` without a retry. Model rows record the final reply's
+`finish_reason` (`stop`, `length`, ...; null when none arrived or the server sent a non-token value).
 Answers are checked against requested claims, evidence IDs and candidate codes;
 known requirement verdicts require every dependent section to be collected, except
 an inferred not-applicable answer with `policy_not_applicable` and no recommendation.

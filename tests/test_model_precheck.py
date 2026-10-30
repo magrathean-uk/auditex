@@ -282,13 +282,16 @@ def test_shadow_records_real_client_answer_without_changing_verdict(tmp_path, mo
              "evidence_ids": ["e0"]}], "limitations": [], "recommendations": ["review_policy_against_baseline_text"]}
         return canonical({"choices": [{"message": {"content": canonical(answer)}}]}).encode()
     monkeypatch.setattr(ModelClient, "_request", request)
+    monkeypatch.setattr("auditex.model_serving.sleep", lambda seconds: None)
     result = run_assessment(tmp_path, monkeypatch, {"SPO_tenant": [{"SharingCapability": 0}]}, shadow_model_on_precheck=True)
     row = result["policies"][0]
     assert len(calls) == (2 if shadow_failure else 1)
     assert row["claims"][0]["status"] == "inferred" and row["claims"][0]["value"] is True
     assert row["attempts"] == 0 and result["totals"]["answered"] == 1
     assert row["comparison"]["model_status"] is None
-    assert row["model_shadow"]["validation_status"] == ("invalid" if shadow_failure else "valid")
+    # A non-JSON body is a reply lost in transit, not a model answer.
+    assert row["model_shadow"]["validation_status"] == ("unknown" if shadow_failure else "valid")
+    assert row["model_shadow"]["reason"] == ("model_transport_failed" if shadow_failure else None)
     validate_assessment(result)
     jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
 
