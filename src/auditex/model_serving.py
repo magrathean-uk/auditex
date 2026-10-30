@@ -30,7 +30,7 @@ from .model_precheck import precheck_case
 from .scope_postcheck import collect_scope_evidence
 from .scuba_projection import (
     DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS,
-    project_run,
+    policy_section, project_run,
 )
 
 SCHEMA_VERSION = "2026-10-29"
@@ -75,7 +75,7 @@ def build_case(policy_id: str, projection: dict[str, Any], as_of: str, *,
         raise PolicyUnavailable("policy_not_in_catalogue")
     entry = data["policies"][policy_id]
     item = entry["policy_item"]
-    observed = {section: projection.get(section, dict(NOT_COLLECTED)) for section in entry["sections"]}
+    observed = {section: policy_section(projection, policy_id, section) for section in entry["sections"]}
     identity = {section: _identity_view(value) if section == "SPO_tenant" else value
                 for section, value in observed.items()}
     view_hash = sha256(f"conv3:{canonical(identity)}".encode()).hexdigest()[:10]

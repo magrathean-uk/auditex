@@ -34,9 +34,14 @@ DEFAULT_SCAN_MAX_CHUNKS = 10_000
 
 
 class Projection(dict):
-    """Evidence mapping with a separate local projection report."""
+    """Evidence mapping with a separate local projection report.
+
+    ``views`` holds the evidence a section shows one policy where it differs by policy (``scuba_config``), keyed by
+    policy then section; :func:`policy_section` reads it.
+    """
 
     report: dict[str, Any]
+    views: dict[str, dict[str, Any]]
 
 
 class Unavailable(ValueError):
@@ -818,6 +823,209 @@ def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
     return next(iter(observed))
 
 
+# ``scuba_config`` is ScubaGear's operator configuration file, which no tenant read returns. It is synthesised from
+# ScubaGear's default configuration, the cloud the tenant runs in and the operator's emergency-access list, in the shape
+# each policy family's training rows carry (configs/scuba-policy-sections.json lists the 19 policies that read it):
+#   AAD                {"Aad": null, "CapExclusions": <empty>, "RoleExclusions": <empty>}; MS.AAD.9.1v1 adds M365Environment.
+#                      With an emergency-access list, the policies whose Rego honours an exclusion carry it under
+#                      Aad[<entry the Rego reads>] (CapExclusions for SCUBA_CAP_EXCLUSION_POLICIES, RoleExclusions for
+#                      MS.AAD.7.4v1; SCUBA_CONFIG_EXCLUSION_KEYS names the entries that differ from the policy id).
+#   MS.EXO.1.1v2       null: no allowed forwarding domains, ScubaGear's default.
+#   MS.TEAMS.*         {"M365Environment": <environment>}.
+#   MS.SECURITYSUITE.* not collected (``operator_input_required``): their rows carry the operator's sensitive users and
+#                      partner domains, an input Auditex does not take, and an empty list is a shape training never held.
+# Each view passes the same shape gate as a collected section; one that fails is withheld for that policy alone.
+SCUBA_CAP_EXCLUSION_POLICIES = frozenset({
+    "MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1", "MS.AAD.3.7v1",
+    "MS.AAD.3.8v1", "MS.AAD.3.9v1"})
+SCUBA_ROLE_EXCLUSION_POLICIES = frozenset({"MS.AAD.7.4v1"})
+# The scuba_config entry a policy's Rego reads its exclusions from. MS.AAD.3.2v2 still reads Aad["MS.AAD.3.2v1"]
+# (CISA finding F2; scripts/build-oracle-cases.py): an entry written under the v2 id would be ignored by the oracle.
+SCUBA_CONFIG_EXCLUSION_KEYS = {"MS.AAD.3.2v2": "MS.AAD.3.2v1"}
+SCUBA_ENVIRONMENT_POLICIES = frozenset({"MS.AAD.9.1v1"})
+SCUBA_CONFIG_SOURCE = "synthesised:default-config"
+_EMPTY_CAP = {"Applications": [], "Groups": [], "GuestUserTypes": [], "Users": []}
+_EMPTY_ROLE = {"Groups": [], "Users": []}
+# OpenID discovery: tenant_region_sub_scope "GCC" marks GCC; under the US Government scope (cloud instance
+# microsoftonline.us) "DODCON" is GCC High and "DOD" is DoD. Any other US Government answer is ambiguous.
+_US_GOV_SUB_SCOPES = {"DODCON": "gcchigh", "DOD": "dod"}
+# Every discovery_status the public-footprint lookup writes (azure_tenant_audit/exposure_lookup.py); any other value is
+# not a row the collector produced.
+_DISCOVERY_STATUSES = frozenset({"ok", "skipped", "unreachable", "not_found", "http_error", "invalid_document"})
+
+
+def _sku_environment(sku: str) -> str | None:
+    """The US Government cloud a SKU is sold in; None for a commercial (or unmarked) SKU."""
+    name = sku.upper()
+    if "USGOV_DOD" in name:
+        return "dod"
+    if "USGOV_GCCHIGH" in name:
+        return "gcchigh"
+    if name.endswith(("_GOV", "_GCC")) or "_GOV_" in name:
+        return "gcc"
+    return None
+
+
+def _environment(bundle: Bundle) -> tuple[str | None, str]:
+    """ScubaGear's M365Environment for the tenant and the evidence it came from.
+
+    The public OpenID discovery the ``dns_posture`` collector saves decides when it is present; without it, licence
+    SKUs sold only in a US Government cloud do; a bundle with neither is taken as commercial (``assumed_default``).
+    Fail closed: discovery or licence evidence that exists but cannot be read (a scan bound, malformed rows), an
+    ``ok`` discovery answer without cloud fields, an instance outside the global and US Government clouds, and
+    signals that disagree all return None (``unreadable`` or ``ambiguous``), and the environment-gated policies
+    are withheld.
+    """
+    discovery: list[dict[str, Any]] | None
+    try:
+        discovery = [row for row in bundle.scan("dns_posture", "publicFootprint") if isinstance(row, dict)]
+    except Unavailable as exc:
+        if exc.reason != "missing_artifact":
+            return None, "unreadable"
+        discovery = None
+    except (ValueError, TypeError, KeyError):
+        return None, "unreadable"
+    if discovery is not None:
+        found: set[str | None] = set()
+        for row in discovery:
+            fields = {k: row.get(k) for k in ("discovery_status", "tenant_region_scope", "tenant_region_sub_scope",
+                                               "cloud_instance_name")}
+            if (fields["discovery_status"] not in _DISCOVERY_STATUSES
+                    or any(v is not None and not isinstance(v, str) for v in fields.values())):
+                return None, "unreadable"  # not a row the collector writes: an unknown status or a field of the wrong type
+            if fields["discovery_status"] != "ok":
+                continue
+            scope = (fields["tenant_region_scope"] or "").lower()
+            sub = (fields["tenant_region_sub_scope"] or "").upper()
+            instance = (fields["cloud_instance_name"] or "").lower()
+            gov_scope = scope in {"usgov", "usg"}
+            if instance not in {"", "microsoftonline.com", "microsoftonline.us"}:
+                found.add(None)  # China (partner.microsoftonline.cn) or another sovereign cloud: no ScubaGear value
+            elif not scope and not instance:
+                found.add(None)  # an answer without cloud fields says nothing about the cloud
+            elif scope and instance and (instance == "microsoftonline.us") != gov_scope:
+                found.add(None)  # the region scope and the cloud instance disagree
+            elif gov_scope or instance == "microsoftonline.us":
+                found.add(_US_GOV_SUB_SCOPES.get(sub))
+            else:
+                found.add("gcc" if sub == "GCC" else "commercial")
+        if found:
+            return (found.pop(), "openid_discovery") if len(found) == 1 and None not in found else (None, "ambiguous")
+    skus: set[str | None] = set()
+    try:
+        for row in bundle.scan("licensing", "subscribedSkus"):
+            sku = row.get("skuPartNumber") if isinstance(row, dict) else None
+            if not isinstance(sku, str) or not sku:
+                return None, "unreadable"  # a licence row without a SKU is not a row the collector writes
+            skus.add(_sku_environment(sku))
+    except Unavailable as exc:
+        if exc.reason != "missing_artifact":
+            return None, "unreadable"
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None, "unreadable"
+    skus.discard(None)
+    if skus:
+        return (skus.pop(), "licence_sku") if len(skus) == 1 else (None, "ambiguous")
+    return "commercial", "assumed_default"
+
+
+def _break_glass(bundle: Bundle, manifest: dict[str, Any]) -> tuple[dict[str, list[str]] | None, dict[str, Any]]:
+    """The operator's emergency-access list as ScubaGear exclusions: object IDs of users and groups.
+
+    Entries resolve as ``--break-glass-accounts`` does (``break_glass.resolve_accounts``) against the full user and
+    group lists the run read. An object ID found in neither is kept as a user, as ScubaGear takes it unverified. An
+    entry that cannot be resolved, an unreadable identity list or a run that did not record its list returns None:
+    a partial exclusion list would judge an exempted account as a gap.
+    """
+    from azure_tenant_audit import break_glass
+
+    parameters = manifest.get("rule_parameters")
+    entries = parameters.get("break_glass_accounts") if isinstance(parameters, dict) else None
+    if not isinstance(entries, list) or not all(isinstance(e, str) and e for e in entries):
+        return None, {"source": "unrecorded"}
+    if not entries:
+        return {"Users": [], "Groups": []}, {"source": "none"}
+    keys = {entry.lower() for entry in entries}
+
+    def wanted(row: dict[str, Any]) -> bool:
+        return any(str(row.get(k) or "").lower() in keys for k in ("id", "userPrincipalName", "mail", "displayName"))
+    try:
+        users = [row for row in bundle.scan("identity", "users") if wanted(row)]
+        groups = [row for row in bundle.scan("identity", "groups") if wanted(row)]
+    except Unavailable:
+        return None, {"source": "operator", "entries": len(entries), "state": "identity_unreadable"}
+    accounts = break_glass.resolve_accounts(entries, users=users, groups=groups, role_assignments=(), role_definitions=())
+    summary = {"source": "operator", "entries": len(entries), "unresolved": len(accounts.unresolved),
+               "unverified": len(accounts.unverified)}
+    if accounts.unresolved:
+        return None, {**summary, "state": "unresolved"}
+    group_ids = {str(g["id"]).lower() for g in groups if g.get("id")}
+    result = {"Users": sorted(i for i in accounts.ids if i not in group_ids), "Groups": sorted(accounts.ids & group_ids)}
+    return result, {**summary, "state": "resolved", "users": len(result["Users"]), "groups": len(result["Groups"])}
+
+
+def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str, Any],
+                  max_items: int, max_chars: int) -> tuple[Any, dict[str, Any], dict[str, Any]]:
+    """The default ``scuba_config``, a per-policy view for each policy that reads it, and the synthesis record."""
+    bundle.sources.append("run-manifest.json")
+    environment, environment_basis = _environment(bundle)
+    exclusions, break_glass_summary = _break_glass(bundle, manifest)
+    base = {"Aad": None, "CapExclusions": deepcopy(_EMPTY_CAP), "RoleExclusions": deepcopy(_EMPTY_ROLE)}
+    views: dict[str, Any] = {}
+    outcomes: dict[str, str] = {}
+    for policy_id in sorted(p for p, entry in catalogue.items() if "scuba_config" in entry["sections"]):
+        family = policy_id.split(".")[1]
+        try:
+            if family == "AAD":
+                view = deepcopy(base)
+                if policy_id in SCUBA_ENVIRONMENT_POLICIES:
+                    if environment is None:
+                        raise Unavailable("environment_ambiguous")
+                    view["M365Environment"] = environment
+                honours = "CapExclusions" if policy_id in SCUBA_CAP_EXCLUSION_POLICIES else \
+                    "RoleExclusions" if policy_id in SCUBA_ROLE_EXCLUSION_POLICIES else None
+                if honours:
+                    if exclusions is None:
+                        raise Unavailable("break_glass_unresolved")
+                    if exclusions["Users"] or exclusions["Groups"]:
+                        entry = {"CapExclusions": deepcopy(_EMPTY_CAP), "RoleExclusions": deepcopy(_EMPTY_ROLE)}
+                        entry[honours].update(Users=list(exclusions["Users"]), Groups=list(exclusions["Groups"]))
+                        view["Aad"] = {SCUBA_CONFIG_EXCLUSION_KEYS.get(policy_id, policy_id): entry}
+            elif policy_id == "MS.EXO.1.1v2":
+                view = None
+            elif family == "TEAMS":
+                if environment is None:
+                    raise Unavailable("environment_ambiguous")
+                view = {"M365Environment": environment}
+            elif family == "SECURITYSUITE":
+                raise Unavailable("operator_input_required")
+            else:
+                raise Unavailable()
+            _seen_shape("scuba_config", view)
+            if _oversize(view, max_items, max_chars):
+                raise Unavailable("oversize")
+        except Unavailable as exc:
+            views[policy_id] = dict(NOT_COLLECTED)
+            outcomes[policy_id] = "unseen_shape" if exc.reason == "incomplete_shape" else exc.reason
+        else:
+            views[policy_id] = view
+            outcomes[policy_id] = "projected"
+    synthesis = {"source": SCUBA_CONFIG_SOURCE, "basis": "scubagear_default_config",
+                 "m365_environment": {"value": environment, "basis": environment_basis},
+                 "break_glass": break_glass_summary, "policies": outcomes}
+    if "projected" not in outcomes.values():
+        raise Unavailable()
+    return base, views, synthesis
+
+
+def policy_section(projection: dict[str, Any], policy_id: str, section: str) -> Any:
+    """The evidence one policy sees for a section: its own view where the projection keeps one, else the section."""
+    views = getattr(projection, "views", None) or {}
+    if section in views.get(policy_id, {}):
+        return views[policy_id][section]
+    return projection.get(section, dict(NOT_COLLECTED))
+
+
 
 
 PS_SECTIONS = {
@@ -858,10 +1066,18 @@ def _powershell(bundle: Bundle, section: str) -> Any:
     return result
 
 
-def _dns(bundle: Bundle, section: str) -> Any:
-    # Parsed dns_posture summaries cannot reconstruct all TXT answers.
+def _dns(bundle: Bundle, section: str, manifest: dict[str, Any]) -> Any:
+    # Parsed dns_posture summaries cannot reconstruct all TXT answers: the section needs the complete answers saved as
+    # their own operation, which the collector does not write today. A missing operation says which of the two it is.
+    try:
+        rows = bundle.operation("dns_posture", section)
+    except Unavailable as exc:
+        if exc.reason != "missing_artifact":
+            raise
+        ran = "dns_posture" in (manifest.get("selected_collectors") or manifest.get("collectors") or [])
+        raise Unavailable("dns_records_not_saved" if ran else "dns_posture_not_run") from None
     result = []
-    for row in bundle.operation("dns_posture", section):
+    for row in rows:
         allowed = {"domain": _text, "doamin": _text, "rdata": _strings, "compliant": _boolean, "message": _text}
         _known_fields(row, set(allowed))
         item = _fields(row, {k: allowed[k] for k in row})
@@ -908,6 +1124,9 @@ def _redact(projection: Projection, salt: str, enabled: bool) -> dict[str, Any]:
                     counts["immutable_ids"] += 1
         for key in projection:
             projection[key] = emails(projection[key])
+        for views in getattr(projection, "views", {}).values():
+            for key in views:
+                views[key] = emails(views[key])
     return {"enabled": enabled, "strategy": "run-salted-sha256-v1", **counts}
 
 
@@ -935,10 +1154,12 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         manifest_error = None if exc.reason == "missing_artifact" else exc
         manifest = {}
     bundle.manifest = manifest
-    sections = sorted({s for p in json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"].values()
-                       for s in p["sections"]})
+    catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
+    sections = sorted({s for p in catalogue.values() for s in p["sections"]})
     result = Projection()
+    result.views = {}
     report = {}
+    synthesis = None
     adapters = {"SPO_tenant": _spo, "conditional_access_policies": _ca, "authorization_policies": _authorization,
                 "service_plans": _plans, "privileged_users": _users, "privileged_roles": _roles}
     for section in sections:
@@ -948,9 +1169,13 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 raise manifest_error
             if manifest.get("platform", "m365") != "m365":
                 raise Unavailable("not_applicable_to_platform")
-            if section in {"scuba_config", "sharing_policy"}:
+            if section == "sharing_policy":
                 raise Unavailable()
-            if section == "tenant_id":
+            if section == "scuba_config":
+                if not manifest:
+                    raise Unavailable("missing_artifact")  # no run manifest, no run to synthesise a configuration for
+                value, views, synthesis = _scuba_config(bundle, manifest, catalogue, max_items, max_chars)
+            elif section == "tenant_id":
                 bundle.sources.append("run-manifest.json")
                 value = _tenant(bundle, manifest)
             elif section in adapters:
@@ -958,7 +1183,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             elif section in PS_SECTIONS:
                 value = _powershell(bundle, section)
             elif section in {"dmarc_records", "spf_records", "dkim_records"}:
-                value = _dns(bundle, section)
+                value = _dns(bundle, section, manifest)
             else:
                 raise Unavailable("missing_artifact")
             # A complete, explicitly empty source collection is known empty.
@@ -982,6 +1207,12 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         else:
             result[section] = value
             report[section] = {"status": "projected", "reason": None, "source": list(bundle.sources)}
+            if section == "scuba_config":
+                # Policy views reach prompts only once the section itself passed the gates above; a withheld
+                # section leaves every reader on the not_collected marker the report describes.
+                for policy_id, view in views.items():
+                    result.views.setdefault(policy_id, {})[section] = view
+                report[section]["synthesis"] = synthesis
         counts = bundle.scan_counts
         if counts["rows"] or counts["bytes"]:
             report[section]["scan"] = counts
@@ -1302,6 +1533,105 @@ PACK_SHAPE_DIGESTS = {'SPO_tenant': ['0431dbf090672152543d23384d46908c3a61402eb9
                       'bea85c55b042f7b4464603d0bd58802aa4291b60dc503e791e2c02ae628d81be',
                       'dd66b0cfb44813443ce8bd68853ca8723479008f84e1cfe5e8a499d756d8629e',
                       'f5c3a92a6fc765186485f64fb69e543f27eb5bc4e34ee0713bb25941567a3c35'],
+ 'scuba_config': ['0020a0f7e9df068b4dd25dad5a11e6fed654d8db609c5d3d85c68b431e95a911',
+                  '03077aacf3fff7a08ece465f860e766c51b623c926662c25f97c0b79cef7dda2',
+                  '054ac16c0c14025c0f7a37e597ecaaf6660f35c216f2d78c0cfac4024fcf6783',
+                  '05cd36160012e63e40f492d24df581fc56bc97a3a327652ed6d4ecd85006159c',
+                  '06378d526fd5fd31068d32ebe287b1f9b1b11bf6c7fe8ecb95928f7232247b0e',
+                  '06a7ecdaec904b697131fceee251ec69e21b0a9b92fc3c563ef351b962d02305',
+                  '083e1c1d676f94fce1e901bacea7b0313c8c2bc85d687bc57d6292eb4a05ba74',
+                  '097cdd1ab9d8b04b8f42de9b9a93dcb9216398dd313aa4a154a0d442b585491b',
+                  '099063e8ea90bb14e0cb5e7fdc7723aa14e3d0391ad4ce4c04f7da50d7c07912',
+                  '0996ed3e82ffa5aadcf6d9109c553e740aa6c6fc3d8ce71fe3467ac8123a7300',
+                  '0df888e26e2de5a4fb3ce3857abce90d4094ef77aaea88f40c37a57c86350fea',
+                  '0e5239193b16c053dc622587790d4a48a7f5548db1457420657e9c7f6cd05cef',
+                  '0eafcfda93bbf092480453c8eae7629de48681ec124c873e317544f88cdf743a',
+                  '1191d2644f97db24b80f24895d881075cab8dc8bdda3fbcca659260af653a3d0',
+                  '1253364d82e2ea04a0f1b700c82ac123e37ae746a4d9e30283c9168576ef6ca5',
+                  '149f8d1ea619afeadec4f173ebb107d10e0b59680fa2674c9a8a5e4a7d4e8a56',
+                  '20cf283ca4ab0d9f9954e5810de01e5601dd9a2fc77661690460d6e4928b11ed',
+                  '264b2e2a74327adef321274f110c637250e37ea1206becefa9f4761500d2ce88',
+                  '26a2653cb76fd3166f7e7cf9d9479688ca2bc8a8743fc636898c3b8cdbad35ea',
+                  '281f457e7c36797161480dfeac7f5f0b29ae751860624419184012f846206c3c',
+                  '29dc7ff718e0c69dce2833fcd65f5177c7b3fada85017fa7d63c3ea3b49131b1',
+                  '2a41fcc4583ac90915ec3eaf42d545c7d8fb1987a7100bd8912dc1e9dbeeaa8b',
+                  '2e29fd471bafbf70740cdfbec89ca02e32e37aed0840594e9cc7ee1e3179bb10',
+                  '2f525a8bf0e0722988f0fc0e91fe1a4dd9a5569197a556ed983b783933e2c23a',
+                  '35b68c2c1a2c96d70740be2095f0547eb722e5dc0134842b1a504a2ce65d8374',
+                  '36b14de165080563f8f24d28f8ae2460d24b318a0b176319a2ce4273df3ff628',
+                  '37243fbecf29e83b7a03ae0afe90a336e916fb4e22334830c0d929f83ab5e927',
+                  '37763563c54bd9cf1c76b8caa07ff5285690fcc0d24b4cd2d9050460a35bf753',
+                  '4461d96248473f3d2271509c680a7a8903bc1fc9b19c96d05eff7ea9d2a722cd',
+                  '459333d3b1103afdee78d4c770c80531ee8bf2e2d850391ed3ff72a735c47148',
+                  '4dc375e273be2312f8bcd329046e5aaec0b8229c34ff59bd893c3348d210875b',
+                  '4e3fb8f7e380c788636b1b6448b5a61d8f738914ce237a3bb045a5c12730c7dd',
+                  '508a29aeadf7542d6287590c399b1486eff5e635f9e3e2e855c06b102c683a21',
+                  '52a8876273bb66098fdd1fcd75121dcb7fbddfa079d27c4b21beac10be55cb51',
+                  '54b4e42abce4c76ed59e9694dae89b7abe66ead627c58289a8bf4d10a4dd10db',
+                  '5610b8ccb35c862a1a4d17bf337f1078eb4bccad778ddd31d800a0f42a59f98d',
+                  '572db71c009b55d6418d3f579a5170369557c538d0138934badc4593038989db',
+                  '57aee2af5cc20fcc245849f168e3ceeba3854851c2d3a39f48df86f588f14936',
+                  '586f29f17644f28934427676277d15b03e921b482246976f346a6428e1adf38b',
+                  '588d13f4ae30a62f75bcc0bb9f6532ea9674d2418d9a67db95f9d76e8cca2197',
+                  '5ad39a8a5184291da83ecfc9ad5b6fa013dff1eec4a20ea6648c72c0dbbbc838',
+                  '5c01ebb738173c79bb072caa43d0631e9be719c512cbe039770ea7c7c17e455d',
+                  '5c6e4a4f4872c0edfd222de04f65fbf4cc5e5b0aebeecfb4db4423ace17c408e',
+                  '5c85a9058dadc302489dfc11c8019e1de145356368555caf45bcf527d14f9d4c',
+                  '5feb7ba01ae5856ff768cf6aad1fe64591b7adb815b0b41ff68b8ef79ef65140',
+                  '6066a22d37b27aae4165b4f8adb3f0714f742e50a19c3971e8eb051403b07c5f',
+                  '6186f6f3a53850c1090b26a1bea373cab5aa52f9a9b82b4c77c20ae0a6e4db01',
+                  '61ff91c14967a6beb98534e3ea1816e65bf1efec8f451c9d1153e88c9c877937',
+                  '63059cf98487832d0edb61e05860ffbe4c2cc1ff4fa64e7c401f1475e344e2c3',
+                  '6f668b8cd538faa2ea136d2dd7d7b9c3be03345ea8f0d64487d9d47f527035ef',
+                  '749e8a42af9fac934482f2c8d99a5f6e8e9d13949352a8c5db5fbe530f87d491',
+                  '75c7c8ecd239c270ba35ce95ad721c70c9df480ea24b1ede991c32d5effc334d',
+                  '78c1eade42ac06207c3d5051f3dc5956cfaecaec589755396207b6e7f0d14e26',
+                  '7bd97c17056af916598645f92508b604c46e2471464c342635416f5b3b85c4fc',
+                  '7c2c942058d5345630dff13cdddccbeb0a198d7c2897e1032e45e2d3f11f8139',
+                  '7d2e1d9cb8690b1af608f8032442ae0669694165f21fd9a3c972c95bab6b362a',
+                  '8382838f6fffe9291924557c78cd3be9aca842dd0301b31ca7276fc44ca8ae08',
+                  '89a3e0699262b74d5ac5e7a31eaad1237a2b083949b0d8168c23449da93a1256',
+                  '8fae2b21b5cfb48eb3f72308471cc732175efd259ea0b1e1d923c14aaa70a4b8',
+                  '9190da9e46121859942c7c3c60d71bbe5caa8fcf718a568c6c3f0acfe350c61a',
+                  '934c6892901bad2d53b0ef7077489b6408d9ac19be57c0c26bf7093e89a6a7ad',
+                  '939bde19185c8b3a5113c06e3dfe967bcf1a8c85251a7cbfe05a193d226349ad',
+                  '97498b3a960cc9164648ff530042621724118d84a5a3869bd894dd1611d4f842',
+                  '9c5f01680993ab3c1d1e2997de7620a3e1fb9ce8d4ec3fe3d9429c2422f93535',
+                  'a2036fd8fff51bc2236178c9aa5a41d0630a5773e12772d731c2c49f047f371c',
+                  'a33b654f2c1d8112911b0b78edcdbad394e04f000fc99af0d9388fbab77318a7',
+                  'a46186770e721a7e40e4b567eae699dbaf63aafed25d8fb40817536cebc8fa43',
+                  'a50df5b82515888b91a06355cd5efe4e559e61ba90248e96800891c2739df30f',
+                  'acbed0f4178bb80d5f569c86907dd8640e623954e03692181acf274b7fd5ecd5',
+                  'ade8c8ad8da89c2dcb2f5a7e2238f1d1e6f5fb8f2b33e06f6c7c20f863980549',
+                  'aebf9e781da5e5d7b0004f531af64ccf93c701b21cad86d21abe50c7fca41815',
+                  'afc1db08a4fb60e1b2291986267e95e9b1bfede51ba03c2be970f65b23ba5c67',
+                  'b42ad93e7b036b4c2e65584b476e65a0bcc8d79aa57778b5bb5e659e08a05199',
+                  'b812e9665980ccc85564941ce323d6df387e5e43c5b339faf9446f115cf88b5d',
+                  'ba4f179851b4739225ebbdea45f273c282962e0272c033b9ea31cb5457b09d5a',
+                  'bbcbc1d57f1eadaf667086405b92540f56a5c3065ea893548b0da9c102c87f73',
+                  'c03256eb85cabe100d5cc24d85ddbeb35bd742c00d9293170bd87cdb34991ded',
+                  'c3484aef269d3938a80535c15eccc1efdff1768760fa61ca8c6c3f0cca359280',
+                  'c8681ddf65723fabf5da95af9b7dccaa02fc8c00a2323088e0adb08d36fa7b0e',
+                  'c86fca9403ff4e65ab884bd13f05c15919cac376787cb00e1b090569554512f9',
+                  'ca5ae1a7556d1e2bd5e5f825cd4e7529e8934df085fdb3549fbc123ab7c79f3d',
+                  'cbce5eb715618b7b35c1a2dd843062c4206359c7eeb96cc7353d1aca1c8e2128',
+                  'd181abd2b236f7988195aaf025994d19c2bc3b19e0a5d194ef5e6964a90835e3',
+                  'd50b0b86f9b38d9bb864e084d60aaa37039f3e425d5287b6ccdad87e90716db3',
+                  'da549ce926ecfcadea482f791b3bff5922a6850872798095cfce04052ae1be85',
+                  'df1b6ec32189bb651f40456d38543069a36362416f81558c98f074c5be60f0c7',
+                  'e2ec276907afba67dfe387bc8b3b2ecafdb77e5250616d8934ef8fa239efa000',
+                  'e396d2e25368e685d73c7545ee76de60c0513b598d3d2292c6c4dde67fac7995',
+                  'eaac9b388955768bfb4cc7b43804d0c2d7bc47cbea0102670674bcebb7c43a2d',
+                  'f16f271b805c4392951ef24dd9db363747733778d9545bacc8d085e3a3f3b949',
+                  'f5c98a1d27c5faad70362c4af323c95d2feb6888ef9f818f249c74d41cda8a6c',
+                  'f7041e13fdf127a346af7ae5f2f0df6cdf6c5f2c61a976a051c6ac15a6686274',
+                  'f7317082330ced3bc27638a9e4a2e27054c4d5b68031ca43b75829e66720741f',
+                  'f8ea75925de096924158468b7340d9de1280e80aaef82cfdf330d4444793188e',
+                  'fac77c3a8bb0ce6b44c495850fe37fac0fa87aa018aedbc5cb1f1f8c3d3466e6',
+                  'fb94e60bfa85d04c68cbeb3b907e20afbfbdfa2ccb91715b74c373c22be07dae',
+                  'ff539a0ec58f3c5263edbf44fd5e36f036c262dcc996c3cb022b93e91f284a30',
+                  'ff78cf59e512895e511a50f34cf15a135dc90be55dfcfda516c3662930ea83cc',
+                  'ffdb646ddb4eeff6f985ca7629c38126ba9442bdac179fc62ecab54c8546823c'],
  'service_plans': ['6e59c69226f3b212dff62231168516863c08fd75dc09ef75c9ccf9c51adb9442',
                    '7f4e7214c6bec7aca5bf3044b58af79df9eda6943a20dcc8c7e1f06cce6152ad'],
  'spf_records': ['0c84e58beeae24d667350e9a88e652ac29446e40ff04acb2f4c77afb08012411',
@@ -1380,6 +1710,7 @@ PACK_ENUM_DOMAINS = {'SPO_tenant': {'[].DefaultLinkPermission': ['1', '2'],
  'privileged_roles': {'[].Rules[].NotificationType': ['""', '"Email"', 'null'],
                       '[].Rules[].RuleSourceType': ['"Directory Role"', '"PIM Group"']},
  'privileged_users': {},
+ 'scuba_config': {'.M365Environment': ['"commercial"', '"dod"', '"gcc"', '"gcchigh"', 'null']},
  'service_plans': {},
  'spf_records': {},
  'tenant_id': {},

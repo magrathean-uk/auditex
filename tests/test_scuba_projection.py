@@ -93,7 +93,7 @@ def complete_bundle(tmp_path):
     assigned = auth.pop('permissionGrantPolicyIdsAssignedToDefaultUserRole')
     auth['defaultUserRolePermissions']['permissionGrantPoliciesAssigned'] = assigned
     operation(tmp_path, 'consent_policy', 'authorizationPolicy', [auth])
-    operation(tmp_path, 'licensing', 'subscribedSkus', [{'servicePlans': [graph(EXPECTED['service_plans'][0])]}])
+    operation(tmp_path, 'licensing', 'subscribedSkus', [{'skuPartNumber': 'SPE_E5', 'servicePlans': [graph(EXPECTED['service_plans'][0])]}])
     write(tmp_path, 'normalized/privileged_roles.json', {'records': ROLES})
     for collector, name, row in PS.values():
         operation(tmp_path, collector, name, [row])
@@ -161,11 +161,10 @@ def test_spo_rejects_invalid_enum_or_scalar_types(complete_bundle, field, value)
     assert project_run(complete_bundle)['SPO_tenant'] == NOT_COLLECTED
 
 
-def test_config_and_sharing_policy_are_disabled_without_faithful_pack_evidence(complete_bundle):
+def test_sharing_policy_is_disabled_without_faithful_pack_evidence(complete_bundle):
     p = project_run(complete_bundle)
-    for section in ('scuba_config', 'sharing_policy'):
-        assert p[section] == NOT_COLLECTED
-        assert p.report['sections'][section]['reason'] == 'incomplete_shape'
+    assert p['sharing_policy'] == NOT_COLLECTED
+    assert p.report['sections']['sharing_policy']['reason'] == 'incomplete_shape'
 
 
 @pytest.mark.parametrize('case', ['conflict', 'non_uuid', 'recorded_conflict'])
@@ -229,7 +228,7 @@ def test_projection_is_read_only_and_has_no_network(complete_bundle, monkeypatch
     before = tree()
     monkeypatch.setattr(socket, 'socket', lambda *a, **kw: pytest.fail('Projection opened a network socket'))
     p = project_run(complete_bundle)
-    assert sum(v['status'] == 'projected' for v in p.report['sections'].values()) == 15
+    assert sum(v['status'] == 'projected' for v in p.report['sections'].values()) == 16
     assert tree() == before
 
 
@@ -269,7 +268,9 @@ def test_endpoint_prompts_respect_redaction_and_all_dependencies(complete_bundle
     assert (PERSON in prompts) is no_redaction
     projected = project_run(complete_bundle, redact=not no_redaction)
     assert (PERSON in canonical(projected)) is no_redaction
-    assert 'sensitive.local' not in prompts
+    # Conditional Access prompts reach the model now that scuba_config projects: the address is masked unless the
+    # operator chose --no-redaction (loopback endpoints only).
+    assert ('sensitive.local' in prompts) is no_redaction
     assert ('sensitive.local' in canonical(projected)) is no_redaction
     result = json.loads((complete_bundle / 'model_assessment.json').read_text())
     assert result['projection']['redaction']['enabled'] is not no_redaction
@@ -381,8 +382,8 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
     assert sections['SPO_tenant']['detail'] == {'field': 'FileAnonymousLinkType', 'kind': 'missing_field'}
     assert sections['authorization_policies']['detail'] == {
         'field': 'AllowInvitesFrom', 'kind': 'unseen_enum_value', 'value': 'everyone'}
-    assert sum(s['status'] == 'projected' for s in result['projection']['sections'].values()) == 3
-    assert sections['privileged_users']['status'] == 'projected'
+    assert sum(s['status'] == 'projected' for s in result['projection']['sections'].values()) == 4
+    assert sections['privileged_users']['status'] == 'projected' and sections['scuba_config']['status'] == 'projected'
     # The privileged-user section projects, so the three rules that read only it reach the model; the other
     # 99 rows stay rule answers with no model call.
     assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 99,
@@ -632,6 +633,9 @@ def test_chunk_iteration_stops_at_scan_row_and_byte_bounds(complete_bundle, monk
     @contextmanager
     def opened(root, relative):
         if relative.endswith('.jsonl'):
+            # Every open starts the file afresh: scuba_config reads the SKUs too (its cloud signal) before service_plans.
+            data.seek(0)
+            data.calls = 0
             yield data
         else:
             with original(root, relative) as handle:
@@ -881,6 +885,7 @@ def test_chunk_whitespace_and_chunk_count_are_scan_bounded(complete_bundle, monk
     @contextmanager
     def opened(root, relative):
         if relative.endswith('.jsonl'):
+            data.seek(0)  # Every open starts afresh: scuba_config reads the SKUs before service_plans.
             yield Guarded()
         else:
             with original(root, relative) as handle:
@@ -1417,3 +1422,243 @@ def test_a_withheld_privileged_roles_artefact_names_its_reason_and_does_not_with
     # The gap is about the artefact, not about a read privileged_users makes: it is listed there and does not withhold it.
     assert p.report['sections']['privileged_users']['status'] == 'projected'
     assert 'identity_governance.privileged_roles' in p.report['sections']['privileged_users']['ignored_failures']
+
+
+# scuba_config: ScubaGear's operator configuration, synthesised per policy family (scuba_projection._scuba_config).
+EMPTY_CAP = {'Applications': [], 'Groups': [], 'GuestUserTypes': [], 'Users': []}
+EMPTY_ROLE = {'Groups': [], 'Users': []}
+AAD_DEFAULT = {'Aad': None, 'CapExclusions': EMPTY_CAP, 'RoleExclusions': EMPTY_ROLE}
+CONFIG_READERS = sorted(p for p, e in json.loads((ROOT / 'configs/scuba-policy-sections.json').read_text())['policies'].items()
+                        if 'scuba_config' in e['sections'])
+BREAK_GLASS_ID = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d'
+BREAK_GLASS_GROUP = '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d'
+BREAK_GLASS_UPN = 'breakglass1@example.invalid'
+
+
+def config_bundle(root, *, accounts=(), footprint=None, skus=None):
+    manifest = json.loads((root / 'run-manifest.json').read_text())
+    manifest['rule_parameters'] = {'schema_version': '2026-10-22', 'break_glass_accounts': list(accounts)}
+    write(root, 'run-manifest.json', manifest)
+    if footprint is not None:
+        operation(root, 'dns_posture', 'publicFootprint', footprint)
+    if skus is not None:
+        operation(root, 'licensing', 'subscribedSkus', [{'skuPartNumber': sku, 'servicePlans': []} for sku in skus])
+    return root
+
+
+def footprint(scope='NA', sub=None, instance='microsoftonline.com', domain='example.invalid'):
+    return {'domain': domain, 'discovery_status': 'ok', 'tenant_region_scope': scope,
+            'tenant_region_sub_scope': sub, 'cloud_instance_name': instance}
+
+
+def case_config(projection, policy_id):
+    from auditex.model_serving import build_case
+    case = build_case(policy_id, projection, '2026-10-30T00:00:00Z')
+    return next(e['observed'] for e in case['evidence'] if e['section'] == 'scuba_config')
+
+
+def test_scuba_config_default_shape_per_family(complete_bundle):
+    from auditex.scuba_projection import PACK_SHAPE_DIGESTS, _seen_shape
+    p = project_run(config_bundle(complete_bundle))
+    assert len(CONFIG_READERS) == 19 and len(PACK_SHAPE_DIGESTS['scuba_config']) == 99
+    assert p['scuba_config'] == AAD_DEFAULT
+    expected = {pid: dict(AAD_DEFAULT) for pid in CONFIG_READERS if pid.startswith('MS.AAD.')}
+    expected['MS.AAD.9.1v1'] = {**AAD_DEFAULT, 'M365Environment': 'commercial'}
+    expected['MS.EXO.1.1v2'] = None
+    expected.update({pid: {'M365Environment': 'commercial'} for pid in CONFIG_READERS if pid.startswith('MS.TEAMS.')})
+    expected.update({pid: NOT_COLLECTED for pid in CONFIG_READERS if pid.startswith('MS.SECURITYSUITE.')})
+    assert {pid: case_config(p, pid) for pid in CONFIG_READERS} == expected
+    for pid, view in expected.items():
+        if view != NOT_COLLECTED:
+            _seen_shape('scuba_config', view)
+    entry = p.report['sections']['scuba_config']
+    assert entry['status'] == 'projected' and entry['reason'] is None and entry['source'][0] == 'run-manifest.json'
+    synthesis = entry['synthesis']
+    assert synthesis['source'] == 'synthesised:default-config' and synthesis['basis'] == 'scubagear_default_config'
+    assert synthesis['m365_environment'] == {'value': 'commercial', 'basis': 'assumed_default'}
+    assert synthesis['break_glass'] == {'source': 'none'}
+    assert {k for k, v in synthesis['policies'].items() if v != 'projected'} == {
+        'MS.SECURITYSUITE.2.1v1', 'MS.SECURITYSUITE.2.3v1', 'MS.SECURITYSUITE.3.2v1'}
+    assert set(synthesis['policies'].values()) == {'projected', 'operator_input_required'}
+
+
+def test_scuba_config_environment_evidence_that_cannot_be_read_fails_closed(complete_bundle):
+    # Two DoD answers under a one-row scan bound: the discovery exists but cannot be read, so no cloud is assumed.
+    root = config_bundle(complete_bundle, footprint=[footprint('USGov', 'DOD', 'microsoftonline.us'),
+                                                      footprint('USGov', 'DOD', 'microsoftonline.us', domain='b.invalid')])
+    full = project_run(root)
+    assert full.report['sections']['scuba_config']['synthesis']['m365_environment'] == {'value': 'dod', 'basis': 'openid_discovery'}
+    bounded = project_run(root, scan_max_rows=1)
+    synthesis = bounded.report['sections']['scuba_config']['synthesis']
+    assert synthesis['m365_environment'] == {'value': None, 'basis': 'unreadable'}
+    for pid in ('MS.AAD.9.1v1', 'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1'):
+        assert case_config(bounded, pid) == NOT_COLLECTED and synthesis['policies'][pid] == 'environment_ambiguous'
+    assert case_config(bounded, 'MS.AAD.1.1v1') == AAD_DEFAULT
+
+
+@pytest.mark.parametrize('bounds', [{'max_items': 1}, {'max_chars': 50}])
+def test_scuba_config_withheld_section_feeds_no_policy_view(complete_bundle, bounds):
+    from auditex.scuba_projection import policy_section
+    p = project_run(config_bundle(complete_bundle), **bounds)
+    entry = p.report['sections']['scuba_config']
+    assert entry['status'] == 'not_collected' and 'synthesis' not in entry
+    assert p['scuba_config'] == NOT_COLLECTED and all('scuba_config' not in v for v in p.views.values())
+    for pid in ('MS.AAD.1.1v1', 'MS.EXO.1.1v2', 'MS.TEAMS.2.2v2'):
+        assert policy_section(p, pid, 'scuba_config') == NOT_COLLECTED and case_config(p, pid) == NOT_COLLECTED
+
+
+def test_scuba_config_unread_sections_keep_their_own_value(complete_bundle):
+    from auditex.scuba_projection import policy_section
+    p = project_run(config_bundle(complete_bundle))
+    assert policy_section(p, 'MS.EXO.1.1v2', 'scuba_config') is None
+    assert policy_section(p, 'MS.EXO.1.1v2', 'tenant_id') == p['tenant_id']
+    assert policy_section({'scuba_config': AAD_DEFAULT}, 'MS.AAD.1.1v1', 'scuba_config') == AAD_DEFAULT
+
+
+@pytest.mark.parametrize('kwargs,environment,basis', [
+    ({}, 'commercial', 'assumed_default'),
+    ({'footprint': [footprint()]}, 'commercial', 'openid_discovery'),
+    ({'footprint': [footprint(sub='GCC')]}, 'gcc', 'openid_discovery'),
+    ({'footprint': [footprint('USGov', 'DODCON', 'microsoftonline.us')]}, 'gcchigh', 'openid_discovery'),
+    ({'footprint': [footprint('USGov', 'DOD', 'microsoftonline.us')]}, 'dod', 'openid_discovery'),
+    ({'skus': ['ENTERPRISEPACK_USGOV_DOD']}, 'dod', 'licence_sku'),
+    ({'skus': ['ENTERPRISEPACK_GOV', 'SPE_E5']}, 'gcc', 'licence_sku'),
+    ({'skus': ['SPE_E5']}, 'commercial', 'assumed_default'),
+    ({'footprint': [footprint(), footprint(sub='GCC', domain='b.invalid')]}, None, 'ambiguous'),
+    ({'footprint': [footprint('USGov', 'Unknown', 'microsoftonline.us')]}, None, 'ambiguous'),
+    ({'skus': ['ENTERPRISEPACK_USGOV_GCCHIGH', 'ENTERPRISEPACK_GOV']}, None, 'ambiguous'),
+    ({'footprint': [footprint(scope=None, instance=None)]}, None, 'ambiguous'),   # an ok answer without cloud fields
+    ({'footprint': [footprint('AS', None, 'partner.microsoftonline.cn')]}, None, 'ambiguous'),   # 21Vianet: no ScubaGear value
+    ({'footprint': [footprint('USGov', 'DOD', 'microsoftonline.us')], 'skus': ['SPE_E5']}, 'dod', 'openid_discovery'),
+    ({'footprint': [{}]}, None, 'unreadable'),   # not a row the collector writes
+    ({'footprint': [footprint(scope=['USGov'], instance=None)]}, None, 'unreadable'),   # a field of the wrong type
+    ({'footprint': [footprint('USGov', 'DOD', 'partner.microsoftonline.cn')]}, None, 'ambiguous'),   # sovereign instance wins
+    ({'footprint': [footprint('USGov', 'DOD', 'microsoftonline.com')]}, None, 'ambiguous'),   # scope and instance disagree
+    ({'footprint': [footprint('NA', None, 'microsoftonline.us')]}, None, 'ambiguous'),
+    ({'footprint': [footprint('USGov', 'DOD', None)]}, 'dod', 'openid_discovery'),   # scope alone, instance not stated
+    ({'footprint': [footprint(None, 'DOD', 'microsoftonline.us')]}, 'dod', 'openid_discovery'),   # instance alone
+    ({'footprint': [{**footprint('USGov', 'DOD', 'microsoftonline.us'), 'discovery_status': None}]}, None, 'unreadable'),
+    ({'footprint': [{**footprint('USGov', 'DOD', 'microsoftonline.us'), 'discovery_status': 'bogus'}]}, None, 'unreadable'),
+    ({'skus': [['ENTERPRISEPACK_USGOV_DOD']]}, None, 'unreadable'),   # a SKU of the wrong type
+    ({'skus': [None]}, None, 'unreadable'),   # a licence row without a SKU
+    ({'skus': ['']}, None, 'unreadable'),
+])
+def test_scuba_config_m365_environment_derivation(complete_bundle, kwargs, environment, basis):
+    p = project_run(config_bundle(complete_bundle, **kwargs))
+    synthesis = p.report['sections']['scuba_config']['synthesis']
+    assert synthesis['m365_environment'] == {'value': environment, 'basis': basis}
+    gated = ['MS.AAD.9.1v1', 'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1']
+    if environment is None:
+        assert all(case_config(p, pid) == NOT_COLLECTED for pid in gated)
+        assert {synthesis['policies'][pid] for pid in gated} == {'environment_ambiguous'}
+        assert case_config(p, 'MS.AAD.1.1v1') == AAD_DEFAULT
+    else:
+        assert case_config(p, 'MS.TEAMS.2.2v2') == {'M365Environment': environment}
+        assert case_config(p, 'MS.AAD.9.1v1')['M365Environment'] == environment
+        assert case_config(p, 'MS.AAD.1.1v1') == AAD_DEFAULT
+
+
+def test_scuba_config_gov_cloud_closes_teams_gate_by_rule(complete_bundle):
+    from auditex.model_serving import build_case
+    p = project_run(config_bundle(complete_bundle, footprint=[footprint('USGov', 'DODCON', 'microsoftonline.us')]))
+    record = precheck_case(build_case('MS.TEAMS.4.1v1', p, '2026-10-30T00:00:00Z'))
+    assert record['rule_precheck']['class'] == 'closed_gate' and record['rule_precheck']['value'] == 'gcchigh'
+
+
+def identity_rows(root):
+    operation(root, 'identity', 'users', [
+        {'id': TENANT, 'displayName': PERSON, 'onPremisesImmutableId': None},
+        {'id': BREAK_GLASS_ID, 'displayName': 'Emergency One', 'userPrincipalName': BREAK_GLASS_UPN,
+         'onPremisesImmutableId': None}])
+    operation(root, 'identity', 'groups', [{'id': BREAK_GLASS_GROUP, 'displayName': 'Emergency Group'}])
+    return root
+
+
+def test_scuba_config_break_glass_maps_to_exclusions_by_object_id(complete_bundle):
+    from auditex.model_serving import build_case, messages_for
+    p = project_run(config_bundle(identity_rows(complete_bundle), accounts=[BREAK_GLASS_UPN]))
+    from auditex.scuba_projection import SCUBA_CONFIG_EXCLUSION_KEYS
+    assert SCUBA_CONFIG_EXCLUSION_KEYS == {'MS.AAD.3.2v2': 'MS.AAD.3.2v1'}
+    for pid in ('MS.AAD.1.1v1', 'MS.AAD.3.8v1'):
+        assert case_config(p, pid) == {**AAD_DEFAULT, 'Aad': {pid: {
+            'CapExclusions': {**EMPTY_CAP, 'Users': [BREAK_GLASS_ID]}, 'RoleExclusions': EMPTY_ROLE}}}
+    # MS.AAD.3.2v2's Rego reads the entry under MS.AAD.3.2v1 (CISA finding F2). The exclusion is written there, where the
+    # oracle honours it, and training never held that shape, so the policy is withheld rather than shown an entry the
+    # oracle would ignore or a shape the model has never seen.
+    assert case_config(p, 'MS.AAD.3.2v2') == NOT_COLLECTED
+    assert p.report['sections']['scuba_config']['synthesis']['policies']['MS.AAD.3.2v2'] == 'unseen_shape'
+    assert case_config(p, 'MS.AAD.7.4v1') == {**AAD_DEFAULT, 'Aad': {'MS.AAD.7.4v1': {
+        'CapExclusions': EMPTY_CAP, 'RoleExclusions': {**EMPTY_ROLE, 'Users': [BREAK_GLASS_ID]}}}}
+    # Rego without an exclusion for the account keeps the default: MFA-method and AI-agent policies.
+    assert case_config(p, 'MS.AAD.3.3v2') == AAD_DEFAULT
+    assert 'Aad' in case_config(p, 'MS.AAD.9.1v1') and case_config(p, 'MS.AAD.9.1v1')['Aad'] is None
+    synthesis = p.report['sections']['scuba_config']['synthesis']
+    assert synthesis['break_glass'] == {'source': 'operator', 'entries': 1, 'unresolved': 0, 'unverified': 0,
+                                        'state': 'resolved', 'users': 1, 'groups': 0}
+    # The operator's entry is a user principal name: only the object ID reaches a prompt or the report.
+    prompts = canonical([messages_for(build_case(pid, p, '2026-10-30T00:00:00Z')) for pid in CONFIG_READERS])
+    assert BREAK_GLASS_UPN not in prompts and 'breakglass1' not in canonical(p.report)
+    assert BREAK_GLASS_ID in prompts
+
+
+def test_scuba_config_break_glass_users_and_groups_fail_closed_where_unseen(complete_bundle):
+    p = project_run(config_bundle(identity_rows(complete_bundle), accounts=[BREAK_GLASS_ID, 'Emergency Group']))
+    view = case_config(p, 'MS.AAD.2.1v1')['Aad']['MS.AAD.2.1v1']['CapExclusions']
+    assert view['Users'] == [BREAK_GLASS_ID] and view['Groups'] == [BREAK_GLASS_GROUP]
+    # Training never held MS.AAD.3.8v1 with both lists, nor MS.AAD.7.4v1 role exclusions of both kinds.
+    policies = p.report['sections']['scuba_config']['synthesis']['policies']
+    for pid in ('MS.AAD.3.8v1', 'MS.AAD.7.4v1'):
+        assert case_config(p, pid) == NOT_COLLECTED and policies[pid] == 'unseen_shape'
+
+
+@pytest.mark.parametrize('accounts,state', [(['nobody@example.invalid'], 'unresolved'), (None, None)])
+def test_scuba_config_unresolved_or_unrecorded_list_withholds_exclusion_policies(complete_bundle, accounts, state):
+    if accounts is None:
+        p = project_run(identity_rows(complete_bundle))  # A manifest from before rule_parameters were recorded.
+        assert p.report['sections']['scuba_config']['synthesis']['break_glass'] == {'source': 'unrecorded'}
+    else:
+        p = project_run(config_bundle(identity_rows(complete_bundle), accounts=accounts))
+        assert p.report['sections']['scuba_config']['synthesis']['break_glass']['state'] == state
+    policies = p.report['sections']['scuba_config']['synthesis']['policies']
+    for pid in ('MS.AAD.1.1v1', 'MS.AAD.3.2v2', 'MS.AAD.7.4v1'):
+        assert case_config(p, pid) == NOT_COLLECTED and policies[pid] == 'break_glass_unresolved'
+    assert case_config(p, 'MS.AAD.3.3v2') == AAD_DEFAULT and case_config(p, 'MS.EXO.1.1v2') is None
+    assert 'nobody' not in canonical(p.report)
+
+
+def test_scuba_config_synthesis_validates_and_tampering_is_rejected(complete_bundle):
+    schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
+    config_bundle(complete_bundle)
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    validate_assessment(result)
+    jsonschema.validate(result, schema)
+    entry = result['projection']['sections']['scuba_config']
+    for mutate in (lambda e: e['synthesis']['policies'].pop('MS.AAD.1.1v1'),
+                   lambda e: e['synthesis']['policies'].update({'MS.AAD.1.1v1': 'guessed'}),
+                   lambda e: e.pop('synthesis')):
+        tampered = json.loads(json.dumps(result))
+        mutate(tampered['projection']['sections']['scuba_config'])
+        with pytest.raises(ValueError):
+            validate_assessment(tampered)
+    moved = json.loads(json.dumps(result))
+    moved['projection']['sections']['SPO_tenant']['synthesis'] = entry['synthesis']
+    with pytest.raises(ValueError):
+        validate_assessment(moved)
+
+
+@pytest.mark.parametrize('selected,reason', [(['identity'], 'dns_posture_not_run'),
+                                             (['identity', 'dns_posture'], 'dns_records_not_saved')])
+def test_dns_sections_say_why_they_are_missing(complete_bundle, selected, reason):
+    payload = json.loads((complete_bundle / 'raw/dns_posture.json').read_text())
+    for name in ('dmarc_records', 'spf_records', 'dkim_records'):
+        payload.pop(name)
+    payload['domainPosture'] = {'value': [], 'status': 'ok'}
+    write(complete_bundle, 'raw/dns_posture.json', payload)
+    manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
+    write(complete_bundle, 'run-manifest.json', {**manifest, 'selected_collectors': selected})
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.EXO.4.1v1'])
+    for name in ('dmarc_records', 'spf_records', 'dkim_records'):
+        assert result['projection']['sections'][name]['status'] == 'not_collected'
+        assert result['projection']['sections'][name]['reason'] == reason
+    validate_assessment(result)
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))

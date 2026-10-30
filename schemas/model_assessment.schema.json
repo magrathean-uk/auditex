@@ -930,7 +930,9 @@
             "incomplete_shape",
             "oversize",
             "powershell_only",
-            "not_applicable_to_platform"
+            "not_applicable_to_platform",
+            "dns_posture_not_run",
+            "dns_records_not_saved"
           ]
         },
         "source": {
@@ -984,6 +986,121 @@
             "pattern": "^[A-Za-z][A-Za-z0-9_]*\\.[A-Za-z][A-Za-z0-9_]*$"
           },
           "uniqueItems": true
+        },
+        "synthesis": {
+          "type": "object",
+          "description": "Present on scuba_config only: the section is ScubaGear's operator configuration, synthesised rather than read from the tenant. policies gives each reading policy's outcome; a policy that is not projected sees the not-collected marker.",
+          "properties": {
+            "source": {
+              "type": "string",
+              "const": "synthesised:default-config"
+            },
+            "basis": {
+              "type": "string",
+              "const": "scubagear_default_config"
+            },
+            "m365_environment": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "commercial",
+                    "gcc",
+                    "gcchigh",
+                    "dod",
+                    null
+                  ]
+                },
+                "basis": {
+                  "type": "string",
+                  "enum": [
+                    "openid_discovery",
+                    "licence_sku",
+                    "assumed_default",
+                    "ambiguous",
+                    "unreadable"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "basis"
+              ],
+              "additionalProperties": false
+            },
+            "break_glass": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "operator",
+                    "unrecorded"
+                  ]
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "resolved",
+                    "unresolved",
+                    "identity_unreadable"
+                  ]
+                },
+                "entries": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unresolved": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unverified": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "users": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "groups": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "policies": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "projected",
+                  "operator_input_required",
+                  "break_glass_unresolved",
+                  "environment_ambiguous",
+                  "unseen_shape",
+                  "oversize"
+                ]
+              },
+              "description": "Keyed by every policy whose catalogue sections include scuba_config; checked by validate_assessment."
+            }
+          },
+          "required": [
+            "source",
+            "basis",
+            "m365_environment",
+            "break_glass",
+            "policies"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

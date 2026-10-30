@@ -57,6 +57,22 @@ bundle gains the `privileged_roles` artefact, both additive.
 
 ### Model serving (new, optional)
 
+- **`scuba_config` is synthesised, no longer withheld.** The 19 policies that read ScubaGear's operator
+  configuration were answered unknown by rule on every real tenant. `auditex model assess` now synthesises the
+  section from ScubaGear's default configuration, the tenant's cloud (`dns_posture` OpenID discovery, else US
+  Government licence SKUs, else `commercial`) and the run's `--break-glass-accounts` list (resolved to object IDs and
+  placed under the `Aad[...]` entry each policy's Rego reads, which for MS.AAD.3.2v2 is `MS.AAD.3.2v1`, a shape the frozen training data never held, so that policy is withheld as `unseen_shape` whenever an exclusion list exists; for the nine CapExclusions policies and MS.AAD.7.4v1), in the shape each policy family's
+  training rows carry. The three SecuritySuite policies stay `not_collected` (`operator_input_required`). The
+  cloud derivation fails closed: discovery or licence evidence that exists but cannot be read, an answer without cloud
+  fields, a sovereign cloud or disagreeing signals withhold the environment-gated policies instead of assuming commercial. The
+  projection report entry carries `synthesis` (`source: synthesised:default-config`, the cloud and its evidence,
+  emergency-access counts and each reading policy's outcome); schema `2026-10-29` gains that optional field and the
+  shape gate gains the 99 frozen v7 `scuba_config` shapes. On the 30 Oct 2026 P5 tenant run 16 of 102 prompts change and
+  9 policies move from a rule `unknown` to the model.
+- **The DNS sections say why they are missing.** `spf_records`, `dkim_records` and `dmarc_records` are reported as
+  `dns_posture_not_run` or `dns_records_not_saved` instead of `missing_artifact`: the `dns_posture` collector keeps
+  parsed posture only and is in no default collector set, so no run produces them yet (model-development guide).
+
 - **Evidence projection (1.2.2.dev4).** `auditex model assess` reads saved bundle
   evidence into complete tier-1 ScubaGear shapes, with fail-closed markers and
   zero model calls for missing-section rule answers. Schema `2026-10-29` adds a

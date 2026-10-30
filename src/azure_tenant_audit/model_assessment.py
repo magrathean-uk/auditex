@@ -29,6 +29,9 @@ ASSESSMENT_SCHEMAS = {
 
 
 SCAN_BOUND_FIELDS = frozenset({"scan_max_rows", "scan_max_bytes", "scan_max_chunks"})
+# What a policy that reads the synthesised scuba_config sees: its view, or why it was withheld.
+SCUBA_CONFIG_OUTCOMES = frozenset({"projected", "operator_input_required", "break_glass_unresolved",
+                                   "environment_ambiguous", "unseen_shape", "oversize"})
 
 
 def safe_projection_enum_value(field: str, value: Any) -> bool:
@@ -134,6 +137,15 @@ def validate_assessment(payload: Any) -> None:
             if ((detail["status"] == "projected") != (detail["reason"] is None)
                     or detail["status"] == "projected" and not detail["source"]):
                 raise ValueError("Inconsistent projection status or source")
+            synthesis = detail.get("synthesis")
+            if synthesis is not None:
+                readers = {p for p, policy in catalogue.items() if section in policy["sections"]}
+                outcomes = synthesis["policies"]
+                if (section != "scuba_config" or detail["status"] != "projected" or set(outcomes) != readers
+                        or not set(outcomes.values()) <= SCUBA_CONFIG_OUTCOMES or "projected" not in outcomes.values()):
+                    raise ValueError("Inconsistent scuba_config synthesis")
+            elif section == "scuba_config" and detail["status"] == "projected":
+                raise ValueError("Inconsistent scuba_config synthesis")
             unsupported = detail.get("unsupported_conditions", [])
             if unsupported and (section != "conditional_access_policies" or detail["reason"] != "incomplete_shape"
                                 or unsupported != sorted(set(unsupported))):

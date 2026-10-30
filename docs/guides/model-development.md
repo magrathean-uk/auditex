@@ -165,8 +165,22 @@ unreadable gate inputs as unknown. Frozen packs are not rewritten.
 | MS.SHAREPOINT.3.1v1, 3.2v1 | `SPO_tenant.SharingCapability` | `0`, `1`, `3` |
 | MS.SHAREPOINT.3.3v2 | `SPO_tenant.SharingCapability` | `0` |
 | MS.SHAREPOINT.1.3v1 | `SPO_tenant.SharingCapability` | `0`; doc-sourced, no test-v7 rows |
-| MS.TEAMS.2.2v2, 2.3v2, 4.1v1 | `scuba_config.M365Environment` | `gcc`, `gcchigh`, `dod` |
+| MS.TEAMS.2.2v2, 2.3v2, 4.1v1 | `scuba_config.M365Environment` (synthesised; see below) | `gcc`, `gcchigh`, `dod` |
 | MS.AAD.3.3v2 | `authentication_method.authentication_method_feature_settings[Id=MicrosoftAuthenticator].State` | `disabled` |
+
+`scuba_config` is ScubaGear's operator configuration, not tenant evidence, so `auditex model assess` synthesises it
+(output contract, `scuba_config` row): ScubaGear's default configuration, the tenant's cloud and the run's
+`--break-glass-accounts` list, per policy family in the training shape. Its projection report entry says so
+(`synthesis.source` `synthesised:default-config`, with the cloud and its evidence, the emergency-access counts and each
+reading policy's outcome). The cloud comes from the `dns_posture` OpenID discovery when the run has it, else from US
+Government licence SKUs, else it is taken as `commercial`.
+
+**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** `spf_records`, `dkim_records` and `dmarc_records` need the complete
+TXT answers ScubaGear exports; the `dns_posture` collector keeps parsed posture only, so no run produces them yet, and
+`dns_posture` is not in any default collector set (it sends the tenant's domain names to the DNS-over-HTTPS resolver,
+the domains' MTA-STS hosts and Microsoft; `docs/reference/security-privacy.md`). The projection report names the
+cause: `dns_posture_not_run` when the run did not select the collector, `dns_records_not_saved` when it did. Running
+it (`--collectors ...,dns_posture`) still helps the model path today: its OpenID discovery decides `M365Environment`.
 
 Sharing values mean `0` organisation only, `1` new/existing guests, `2` anyone,
 `3` existing guests. Real integers and integral floats are accepted; booleans,

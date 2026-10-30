@@ -46,12 +46,20 @@ def fake_projection(root, values):
     projection = project_run(root)
     for key, value in values.items():
         if key in projection:
+            previous = projection.report["sections"].get(key, {})
             projection[key] = value
             projection.report["sections"][key] = {
                 "status": "projected" if value != NOT_COLLECTED else "not_collected",
                 "reason": None if value != NOT_COLLECTED else "incomplete_shape",
                 "source": ["raw/synthetic.json"],
             }
+            # scuba_config is synthesised, never read: a faked value keeps the real synthesis record (and the
+            # per-policy views the readers see) so the entry stays consistent with what the validator requires.
+            if key == "scuba_config" and value != NOT_COLLECTED and "synthesis" in previous:
+                projection.report["sections"][key]["synthesis"] = previous["synthesis"]
+            # A faked section is what every reader sees: drop the per-policy views the real projection kept for it.
+            for views in getattr(projection, "views", {}).values():
+                views.pop(key, None)
     return projection
 
 
@@ -404,7 +412,7 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
                                 "scope_narrowed": 0}
     assert result["limitations"] == []
     assert {name for name, detail in result["projection"]["sections"].items()
-            if detail["status"] == "projected"} == {"service_plans", "tenant_id", "privileged_users"}
+            if detail["status"] == "projected"} == {"service_plans", "tenant_id", "privileged_users", "scuba_config"}
     # The three rules that read only the projected privileged users reach the model; the rest are rule answers.
     model_rows = {row["policy_id"] for row in result["policies"] if row["reason"] != "rule_precheck"}
     assert model_rows == {"MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"}
