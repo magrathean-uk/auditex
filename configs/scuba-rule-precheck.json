@@ -414,6 +414,99 @@
       "complete": true
     }
   ],
+  "list_rules": [
+    {
+      "rule_id": "MS.AAD.1.1v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.1.1v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); oracle-pack-v10 labels: every collected-empty row this rule decides is not met (scuba-aad-ms-aad-1-1v1-cec176e45a); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.2.1v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.2.1v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); no oracle-pack-v10 row this rule decides (collected-empty rows are answered absent_section first); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.2.3v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.2.3v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); oracle-pack-v10 labels: every collected-empty row this rule decides is not met (scuba-aad-ms-aad-2-3v1-a4f3ce848e); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.3.1v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.3.1v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); oracle-pack-v10 labels: every collected-empty row this rule decides is not met (scuba-aad-ms-aad-3-1v1-cec176e45a); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.3.2v2.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.3.2v2",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); oracle-pack-v10 labels: every collected-empty row this rule decides is not met (scuba-aad-ms-aad-3-2v2-cec176e45a); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.3.6v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.3.6v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); no oracle-pack-v10 row this rule decides (collected-empty rows are answered absent_section first); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.3.7v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.3.7v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); oracle-pack-v10 labels: every collected-empty row this rule decides is not met (scuba-aad-ms-aad-3-7v1-cec176e45a); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.3.8v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.3.8v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); oracle-pack-v10 labels: every collected-empty row this rule decides is not met (scuba-aad-ms-aad-3-8v1-cec176e45a); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.3.9v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.3.9v1",
+      "section": "conditional_access_policies",
+      "unless": [],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); no oracle-pack-v10 row this rule decides (collected-empty rows are answered absent_section first); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20",
+      "complete": true
+    },
+    {
+      "rule_id": "MS.AAD.9.1v1.conditional_access_policies_empty",
+      "policy_id": "MS.AAD.9.1v1",
+      "section": "conditional_access_policies",
+      "unless": [
+        {
+          "section": "scuba_config",
+          "path": [
+            "M365Environment"
+          ],
+          "values": [
+            "gcchigh",
+            "dod"
+          ]
+        }
+      ],
+      "source": "v10 leakage-report read_fields (conditional_access_policies); oracle-pack-v10 labels: every collected-empty row this rule decides is not met (scuba-aad-ms-aad-9-1v1-a4f3ce848e); OPA 1.20.2 probe of AADConfig.rego@2446ad7 with conditional_access_policies [] over 20 base-fixture variants (M365Environment commercial/gcc/gcchigh/dod/absent x service_plans base/[] x MicrosoftAuthenticator enabled/disabled): RequirementMet false in all 20; AAD_9_1_Not_Applicable_Due_To_Environment makes gcchigh/dod with a P2 licence a Not-Implemented skip row the oracle drops, so those environments are left to the model",
+      "complete": true
+    }
+  ],
   "applicability_notes": {
     "MS.AAD.3.3v2": "This policy is only applicable if MS Authenticator is enabled and no conditional access policy already enforces phishing-resistant MFA (the requirement of MS.AAD.3.1v1)."
   },

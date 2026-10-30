@@ -71,7 +71,7 @@ their training text, including the intentionally empty Power Platform excerpt.
 
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
-The product and oracle generator use the same gate evaluator and data, in this order:
+The product and oracle generator share the gate evaluator and its data; the generator applies the first two classes below (closed gate, absent section) and leaves the field-level and empty-list classes off, while serving enables all four. In order:
 
 1. A present, usable gate section and field with a typed value in the closed set
    produces `closed_gate`: requirement `inferred` true, limitations exactly
@@ -81,7 +81,12 @@ The product and oracle generator use the same gate evaluator and data, in this o
    missing dependent section for any policy, produces `absent_section`: requirement
    `unknown` with null value, with limitations naming unavailable sections or fields.
    A `not_collected` marker is unavailable, including a gate section marker.
-3. Otherwise there is no rule answer; the model decides.
+3. Otherwise a registered field rule whose field is missing inside a collected section
+   produces `absent_field` (unknown, as above).
+4. Otherwise a registered list rule whose section was collected as exactly `[]` produces
+   `empty_required_list`: requirement `confirmed` false (the ten AAD policies that need a
+   matching Conditional Access policy; `docs/guides/model-development.md`).
+5. Otherwise there is no rule answer; the model decides.
 
 Explicit null sections retain their model/default semantics outside registered
 gate fields. A visibly closed gate makes the other dependent evidence moot, as
@@ -89,14 +94,18 @@ required by the training system prompt.
 
 Rule rows have `reason: "rule_precheck"`, `validation_status: "valid"`, zero attempts
 and latency, null prompt/response hashes, and false thinking flags. Their
-`rule_precheck` object contains `class` (`closed_gate`, `absent_section` or `absent_field`: a Rego-read field missing inside a collected section, answered unknown by a registered field rule), `rule_id`,
+`rule_precheck` object contains `class` (`closed_gate`, `absent_section`, `absent_field`: a Rego-read field missing inside a collected section, answered unknown by a registered field rule, or `empty_required_list`: a collected, exactly empty list that every passing verdict of the policy needs an entry of, answered not met by a registered list rule), `rule_id`,
 `section` (an ordered array of affected section names), `field` (a path or null) and
 `value` (the normalised gate value or null). Missing gate inputs share the
 `absent_section` class and name the field. Absence rows carry
 `required_evidence_section_not_collected` plus one limitation per unavailable input,
 `required_evidence_section_not_collected:<section>[.<field>]`, and recommend
 `collect_missing_evidence_section`. Criticality remains confirmed from the policy item.
-`totals.rule_answered` counts both kinds, overlapping `answered` and `unknown`;
+`empty_required_list` rows have a null `field` and `value`, requirement `confirmed` false citing
+`e0` and every section, no limitations and the one recommendation
+`review_policy_against_baseline_text`, as an oracle not-met verdict; the comparison treats them as
+model `fail`. Precedence is `closed_gate`, `absent_section`, `absent_field`, then `empty_required_list`.
+`totals.rule_answered` counts every class, overlapping `answered` and `unknown`;
 the four verdict totals still sum to the policy count.
 
 Version `2026-10-29` replaces the P1 stub with a read-only tier-1 ScubaGear

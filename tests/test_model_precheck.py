@@ -431,3 +431,230 @@ def test_evaluator_combines_rules_with_recorded_model_and_counts_missing(tmp_pat
     report = evaluate_precheck(str(path), str(responses))
     assert report["product_scores"][0]["correct"] == 2
     assert report["product_scores"][0]["missing_model_on_remaining"] == 1
+
+
+# --- empty required list (`empty_required_list`) ------------------------------------------------------------------------
+
+CA_RULES = ["MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1",
+            "MS.AAD.3.7v1", "MS.AAD.3.8v1", "MS.AAD.3.9v1", "MS.AAD.9.1v1"]
+
+
+def empty_ca(pid, **sections):
+    """Every input of the policy collected, the Conditional Access list empty."""
+    from auditex.model_serving import policy_catalogue
+    projection = {section: [] for section in policy_catalogue()["policies"][pid]["sections"]}
+    projection["scuba_config"] = {"CapExclusions": {}, "M365Environment": "commercial"}
+    return {**projection, **sections}
+
+
+def test_list_rules_are_well_formed():
+    rules = rule_catalogue()["list_rules"]
+    assert [rule["policy_id"] for rule in rules] == CA_RULES
+    assert len({rule["rule_id"] for rule in rules}) == len(rules)
+    for rule in rules:
+        assert rule["section"] == "conditional_access_policies" and rule["source"] and rule["complete"] is True
+        assert rule["rule_id"] == rule["policy_id"] + ".conditional_access_policies_empty"
+        assert all(c["section"] and c["path"] and c["values"] for c in rule["unless"])
+    # MS.AAD.3.3v2 can be met by the Authenticator configuration alone; it is not registered.
+    assert "MS.AAD.3.3v2" not in {rule["policy_id"] for rule in rules}
+
+
+@pytest.mark.parametrize("pid", CA_RULES)
+def test_empty_conditional_access_list_is_not_met_only_when_enabled(pid):
+    case = build_case(pid, empty_ca(pid), "unused")
+    assert precheck_case(case, absent_fields=True) is None
+    record = precheck_case(case, absent_fields=True, empty_lists=True)
+    assert record["rule_precheck"] == {"class": "empty_required_list", "rule_id": f"{pid}.conditional_access_policies_empty",
+                                       "section": ["conditional_access_policies"], "field": None, "value": None}
+    sections = len(case["evidence"]) - 1
+    assert record["claims"][0] == {"id": "requirement_met", "status": "confirmed", "value": False,
+                                   "evidence_ids": ["e0", *(f"e{i + 1}" for i in range(sections))]}
+    assert record["limitations"] == []
+    assert record["recommendations"] == ["review_policy_against_baseline_text"]
+    assert precheck_case(case, empty_lists=True, named_limitations=False)["limitations"] == []
+
+
+@pytest.mark.parametrize("pid,projection", [
+    # Unregistered: an empty list can be met through the Authenticator configuration.
+    ("MS.AAD.3.3v2", {"authentication_method": [{"authentication_method_feature_settings": [
+        {"Id": "MicrosoftAuthenticator", "State": "enabled"}]}], "conditional_access_policies": [], "scuba_config": {}}),
+    # Unregistered section of a registered policy.
+    ("MS.AAD.2.1v1", {"conditional_access_policies": [{"State": "enabled"}], "scuba_config": {}, "service_plans": []}),
+    # Not exactly an empty list: entries, null, an object.
+    ("MS.AAD.1.1v1", {"conditional_access_policies": [{}], "scuba_config": {}}),
+    ("MS.AAD.1.1v1", {"conditional_access_policies": None, "scuba_config": {}}),
+    ("MS.AAD.1.1v1", {"conditional_access_policies": {}, "scuba_config": {}}),
+    # MS.AAD.9.1v1 is a Not-Implemented skip in GCC High and DoD, and an unusable scuba_config cannot rule that out.
+    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": {"M365Environment": "gcchigh"}, "service_plans": []}),
+    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": {"M365Environment": "dod"}, "service_plans": []}),
+    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": None, "service_plans": []}),
+    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": [], "service_plans": []}),
+])
+def test_unregistered_non_empty_or_possibly_not_applicable_lists_are_left_to_the_model(pid, projection):
+    assert precheck_case(build_case(pid, projection, "unused"), absent_fields=True, empty_lists=True) is None
+
+
+@pytest.mark.parametrize("environment", ["commercial", "gcc", None, "GCCHIGH", 0])
+def test_ai_agents_rule_applies_outside_the_excluded_environments(environment):
+    projection = empty_ca("MS.AAD.9.1v1", scuba_config={"M365Environment": environment})
+    record = precheck_case(build_case("MS.AAD.9.1v1", projection, "unused"), empty_lists=True)
+    assert record["rule_precheck"]["class"] == "empty_required_list"
+    del projection["scuba_config"]["M365Environment"]  # undefined in Rego: the not-applicable branch cannot fire
+    assert precheck_case(build_case("MS.AAD.9.1v1", projection, "unused"), empty_lists=True) is not None
+
+
+@pytest.mark.parametrize("projection,expected", [
+    ({"conditional_access_policies": NOT_COLLECTED, "scuba_config": {}}, ("absent_section", "required_sections_present")),
+    ({"conditional_access_policies": []}, ("absent_section", "required_sections_present")),
+    ({"conditional_access_policies": [], "scuba_config": NOT_COLLECTED}, ("absent_section", "required_sections_present")),
+])
+def test_section_absence_takes_precedence_over_empty_list(projection, expected):
+    detail = precheck_case(build_case("MS.AAD.1.1v1", projection, "unused"), absent_fields=True,
+                           empty_lists=True)["rule_precheck"]
+    assert (detail["class"], detail["rule_id"]) == expected
+
+
+def test_gate_and_absent_field_take_precedence_over_empty_list(monkeypatch):
+    """Registered list rules never share a policy with a gate or a field rule today; pin the order regardless."""
+    import azure_tenant_audit.scuba_precheck as engine
+    catalogue = rule_catalogue()
+    extra = [{"rule_id": f"{pid}.test_empty", "policy_id": pid, "section": section, "unless": [], "source": "test",
+              "complete": True} for pid, section in ((SP, "SPO_tenant"), (PBI, "powerbi_tenant_settings"),
+                                                     ("MS.AAD.3.3v2", "conditional_access_policies"))]
+    monkeypatch.setattr(engine, "rule_catalogue", lambda: {**catalogue, "list_rules": catalogue["list_rules"] + extra})
+    assert precheck_policy(SP, {"SPO_tenant": []}, ["SPO_tenant"], absent_fields=True, empty_lists=True)["class"] == \
+        "absent_section"  # gate input missing
+    assert precheck_policy(PBI, {**PBI_SECTIONS, "powerbi_tenant_settings": []}, list(PBI_SECTIONS) + [
+        "powerbi_tenant_settings"], absent_fields=True, empty_lists=True)["class"] == "absent_field"
+    disabled = [{"authentication_method_feature_settings": [{"Id": "MicrosoftAuthenticator", "State": "disabled"}]}]
+    projection = {"authentication_method": disabled, "conditional_access_policies": [], "scuba_config": {}}
+    assert precheck_policy("MS.AAD.3.3v2", projection, list(projection), empty_lists=True)["class"] == "closed_gate"
+    projection["authentication_method"] = [{"authentication_method_feature_settings": [
+        {"Id": "MicrosoftAuthenticator", "State": "enabled"}]}]
+    assert precheck_policy("MS.AAD.3.3v2", projection, list(projection), empty_lists=True)["class"] == \
+        "empty_required_list"
+    assert precheck_policy("MS.AAD.3.3v2", projection, list(projection)) is None
+
+
+@pytest.mark.parametrize("name", ["test.jsonl", "approved-cases.jsonl"])
+def test_empty_list_rows_are_not_met_in_every_frozen_v10_row(name):
+    path = FROZEN_V10 / name
+    if not path.is_file():
+        pytest.skip(f"frozen v10 pack not present ({path}); set AUDITEX_TEST_PRECHECK_PACK")
+    fired = 0
+    for line in path.read_text().splitlines():
+        row = json.loads(line)
+        case = json.loads(next(m["content"] for m in row["messages"] if m["role"] == "user"))
+        if "policy_id" not in case:
+            continue
+        record = precheck_case(case, absent_fields=True, empty_lists=True, named_limitations=False)
+        if record is None or record["rule_precheck"]["class"] != "empty_required_list":
+            continue
+        fired += 1
+        assert (row["expected"]["claims"][0]["status"], row["expected"]["claims"][0]["value"]) == ("confirmed", False), row["id"]
+        assert {key: record[key] for key in ("claims", "limitations", "recommendations")} == {
+            key: row["expected"][key] for key in ("claims", "limitations", "recommendations")}, row["id"]
+    assert fired == (1 if name == "test.jsonl" else 7)
+
+
+def test_evaluator_scores_empty_list_only_on_request(tmp_path):
+    pid = "MS.AAD.1.1v1"
+    built = build_case(pid, empty_ca(pid), "unused")
+    response = {key: value for key, value in precheck_case(built, empty_lists=True, named_limitations=False).items()
+                if key in ("claims", "limitations", "recommendations")}
+    row = {"id": built["case_id"], "family": "precheck-test", "split": "test",
+           "provenance": {"source": "synthetic:precheck-test", "synthetic": True, "review_status": "approved",
+                          "reviewer": "unit-test"},
+           "messages": [*messages_for(built), {"role": "assistant", "content": canonical(response)}],
+           "expected": {**response, "allowed_evidence_ids": ["e0", "e1", "e2"]}}
+    path = tmp_path / "test.jsonl"
+    path.write_text(canonical(row) + "\n")
+    assert evaluate_precheck(str(path))["rule_answered"] == 0
+    report = evaluate_precheck(str(path), empty_lists=True)
+    assert report["classes"]["empty_required_list"] == {"rule_answered": 1, "correct": 1}
+    assert report["empty_lists"] is True
+
+
+def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
+    from test_model_serving import fake_projection
+    pid = "MS.AAD.1.1v1"
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
+    monkeypatch.setattr("auditex.model_serving.project_run",
+                        lambda root, **kw: fake_projection(root, {"conditional_access_policies": [],
+                                                                  "scuba_config": {"CapExclusions": {}}}))
+    monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
+    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[pid])
+    row = result["policies"][0]
+    assert row["reason"] == "rule_precheck" and row["rule_precheck"]["class"] == "empty_required_list"
+    assert (row["claims"][0]["status"], row["claims"][0]["value"]) == ("confirmed", False)
+    assert row["comparison"]["model_status"] == "fail"
+    assert result["totals"]["rule_answered"] == result["totals"]["answered"] == 1
+    validate_assessment(result)
+    jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
+    for key, value in (("class", "closed_gate"), ("class", "absent_field"), ("field", "conditional_access_policies"),
+                       ("value", 0), ("section", ["scuba_config"]),
+                       ("rule_id", "MS.AAD.3.1v1.conditional_access_policies_empty")):
+        tampered = deepcopy(result)
+        tampered["policies"][0]["rule_precheck"][key] = value
+        with pytest.raises(ValueError):
+            validate_assessment(tampered)
+    tampered = deepcopy(result)
+    tampered["policies"][0]["claims"][0]["value"] = True
+    tampered["policies"][0]["comparison"]["model_status"] = "pass"
+    with pytest.raises(ValueError):
+        validate_assessment(tampered)
+
+
+SCUBAGEAR_PIN = "2446ad723b7f55031cc02c8aca244d731d468cba"   # the ScubaGear revision the oracle packs were mined from
+OPA_PIN = "1.20.2"                                            # the OPA release the packs were evaluated with
+
+
+@pytest.fixture(scope="module")
+def pinned_rego():
+    """The local oracle, only at the pinned revisions: another ScubaGear or OPA would test a different oracle."""
+    import subprocess
+    opa_value, scuba_value = os.environ.get("AUDITEX_TEST_OPA"), os.environ.get("AUDITEX_TEST_SCUBAGEAR")
+    if not opa_value or not scuba_value:
+        pytest.skip("export AUDITEX_TEST_OPA and AUDITEX_TEST_SCUBAGEAR for local oracle evaluation")
+    revision = subprocess.run(["git", "-C", scuba_value, "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip()
+    assert revision == SCUBAGEAR_PIN, f"ScubaGear checkout at {revision or 'unknown'}, the oracle packs were mined from {SCUBAGEAR_PIN}"
+    version = subprocess.run([opa_value, "version"], capture_output=True, text=True, check=False).stdout
+    assert f"Version: {OPA_PIN}" in version, f"OPA is not {OPA_PIN}: {version.splitlines()[0] if version else 'no output'}"
+    return Path(opa_value), Path(scuba_value)
+
+
+def test_every_list_rule_is_not_met_in_the_pinned_rego(pinned_rego, tmp_path):
+    """ScubaGear's Rego with an empty Conditional Access list, across environment, licence and Authenticator variants:
+    every registered policy is not met unless its `unless` condition holds; MS.AAD.3.3v2 can be met."""
+    import itertools
+    opa, scuba = pinned_rego
+    miner = runpy.run_path(str(ROOT / "scripts/build-oracle-cases.py"))
+    meta = miner["product_meta"](scuba, "AAD")
+    base = miner["load_base"](opa, meta)[0]
+    rules = {rule["policy_id"]: rule for rule in rule_catalogue()["list_rules"]}
+    met_33 = False
+    for index, (env, licensed, auth) in enumerate(itertools.product(
+            ["commercial", "gcc", "gcchigh", "dod", None], [True, False], ["enabled", "disabled"])):
+        variant = deepcopy(base)
+        variant["conditional_access_policies"] = []
+        if env is None:
+            variant.pop("scuba_config", None)
+        else:
+            variant["scuba_config"]["M365Environment"] = env
+        if not licensed:
+            variant["service_plans"] = []
+        for method in variant["authentication_method"]:
+            for setting in method.get("authentication_method_feature_settings", []):
+                if setting.get("Id") == "MicrosoftAuthenticator":
+                    setting["State"] = auth
+        path = tmp_path / f"aad-{index}.json"
+        path.write_text(json.dumps(variant))
+        results = miner["opa_json"](opa, ["-d", str(meta["config"]), "-d", str(scuba / "Rego/Utils"), "-i", str(path),
+                                          f"data.{meta['package']}.tests"])
+        for pid, rule in rules.items():
+            if any(env in c["values"] for c in rule["unless"]):
+                continue
+            target = [r for r in results if r.get("PolicyId") == pid and miner["is_verdict"](r)]
+            assert len(target) == 1 and target[0]["RequirementMet"] is False, (pid, env, licensed, auth)
+        met_33 |= any(r.get("PolicyId") == "MS.AAD.3.3v2" and r["RequirementMet"] is True for r in results)
+    assert met_33

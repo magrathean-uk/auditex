@@ -280,6 +280,48 @@ v10 SCuBA rows the class answers 69, all unknown and strict-correct. The SharePo
 "not applicable" misses with `SharingCapability` removed were already `absent_section`
 rows through the gate input.
 
+#### Empty required list (`empty_required_list`)
+
+A fourth class answers a collected list that is exactly `[]` for a policy that passes only
+when some entry of that list satisfies it. Its rules are `list_rules` in
+`configs/scuba-rule-precheck.json`: `policy_id`, `section`, `unless` (conditions that
+leave the row to the model) and `source`/`complete`. The answer is the oracle's not-met
+shape, identical in all 1,424 v10 not-met rows of these policies: requirement `confirmed`
+false citing `e0` and every section, no limitations, `review_policy_against_baseline_text`.
+Precedence: closed gate, `absent_section`, `absent_field`, then this class, so a missing
+or marked `scuba_config` or licence section is still answered unknown first.
+
+All registered rules read `conditional_access_policies`. Of the 11 policies whose Rego reads
+it, a policy is registered where every v10 row the rule would answer (train, validation and
+test) is labelled not met, and the pinned Rego (ScubaGear 2446ad7 with OPA 1.20.2, the
+generator's AAD base fixture, `conditional_access_policies` `[]`, `M365Environment`
+`commercial`/`gcc`/`gcchigh`/`dod`/absent, `service_plans` as fixture or `[]`, Authenticator
+enabled or disabled) returns not met in all 20 variants:
+
+| Policies | v10 rows decided | Note |
+| --- | --- | --- |
+| MS.AAD.1.1v1, 2.3v1, 3.1v1, 3.2v2, 3.7v1, 3.8v1 | 1 each (train), not met | |
+| MS.AAD.9.1v1 | 1 (test), not met | `unless` `scuba_config.M365Environment` is `gcchigh` or `dod`, or `scuba_config` is not an object: ScubaGear's not-applicable branch, a Not-Implemented row the generator drops |
+| MS.AAD.2.1v1, 3.9v1 | 0 (their one empty-list row each is `absent_section` first) | Rego probe only |
+| MS.AAD.3.6v1 | 0 (no empty-list row) | Rego probe only |
+
+MS.AAD.3.3v2 is **not** registered: an empty list removes only its phishing-resistant
+not-applicable branch, so the Authenticator configuration decides (the one v10 empty-list
+row is met). A list with entries, null, an object or a marker is left to the earlier
+classes or the model.
+
+The class is served (`precheck_case(..., empty_lists=True)`); the schema enum and
+`validate_assessment` accept a row only for a registered list rule of the row's policy,
+naming its section, with null `field` and `value`. The oracle generator does not use it.
+Offline scoring opts in with `scripts/score-model-precheck.py --empty-lists`. Frozen v10
+test: rule rows 172 to 173, all strict-correct; the new row (MS.AAD.9.1v1) was already a
+model pass, so the G4 8B Q5_K_M combined score stays 419/435. All 5,227 v10 SCuBA rows: 7
+answered, all not met and strict-correct. On the P5 tenant (no Conditional Access policy) nine
+prompts become rule answers; MS.AAD.3.6v1 stays `absent_section` there (`privileged_roles` not
+collected). With
+`AUDITEX_TEST_OPA` and `AUDITEX_TEST_SCUBAGEAR` exported, `tests/test_model_precheck.py`
+re-runs the Rego probe.
+
 ## Case and answer contract
 
 Each JSONL case has `id`, `family`, `split`, `provenance`, `messages` and

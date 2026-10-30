@@ -167,6 +167,20 @@ bundle gains the `privileged_roles` artefact, both additive.
   assessment schema's `rule_precheck.class` enum and `validate_assessment` accept it (the rule must be a registered field
   rule of the row's policy, naming its section and field, with a null value). `scripts/score-model-precheck.py --absent-fields` scores it; frozen
   v10 test rule rows 167 to 172 (all correct), G4 8B Q5_K_M combined score 417 to 419/435.
+- **Empty Conditional Access list pre-check (`empty_required_list`).** `configs/scuba-rule-precheck.json` gains
+  `list_rules`: ten AAD policies (1.1, 2.1, 2.3, 3.1, 3.2v2, 3.6, 3.7, 3.8, 3.9, 9.1) that pass only when some
+  Conditional Access policy satisfies them, so a collected, exactly empty `conditional_access_policies` list is
+  answered not met (confirmed false citing every section, no limitation, `review_policy_against_baseline_text`) without
+  the model. Every v10 row it would answer is labelled so (7 rows across train, validation and test, 100 %), and the
+  pinned Rego (ScubaGear 2446ad7, OPA 1.20.2) returns not met for all ten over 20 environment, licence and
+  Authenticator variants; 2.1, 3.6 and 3.9 have no v10 row of their own and rest on that probe. MS.AAD.3.3v2 is not
+  registered (met through the Authenticator configuration alone); MS.AAD.9.1v1 is left to the model in `gcchigh` and
+  `dod`, where ScubaGear reports it not applicable. Precedence: closed gate, `absent_section`, `absent_field`, then this
+  class. Served by default; the schema enum and `validate_assessment` accept it (a registered list rule of the row's
+  policy, its section only, null field and value). `scripts/score-model-precheck.py --empty-lists` scores it; frozen v10
+  test rule rows 172 to 173 (all correct; the one new row was already a model pass), combined score unchanged at 419/435.
+  On the P5 tenant (no Conditional Access policy) nine prompts move to the rule, including the wrong `met` verdicts for
+  MS.AAD.1.1v1 and MS.AAD.3.9v1 and the two invalid answers for 3.1 and 9.1.
 - **Scope post-check.** ScubaGear's Rego ignores the location, platform, device-filter, client-application
   (and, for most policies, client-application-type) conditions of a Conditional Access policy, and the grant
   operator of several, so the oracle labels the specialist model is trained on give a clean pass to a policy

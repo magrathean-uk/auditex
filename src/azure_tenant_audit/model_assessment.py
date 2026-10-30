@@ -313,6 +313,13 @@ def validate_assessment(payload: Any) -> None:
                 if (rule is None or rule["policy_id"] != row["policy_id"] or detail["section"] != [rule["section"]]
                         or detail["field"] != field_name(rule) or detail["value"] is not None):
                     raise ValueError("Unsupported rule pre-check field rule")
+            elif detail["class"] == "empty_required_list":
+                # A collected, exactly empty list that every passing verdict of the policy needs an entry of: the rule
+                # must be one of the registered list rules of this policy and name only its section.
+                rule = next((r for r in rule_catalogue()["list_rules"] if r["rule_id"] == detail["rule_id"]), None)
+                if (rule is None or rule["policy_id"] != row["policy_id"] or detail["section"] != [rule["section"]]
+                        or detail["field"] is not None or detail["value"] is not None):
+                    raise ValueError("Unsupported rule pre-check list rule")
             else:
                 rule = policy_rule(row["policy_id"])
                 if (rule is None or detail["rule_id"] != rule["rule_id"] or

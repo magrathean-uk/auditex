@@ -148,15 +148,48 @@ def check_fields(policy_id: str, projection: dict[str, Any]) -> dict[str, Any] |
     return None
 
 
+def check_lists(policy_id: str, projection: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a registered list section that was collected and is exactly empty.
+
+    Every registered policy passes only when some entry of that list satisfies
+    it, so an empty list is not met. ``unless`` leaves the row to the model when
+    a not-applicable branch could apply (a listed value at the path) or the path
+    does not run through objects; a missing final key is Rego's undefined, which
+    does not open that branch.
+    """
+    for rule in rule_catalogue()["list_rules"]:
+        if rule["policy_id"] != policy_id:
+            continue
+        value = projection.get(rule["section"])
+        if type(value) is not list or value:
+            continue
+        blocked = False
+        for condition in rule["unless"]:
+            found = projection.get(condition["section"])
+            for part in condition["path"]:
+                if not isinstance(found, dict):
+                    blocked = True
+                    break
+                found = found.get(part)
+            if blocked or any(type(found) is type(target) and found == target for target in condition["values"]):
+                blocked = True
+                break
+        if not blocked:
+            return {"class": "empty_required_list", "rule_id": rule["rule_id"], "section": [rule["section"]],
+                    "field": None, "value": None}
+    return None
+
+
 def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[str], *,
-                    skip_absent_sections: bool = False, absent_fields: bool = False) -> dict[str, Any] | None:
+                    skip_absent_sections: bool = False, absent_fields: bool = False,
+                    empty_lists: bool = False) -> dict[str, Any] | None:
     """A usable closed gate wins over absent dependent evidence.
 
     The serving caller alone opts out for the entirely empty P1 projection.
     Pack evaluation never opts out. A missing gate is included in the absence
     class, with ``field`` naming the unavailable input. ``absent_fields`` adds
-    the field-level class after both; it is off until the assessment contract
-    accepts ``absent_field`` rows.
+    the field-level class after both, and ``empty_lists`` the empty required
+    list after that; serving enables both, the oracle generator neither.
     """
     if skip_absent_sections:
         return None
@@ -168,7 +201,9 @@ def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[s
         return {"class": "absent_section", "rule_id": "required_sections_present",
                 "section": missing, "field": None, "value": None}
     if gate is None and absent_fields:
-        return check_fields(policy_id, projection)
+        gate = check_fields(policy_id, projection)
+    if gate is None and empty_lists:
+        gate = check_lists(policy_id, projection)
     return gate
 
 
@@ -176,9 +211,19 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
                       named_limitations: bool = True) -> dict[str, Any]:
     """Render the pack verdict; serving also names each unavailable input.
 
+    An empty required list is the oracle's not-met shape: confirmed false citing
+    every section, no limitation, the baseline-review recommendation.
+
     The named limitations are assessment-contract extensions, not new pack
     vocabulary. Offline scoring compares the original pack response vocabulary.
     """
+    if detail["class"] == "empty_required_list":
+        return {"claims": [
+            {"id": "requirement_met", "status": "confirmed", "value": False,
+             "evidence_ids": ["e0", *(f"e{index + 1}" for index in range(len(sections)))]},
+            {"id": "policy_criticality", "status": "confirmed", "value": policy_item["criticality"],
+             "evidence_ids": ["e0"]},
+        ], "limitations": [], "recommendations": ["review_policy_against_baseline_text"]}
     closed = detail["class"] == "closed_gate"
     refs = [f"e{index + 1}" for index, section in enumerate(sections)
             if closed or section in detail["section"]]

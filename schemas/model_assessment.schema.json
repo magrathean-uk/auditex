@@ -638,7 +638,8 @@
           "enum": [
             "closed_gate",
             "absent_section",
-            "absent_field"
+            "absent_field",
+            "empty_required_list"
           ]
         },
         "rule_id": {

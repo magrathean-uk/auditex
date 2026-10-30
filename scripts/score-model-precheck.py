@@ -18,9 +18,12 @@ def main() -> int:
     parser.add_argument("--responses", help="Optional case_id/model_id/response JSONL from the checkpoint scorer.")
     parser.add_argument("--absent-fields", action="store_true",
                         help="Also score the absent_field class (served by auditex model assess; off by default here for comparability).")
+    parser.add_argument("--empty-lists", action="store_true",
+                        help="Also score the empty_required_list class (served by auditex model assess; off by default here for comparability).")
     args = parser.parse_args()
     try:
-        report = evaluate_precheck(args.cases, args.responses, absent_fields=args.absent_fields)
+        report = evaluate_precheck(args.cases, args.responses, absent_fields=args.absent_fields,
+                                    empty_lists=args.empty_lists)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         parser.exit(2, f"Pre-check evaluation failed: {exc}\n")
     print(json.dumps(report, indent=2, allow_nan=False))
