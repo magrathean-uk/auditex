@@ -29,7 +29,13 @@ def test_model_catalogue_is_pinned_and_names_the_trained_product_model(capsys):
     assert product["conversion"]["llama_cpp_revision"] == "620d2225cc436ab0b001e3200e590e3b286ef9ab"
     assert {score["id"] for score in product["scores"]} == {
         "strict_model_alone", "product", "product_twin_free", "product_policy_weighted"}
-    assert "pending" in product["availability"] and "verify" in product["licence"]
+    assert "pending" in product["availability"]
+    assert product["licence"].startswith("Base model: Apache-2.0 (verified on the mistralai/Ministral-3-8B-Instruct-2512-BF16 model card")
+    assert "modified work" in product["licence"] and "CC0 1.0" in product["licence"] and "verify on" not in product["licence"]
+    assert product["adapter"]["archive"] == "results-round5-adapter-ministral3-8b-20261030T0250Z.tar"
+    assert product["adapter"]["sha256"] == "40db5b31a3bff37d4d6d57294174ab2b0c4235ebe1687934079e96efd29f1886"
+    assert product["adapter"]["weights_file"] == "adapter_model.safetensors"
+    assert product["adapter"]["weights_sha256"] == "b477f2b60fe72b29207bac835811590706fc418aa2cbd6aa643465dd174be682"
 
 
 def _catalogue():
@@ -39,6 +45,10 @@ def _catalogue():
 @pytest.mark.parametrize("mutate, message", [
     (lambda d: d["sources"][0].update(sha256="840fb447"), "sha256"),
     (lambda d: d["sources"][0]["adapter"].update(sha256="B477" * 16), "adapter"),
+    (lambda d: d["sources"][0]["adapter"].pop("weights_sha256"), "adapter"),
+    (lambda d: d["sources"][0]["adapter"].update(weights_sha256="b477f2b6"), "adapter"),
+    (lambda d: d["sources"][0]["adapter"].update(weights_file=""), "adapter"),
+    (lambda d: d["sources"][0]["adapter"].update(sha256=d["sources"][0]["adapter"]["weights_sha256"]), "weights_sha256"),
     (lambda d: d["sources"][0]["base"].update(revision="main"), "base"),
     (lambda d: d["sources"][0].pop("availability"), "missing availability"),
     (lambda d: d["sources"][0]["parts"]["files"].pop(), "parts"),

@@ -1,6 +1,6 @@
 {
   "schema_version": "2026-10-30",
-  "verified_at": "2026-10-30",
+  "verified_at": "2026-10-31",
   "tenant_access": false,
   "external_execution": true,
   "inference_executed": true,
@@ -46,7 +46,9 @@
         "checkpoint": "checkpoint-500 of 537 (one epoch, lr 5e-05 cosine, seed 42)",
         "selection": "Validation ranking: applicability errors first, then strict count within the noise band; never by eval loss",
         "archive": "results-round5-adapter-ministral3-8b-20261030T0250Z.tar",
-        "sha256": "b477f2b60fe72b29207bac835811590706fc418aa2cbd6aa643465dd174be682"
+        "sha256": "40db5b31a3bff37d4d6d57294174ab2b0c4235ebe1687934079e96efd29f1886",
+        "weights_file": "adapter_model.safetensors",
+        "weights_sha256": "b477f2b60fe72b29207bac835811590706fc418aa2cbd6aa643465dd174be682"
       },
       "conversion": {
         "tool": "llama.cpp",
@@ -141,7 +143,7 @@
         "Guesses 'not applicable' when SharePoint SharingCapability is absent; field-level absence inside a collected section abstains correctly only 4/20",
         "Real tenant without Conditional Access policies: two false 'met' before the empty_required_list rule class took those rows"
       ],
-      "licence": "Base model licence: verify on the mistralai/Ministral-3-8B-Instruct-2512-BF16 model card before redistribution (not confirmed offline). Training labels derive from ScubaGear, CC0 1.0.",
+      "licence": "Base model: Apache-2.0 (verified on the mistralai/Ministral-3-8B-Instruct-2512-BF16 model card at the pinned revision f6fae9795746f63c9be8344932f01275f3c63734, 31 October 2026). The merged and quantised weights are distributed under Apache-2.0 as a modified work. Training labels derive from ScubaGear, CC0 1.0.",
       "availability": "Public Hugging Face repository proposed, upload pending; revision is null until it is published. Internal copy: Civo s3://gmodels/auditex/jupiter-results/gguf-round5-8b-ckpt500/ (two parts and SHA256SUMS). Re-pick the base model in January 2027."
     },
     {

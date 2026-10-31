@@ -61,13 +61,22 @@ bundle gains the `privileged_roles` artefact, both additive.
   the `product_model` entry `auditex-ministral3-8b-scuba-v10`: Ministral 3 8B Instruct 2512 (BF16 base at
   `f6fae979...`) with LoRA checkpoint-500 trained on oracle pack v10, merged and quantised Q5_K_M with llama.cpp
   `620d2225...` (`model-Q5_K_M.gguf`, 6,058,747,104 bytes, sha256 `840fb447...`, two `split` parts with their
-  hashes), the adapter hash, training pack and card, the validated serving flags and request, four scores with their
+  hashes), the adapter archive and weights hashes, training pack and card, the validated serving flags and request, four scores with their
   definitions (product 419/435, model alone 403/435, twin-free 280/298, per-policy 88.6 %), the known weak classes, a
-  licence to verify on the base model card and its availability (public Hugging Face repository
+  licence (Apache-2.0, read on the base model card; see "Adapter hash pairing and licence" below) and its availability (public Hugging Face repository
   `magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF` pending upload, `revision` null until then). The catalogue's
   `inference_executed`, `training_executed` and `external_execution` flags are now true. `auditex model sources`
   validates the catalogue and fails closed: unique ids, 64-hex hashes, 40-hex revisions for every other entry,
   exactly one product model with all required keys, parts that sum to the artefact, scores as counts or rates.
+- **Adapter hash pairing and licence.** The catalogue's `adapter` block pinned the archive name
+  `results-round5-adapter-ministral3-8b-20261030T0250Z.tar` with the hash of the weights file inside it. `sha256` is now
+  the archive's (`40db5b31...`) and the new required `weights_file` (`adapter_model.safetensors`) and `weights_sha256`
+  (`b477f2b6...`) pin the checkpoint-500 weights; `auditex model sources` fails closed on a missing or malformed weights
+  hash and on identical archive and weights hashes (the error names both fields). Catalogue `schema_version` stays
+  `2026-10-30` (the entry has never been released). The base model's licence was read on its Hugging Face card at the
+  pinned revision on 31 October 2026: Apache-2.0. The catalogue now records the merged and quantised weights as
+  distributed under Apache-2.0 as a modified work, with the training labels CC0 1.0; the licence is no longer "to be
+  verified". The Hugging Face upload is still pending.
 - **Serving matches the benchmark protocol more closely.** Requests send `cache_prompt: false` (a 400 rejecting it
   is negotiated away like `response_format`). A reply lost in transit (connection error, timeout, cut-short, empty
   or non-JSON body, no chat-completion choice or assistant text) is now retried once after a 2 s pause and, if lost

@@ -24,7 +24,7 @@ PRODUCT_KEYS = frozenset({
 # Nested objects whose every listed field must be a non-empty string (hash and revision fields are checked again below).
 _TEXT_FIELDS = {
     "base": ("repository", "url", "revision", "backbone"),
-    "adapter": ("method", "checkpoint", "selection", "archive", "sha256"),
+    "adapter": ("method", "checkpoint", "selection", "archive", "sha256", "weights_file", "weights_sha256"),
     "conversion": ("tool", "llama_cpp_revision", "steps", "tokeniser", "chat_template"),
     "training": ("pack_id", "pack", "pack_manifest_sha256", "labels", "dataset_card", "run", "records"),
     "serving": ("runtime", "server_flags", "client", "guide", "protocol_difference"),
@@ -141,8 +141,11 @@ def _product_issues(source: dict[str, Any]) -> list[str]:
                                            for key in ("base", "adapter", "conversion", "training"))
     if "base" not in issues and (not _REVISION.fullmatch(base["revision"]) or not _https_url(base["url"])):
         issues.append("base")
-    if "adapter" not in issues and not _SHA256.fullmatch(adapter["sha256"]):
+    # ``sha256`` pins the adapter archive and ``weights_sha256`` the weights file inside it; one hash cannot be both.
+    if "adapter" not in issues and (not _SHA256.fullmatch(adapter["sha256"]) or not _SHA256.fullmatch(adapter["weights_sha256"])):
         issues.append("adapter")
+    elif "adapter" not in issues and adapter["sha256"] == adapter["weights_sha256"]:
+        issues.append("adapter sha256 (archive) and weights_sha256 (weights file) must differ")
     if "conversion" not in issues and not _REVISION.fullmatch(conversion["llama_cpp_revision"]):
         issues.append("conversion")
     rows = training.get("rows")

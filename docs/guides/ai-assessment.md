@@ -32,7 +32,7 @@ behaviour on a real tenant, not to override rules.
 
 One model ships: **`auditex-ministral3-8b-scuba-v10`**, Ministral 3 8B Instruct with a LoRA adapter trained on the
 Auditex SCuBA oracle pack v10, merged and quantised to `model-Q5_K_M.gguf` (6,058,747,104 bytes). Its full
-provenance (base revision, adapter hash, llama.cpp revision, training pack, scores) is the `product_model` entry of
+provenance (base revision, adapter archive and weights hashes, llama.cpp revision, training pack, scores) is the `product_model` entry of
 `auditex model sources`.
 
 The public Hugging Face repository `magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF` is **pending upload**.
@@ -53,8 +53,9 @@ shasum -a 256 -c SHA256SUMS
 ```
 
 The parts are plain byte splits, not llama.cpp `gguf-split` shards: llama.cpp cannot load them until they are
-joined. The base model's licence governs redistribution; check it on the base model card
-(`mistralai/Ministral-3-8B-Instruct-2512-BF16`) before mirroring the file.
+joined. The base model (`mistralai/Ministral-3-8B-Instruct-2512-BF16`) is Apache-2.0 (read on its model card at the
+pinned revision on 31 October 2026), and the merged, quantised file is distributed under Apache-2.0 as a modified work:
+a mirror keeps the licence text and the base model's notices and says the weights were modified. The training labels are CC0 1.0.
 
 ## Serve it
 

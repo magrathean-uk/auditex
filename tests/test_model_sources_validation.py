@@ -59,6 +59,14 @@ def test_real_catalogue_validates():
     (("url",), "https://example.com:bad/x"),
     (("url",), "https://example.com:70000/x"),
     (("base", "url"), "https://-bad-.example/x"),
+    # The adapter pins the archive (sha256) and the weights file inside it (weights_sha256) separately.
+    (("adapter", "weights_sha256"), None),
+    (("adapter", "weights_sha256"), ""),
+    (("adapter", "weights_sha256"), "b477f2b6"),
+    (("adapter", "weights_sha256"), "B477F2B60FE72B29207BAC835811590706FC418AA2CBD6AA643465DD174BE682"),
+    (("adapter", "weights_file"), None),
+    (("adapter", "weights_file"), "  "),
+    (("adapter", "sha256"), "40db5b31"),
 ])
 def test_null_stray_or_vague_values_are_rejected(path, value):
     payload = catalogue()
@@ -76,3 +84,25 @@ def test_accepted_values_still_pass():
     entry["serving"]["production_request"]["response_format"] = {"type": "text"}
     entry["evaluated_at"] = "2026-02-28"
     validate_model_sources(payload)
+
+
+def test_adapter_weights_hash_is_required_and_must_differ_from_the_archive_hash():
+    payload = catalogue()
+    adapter = product(payload)["adapter"]
+    assert adapter["archive"].endswith(".tar") and adapter["weights_file"] == "adapter_model.safetensors"
+    assert adapter["sha256"] == "40db5b31a3bff37d4d6d57294174ab2b0c4235ebe1687934079e96efd29f1886"
+    assert adapter["weights_sha256"] == "b477f2b60fe72b29207bac835811590706fc418aa2cbd6aa643465dd174be682"
+    del adapter["weights_sha256"]
+    with pytest.raises(ValueError, match="adapter"):
+        validate_model_sources(payload)
+    del adapter["weights_file"]
+    with pytest.raises(ValueError, match="adapter"):
+        validate_model_sources(payload)
+
+
+def test_equal_archive_and_weights_hashes_are_refused_naming_both_fields():
+    payload = catalogue()
+    adapter = product(payload)["adapter"]
+    adapter["sha256"] = adapter["weights_sha256"]
+    with pytest.raises(ValueError, match=r"sha256 \(archive\) and weights_sha256 \(weights file\) must differ"):
+        validate_model_sources(payload)
