@@ -62,6 +62,8 @@ def _require(condition: bool, field: str = "$", kind: str = "unseen_shape") -> N
 
 # A field name recorded under ``ignored_fields``: an identifier, else masked, since an arbitrary key can be a person's name.
 _FIELD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
+# A Conditional Access policy's identifier, as recorded against its dropped content; anything else is its list position.
+_POLICY_ID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
 
 
 def _annotation(key: Any) -> bool:
@@ -71,6 +73,18 @@ def _annotation(key: Any) -> bool:
 
 def _empty(value: Any) -> bool:
     return value is None or isinstance(value, (str, list, dict)) and not value
+
+
+def _blank(value: Any) -> bool:
+    """No content at any depth: null, an empty string, list or object, or a container holding only such values.
+
+    ``False`` and ``0`` are values (a disabled session control still says something), so they are not blank.
+    """
+    if isinstance(value, dict):
+        return all(_blank(child) for child in value.values())
+    if isinstance(value, list):
+        return all(_blank(child) for child in value)
+    return value is None or value == "" and isinstance(value, str)
 
 
 def _collector_error(marker: dict[str, Any]) -> Unavailable:
@@ -282,6 +296,8 @@ class Bundle:
         self.sizes: dict[str, int] = {}
         self.ignored: set[str] = set()
         self.ignored_fields: set[str] = set()
+        self.dropped_conditions: set[str] = set()
+        self.null_lists: set[str] = set()
 
     def known_fields(self, row: Any, allowed: set[str], path: str = "") -> None:
         """Require an object; record its fields the training shape does not know, which are never projected.
@@ -730,15 +746,19 @@ def _ca(bundle: Bundle) -> Any:
                                                        "ExternalTenants": {"MembershipKind": _text}}}},
         "GrantControls": {"BuiltInControls": _strings, "Operator": _nullable_text,
                           "AuthenticationStrength": {"AllowedCombinations": lambda v: v is None or _strings(v)}}}
-    unsupported = set()
     # Only schema field names enter diagnostics; unknown keys can themselves contain PII. A known restriction withholds
-    # whatever its value. An unrecognised field is ignored (and recorded) when it is empty or outside the conditions and
-    # controls; a populated one inside them can narrow who or what the policy covers, so it still withholds.
+    # when it carries a value (see ``_blank``): a null, empty or all-empty one restricts nothing, so it is read as absent
+    # whatever the Graph serialisation of an unset condition is. An unrecognised field is ignored (and recorded) when it
+    # is empty or outside the conditions and controls; a populated one inside them can narrow who or what the policy
+    # covers, so it still withholds. Only a policy in the ``enabled`` state is read by any pinned ScubaGear rule
+    # (AADConfig.rego: every ``*BaseCheck`` requires ``policy.State == "enabled"``), so a disabled or report-only policy
+    # cannot change a verdict: its unsupported keys are dropped and recorded under ``dropped_conditions``, not withheld.
     restriction_names = {"locations", "devices", "platforms", "sessionControls", "includeGroups",
                          "includeGuestsOrExternalUsers", "authenticationContextClassReferences",
                          "servicePrincipalRiskLevels", "customAuthenticationFactors", "termsOfUse",
                          "applicationFilter", "includeServicePrincipals", "excludeServicePrincipals",
                          "servicePrincipalFilter", "id", "displayName"}
+    found: set[str] = set()
     def convert(row: Any, fields: dict, path: str = "", field_path: str = "") -> dict:
         _require(isinstance(row, dict), field_path or "$", "invalid_type")
         output = {}
@@ -749,8 +769,10 @@ def _ca(bundle: Bundle) -> Any:
             if target not in fields:
                 # The policy's own ``id`` (like createdDateTime and templateId) is recorded; a nested one is a restriction.
                 restricted = key in restriction_names and (path or key != "id")
-                if restricted or path and value not in (None, [], {}, ""):
-                    unsupported.add(path + (key if restricted else "unrecognisedField"))
+                if restricted and not _blank(value):
+                    found.add(path + key)
+                elif not restricted and path and value not in (None, [], {}, ""):
+                    found.add(path + "unrecognisedField")
                 else:
                     bundle.known_fields({key: value}, set(), path.rstrip("."))
                 continue
@@ -761,12 +783,26 @@ def _ca(bundle: Bundle) -> Any:
             if isinstance(check, dict):
                 output[target] = None if value is None else convert(value, check, path + key + ".", field)
             else:
+                if value is None and check is _strings:
+                    # Count, ContainsValue and ConvertToSet in the pinned Rego (utils/KeyFunctions.rego) read null as an empty
+                    # list, and so does every ``in`` over these fields; Graph documents no nullability for a collection.
+                    value = []
+                    bundle.null_lists.add(field)
                 _require(check(value), field, "invalid_type")
                 if target == "State":
                     _enum(value, {"enabled", "disabled", "enabledForReportingButNotEnforced"}, "State")
                 output[target] = deepcopy(value)
         return output
-    result = [convert(row, spec) for row in bundle.operation("conditional_access", "conditionalAccessPolicies")]
+    result, unsupported = [], set()
+    for index, row in enumerate(bundle.operation("conditional_access", "conditionalAccessPolicies")):
+        found.clear()
+        result.append(convert(row, spec))
+        if result[-1].get("State") not in {"disabled", "enabledForReportingButNotEnforced"}:
+            unsupported |= found
+        else:
+            identifier = row.get("id") if isinstance(row.get("id"), str) else ""
+            reference = identifier if _POLICY_ID.fullmatch(identifier) else f"policy{index}"
+            bundle.dropped_conditions.update(f"{reference}:{name}" for name in found)
     if unsupported:
         raise Unavailable(unsupported=sorted(unsupported), field=sorted(unsupported)[0], kind="unexpected_field")
     return result
@@ -1418,6 +1454,11 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         else:
             result[section] = value
             report[section] = {"status": "projected", "reason": None, "source": list(bundle.sources)}
+            # What a Conditional Access projection dropped or normalised; a withheld section has no complete record.
+            if bundle.dropped_conditions:
+                report[section]["dropped_conditions"] = sorted(bundle.dropped_conditions)
+            if bundle.null_lists:
+                report[section]["null_lists_read_as_empty"] = sorted(bundle.null_lists)
             if section == "scuba_config":
                 # Policy views reach prompts only once the section itself passed the gates above; a withheld
                 # section leaves every reader on the not_collected marker the report describes.
@@ -1436,6 +1477,11 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         if value != NOT_COLLECTED and _oversize(annotate_enum_names(section, value), max_items, max_chars):
             result[section] = dict(NOT_COLLECTED)
             report[section].update(status="not_collected", reason="oversize")
+            # A withheld section carries no Conditional Access record (output-contract.md; the validator rejects one).
+            # scuba_config's ``synthesis`` cannot get here: its value is the constant, string-free base object, which
+            # redaction cannot grow and enum annotation does not touch, so the check above already passed it.
+            report[section].pop("dropped_conditions", None)
+            report[section].pop("null_lists_read_as_empty", None)
     result.report = {"schema_version": PROJECTION_VERSION, "sections": report, "redaction": redaction,
                      "bounds": bounds}
     return result

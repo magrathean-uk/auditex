@@ -188,6 +188,10 @@ def validate_assessment(payload: Any) -> None:
             ignored_fields = detail.get("ignored_fields", [])
             if not _sorted_unique(ignored_fields):
                 raise ValueError("Unsorted ignored projection fields")
+            for name in ("dropped_conditions", "null_lists_read_as_empty"):
+                if name in detail and (section != "conditional_access_policies" or detail["status"] != "projected"
+                                       or not _sorted_unique(detail[name])):
+                    raise ValueError("Inconsistent projection Conditional Access record")
             diagnostic = detail.get("detail")
             if detail["reason"] == "collector_error":
                 # A failed read names its cause: the collector's error class, and the operation when known.

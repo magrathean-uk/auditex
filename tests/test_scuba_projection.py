@@ -543,6 +543,153 @@ def test_record_status_does_not_hide_an_envelope_error(complete_bundle):
         'error_class': 'unclassified', 'operation': 'identity_governance.roleAssignmentSchedules'}
 
 
+POLICY_A, POLICY_B = '0a1b2c3d-1111-4222-8333-444455556666', '0a1b2c3d-1111-4222-8333-777788889999'
+MANAGED_SESSION = {'signInFrequency': {'isEnabled': True, 'type': 'hours', 'value': 4, 'frequencyInterval': 'timeBased'},
+                   'persistentBrowser': None}
+
+
+def ca_section(root, rows):
+    operation(root, 'conditional_access', 'conditionalAccessPolicies', rows)
+    p = project_run(root, redact=False)
+    return p['conditional_access_policies'], p.report['sections']['conditional_access_policies']
+
+
+def ca_row(set_at=(), *, state='enabled', pid=None):
+    row = graph({**CA, 'State': state})
+    if pid:
+        row['id'] = pid
+    for path, value in set_at:
+        target = row
+        for key in path[:-1]:
+            target = target.setdefault(key, {})
+        target[path[-1]] = value
+    return row
+
+
+BLANK = [None, {}, [], '', {'applicationEnforcedRestrictions': None, 'signInFrequency': {'isEnabled': None}}]
+RESTRICTIONS = [('sessionControls',), ('conditions', 'platforms'), ('conditions', 'locations'), ('conditions', 'devices'),
+                ('conditions', 'users', 'includeGroups'), ('conditions', 'applications', 'applicationFilter'),
+                ('conditions', 'users', 'includeGuestsOrExternalUsers')]
+
+
+@pytest.mark.parametrize('path', RESTRICTIONS, ids='.'.join)
+@pytest.mark.parametrize('value', BLANK, ids=lambda v: json.dumps(v)[:20])
+def test_ca_null_or_empty_restriction_is_read_as_absent(complete_bundle, path, value):
+    section, report = ca_section(complete_bundle, [ca_row([(path, value)])])
+    assert section == [CA] and report['status'] == 'projected' and 'unsupported_conditions' not in report
+    assert '.'.join(path) in report['ignored_fields']
+
+
+@pytest.mark.parametrize('path', RESTRICTIONS, ids='.'.join)
+@pytest.mark.parametrize('value', [{'include': ['restricted']}, ['x'], 'x', {'signInFrequency': {'isEnabled': False}}], ids=str)
+def test_ca_populated_restriction_on_an_enabled_policy_still_withholds(complete_bundle, path, value):
+    section, report = ca_section(complete_bundle, [ca_row(), ca_row([(path, value)], pid=POLICY_A)])
+    assert section == NOT_COLLECTED and report['reason'] == 'incomplete_shape'
+    assert report['unsupported_conditions'] == ['.'.join(path)] and 'dropped_conditions' not in report
+
+
+@pytest.mark.parametrize('state', ['disabled', 'enabledForReportingButNotEnforced'])
+def test_ca_policy_that_is_not_enabled_keeps_its_state_and_drops_unsupported_keys(complete_bundle, state):
+    # AADConfig.rego: every Conditional Access base check requires State == "enabled", so no rule counts this policy.
+    managed = ca_row([(('sessionControls',), MANAGED_SESSION), (('conditions', 'locations'), {'includeLocations': ['All']}),
+                      (('conditions', 'newCondition'), {'mode': 'x'})], state=state, pid=POLICY_A)
+    anonymous = ca_row([(('conditions', 'platforms'), {'includePlatforms': ['iOS']})], state=state)
+    section, report = ca_section(complete_bundle, [managed, anonymous])
+    assert section == [{**CA, 'State': state}, {**CA, 'State': state}] and report['status'] == 'projected'
+    assert report['dropped_conditions'] == sorted([
+        'policy1:conditions.platforms', f'{POLICY_A}:conditions.locations', f'{POLICY_A}:conditions.unrecognisedField',
+        f'{POLICY_A}:sessionControls'])
+    assert 'unsupported_conditions' not in report
+
+
+def test_ca_microsoft_managed_policy_beside_a_kit_policy_gives_a_collected_section(complete_bundle):
+    managed = ca_row([(('sessionControls',), MANAGED_SESSION)], state='disabled', pid=POLICY_B)
+    managed['displayName'] = 'Microsoft-managed: Multifactor authentication for admins accessing Microsoft Admin Portals'
+    section, report = ca_section(complete_bundle, [ca_row(pid=POLICY_A), managed])
+    assert section == [CA, {**CA, 'State': 'disabled', 'DisplayName': managed['displayName']}]
+    assert report['status'] == 'projected' and report['dropped_conditions'] == [f'{POLICY_B}:sessionControls']
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    validate_assessment(result)
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    assert result['projection']['sections']['conditional_access_policies']['dropped_conditions'] == [
+        f'{POLICY_B}:sessionControls']
+
+
+def test_ca_enabled_policy_still_withholds_beside_a_dropped_one(complete_bundle):
+    disabled = ca_row([(('sessionControls',), MANAGED_SESSION)], state='disabled', pid=POLICY_A)
+    enabled = ca_row([(('conditions', 'platforms'), {'includePlatforms': ['iOS']})], pid=POLICY_B)
+    section, report = ca_section(complete_bundle, [disabled, enabled])
+    assert section == NOT_COLLECTED and report['unsupported_conditions'] == ['conditions.platforms']
+    assert 'dropped_conditions' not in report
+
+
+def test_ca_invalid_state_of_a_policy_that_carries_a_restriction_still_withholds(complete_bundle):
+    section, report = ca_section(complete_bundle, [ca_row([(('sessionControls',), MANAGED_SESSION)], state='unknown')])
+    assert section == NOT_COLLECTED and report['detail'] == {'field': 'State', 'kind': 'unseen_enum_value'}
+
+
+def test_ca_null_list_field_is_read_as_empty_and_recorded(complete_bundle):
+    # Count(null) is 0, ContainsValue(null, _) is false and ConvertToSet(null) is set() in utils/KeyFunctions.rego; every
+    # other read of these fields is an `in`, which is false for null as for []. Graph documents no nullability either way.
+    row = ca_row([(('conditions', 'users', 'excludeRoles'), None), (('conditions', 'applications', 'excludeApplications'), None)])
+    section, report = ca_section(complete_bundle, [row])
+    assert section == [CA] and report['null_lists_read_as_empty'] == [
+        'Conditions.Applications.ExcludeApplications', 'Conditions.Users.ExcludeRoles']
+    # The projected value still has to be a shape the pack holds: a null that reads as an unseen empty list withholds.
+    section, report = ca_section(complete_bundle, [ca_row([(('conditions', 'users', 'includeUsers'), None)])])
+    assert section == NOT_COLLECTED and report['detail'] == {'field': '$', 'kind': 'unseen_shape'}
+    assert 'null_lists_read_as_empty' not in report
+    # Null on a scalar or an object-valued required field is no list: it is not read as empty.
+    section, report = ca_section(complete_bundle, [ca_row([(('displayName',), None)])])
+    assert section == NOT_COLLECTED and report['detail'] == {'field': 'DisplayName', 'kind': 'invalid_type'}
+
+
+def test_ca_section_withheld_oversize_after_redaction_carries_no_record_keys(complete_bundle):
+    # Redaction grows a short email (a@b.cc -> ***@b.cc) by two characters but shrinks the fixture's longer ExcludeUsers
+    # address, so each policy name holds ten of them for a net growth; a section sitting exactly on the bound passes the
+    # first size check and fails the second, and the record keys of a projected section must not outlive that flip.
+    dropped = ca_row([(('sessionControls',), MANAGED_SESSION)], state='disabled', pid=POLICY_A)
+    dropped['displayName'] = ' '.join(['a@b.cc'] * 10)
+    kept = ca_row([(('conditions', 'users', 'excludeRoles'), None)], pid=POLICY_B)
+    kept['displayName'] = ' '.join(['a@b.cc'] * 10)
+    operation(complete_bundle, 'conditional_access', 'conditionalAccessPolicies', [dropped, kept])
+    bound = len(json.dumps(project_run(complete_bundle, redact=False)['conditional_access_policies'],
+                           sort_keys=True, separators=(',', ':'), ensure_ascii=False))
+    projected = project_run(complete_bundle, redact=False, max_chars=bound)
+    assert projected.report['sections']['conditional_access_policies']['status'] == 'projected'
+    assert 'dropped_conditions' in projected.report['sections']['conditional_access_policies']
+    assert 'null_lists_read_as_empty' in projected.report['sections']['conditional_access_policies']
+    p = project_run(complete_bundle, max_chars=bound)
+    report = p.report['sections']['conditional_access_policies']
+    assert p['conditional_access_policies'] == NOT_COLLECTED
+    assert report['status'] == 'not_collected' and report['reason'] == 'oversize'
+    assert 'dropped_conditions' not in report and 'null_lists_read_as_empty' not in report
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'],
+                        projection_max_chars=bound)
+    validate_assessment(result)
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+
+
+@pytest.mark.parametrize('name,value', [('dropped_conditions', [f'{POLICY_A}:sessionControls']),
+                                        ('null_lists_read_as_empty', ['Conditions.Users.ExcludeRoles'])])
+def test_ca_record_keys_validate(complete_bundle, name, value):
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    sections = result['projection']['sections']
+    sections['conditional_access_policies'][name] = value
+    validate_assessment(result)
+    sections['conditional_access_policies'][name] = value[:] * 2
+    with pytest.raises(ValueError):
+        validate_assessment(result)
+    sections['conditional_access_policies'][name] = value
+    sections['service_plans'][name] = value
+    with pytest.raises(ValueError):
+        validate_assessment(result)
+    del sections['service_plans'][name]
+    sections['conditional_access_policies'][name] = [PERSON]
+    with pytest.raises(ValueError):
+        validate_assessment(result)
+
+
 @pytest.mark.parametrize('condition', ['locations', 'devices', 'platforms'])
 def test_ca_unsupported_scope_withholds_entire_section_and_names_condition(complete_bundle, condition):
     row = graph(CA)

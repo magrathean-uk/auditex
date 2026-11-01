@@ -13,6 +13,18 @@ MCP behaviour is unchanged. Audit collection is not: the `identity_governance` c
 gains two GET-only reads (the PIM role policies, "Collection (1.2.2.dev5)" below) and the
 bundle gains the `privileged_roles` artefact, both additive.
 
+### Conditional Access projection
+
+- **The Conditional Access section is withheld only for restrictions that restrict.** `auditex.scuba_projection` withheld the whole
+  `conditional_access_policies` section whenever a restriction key (`sessionControls`, `locations`, `platforms`, `devices` and the
+  rest) was present, whatever its value, and never used a policy's `State`. A null, empty or all-empty restriction is now read as
+  absent, as `docs/reference/output-contract.md` always said. A restriction with a value withholds only when its policy is
+  `enabled`: every pinned ScubaGear Conditional Access rule requires `policy.State == "enabled"` (`AADConfig.rego`), so a disabled or
+  report-only policy (a Microsoft-managed policy that was turned Off, which cannot be deleted) stays in the projection with its state
+  and its dropped keys are listed as `dropped_conditions` (`<policy id>:<path>`). A schema list field that Graph returns as `null`
+  is read as `[]` (the pinned Rego does) and listed as `null_lists_read_as_empty`. Both keys are optional additions to the
+  `2026-10-29` assessment schema; the whole-shape gate still applies.
+
 ### Collection (1.2.2.dev5)
 
 - **PIM role policy collection (new reads, no new required scope).** The `identity_governance` collector reads the PIM role

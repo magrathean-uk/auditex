@@ -1049,6 +1049,24 @@
           },
           "uniqueItems": true
         },
+        "dropped_conditions": {
+          "type": "array",
+          "description": "Conditional Access only: conditions and controls dropped from a policy that is not enabled, as <policy id>:<field path> (the id is the policy's GUID, else policy<position>), sorted. The pinned ScubaGear rules read only enabled policies, so such a policy stays in the projection with its state and does not withhold the section.",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}|policy[0-9]+):[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*$"
+          },
+          "uniqueItems": true
+        },
+        "null_lists_read_as_empty": {
+          "type": "array",
+          "description": "Conditional Access only: list fields (ProviderExport spelling) that Graph returned as null and the projection read as an empty list, sorted. The pinned Rego reads a null list as empty.",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$"
+          },
+          "uniqueItems": true
+        },
         "synthesis": {
           "type": "object",
           "description": "Present on scuba_config only: the section is ScubaGear's operator configuration, synthesised rather than read from the tenant. policies gives each reading policy's outcome; a policy that is not projected sees the not-collected marker.",
