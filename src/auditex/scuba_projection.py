@@ -1332,6 +1332,19 @@ def _dns(bundle: Bundle, section: str, manifest: dict[str, Any]) -> Any:
     return result
 
 
+def _user_entries(users: Any) -> None:
+    """The fields ``_redact`` reads from every privileged user, held by each entry. The pack admits a ``User<n>`` map
+    that mixes an entry without ``OnPremisesImmutableId`` and one with a null (a training witness); ``_users`` never emits
+    one, and a missing key is not a null to the Rego, so such a map withholds rather than projects."""
+    _require(isinstance(users, dict), "$", "invalid_type")
+    for name, item in users.items():
+        _require(isinstance(item, dict), name, "invalid_type")
+        _require("DisplayName" in item, name + ".DisplayName", "missing_field")
+        _require(_text(item["DisplayName"]), name + ".DisplayName", "invalid_type")
+        _require("OnPremisesImmutableId" in item, name + ".OnPremisesImmutableId", "missing_field")
+        _require(_nullable_text(item["OnPremisesImmutableId"]), name + ".OnPremisesImmutableId", "invalid_type")
+
+
 def _oversize(value: Any, max_items: int, max_chars: int) -> bool:
     def exceeds(item: Any) -> bool:
         if isinstance(item, list):
@@ -1439,6 +1452,8 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             if value in ([], {}):
                 _require(bundle.complete)
             _seen_shape(section, value)
+            if section == "privileged_users":
+                _user_entries(value)
             if _oversize(value, max_items, max_chars):
                 raise Unavailable("oversize")
         except (Unavailable, ValueError, TypeError, KeyError, OverflowError) as exc:

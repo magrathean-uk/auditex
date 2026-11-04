@@ -2269,3 +2269,51 @@ def test_text_validators_reject_lone_surrogates():
     assert _text("Global Administrator") and _nullable_text(None) and _strings(["a", "b"])
     assert not _text("x\ud800y") and not _nullable_text("\udfff") and not _strings(["ok", "\ud800"])
 
+
+def _gate_admits_users(users):
+    from auditex import scuba_projection as sp
+    return sha256(sp._json(sp._shape(users)).encode()).hexdigest() in sp.PACK_SHAPE_DIGESTS['privileged_users']
+
+
+_ROLES = ['Global Administrator']
+_USER_MIXED = {
+    'User1': {'DisplayName': PERSON, 'roles': _ROLES},
+    'User2': {'DisplayName': 'Second Person', 'OnPremisesImmutableId': None, 'roles': _ROLES}}
+
+
+def test_the_gate_admits_a_users_value_with_one_entry_missing_the_immutable_id_key():
+    # Shape digests record the distinct entry shapes, so a mix of key-less and null entries is a seen shape.
+    # Premise pin: delete with the 44e39708 digest.
+    assert _gate_admits_users(_USER_MIXED)
+
+
+@pytest.mark.parametrize('redact', [True, False])
+def test_a_gate_admitted_users_entry_missing_the_immutable_id_key_withholds_instead_of_crashing(
+        complete_bundle, monkeypatch, redact):
+    from auditex import scuba_projection as sp
+    monkeypatch.setattr(sp, '_users', lambda bundle: {k: dict(v) for k, v in _USER_MIXED.items()})
+    p = project_run(complete_bundle, redact=redact)
+    section = p.report['sections']['privileged_users']
+    assert p['privileged_users'] == NOT_COLLECTED
+    assert section['status'] == 'not_collected' and section['reason'] == 'incomplete_shape'
+    assert section['detail'] == {'field': 'User1.OnPremisesImmutableId', 'kind': 'missing_field'}
+    assert PERSON not in canonical(p) and 'Second Person' not in canonical(p)
+    # Sections that do not depend on the user list are unaffected.
+    assert p.report['sections']['service_plans']['status'] == 'projected'
+
+
+@pytest.mark.parametrize('users', [
+    {'User1': {'DisplayName': PERSON, 'OnPremisesImmutableId': None, 'roles': _ROLES}},
+    {'User1': {'DisplayName': PERSON, 'OnPremisesImmutableId': 'immutable', 'roles': _ROLES}},
+    {'User1': {'DisplayName': PERSON, 'OnPremisesImmutableId': None, 'roles': _ROLES},
+     'User2': {'DisplayName': 'Second Person', 'OnPremisesImmutableId': 'immutable', 'roles': _ROLES}}])
+def test_neighbouring_valid_users_shapes_still_project_and_redact(complete_bundle, monkeypatch, users):
+    from auditex import scuba_projection as sp
+    monkeypatch.setattr(sp, '_users', lambda bundle: {k: dict(v) for k, v in users.items()})
+    p = project_run(complete_bundle)
+    assert p.report['sections']['privileged_users']['status'] == 'projected'
+    assert p.report['redaction']['user_display_names'] == len(users)
+    assert p.report['redaction']['immutable_ids'] == sum(u['OnPremisesImmutableId'] is not None for u in users.values())
+    assert all(u['DisplayName'].startswith('User ') and u['DisplayName'] != PERSON for u in p['privileged_users'].values())
+    assert all(u['OnPremisesImmutableId'] is None or u['OnPremisesImmutableId'].startswith('Id ')
+               for u in p['privileged_users'].values()) and 'immutable' not in canonical(p)
