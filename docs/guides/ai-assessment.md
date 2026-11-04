@@ -141,11 +141,11 @@ ScubaGear's Rego unit-test fixtures and labelled by running that Rego (oracle la
 | --- | --- |
 | Product, as `auditex model assess` answers (173 rule rows, all correct, plus the model) | 419/435 (96.3 %) |
 | Model alone on every row | 403/435 (92.6 %) |
-| Product on rows with no training twin (no train row with the same Rego-read evidence) | 280/298 (94.0 %) |
-| Product, each of the 12 policies weighted equally | 88.6 % |
+| Product on rows with no training twin (no train row with the same Rego-read evidence) | 282/298 (94.6 %) |
+| Product, each of the 12 policies weighted equally | 89.1 % |
 
-The twin-free and per-policy figures were computed before the `absent_field` and `empty_required_list` classes
-(product 417/435 then) and not recomputed. The same test set also chose between candidate builds, so all figures
+The twin-free and per-policy figures were recomputed on 4 November 2026 on the 419/435 scoring, with all four rule
+classes (earlier figures: 280/298 and 88.6 % on the 417/435 scoring). The same test set also chose between candidate builds, so all figures
 are mildly optimistic. One policy, MS.AAD.9.1v1, is 171 of the 435 rows. Synthetic cases say nothing direct about
 real tenants, which are noisier and wider; on the one real tenant assessed so far, before the `empty_required_list`
 class existed, the model answered "met" for two Conditional Access policies in a tenant that had none.

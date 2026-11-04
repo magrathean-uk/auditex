@@ -74,7 +74,7 @@ bundle gains the `privileged_roles` artefact, both additive.
   `f6fae979...`) with LoRA checkpoint-500 trained on oracle pack v10, merged and quantised Q5_K_M with llama.cpp
   `620d2225...` (`model-Q5_K_M.gguf`, 6,058,747,104 bytes, sha256 `840fb447...`, two `split` parts with their
   hashes), the adapter archive and weights hashes, training pack and card, the validated serving flags and request, four scores with their
-  definitions (product 419/435, model alone 403/435, twin-free 280/298, per-policy 88.6 %), the known weak classes, a
+  definitions (product 419/435, model alone 403/435, twin-free 282/298, per-policy 89.1 %), the known weak classes, a
   licence (Apache-2.0, read on the base model card; see "Adapter hash pairing and licence" below) and its availability (public Hugging Face repository
   `magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF` pending upload, `revision` null until then). The catalogue's
   `inference_executed`, `training_executed` and `external_execution` flags are now true. `auditex model sources`

@@ -127,14 +127,14 @@
         },
         {
           "id": "product_twin_free",
-          "correct": 280,
+          "correct": 282,
           "total": 298,
-          "definition": "Product score on test rows with no training twin (no train row with the same Rego-read evidence key); computed on the 417/435 product scoring before the absent_field and empty_required_list classes, not recomputed."
+          "definition": "Product score on test rows with no training twin (no train row with the same Rego-read evidence key); recomputed on 4 November 2026 on the 419/435 product scoring with all four rule classes (earlier figure 280/298 on the 417/435 scoring)."
         },
         {
           "id": "product_policy_weighted",
-          "rate": 0.886,
-          "definition": "Mean of the 12 per-policy product rates, each policy counting once (MS.AAD.9.1v1 alone is 171 of the 435 rows); computed on the 417/435 scoring."
+          "rate": 0.891,
+          "definition": "Mean of the 12 per-policy product rates, each policy counting once (MS.AAD.9.1v1 alone is 171 of the 435 rows); recomputed on 4 November 2026 on the 419/435 scoring with all four rule classes (earlier figure 0.886 on the 417/435 scoring)."
         }
       ],
       "known_weaknesses": [
