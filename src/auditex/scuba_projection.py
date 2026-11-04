@@ -139,6 +139,31 @@ def _nullable_text(value: Any) -> bool:
     return value is None or _clean_text(value)
 
 
+# Deeper than any collector writes (examples and fixtures reach 13 container levels, 14 counting a leaf). The checks
+# below recurse, so depth is bounded where a file is parsed, and a deeper value withholds like a malformed one.
+_MAX_DEPTH = 64
+
+
+def _shallow(value: Any) -> bool:
+    """True when ``value`` nests no deeper than ``_MAX_DEPTH``; iterative, so it never depends on the stack.
+
+    The stack holds one iterator per open container, so memory is bounded by the depth, not by the size of the file.
+    """
+    if not isinstance(value, (dict, list)):
+        return True
+    stack = [iter(value.values() if isinstance(value, dict) else value)]
+    while stack:
+        for child in stack[-1]:
+            if isinstance(child, (dict, list)):
+                if len(stack) >= _MAX_DEPTH:
+                    return False
+                stack.append(iter(child.values() if isinstance(child, dict) else child))
+                break
+        else:
+            stack.pop()
+    return True
+
+
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result = {}
     for key, value in pairs:
@@ -344,8 +369,9 @@ class Bundle:
             raise _scan_bound("scan_max_bytes")
         try:
             value = json.loads(data, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant)
-        except (OSError, ValueError, UnicodeError):
+        except (OSError, ValueError, UnicodeError, RecursionError):
             raise Unavailable() from None
+        _require(_shallow(value))
         if relative not in self.sources:
             self.sources.append(relative)
         self.sizes[relative] = len(data)
@@ -638,13 +664,15 @@ class Bundle:
                                 continue
                             if count >= self.scan_max_rows:
                                 raise _scan_bound("scan_max_rows")
-                            row = valid(json.loads(line, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant))
+                            row = json.loads(line, object_pairs_hook=_unique_pairs, parse_constant=_invalid_constant)
+                            _require(_shallow(row), "chunk_files")
+                            row = valid(row)
                             count += 1
                             self.scan_rows += 1
                             yield row
                 except Unavailable:
                     raise
-                except (OSError, ValueError, UnicodeError):
+                except (OSError, ValueError, UnicodeError, RecursionError):
                     raise Unavailable(field="chunk_files") from None
         else:
             _require("value" in section, "value", "missing_field")
@@ -1410,9 +1438,16 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
     try:
         manifest = bundle.read("run-manifest.json")
         _require(isinstance(manifest, dict))
+        # The redaction salt is the digest of the canonical manifest; one that cannot be serialised (``1e999``, a lone
+        # surrogate) is unusable, so it takes the same path as an unparseable manifest rather than raising later.
+        try:
+            salt = sha256(_json(manifest).encode()).hexdigest()
+        except (ValueError, UnicodeError, TypeError, RecursionError):
+            raise Unavailable() from None
     except Unavailable as exc:
         manifest_error = None if exc.reason == "missing_artifact" else exc
         manifest = {}
+        salt = sha256(_json(manifest).encode()).hexdigest()
     bundle.manifest = manifest
     catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
     sections = sorted({s for p in catalogue.values() for s in p["sections"]})
@@ -1487,7 +1522,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             report[section]["ignored_failures"] = sorted(bundle.ignored)
         if bundle.ignored_fields:
             report[section]["ignored_fields"] = sorted(bundle.ignored_fields)
-    redaction = _redact(result, sha256(_json(manifest).encode()).hexdigest(), redact)
+    redaction = _redact(result, salt, redact)
     for section, value in result.items():
         if value != NOT_COLLECTED and _oversize(annotate_enum_names(section, value), max_items, max_chars):
             result[section] = dict(NOT_COLLECTED)

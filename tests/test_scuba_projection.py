@@ -1026,6 +1026,127 @@ def test_malformed_manifest_cannot_hide_coverage_failures(complete_bundle):
     assert all(v == NOT_COLLECTED for v in project_run(complete_bundle).values())
 
 
+@pytest.mark.parametrize('raw', [
+    '{"run_id":"synthetic-run","platform":"m365","extra":1e999}',          # float overflow to inf
+    '{"run_id":"synthetic-run","platform":"m365","extra":-1e999}',
+    '{"run_id":"synthetic-run","platform":"m365","extra":"\\ud800"}',        # lone surrogate
+    '{"run_id":"synthetic-run","platform":"m365","\\udc00":1}',              # lone surrogate in a key
+    '{"run_id":"synthetic-run","platform":"m365","extra":[[[1e999]]]}',    # nested
+])
+def test_unserialisable_manifest_withholds_instead_of_raising(complete_bundle, raw):
+    (complete_bundle / 'run-manifest.json').write_text(raw)
+    projection = project_run(complete_bundle)
+    assert all(v == NOT_COLLECTED for v in projection.values())
+    assert projection.report['sections']['tenant_id']['reason'] == 'incomplete_shape'
+    assert projection.report['redaction']['enabled'] is True
+
+
+def test_unserialisable_manifest_withholds_without_redaction(complete_bundle):
+    (complete_bundle / 'run-manifest.json').write_text('{"extra":1e999}')
+    assert all(v == NOT_COLLECTED for v in project_run(complete_bundle, redact=False).values())
+
+
+def test_manifest_nested_beyond_the_parser_depth_is_withheld_not_raised(complete_bundle):
+    (complete_bundle / 'run-manifest.json').write_text('[' * 100000 + ']' * 100000)
+    assert all(v == NOT_COLLECTED for v in project_run(complete_bundle).values())
+
+
+def test_manifest_with_a_huge_integer_is_withheld_not_raised(complete_bundle):
+    # Pin: already withheld at parse (int max str digits); not part of the salt fix.
+    (complete_bundle / 'run-manifest.json').write_text('{"run_id":"x","platform":"m365","n":' + '9' * 5000 + '}')
+    assert all(v == NOT_COLLECTED for v in project_run(complete_bundle).values())
+
+
+def test_manifest_gaps_deeper_than_the_walkers_are_withheld_not_raised(complete_bundle):
+    (complete_bundle / 'run-manifest.json').write_text('{"platform":"m365","coverage_gaps":' + '[' * 1500 + '"a"' + ']' * 1500 + '}')
+    projection = project_run(complete_bundle)
+    assert all(v == NOT_COLLECTED for v in projection.values())
+    assert projection.report['sections']['tenant_id']['reason'] == 'incomplete_shape'
+
+
+def test_deep_raw_envelope_is_withheld_not_raised(complete_bundle):
+    operation(complete_bundle, 'identity', 'other', json.loads('[' * 1500 + ']' * 1500))
+    assert project_run(complete_bundle).report['sections']['privileged_users']['reason'] == 'incomplete_shape'
+
+
+def test_deep_normalised_file_is_withheld_not_raised(complete_bundle):
+    write(complete_bundle, 'normalized/privileged_roles.json', {'records': [json.loads('{"a":' * 1500 + '1' + '}' * 1500)]})
+    assert project_run(complete_bundle).report['sections']['privileged_roles']['reason'] == 'incomplete_shape'
+
+
+def test_deep_coverage_row_is_withheld_not_raised(complete_bundle):
+    write(complete_bundle, 'coverage.json', [{'collector': 'identity', 'name': 'users', 'status': 'ok', 'x': json.loads('[' * 1500 + ']' * 1500)}])
+    projection = project_run(complete_bundle)
+    assert projection.report['sections']['privileged_users']['reason'] == 'incomplete_shape'
+
+
+def test_chunk_row_nested_too_deep_is_withheld_not_raised(complete_bundle):
+    raw = json.loads((complete_bundle / 'raw/identity.json').read_text())
+    raw['users'] = {'status': 'ok', 'chunk_files': ['chunks/identity/users-0.jsonl']}
+    write(complete_bundle, 'raw/identity.json', raw)
+    (complete_bundle / 'chunks/identity').mkdir(parents=True, exist_ok=True)
+    (complete_bundle / 'chunks/identity/users-0.jsonl').write_text('{"id":"a","x":' + '[' * 1500 + ']' * 1500 + '}\n')
+    report = project_run(complete_bundle).report['sections']['privileged_users']
+    assert report['reason'] == 'incomplete_shape' and report['detail']['field'] == 'chunk_files'
+
+
+def test_nested_but_legal_depth_still_projects_identically(complete_bundle):
+    deep = json.loads('[' * 14 + ']' * 14)
+    baseline = dict(project_run(complete_bundle))
+    operation(complete_bundle, 'identity', 'other', deep)
+    write(complete_bundle, 'coverage.json', [{'collector': 'identity', 'name': 'users', 'status': 'ok', 'x': deep}])
+    nested = dict(project_run(complete_bundle))
+    assert nested == baseline and nested['privileged_users'] != NOT_COLLECTED
+
+
+def test_depth_bound_is_exactly_64_containers(complete_bundle):
+    from auditex.scuba_projection import _MAX_DEPTH, _shallow
+    assert _MAX_DEPTH == 64
+    for nest in (lambda n: json.loads('[' * n + ']' * n), lambda n: json.loads('{"a":' * (n - 1) + '{}' + '}' * (n - 1))):
+        assert _shallow(nest(64)) and not _shallow(nest(65))
+    # raw/identity.json wraps the operation value in 2 containers: 62 inner levels is 64 in the file, 63 is 65.
+    operation(complete_bundle, 'identity', 'other', json.loads('[' * 62 + ']' * 62))
+    assert project_run(complete_bundle)['privileged_users'] != NOT_COLLECTED
+    operation(complete_bundle, 'identity', 'other', json.loads('[' * 63 + ']' * 63))
+    assert project_run(complete_bundle).report['sections']['privileged_users']['reason'] == 'incomplete_shape'
+
+
+def test_manifest_depth_bound_is_exactly_64_containers(complete_bundle):
+    manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
+    # The manifest root is level 1, so 63 nested levels under an unrelated key reach 64 and 64 levels reach 65.
+    write(complete_bundle, 'run-manifest.json', {**manifest, 'extra': json.loads('[' * 63 + ']' * 63)})
+    assert project_run(complete_bundle)['tenant_id'] != NOT_COLLECTED
+    write(complete_bundle, 'run-manifest.json', {**manifest, 'extra': json.loads('[' * 64 + ']' * 64)})
+    projection = project_run(complete_bundle)
+    assert projection['tenant_id'] == NOT_COLLECTED
+    assert projection.report['sections']['tenant_id']['reason'] == 'incomplete_shape'
+
+
+def test_chunk_row_depth_bound_is_exactly_64_containers(complete_bundle):
+    path = 'raw/licensing/subscribedSkus/part-00001.jsonl'
+    target = complete_bundle / path
+    target.parent.mkdir(parents=True)
+    row = {'skuPartNumber': 'SPE_E5', 'servicePlans': [{**graph(EXPECTED['service_plans'][0]), 'provisioningStatus': 'Success'}]}
+    operation(complete_bundle, 'licensing', 'subscribedSkus', [], chunk_files=[path], item_count=1)
+    # The row object is level 1, so 63 nested levels under an unrelated key reach 64 and 64 levels reach 65.
+    target.write_text(json.dumps({**row, 'x': json.loads('[' * 63 + ']' * 63)}) + '\n')
+    assert project_run(complete_bundle)['service_plans'] != NOT_COLLECTED
+    target.write_text(json.dumps({**row, 'x': json.loads('[' * 64 + ']' * 64)}) + '\n')
+    projection = project_run(complete_bundle)
+    assert projection['service_plans'] == NOT_COLLECTED
+    assert projection.report['sections']['service_plans']['detail']['field'] == 'chunk_files'
+
+
+def test_normal_manifest_salt_and_output_are_unchanged(complete_bundle):
+    projection = project_run(complete_bundle)
+    manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
+    salt = sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    assert salt == 'fed5fb19ba49484bd4e1106e433bfbb4192030f0ff496f2474fb051a39fca1b6'
+    pseudonym = 'User ' + sha256((salt + '\0' + PERSON).encode()).hexdigest()[:16]
+    assert pseudonym in json.dumps(projection['privileged_users'])
+    assert sha256(canonical([dict(projection), projection.report, projection.views]).encode()).hexdigest() == '156de0e68683724c0b093641edc6ca3a7f0b234efb9f6ee6e28a353ddba1e4ce'
+
+
 @pytest.mark.parametrize('metadata', [{'error': 'Forbidden'}, {'collection_status': 'not_collected'}, {'status': 'failed'}])
 @pytest.mark.parametrize('offline', [False, True])
 def test_failed_collector_envelope_overrides_populated_endpoint(complete_bundle, metadata, offline):
