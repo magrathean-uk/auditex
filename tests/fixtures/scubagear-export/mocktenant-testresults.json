@@ -1,0 +1,47 @@
+[
+  {
+    "Commandlet": [
+      "Get-Mock"
+    ],
+    "Criticality": "Shall",
+    "PolicyId": "MS.AAD.7.1v1",
+    "ReportDetails": "SENTINEL-NOT-A-SECRET-0001",
+    "RequirementMet": true
+  },
+  {
+    "Commandlet": [
+      "Get-Mock"
+    ],
+    "Criticality": "Shall",
+    "PolicyId": "MS.AAD.7.2v1",
+    "ReportDetails": "SENTINEL-NOT-A-SECRET-0001",
+    "RequirementMet": false
+  },
+  {
+    "Commandlet": [
+      "Get-Mock"
+    ],
+    "Criticality": "Should",
+    "PolicyId": "MS.AAD.7.3v1",
+    "ReportDetails": "SENTINEL-NOT-A-SECRET-0001",
+    "RequirementMet": false
+  },
+  {
+    "Commandlet": [
+      "Get-Mock"
+    ],
+    "Criticality": "Shall/Not-Implemented",
+    "PolicyId": "MS.AAD.7.4v1",
+    "ReportDetails": "SENTINEL-NOT-A-SECRET-0001",
+    "RequirementMet": false
+  },
+  {
+    "Commandlet": [
+      "Get-Mock"
+    ],
+    "Criticality": "Should/3rd Party",
+    "PolicyId": "MS.AAD.1.1v1",
+    "ReportDetails": "SENTINEL-NOT-A-SECRET-0001",
+    "RequirementMet": false
+  }
+]

@@ -347,6 +347,55 @@ def _baseline_statuses(pack_path: Path) -> dict[str, str]:
         return {}
 
 
+def _assess_policies(projection: dict[str, Any], client: ModelClient | None, selected: list[str],
+                     catalogue: dict[str, Any], generated_at: str, *, dry_run: bool,
+                     baseline: dict[str, str], scope: Any, shadow_model_on_precheck: bool,
+                     max_items: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    records, prompts = [], []
+    for policy_id in selected:
+        try:
+            case = build_case(policy_id, projection, generated_at, catalogue=catalogue)
+        except PolicyUnavailable:
+            record = {"policy_id": policy_id, "claims": [], "limitations": [], "recommendations": [],
+                      "validation_status": "skipped", "reason": "policy_not_in_catalogue", "latency_ms": 0,
+                      "attempts": 0, "prompt_sha256": None, "response_sha256": None,
+                      "thinking_disabled": False, "thinking_stripped": False}
+            if dry_run:
+                prompts.append({"policy_id": policy_id, "skipped": True, "reason": "policy_not_in_catalogue"})
+        else:
+            if dry_run:
+                messages = messages_for(case)
+                prompts.append({"policy_id": policy_id, "messages": messages,
+                                "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(),
+                                "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
+                continue
+            record = precheck_case(case, absent_fields=True, empty_lists=True)
+            if record is None:
+                record = client.assess(case)
+            elif shadow_model_on_precheck:
+                record["model_shadow"] = client.assess(case)
+        if scope is not None and scope.entries:
+            apply_post_check(record, scope.entries, max_items=max_items)
+        record["comparison"] = _comparison(policy_id, record, baseline)
+        records.append(record)
+    return records, prompts
+
+
+def _totals(records: list[dict[str, Any]]) -> dict[str, int]:
+    totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0,
+              "scope_narrowed": sum("post_check" in record for record in records)}
+    for record in records:
+        totals["rule_answered"] += record["reason"] == "rule_precheck"
+        state = record["validation_status"]
+        if state in {"invalid", "skipped"}:
+            totals[state] += 1
+        elif state == "unknown" or any(c["id"] == "requirement_met" and c["status"] == "unknown" for c in record["claims"]):
+            totals["unknown"] += 1
+        else:
+            totals["answered"] += 1
+    return totals
+
+
 def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] | None = None,
                dry_run: bool = False, shadow_model_on_precheck: bool = False,
                no_redaction: bool = False, projection_max_items: int = DEFAULT_MAX_ITEMS,
@@ -387,48 +436,15 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
         scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
         scan_max_chunks=projection_scan_max_chunks)
     client = ModelClient(config) if not dry_run else None
-    records, prompts = [], []
-    for policy_id in selected:
-        try:
-            case = build_case(policy_id, projection, generated_at, catalogue=catalogue)
-        except PolicyUnavailable:
-            record = {"policy_id": policy_id, "claims": [], "limitations": [], "recommendations": [],
-                      "validation_status": "skipped", "reason": "policy_not_in_catalogue", "latency_ms": 0,
-                      "attempts": 0, "prompt_sha256": None, "response_sha256": None,
-                      "thinking_disabled": False, "thinking_stripped": False}
-            if dry_run:
-                prompts.append({"policy_id": policy_id, "skipped": True, "reason": "policy_not_in_catalogue"})
-        else:
-            if dry_run:
-                messages = messages_for(case)
-                prompts.append({"policy_id": policy_id, "messages": messages,
-                                "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(),
-                                "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
-                continue
-            record = precheck_case(case, absent_fields=True, empty_lists=True)
-            if record is None:
-                record = client.assess(case)
-            elif shadow_model_on_precheck:
-                record["model_shadow"] = client.assess(case)
-        if scope is not None and scope.entries:
-            apply_post_check(record, scope.entries, max_items=projection_max_items)
-        record["comparison"] = _comparison(policy_id, record, baseline)
-        records.append(record)
+    records, prompts = _assess_policies(projection, client, selected, catalogue, generated_at,
+                                        dry_run=dry_run, baseline=baseline, scope=scope,
+                                        shadow_model_on_precheck=shadow_model_on_precheck,
+                                        max_items=projection_max_items)
     if dry_run:
         write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
         return {"path": str(target), "dry_run": True, "prompts": sum("messages" in row for row in prompts),
                 "skipped": sum(row.get("skipped", False) for row in prompts)}
-    totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0,
-              "scope_narrowed": sum("post_check" in record for record in records)}
-    for record in records:
-        totals["rule_answered"] += record["reason"] == "rule_precheck"
-        state = record["validation_status"]
-        if state in {"invalid", "skipped"}:
-            totals[state] += 1
-        elif state == "unknown" or any(c["id"] == "requirement_met" and c["status"] == "unknown" for c in record["claims"]):
-            totals["unknown"] += 1
-        else:
-            totals["answered"] += 1
+    totals = _totals(records)
     result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at, "run_id": manifest["run_id"],
               "endpoint_host": config.endpoint_host, "model_name": config.model_name,
               "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
@@ -438,4 +454,107 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
     from azure_tenant_audit.model_assessment import validate_assessment
     validate_assessment(result)
     write_private_text(target, json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+    return result
+
+
+def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, config: ModelConfig, *,
+                            results_path: str | Path | None = None, policies: list[str] | None = None,
+                            dry_run: bool = False, no_redaction: bool = False,
+                            projection_max_items: int = DEFAULT_MAX_ITEMS,
+                            projection_max_chars: int = DEFAULT_MAX_CHARS,
+                            verdict_map: dict[str, str] | None = None) -> dict[str, Any]:
+    """Assess a local ScubaGear export without a run bundle or tenant contact."""
+    from .scubagear_export import (
+        VERDICT_MAP, _valid_map, build_baseline, build_sidecar, load_export, load_results,
+        project_export, resolve_output_directory, scope_from_export, scubaresults_layout_ok,
+    )
+    if verdict_map is None:
+        verdict_map = VERDICT_MAP
+    _valid_map(verdict_map)
+    if no_redaction and not _is_loopback(config.endpoint_host):
+        raise ValueError("--no-redaction requires a loopback model endpoint host")
+    target_dir = resolve_output_directory(output_dir)
+    if not dry_run and not config.model_name.strip():
+        raise ValueError("AUDITEX_MODEL_NAME or --model is required")
+    catalogue = policy_catalogue()
+    selected = list(catalogue["policies"]) if policies is None else policies
+    if not selected or len(set(selected)) != len(selected) or any(
+        not re.fullmatch(r"MS\.[A-Z]+\.\d+\.\d+v\d+", pid) for pid in selected
+    ):
+        raise ValueError("Policies must be unique SCuBA policy IDs")
+    loaded = load_export(export_path)
+    projection, extras = project_export(loaded, catalogue["policies"], redact=not no_redaction,
+                                        max_items=projection_max_items, max_chars=projection_max_chars)
+    verdict_error = False
+    if results_path is not None:
+        try:
+            verdict_rows, verdict_kind = load_results(results_path)
+        except (OSError, ValueError):
+            verdict_rows, verdict_kind, verdict_error = None, "none", True
+        verdict_source = "results_file"
+    elif loaded.kind == "scubaresults":
+        verdict_rows, verdict_kind = loaded.results, "scubaresults"
+        verdict_source = "embedded"
+    else:
+        verdict_rows, verdict_kind, verdict_source = None, "none", "none"
+    layout_error = verdict_kind == "scubaresults" and not scubaresults_layout_ok(verdict_rows)
+    if ("Results" in loaded.repaired_keys and results_path is None) or layout_error:
+        verdict_rows, verdict_kind = None, "none"
+    baseline, reasons, unmappable = build_baseline(
+        verdict_rows, loaded.raw, kind=verdict_kind, repaired_keys=loaded.repaired_keys,
+        verdict_map=verdict_map, catalogue_ids=set(catalogue["policies"]))
+    if "Results" in loaded.repaired_keys and results_path is None:
+        verdict_state = "unreadable_repaired"
+    elif verdict_error:
+        verdict_state = "unreadable_file"
+    elif verdict_source == "none":
+        verdict_state = "absent"
+    elif layout_error:
+        verdict_state = "unreadable_layout"
+    elif not baseline:
+        verdict_state = "empty"
+    else:
+        verdict_state = "readable"
+    generated_at = datetime.now(timezone.utc).isoformat()
+    scope = None if dry_run else scope_from_export(projection, extras["raw_ca"],
+                                                   redact=not no_redaction, max_items=projection_max_items)
+    client = ModelClient(config) if not dry_run else None
+    records, prompts = _assess_policies(projection, client, selected, catalogue, generated_at,
+                                        dry_run=dry_run, baseline=baseline, scope=scope,
+                                        shadow_model_on_precheck=False, max_items=projection_max_items)
+    sidecar = build_sidecar(loaded, projection, extras, catalogue["policies"], selected, baseline,
+                            reasons, unmappable, verdict_source, verdict_state, verdict_map, generated_at, scope)
+    filename = "model_assessment_prompts.jsonl" if dry_run else "model_assessment.json"
+    if dry_run:
+        content = "".join(canonical(row) + "\n" for row in prompts)
+        result: dict[str, Any] = {"path": str(target_dir / filename), "dry_run": True,
+                                  "prompts": sum("messages" in row for row in prompts),
+                                  "skipped": sum(row.get("skipped", False) for row in prompts),
+                                  "sidecar_path": str(target_dir / "scubagear_adapter_report.json")}
+    else:
+        run_suffix = loaded.report_uuid or loaded.sha256[:16]
+        result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at,
+                  "run_id": "scubagear-" + run_suffix, "endpoint_host": config.endpoint_host,
+                  "model_name": config.model_name, "prompt_convention": PROMPT_CONVENTION,
+                  "system_prompt_sha256": SYSTEM_PROMPT_SHA256, "totals": _totals(records),
+                  "policies": records, "serving": client.serving(), "projection": projection.report,
+                  "scope_post_check": scope.summary,
+                  "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
+        from azure_tenant_audit.model_assessment import validate_assessment
+        validate_assessment(result)
+        content = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    sidecar_text = json.dumps(sidecar, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    resolve_output_directory(target_dir)
+    target_dir.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(target_dir, 0o700)
+    created: list[Path] = []
+    try:
+        for name, data in ((filename, content), ("scubagear_adapter_report.json", sidecar_text)):
+            path = target_dir / name
+            created.append(path)
+            write_private_text(path, data)
+    except OSError:
+        for path in created:
+            path.unlink(missing_ok=True)
+        raise
     return result

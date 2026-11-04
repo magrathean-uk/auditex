@@ -1,0 +1,371 @@
+{
+  "SPO_tenant": [
+    {
+      "DefaultLinkPermission": 1,
+      "DefaultSharingLinkType": 1,
+      "EmailAttestationReAuthDays": 0,
+      "EmailAttestationRequired": false,
+      "FileAnonymousLinkType": 1,
+      "FolderAnonymousLinkType": 1,
+      "ODBSharingCapability": 2,
+      "RequireAnonymousLinksExpireInDays": 0,
+      "SharingCapability": 2,
+      "SharingDomainRestrictionMode": 0
+    }
+  ],
+  "SharePoint_successful_commands": [
+    "Get-Mock"
+  ],
+  "SharePoint_unsuccessful_commands": [],
+  "aad_successful_commands": [
+    "Get-Mock"
+  ],
+  "aad_unsuccessful_commands": [],
+  "accepted_domains": [
+    {
+      "DomainName": "mocktenant.invalid",
+      "Name": "mocktenant.invalid"
+    }
+  ],
+  "authorization_policies": [
+    {
+      "AllowInvitesFrom": "Bad value",
+      "DefaultUserRolePermissions": {
+        "AllowedToCreateApps": false
+      },
+      "GuestUserRoleId": "mock",
+      "Id": "00000000-0000-4000-8000-000000000010",
+      "PermissionGrantPolicyIdsAssignedToDefaultUserRole": [
+        "mock"
+      ]
+    }
+  ],
+  "conditional_access_policies": [
+    {
+      "Conditions": {
+        "Applications": {
+          "ExcludeApplications": [],
+          "IncludeApplications": [
+            "All"
+          ],
+          "IncludeUserActions": []
+        },
+        "AuthenticationFlows": {
+          "TransferMethods": null
+        },
+        "ClientAppTypes": [
+          "other",
+          "exchangeActiveSync"
+        ],
+        "SignInRiskLevels": [
+          ""
+        ],
+        "UserRiskLevels": [],
+        "Users": {
+          "ExcludeGroups": [],
+          "ExcludeGuestsOrExternalUsers": null,
+          "ExcludeRoles": [],
+          "ExcludeUsers": [],
+          "IncludeUsers": [
+            "All"
+          ]
+        }
+      },
+      "DisplayName": "Mock legacy block",
+      "GrantControls": {
+        "AuthenticationStrength": null,
+        "BuiltInControls": [
+          "block"
+        ]
+      },
+      "State": "enabled"
+    },
+    {
+      "Conditions": {
+        "Applications": {
+          "ExcludeApplications": [],
+          "IncludeApplications": [
+            "mock"
+          ],
+          "IncludeUserActions": []
+        },
+        "AuthenticationFlows": {
+          "TransferMethods": null
+        },
+        "ClientAppTypes": [
+          ""
+        ],
+        "SignInRiskLevels": [],
+        "UserRiskLevels": [
+          ""
+        ],
+        "Users": {
+          "ExcludeGroups": [],
+          "ExcludeGuestsOrExternalUsers": null,
+          "ExcludeRoles": [],
+          "ExcludeUsers": [],
+          "IncludeUsers": [
+            "mock"
+          ]
+        }
+      },
+      "DisplayName": "Mock disabled policy",
+      "GrantControls": {
+        "AuthenticationStrength": null,
+        "BuiltInControls": [
+          ""
+        ]
+      },
+      "State": "disabled"
+    },
+    {
+      "Conditions": {
+        "Applications": {
+          "ExcludeApplications": [],
+          "IncludeApplications": [
+            "mock"
+          ],
+          "IncludeUserActions": []
+        },
+        "AuthenticationFlows": {
+          "TransferMethods": null
+        },
+        "ClientAppTypes": [
+          ""
+        ],
+        "SignInRiskLevels": [],
+        "UserRiskLevels": [],
+        "Users": {
+          "ExcludeGroups": [],
+          "ExcludeGuestsOrExternalUsers": null,
+          "ExcludeRoles": [],
+          "ExcludeUsers": [],
+          "IncludeUsers": [
+            "mock"
+          ]
+        }
+      },
+      "DisplayName": "Mock report policy",
+      "GrantControls": {
+        "AuthenticationStrength": null,
+        "BuiltInControls": [
+          ""
+        ]
+      },
+      "State": "enabledForReportingButNotEnforced"
+    }
+  ],
+  "directory_settings": [
+    {
+      "mock": "value"
+    }
+  ],
+  "dkim_config": [
+    {
+      "Domain": "mock",
+      "Enabled": false
+    }
+  ],
+  "dkim_records": [
+    {
+      "domain": "mocktenant.invalid",
+      "rdata": [
+        "v=spf1 -all"
+      ]
+    },
+    {
+      "domain": "mocktenant.invalid",
+      "rdata": []
+    }
+  ],
+  "dmarc_records": [
+    {
+      "domain": "mocktenant.invalid",
+      "rdata": [
+        "v=spf1 -all"
+      ]
+    },
+    {
+      "domain": "mocktenant.invalid",
+      "rdata": []
+    }
+  ],
+  "exo_successful_commands": [
+    "Get-Mock"
+  ],
+  "exo_unsuccessful_commands": [],
+  "meeting_policies": [
+    {
+      "AllowAnonymousUsersToStartMeeting": false,
+      "AllowCloudRecording": false,
+      "AllowExternalParticipantGiveRequestControl": true,
+      "AllowPSTNUsersToBypassLobby": false,
+      "AutoAdmittedUsers": "Everyone",
+      "Identity": "Global"
+    }
+  ],
+  "org_config": [
+    {
+      "AuditDisabled": false,
+      "Identity": "mocktenant.invalid",
+      "Name": "mocktenant.invalid"
+    }
+  ],
+  "powerbi_successful_commands": [
+    "Get-Mock"
+  ],
+  "powerbi_unsuccessful_commands": [],
+  "powerplatform_successful_commands": [
+    "Get-Mock"
+  ],
+  "powerplatform_unsuccessful_commands": [],
+  "privileged_roles": [
+    {
+      "Assignments": [
+        {
+          "EndDateTime": null,
+          "PrincipalId": "00000000-0000-4000-8000-000000000099",
+          "StartDateTime": null
+        }
+      ],
+      "DisplayName": "Mock policy",
+      "RoleTemplateId": "00000000-0000-4000-8000-000000000010",
+      "Rules": [
+        {
+          "Id": "Expiration_EndUser_Assignment",
+          "IsExpirationRequired": false,
+          "MaximumDuration": "PT8H",
+          "NotificationRecipients": [
+            "mock"
+          ],
+          "RuleSource": "mock",
+          "RuleSourceType": "Directory Role",
+          "Setting": {
+            "IsApprovalRequired": false
+          }
+        }
+      ]
+    },
+    {
+      "Assignments": [
+        {
+          "EndDateTime": null,
+          "PrincipalId": "00000000-0000-4000-8000-000000000099",
+          "StartDateTime": "/Date(1767225600000)/"
+        }
+      ],
+      "DisplayName": "Mock policy",
+      "RoleTemplateId": "00000000-0000-4000-8000-000000000010",
+      "Rules": [
+        {
+          "Id": "Expiration_EndUser_Assignment",
+          "IsExpirationRequired": false,
+          "MaximumDuration": "PT8H",
+          "NotificationRecipients": [
+            "mock"
+          ],
+          "NotificationType": "",
+          "RuleSource": "mock",
+          "RuleSourceType": "Directory Role",
+          "Setting": {
+            "IsApprovalRequired": false
+          }
+        },
+        {
+          "Id": "Notification_Admin_EndUser_Assignment",
+          "NotificationRecipients": [
+            "mock"
+          ],
+          "NotificationType": "",
+          "RuleSource": "mock",
+          "RuleSourceType": "Directory Role"
+        }
+      ]
+    }
+  ],
+  "privileged_users": {
+    "00000000-0000-4000-8000-000000000001": {
+      "DisplayName": "Alice Mock",
+      "OnPremisesImmutableId": null,
+      "id": "00000000-0000-4000-8000-000000000001",
+      "roles": [
+        "Global Administrator"
+      ]
+    },
+    "00000000-0000-4000-8000-000000000002": {
+      "DisplayName": "Bob Mock",
+      "OnPremisesImmutableId": null,
+      "id": "00000000-0000-4000-8000-000000000002",
+      "roles": [
+        "Privileged Role Administrator"
+      ]
+    },
+    "00000000-0000-4000-8000-000000000003": {
+      "DisplayName": "Carol Mock",
+      "OnPremisesImmutableId": "FAKE-IMMUTABLE-1",
+      "id": "00000000-0000-4000-8000-000000000003",
+      "roles": [
+        "Global Administrator",
+        "Privileged Role Administrator"
+      ]
+    },
+    "00000000-0000-4000-8000-000000000004": {
+      "DisplayName": "Dan Mock",
+      "OnPremisesImmutableId": null,
+      "id": "00000000-0000-4000-8000-000000000004",
+      "roles": [
+        "User Administrator"
+      ]
+    }
+  },
+  "safe_links_policies": [
+    {
+      "mock": "value"
+    }
+  ],
+  "scuba_config": {
+    "AppID": "SENTINEL-NOT-A-SECRET-0001",
+    "CertificateThumbprint": "NOT-HEX-THUMBPRINT",
+    "M365Environment": "commercial"
+  },
+  "securitysuite_successful_commands": [
+    "Get-Mock"
+  ],
+  "securitysuite_unsuccessful_commands": [],
+  "service_plans": [
+    {
+      "ServicePlanId": "00000000-0000-4000-8000-000000000011",
+      "ServicePlanName": "MFA_PREMIUM"
+    }
+  ],
+  "sharing_policy": [
+    {
+      "mock": "value"
+    }
+  ],
+  "spf_records": [
+    {
+      "compliant": false,
+      "domain": "mocktenant.invalid",
+      "message": "mock message",
+      "rdata": [
+        "v=spf1 -all"
+      ]
+    }
+  ],
+  "teams_successful_commands": [
+    "Get-Mock"
+  ],
+  "teams_unsuccessful_commands": [],
+  "tenant_details": {
+    "Ignored": "SENTINEL-NOT-A-SECRET-0001",
+    "TenantId": "11111111-1111-4111-8111-111111111111"
+  },
+  "tenant_id": "11111111-1111-4111-8111-111111111111",
+  "transport_config": [
+    {
+      "Name": "mocktenant.invalid",
+      "SmtpClientAuthenticationDisabled": false
+    }
+  ]
+}

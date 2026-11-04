@@ -1,0 +1,941 @@
+{
+  "assessed": 44,
+  "disposition": {
+    "MS.AAD.1.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.2.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.2.3v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.3.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.3.2v2": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.3.3v2": {
+      "sections": {
+        "authentication_method": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.3.4v1": {
+      "sections": {
+        "authentication_method": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.3.5v2": {
+      "sections": {
+        "authentication_method": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.3.6v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.3.7v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.3.8v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.3.9v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.5.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.5.2v1": {
+      "sections": {
+        "risky_delegated_permission_classifications": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.5.3v1": {
+      "sections": {
+        "directory_settings": {
+          "detail_kind": "unseen_shape",
+          "reason": "incomplete_shape"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.5.5v1": {
+      "sections": {
+        "app_management_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "default_app_management_policy": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.5.6v1": {
+      "sections": {
+        "app_management_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "default_app_management_policy": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.5.7v1": {
+      "sections": {
+        "app_management_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "default_app_management_policy": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.6.1v1": {
+      "sections": {
+        "domain_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.AAD.7.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.2v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.3v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.4v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.5v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.6v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.7v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.8v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.7.9v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.8.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.8.2v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.AAD.9.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.1.1v2": {
+      "sections": {
+        "remote_domains": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.EXO.13.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.2.2v3": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.3.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.4.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.4.2v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.4.3v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.4.4v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.5.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.EXO.6.1v1": {
+      "sections": {
+        "sharing_policy": {
+          "detail_kind": "unseen_shape",
+          "reason": "incomplete_shape"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.EXO.6.2v1": {
+      "sections": {
+        "sharing_policy": {
+          "detail_kind": "unseen_shape",
+          "reason": "incomplete_shape"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.EXO.7.1v1": {
+      "sections": {
+        "transport_rule": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.1.1v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.2.1v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.3.1v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.4.1v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.4.2v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.5.1v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.6.1v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERBI.7.1v1": {
+      "sections": {
+        "powerbi_access_denied_reason": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_license_found": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "powerbi_tenant_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.1.1v1": {
+      "sections": {
+        "environment_creation": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.1.2v1": {
+      "sections": {
+        "environment_creation": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.2.1v1": {
+      "sections": {
+        "dlp_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.2.2v1": {
+      "sections": {
+        "dlp_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "environment_list": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.2.3v1": {
+      "sections": {
+        "dlp_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.3.1v1": {
+      "sections": {
+        "tenant_isolation": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.5.1v1": {
+      "sections": {
+        "environment_creation": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.POWERPLATFORM.6.1v1": {
+      "sections": {
+        "environment_creation": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.1.1v1": {
+      "sections": {
+        "anti_malware_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "anti_malware_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.1.2v1": {
+      "sections": {
+        "anti_malware_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "anti_malware_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.1.3v1": {
+      "sections": {
+        "atp_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "built_in_protection_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "safe_attachment_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "safe_attachment_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.1.4v1": {
+      "sections": {
+        "atp_policy_for_o365": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.2.1v1": {
+      "sections": {
+        "anti_phish_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "anti_phish_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "defender_license": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "scuba_config": {
+          "outcome": "operator_input_required"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.2.2v1": {
+      "sections": {
+        "anti_phish_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "anti_phish_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "defender_license": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.2.3v1": {
+      "sections": {
+        "anti_phish_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "anti_phish_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "defender_license": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "scuba_config": {
+          "outcome": "operator_input_required"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.2.4v1": {
+      "sections": {
+        "anti_phish_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "anti_phish_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "defender_license": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.3.1v1": {
+      "sections": {
+        "dlp_compliance_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "dlp_compliance_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.3.2v1": {
+      "sections": {
+        "defender_dlp_license": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "dlp_compliance_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "dlp_compliance_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "scuba_config": {
+          "outcome": "operator_input_required"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.3.3v1": {
+      "sections": {
+        "dlp_compliance_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "dlp_compliance_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.3.4v1": {
+      "sections": {
+        "dlp_compliance_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "dlp_compliance_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.4.1v1": {
+      "sections": {
+        "protection_alerts": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.5.1v1": {
+      "sections": {
+        "admin_audit_log_config": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.6.1v1": {
+      "sections": {
+        "hosted_content_filter_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "hosted_content_filter_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.6.2v1": {
+      "sections": {
+        "hosted_content_filter_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "hosted_content_filter_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.7.1v1": {
+      "sections": {
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "safe_links_policies": {
+          "detail_kind": "unseen_shape",
+          "reason": "incomplete_shape"
+        },
+        "safe_links_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.7.2v1": {
+      "sections": {
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "safe_links_policies": {
+          "detail_kind": "unseen_shape",
+          "reason": "incomplete_shape"
+        },
+        "safe_links_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.7.3v1": {
+      "sections": {
+        "protection_policy_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "safe_links_policies": {
+          "detail_kind": "unseen_shape",
+          "reason": "incomplete_shape"
+        },
+        "safe_links_rules": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.8.1v1": {
+      "sections": {
+        "conn_filter": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SECURITYSUITE.8.2v1": {
+      "sections": {
+        "conn_filter": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.SHAREPOINT.1.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.SHAREPOINT.1.2v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.SHAREPOINT.1.3v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.SHAREPOINT.2.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.SHAREPOINT.2.2v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.SHAREPOINT.3.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.SHAREPOINT.3.2v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.SHAREPOINT.3.3v2": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.TEAMS.1.1v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.TEAMS.1.2v2": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.TEAMS.1.3v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.TEAMS.1.4v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.TEAMS.1.5v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.TEAMS.1.6v1": {
+      "sections": {},
+      "status": "assessed"
+    },
+    "MS.TEAMS.1.7v2": {
+      "sections": {
+        "broadcast_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.TEAMS.2.1v2": {
+      "sections": {
+        "federation_configuration": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.TEAMS.2.2v2": {
+      "sections": {
+        "federation_configuration": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.TEAMS.2.3v2": {
+      "sections": {
+        "federation_configuration": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.TEAMS.4.1v1": {
+      "sections": {
+        "client_configuration": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.TEAMS.5.1v2": {
+      "sections": {
+        "app_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "tenant_app_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.TEAMS.5.2v2": {
+      "sections": {
+        "app_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "tenant_app_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    },
+    "MS.TEAMS.5.3v2": {
+      "sections": {
+        "app_policies": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        },
+        "tenant_app_settings": {
+          "detail_kind": null,
+          "reason": "missing_artifact"
+        }
+      },
+      "status": "withheld"
+    }
+  },
+  "figure": "fixture construction"
+}
