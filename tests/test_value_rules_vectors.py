@@ -69,8 +69,27 @@ STAGE9_POLICIES = frozenset({
     "MS.AAD.5.7v1",
     "MS.AAD.6.1v1",
 })
+# stage 7: include the privileged-role and Conditional Access registrations.
+STAGE7_POLICIES = frozenset({
+    "MS.AAD.1.1v1",
+    "MS.AAD.2.1v1",
+    "MS.AAD.2.3v1",
+    "MS.AAD.3.1v1",
+    "MS.AAD.3.2v2",
+    "MS.AAD.3.6v1",
+    "MS.AAD.3.7v1",
+    "MS.AAD.3.8v1",
+    "MS.AAD.3.9v1",
+    "MS.AAD.7.4v1",
+    "MS.AAD.7.5v1",
+    "MS.AAD.7.6v1",
+    "MS.AAD.7.7v1",
+    "MS.AAD.7.8v1",
+    "MS.AAD.7.9v1",
+    "MS.AAD.9.1v1",
+})
 STAGE_POLICIES = (STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE5_POLICIES
-                  | STAGE6_POLICIES | STAGE8_POLICIES | STAGE9_POLICIES)
+                  | STAGE6_POLICIES | STAGE7_POLICIES | STAGE8_POLICIES | STAGE9_POLICIES)
 GATE_POLICIES = frozenset(policy for policy, row in catalogue()["policies"].items()
                           if row["params"].get("environment_gate"))
 PBI_COMMON = {"section_not_collected", "licence_false", "licence_flag_unusable", "access_denied",

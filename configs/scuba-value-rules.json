@@ -913,6 +913,919 @@
     "reason_text": "Not assessed: the optional Power BI / Power Platform collection was not enabled for this run."
   },
   "policies": {
+    "MS.AAD.1.1v1": {
+      "cells": {
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (legacy authentication is not blocked for all users)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "client_legacy",
+              "S"
+            ],
+            [
+              "block",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.1.1v1",
+          "p2": false,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "what": "legacy authentication is not blocked for all users"
+        },
+        "what": "legacy authentication is not blocked for all users"
+      },
+      "rule_id": "MS.AAD.1.1v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ]
+    },
+    "MS.AAD.2.1v1": {
+      "cells": {
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (high-risk users are not blocked)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "user_risk_high",
+              "C"
+            ],
+            [
+              "block",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.2.1v1",
+          "p2": true,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "what": "high-risk users are not blocked"
+        },
+        "what": "high-risk users are not blocked"
+      },
+      "rule_id": "MS.AAD.2.1v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config",
+        "service_plans"
+      ]
+    },
+    "MS.AAD.2.3v1": {
+      "cells": {
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (high-risk sign-ins are not blocked)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "signin_risk_high",
+              "C"
+            ],
+            [
+              "block",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.2.3v1",
+          "p2": true,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "what": "high-risk sign-ins are not blocked"
+        },
+        "what": "high-risk sign-ins are not blocked"
+      },
+      "rule_id": "MS.AAD.2.3v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config",
+        "service_plans"
+      ]
+    },
+    "MS.AAD.3.1v1": {
+      "cells": {
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (phishing-resistant MFA is not enforced for all users)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "strength_pr",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.3.1v1",
+          "p2": false,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "what": "phishing-resistant MFA is not enforced for all users"
+        },
+        "what": "phishing-resistant MFA is not enforced for all users"
+      },
+      "rule_id": "MS.AAD.3.1v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ]
+    },
+    "MS.AAD.3.2v2": {
+      "cells": {
+        "exemption_key_ambiguous": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: the exemption entry is written under MS.AAD.3.2v2, which ScubaGear ignores (it reads MS.AAD.3.2v1); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (MFA is not enforced for all users)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "mfa_general",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.3.2v1",
+          "p2": false,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "what": "MFA is not enforced for all users"
+        },
+        "what": "MFA is not enforced for all users"
+      },
+      "rule_id": "MS.AAD.3.2v2.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ]
+    },
     "MS.AAD.3.3v2": {
       "cells": {
         "authenticator_duplicated": {
@@ -1300,6 +2213,707 @@
       "rule_id": "MS.AAD.3.5v2.am_low",
       "sections": [
         "authentication_method"
+      ]
+    },
+    "MS.AAD.3.6v1": {
+      "cells": {
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (phishing-resistant MFA is not required for every highly privileged role)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: privileged_roles is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, privileged_roles, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "roles_cover",
+              "S"
+            ],
+            [
+              "strength_pr",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.3.6v1",
+          "p2": false,
+          "sections": [
+            "conditional_access_policies",
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "what": "phishing-resistant MFA is not required for every highly privileged role"
+        },
+        "what": "phishing-resistant MFA is not required for every highly privileged role"
+      },
+      "rule_id": "MS.AAD.3.6v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "privileged_roles",
+        "scuba_config"
+      ]
+    },
+    "MS.AAD.3.7v1": {
+      "cells": {
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (managed devices are not required for authentication)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "grant_devices",
+              "C"
+            ],
+            [
+              "operator_or",
+              "C"
+            ],
+            [
+              "no_user_actions",
+              "S"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.3.7v1",
+          "p2": false,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "what": "managed devices are not required for authentication"
+        },
+        "what": "managed devices are not required for authentication"
+      },
+      "rule_id": "MS.AAD.3.7v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ]
+    },
+    "MS.AAD.3.8v1": {
+      "cells": {
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (managed devices are not required to register MFA)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "action_register",
+              "C"
+            ],
+            [
+              "grant_any_device",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "guests"
+          ],
+          "key": "MS.AAD.3.8v1",
+          "p2": false,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "what": "managed devices are not required to register MFA"
+        },
+        "what": "managed devices are not required to register MFA"
+      },
+      "rule_id": "MS.AAD.3.8v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ]
+    },
+    "MS.AAD.3.9v1": {
+      "cells": {
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (device code authentication is not blocked)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "users_all",
+              "S"
+            ],
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "no_role_excl",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "flow_device_code",
+              "C"
+            ],
+            [
+              "block",
+              "C"
+            ]
+          ],
+          "ex": [
+            "users",
+            "groups",
+            "apps",
+            "guests"
+          ],
+          "key": "MS.AAD.3.9v1",
+          "p2": false,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "what": "device code authentication is not blocked"
+        },
+        "what": "device code authentication is not blocked"
+      },
+      "rule_id": "MS.AAD.3.9v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config"
       ]
     },
     "MS.AAD.5.1v1": {
@@ -2309,6 +3923,659 @@
         "privileged_users"
       ]
     },
+    "MS.AAD.7.4v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "privileged_roles",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no role has a permanent active assignment beyond the configured exclusions."
+          ],
+          "verdict": "met"
+        },
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_roles holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_field_unusable": {
+          "cited": [
+            "privileged_roles",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a role has no usable assignment list, an assignment lacks its end date, or the role exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_flagged": {
+          "cited": [
+            "privileged_roles",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: a role has a permanent active assignment that the configuration does not allow."
+          ],
+          "verdict": "not_met"
+        },
+        "role_unlabelled": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a role or assignment that shows a permanent assignment carries no name or principal; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_roles is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_roles",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_roles",
+      "params": {
+        "leaf": "permanent",
+        "what": "a role has permanent active assignments"
+      },
+      "rule_id": "MS.AAD.7.4v1.priv_roles",
+      "sections": [
+        "privileged_roles",
+        "scuba_config",
+        "service_plans"
+      ]
+    },
+    "MS.AAD.7.5v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: every assignment of every role has a start date."
+          ],
+          "verdict": "met"
+        },
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_roles holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_field_unusable": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a role has no usable assignment list or an assignment lacks its start date key; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_flagged": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: a role has an assignment without a start date, so it was made outside PIM."
+          ],
+          "verdict": "not_met"
+        },
+        "role_unlabelled": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a role without a name shows an assignment without a start date; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_roles is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_roles",
+      "params": {
+        "leaf": "outside_pim",
+        "what": "a role has an assignment without a start date"
+      },
+      "rule_id": "MS.AAD.7.5v1.priv_roles",
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ]
+    },
+    "MS.AAD.7.6v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: every rule the policy reads is set as required."
+          ],
+          "verdict": "met"
+        },
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_roles holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_field_unusable": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a role or rule the policy reads lacks a usable value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_flagged": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: Global Administrator activation does not require approval."
+          ],
+          "verdict": "not_met"
+        },
+        "role_unlabelled": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a rule that shows the condition the policy looks for carries no source name or type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_absent": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_rule_absent",
+          "reason_texts": [
+            "Data unavailable: a role lacks a rule the policy reads (a missing eligibility or assignment rule, or a role with no rules), so not every part of the requirement is shown; the policy was not assessed.",
+            "Data unavailable: no role carries the rule the policy reads (for Global Administrator, no such role); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_roles is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_roles",
+      "params": {
+        "leaf": "ga_approval",
+        "what": "Global Administrator activation does not require approval"
+      },
+      "rule_id": "MS.AAD.7.6v1.priv_roles",
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ]
+    },
+    "MS.AAD.7.7v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: every rule the policy reads is set as required."
+          ],
+          "verdict": "met"
+        },
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_roles holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_field_unusable": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a role or rule the policy reads lacks a usable value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_flagged": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: a role assignment sends no alert."
+          ],
+          "verdict": "not_met"
+        },
+        "role_unlabelled": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a rule that shows the condition the policy looks for carries no source name or type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_absent": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_rule_absent",
+          "reason_texts": [
+            "Data unavailable: a role lacks a rule the policy reads (a missing eligibility or assignment rule, or a role with no rules), so not every part of the requirement is shown; the policy was not assessed.",
+            "Data unavailable: no role carries the rule the policy reads (for Global Administrator, no such role); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_roles is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_roles",
+      "params": {
+        "leaf": "assignment_alert",
+        "what": "a role assignment sends no alert"
+      },
+      "rule_id": "MS.AAD.7.7v1.priv_roles",
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ]
+    },
+    "MS.AAD.7.8v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: every rule the policy reads is set as required."
+          ],
+          "verdict": "met"
+        },
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_roles holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_field_unusable": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a role or rule the policy reads lacks a usable value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_flagged": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: Global Administrator activation sends no alert."
+          ],
+          "verdict": "not_met"
+        },
+        "role_unlabelled": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a rule that shows the condition the policy looks for carries no source name or type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_absent": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_rule_absent",
+          "reason_texts": [
+            "Data unavailable: a role lacks a rule the policy reads (a missing eligibility or assignment rule, or a role with no rules), so not every part of the requirement is shown; the policy was not assessed.",
+            "Data unavailable: no role carries the rule the policy reads (for Global Administrator, no such role); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_roles is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_roles",
+      "params": {
+        "leaf": "ga_activation_alert",
+        "what": "Global Administrator activation sends no alert"
+      },
+      "rule_id": "MS.AAD.7.8v1.priv_roles",
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ]
+    },
+    "MS.AAD.7.9v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: every rule the policy reads is set as required."
+          ],
+          "verdict": "met"
+        },
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_roles holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_field_unusable": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a role or rule the policy reads lacks a usable value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "role_flagged": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: activation of another privileged role sends no alert."
+          ],
+          "verdict": "not_met"
+        },
+        "role_unlabelled": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a rule that shows the condition the policy looks for carries no source name or type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_absent": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unavailable_rule_absent",
+          "reason_texts": [
+            "Data unavailable: a role lacks a rule the policy reads (a missing eligibility or assignment rule, or a role with no rules), so not every part of the requirement is shown; the policy was not assessed.",
+            "Data unavailable: no role carries the rule the policy reads (for Global Administrator, no such role); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "privileged_roles"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_roles is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_roles",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_roles, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: privileged_roles.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_roles",
+      "params": {
+        "leaf": "other_activation_alert",
+        "what": "activation of another privileged role sends no alert"
+      },
+      "rule_id": "MS.AAD.7.9v1.priv_roles",
+      "sections": [
+        "privileged_roles",
+        "service_plans"
+      ]
+    },
     "MS.AAD.8.1v1": {
       "cells": {
         "all_clear": {
@@ -2475,6 +4742,221 @@
       "rule_id": "MS.AAD.8.2v1.authz",
       "sections": [
         "authorization_policies"
+      ]
+    },
+    "MS.AAD.9.1v1": {
+      "cells": {
+        "closed_gate": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "policy_not_applicable_environment",
+          "reason_texts": [
+            "Not applicable: the policy does not apply to GCC High or DOD environments."
+          ],
+          "verdict": "not_applicable"
+        },
+        "environment_unknown": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_environment_field",
+          "reason_texts": [
+            "Data unusable: scuba_config does not state the M365 environment as commercial, gcc, gcchigh or dod, so whether the policy applies is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_not_detected": {
+          "cited": [
+            "service_plans"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Entra ID P2 service plan was found (this can also mean missing permissions or a failed read), so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "met_policy_clean": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "policy_meets_requirement",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition."
+          ],
+          "verdict": "met"
+        },
+        "met_policy_declared_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "policy_meets_with_declared_exclusions",
+          "reason_texts": [
+            "Requirement met: a Conditional Access policy meets every condition, its exclusions all on the configured exemption list."
+          ],
+          "verdict": "met"
+        },
+        "near_miss_exclusions": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "exclusions_not_configured",
+          "reason_texts": [
+            "Requirement not met: a policy would meet the condition, but its exclusions are not on the configured exemption list."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policies": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "no_policies_configured",
+          "reason_texts": [
+            "Requirement not met: conditional_access_policies is empty, so no Conditional Access policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_policy_meets": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "no_policy_meets_requirement",
+          "reason_texts": [
+            "Requirement not met: no Conditional Access policy meets every condition (risky AI agents are not blocked)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: conditional_access_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restricted_policy_only": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: conditional_access_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: service_plans is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: conditional_access_policies.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config, service_plans.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: service_plans."
+          ],
+          "verdict": "not_assessed"
+        },
+        "union_possible": {
+          "cited": [
+            "conditional_access_policies"
+          ],
+          "reason_code": "data_unusable_policy_set",
+          "reason_texts": [
+            "Data unusable: no single Conditional Access policy carries every condition, but more than one policy carries the control, so the evidence does not show whether they cover the requirement together; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "ca_exists",
+      "params": {
+        "ca": {
+          "conj": [
+            [
+              "apps_all",
+              "S"
+            ],
+            [
+              "enabled",
+              "C"
+            ],
+            [
+              "client_all",
+              "S"
+            ],
+            [
+              "agent_risk_high",
+              "C"
+            ],
+            [
+              "block",
+              "C"
+            ],
+            [
+              "agent_sp_all",
+              "S"
+            ]
+          ],
+          "ex": [
+            "apps"
+          ],
+          "key": "MS.AAD.9.1v1",
+          "p2": true,
+          "sections": [
+            "conditional_access_policies",
+            "scuba_config",
+            "service_plans"
+          ],
+          "what": "risky AI agents are not blocked"
+        },
+        "what": "risky AI agents are not blocked"
+      },
+      "rule_id": "MS.AAD.9.1v1.ca_exists",
+      "sections": [
+        "conditional_access_policies",
+        "scuba_config",
+        "service_plans"
       ]
     },
     "MS.EXO.1.1v2": {

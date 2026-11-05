@@ -80,9 +80,9 @@ def test_a1_exception_set_is_pinned_and_does_not_register_policies():
     assert len(VARIANTS) == 67
     assert sum(len(v) > 1 for v in VARIANTS.values()) == 64
     assert sha256(canonical(serial).encode()).hexdigest() == "e129cc16d8370e0fa929d0d06aec25ebfeb33e3fbe9662fd54fc9e7cac6ac583"
-    # stage 5 added 11 policies (held SS 1.1 still unregistered); stage 9 registers the eight AAD pilot rules,
-    # which preserves the exact A1 exception contract.
-    assert len(SOURCE["policies"]) == 64 + 11 + 8
+    # stage 5 added 11 policies (held SS 1.1 still unregistered), stage 9 the eight AAD pilot rules (A1 exception
+    # contract preserved) and stage 7 sixteen AAD role and Conditional Access registrations.
+    assert len(SOURCE["policies"]) == 64 + 11 + 8 + 16
     assert "MS.AAD.6.1v1" in SOURCE["policies"]
     assert set(TWO_CODES) == {"data_unusable_sub_domain_root_case", "data_unusable_sub_domain_without_root"}
     assert TWO_CODES == {
