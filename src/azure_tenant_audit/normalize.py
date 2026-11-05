@@ -2761,6 +2761,7 @@ def build_normalized_snapshot(
     # service is not provisioned the source list is empty and the section stays
     # absent (records_by_section drops empty values via object_counts).
 
+    # Preserve null and non-boolean source values after _record's usual compaction.
     power_platform_environment_records = [
         _record(
             "power_platform_environment",
@@ -2768,9 +2769,8 @@ def build_normalized_snapshot(
             str(item.get("id") or item.get("name")),
             display_name=item.get("display_name") or item.get("displayName"),
             environment_sku=item.get("environment_sku") or item.get("environmentSku"),
-            is_default=bool(item.get("is_default") or item.get("isDefault")),
             created_time=item.get("created_time") or item.get("createdTime"),
-        )
+        ) | {"is_default": item.get("is_default", item.get("isDefault"))}
         for item in _values(collector_payloads.get("power_platform", {}), "environments")
         if item.get("id") or item.get("name")
     ]
@@ -2793,7 +2793,9 @@ def build_normalized_snapshot(
             "power_platform_tenant_setting",
             "power_platform.tenantSettings",
             "tenant",
-            **{k: v for k, v in item.items() if isinstance(k, str)},
+            **{k: item[k] for k in (
+                "is_power_apps_enabled", "is_power_automate_enabled", "is_dataverse_enabled",
+            ) if k in item},
         )
         for item in _values(collector_payloads.get("power_platform", {}), "tenantSettings")
     ]

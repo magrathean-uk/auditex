@@ -225,6 +225,13 @@
       ],
       "notes": "OneDrive posture uses SharePoint read APIs and site URL heuristics; admin-center-only OneDrive details may still be unavailable to Global Reader."
     },
+    "power_bi": {
+      "graph_scopes": [],
+      "minimum_role_hints": [
+        "Fabric Administrator"
+      ],
+      "notes": "Opt-in extended scope, off by default. Read-only admin API reads require Fabric Administrator (a write-capable admin role used read-only) or the Power BI tenant setting that lets a service principal read the admin APIs; token audience https://analysis.windows.net/powerbi/api/.default; no message bodies, no file content, no tenant writes. Do not grant Tenant.Read.All."
+    },
     "power_platform": {
       "graph_scopes": [],
       "minimum_role_hints": [
