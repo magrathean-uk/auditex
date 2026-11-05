@@ -1,0 +1,1188 @@
+{
+  "_meta": {
+    "provenance": "constructed rows and pack train and validation rows from v3.9.1; held-out test and pilot rows excluded",
+    "spec_version": "v3.9.1 FINAL",
+    "source": "value-rules-v391/vectors.jsonl",
+    "source_sha256": "3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e",
+    "selection": "Exact individual section objects; repeated content uses an allowed representative, preferring constructed, pack-train, pack-validation, then packlic-train. No source values are coerced or redacted.",
+    "scope": "Counts refer to stored section objects, not unique vectors or complete policy cases. Policy, cell, family and reason identify the source vector; assembled operations do not assert its verdict.",
+    "local_variants": "The cases fixture constructs empty operations, missing ExceptIfSentTo, integer State and synthetic collector errors in memory from these bases. They are adapter probes, not borrowed vector rows. Base sizes and the 78 runtime row objects are retained.",
+    "before": {
+      "by_source_kind": {
+        "constructed": 12,
+        "pack-train": 6,
+        "untraceable (forbidden)": 60
+      },
+      "rows": {
+        "eopProtectionPolicyRules": {
+          "good": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:preset_domain_partial_beside_covering_preset",
+              "section_row": 1,
+              "source_kind": "constructed"
+            },
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.6.1v1:strict_rule_link_absent",
+              "section_row": 0,
+              "source_kind": "constructed"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "atpProtectionPolicyRules": {
+          "good": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:preset_domain_partial_beside_covering_preset",
+              "section_row": 1,
+              "source_kind": "constructed"
+            },
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:preset_beats_custom",
+              "section_row": 0,
+              "source_kind": "constructed"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "atpBuiltInProtectionRules": {
+          "good": [
+            {
+              "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-1-3v1-0939ae5219",
+              "section_row": 0,
+              "source_kind": "pack-train"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-1-3v1-0939ae5219",
+              "section_row": 0,
+              "source_kind": "pack-train"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "atpPolicyForO365": {
+          "good": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.1.4v1:on_and_unusable",
+              "section_row": 1,
+              "source_kind": "constructed"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.1.4v1:on_and_unusable",
+              "section_row": 1,
+              "source_kind": "constructed"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.1.4v1:on_and_unusable",
+              "section_row": 1,
+              "source_kind": "constructed"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "malwareFilterPolicy": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.1.1v1:accepted_domains_empty_default_ok",
+              "section_row": 0,
+              "source_kind": "constructed"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "malwareFilterRules": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "safeAttachmentPolicies": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.1.3v1:accepted_domains_empty_default_ok",
+              "section_row": 0,
+              "source_kind": "constructed"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "safeAttachmentRules": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "antiPhishPolicies": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "antiPhishRules": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "hostedContentFilterPolicies": {
+          "good": [
+            {
+              "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-6-1v1-127f193293",
+              "section_row": 0,
+              "source_kind": "pack-train"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-6-1v1-127f193293",
+              "section_row": 0,
+              "source_kind": "pack-train"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-6-1v1-127f193293",
+              "section_row": 0,
+              "source_kind": "pack-train"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "hostedContentFilterRules": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "safeLinksPolicies": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            },
+            {
+              "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-7-1v1-4453d56a4b",
+              "section_row": 2,
+              "source_kind": "pack-train"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "safeLinksRules": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "hostedConnectionFilterPolicy": {
+          "good": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        },
+        "adminAuditLogConfig": {
+          "good": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.5.1v1:on_and_unusable",
+              "section_row": 1,
+              "source_kind": "constructed"
+            }
+          ],
+          "empty": [],
+          "absent_exceptif": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.5.1v1:on_and_unusable",
+              "section_row": 1,
+              "source_kind": "constructed"
+            }
+          ],
+          "enum_as_int": [
+            {
+              "vector_id": "constructed:MS.SECURITYSUITE.5.1v1:on_and_unusable",
+              "section_row": 1,
+              "source_kind": "constructed"
+            }
+          ],
+          "error_row": [
+            {
+              "source_kind": "untraceable (forbidden)"
+            }
+          ]
+        }
+      }
+    },
+    "after_by_source_kind": {
+      "constructed": 25,
+      "pack-train": 5
+    },
+    "rows": {
+      "eopProtectionPolicyRules": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:preset_domain_partial_beside_covering_preset",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.7.1v1",
+          "family_name": "preset_domain_partial_beside_covering_preset",
+          "rule_cell": "preset_covers",
+          "rule_reason_code": "preset_covers_all_recipients",
+          "section": "protection_policy_rules",
+          "section_row": 1,
+          "row_sha256": "5fed26817792bc9a76cf65c4db054a9842e1f4199ba949dd6c4b4a2c8a3286ee"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.6.1v1:strict_rule_link_absent",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.6.1v1",
+          "family_name": "strict_rule_link_absent",
+          "rule_cell": "preset_topology_unusable",
+          "rule_reason_code": "data_unusable_preset_topology",
+          "section": "protection_policy_rules",
+          "section_row": 0,
+          "row_sha256": "7ad160f3331ce9ef9e65b4747bb1987dfe762eb2affb5ba45fb7e2c705cc4bd6"
+        }
+      ],
+      "atpProtectionPolicyRules": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:preset_domain_partial_beside_covering_preset",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.7.1v1",
+          "family_name": "preset_domain_partial_beside_covering_preset",
+          "rule_cell": "preset_covers",
+          "rule_reason_code": "preset_covers_all_recipients",
+          "section": "atp_policy_rules",
+          "section_row": 1,
+          "row_sha256": "5fed26817792bc9a76cf65c4db054a9842e1f4199ba949dd6c4b4a2c8a3286ee"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:preset_beats_custom",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.7.1v1",
+          "family_name": "preset_beats_custom",
+          "rule_cell": "preset_covers",
+          "rule_reason_code": "preset_covers_all_recipients",
+          "section": "atp_policy_rules",
+          "section_row": 0,
+          "row_sha256": "7ad160f3331ce9ef9e65b4747bb1987dfe762eb2affb5ba45fb7e2c705cc4bd6"
+        }
+      ],
+      "atpBuiltInProtectionRules": [
+        {
+          "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-1-3v1-0939ae5219",
+          "source_kind": "pack-train",
+          "source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl",
+          "policy": "MS.SECURITYSUITE.1.3v1",
+          "family_name": "securitysuite/MS.SECURITYSUITE.1.3v1/replace:atp_policy_rules",
+          "rule_cell": "section_not_collected",
+          "rule_reason_code": "required_evidence_section_not_collected",
+          "split": "train",
+          "section": "built_in_protection_rules",
+          "section_row": 0,
+          "row_sha256": "03ba8440a4fe4a4924fe9d0bbf9514bc2b9ac18a560cf551b3304af5f02035d5"
+        }
+      ],
+      "atpPolicyForO365": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.4v1:on_and_unusable",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.4v1",
+          "family_name": "on_and_unusable",
+          "rule_cell": "flag_true",
+          "rule_reason_code": "enabled_found",
+          "section": "atp_policy_for_o365",
+          "section_row": 1,
+          "row_sha256": "2ef8921901c66ba07d6632f7eb475a03ef6e2aef5c5d8985b10cde3292d53ea6"
+        }
+      ],
+      "malwareFilterPolicy": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.1v1:accepted_domains_empty_default_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.1v1",
+          "family_name": "accepted_domains_empty_default_ok",
+          "rule_cell": "default_compliant",
+          "rule_reason_code": "default_policy_applies_compliant",
+          "section": "anti_malware_policies",
+          "section_row": 0,
+          "row_sha256": "e4320616df8ae2d43917df2a65e127106466649a1fccef7fece3a8f75b96affb"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.1v1:custom_covering_shields_lower_covering_bad",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.1v1",
+          "family_name": "custom_covering_shields_lower_covering_bad",
+          "rule_cell": "custom_covers_compliant",
+          "rule_reason_code": "custom_policy_covers_all_recipients_compliant",
+          "section": "anti_malware_policies",
+          "section_row": 1,
+          "row_sha256": "7a5affbd5ddbb39c773148289bfc5ca6b32cea651301dc78d17be48d7915944f"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.1v1:custom_lowest_priority_number_wins_bad",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.1v1",
+          "family_name": "custom_lowest_priority_number_wins_bad",
+          "rule_cell": "custom_noncompliant",
+          "rule_reason_code": "applied_custom_policy_noncompliant",
+          "section": "anti_malware_policies",
+          "section_row": 2,
+          "row_sha256": "3eb6084a0fe0148317405da4384738c2b98f675cfe821d2a1702abfca78246c5"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.1v1:accepted_domains_empty_default_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.1v1",
+          "family_name": "accepted_domains_empty_default_ok",
+          "rule_cell": "default_compliant",
+          "rule_reason_code": "default_policy_applies_compliant",
+          "section": "anti_malware_policies",
+          "section_row": 0,
+          "row_sha256": "e4320616df8ae2d43917df2a65e127106466649a1fccef7fece3a8f75b96affb"
+        }
+      ],
+      "malwareFilterRules": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.1v1:custom_covering_shields_lower_covering_bad",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.1v1",
+          "family_name": "custom_covering_shields_lower_covering_bad",
+          "rule_cell": "custom_covers_compliant",
+          "rule_reason_code": "custom_policy_covers_all_recipients_compliant",
+          "section": "anti_malware_rules",
+          "section_row": 0,
+          "row_sha256": "d01ca6a0ee0e0bffe45feb606dcbcf61fff713400f620b0bb3dcf00dc0249b34"
+        }
+      ],
+      "safeAttachmentPolicies": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.3v1:accepted_domains_empty_default_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.3v1",
+          "family_name": "accepted_domains_empty_default_ok",
+          "rule_cell": "builtin_compliant",
+          "rule_reason_code": "built_in_protection_policy_applies_compliant",
+          "section": "safe_attachment_policies",
+          "section_row": 0,
+          "row_sha256": "a73ab9055e39b79785cc6b710ff94d4560d904b2d67d11b939ac4e53b5e20cfb"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.3v1:builtin_exception_covering_custom",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.3v1",
+          "family_name": "builtin_exception_covering_custom",
+          "rule_cell": "custom_covers_compliant",
+          "rule_reason_code": "custom_policy_covers_all_recipients_compliant",
+          "section": "safe_attachment_policies",
+          "section_row": 1,
+          "row_sha256": "84bff0906be34a99408da1c2ec118d34fab78f94aa814ae0c24fbfba9ae42cf2"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.3v1:leaf_action_'DynamicDelivery'",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.3v1",
+          "family_name": "leaf_action_'DynamicDelivery'",
+          "rule_cell": "builtin_compliant",
+          "rule_reason_code": "built_in_protection_policy_applies_compliant",
+          "section": "safe_attachment_policies",
+          "section_row": 0,
+          "row_sha256": "246a152c138628e49889be50cc3edd4ea319163d17b54eeabb6af5582c56e933"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.3v1:accepted_domains_empty_default_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.3v1",
+          "family_name": "accepted_domains_empty_default_ok",
+          "rule_cell": "builtin_compliant",
+          "rule_reason_code": "built_in_protection_policy_applies_compliant",
+          "section": "safe_attachment_policies",
+          "section_row": 0,
+          "row_sha256": "a73ab9055e39b79785cc6b710ff94d4560d904b2d67d11b939ac4e53b5e20cfb"
+        }
+      ],
+      "safeAttachmentRules": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.1.3v1:builtin_exception_covering_custom",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.1.3v1",
+          "family_name": "builtin_exception_covering_custom",
+          "rule_cell": "custom_covers_compliant",
+          "rule_reason_code": "custom_policy_covers_all_recipients_compliant",
+          "section": "safe_attachment_rules",
+          "section_row": 0,
+          "row_sha256": "64b65eaebceb204d767a600e561fbb08720ea2663115c354bb1fe7811fa72d60"
+        }
+      ],
+      "antiPhishPolicies": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.2.2v1:custom_covers_by_identity_not_name",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.2.2v1",
+          "family_name": "custom_covers_by_identity_not_name",
+          "rule_cell": "custom_qualifies",
+          "rule_reason_code": "custom_policy_qualifies",
+          "section": "anti_phish_policies",
+          "section_row": 1,
+          "row_sha256": "efc2ef58dbabe88aeed34e6b0617231d8353f6b3f71669de1ab06657d8e0781c"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.2.2v1:custom_covers_by_name_not_identity",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.2.2v1",
+          "family_name": "custom_covers_by_name_not_identity",
+          "rule_cell": "custom_qualifies",
+          "rule_reason_code": "custom_policy_qualifies",
+          "section": "anti_phish_policies",
+          "section_row": 1,
+          "row_sha256": "3cb56a22f15ae5224e7110aaf011f0600a74ad579666958fa622cbed5d9b81f2"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.2.4v1:accepted_domains_empty_default_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.2.4v1",
+          "family_name": "accepted_domains_empty_default_ok",
+          "rule_cell": "default_qualifies",
+          "rule_reason_code": "default_policy_qualifies",
+          "section": "anti_phish_policies",
+          "section_row": 0,
+          "row_sha256": "b986e9d82dd7c3cc84905bad8e7bbf1b573abb4f12fa3b92e8ded3f6bdc63ae6"
+        }
+      ],
+      "antiPhishRules": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.2.1v1:v33_custom_covers_bad_default_bad",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.2.1v1",
+          "family_name": "v33_custom_covers_bad_default_bad",
+          "rule_cell": "no_qualifying_policy",
+          "rule_reason_code": "no_qualifying_policy",
+          "section": "anti_phish_rules",
+          "section_row": 0,
+          "row_sha256": "d05f11146469e8de24d45819c54a0761471260f9e451da095c58054546af4cd8"
+        }
+      ],
+      "hostedContentFilterPolicies": [
+        {
+          "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-6-1v1-127f193293",
+          "source_kind": "pack-train",
+          "source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl",
+          "policy": "MS.SECURITYSUITE.6.1v1",
+          "family_name": "securitysuite/MS.SECURITYSUITE.6.1v1/remove:protection_policy_rules.*+replace:hosted_content_filter_policies+replace:hosted_content_filter_rules",
+          "rule_cell": "custom_covers_compliant",
+          "rule_reason_code": "custom_policy_covers_all_recipients_compliant",
+          "split": "train",
+          "section": "hosted_content_filter_policies",
+          "section_row": 0,
+          "row_sha256": "1b7dae8bbdf7466edcc44baddf3c08b26b46de1c1ce5a67d924680e436f4a6c7"
+        },
+        {
+          "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-6-1v1-387c54853f",
+          "source_kind": "pack-train",
+          "source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl",
+          "policy": "MS.SECURITYSUITE.6.1v1",
+          "family_name": "securitysuite/MS.SECURITYSUITE.6.1v1/add:protection_policy_rules.*.HostedContentFilterPolicy+remove:protection_policy_rules.*.ExceptIfRecipientDomainIs+remove:protection_policy_rules.*.ExceptIfSentTo+4more-11e440bc",
+          "rule_cell": "preset_topology_unusable",
+          "rule_reason_code": "data_unusable_preset_topology",
+          "split": "train",
+          "section": "hosted_content_filter_policies",
+          "section_row": 1,
+          "row_sha256": "4f590e9290c300b3895d1342fdc8e0b2514c68eada55df579e6f3bae4045fb1d"
+        },
+        {
+          "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-6-1v1-474b252257",
+          "source_kind": "pack-train",
+          "source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl",
+          "policy": "MS.SECURITYSUITE.6.1v1",
+          "family_name": "securitysuite/MS.SECURITYSUITE.6.1v1/add:protection_policy_rules.*.HostedContentFilterPolicy+remove:protection_policy_rules.*.ExceptIfRecipientDomainIs+remove:protection_policy_rules.*.ExceptIfSentTo+5more-b2a46aec",
+          "rule_cell": "preset_topology_unusable",
+          "rule_reason_code": "data_unusable_preset_topology",
+          "split": "train",
+          "section": "hosted_content_filter_policies",
+          "section_row": 1,
+          "row_sha256": "d6f79c19a6bb93302bb8d12565a38da608b36ed5b714fc36d0a664bf4baaf3af"
+        },
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.6.1v1:custom_covers_bad_and_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.6.1v1",
+          "family_name": "custom_covers_bad_and_ok",
+          "rule_cell": "custom_order_dependent",
+          "rule_reason_code": "data_unavailable_custom_policy_priority",
+          "section": "hosted_content_filter_policies",
+          "section_row": 1,
+          "row_sha256": "a10f3f8a8a81bd984c607cfb8058897a277d94e4a1cd2fff9845189804a3311e"
+        }
+      ],
+      "hostedContentFilterRules": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.6.1v1:custom_covers_bad_and_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.6.1v1",
+          "family_name": "custom_covers_bad_and_ok",
+          "rule_cell": "custom_order_dependent",
+          "rule_reason_code": "data_unavailable_custom_policy_priority",
+          "section": "hosted_content_filter_rules",
+          "section_row": 0,
+          "row_sha256": "f5dae53ab81df8cbffd7d1ff27ededa026881cd2744c3f6f7412524dd43feffa"
+        }
+      ],
+      "safeLinksPolicies": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:atp_policy_rules_null",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.7.1v1",
+          "family_name": "atp_policy_rules_null",
+          "rule_cell": "section_not_a_list",
+          "rule_reason_code": "data_unusable_section_not_a_list",
+          "section": "safe_links_policies",
+          "section_row": 0,
+          "row_sha256": "e77b3453006227ffcc92ab02541125a01b7fc627525cd2b340cb8daf745cf89c"
+        },
+        {
+          "vector_id": "pack-train:scuba-securitysuite-ms-securitysuite-7-1v1-4453d56a4b",
+          "source_kind": "pack-train",
+          "source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl",
+          "policy": "MS.SECURITYSUITE.7.1v1",
+          "family_name": "securitysuite/MS.SECURITYSUITE.7.1v1/v8:section_drop:protection_policy_rules:met",
+          "rule_cell": "section_not_collected",
+          "rule_reason_code": "required_evidence_section_not_collected",
+          "split": "train",
+          "section": "safe_links_policies",
+          "section_row": 2,
+          "row_sha256": "ee9392553a1f39b801b5f77237b64458dae45159da3ec71fc962901d4578cdfb"
+        }
+      ],
+      "safeLinksRules": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.7.1v1:custom_rule_disabled_builtin_ok",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.7.1v1",
+          "family_name": "custom_rule_disabled_builtin_ok",
+          "rule_cell": "policy_flags_ok",
+          "rule_reason_code": "applied_policy_flags_on",
+          "section": "safe_links_rules",
+          "section_row": 0,
+          "row_sha256": "f93feef44e691e0c6cc3e9d084355c78cbb2c7139b7536c2797a61bb19a0e1bd"
+        }
+      ],
+      "hostedConnectionFilterPolicy": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.8.1v1:bad_second_item",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.8.1v1",
+          "family_name": "bad_second_item",
+          "rule_cell": "flag_bad",
+          "rule_reason_code": "violation_found",
+          "section": "conn_filter",
+          "section_row": 0,
+          "row_sha256": "9f7ea14b8e9c1cb7ec7d03cb569da85cdcb70ad357f74be8c1029ec38b65b287"
+        }
+      ],
+      "adminAuditLogConfig": [
+        {
+          "vector_id": "constructed:MS.SECURITYSUITE.5.1v1:on_and_unusable",
+          "source_kind": "constructed",
+          "source_file": "constructed by build_vectors.py",
+          "policy": "MS.SECURITYSUITE.5.1v1",
+          "family_name": "on_and_unusable",
+          "rule_cell": "flag_true",
+          "rule_reason_code": "enabled_found",
+          "section": "admin_audit_log_config",
+          "section_row": 1,
+          "row_sha256": "d8d828fbf15f339cd44de9c8482121a2b0797b963f796ff31b721b3443e2c139"
+        }
+      ]
+    }
+  },
+  "eopProtectionPolicyRules": {
+    "good": [
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "Identity": "Standard Preset Security Policy",
+        "RecipientDomainIs": null,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      },
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "Identity": "Strict Preset Security Policy",
+        "RecipientDomainIs": null,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      }
+    ]
+  },
+  "atpProtectionPolicyRules": {
+    "good": [
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "Identity": "Standard Preset Security Policy",
+        "RecipientDomainIs": null,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      },
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "Identity": "Strict Preset Security Policy",
+        "RecipientDomainIs": null,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      }
+    ]
+  },
+  "atpBuiltInProtectionRules": {
+    "good": [
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "Identity": "ATP Built-In Protection Rule"
+      }
+    ]
+  },
+  "atpPolicyForO365": {
+    "good": [
+      {
+        "EnableATPForSPOTeamsODB": true,
+        "Identity": "Default"
+      }
+    ]
+  },
+  "malwareFilterPolicy": {
+    "good": [
+      {
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "Identity": "Default",
+        "ZapEnabled": true
+      },
+      {
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "Identity": "C1",
+        "ZapEnabled": true
+      },
+      {
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "Identity": "C2",
+        "ZapEnabled": true
+      },
+      {
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "Identity": "Default",
+        "ZapEnabled": true
+      }
+    ]
+  },
+  "malwareFilterRules": {
+    "good": [
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "MalwareFilterPolicy": "C1",
+        "Priority": 0,
+        "RecipientDomainIs": null,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      }
+    ]
+  },
+  "safeAttachmentPolicies": {
+    "good": [
+      {
+        "Action": "Block",
+        "Identity": "Built-In Protection Policy"
+      },
+      {
+        "Action": "Block",
+        "Identity": "C1"
+      },
+      {
+        "Action": "DynamicDelivery",
+        "Identity": "Built-In Protection Policy"
+      },
+      {
+        "Action": "Block",
+        "Identity": "Built-In Protection Policy"
+      }
+    ]
+  },
+  "safeAttachmentRules": {
+    "good": [
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "Priority": 0,
+        "RecipientDomainIs": null,
+        "SafeAttachmentPolicy": "C1",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      }
+    ]
+  },
+  "antiPhishPolicies": {
+    "good": [
+      {
+        "EnableOrganizationDomainsProtection": true,
+        "Enabled": true,
+        "Identity": "C1",
+        "IsDefault": false,
+        "Name": "Other",
+        "TargetedDomainProtectionAction": "Quarantine"
+      },
+      {
+        "EnableOrganizationDomainsProtection": true,
+        "Enabled": true,
+        "Identity": "C1",
+        "IsDefault": false,
+        "Name": "N1",
+        "TargetedDomainProtectionAction": "Quarantine"
+      },
+      {
+        "EnableFirstContactSafetyTips": true,
+        "EnableSimilarDomainsSafetyTips": true,
+        "EnableSimilarUsersSafetyTips": true,
+        "EnableUnauthenticatedSender": true,
+        "EnableUnusualCharactersSafetyTips": true,
+        "EnableViaTag": true,
+        "Enabled": true,
+        "Identity": "Office365 AntiPhish Default (Default)",
+        "IsDefault": true,
+        "Name": "Office365 AntiPhish Default (Default)"
+      }
+    ]
+  },
+  "antiPhishRules": {
+    "good": [
+      {
+        "AntiPhishPolicy": "C1",
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      }
+    ]
+  },
+  "hostedContentFilterPolicies": {
+    "good": [
+      {
+        "AllowedSenderDomains": [],
+        "HighConfidencePhishAction": "Quarantine",
+        "HighConfidenceSpamAction": "MoveToJmf",
+        "Identity": "Default",
+        "IsDefault": true,
+        "PhishSpamAction": "Quarantine",
+        "RecommendedPolicyType": "Custom",
+        "SpamAction": "MoveToJmf"
+      },
+      {
+        "AllowedSenderDomains": [],
+        "HighConfidencePhishAction": "Quarantine",
+        "HighConfidenceSpamAction": "MoveToJmf",
+        "Identity": "Standard Preset Security Policy1659535429826",
+        "IsDefault": false,
+        "PhishSpamAction": "Quarantine",
+        "RecommendedPolicyType": "Standard",
+        "SpamAction": "MoveToJmf"
+      },
+      {
+        "AllowedSenderDomains": [],
+        "HighConfidencePhishAction": "Quarantine",
+        "HighConfidenceSpamAction": "Quarantine",
+        "Identity": "Strict Preset Security Policy1659535429827",
+        "IsDefault": false,
+        "PhishSpamAction": "Quarantine",
+        "RecommendedPolicyType": "Strict",
+        "SpamAction": "Quarantine"
+      },
+      {
+        "AllowedSenderDomains": [],
+        "HighConfidencePhishAction": "Quarantine",
+        "HighConfidenceSpamAction": "Quarantine",
+        "Identity": "Custom B",
+        "IsDefault": false,
+        "PhishSpamAction": "Quarantine",
+        "RecommendedPolicyType": "Custom",
+        "SpamAction": "MoveToJmf"
+      }
+    ]
+  },
+  "hostedContentFilterRules": {
+    "good": [
+      {
+        "ExceptIfRecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "HostedContentFilterPolicy": "Custom A",
+        "Identity": "Custom A",
+        "RecipientDomainIs": null,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Enabled"
+      }
+    ]
+  },
+  "safeLinksPolicies": {
+    "good": [
+      {
+        "DeliverMessageAfterScan": true,
+        "EnableForInternalSenders": true,
+        "EnableSafeLinksForEmail": true,
+        "EnableSafeLinksForOffice": true,
+        "EnableSafeLinksForTeams": true,
+        "Identity": "Built-In Protection Policy",
+        "ScanUrls": true,
+        "TrackClicks": true
+      },
+      {
+        "DeliverMessageAfterScan": true,
+        "EnableForInternalSenders": false,
+        "EnableSafeLinksForEmail": true,
+        "EnableSafeLinksForOffice": true,
+        "EnableSafeLinksForTeams": true,
+        "Identity": "Built-In Protection Policy",
+        "ScanUrls": true,
+        "TrackClicks": true
+      }
+    ]
+  },
+  "safeLinksRules": {
+    "good": [
+      {
+        "Identity": "R",
+        "Priority": 0,
+        "RecipientDomainIs": null,
+        "SafeLinksPolicy": "Custom A",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "State": "Disabled"
+      }
+    ]
+  },
+  "hostedConnectionFilterPolicy": {
+    "good": [
+      {
+        "EnableSafeList": false,
+        "IPAllowList": [],
+        "Name": "A"
+      }
+    ]
+  },
+  "adminAuditLogConfig": {
+    "good": [
+      {
+        "Identity": "Admin Audit Log Settings",
+        "UnifiedAuditLogIngestionEnabled": true
+      }
+    ]
+  }
+}

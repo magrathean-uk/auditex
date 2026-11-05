@@ -1323,6 +1323,7 @@ AREA_ADAPTER_MODULES: tuple[str, ...] = (
     # One module per line (keeps merges of the area branches small): "auditex.scuba_adapters_<area>",
     "auditex.scuba_adapters_exchange",
     "auditex.scuba_adapters_teams",
+    "auditex.scuba_adapters_defender",
 )
 
 PS_SECTIONS = {
