@@ -192,8 +192,21 @@ The same Exchange session reads `Get-SharingPolicy` (`Name`, `Domains`), readabl
 ## Power Platform and Power BI (optional)
 
 This is extended scope, off by default and available only in the commercial cloud.
-Select `--collector-preset power-platform --plane inventory --mode app` deliberately
-for an app-mode run or probe. The preset selects `identity`, `licensing`,
+With app credentials configured locally, deliberately opt in for a run:
+
+```bash
+auditex run --tenant-name CLIENT --tenant-id <tenant-id-or-domain> \
+  --collector-preset power-platform --plane inventory
+```
+
+For an app-mode probe, explicitly select the surfaces instead:
+
+```bash
+auditex probe live --tenant-name CLIENT --tenant-id <tenant-id-or-domain> \
+  --mode app --surface identity,licensing,power_platform,power_bi
+```
+
+The preset selects `identity`, `licensing`,
 `power_platform` and `power_bi`; it does not extend `full` or any existing preset.
 Both collector definitions remain `enabled: false`: presets and explicit collector
 selection use the configured names, rather than filtering on that flag. To add these

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import shlex
 
+import pytest
+
+from azure_tenant_audit import cli as tenant_cli
 from auditex import cli as auditex_cli
 from auditex.mcp_registry import iter_tool_specs
 from auditex.mcp_server import setup_guide as mcp_setup_guide
@@ -109,3 +114,59 @@ def test_optional_power_platform_setup_notes_are_selected_only_on_opt_in():
     # The opt-in adds no Graph permission beyond identity and licensing.
     supporting = build_setup_guide(provider="m365", collectors=["identity", "licensing"])
     assert optional["graph_permissions"] == supporting["graph_permissions"]
+
+
+@pytest.mark.parametrize("selection", [
+    {"collector_preset": "power-platform"},
+    {"collectors": ["identity", "licensing", "power_platform", "power_bi"]},
+    {"collectors": "identity,power_platform"},
+    {"collectors": ["power_bi"]},
+    {"collector_preset": "power-platform", "exclude": ["power_bi"]},
+    {"collector_preset": "full", "collectors": ["power_bi", "identity"]},
+])
+def test_optional_setup_commands_preserve_resolved_selection(selection) -> None:
+    payload = build_setup_guide(provider="m365", mode="app", plane="inventory", **selection)
+    commands = payload["commands"]
+    probe = auditex_cli._build_probe_parser().parse_args(shlex.split(commands["app_probe"])[2:])
+    run = tenant_cli.build_parser().parse_args(shlex.split(commands["app_run"])[2:])
+
+    assert probe.mode == "app"
+    assert probe.surface.split(",") == payload["selected_collectors"]
+    assert run.collectors.split(",") == payload["selected_collectors"]
+    assert run.collector_preset == selection.get("collector_preset")
+    assert run.plane == "inventory"
+    assert run.client_id == probe.client_id == "<app-id>"
+
+
+@pytest.mark.parametrize("selection", [
+    {},
+    {"collector_preset": "full"},
+    {"collectors": ["identity", "licensing"]},
+    {"collector_preset": "power-platform", "exclude": ["power_platform", "power_bi"]},
+])
+def test_setup_commands_without_optional_collectors_are_unchanged(selection) -> None:
+    payload = build_setup_guide(provider="m365", **selection)
+    assert payload["commands"]["app_probe"] == (
+        "auditex probe live --tenant-name CLIENT --tenant-id <tenant-id-or-domain> "
+        "--auditor-profile global-reader --mode app --client-id <app-id> --client-secret <client-secret>"
+    )
+    assert payload["commands"]["app_run"] == (
+        "auditex run --tenant-name CLIENT --tenant-id <tenant-id-or-domain> "
+        "--auditor-profile global-reader --plane full --client-id <app-id> --client-secret <client-secret> "
+        "--probe-first --throttle-mode safe"
+    )
+
+
+def test_documented_optional_run_and_probe_examples_parse() -> None:
+    guide = (Path(__file__).resolve().parents[1] / "docs/guides/admin-permission-guide.md").read_text()
+    optional = guide.split("## Power Platform and Power BI (optional)", 1)[1]
+    examples = [block.split("```", 1)[0] for block in optional.split("```bash\n")[1:]]
+    run_words, probe_words = [shlex.split(example.replace("\\\n", "")) for example in examples[:2]]
+    assert run_words[:2] == ["auditex", "run"]
+    assert probe_words[:3] == ["auditex", "probe", "live"]
+    run = tenant_cli.build_parser().parse_args(run_words[2:])
+    probe = auditex_cli._build_probe_parser().parse_args(probe_words[2:])
+    assert run.collector_preset == "power-platform"
+    assert run.plane == "inventory"
+    assert probe.mode == "app"
+    assert probe.surface == "identity,licensing,power_platform,power_bi"

@@ -330,6 +330,15 @@ def build_m365_setup_guide(
         "Keep command adapters read-only and review api-inventory.json after each run.",
     ]
 
+    app_probe_selection = ""
+    app_run_selection = ""
+    if {"power_platform", "power_bi"}.intersection(selected):
+        selected_csv = ",".join(selected)
+        app_probe_selection = f" --surface {selected_csv}"
+        if collector_preset:
+            app_run_selection = f" --collector-preset {collector_preset}"
+        app_run_selection += f" --collectors {selected_csv}"
+
     return {
         "schema_version": "2026-05-22",
         "kind": "auditex_setup_guide",
@@ -369,11 +378,12 @@ def build_m365_setup_guide(
             "app_probe": (
                 f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
                 f"--auditor-profile {auditor_profile} --mode app --client-id <app-id> --client-secret <client-secret>"
+                f"{app_probe_selection}"
             ),
             "app_run": (
                 f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
                 f"--auditor-profile {auditor_profile} --plane {plane} --client-id <app-id> --client-secret <client-secret> "
-                "--probe-first --throttle-mode safe"
+                f"--probe-first --throttle-mode safe{app_run_selection}"
             ),
         },
         "review_artifacts": [
