@@ -96,7 +96,7 @@ is `pass`, `fail` or null. The value-rule inventory (`configs/scuba-value-rules.
 | --- | --- | --- | --- |
 | met | `confirmed`, `true` | `pass` | no limitation |
 | not met | `confirmed`, `false` | `fail` | recommendation `review_policy_against_baseline_text` |
-| not assessed | `unknown`, null | null | limitation `required_evidence_section_not_collected`, recommendation `collect_missing_evidence_section` |
+| not assessed | `unknown`, null | null | missing sections: `required_evidence_section_not_collected`, `collect_missing_evidence_section`; collected but unusable evidence: `evidence_unusable` and the reason-specific recommendation below |
 | not applicable | `inferred`, `true` | null | limitation `policy_not_applicable` |
 
 A model row that abstains (`unknown`), fails to answer (`invalid`) or is skipped has no customer verdict and reads
@@ -168,8 +168,22 @@ not-assessed `environment_unknown` cell. The `value_rule` metadata adds `cell`,
 `value`. The cell, code and reason text must match the shipped policy inventory.
 These fixed texts contain only section names, setting names, known enum names
 or generic descriptions of counts. A not-assessed rule answer cites only
-the sections that explain it and uses the existing unknown claim, missing-evidence
-limitations and collection recommendation. A met or not-met answer confirms the
+the sections that explain it and uses the existing unknown claim. Only `section_not_collected`
+uses `required_evidence_section_not_collected`, its named section limitations and
+`collect_missing_evidence_section`. Addendum A1 is additive within the unreleased `2026-11-05`
+schema: collected but unusable evidence uses `evidence_unusable` plus
+`evidence_unusable:<section>:<kind>` for each cited section. Kinds `blocked`, `absent`,
+`unusable` and `undecidable` recommend, respectively, `check_licence_or_permissions`,
+`recollect_unusable_evidence`, `recollect_unusable_evidence` and
+`review_policy_against_baseline_text`. Customer text reads not assessed plus the constant
+catalogued reason; no evidence text is interpolated and these recommendation ids define
+no display wording. Offline pack parity (`as_pack_response(..., legacy=True)`) and previously
+written `2026-11-05` answers retain the earlier vocabulary and still validate.
+A1 also closes the exact citation variants for 64 cells, the two paired reason codes/texts
+for AAD 6.1 `orphan_sub_domain`, and the specified citation order for the three SS 7.x
+`preset_rule_unusable` cells. Catalogue-level contracts support subsequent policy stages
+without registering those policies. Other codes, texts and citation lists are rejected.
+A met or not-met answer confirms the
 requirement and cites every section in the model case; not-met recommends baseline
 review. The validator checks the inventory, sections, claims and text but cannot
 re-run the predicate, because the assessment bundle does not contain its input

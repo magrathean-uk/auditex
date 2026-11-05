@@ -47,7 +47,7 @@ def _check_vector(vector):
         "policies"][policy]["policy_item"]["criticality"]
     response = precheck_response(detail, {"policy_id": policy, "criticality": criticality}, list(sections),
                                  named_limitations=False)
-    assert response == as_pack_response(record, criticality, list(sections))
+    assert response == as_pack_response(record, criticality, list(sections), legacy=True)
     if vector.get("gold_response") is not None and vector.get("disagreement") is None:
         assert response == vector["gold_response"], vector["vector_id"]
     assert vector.get("disagreement") is None or vector["disagreement"].startswith("expected:")

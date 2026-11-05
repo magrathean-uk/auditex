@@ -509,7 +509,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?:required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|model_transport_failed|scope_narrowed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
+            "pattern": "^(?:evidence_unusable|evidence_unusable:[A-Za-z_][A-Za-z0-9_]*:(?:blocked|absent|unusable|undecidable)|required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|model_transport_failed|scope_narrowed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
           },
           "uniqueItems": true
         },
@@ -521,7 +521,9 @@
             "enum": [
               "collect_missing_evidence_section",
               "review_policy_against_baseline_text",
-              "report_product_fault"
+              "report_product_fault",
+              "check_licence_or_permissions",
+              "recollect_unusable_evidence"
             ]
           },
           "uniqueItems": true

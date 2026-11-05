@@ -45,7 +45,7 @@ def _check_rows(policy, rows):
             record["cited_sections"] or rule["sections"]), row["vector_id"]
         response = precheck_response(detail, {"policy_id": policy, "criticality": row["criticality"]},
                                      list(sections), named_limitations=False)
-        assert response == as_pack_response(record, row["criticality"], list(sections)), row["vector_id"]
+        assert response == as_pack_response(record, row["criticality"], list(sections), legacy=True), row["vector_id"]
         if row.get("gold_response") is not None and row.get("disagreement") is None:
             assert response == row["gold_response"], row["vector_id"]
         assert row.get("disagreement") is None or row["disagreement"].startswith("expected:"), row["vector_id"]

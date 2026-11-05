@@ -1,4 +1,806 @@
 {
+  "cell_contracts": {
+    "MS.AAD.2.1v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "conditional_access_policies"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.2.3v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "conditional_access_policies"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.3.6v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "conditional_access_policies"
+          ],
+          [
+            "privileged_roles"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.5.5v1": {
+      "section_shape_unusable": {
+        "cited_variants": [
+          [
+            "app_management_policies"
+          ],
+          [
+            "default_app_management_policy"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.5.6v1": {
+      "section_shape_unusable": {
+        "cited_variants": [
+          [
+            "app_management_policies"
+          ],
+          [
+            "default_app_management_policy"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.5.7v1": {
+      "section_shape_unusable": {
+        "cited_variants": [
+          [
+            "app_management_policies"
+          ],
+          [
+            "default_app_management_policy"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.6.1v1": {
+      "orphan_sub_domain": {
+        "reason_texts_by_code": {
+          "data_unusable_sub_domain_root_case": "Data unusable: a managed sub-domain matches a managed verified root domain only when letter case is ignored, so the export does not establish that it is under that root and its password policy is unknown; the policy was not assessed.",
+          "data_unusable_sub_domain_without_root": "Data unusable: a managed sub-domain has no managed verified root domain in the export, so its password policy is unknown; the policy was not assessed."
+        }
+      }
+    },
+    "MS.AAD.7.4v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "privileged_roles"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.7.5v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "privileged_roles"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.7.6v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "privileged_roles"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.7.7v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "privileged_roles"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.7.8v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "privileged_roles"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.7.9v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "privileged_roles"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.AAD.9.1v1": {
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "conditional_access_policies"
+          ],
+          [
+            "service_plans"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.1.1v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "anti_malware_policies"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_scope_unusable": {
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "anti_malware_rules"
+          ],
+          [
+            "accepted_domains",
+            "protection_policy_rules"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "anti_malware_policies"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.1.2v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "anti_malware_policies"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_scope_unusable": {
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "anti_malware_rules"
+          ],
+          [
+            "accepted_domains",
+            "protection_policy_rules"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "anti_malware_policies"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.1.3v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "safe_attachment_policies"
+          ],
+          [
+            "safe_attachment_rules"
+          ]
+        ]
+      },
+      "rule_scope_unusable": {
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "atp_policy_rules"
+          ],
+          [
+            "accepted_domains",
+            "safe_attachment_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "safe_attachment_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "safe_attachment_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "built_in_protection_rules"
+          ],
+          [
+            "safe_attachment_policies"
+          ],
+          [
+            "safe_attachment_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.2.1v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "preset_topology_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies",
+            "atp_policy_rules"
+          ],
+          [
+            "anti_phish_policies",
+            "protection_policy_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.2.2v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "preset_topology_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies",
+            "atp_policy_rules"
+          ],
+          [
+            "anti_phish_policies",
+            "protection_policy_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.2.3v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "preset_topology_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies",
+            "atp_policy_rules"
+          ],
+          [
+            "anti_phish_policies",
+            "protection_policy_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "atp_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.2.4v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "preset_topology_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_policies",
+            "protection_policy_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "anti_phish_policies"
+          ],
+          [
+            "anti_phish_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.3.1v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.3.2v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.3.3v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.3.4v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "dlp_compliance_policies"
+          ],
+          [
+            "dlp_compliance_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.6.1v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_scope_unusable": {
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "hosted_content_filter_rules"
+          ],
+          [
+            "accepted_domains",
+            "protection_policy_rules"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    },
+    "MS.SECURITYSUITE.6.2v1": {
+      "list_element_unusable": {
+        "cited_variants": [
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "rule_scope_unusable": {
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "hosted_content_filter_rules"
+          ],
+          [
+            "accepted_domains",
+            "protection_policy_rules"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ]
+        ]
+      },
+      "rule_state_unusable": {
+        "cited_variants": [
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      },
+      "section_not_a_list": {
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ]
+      }
+    }
+  },
   "policies": {
     "MS.AAD.3.4v1": {
       "cells": {

@@ -125,7 +125,7 @@ def test_v2_vectors_through_precheck(policy, rows_by_policy):
         reached.add(detail["cell"])
         response = precheck_response(detail, {"policy_id": policy, "criticality": row["criticality"]},
                                      list(row["sections"]), named_limitations=False)
-        expected = as_pack_response(assess(policy, row["sections"]), row["criticality"], list(row["sections"]))
+        expected = as_pack_response(assess(policy, row["sections"]), row["criticality"], list(row["sections"]), legacy=True)
         assert response == expected, row["vector_id"]
         if row.get("gold_response") is not None and row.get("disagreement") is None:
             assert response == row["gold_response"], row["vector_id"]
@@ -164,7 +164,7 @@ def test_v39_vectors_through_precheck(policy, rows_v39):
         reached.add(record["cell"])
         response = precheck_response(detail, {"policy_id": policy, "criticality": row["criticality"]},
                                      list(sections), named_limitations=False)
-        assert response == as_pack_response(record, row["criticality"], list(sections)), row["vector_id"]
+        assert response == as_pack_response(record, row["criticality"], list(sections), legacy=True), row["vector_id"]
         if row.get("gold_response") is not None and row.get("disagreement") is None:
             assert response == row["gold_response"], row["vector_id"]
         assert row.get("disagreement") is None or row["disagreement"].startswith("expected:")

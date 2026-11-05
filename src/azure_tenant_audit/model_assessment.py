@@ -313,7 +313,7 @@ def validate_assessment(payload: Any) -> None:
             if detail["class"] == "value_rule":
                 if version != "2026-11-05":
                     raise ValueError("Value rule requires current schema")
-                from .value_rules.catalogue import failure_entry, row_for
+                from .value_rules.catalogue import cell_entry, citation_variants, failure_entry, reason_matches, row_for
                 value_row = row_for(row["policy_id"])
                 if not {"cell", "reason_code", "reason_text"} <= detail.keys():
                     raise ValueError("Missing value-rule cell or reason")
@@ -323,16 +323,15 @@ def validate_assessment(payload: Any) -> None:
                     cell = {"verdict": failure["verdict"], "reason_code": failure["reason_code"],
                             "reason_texts": [failure["reason_text"]], "cited": value_row["sections"]}
                 else:
-                    cell = value_row["cells"].get(detail["cell"]) if value_row else None
+                    cell = cell_entry(row["policy_id"], detail["cell"], value_row) if value_row else None
                 if (value_row is None or cell is None or detail["rule_id"] != value_row["rule_id"]
-                        or detail["reason_code"] != cell["reason_code"]
-                            or detail["reason_text"] not in cell["reason_texts"]
+                        or not reason_matches(cell, detail["reason_code"], detail["reason_text"])
                         or detail["field"] is not None or detail["value"] is not None):
                     raise ValueError("Unsupported value-rule cell or reason")
                 allowed_sections = value_row["sections"]
-                # stage 4: SS 7.x preserves its explicit reference cell citation order.
+                # A1: the effective contract includes the exact SS 7.x reference order.
                 if (detail["section"] != [s for s in allowed_sections if s in detail["section"]]
-                        and detail["section"] not in cell.get("cited_variants", [])):
+                        and detail["section"] not in citation_variants(cell)):
                     raise ValueError("Invalid value-rule section order")
             else:
                 allowed_sections = sections
@@ -346,9 +345,7 @@ def validate_assessment(payload: Any) -> None:
                                      + ", ".join(detail["section"]) + ".")
                     if detail["reason_text"] != expected_text:
                         raise ValueError("Value-rule missing-section reason differs from citation")
-                # stage 4: DNS and Defender unusable cells have closed citation variants.
-                # stage 8: PP 2.2 shape/empty cells cite the section that could not be read.
-                elif detail["section"] not in cell.get("cited_variants", [cell["cited"]]):
+                elif detail["section"] not in citation_variants(cell):
                     raise ValueError("Value-rule decision cites the wrong section")
             elif detail["rule_id"] == "required_sections_present":
                 if detail["class"] != "absent_section" or detail["field"] is not None or detail["value"] is not None:
@@ -380,7 +377,11 @@ def validate_assessment(payload: Any) -> None:
                     raise ValueError("Absent gate input must have null value")
             expected = precheck_response(detail, policy["policy_item"], sections)
             if any(row[key] != expected[key] for key in expected):
-                raise ValueError("Invalid rule pre-check answer")
+                # A1 is additive within unreleased 2026-11-05. Previously written
+                # value-rule rows used the missing-evidence vocabulary for all abstentions.
+                previous = precheck_response(detail, policy["policy_item"], sections, legacy=True)
+                if detail["class"] != "value_rule" or any(row[key] != previous[key] for key in previous):
+                    raise ValueError("Invalid rule pre-check answer")
             if "model_shadow" in row:
                 shadow = row["model_shadow"]
                 if shadow["policy_id"] != row["policy_id"]:

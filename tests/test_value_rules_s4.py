@@ -27,6 +27,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/value-rules"
 FIXTURE = FIXTURES / "vectors-s4.jsonl.xz"
 HELD = json.loads((FIXTURES / "held-rows-s4.json").read_text())
+# The prepared anti-spam fixture predates A1 and included an uncatalogued fourth
+# rule_scope_unusable citation. Exercise its rows against the final shared contract.
+for _policy, _row in HELD.items():
+    for _cell, _extension in catalogue()["cell_contracts"].get(_policy, {}).items():
+        if _cell in _row["cells"]:
+            _row["cells"][_cell].update(_extension)
 LIVE = {"MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS.EXO.4.3v1", "MS.EXO.4.4v1",
         "MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"}
 POLICIES = LIVE | HELD.keys()
@@ -76,7 +82,7 @@ def _check_vector(row):
     if record["cell"] != "section_not_collected":
         assert actual[-1] in entry.get("cited_variants", [entry["cited"]]), row["vector_id"]
     criticality = row.get("criticality", POLICY_ITEMS[policy]["policy_item"]["criticality"])
-    response = as_pack_response(record, criticality, list(sections))
+    response = as_pack_response(record, criticality, list(sections), legacy=True)
     if policy in LIVE:
         detail = precheck_policy(policy, sections, list(sections), value_rules=True,
                                  absent_fields=True, empty_lists=True)
@@ -218,7 +224,7 @@ def test_full_external_counts_include_pilot_and_flagged_rows(external_vectors):
 
 
 @pytest.mark.parametrize("policy", sorted(HELD))
-def test_unreadable_preset_scope_has_its_own_citation(policy, vectors):
+def test_unreadable_preset_scope_outside_final_contract_is_rejected(policy, vectors, monkeypatch):
     row = next(row for row in vectors[policy] if row["rule_cell"] == "strict_covers_compliant")
     sections = deepcopy(row["sections"])
     strict = next(rule for rule in sections["protection_policy_rules"] if PRESET_RE[0].search(rule["Identity"]))
@@ -226,7 +232,19 @@ def test_unreadable_preset_scope_has_its_own_citation(policy, vectors):
     record = _evaluate(policy, sections)
     assert record["cell"] == "rule_scope_unusable"
     assert record["cited_sections"] == ["protection_policy_rules"]
-    assert record["cited_sections"] in HELD[policy]["cells"][record["cell"]]["cited_variants"]
+    # This pre-existing held predicate output is absent from A1's exact list.
+    # Contract work must reject it; changing the held predicate belongs to its stage.
+    assert record["cited_sections"] not in HELD[policy]["cells"][record["cell"]]["cited_variants"]
+    import azure_tenant_audit.value_rules.catalogue as loader
+    data = deepcopy(catalogue())
+    data["policies"].update(HELD)
+    monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
+    loader.catalogue.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="wrong section"):
+            checked(record)
+    finally:
+        loader.catalogue.cache_clear()
 
 
 @pytest.mark.parametrize("policy", sorted(LIVE & {f"MS.SECURITYSUITE.7.{i}v1" for i in (1, 2, 3)}))
@@ -352,7 +370,7 @@ def test_rule_outputs_never_echo_evidence(policy, vectors):
     for row in vectors[policy]:
         sections = _taint(row["sections"])
         record = _evaluate(policy, sections)
-        for output in (record, as_pack_response(record, row["criticality"], list(sections))):
+        for output in (record, as_pack_response(record, row["criticality"], list(sections), legacy=True)):
             rendered = json.dumps(output)
             assert CANARY_EMAIL not in rendered and CANARY_NAME not in rendered
         # Taint actual labels and values, not just unused fields.
