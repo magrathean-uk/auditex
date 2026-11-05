@@ -510,8 +510,12 @@ def test_ca_variant_changes_only_rules(run, monkeypatch, extra):
     assert with_variant.report["sections"]["conditional_access_policies"]["unsupported_conditions"]
 
 
-@pytest.mark.parametrize("section", ["conditional_access_policies", "SPO_tenant"])
-def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(run, monkeypatch, section):
+@pytest.mark.parametrize("section,policy,cell,reason_code", [
+    ("conditional_access_policies", "MS.AAD.1.1v1", "no_policy_meets", "no_policy_meets_requirement"),
+    ("SPO_tenant", "MS.SHAREPOINT.1.1v1", "value_noncompliant", "setting_noncompliant"),
+], ids=["conditional_access_policies", "SPO_tenant"])
+def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
+        run, monkeypatch, capsys, caplog, section, policy, cell, reason_code):
     import auditex.model_serving as serving
 
     class FixedDatetime(datetime):
@@ -521,9 +525,11 @@ def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(run
 
     monkeypatch.setattr(serving, "datetime", FixedDatetime)
     monkeypatch.setattr(serving.ModelClient, "assess", lambda *a, **k: pytest.fail("unexpected model call"))
-    # Rule verdicts may legitimately change. Exercise the persisted model route
-    # for the affected families while varying only the private rule projection.
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+    caplog.set_level("DEBUG")
+    # A recorded empty emergency-access list makes the CA config usable; an
+    # unrecorded list would mask the variant's answer as section_not_collected.
+    manifest = json.loads((run / "run-manifest.json").read_text())
+    write(run, "run-manifest.json", {**manifest, "rule_parameters": {"break_glass_accounts": []}})
     canary = "PRIVATE CA display-name canary"
     email = "private-ca-canary@example.invalid"
     row = with_restriction(RESTRICTIONS[0])
@@ -543,28 +549,63 @@ def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(run
     def outputs(result):
         public = public_projection_bytes(result)
         # Exercise the real prompt writer for both affected policy families.
-        serving.assess_run(run, serving.ModelConfig(model_name="stub"), dry_run=True,
+        serving.assess_run(run, dry_run=True,
                            policies=["MS.AAD.1.1v1", "MS.SHAREPOINT.1.1v1"])
-        serving.assess_run(run, serving.ModelConfig(model_name="stub"),
+        serving.assess_run(run,
                            policies=["MS.AAD.1.1v1", "MS.SHAREPOINT.1.1v1"])
         public.update({name: (run / name).read_bytes() for name in (
             "model_assessment_prompts.jsonl", "model_assessment.json")})
         return public
 
     with_variant = outputs(enabled)
-    monkeypatch.setattr(aad, "RULE_VARIANTS", {})
+    # Toggle one private adapter at a time; the other policy is an unchanged control.
+    monkeypatch.setattr(aad, "RULE_VARIANTS", {k: v for k, v in aad.RULE_VARIANTS.items() if k != section})
     disabled = projection.project_run(run)
     assert disabled.rule_sections[section] == NOT_COLLECTED
     assert enabled.rule_sections[section] != NOT_COLLECTED
     without = outputs(disabled)
-    assert with_variant == without
+    assessment_name = "model_assessment.json"
+    assert {k: v for k, v in with_variant.items() if k != assessment_name} == {
+        k: v for k, v in without.items() if k != assessment_name}
+    on, off = (json.loads(files[assessment_name]) for files in (with_variant, without))
+    # Every envelope field and unaffected row must remain identical, including order.
+    assert {k: v for k, v in on.items() if k not in {"policies", "totals"}} == {
+        k: v for k, v in off.items() if k not in {"policies", "totals"}}
+    assert [r["policy_id"] for r in on["policies"]] == [r["policy_id"] for r in off["policies"]]
+    assert [r for r in on["policies"] if r["policy_id"] != policy] == [
+        r for r in off["policies"] if r["policy_id"] != policy]
+    on_row, off_row = (next(r for r in result["policies"] if r["policy_id"] == policy) for result in (on, off))
+    answer_fields = {"claims", "limitations", "recommendations", "rule_precheck", "comparison"}
+    assert {k: v for k, v in on_row.items() if k not in answer_fields} == {
+        k: v for k, v in off_row.items() if k not in answer_fields}
+    on_detail, off_detail = on_row["rule_precheck"], off_row["rule_precheck"]
+    assert (on_detail["cell"], on_detail["reason_code"]) == (cell, reason_code)
+    assert (off_detail["cell"], off_detail["reason_code"]) == (
+        "section_not_collected", "required_evidence_section_not_collected")
+    changed_detail = {"cell", "reason_code", "reason_text", "section"}
+    assert {k: v for k, v in on_detail.items() if k not in changed_detail} == {
+        k: v for k, v in off_detail.items() if k not in changed_detail}
+    on_claim = next(c for c in on_row["claims"] if c["id"] == "requirement_met")
+    off_claim = next(c for c in off_row["claims"] if c["id"] == "requirement_met")
+    assert (on_claim["status"], on_claim["value"]) == ("confirmed", False)
+    assert (off_claim["status"], off_claim["value"]) == ("unknown", None)
+    assert on_row["comparison"] == {**off_row["comparison"], "model_status": "fail"}
+    assert off_row["comparison"]["model_status"] is None
+    assert on["totals"] == {"answered": 2, "unknown": 0, "invalid": 0, "skipped": 0,
+                            "rule_answered": 2, "scope_narrowed": 0}
+    assert off["totals"] == {**on["totals"], "answered": 1, "unknown": 1}
     for mode, files in (("enabled", with_variant), ("disabled", without)):
         for name, content in files.items():
             target = run / "serialisation" / mode / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-            assert target.read_bytes() == (run / "serialisation" / "enabled" / name).read_bytes()
+            assert target.read_bytes() == content
+            if name != assessment_name:
+                assert target.read_bytes() == (run / "serialisation" / "enabled" / name).read_bytes()
             assert canary.encode() not in content and email.encode() not in content
+    captured = capsys.readouterr()
+    for text in (captured.out, captured.err, caplog.text):
+        assert canary not in text and email not in text
 
 
 @pytest.mark.parametrize("state", ["enabled", "disabled", "enabledForReportingButNotEnforced"])
