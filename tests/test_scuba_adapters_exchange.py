@@ -1,6 +1,7 @@
 """Synthetic Exchange adapter checks; no tenant access or network calls."""
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -25,7 +26,8 @@ ROWS = {
 FIELDS = {'remote_domains': ('DomainName', 'AutoForwardEnabled'),
           'transport_rule': ('State', 'Mode', 'FromScope', 'PrependSubject'),
           'sharing_policy': ('Name', 'Domains')}
-VECTORS = json.loads((Path(__file__).parent / 'fixtures/collect-exchange/adapter-vectors-v39.json').read_text())
+FIXTURE = json.loads((Path(__file__).parent / 'fixtures/collect-exchange/adapter-vectors-v39.json').read_text())
+VECTORS = FIXTURE['vectors']
 # Explicit expectations, rather than deriving rejection from the implementation.
 WITHHELD = {
     'MS.EXO.1.1v2': {'bad_unlabelled', 'clear_with_junk_elements',
@@ -98,6 +100,35 @@ def test_bad_module_import_propagates(tmp_path, monkeypatch):
     monkeypatch.setattr(projection, 'AREA_ADAPTER_MODULES', ('auditex.no_such_exchange_adapter',))
     with pytest.raises(ImportError):
         projection.project_run(tmp_path)
+
+
+def test_fixture_provenance_and_coverage():
+    assert FIXTURE['_meta']['provenance'] == (
+        'constructed rows and pack train and validation rows from v3.9.1; '
+        'held-out test and pilot rows excluded')
+    assert len(VECTORS) == len({v['vector_id'] for v in VECTORS}) == 48
+    assert Counter(v['source_kind'] for v in VECTORS) == {
+        'constructed': 45, 'pack-train': 1, 'pack-validation': 2}
+    assert Counter(v['policy'] for v in VECTORS) == {
+        'MS.EXO.1.1v2': 12, 'MS.EXO.6.1v1': 12,
+        'MS.EXO.6.2v1': 12, 'MS.EXO.7.1v1': 12}
+    for vector in VECTORS:
+        kind = vector['source_kind']
+        assert vector['vector_id'].startswith(f'{kind}:')
+        if kind == 'constructed':
+            assert vector['source_file'] == 'constructed by build_vectors.py'
+            assert vector['split'] is None
+        else:
+            assert kind in {'pack-train', 'pack-validation', 'packlic-train'}
+            assert vector['source_file'].startswith('20261030-oracle-pack-v10/')
+            assert vector['split'] == ('validation' if kind == 'pack-validation' else 'train')
+    # Preserve both EXO 7.1 cells when replacing the three held-out rows.
+    exo_7 = [v for v in VECTORS if v['policy'] == 'MS.EXO.7.1v1']
+    assert Counter((v['rule_cell'], v['rule_reason_code']) for v in exo_7) == {
+        ('qualifying_rule', 'qualifying_rule_found'): 3,
+        ('no_qualifying_rule', 'no_qualifying_rule'): 8,
+        ('rule_unusable', 'data_unusable_item_value'): 1,
+    }
 
 
 @pytest.mark.parametrize('vector', VECTORS, ids=lambda v: v['vector_id'])
