@@ -307,14 +307,16 @@
         "messagingPolicies",
         "meetingPolicies",
         "appPermissionPolicies",
-        "appSetupPolicies"
+        "appSetupPolicies",
+        "broadcastPolicies",
+        "clientConfiguration"
       ],
       "command_collectors": [
         {
           "name": "tenantFederationConfiguration",
           "category": "policy",
           "commands": [
-            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers,AllowedDomains,BlockedDomains"
+            "Get-CsTenantFederationConfiguration | Select-Object Identity,AllowFederatedUsers,AllowTeamsConsumer,AllowTeamsConsumerInbound,AllowPublicUsers,AllowedDomains,BlockedDomains"
           ]
         },
         {
@@ -328,14 +330,14 @@
           "name": "meetingPolicies",
           "category": "policy",
           "commands": [
-            "Get-CsTeamsMeetingPolicy | Select-Object Identity,AllowCloudRecording,AllowIPVideo,ScreenSharingMode"
+            "Get-CsTeamsMeetingPolicy | Select-Object Identity,AllowCloudRecording,AllowIPVideo,ScreenSharingMode,AllowExternalParticipantGiveRequestControl,AllowAnonymousUsersToStartMeeting,AutoAdmittedUsers,AllowPSTNUsersToBypassLobby"
           ]
         },
         {
           "name": "appPermissionPolicies",
           "category": "policy",
           "commands": [
-            "Get-CsTeamsAppPermissionPolicy | Select-Object Identity,GlobalCatalogAppsType"
+            "Get-CsTeamsAppPermissionPolicy | Select-Object Identity,DefaultCatalogAppsType,GlobalCatalogAppsType,PrivateCatalogAppsType"
           ]
         },
         {
@@ -343,6 +345,20 @@
           "category": "policy",
           "commands": [
             "Get-CsTeamsAppSetupPolicy | Select-Object Identity,AllowSideLoading"
+          ]
+        },
+        {
+          "name": "broadcastPolicies",
+          "category": "policy",
+          "commands": [
+            "Get-CsTeamsMeetingBroadcastPolicy | Select-Object Identity,BroadcastRecordingMode"
+          ]
+        },
+        {
+          "name": "clientConfiguration",
+          "category": "policy",
+          "commands": [
+            "Get-CsTeamsClientConfiguration | Select-Object Identity,AllowEmailIntoChannel"
           ]
         }
       ]

@@ -302,7 +302,9 @@
         "Get-CsTeamsMessagingPolicy",
         "Get-CsTeamsMeetingPolicy",
         "Get-CsTeamsAppPermissionPolicy",
-        "Get-CsTeamsAppSetupPolicy"
+        "Get-CsTeamsAppSetupPolicy",
+        "Get-CsTeamsMeetingBroadcastPolicy",
+        "Get-CsTeamsClientConfiguration"
       ]
     },
     "app_consent": {

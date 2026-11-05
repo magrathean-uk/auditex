@@ -6,6 +6,17 @@ from ..adapters import get_adapter
 from .base import Collector, CollectorResult
 
 
+TEAMS_OPERATIONS: tuple[str, ...] = (
+    "tenantFederationConfiguration",
+    "messagingPolicies",
+    "meetingPolicies",
+    "appPermissionPolicies",
+    "appSetupPolicies",
+    "broadcastPolicies",
+    "clientConfiguration",
+)
+
+
 class TeamsPolicyCollector(Collector):
     name = "teams_policy"
     description = "Teams federation, messaging, meeting, and app policy posture."
@@ -15,7 +26,7 @@ class TeamsPolicyCollector(Collector):
     command_collectors = [
         (
             "tenantFederationConfiguration",
-            "Get-CsTenantFederationConfiguration | Select-Object AllowFederatedUsers,AllowTeamsConsumer,AllowPublicUsers,AllowedDomains,BlockedDomains",
+            "Get-CsTenantFederationConfiguration | Select-Object Identity,AllowFederatedUsers,AllowTeamsConsumer,AllowTeamsConsumerInbound,AllowPublicUsers,AllowedDomains,BlockedDomains",
         ),
         (
             "messagingPolicies",
@@ -23,15 +34,23 @@ class TeamsPolicyCollector(Collector):
         ),
         (
             "meetingPolicies",
-            "Get-CsTeamsMeetingPolicy | Select-Object Identity,AllowCloudRecording,AllowIPVideo,ScreenSharingMode",
+            "Get-CsTeamsMeetingPolicy | Select-Object Identity,AllowCloudRecording,AllowIPVideo,ScreenSharingMode,AllowExternalParticipantGiveRequestControl,AllowAnonymousUsersToStartMeeting,AutoAdmittedUsers,AllowPSTNUsersToBypassLobby",
         ),
         (
             "appPermissionPolicies",
-            "Get-CsTeamsAppPermissionPolicy | Select-Object Identity,GlobalCatalogAppsType",
+            "Get-CsTeamsAppPermissionPolicy | Select-Object Identity,DefaultCatalogAppsType,GlobalCatalogAppsType,PrivateCatalogAppsType",
         ),
         (
             "appSetupPolicies",
             "Get-CsTeamsAppSetupPolicy | Select-Object Identity,AllowSideLoading",
+        ),
+        (
+            "broadcastPolicies",
+            "Get-CsTeamsMeetingBroadcastPolicy | Select-Object Identity,BroadcastRecordingMode",
+        ),
+        (
+            "clientConfiguration",
+            "Get-CsTeamsClientConfiguration | Select-Object Identity,AllowEmailIntoChannel",
         ),
     ]
 
