@@ -1,0 +1,855 @@
+{
+  "adminAuditLogConfig": {
+    "good": [
+      {
+        "Identity": "Admin Audit Log Settings",
+        "UnifiedAuditLogIngestionEnabled": true
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Admin Audit Log Settings",
+        "UnifiedAuditLogIngestionEnabled": true
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Admin Audit Log Settings",
+        "UnifiedAuditLogIngestionEnabled": true
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "hostedConnectionFilterPolicy": {
+    "good": [
+      {
+        "Name": "example.invalid",
+        "IPAllowList": [],
+        "EnableSafeList": false
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Name": "example.invalid",
+        "IPAllowList": [],
+        "EnableSafeList": false
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Name": "example.invalid",
+        "IPAllowList": [],
+        "EnableSafeList": false
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "atpPolicyForO365": {
+    "good": [
+      {
+        "Identity": "Default",
+        "EnableATPForSPOTeamsODB": true
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Default",
+        "EnableATPForSPOTeamsODB": true
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Default",
+        "EnableATPForSPOTeamsODB": true
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "eopProtectionPolicyRules": {
+    "good": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "State": "Enabled",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      },
+      {
+        "Identity": "Strict Preset Security Policy",
+        "State": "Enabled",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Strict Preset Security Policy",
+        "State": "Enabled",
+        "SentTo": [
+          "recipient"
+        ],
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "State": 1,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "atpProtectionPolicyRules": {
+    "good": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "State": "Enabled",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      },
+      {
+        "Identity": "Strict Preset Security Policy",
+        "State": "Enabled",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "State": "Enabled",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "State": 1,
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null,
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "atpBuiltInProtectionRules": {
+    "good": [
+      {
+        "Identity": "ATP Built-In Protection Rule",
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "ATP Built-In Protection Rule",
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "ATP Built-In Protection Rule",
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "malwareFilterPolicy": {
+    "good": [
+      {
+        "Identity": "Strict Preset Security Policy",
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "ZapEnabled": true
+      },
+      {
+        "Identity": "Standard Preset Security Policy",
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "ZapEnabled": true
+      },
+      {
+        "Identity": "example.invalid",
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "ZapEnabled": true
+      },
+      {
+        "Identity": "Default",
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "ZapEnabled": true
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Strict Preset Security Policy",
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "ZapEnabled": true
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Strict Preset Security Policy",
+        "EnableFileFilter": true,
+        "FileTypes": [
+          "exe",
+          "cmd",
+          "vbe"
+        ],
+        "ZapEnabled": true
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "malwareFilterRules": {
+    "good": [
+      {
+        "State": "Enabled",
+        "Priority": 0,
+        "MalwareFilterPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "State": "Enabled",
+        "Priority": 0,
+        "MalwareFilterPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "State": 1,
+        "Priority": 0,
+        "MalwareFilterPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "safeAttachmentPolicies": {
+    "good": [
+      {
+        "Identity": "Strict Preset Security Policy",
+        "Action": "Block"
+      },
+      {
+        "Identity": "Standard Preset Security Policy",
+        "Action": "Block"
+      },
+      {
+        "Identity": "example.invalid",
+        "Action": "DynamicDelivery"
+      },
+      {
+        "Identity": "Built-In Protection Policy",
+        "Action": "Block"
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Strict Preset Security Policy",
+        "Action": "Block"
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Strict Preset Security Policy",
+        "Action": "Block"
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "safeAttachmentRules": {
+    "good": [
+      {
+        "State": "Enabled",
+        "Priority": 0,
+        "SafeAttachmentPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "State": "Enabled",
+        "Priority": 0,
+        "SafeAttachmentPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "State": 1,
+        "Priority": 0,
+        "SafeAttachmentPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "antiPhishPolicies": {
+    "good": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "Name": "Standard Preset Security Policy",
+        "IsDefault": false,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "EnableOrganizationDomainsProtection": true,
+        "TargetedDomainProtectionAction": "Quarantine",
+        "EnableTargetedDomainsProtection": true,
+        "TargetedDomainsToProtect": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "EnableFirstContactSafetyTips": null,
+        "EnableSimilarUsersSafetyTips": null,
+        "EnableSimilarDomainsSafetyTips": null,
+        "EnableUnusualCharactersSafetyTips": null,
+        "EnableViaTag": null,
+        "EnableUnauthenticatedSender": null
+      },
+      {
+        "Identity": "Strict Preset Security Policy",
+        "Name": "Strict Preset Security Policy",
+        "IsDefault": false,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "EnableOrganizationDomainsProtection": true,
+        "TargetedDomainProtectionAction": "Quarantine",
+        "EnableTargetedDomainsProtection": true,
+        "TargetedDomainsToProtect": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "EnableFirstContactSafetyTips": null,
+        "EnableSimilarUsersSafetyTips": null,
+        "EnableSimilarDomainsSafetyTips": null,
+        "EnableUnusualCharactersSafetyTips": null,
+        "EnableViaTag": null,
+        "EnableUnauthenticatedSender": null
+      },
+      {
+        "Identity": "example.invalid",
+        "Name": "example.invalid",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "EnableOrganizationDomainsProtection": true,
+        "TargetedDomainProtectionAction": "Quarantine",
+        "EnableTargetedDomainsProtection": true,
+        "TargetedDomainsToProtect": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "EnableFirstContactSafetyTips": true,
+        "EnableSimilarUsersSafetyTips": true,
+        "EnableSimilarDomainsSafetyTips": true,
+        "EnableUnusualCharactersSafetyTips": true,
+        "EnableViaTag": true,
+        "EnableUnauthenticatedSender": true
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "Name": "Standard Preset Security Policy",
+        "IsDefault": false,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "EnableOrganizationDomainsProtection": true,
+        "TargetedDomainProtectionAction": "Quarantine",
+        "EnableTargetedDomainsProtection": true,
+        "TargetedDomainsToProtect": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "EnableFirstContactSafetyTips": null,
+        "EnableSimilarUsersSafetyTips": null,
+        "EnableSimilarDomainsSafetyTips": null,
+        "EnableUnusualCharactersSafetyTips": null,
+        "EnableViaTag": null,
+        "EnableUnauthenticatedSender": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Standard Preset Security Policy",
+        "Name": "Standard Preset Security Policy",
+        "IsDefault": false,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "EnableOrganizationDomainsProtection": true,
+        "TargetedDomainProtectionAction": "Quarantine",
+        "EnableTargetedDomainsProtection": true,
+        "TargetedDomainsToProtect": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "EnableFirstContactSafetyTips": null,
+        "EnableSimilarUsersSafetyTips": null,
+        "EnableSimilarDomainsSafetyTips": null,
+        "EnableUnusualCharactersSafetyTips": null,
+        "EnableViaTag": null,
+        "EnableUnauthenticatedSender": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "antiPhishRules": {
+    "good": [
+      {
+        "State": "Enabled",
+        "AntiPhishPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "State": "Enabled",
+        "AntiPhishPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "State": 1,
+        "AntiPhishPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "hostedContentFilterPolicies": {
+    "good": [
+      {
+        "Identity": "Default",
+        "IsDefault": true,
+        "RecommendedPolicyType": "Custom",
+        "SpamAction": "MoveToJmf",
+        "HighConfidenceSpamAction": "MoveToJmf",
+        "PhishSpamAction": "Quarantine",
+        "HighConfidencePhishAction": "Quarantine",
+        "AllowedSenderDomains": []
+      },
+      {
+        "Identity": "Standard Preset Security Policy",
+        "IsDefault": false,
+        "RecommendedPolicyType": "Standard",
+        "SpamAction": "MoveToJmf",
+        "HighConfidenceSpamAction": "MoveToJmf",
+        "PhishSpamAction": "Quarantine",
+        "HighConfidencePhishAction": "Quarantine",
+        "AllowedSenderDomains": []
+      },
+      {
+        "Identity": "Strict Preset Security Policy",
+        "IsDefault": false,
+        "RecommendedPolicyType": "Strict",
+        "SpamAction": "Quarantine",
+        "HighConfidenceSpamAction": "Quarantine",
+        "PhishSpamAction": "Quarantine",
+        "HighConfidencePhishAction": "Quarantine",
+        "AllowedSenderDomains": []
+      },
+      {
+        "Identity": "example.invalid",
+        "IsDefault": false,
+        "RecommendedPolicyType": "Custom",
+        "SpamAction": "MoveToJmf",
+        "HighConfidenceSpamAction": "Quarantine",
+        "PhishSpamAction": "Quarantine",
+        "HighConfidencePhishAction": "Quarantine",
+        "AllowedSenderDomains": []
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "Default",
+        "IsDefault": true,
+        "RecommendedPolicyType": "Custom",
+        "SpamAction": "MoveToJmf",
+        "HighConfidenceSpamAction": "MoveToJmf",
+        "PhishSpamAction": "Quarantine",
+        "HighConfidencePhishAction": "Quarantine",
+        "AllowedSenderDomains": []
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "Default",
+        "IsDefault": true,
+        "RecommendedPolicyType": "Custom",
+        "SpamAction": "MoveToJmf",
+        "HighConfidenceSpamAction": "MoveToJmf",
+        "PhishSpamAction": "Quarantine",
+        "HighConfidencePhishAction": "Quarantine",
+        "AllowedSenderDomains": []
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "hostedContentFilterRules": {
+    "good": [
+      {
+        "Identity": "example.invalid",
+        "State": "Enabled",
+        "HostedContentFilterPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "example.invalid",
+        "State": "Enabled",
+        "HostedContentFilterPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "example.invalid",
+        "State": 1,
+        "HostedContentFilterPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": [
+          "example.invalid",
+          "example.invalid"
+        ],
+        "ExceptIfSentTo": null,
+        "ExceptIfSentToMemberOf": null,
+        "ExceptIfRecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "safeLinksPolicies": {
+    "good": [
+      {
+        "Identity": "example.invalid",
+        "EnableSafeLinksForEmail": true,
+        "EnableSafeLinksForTeams": true,
+        "EnableSafeLinksForOffice": true,
+        "EnableForInternalSenders": true,
+        "ScanUrls": true,
+        "DeliverMessageAfterScan": true,
+        "TrackClicks": true
+      },
+      {
+        "Identity": "Built-In Protection Policy",
+        "EnableSafeLinksForEmail": true,
+        "EnableSafeLinksForTeams": true,
+        "EnableSafeLinksForOffice": true,
+        "EnableForInternalSenders": false,
+        "ScanUrls": true,
+        "DeliverMessageAfterScan": true,
+        "TrackClicks": true
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "example.invalid",
+        "EnableSafeLinksForEmail": true,
+        "EnableSafeLinksForTeams": true,
+        "EnableSafeLinksForOffice": true,
+        "EnableForInternalSenders": true,
+        "ScanUrls": true,
+        "DeliverMessageAfterScan": true,
+        "TrackClicks": true
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "example.invalid",
+        "EnableSafeLinksForEmail": true,
+        "EnableSafeLinksForTeams": true,
+        "EnableSafeLinksForOffice": true,
+        "EnableForInternalSenders": true,
+        "ScanUrls": true,
+        "DeliverMessageAfterScan": true,
+        "TrackClicks": true
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  },
+  "safeLinksRules": {
+    "good": [
+      {
+        "Identity": "example.invalid",
+        "State": "Disabled",
+        "Priority": 0,
+        "SafeLinksPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null
+      }
+    ],
+    "empty": [],
+    "absent_exceptif": [
+      {
+        "Identity": "example.invalid",
+        "State": "Disabled",
+        "Priority": 0,
+        "SafeLinksPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null
+      }
+    ],
+    "enum_as_int": [
+      {
+        "Identity": "example.invalid",
+        "State": 1,
+        "Priority": 0,
+        "SafeLinksPolicy": "example.invalid",
+        "SentTo": null,
+        "SentToMemberOf": null,
+        "RecipientDomainIs": null
+      }
+    ],
+    "error_row": [
+      {
+        "error": "Synthetic failure",
+        "error_class": "command_error"
+      }
+    ]
+  }
+}
