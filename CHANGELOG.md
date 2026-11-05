@@ -9,6 +9,24 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 Nothing yet.
 
+## [1.2.2] - 2026-11-05
+
+### Security
+
+A secret supplied through an abbreviated command-line flag, such as `--client-sec` or
+`--access-tok`, was recorded in clear in the `command_line` field of `run-manifest.json`, probe
+and response manifests, Google run manifests and customer-pack copies, and in the audit logs
+`audit-log.jsonl` and `audit-debug.log`. Values supplied through full flag names were always
+redacted. Parsers now reject abbreviated options with exit status 2 before a run bundle or audit
+log is created.
+
+The first affected release was v0.9; releases through 1.2.1 are affected. Google manifest recording
+was added later and is present in the checked releases 1.1.0, 1.2.0 and 1.2.1.
+
+Rotate any client secret, access token or certificate password supplied through an abbreviated
+flag, delete or rebuild affected run bundles and customer packs, and upgrade to 1.2.2. Contact
+contact+auditex@magrathean.uk for help.
+
 ## [1.2.1] - 2026-10-25
 
 Model-development tooling only. `CONTRACT_VERSION` stays `2026-10-22`, and the audit, report, export and
@@ -778,7 +796,8 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/magrathean-uk/auditex/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/magrathean-uk/auditex/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/magrathean-uk/auditex/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/magrathean-uk/auditex/compare/v1.0.0...v1.1.0
