@@ -34,17 +34,23 @@ NOTIFY_PROFILE = PROFILE_CUSTOMER_PACK
 # regardless of whether the key name was on the existing sensitive-key
 # allowlist.
 _REDACTION_PLACEHOLDER = "[REDACTED]"
+# Every pattern is linear in the input: a left boundary so a match can only start where a run of its own alphabet starts
+# (not at each of the many overlapping ``eyJ`` of ``"eyJ" * n``), and possessive quantifiers so a failed match never
+# backtracks through the run it just read (Python 3.11+). ``tests/test_notify_profile.py`` times the real send path.
 _TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # OAuth Authorization headers: ``Authorization: Bearer <token>`` and
     # bare ``Bearer <token>``.
-    (re.compile(r"Bearer\s+[A-Za-z0-9._\-+=/]{8,}", re.IGNORECASE), "Bearer [REDACTED]"),
+    (re.compile(r"Bearer\s++[A-Za-z0-9._\-+=/]{8,}+", re.IGNORECASE), "Bearer [REDACTED]"),
     # JWTs (header.payload.signature, base64url everywhere). The header
     # almost always starts with ``eyJ`` (decoded ``{"``).
-    (re.compile(r"eyJ[A-Za-z0-9_\-]{15,}\.[A-Za-z0-9_\-]{15,}\.[A-Za-z0-9_\-]+"), "[REDACTED-JWT]"),
+    (
+        re.compile(r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]{15,}+\.[A-Za-z0-9_\-]{15,}+\.[A-Za-z0-9_\-]++"),
+        "[REDACTED-JWT]",
+    ),
     # Long base64 blobs — DSC export payloads, encrypted credential blobs,
     # PFX-encoded certificates. 200 chars is well above any legitimate
     # short ID / display name and short of a full RSA key dump.
-    (re.compile(r"[A-Za-z0-9+/]{200,}={0,2}"), "[REDACTED-BLOB]"),
+    (re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{200,}+={0,2}"), "[REDACTED-BLOB]"),
 ]
 # Sensitive key names whose VALUES (regardless of shape) get fully
 # replaced. Mirrors the contracts.py sensitive-keys regex but scoped

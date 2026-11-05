@@ -298,9 +298,13 @@ returned. `auditex/output_writers.py` holds three machine-readable inventories a
   incomplete when any run is. The operator fixes or removes the listed files; a caller that has reviewed the gap
   passes a context with `incomplete=False`.
   - **What the refusal says.** Each unusable file is named by a *safe label* and a reason class, nothing else: the
-    run-relative path in which every segment that is not a short lower-case section name (`normalized`,
-    `identity_users.json`) without a credential word or a long digit run is replaced by `<redacted-segment-N>` (N is
-    the segment's position; the label also ends `#K`, K being the file's index, when a segment was replaced), then the
+    run-relative path in which every segment that is not a *recognised public section label* is replaced by
+    `<redacted-segment-N>` (N is the segment's position; the label also ends `#K`, K being the file's index, when a
+    segment was replaced). The recognised labels are `normalized` and the names of the sections the product itself
+    writes (`identity_users.json`, `devices.json` and so on: `_PUBLIC_SECTION_LABELS`, which a test keeps equal to the
+    section names the producers under `src/` write). Spelling is never the test, because a file name is untrusted
+    text: `alice_smith.json` and `acme_corp.json` look like section names and are shown as `<redacted-segment-2>`, so
+    a refusal never reveals a name, and a section the list does not know is opaque too. Then the
     reason: `unreadable`, `malformed JSON`, `oversize`, `non-regular`, `dangling link`, `limit`, `outside run` or
     `changed during scan`. The message, `str`, `repr` and `args` never carry file content, an operating-system
     message, an address, a name or credential taken from a file name, or the absolute run path. The exception
@@ -310,24 +314,35 @@ returned. `auditex/output_writers.py` holds three machine-readable inventories a
   - **Report loaders.** `preview_report`, `render_report` and everything built on `RunBundle` read `normalized/`
     records through the same guarded reader (`read_normalized_sections`, `read_run_json`), so a FIFO in `normalized/`
     can no longer block a report before discovery runs, even when the section is not selected; the unusable file is
-    left out of the section and the discovery then refuses the shareable outputs.
-- **Not covered at all:** customer-pack source artifacts other than `run-manifest.json` (below), the
-  `report_pack` profile, anything in the operator-only rows, and writers, prints, sends and return values the
-  structural test cannot see.
+    left out of the section and the discovery then refuses the shareable outputs. `diff_run_directories` (the MCP
+    diff, `auditex diff`, `compare`) reads the run manifest, the report pack, `snapshot.json` and every
+    `normalized/*.json` through the same reader, strictly: an unusable file raises `ContextIncompleteError`
+    (a `ValueError`) instead of being left out, so a FIFO can no longer block a diff before discovery runs.
+  - **Bytes and stability.** The reader opens a file only when its state (device, inode, size, `mtime`, `ctime`) is
+    the one listed, reads at most what is left of the 128 MiB aggregate budget and charges the bytes actually read
+    (a file that grew within the 32 MiB per-file limit is not accepted), and re-checks the state and the byte count
+    after the last byte: a file that changed while it was read is `changed during scan`. The context records the
+    state of every file it read (`RedactionContext.snapshot`; `snapshot_run`, `assert_snapshot_stable`). `preview_report`
+    takes a snapshot before it loads the report, compares it with the discovery snapshot and re-checks it after
+    rendering, and `redact_payload` re-checks it after redacting, so a run changed in between is refused, never published
+    half old and half new. A change that leaves device, inode, size, `mtime` and `ctime` all unchanged is not seen, and a
+    payload an MCP tool built before it called `redact_payload` is bound only from the context scan onward.
+- **Not covered at all:** the `report_pack` profile (the private working artifact), anything in the operator-only
+  rows, and writers, prints, sends and return values the structural test cannot see.
 
 ### Inventory
 
 | Output | Writer | Audience | Handling | Can leave the machine |
 | --- | --- | --- | --- | --- |
 | Run bundle: `raw/`, `normalized/`, `findings/`, `blockers/`, `index/evidence.sqlite`, `audit-log.jsonl`, `coverage.json`, `summary.json`, `summary.md`, manifests, `validation.json`, `bundle-hashes.json` | `AuditWriter` (`output.py`), `evidence_db.py`, `run_offline` | Operator | Private working files. Not redacted. Diagnostics inside them are masked by the command-output boundary above; user-authored text is minimised at collection | Only by operator action (copying, a customer pack) |
-| `reports/report-pack.json`, `reports/action-plan.json` | `AuditWriter.write_report_pack` | Operator; copied verbatim into customer packs | `report_pack` profile: secrets only. **E-mails, GUIDs, names and paths are retained exactly** because finding ids, proof-table rows and evidence references embed the keys of the records they cite and the validator resolves them (an e-mail masked here gives `unresolved_report_proof_table_ref`) | Yes, inside a customer pack (see below) |
+| `reports/report-pack.json`, `reports/action-plan.json` | `AuditWriter.write_report_pack` | Operator only (a private working artifact; a customer pack carries a redacted derivative, below) | `report_pack` profile: secrets only. **E-mails, GUIDs, names and paths are retained exactly** because finding ids, proof-table rows and evidence references embed the keys of the records they cite and the validator resolves them (an e-mail masked here gives `unresolved_report_proof_table_ref`). Never distribute the original | Only by operator action |
 | Reports: HTML, Markdown, JSON, CSV, SARIF, OSCAL; exports (`auditex export run`, built-in exporters call `render_report`) | `render_report`, `preview_report` (`reporting.py`) | Customer, reviewers, CI tools | `shareable` profile on the sections before rendering, then on the rendered text (not on JSON, SARIF or OSCAL text) | Yes |
 | Report preview returned to the CLI and the MCP tool `auditex_report_preview` | `preview_report` | Local client, AI client | `shareable`, including the citations (re-derived after masking) | Yes |
 | `report api-calls`, `permissions`, `proof-table`, `handoff` and `analyze`, to a file or stdout | `_emit_report_payload` (`cli.py`) | Customer, reviewers | `shareable`: the payload is redacted as structure first, then rendered (Markdown gets a markup-safe pass over the already redacted text) | Yes |
 | MCP tools `auditex_summarize_run`, `auditex_probe_summarize`, `auditex_diff_runs`, `auditex_compare_runs`, `auditex_normalize_external_assessment`, `auditex_compare_external_assessments`, `auditex_list_blockers`, `auditex_report_analyze`, `auditex_api_inventory`, `auditex_permissions_ledger`, `auditex_proof_table`, `auditex_enterprise_handoff`, `auditex_verify_customer_pack` | `mcp_server.py` functions of the same names | An AI client or any MCP caller | `shareable` over the complete returned payload, with the context of every run it was built from (a comparison uses the first run's salt); citation summaries re-derived. A pack-verification result also scrubs the pack's own path | Yes |
 | Setup guide (`setup-guide`) | `_emit_setup_guide` (`cli.py`) | Operator | Not redacted: it renders the operator's own parameters (for example `--subject`) and commands, and holds no tenant evidence | Yes, but carries no evidence |
-| Customer pack: `handoff`, `report.md`, `api-calls`, `permissions`, `proof-table`, `README.md`, `checksums.sha256`, `pack-manifest.json` and the copy of `run-manifest.json` | `write_enterprise_handoff_pack`, `_write_text_artifact`, `_copy_source_artifact` | The tenant owner and whoever they pass it to | `customer_pack` profile, with the run salt; the manifest digests are those of the redacted files | Yes |
-| Customer pack `source-artifacts/` other than `run-manifest.json`: `summary.json`, `data-handling.json`, `api-inventory.json`, `audit-plan.json`, `live-readiness.json`, `reports/report-pack.json`, `validation.json`, `ai_context.json`, `bundle-hashes.json` | `_copy_source_artifact` | As above | **Verbatim, integrity-bound copies, not redacted** (`verify-pack` ties them to `bundle-hashes.json`) | Yes |
+| Customer pack: `handoff`, `report.md`, `api-calls`, `permissions`, `proof-table`, `README.md`, `checksums.sha256`, `pack-manifest.json` | `write_enterprise_handoff_pack`, `_write_text_artifact` | The tenant owner and whoever they pass it to | `customer_pack` profile, with the run salt, applied to the report's structure before it is rendered (`preview_report(profile="customer_pack")`, so the free-text keys are recognised) and again to the rendered text; the manifest digests are those of the redacted files | Yes |
+| Customer pack `source-artifacts/`: `run-manifest.json`, `summary.json`, `data-handling.json`, `api-inventory.json`, `audit-plan.json`, `live-readiness.json`, `reports/report-pack.json`, `validation.json`, `ai_context.json`; `bundle-hashes.json` | `_copy_source_artifact` | As above | **Redacted derivatives** (`customer_pack`, run salt, local paths made pack-relative) of the run's files; each row records the digest of the original (`source_sha256`) and of the copy (`sha256`) and says `transformed`. The hash manifest is copied verbatim only when redaction leaves it unchanged, otherwise it is left out (`skipped_reason`); a file that is not JSON the product can parse is left out | Yes |
 | Notifications: Slack, Teams, SMTP, Jira, GitHub | `send_notification` (`notify.py`) | Third-party services | `customer_pack` (stricter than `shareable`: waiver free text is redacted too) over the whole envelope (payload, citations, service responses) before any sink and before the return; the run identity used for ticket de-duplication is computed first, from the real run directory, and carried as a one-way digest (`run_fingerprint`); the webhook walker (`_redact_value`) stays as a second layer; one constant, `NOTIFY_PROFILE` in `notify.py`, sets the profile for every sink | Yes |
 | Explorer page | `write_explorer` (`explorer.py`) | Operator's browser | Private working view; it exists to inspect real values. Not redacted. Decision pending product if it is to be shared | Only by operator action |
 | Model assessment files, prompts, adapter sidecar | `assess_run`, `assess_scubagear_export` (`model_serving.py`) | Operator; the model endpoint (loopback unless the operator says otherwise) | The model view is redacted by the projection (input side); the files are private. The explainer's text passes `redact_output(..., profile="explainer", context=context_for_run(run))`, wired by the explainer job, not by these writers | Prompts only to the configured endpoint |
@@ -395,9 +410,9 @@ The detail of each class:
 | Class | What it does |
 | --- | --- |
 | Secrets: Bearer values, JWTs, `key=value` and JSON-keyed credentials (`secret_hygiene.INLINE_SECRET_RE`, quoted values with escaped quotes included), the same assignments written inside a mapping key (`password=value` as a key; colliding keys keep a `#n` suffix and every value), and the whole value, of any type, under an exact credential key (`client_secret`, `password`, `access_token`, `refresh_token`, `api_key` and the like, spelled `snake_case`, `kebab-case` or `camelCase`) | All profiles |
-| Credentials in URLs: the password of `scheme://user:password@host` and the value of a query or fragment parameter named `access_token`, `refresh_token`, `id_token`, `token`, `sig`, `signature`, `code`, `password`, `passwd`, `pwd`, `secret`, `client_secret`, `key`, `api_key`, `apikey`, `auth`, `authorization`, `assertion`, `jwt`, `bearer`, `sas`, `sastoken` or a shared-access-signature field (`sv`, `se`, `sp`, `sr`, `spr`, `st`, `skoid`, `sktid`), after `?`, `&`, `;` or `#`; the URL syntax and the other parameters stay | All profiles, rendered text (`markup=True`) included |
+| Credentials in URLs: the password of `scheme://user:password@host` (a scheme of 1 to 32 characters, or none: `//user:password@host`) and the value of a query or fragment parameter named `access_token`, `refresh_token`, `id_token`, `token`, `sig`, `signature`, `code`, `password`, `passwd`, `pwd`, `secret`, `client_secret`, `key`, `api_key`, `apikey`, `auth`, `authorization`, `assertion`, `jwt`, `bearer`, `sas`, `sastoken` or a shared-access-signature field (`sv`, `se`, `sp`, `sr`, `spr`, `st`, `skoid`, `sktid`), after `?`, `&`, `;` or `#`; the URL syntax and the other parameters stay | All profiles, rendered text (`markup=True`) included |
 | E-mail local parts, masked `***@domain` exactly as the model projection masks them, also when the at sign is written `%40`, `\u0040`, `&#64;` or full-width | `shareable`, `customer_pack`, `explainer` |
-| Privileged-user display names (a record with an immutable id, M365 role holders, Google users flagged `is_admin`, `is_delegated_admin` or `is_privileged`) and `onPremisesImmutableId`, pseudonymised as the projection does (`User <16 hex>`, `Id <16 hex>`; `sha256(salt NUL value)`, the salt being the SHA-256 of the canonical `run-manifest.json`), so a name matches across the model view and every output of one run. The names and ids come from every `normalized/` record of the run, so an output that selects only some sections still protects them. Immutable ids are replaced by value in free text, whatever their shape and case | `shareable`, `customer_pack`, `explainer` |
+| Privileged-user display names (a record with an immutable id, M365 role holders, Google users flagged `is_admin`, `is_delegated_admin` or `is_privileged`) and `onPremisesImmutableId`, pseudonymised as the projection does (`User <16 hex>`, `Id <16 hex>`; `sha256(salt NUL value)`, the salt being the SHA-256 of the canonical `run-manifest.json`), so a name matches across the model view and every output of one run. The names and ids come from every `normalized/` record of the run, so an output that selects only some sections still protects them. Immutable ids are replaced by value in free text, whatever their shape and case, when the id is at least 4 characters (a structured `immutable_id` is pseudonymised whatever its length; a shorter value is not searched for in prose, because it would rewrite ordinary words and numbers) and not inside a longer word: an adjacent `=`, `/`, `-` or `+` does not hide it (`immutable_id=<id>`, `/users/<id>/`) | `shareable`, `customer_pack`, `explainer` |
 | Dashed GUIDs (tenant, object, application and policy ids): replaced by a valid GUID `00000000-0000-4000-8000-<12 hex>` derived from the run salt, so references inside one output stay consistent and OSCAL still validates | `shareable`, `customer_pack`, `explainer` (`redact_guids`) |
 | The operator's run paths, every occurrence: run-relative when the text starts with the path, otherwise `<run-dir>` | `shareable`, `customer_pack`, `explainer` |
 | JSON embedded in a string | Parsed (up to 16 MiB), redacted as structure and written back in its own layout, so escapes and quotes stay valid; number literals (`0.1000`, `1e400`, `-0`, long decimals) are written back exactly as written, and text with `NaN` or `Infinity` is not JSON and is handled as text |
@@ -425,27 +440,40 @@ pseudonymised in free text; the price is that a person literally named like a co
 `<namespace>:<snake_case_words>[:<suffix>]`, for example `identity:global_admin_stale_password:<guid>`. The inline
 secret pattern (`secret_hygiene.INLINE_SECRET_RE`) would read `password:` inside it as an assignment, mask the GUID
 and make `findings.json` and `report-pack.json` disagree. A credential word is therefore left alone only inside a
-token that is exactly a finding id: the namespace is one of `_ID_NAMESPACES` (the namespaces the finding producers
-under `src/` emit; a test scans the producers and fails when one is missing; never a credential word), the words are
-lower-case snake_case with at least one underscore, the optional suffix is a dashed GUID, a lower-case hex digest of
-16 to 64 digits or a decimal number, and the token is not preceded by a word character, `:`, `.` or `-` and is not
-followed by a word character, `:` or `=`. Everything else is redacted: `password: hunter2`, `db_password=x`,
-`config:db_password:x` (unknown namespace), `identity:db_password:hunter` (suffix is not an id shape),
-`identity:global_admin_stale_password:<guid>:hunter` and `identity:db_password=x` (followed by `:` or `=`). The id
-alternative and the inline pattern are one regular expression run in one pass, linear in the text, with no
-recursion. If two keys become equal the later one gets a `#n` suffix; no value is lost. Redaction is deterministic
-and leaves numbers, booleans, `None` and bytes alone.
+token that is exactly a *recognised finding definition*: the `namespace:name` pair is one of `_ID_DEFINITIONS` (the
+definitions the finding producers under `src/` emit whose name carries a credential word; a test scans the producers
+and fails when one is missing), the optional suffix is a dashed GUID, a lower-case hex digest of 16 to 64 digits or
+a decimal id of 16 to 24 digits, and the token is not preceded by a word character, `:`, `.` or `-` and is not
+followed by a word character, `:` or `=`. A name that is not recognised is not exempt whatever its namespace and
+shape, because a numeric or hex password looks exactly like a suffix: `identity:db_password:654321` and
+`identity:db_password:deadbeefcafebabe` are redacted, and so are `password: hunter2`, `db_password=x`,
+`config:db_password:x`, `identity:global_admin_stale_password:654321` (a suffix no producer writes),
+`identity:global_admin_stale_password:<guid>:hunter` and `identity:db_password=x`. The id alternative and the inline
+pattern are one regular expression run in one pass, linear in the text, with no recursion. If two keys become equal
+the later one gets a `#n` suffix; no value is lost. Redaction is deterministic and leaves numbers, booleans, `None`
+and bytes alone.
 
-### The customer pack's verbatim files
+### The customer pack's source artifacts
 
-A customer pack redacts what the product generates (`handoff.json`, `report.md`, the ledgers, `README.md`,
-`checksums.sha256`, `pack-manifest.json`) and the copy of `run-manifest.json`. It does **not** redact nine
-source artifacts, which are integrity-bound byte copies of the run's files: `summary.json`,
-`data-handling.json`, `api-inventory.json`, `audit-plan.json`, `live-readiness.json`, `reports/report-pack.json`,
-`validation.json`, `ai_context.json` and `bundle-hashes.json`. They can carry e-mail addresses, GUIDs and
-privileged names exactly as the run recorded them (the report pack in particular, per the `report_pack` row
-above). A pack therefore cannot be described as "all identifiers redacted", and the test deliberately skips
-those files. The confidentiality of the pack depends on who receives it.
+A customer pack redacts everything it carries. What the product generates (`handoff.json`, `report.md`, the ledgers,
+`README.md`, `checksums.sha256`, `pack-manifest.json`) is written under the `customer_pack` profile, `report.md` from
+the report's *structure* (the free-text keys can only be recognised there, never in rendered Markdown). The run's own
+files under `source-artifacts/` are redacted derivatives: `run-manifest.json` with its local paths made pack-relative,
+and `summary.json`, `data-handling.json`, `api-inventory.json`, `audit-plan.json`, `live-readiness.json`,
+`reports/report-pack.json`, `validation.json` and `ai_context.json` under the `customer_pack` profile with the run's
+salt (so a pseudonym means the same in every file of the pack). The original `reports/report-pack.json` keeps GUIDs,
+addresses and names because its references must resolve inside the run; that is a property of the private working
+file, and the pack never carries it. Each derivative's row in `pack-manifest.json` has `transformed`, `source_sha256`
+(the digest `bundle-hashes.json` lists for the run's own file) and `sha256` (the copy). `verify-pack` accepts a
+transformed row only when `source_sha256` is the listed digest, and a row that claims no transformation must match
+`bundle-hashes.json` exactly.
+
+Two limits follow. A derivative is bound to the pack by `checksums.sha256` only (it cannot equal the original), so
+someone who edits it and re-hashes the whole pack is caught only by a `checksums.sha256` digest recorded elsewhere
+(`--expect-checksums-sha256`). And `bundle-hashes.json` cannot be derived, because its bytes are what the run was
+verified against: it is copied verbatim only when redaction would leave it unchanged (it holds paths and digests), and
+otherwise it is left out and `verify-pack` reports the missing manifest; the same applies to a source file that is not
+JSON the product can parse.
 
 ### Product decisions (the policy per profile)
 
@@ -461,8 +489,8 @@ the branch was unmerged, so there is no compatibility alias). A flip is one fiel
 | Group display names | Kept everywhere | The group is what an administrator acts on | `redact_group_names=True` pseudonymises records whose `principal_type` is `group` (`Group <16 hex>`; structured names only, not group names in prose) |
 | Free-text keys | Redacted in `customer_pack` and `explainer`; kept in `shareable` and `report_pack` | Accountability fields of waivers stay readable to the operator; they can name people and justify exceptions in words the customer never agreed to publish | `redact_free_text_keys` |
 | Role names | Kept; **no setting exists** | Built-in names are public Microsoft vocabulary, custom names are tenant text, and the output alone cannot tell them apart | Needs a product definition first |
-| Customer-pack source artifacts (the nine above) | Verbatim | `verify-pack` checks them against `bundle-hashes.json`; a redacted copy needs a `transformed` row like the manifest has, and a recipient who is the tenant owner may need the real values | Product to decide whether the pack carries redacted derivatives |
-| `report-pack.json` in the run bundle | Secrets only | Its ids are references; see the inventory | Redact at hand-over only (the current design) |
+| Customer-pack source artifacts | Redacted derivatives under `customer_pack` | The originals hold identifiers and free text a customer file must not; `GUIDs redacted` applies to what leaves (product, 5 Nov 2026) | Exclude an artifact from `_CUSTOMER_SAFE_SOURCE_ARTIFACTS` |
+| `report-pack.json` in the run bundle | Secrets only (private working artifact) | Its ids are references; see the inventory | Redact at hand-over only (the current design); never distribute the original |
 | Notifications | `customer_pack` (free text redacted) | They leave the machine for third-party services (product, 5 Nov 2026) | `NOTIFY_PROFILE` in `notify.py` |
 | Explorer page | Not redacted | Operator working view | Add a shareable variant |
 | MCP auth tools | Not redacted | Operator's saved connection metadata | Decide whether tenant ids and names in them are shared with an AI client |
@@ -492,17 +520,27 @@ Honest limits of the output redaction boundary; none of them is a claim that the
 - Representations beyond the listed ones: double-encoded addresses, general Unicode look-alikes, full-width GUID digits
   or credential words, credentials split across fields, base64- or otherwise-encoded secrets, a credential in a bytes
   value outside an exact credential key, and URL credentials in a parameter whose name is not on the list.
-- The id exemption is exactly the shipped finding-id shapes: a producer that adds a namespace must list it in
-  `_ID_NAMESPACES` (the test fails until it does); an id with another suffix shape is redacted, not kept.
+- The id exemption is exactly the recognised finding definitions whose name carries a credential word
+  (`_ID_DEFINITIONS`): a producer that adds one must list it (the test fails until it does); any other name, or a
+  suffix shape no producer writes, is redacted, not kept.
+- A refusal shows only the recognised section labels (`_PUBLIC_SECTION_LABELS`); every other file name is opaque, so a
+  section the product writes but the list does not know is shown as `<redacted-segment-N>` (safe, less helpful).
+- Immutable ids shorter than 4 characters are pseudonymised under their own key but not searched for in prose, and an
+  id is not matched inside a longer word.
 - Discovery reads `normalized/**/*.json` only; a privileged person recorded only in `raw/`, `index/` or an artifact
   outside `normalized/` is not discovered. Discovery cannot defend against a hostile process that changes the run
-  directory's own parents between `realpath` and the first open, or against a file whose contents change while it is
-  read (the bytes read are what is used). The cost of no caching is one full read of `normalized/` per context.
-- Some readers of `normalized/` that feed other commands (`compare`, the projection, `ai_context`) still use their own
-  readers; only the report loaders and discovery use the guarded reader.
+  directory's own parents between `realpath` and the first open. A file that changes while it is read, or a run
+  that changes between discovery and the end of a report or `redact_payload`, is refused (`changed during scan`), except
+  that a change leaving device, inode, size, `mtime` and `ctime` unchanged is not seen. The cost of no caching is one
+  full read of `normalized/` per context.
+- Some readers of `normalized/` that feed other commands (the projection, `ai_context`, and `compare` beyond its
+  `diff_run_directories` call) still use their own readers; the report loaders, the diff and discovery use the
+  guarded reader.
 - The boundary covers the shapes in the inventory. It does not cover third-party exporter plugins (which receive the
   raw run directory), a new sink reached through an alias, a stored callable, `os.write`, SQL, logging or subprocess
-  side effects, terminal logs redirected by the operator, or the nine verbatim customer-pack source artifacts.
+  side effects, or terminal logs redirected by the operator.
+- A redacted customer-pack derivative is tamper-evident only against a `checksums.sha256` digest recorded elsewhere;
+  `bundle-hashes.json`, when copied, is the run's own file and carries paths and digests only.
 - Notifications are `customer_pack`: free-text keys are redacted in them (above).
 - Pseudonyms are stable per run and salt: anyone holding the run directory can recompute them, and two runs of one
   tenant share no pseudonyms only because the salt differs.
