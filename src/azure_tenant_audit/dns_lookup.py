@@ -78,8 +78,6 @@ class DohClient:
             # SERVFAIL (2), REFUSED (5) and the other failure codes say the resolver could not answer; they
             # are not evidence that the record does not exist, so the domain reads unknown, never "missing".
             raise DohError(f"DoH resolver could not answer {record_type} {name}: {_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
-        if rcode == _RCODE_NXDOMAIN and not payload.get("Answer"):
-            return DnsAnswer([], "nxdomain")
         answer = payload.get("Answer") or []
         records: list[str] = []
         record_types: list[int | None] = []
@@ -91,7 +89,8 @@ class DohClient:
                 continue
             records.append(_decode_txt(data))
             record_types.append(entry.get("type"))
-        return DnsAnswer(records, "answers" if records else "empty",
+        outcome = "nxdomain" if rcode == _RCODE_NXDOMAIN else "answers" if records else "empty"
+        return DnsAnswer(records, outcome,
                          tuple(record_types) if any(t is not None for t in record_types) else ())
 
 
@@ -189,11 +188,15 @@ def scuba_dkim_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | No
         name = f"{selector}._domainkey.{domain}"
         answer = _record_ask(resolver, name)
         # SG-P:297-303: traditional DNS keeps TXT strings, not CNAME targets.
-        # With no TXT, DoH fallback retains CNAME data and stops the selector walk.
+        # With NOERROR and no TXT, DoH fallback retains CNAME data and stops the walk.
         if answer.record_types:
             records = [r for r, kind in zip(answer.records, answer.record_types) if kind != 5]
             if records:
                 answer = DnsAnswer(records, answer.outcome)
+            elif answer.outcome == "nxdomain":
+                # RFC 6604 permits NXDOMAIN with a CNAME to a missing target;
+                # inferred, not observed live. SG-P:450-459 adds no answers, so walk on.
+                answer = DnsAnswer([], "nxdomain")
         log.append(_dns_log(name, answer))
         if answer.records:
             break

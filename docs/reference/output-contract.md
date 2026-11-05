@@ -996,11 +996,12 @@ Report and compare code can use this database as the durable lookup surface inst
 
 No list read drops its next-page link silently. `defender.secureScoreControlProfiles`, `defender.secureScores`, `licensing.subscribedSkus` and `identity.domains` were unpaged reads (the first returned 200 rows and a next link in a live run); they now go through the shared paging path without `$top` and are kept whole inline (the endpoint-spec flag `inline: true`), so an operator `--top` below the list length cuts them like any other list (below about 250 it makes `defender` partial). An unpaged response that still carries `@odata.nextLink` is a gap with `truncation_reason` `pagination_not_followed`, and the capability-gated list endpoints (`/security/incidents`, `/security/alerts_v2`, `/identityGovernance/appConsent/appConsentRequests`) follow the next link or record the same reason. A test fails the build when a collector reads a list with a direct `get_json`.
 
-**DKIM CNAME parity.** For raw SCuBA records, a CNAME-only answer is retained as `rdata`,
-matching the pinned ScubaGear DoH fallback. A selector CNAME whose target is NXDOMAIN can therefore
-stop the selector walk and read not met as a non-key answer, rather than being flattened to an absent
-TXT answer. When other answers remain, CNAME entries are dropped. This differs from a resolver that
-follows the target and returns only its NXDOMAIN result.
+**DKIM CNAME parity.** For raw SCuBA records, a NOERROR CNAME-only answer is retained as `rdata`,
+matching the pinned ScubaGear DoH fallback, and stops the selector walk as a non-key answer.
+When the response instead carries NXDOMAIN (DoH `Status: 3`) with only CNAME answers, the walk
+continues to the next selector and logs `Query returned NXDomain` with no query answers.
+This response shape is inferred from RFC 6604, not observed live. The shared query API retains
+the CNAME records and NXDOMAIN outcome. When other answers remain, CNAME entries are dropped.
 
 A DNS resolver failure is unknown, never a missing record. The DNS-over-HTTPS client raises for SERVFAIL, REFUSED, FORMERR and NOTIMP; only NXDOMAIN and NOERROR without an answer mean the record is absent. A response with no `Status` (or one that is not a number) and a response with the truncation flag (`TC`) are not statements about the record either: they raise too, so a malformed answer cannot read "absent" and raise a false "missing" finding. A DKIM record with an empty `p=` is a revoked key (RFC 6376) and counts as an absent selector. An MTA-STS policy fetch that did not answer (unreachable, HTTP 429 or 5xx) fails the domain's row with error class `public_lookup_error` and makes the collector `partial`; a 404 or an invalid file is an answer and stays a finding. The domain's coverage row is `failed` with error class `dns_resolver_error`, so the `dns_posture` collector and the run are `partial`, a blocker names the error, and the rules read `not_assessed` with `collector_not_complete:dns_posture` (an offline bundle whose collector is complete but whose record carries `resolver_error` reads `resolver_error`). The record has every presence flag unknown (`present: null`; DKIM `selectors_unresolved`) and the normalized `dns_posture_objects` record omits `spf_present`, `dmarc_present`, `mta_sts_dns_present`, `tls_rpt_present` and `bimi_present` and lists `dkim_selectors_unresolved`. No SPF, DMARC, DKIM, MTA-STS, TLS-RPT or BIMI finding is raised for such a domain (Microsoft 365 and Google Workspace), and it no longer mutes `exchange.dkim_signing_disabled`.
 

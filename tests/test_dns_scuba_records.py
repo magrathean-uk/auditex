@@ -230,7 +230,7 @@ class Session:
     ({'Status': 0, 'Answer': [{'data': '"v=spf1 " "-all"'}, {'data': 'target.invalid'}, {}, 5]}, 'answers', ['v=spf1 -all', 'target.invalid']),
     ({'Status': 0}, 'empty', []), ({'Status': 3}, 'nxdomain', []),
     ({'Status': 0, 'Answer': [{'data': 5}]}, 'empty', []),
-    ({'Status': 3, 'Answer': [{'data': '"x"'}]}, 'answers', ['x']),
+    ({'Status': 3, 'Answer': [{'data': '"x"'}]}, 'nxdomain', ['x']),
     ({'Status': 2, 'Answer': [{'data': '"x"'}]}, 'answers', ['x']),
 ])
 def test_doh_query_detailed_agrees(payload, outcome, records):
@@ -291,7 +291,8 @@ def test_dkim_typed_cname_keeps_txt_or_doh_fallback(with_txt):
     assert resolver.query(first, 'TXT') == ['target.invalid'] + (['v=DKIM1; p=key'] if with_txt else [])
 
 
-def test_dkim_dangling_selector1_stops_before_valid_selector2():
+@pytest.mark.parametrize('status', [0, 3], ids=['noerror-stops', 'nxdomain-walks'])
+def test_dkim_dangling_selector1_walk_depends_on_rcode(status):
     first = 'selector1._domainkey.example.invalid'
     second = 'selector2._domainkey.example.invalid'
     calls = []
@@ -300,21 +301,46 @@ def test_dkim_dangling_selector1_stops_before_valid_selector2():
         def get(self, *args, **kwargs):
             name = kwargs['params']['name']
             calls.append((name, kwargs['params']['type']))
-            self.payload = {'Status': 0, 'Answer': {
+            self.payload = {'Status': status if name == first else 0, 'Answer': {
                 first: [{'type': 5, 'data': 'target.invalid'}],
                 second: [{'type': 5, 'data': 'working.invalid'},
                          {'type': 16, 'data': '"v=DKIM1; p=key"'}],
             }[name]}
             return self
 
-    result = dns.scuba_dkim_record('example.invalid', dns.DohClient(session=DkimSession(None)))
-    # ref_impl is not a test dependency. Pin the row that v3.9.1 EXO 3.1 reads
-    # as domain_noncompliant.key_not_published, rather than passing on selector2.
-    assert result == {'domain': 'example.invalid', 'rdata': ['target.invalid'], 'log': [{
+    resolver = dns.CachingResolver(dns.DohClient(session=DkimSession(None)))
+    result = dns.scuba_dkim_record('example.invalid', resolver)
+    # NOERROR keeps the non-key row (v3.9.1 EXO 3.1: key_not_published).
+    # Status 3 walks on, matching SG-P:450-459,612-621; RFC 6604, not observed live.
+    nxdomain = status == 3
+    expected = ['v=DKIM1; p=key'] if nxdomain else ['target.invalid']
+    log = [{
         'query_name': first, 'query_method': 'DoH',
-        'query_result': 'Query returned 1 txt records', 'query_answers': ['target.invalid'],
-    }]}
-    assert calls == [(first, 'TXT')]
+        'query_result': 'Query returned NXDomain' if nxdomain else 'Query returned 1 txt records',
+        'query_answers': [] if nxdomain else ['target.invalid'],
+    }]
+    if nxdomain:
+        log.append({'query_name': second, 'query_method': 'DoH',
+                    'query_result': 'Query returned 1 txt records', 'query_answers': expected})
+    assert result == {'domain': 'example.invalid', 'rdata': expected, 'log': log}
+    assert calls == [(first, 'TXT')] + ([(second, 'TXT')] if nxdomain else [])
+    # DKIM filtering must not discard records or types from the shared query API.
+    assert resolver.query_detailed(first, 'TXT') == dns.DnsAnswer(
+        ['target.invalid'], 'nxdomain' if nxdomain else 'answers', (5,))
+
+
+@pytest.mark.parametrize('records,message,compliant', [
+    (['v=spf1 -all'], 'SPF record found.', True),
+    (['unrelated'], 'Domain name exists but no SPF records returned.', False),
+])
+def test_spf_checks_records_before_nxdomain(records, message, compliant):
+    resolver = DetailedResolver({'example.invalid': dns.DnsAnswer(records, 'nxdomain')})
+    result = dns.scuba_spf_record('example.invalid', resolver)
+    assert result == {'domain': 'example.invalid', 'compliant': compliant, 'message': message,
+                      'rdata': records, 'log': [{
+                          'query_name': 'example.invalid', 'query_method': 'DoH',
+                          'query_result': 'Query returned NXDomain', 'query_answers': records,
+                      }]}
 
 
 def test_cache_shares_both_interfaces_and_does_not_cache_errors():
