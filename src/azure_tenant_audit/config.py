@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
 from .resources import resolve_resource_path
 from .selection import select_collectors
+from .certificate_auth import CertificateCredential
 
 
 @dataclass
@@ -14,13 +15,14 @@ class AuthConfig:
     tenant_id: str
     client_id: str | None
     auth_mode: str = "app"
-    client_secret: Optional[str] = None
-    access_token: Optional[str] = None
+    client_secret: Optional[str] = field(default=None, repr=False)
+    access_token: Optional[str] = field(default=None, repr=False)
     authority: str = "https://login.microsoftonline.com/"
     graph_scope: str = "https://graph.microsoft.com/.default"
     interactive_scopes: Optional[list[str]] = None
     timeout_seconds: int = 60
     throttle_mode: str = "safe"
+    certificate: CertificateCredential | None = field(default=None, repr=False)
 
 
 @dataclass

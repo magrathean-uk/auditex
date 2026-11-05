@@ -23,6 +23,7 @@ from .collectors import REGISTRY
 from .collectors.base import normalize_collection_limit
 from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
 from .config import AuthConfig, CollectorConfig
+from .certificate_auth import KeychainCertificate, PfxCertificate
 from .data_minimisation import minimise_user_text
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
@@ -97,6 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
     parser.add_argument("--client-id", default=None, help="App registration ID.")
     parser.add_argument("--client-secret", default=None, help="App secret.")
+    certificates = parser.add_mutually_exclusive_group()
+    certificates.add_argument("--certificate-pfx", help="Customer-local PFX path; never copied into the bundle.")
+    certificates.add_argument("--certificate-keychain-sha256", help="macOS identity certificate SHA-256 hex fingerprint.")
+    parser.add_argument("--certificate-password-env", help="Name of the PFX password environment variable, never the password.")
     parser.add_argument("--access-token", default=None, help="Optional preissued Graph access token.")
     parser.add_argument("--auth-context", default=None, help="Optional saved Auditex auth context name.")
     parser.add_argument(
@@ -564,8 +569,8 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         if not args.client_id:
             LOG.error("client-id is required for app authentication.")
             return 2
-        if not args.client_secret:
-            LOG.error("client-id and client-secret are required for app auth. Use --interactive or --use-azure-cli-token.")
+        if not args.client_secret and not args.certificate_pfx and not args.certificate_keychain_sha256:
+            LOG.error("client-id and a client secret or certificate are required for app auth. Use --interactive or --use-azure-cli-token.")
             return 2
         if not args.tenant_id:
             LOG.error("tenant-id is required for app authentication.")
@@ -587,6 +592,9 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         graph_scope=args.graph_scope,
         interactive_scopes=auth_scopes,
         throttle_mode=args.throttle_mode,
+        certificate=(PfxCertificate(args.certificate_pfx, password_env=args.certificate_password_env)
+                     if args.certificate_pfx else KeychainCertificate(args.certificate_keychain_sha256)
+                     if args.certificate_keychain_sha256 else None),
     )
     client = GraphClient(auth, audit_event=writer.log_event)
     session_context: dict[str, Any] = {}
@@ -941,6 +949,12 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
     parser = build_parser()
     parsed_argv = list(argv if argv is not None else sys.argv[1:])
     args = parser.parse_args(parsed_argv)
+    certificate_selected = bool(args.certificate_pfx or args.certificate_keychain_sha256)
+    if args.certificate_password_env and not args.certificate_pfx:
+        parser.error("--certificate-password-env requires --certificate-pfx")
+    if certificate_selected and (args.client_secret or args.interactive or args.access_token
+                                 or args.use_azure_cli_token or args.auth_context):
+        parser.error("Certificate authentication requires app mode without another credential source.")
     args._command_line = ["azure-tenant-audit", *parsed_argv]
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -956,7 +970,7 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
         args.tenant_id = __import__("os").environ.get("AZURE_TENANT_ID")
     if args.client_id is None:
         args.client_id = __import__("os").environ.get("AZURE_CLIENT_ID")
-    if args.client_secret is None:
+    if args.client_secret is None and not certificate_selected:
         args.client_secret = __import__("os").environ.get("AZURE_CLIENT_SECRET")
     if args.access_token is None and __import__("os").environ.get("AZURE_ACCESS_TOKEN") is not None:
         LOG.warning(

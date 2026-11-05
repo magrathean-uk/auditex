@@ -86,6 +86,34 @@ auditex setup-guide m365 --mode app --auditor-profile app-readonly-full --collec
 
 The app registration must be customer-owned. Add only the listed Microsoft Graph application permissions and grant tenant-wide admin consent.
 
+### Customer-owned certificate credentials
+
+1. Create an RSA certificate (at least 2048 bits) under the customer's key-management policy.
+2. **Upload the certificate (.cer, public part only) to the app registration** under Certificates & secrets > Certificates. Never upload or share its private key or PFX password.
+3. Select that certificate for the audit run with one of the engine CLI options below. Certificate mode ignores a saved `AZURE_CLIENT_SECRET`; do not pass `--client-secret` or a delegated/token credential alongside it.
+
+For a customer-local PFX, supply its password through an environment variable populated by the customer's approved secret mechanism. Pass only the variable's **name**, never its value, on the command line:
+
+```bash
+azure-tenant-audit --tenant-name CUSTOMER --tenant-id CUSTOMER_TENANT --client-id CUSTOMER_APP \
+  --certificate-pfx /customer-managed/audit.pfx --certificate-password-env CUSTOMER_PFX_PASSWORD
+```
+
+For a macOS keychain identity, select the public certificate's SHA-256 fingerprint (64 hexadecimal characters):
+
+```bash
+azure-tenant-audit --tenant-name CUSTOMER --tenant-id CUSTOMER_TENANT --client-id CUSTOMER_APP \
+  --certificate-keychain-sha256 CUSTOMER_CERTIFICATE_SHA256
+```
+
+The keychain identity must include an RSA private key available for signing to the audit process under its keychain access policy. Auditex uses Security.framework to sign through an opaque key handle; it never exports that private key. Locked, missing or inaccessible identities fail closed. This native integration still requires a customer-authorised macOS validation before release.
+
+Embedded callers select `AuthConfig(..., auth_mode="app", client_secret=None, certificate=PfxCertificate(path, password_env="CUSTOMER_PFX_PASSWORD"))` or `certificate=KeychainCertificate(sha256_hex)`. Import these credential classes from `azure_tenant_audit.certificate_auth`. A PFX password callable is also supported as `password_provider=callable`; no literal password field exists. The run context's `client.app_token_for(scope)` returns the raw access-token string or raises a fixed `CertificateAuthError`; it performs no disk caching. The same certificate supplies the Graph token through `ensure_token()`.
+
+No secret leaves the customer for Auditex or the auditor: the private key and PFX password remain customer-side, in memory during use. Authentication sends a short-lived signed assertion directly to Microsoft's tenant token endpoint, and API calls send the resulting bearer token to the selected Microsoft resource. Neither is written to audit evidence or logs by this path. Do not enable external wire tracing, debugger local-variable capture or process dumps while handling credentials. Teams admin API acceptance remains unverified live and is a release gate.
+
+Protocol reference: [Microsoft identity platform certificate credentials](https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials). **Inference, offline implementation:** the established RS256 flow is used with `x5t#S256`, tenant token endpoint audience, app ID issuer/subject, unique `jti`, `nbf` and a five-minute expiry. The current Learn page and service acceptance were not checked online.
+
 Emergency access accounts: tell the Conditional Access check which accounts they are, so that it does not rely on inference. Pass `--break-glass-accounts` to `auditex run` or `azure-tenant-audit` (comma-separated object IDs, user principal names, display names or group names, or `@file` with one per line; an entry is looked up in the full user and group lists, and one that matches nothing, or a display name two accounts share, is reported as unresolved and not judged) or set `AUDITEX_BREAK_GLASS_ACCOUNTS` for any entry point; the option wins over the variable. List the group your policies exclude when the accounts are excluded through it (membership is read only for role-assignable groups). The same list tells the MFA and legacy-authentication checks which exclusions are acceptable: a Conditional Access policy for all users that excludes anything else (an administrator role, a guest type, a staff group) reads "enforced with exclusions" and fails the CIS and ScubaGear controls, so list the accounts even when you do not need the break-glass finding. The finding `ca.break_glass_exclusion_missing` then names each enabled policy that requires MFA or blocks and excludes none of the listed accounts. Without a list the accounts are inferred (names containing break glass or emergency access, and Global Administrator role holders), and the finding is rated medium at most.
 
 ```bash

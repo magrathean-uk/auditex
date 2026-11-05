@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import logging
 import random
 import time
@@ -12,6 +13,8 @@ from requests.exceptions import RequestException
 
 from . import auth_context
 from .config import AuthConfig
+from .certificate_auth import CertificateAuthError, client_assertion
+from .secret_hygiene import deep_sanitize
 from .versioning import package_user_agent
 
 
@@ -227,13 +230,13 @@ class GraphError(RuntimeError):
 class GraphClient:
     auth: AuthConfig
     session: requests.Session = field(default_factory=requests.Session)
-    _token: Optional[str] = None
+    _token: Optional[str] = field(default=None, repr=False)
     audit_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None
     # Explicit caller backstop only; ordinary inventories have no page-count ceiling.
     max_pages: int | None = None
     _next_request_not_before: float = field(default=0.0, init=False)
     _permission_failures: dict[str, int] = field(default_factory=dict, init=False)
-    _token_claims: Optional[dict[str, Any]] = field(default=None, init=False)
+    _token_claims: Optional[dict[str, Any]] = field(default=None, init=False, repr=False)
 
     def _emit(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
         if self.audit_event is None:
@@ -241,14 +244,11 @@ class GraphClient:
         try:
             self.audit_event(event, message, details)
         except Exception:  # noqa: BLE001
-            LOG.exception("Failed to emit audit event.")
+            LOG.warning("Failed to emit audit event.")
 
     @staticmethod
     def _safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        copy = dict(payload)
-        if "client_secret" in copy:
-            copy["client_secret"] = "***redacted***"
-        return copy
+        return deep_sanitize(payload)
 
     @staticmethod
     def _params_overview(params: Optional[Dict[str, Any]]) -> dict[str, Any]:
@@ -327,6 +327,13 @@ class GraphClient:
 
     def app_token_for(self, scope: str) -> str | None:
         """Client-credentials token for another resource (e.g. Exchange Online), or None outside app mode."""
+        if self.auth.certificate is not None:
+            if self.auth.auth_mode != "app" or self.auth.access_token or not self.auth.client_id:
+                return None
+            return self._certificate_app_token(scope)
+        # Teams requires certificate credentials; never fall back to a secret.
+        if scope == "48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default":
+            return None
         if self.auth.access_token or self.auth.auth_mode == "interactive" or not self.auth.client_secret or not self.auth.client_id:
             return None
         cache = self.__dict__.setdefault("_resource_tokens", {})
@@ -360,7 +367,75 @@ class GraphClient:
         self._emit("graph.token.succeeded", "Resource token acquired", {"scope": scope, "status": response.status_code})
         return token
 
+    def _certificate_result(self, scope: str) -> str | CertificateAuthError:
+        """Contain all sensitive locals and upstream tracebacks inside this frame."""
+        response = None
+        try:
+            url = self._token_url()
+            parsed = urlparse(url)
+            # A certificate assertion is a credential too. Refuse redirects and
+            # arbitrary authorities before generating it, including wire debug.
+            if (parsed.scheme != "https" or parsed.netloc not in {
+                    "login.microsoftonline.com", "login.microsoftonline.us", "login.chinacloudapi.cn"}
+                    or parsed.query or parsed.fragment
+                    or not self.auth.tenant_id
+                    or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+                           for ch in self.auth.tenant_id)
+                    or parsed.path != f"/{self.auth.tenant_id}/oauth2/v2.0/token"
+                    or not scope.endswith("/.default")
+                    or http.client.HTTPConnection.debuglevel
+                    or http.client.HTTPSConnection.debuglevel
+                    or requests.packages.urllib3.connection.HTTPConnection.debuglevel
+                    or requests.packages.urllib3.connection.HTTPSConnection.debuglevel):
+                return CertificateAuthError()
+            assertion = client_assertion(self.auth.certificate, self.auth.client_id, url)
+            response = self.session.post(
+                url,
+                data={"client_id": self.auth.client_id, "scope": scope,
+                      "grant_type": "client_credentials",
+                      "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                      "client_assertion": assertion},
+                timeout=self.auth.timeout_seconds,
+                allow_redirects=False,
+            )
+            if not 200 <= response.status_code < 300:
+                return CertificateAuthError()
+            token = response.json().get("access_token")
+            if not isinstance(token, str) or not token:
+                return CertificateAuthError()
+            if scope == "48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default":
+                claims = auth_context.b64url_json(token.split(".")[1])
+                if (claims.get("aud") != scope.removesuffix("/.default")
+                        or claims.get("azpacr", claims.get("appidacr")) != "2"
+                        or claims.get("scp")
+                        or not isinstance(claims.get("exp"), (int, float))
+                        or claims["exp"] <= time.time()):
+                    return CertificateAuthError()
+            return token
+        except Exception:
+            # Never render response bodies, transport messages, callbacks or
+            # library errors: they can all contain passwords or assertions.
+            return CertificateAuthError()
+        finally:
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+
+    def _certificate_app_token(self, scope: str) -> str:
+        # Events contain no credential payload and no upstream diagnostics.
+        self._emit("graph.token.requested", "Requesting certificate app token", {"mode": "certificate"})
+        result = self._certificate_result(scope)
+        if isinstance(result, CertificateAuthError):
+            self._emit("graph.token.failed", "Certificate authentication failed", {"error_code": result.error_code})
+            raise result
+        self._emit("graph.token.succeeded", "Certificate app token acquired", {"mode": "certificate"})
+        return result
+
     def _app_token(self) -> str:
+        if self.auth.certificate is not None:
+            return self._certificate_app_token(self.auth.graph_scope)
         if not self.auth.client_secret:
             raise GraphError("No client secret or access token provided.")
 

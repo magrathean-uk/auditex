@@ -14,6 +14,9 @@ SENSITIVE_ARG_FLAGS = frozenset(
         "--access-token",
         "--token",
         "--client-secret",
+        "--certificate-pfx",
+        "--certificate-password-env",
+        "--certificate-keychain-sha256",
         "--secret",
         "--password",
         "--command-override",
@@ -22,11 +25,15 @@ SENSITIVE_ARG_FLAGS = frozenset(
 )
 
 SENSITIVE_KEY_RE = re.compile(
-    r"(^|[_-])(access[_-]?token|refresh[_-]?token|token|secret|password|credential|authorization|raw[_-]?claims)([_-]|$)",
+    r"(^|[_-])(access[_-]?token|refresh[_-]?token|token|secret|password|credential|authorization|raw[_-]?claims|certificate|pfx|private[_-]?key|client[_-]?assertion|thumbprint[_-]?sha256)([_-]|$)",
     re.IGNORECASE,
 )
 
 BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+PRIVATE_KEY_PEM_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----",
+    re.DOTALL,
+)
 JWT_RE = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++\.[A-Za-z0-9_-]+")
 # Include guest UPNs (#EXT#), Unicode local parts and single-label UPN suffixes.
 _OUTPUT_EMAIL_RE = re.compile(
@@ -64,7 +71,7 @@ _OUTPUT_SAMPLE_MARGIN = 2048
 # ``key=value``, ``key: value`` and the JSON forms ``"key": "value"`` / ``'key':'value'``: the closing quote of the
 # key and a quoted value (which may hold spaces) are part of the match, so a JSON-keyed secret is not left behind.
 INLINE_SECRET_RE = re.compile(
-    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key)"
+    r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key|client[_-]?assertion|private[_-]?key|certificate(?:[_-]?(?:pfx|password[_-]?env|keychain[_-]?sha256))?|pfx[_-]?path|password[_-]?(?:env|provider)|thumbprint[_-]?sha256)"
     r"[\"']?\s*[=:]\s*)(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
     re.IGNORECASE,
 )
@@ -162,6 +169,7 @@ def redact_text(value: str, sensitive_values: Iterable[str] | None = None) -> st
     for sensitive in sorted({str(item) for item in sensitive_values or [] if item}, key=len, reverse=True):
         redacted = redacted.replace(sensitive, "***redacted***")
     redacted = BEARER_RE.sub("Bearer ***redacted***", redacted)
+    redacted = PRIVATE_KEY_PEM_RE.sub("***redacted-private-key***", redacted)
     redacted = JWT_RE.sub("***redacted-jwt***", redacted)
     redacted = INLINE_SECRET_RE.sub(lambda match: f"{match.group('prefix')}***redacted***", redacted)
     return redacted
