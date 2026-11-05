@@ -24,7 +24,8 @@ ASSESSMENT_SCHEMAS = {
     "2026-10-27": "schemas/model_assessment-2026-10-27.schema.json",
     "2026-10-27.1": "schemas/model_assessment-2026-10-27.1.schema.json",
     "2026-10-28": "schemas/model_assessment-2026-10-28.schema.json",
-    "2026-10-29": MODEL_ASSESSMENT_SCHEMA,
+    "2026-10-29": "schemas/model_assessment-2026-10-29.schema.json",
+    "2026-11-05": MODEL_ASSESSMENT_SCHEMA,
 }
 
 
@@ -76,7 +77,7 @@ def safe_projection_enum_value(field: str, value: Any) -> bool:
 def _check(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str) -> None:
     supported = {"$schema", "$id", "$defs", "title", "description", "$ref", "type", "const", "enum",
                  "required", "properties", "additionalProperties", "items", "uniqueItems", "pattern",
-                 "minimum", "maximum", "minLength", "minItems", "maxItems", "anyOf"}
+                 "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "anyOf"}
     if set(schema) - supported:
         raise ValueError("Unsupported model assessment schema keyword")
     if "anyOf" in schema:
@@ -119,7 +120,8 @@ def _check(value: Any, schema: dict[str, Any], root: dict[str, Any], path: str) 
         for index, item in enumerate(value):
             _check(item, schema.get("items", {}), root, f"{path}[{index}]")
     if isinstance(value, str):
-        if len(value) < schema.get("minLength", 0) or "pattern" in schema and not re.search(schema["pattern"], value):
+        if (len(value) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", len(value))
+                or "pattern" in schema and not re.search(schema["pattern"], value)):
             raise ValueError(f"Invalid model assessment string at {path}")
     if type(value) in (int, float):
         if (type(value) is float and not math.isfinite(value)) or value < schema.get("minimum", value) or value > schema.get("maximum", value):
@@ -163,7 +165,7 @@ def validate_assessment(payload: Any) -> None:
     schema = json.loads(open_text_resource(ASSESSMENT_SCHEMAS[version]))
     _check(payload, schema, schema, "assessment")
     catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
-    if version == "2026-10-29":
+    if version in {"2026-10-29", "2026-11-05"}:
         projection = payload["projection"]
         sections = projection["sections"]
         if set(sections) != {s for policy in catalogue.values() for s in policy["sections"]}:
@@ -233,7 +235,7 @@ def validate_assessment(payload: Any) -> None:
             if not loopback or any(redaction[k] for k in ("user_display_names", "email_addresses", "immutable_ids")):
                 raise ValueError("Invalid unredacted projection")
     counts = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0}
-    if version in {"2026-10-28", "2026-10-29"}:
+    if version in {"2026-10-28", "2026-10-29", "2026-11-05"}:
         counts["rule_answered"] = 0
     ids = set()
     scope_rows = 0
@@ -247,7 +249,7 @@ def validate_assessment(payload: Any) -> None:
             raise ValueError("Unsupported model assessment policy")
         policy = catalogue.get(row["policy_id"])
         is_rule = row["reason"] == "rule_precheck"
-        if version in {"2026-10-28", "2026-10-29"}:
+        if version in {"2026-10-28", "2026-10-29", "2026-11-05"}:
             counts["rule_answered"] += is_rule
             if ("rule_precheck" in row) != is_rule or "model_shadow" in row and not is_rule:
                 raise ValueError("Invalid rule pre-check metadata")
@@ -307,9 +309,38 @@ def validate_assessment(payload: Any) -> None:
                     row["thinking_disabled"] or row["thinking_stripped"]):
                 raise ValueError("Invalid rule pre-check provenance")
             sections = policy["sections"]
-            if not set(detail["section"]) <= set(sections):
+            value_row = None
+            if detail["class"] == "value_rule":
+                if version != "2026-11-05":
+                    raise ValueError("Value rule requires current schema")
+                from .value_rules.catalogue import row_for
+                value_row = row_for(row["policy_id"])
+                if not {"cell", "reason_code", "reason_text"} <= detail.keys():
+                    raise ValueError("Missing value-rule cell or reason")
+                cell = value_row["cells"].get(detail["cell"]) if value_row else None
+                if (value_row is None or cell is None or detail["rule_id"] != value_row["rule_id"]
+                        or detail["reason_code"] != cell["reason_code"]
+                            or detail["reason_text"] not in cell["reason_texts"]
+                        or detail["field"] is not None or detail["value"] is not None):
+                    raise ValueError("Unsupported value-rule cell or reason")
+                allowed_sections = value_row["sections"]
+                if detail["section"] != [s for s in allowed_sections if s in detail["section"]]:
+                    raise ValueError("Invalid value-rule section order")
+            else:
+                allowed_sections = sections
+                if set(detail) - {"class", "rule_id", "section", "field", "value"}:
+                    raise ValueError("Unexpected legacy pre-check metadata")
+            if not set(detail["section"]) <= set(allowed_sections):
                 raise ValueError("Unsupported rule pre-check section")
-            if detail["rule_id"] == "required_sections_present":
+            if detail["class"] == "value_rule":
+                if cell["verdict"] == "not_assessed" and detail["cell"] == "section_not_collected":
+                    expected_text = ("Data unavailable: required evidence section(s) not collected: "
+                                     + ", ".join(detail["section"]) + ".")
+                    if detail["reason_text"] != expected_text:
+                        raise ValueError("Value-rule missing-section reason differs from citation")
+                elif detail["section"] != cell["cited"]:
+                    raise ValueError("Value-rule decision cites the wrong section")
+            elif detail["rule_id"] == "required_sections_present":
                 if detail["class"] != "absent_section" or detail["field"] is not None or detail["value"] is not None:
                     raise ValueError("Invalid absent-section pre-check")
             elif detail["class"] == "absent_field":

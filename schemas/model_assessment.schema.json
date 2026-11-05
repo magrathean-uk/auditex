@@ -6,7 +6,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "2026-10-29"
+      "const": "2026-11-05"
     },
     "generated_at": {
       "type": "string",
@@ -673,7 +673,8 @@
             "closed_gate",
             "absent_section",
             "absent_field",
-            "empty_required_list"
+            "empty_required_list",
+            "value_rule"
           ]
         },
         "rule_id": {
@@ -688,6 +689,18 @@
           },
           "minItems": 1,
           "uniqueItems": true
+        },
+        "cell": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.]{0,63}$"
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.]{0,63}$"
+        },
+        "reason_text": {
+          "type": "string",
+          "maxLength": 400
         },
         "field": {
           "type": [

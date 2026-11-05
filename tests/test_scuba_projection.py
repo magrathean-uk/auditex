@@ -453,12 +453,16 @@ def test_effective_admin_set_requires_all_counted_users_and_redacts_immutable_id
     assert project_run(complete_bundle)['privileged_users'] == NOT_COLLECTED
 
 
-def test_2026_10_28_assessments_continue_to_validate(complete_bundle):
+@pytest.mark.parametrize('version', ['2026-10-28', '2026-10-29'])
+def test_legacy_assessments_continue_to_validate(complete_bundle, monkeypatch, version):
+    monkeypatch.setenv('AUDITEX_DISABLE_VALUE_RULES', '1')
     payload = assess_run(complete_bundle, ModelConfig(model_name='unused'), policies=['MS.POWERBI.1.1v1'])
-    payload['schema_version'] = '2026-10-28'
-    del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed'], payload['serving']
+    assert payload['policies'][0]['rule_precheck']['class'] != 'value_rule'
+    payload['schema_version'] = version
+    if version == '2026-10-28':
+        del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed'], payload['serving']
     validate_assessment(payload)
-    jsonschema.validate(payload, json.loads((ROOT / 'schemas/model_assessment-2026-10-28.schema.json').read_text()))
+    jsonschema.validate(payload, json.loads((ROOT / f'schemas/model_assessment-{version}.schema.json').read_text()))
 
 
 @pytest.mark.parametrize('marker', [{'error': 'Forbidden'}, {'read_state': 'blocked'},

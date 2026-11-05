@@ -43,10 +43,10 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 ## Evidence discipline
 
 `model_assessment.json` is an optional root artefact written by `auditex model assess`.
-Its schema is `schemas/model_assessment.schema.json` (version `2026-10-29`), listed
+Its schema is `schemas/model_assessment.schema.json` (version `2026-11-05`), listed
 by the schema manifest and checked when present by bundle validation. The known
-older versions `2026-10-27`, `2026-10-27.1` and `2026-10-28` use their byte-preserved,
-date-named schema files.
+older versions `2026-10-27`, `2026-10-27.1`, `2026-10-28` and `2026-10-29` use their
+byte-preserved, date-named schema files; `2026-10-29` is the most recent of these.
 Malformed or unknown-version optional assessments produce warnings and never change
 the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention
@@ -63,7 +63,7 @@ after removal of a leading thinking block. They are null when the final attempt
 failed at transport level or supplied no assistant text. Skips have no
 prompt or response hash. No raw invalid answer or API key is retained.
 
-Within `2026-10-29`, two additive changes (older files still validate; the schema version is unchanged): model
+Within `2026-10-29` (since superseded by `2026-11-05`), two additive changes (older files still validate; the schema version is unchanged): model
 rows (and `model_shadow`) may carry `finish_reason`, the final reply's token (`stop`, `length`, ...) or null when
 no reply arrived or the server sent none or a non-token value; it is absent from rule and skipped rows, and the
 validator rejects it there. A row whose reply was lost in transit twice (connection error, timeout, cut-short,
@@ -124,6 +124,35 @@ and latency, null prompt/response hashes, and false thinking flags. Their
 model `fail`. Precedence is `closed_gate`, `absent_section`, `absent_field`, then `empty_required_list`.
 `totals.rule_answered` counts every class, overlapping `answered` and `unknown`;
 the four verdict totals still sum to the policy count.
+
+Version `2026-11-05` adds the `value_rule` class and the shipped
+`configs/scuba-value-rules.json` inventory. The current route covers eight
+Power BI policies and AAD 3.4v1. Serving enables it by default. The hidden operational
+switch `AUDITEX_DISABLE_VALUE_RULES` turns it off: the value is stripped of whitespace and
+lower-cased, and any result that is not empty and not `0`, `false`, `no` or `off` restores the
+previous pre-check order (unset, empty, whitespace-only and those four values leave the rules on).
+Offline `evaluate_precheck` scoring always leaves value rules off,
+so historical pack scores remain comparable. The Power BI field rules
+remain registered for rollback but are bypassed when a value rule answers.
+
+For a value-rule policy, a usable closed gate wins, then the rule's ordered read
+set determines missing or marked sections, then the value predicate answers before
+the old absent-field and empty-list checks. The `value_rule` metadata adds `cell`,
+`reason_code` and `reason_text` to `rule_id`, `section`, null `field` and null
+`value`. The cell, code and reason text must match the shipped policy inventory.
+These fixed texts contain only section names, setting names, known enum names
+or generic descriptions of counts. A not-assessed rule answer cites only
+the sections that explain it and uses the existing unknown claim, missing-evidence
+limitations and collection recommendation. A met or not-met answer confirms the
+requirement and cites every section in the model case; not-met recommends baseline
+review. The validator checks the inventory, sections, claims and text but cannot
+re-run the predicate, because the assessment bundle does not contain its input
+evidence. The prior `2026-10-29` schema is preserved separately and still validates.
+
+These rules read the model case's projected evidence. Its Power BI and
+`authentication_method` sections can still be withheld by the projection digest
+gate, producing a not-assessed section-not-collected answer on those live inputs.
+A planned in-memory rule view will bypass that gate.
 
 Version `2026-10-29` replaces the P1 stub with a read-only tier-1 ScubaGear
 ProviderExport projection. Incomplete, failed, sampled, truncated, malformed or

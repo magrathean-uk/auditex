@@ -66,11 +66,20 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   (public domain dedication). Used: the Rego policies (`PowerShell/ScubaGear/Rego/`), the unit-test
   fixtures and their `json.patch` mutations (`Testing/Unit/Rego/`) and the baseline markdown
   (`baselines/*.md`). The policies are evaluated with Open Policy Agent 1.20.2 (Apache-2.0, the version
-  ScubaGear pins; not redistributed) over fictional tenant configurations. No ScubaGear code, fixture
-  or complete baseline file is vendored or shipped in the product; the scripts read a local checkout supplied on
+  ScubaGear pins; not redistributed) over fictional tenant configurations. No original ScubaGear code, fixture
+  file or complete baseline file is vendored or shipped in the product; the scripts read a local checkout supplied on
   the command line, and each case records the commit (the 12-character short commit, in `provenance.source` and
   in the oracle reviewer; the run's `summary.json` holds the full 40-character commit), policy id, test name, OPA
   version and input hash.
+  The compressed value-rule test fixture (`tests/fixtures/value-rules/`, built by
+  `scripts/build-value-rule-fixture.py`) holds 825 rows: 398 constructed synthetic
+  rows and 427 rows from the train and validation splits of the model-development
+  training pack. The pack rows derive from ScubaGear fixtures and are covered by
+  its CC0 1.0 Universal dedication. Held-out test rows and the sealed evaluation
+  rows are not included. The fixture builder replaces the two Power BI licence-cell
+  texts in the source vectors with the current fixed wording. The manifest records
+  the source and compressed-file hashes, policy counts, cell counts, verdicts and
+  row origins.
 - The `policy` evidence object quotes up to 600 characters of baseline text per policy. CISA states
   that parts of those baselines are adapted from Microsoft documentation under CC BY 4.0, so a
   dataset that keeps `baseline_text` must carry attribution to Microsoft and CISA for that prose;

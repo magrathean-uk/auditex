@@ -23,6 +23,14 @@ SharePoint, or OneDrive file content. Metadata and settings can still contain
 personal data, including user names, email addresses, group membership, device
 metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
 Treat every bundle as confidential.
+Value-rule records carry policy, cell, code, section names and controlled reason
+text, not tenant evidence values. The current rules evaluate the same projected case that
+the local model would see. The planned rule-view projection is designed to retain
+unredacted values only in process, after collection checks but before shape,
+size and redaction gates; it must never enter prompts, assessment files, sidecars
+or logs. This matters for rules that compare bare e-mail addresses, which
+redaction would make indistinguishable within a domain. That rule view is not
+implemented yet.
 The identity collector's user inventory selects `onPremisesImmutableId`, so raw
 `identity.users` chunks hold it for every returned user, up to the 250,000-user
 safety ceiling. Previously only the hybrid collector's first 100 sampled users

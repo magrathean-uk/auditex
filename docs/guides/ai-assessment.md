@@ -17,9 +17,15 @@ or a **model row** (one chat-completions request, retried once). Rules are check
 | `absent_section` | A section the policy needs was not collected (missing permission, licence, PowerShell-only data, failed read) | unknown, naming the missing section |
 | `absent_field` | The section was collected but a field the policy's Rego reads is missing | unknown, naming the field |
 | `empty_required_list` | The Conditional Access list was collected and is exactly empty, for the ten AAD policies that need at least one policy | not met |
+| `value_rule` | A Power BI or AAD 3.4 setting is evaluated from its available evidence | met, not met, or unknown with a named reason |
 
-Only rows no rule decides reach the model. The tables of gates, fields and lists are
-`configs/scuba-rule-precheck.json`; the full precedence is in [model development](model-development.md#rule-pre-checks-and-offline-product-scoring).
+Only rows no rule decides reach the model. Gates, fields and lists are in
+`configs/scuba-rule-precheck.json`; value-rule cells are in
+`configs/scuba-value-rules.json`. The full precedence is in [model development](model-development.md#rule-pre-checks-and-offline-product-scoring).
+Value rules are on by default and can be disabled for incident rollback with
+`AUDITEX_DISABLE_VALUE_RULES=1`. These rules use the projected model evidence, so
+Power BI and authentication-method evidence withheld by the current projection
+still yields unknown. A planned in-memory rule view will remove that coverage limit.
 A deterministic **scope post-check** then marks a "met" verdict whose Conditional Access policy is narrowed
 by location, platform, device or client-application conditions that ScubaGear's Rego ignores
 (`scope_narrowed`); it never changes the verdict.

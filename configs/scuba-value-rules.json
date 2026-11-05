@@ -1,0 +1,1376 @@
+{
+  "policies": {
+    "MS.AAD.3.4v1": {
+      "cells": {
+        "policy_object_absent": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_policy_object_absent",
+          "reason_texts": [
+            "Data unusable: authentication_method has no authentication_method_policy object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: authentication_method."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_singleton": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: authentication_method does not hold exactly one object; the policy was not assessed.",
+            "Data unusable: authentication_method holds 0 objects, not one; the policy was not assessed.",
+            "Data unusable: authentication_method holds 2 objects, not one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: authentication_method is not a list holding one policy object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "state_complete": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "migration_complete",
+          "reason_texts": [
+            "Requirement met: authentication methods migration is complete."
+          ],
+          "verdict": "met"
+        },
+        "state_field_absent": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unavailable_state_absent",
+          "reason_texts": [
+            "Data unavailable: PolicyMigrationState is not in the exported authentication methods policy; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "state_not_a_string": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_state_not_a_string",
+          "reason_texts": [
+            "Data unusable: PolicyMigrationState is not a string; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "state_not_complete": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "migration_not_complete",
+          "reason_texts": [
+            "Requirement not met: authentication methods migration state is an unrecognised value, not migrationComplete.",
+            "Requirement not met: authentication methods migration state is migrationInProgress, not migrationComplete.",
+            "Requirement not met: authentication methods migration state is preMigration, not migrationComplete.",
+            "Requirement not met: authentication methods migration state is unknownFutureValue, not migrationComplete."
+          ],
+          "verdict": "not_met"
+        },
+        "state_null": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unavailable_migration_state_absent",
+          "reason_texts": [
+            "Data unavailable: migration state absent; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "aad_3_4",
+      "params": {},
+      "rule_id": "MS.AAD.3.4v1.aad_3_4",
+      "sections": [
+        "authentication_method"
+      ]
+    },
+    "MS.POWERBI.1.1v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting PublishToWeb has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of PublishToWeb is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "off.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_disabled",
+          "reason_texts": [
+            "Requirement met: PublishToWeb is disabled."
+          ],
+          "verdict": "met"
+        },
+        "off.enabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_enabled",
+          "reason_texts": [
+            "Requirement not met: PublishToWeb is enabled."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting PublishToWeb appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting PublishToWeb appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting PublishToWeb is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting PublishToWeb is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.off",
+      "params": {
+        "setting_name": "PublishToWeb"
+      },
+      "rule_id": "MS.POWERBI.1.1v1.powerbi.off",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    },
+    "MS.POWERBI.2.1v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting AllowGuestUserToAccessSharedContent has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of AllowGuestUserToAccessSharedContent is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_disabled",
+          "reason_texts": [
+            "Requirement met: AllowGuestUserToAccessSharedContent is disabled."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_listed": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_specific_groups",
+          "reason_texts": [
+            "Requirement met: AllowGuestUserToAccessSharedContent is enabled only for specific security groups."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_unusable": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_security_groups",
+          "reason_texts": [
+            "Data unusable: the security groups of AllowGuestUserToAccessSharedContent are not a list of group objects with a graphId; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.enabled_no_groups": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_everyone",
+          "reason_texts": [
+            "Requirement not met: AllowGuestUserToAccessSharedContent is enabled and no security group restricts it."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting AllowGuestUserToAccessSharedContent appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting AllowGuestUserToAccessSharedContent appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting AllowGuestUserToAccessSharedContent is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting AllowGuestUserToAccessSharedContent is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.off_or_groups",
+      "params": {
+        "setting_name": "AllowGuestUserToAccessSharedContent"
+      },
+      "rule_id": "MS.POWERBI.2.1v1.powerbi.off_or_groups",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    },
+    "MS.POWERBI.3.1v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting ExternalSharingV2 has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of ExternalSharingV2 is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_disabled",
+          "reason_texts": [
+            "Requirement met: ExternalSharingV2 is disabled."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_listed": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_specific_groups",
+          "reason_texts": [
+            "Requirement met: ExternalSharingV2 is enabled only for specific security groups."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_unusable": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_security_groups",
+          "reason_texts": [
+            "Data unusable: the security groups of ExternalSharingV2 are not a list of group objects with a graphId; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.enabled_no_groups": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_everyone",
+          "reason_texts": [
+            "Requirement not met: ExternalSharingV2 is enabled and no security group restricts it."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting ExternalSharingV2 appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting ExternalSharingV2 appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting ExternalSharingV2 is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting ExternalSharingV2 is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.off_or_groups",
+      "params": {
+        "setting_name": "ExternalSharingV2"
+      },
+      "rule_id": "MS.POWERBI.3.1v1.powerbi.off_or_groups",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    },
+    "MS.POWERBI.4.1v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting ServicePrincipalAccessPermissionAPIs has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of ServicePrincipalAccessPermissionAPIs is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_disabled",
+          "reason_texts": [
+            "Requirement met: ServicePrincipalAccessPermissionAPIs is disabled."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_listed": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_specific_groups",
+          "reason_texts": [
+            "Requirement met: ServicePrincipalAccessPermissionAPIs is enabled only for specific security groups."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_unusable": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_security_groups",
+          "reason_texts": [
+            "Data unusable: the security groups of ServicePrincipalAccessPermissionAPIs are not a list of group objects with a graphId; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.enabled_no_groups": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_everyone",
+          "reason_texts": [
+            "Requirement not met: ServicePrincipalAccessPermissionAPIs is enabled and no security group restricts it."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting ServicePrincipalAccessPermissionAPIs appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting ServicePrincipalAccessPermissionAPIs appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting ServicePrincipalAccessPermissionAPIs is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting ServicePrincipalAccessPermissionAPIs is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.off_or_groups",
+      "params": {
+        "setting_name": "ServicePrincipalAccessPermissionAPIs"
+      },
+      "rule_id": "MS.POWERBI.4.1v1.powerbi.off_or_groups",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    },
+    "MS.POWERBI.4.2v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting AllowServicePrincipalsCreateAndUseProfiles has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of AllowServicePrincipalsCreateAndUseProfiles is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_disabled",
+          "reason_texts": [
+            "Requirement met: AllowServicePrincipalsCreateAndUseProfiles is disabled."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_listed": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_specific_groups",
+          "reason_texts": [
+            "Requirement met: AllowServicePrincipalsCreateAndUseProfiles is enabled only for specific security groups."
+          ],
+          "verdict": "met"
+        },
+        "og.enabled_groups_unusable": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_security_groups",
+          "reason_texts": [
+            "Data unusable: the security groups of AllowServicePrincipalsCreateAndUseProfiles are not a list of group objects with a graphId; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "og.enabled_no_groups": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "enabled_for_everyone",
+          "reason_texts": [
+            "Requirement not met: AllowServicePrincipalsCreateAndUseProfiles is enabled and no security group restricts it."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting AllowServicePrincipalsCreateAndUseProfiles appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting AllowServicePrincipalsCreateAndUseProfiles appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting AllowServicePrincipalsCreateAndUseProfiles is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting AllowServicePrincipalsCreateAndUseProfiles is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.off_or_groups",
+      "params": {
+        "setting_name": "AllowServicePrincipalsCreateAndUseProfiles"
+      },
+      "rule_id": "MS.POWERBI.4.2v1.powerbi.off_or_groups",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    },
+    "MS.POWERBI.5.1v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting BlockResourceKeyAuthentication has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of BlockResourceKeyAuthentication is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "on.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_not_enabled",
+          "reason_texts": [
+            "Requirement not met: BlockResourceKeyAuthentication is not enabled."
+          ],
+          "verdict": "not_met"
+        },
+        "on.enabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_enabled",
+          "reason_texts": [
+            "Requirement met: BlockResourceKeyAuthentication is enabled."
+          ],
+          "verdict": "met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting BlockResourceKeyAuthentication appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting BlockResourceKeyAuthentication appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting BlockResourceKeyAuthentication is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting BlockResourceKeyAuthentication is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.on",
+      "params": {
+        "setting_name": "BlockResourceKeyAuthentication"
+      },
+      "rule_id": "MS.POWERBI.5.1v1.powerbi.on",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    },
+    "MS.POWERBI.6.1v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting RScriptVisual has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of RScriptVisual is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "off.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_disabled",
+          "reason_texts": [
+            "Requirement met: RScriptVisual is disabled."
+          ],
+          "verdict": "met"
+        },
+        "off.enabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_enabled",
+          "reason_texts": [
+            "Requirement not met: RScriptVisual is enabled."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting RScriptVisual appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting RScriptVisual appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting RScriptVisual is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting RScriptVisual is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.off",
+      "params": {
+        "setting_name": "RScriptVisual"
+      },
+      "rule_id": "MS.POWERBI.6.1v1.powerbi.off",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    },
+    "MS.POWERBI.7.1v1": {
+      "cells": {
+        "access_denied": {
+          "cited": [
+            "powerbi_access_denied_reason"
+          ],
+          "reason_code": "data_unavailable_access_denied",
+          "reason_texts": [
+            "Data unavailable: the Power BI Admin API denied access to the tenant settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_missing",
+          "reason_texts": [
+            "Data unusable: tenant setting EimInformationProtectionEdit has no enabled flag; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "enabled_not_boolean": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_enabled_not_boolean",
+          "reason_texts": [
+            "Data unusable: the enabled flag of EimInformationProtectionEdit is not true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Power BI licence was found (a false read can also mean missing permissions or a failed command), so the tenant settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "powerbi_license_found"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: licence not detected: powerbi_license_found is not a boolean, so it is unknown whether a Power BI licence was found and the tenant settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "on.disabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_not_enabled",
+          "reason_texts": [
+            "Requirement not met: EimInformationProtectionEdit is not enabled."
+          ],
+          "verdict": "not_met"
+        },
+        "on.enabled": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "setting_enabled",
+          "reason_texts": [
+            "Requirement met: EimInformationProtectionEdit is enabled."
+          ],
+          "verdict": "met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "powerbi_access_denied_reason",
+            "powerbi_license_found",
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_access_denied_reason.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found, powerbi_tenant_settings.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_license_found.",
+            "Data unavailable: required evidence section(s) not collected: powerbi_tenant_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_duplicated": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_setting_duplicated",
+          "reason_texts": [
+            "Data unusable: tenant setting EimInformationProtectionEdit appears 2 times in the export; the policy was not assessed.",
+            "Data unusable: tenant setting EimInformationProtectionEdit appears more than once in the export; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "setting_entry_missing": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting EimInformationProtectionEdit is not in the exported settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_empty": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unavailable_setting_not_found",
+          "reason_texts": [
+            "Data unavailable: tenant setting EimInformationProtectionEdit is not in the exported settings (the list is empty); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "powerbi_tenant_settings"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: powerbi_tenant_settings is not a list of tenant-setting objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "powerbi.on",
+      "params": {
+        "setting_name": "EimInformationProtectionEdit"
+      },
+      "rule_id": "MS.POWERBI.7.1v1.powerbi.on",
+      "sections": [
+        "powerbi_access_denied_reason",
+        "powerbi_license_found",
+        "powerbi_tenant_settings"
+      ]
+    }
+  },
+  "schema_version": 1,
+  "scubagear_revision": "2446ad72",
+  "spec_version": "v3.6"
+}

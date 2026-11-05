@@ -12,12 +12,12 @@ from .model_eval import _evaluate, _invalid_constant, _load_cases, _load_respons
 
 def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
                   named_limitations: bool = True, absent_fields: bool = False,
-                  empty_lists: bool = False) -> dict[str, Any] | None:
+                  empty_lists: bool = False, value_rules: bool = False) -> dict[str, Any] | None:
     sections = [item["section"] for item in case["evidence"][1:]]
     projection = {item["section"]: item["observed"] for item in case["evidence"][1:]}
     detail = precheck_policy(case["policy_id"], projection, sections,
                              skip_absent_sections=skip_absent_sections, absent_fields=absent_fields,
-                             empty_lists=empty_lists)
+                             empty_lists=empty_lists, value_rules=value_rules)
     if detail is None:
         return None
     return {**precheck_response(detail, case["evidence"][0]["observed"], sections,

@@ -51,6 +51,30 @@ def test_missing_or_ambiguous_gate_is_unknown(observed):
                                      "required_evidence_section_not_collected:SPO_tenant.SharingCapability"]
 
 
+def test_value_rules_are_off_in_offline_scoring_by_default():
+    from hashlib import sha256
+
+    path = ROOT / "tests/fixtures/model-serving-cases.jsonl"
+    report = evaluate_precheck(str(path))
+    digest = sha256(json.dumps(report, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    # Pinned from HEAD before value-rule support was added.
+    assert digest == "0cfe7d1d50db6532fb51a7a199ec38eb996c7fb9a7358dcf85142360a2cd24eb"
+    rows = []
+    for line in path.read_text().splitlines():
+        item = json.loads(line)
+        case = json.loads(next(message["content"] for message in item["messages"] if message["role"] == "user"))
+        rows.append(precheck_case(case))
+    digest = sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert digest == "95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738"
+
+    case = build_case("MS.POWERBI.1.1v1", {"powerbi_license_found": False,
+        "powerbi_access_denied_reason": "", "powerbi_tenant_settings": []}, "unused")
+    default = precheck_case(case)
+    enabled = precheck_case(case, value_rules=True)
+    assert default is None or default["rule_precheck"]["class"] != "value_rule"
+    assert enabled["rule_precheck"]["class"] == "value_rule"
+
+
 @pytest.mark.parametrize("pid", ["MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1"])
 @pytest.mark.parametrize("value,expected", [("gcc", "closed_gate"), ("gcchigh", "closed_gate"),
     ("dod", "closed_gate"), ("commercial", None), ("GCC", "absent_section"),

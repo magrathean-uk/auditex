@@ -33,6 +33,17 @@ bundle gains the `privileged_roles` artefact, both additive.
   is read as `[]` (the pinned Rego does) and listed as `null_lists_read_as_empty`. Both keys are optional additions to the
   `2026-10-29` assessment schema; the whole-shape gate still applies.
 
+### Model assessment schema
+
+- **Model assessment schema version `2026-11-05` adds a `value_rule` class for deterministic rule answers.** The change is additive:
+  a `value_rule` row carries `cell`, `reason_code` and `reason_text`, where the text is constant and comes from the shipped
+  `configs/scuba-value-rules.json` inventory, and the validator checks all three against that inventory. Version `2026-10-29`
+  stays valid under its own preserved schema file. The inventory covers eight Power BI policies and `MS.AAD.3.4v1`. Serving
+  applies it by default, ahead of the registered missing-field and empty-list checks; because the model case's Power BI and
+  `authentication_method` evidence can still be withheld by the projection, those policies may answer not assessed until the
+  rules read evidence directly. The hidden `AUDITEX_DISABLE_VALUE_RULES` switch turns the rules off operationally, and the offline
+  `evaluate_precheck` scorer always leaves them off.
+
 ### Collection (1.2.2.dev5)
 
 - **PIM role policy collection (new reads, no new required scope).** The `identity_governance` collector reads the PIM role

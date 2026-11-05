@@ -182,7 +182,7 @@ def check_lists(policy_id: str, projection: dict[str, Any]) -> dict[str, Any] | 
 
 def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[str], *,
                     skip_absent_sections: bool = False, absent_fields: bool = False,
-                    empty_lists: bool = False) -> dict[str, Any] | None:
+                    empty_lists: bool = False, value_rules: bool = False) -> dict[str, Any] | None:
     """A usable closed gate wins over absent dependent evidence.
 
     The serving caller alone opts out for the entirely empty P1 projection.
@@ -193,6 +193,23 @@ def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[s
     """
     if skip_absent_sections:
         return None
+    if value_rules:
+        from .value_rules import assess
+        from .value_rules.catalogue import row_for
+        row = row_for(policy_id)
+        if row is not None:
+            # A closed gate wins before a missing dependent section. Stage 1's
+            # policies have no gate, but the order is shared with later stages.
+            gate = check_gate(policy_id, projection)
+            if gate and gate["class"] == "closed_gate":
+                return gate
+            result = assess(policy_id, projection)
+            if result is not None:
+                cited = result["cited_sections"] or list(row["sections"])
+                return {"class": "value_rule", "rule_id": row["rule_id"],
+                        "section": cited, "field": None, "value": None,
+                        "cell": result["cell"], "reason_code": result["reason_code"],
+                        "reason_text": result["reason_text"]}
     gate = check_gate(policy_id, projection)
     if gate and gate["class"] == "closed_gate":
         return gate
@@ -217,6 +234,16 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
     The named limitations are assessment-contract extensions, not new pack
     vocabulary. Offline scoring compares the original pack response vocabulary.
     """
+    if detail["class"] == "value_rule":
+        from .value_rules.catalogue import row_for
+        from .value_rules.record import as_pack_response
+        row = row_for(policy_item["policy_id"])
+        verdict = row["cells"][detail["cell"]]["verdict"]
+        record = {"verdict": verdict, "cited_sections": detail["section"] if verdict == "not_assessed" else None}
+        response = as_pack_response(record, policy_item["criticality"], sections)
+        if verdict == "not_assessed" and named_limitations:
+            response["limitations"] += ["required_evidence_section_not_collected:" + name for name in detail["section"]]
+        return response
     if detail["class"] == "empty_required_list":
         return {"claims": [
             {"id": "requirement_met", "status": "confirmed", "value": False,

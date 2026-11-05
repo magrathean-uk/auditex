@@ -681,7 +681,7 @@ def test_schema_and_validators_accept_the_marked_result(marked):
     validate_assessment(marked)
     jsonschema.Draft202012Validator.check_schema(SCHEMA)
     jsonschema.validate(marked, SCHEMA)
-    assert marked["schema_version"] == "2026-10-29" and marked["projection"]["schema_version"] == "2026-10-29"
+    assert marked["schema_version"] == "2026-11-05" and marked["projection"]["schema_version"] == "2026-10-29"
 
 
 @pytest.mark.parametrize("name", sorted(MUTATIONS))

@@ -596,11 +596,66 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
     resources = shipped_resource_manifest()["resources"]
     assert "configs/scuba-policy-sections.json" in resources
     assert "configs/scuba-rule-precheck.json" in resources
+    assert "configs/scuba-value-rules.json" in resources
     assert "configs/scuba-scope-blind.json" in resources
     assert "schemas/model_assessment-2026-10-27.1.schema.json" in resources
     assert "schemas/model_assessment-2026-10-28.schema.json" in resources
+    assert "schemas/model_assessment-2026-10-29.schema.json" in resources
     assert "schemas/model_assessment.schema.json" in resources
     assert "model_assessment.schema.json" in contract_schema_manifest()["schemas"]
+
+
+def test_value_rule_schema_rejects_wrong_cell_code_section_and_text(demo_bundle, monkeypatch):
+    monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
+    monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("value rule must not call model"))
+    result = assess_run(demo_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
+    assert result["schema_version"] == "2026-11-05"
+    detail = result["policies"][0]["rule_precheck"]
+    assert detail["class"] == "value_rule" and detail["cell"] == "section_not_collected"
+    validate_assessment(result)
+    for key, bad in (("cell", "off.enabled"), ("reason_code", "wrong_code"),
+                     ("reason_text", "tenant@example.com"), ("section", ["privileged_users"])):
+        tampered = deepcopy(result)
+        tampered["policies"][0]["rule_precheck"][key] = bad
+        with pytest.raises(ValueError):
+            validate_assessment(tampered)
+
+    from azure_tenant_audit.scuba_precheck import precheck_response
+    from azure_tenant_audit.value_rules.catalogue import row_for
+    tampered = deepcopy(result)
+    policy_row = tampered["policies"][0]
+    detail = policy_row["rule_precheck"]
+    cell = row_for("MS.POWERBI.1.1v1")["cells"]["licence_false"]
+    detail.update(cell="licence_false", reason_code=cell["reason_code"],
+                  reason_text=cell["reason_texts"][0], section=["powerbi_tenant_settings"])
+    policy_row.update(precheck_response(detail, {"policy_id": policy_row["policy_id"],
+                                        "criticality": policy_row["claims"][1]["value"]},
+                                        row_for("MS.POWERBI.1.1v1")["sections"]))
+    with pytest.raises(ValueError, match="wrong section"):
+        validate_assessment(tampered)
+    for key in ("cell", "reason_code", "reason_text"):
+        missing = deepcopy(result)
+        del missing["policies"][0]["rule_precheck"][key]
+        with pytest.raises(ValueError, match="Missing value-rule"):
+            validate_assessment(missing)
+
+
+def test_value_rule_kill_switch_and_legacy_schema(demo_bundle, monkeypatch):
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+    monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("missing section pre-check must answer"))
+    result = assess_run(demo_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
+    assert result["policies"][0]["rule_precheck"]["class"] == "absent_section"
+    result["schema_version"] = "2026-10-29"
+    validate_assessment(result)
+
+
+@pytest.mark.parametrize("switch,enabled", [(" 1 ", False), ("y", False), ("disable", False),
+                                              (" 0 ", True), ("false", True), ("", True)])
+def test_value_rule_kill_switch_values(demo_bundle, monkeypatch, switch, enabled):
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", switch)
+    monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("pre-check must answer"))
+    result = assess_run(demo_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
+    assert (result["policies"][0]["rule_precheck"]["class"] == "value_rule") is enabled
 
 
 @pytest.mark.parametrize("mutation", ["evidence", "criticality", "policy", "comparison", "nonfinite", "boolean_number"])

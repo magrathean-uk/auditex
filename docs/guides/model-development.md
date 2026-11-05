@@ -162,6 +162,16 @@ pack data is ignored for comparison; dry-run does not read the report pack.
 
 ### Rule pre-checks and offline product scoring
 
+Serving enables the nine Power BI and AAD 3.4 value rules in
+`configs/scuba-value-rules.json` by default. Their cell inventory and reason
+codes are checked by the `2026-11-05` assessment validator against the shipped inventory. A value rule uses the
+shared closed gate first, then its own ordered section list, then its setting
+predicate; it answers before registered missing-field and empty-list checks.
+`AUDITEX_DISABLE_VALUE_RULES=1` restores the prior serving route. The offline
+`evaluate_precheck` scorer always leaves value rules off, preserving historical
+scoring output. These rules still read the model case; a separate in-memory rule
+view is planned.
+
 Assessment pre-checks non-empty projections before inference. The shipped
 `configs/scuba-rule-precheck.json` is the shared authority for serving and oracle
 generation; `learn_gates` remains discovery for unregistered policies. Generation

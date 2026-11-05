@@ -33,7 +33,7 @@ from .scuba_projection import (
     policy_section, project_run,
 )
 
-SCHEMA_VERSION = "2026-10-29"
+SCHEMA_VERSION = "2026-11-05"
 PROMPT_CONVENTION = "named-enums-v1"
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 # Pause before re-sending a request whose reply was lost in transit (P5: a relay dropped replies under load).
@@ -369,7 +369,8 @@ def _assess_policies(projection: dict[str, Any], client: ModelClient | None, sel
                                 "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(),
                                 "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
                 continue
-            record = precheck_case(case, absent_fields=True, empty_lists=True)
+            value_rules_enabled = os.getenv("AUDITEX_DISABLE_VALUE_RULES", "").strip().lower() in {"", "0", "false", "no", "off"}
+            record = precheck_case(case, absent_fields=True, empty_lists=True, value_rules=value_rules_enabled)
             if record is None:
                 record = client.assess(case)
             elif shadow_model_on_precheck:
