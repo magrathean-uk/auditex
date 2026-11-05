@@ -9,6 +9,25 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 Nothing yet.
 
+## [1.2.3] - 2026-11-05
+
+### Security
+
+The standalone lab bootstrap kit (`tenant-bootstrap/`) carries its own copy of the command-line
+handling. Like the main tool, it accepted abbreviated options and redacted only exact flag names,
+so a secret supplied through an abbreviated flag was recorded in clear in the run manifest it
+wrote. That copy now rejects abbreviated options and redacts through the shared logic, with a
+self-contained fallback when the shared helper is unavailable. The shared redaction defence also
+treats an option as sensitive when it is a prefix of any sensitive flag, including an ambiguous
+prefix. Options must be spelled in full.
+
+The lab-kit copy is affected in every checked release: v0.9, v1.0.0, release-2026-04-29,
+release-2026-05-06, v1.1.0, v1.2.0, v1.2.1 and v1.2.2. The first affected release was v0.9;
+releases through 1.2.2 are affected.
+
+Rotate any secret passed through an abbreviated flag to the lab bootstrap kit, delete or rebuild
+affected run bundles, and upgrade to 1.2.3. Contact contact+auditex@magrathean.uk for help.
+
 ## [1.2.2] - 2026-11-05
 
 ### Security
@@ -18,7 +37,7 @@ A secret supplied through an abbreviated command-line flag, such as `--client-se
 and response manifests, Google run manifests and customer-pack copies, and in the audit logs
 `audit-log.jsonl` and `audit-debug.log`. Values supplied through full flag names were always
 redacted. Parsers now reject abbreviated options with exit status 2 before a run bundle or audit
-log is created.
+log is created. The standalone lab bootstrap kit copy of the command-line handling was fixed in 1.2.3.
 
 The first affected release was v0.9; releases through 1.2.1 are affected. Google manifest recording
 was added later and is present in the checked releases 1.1.0, 1.2.0 and 1.2.1.
@@ -796,7 +815,8 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/magrathean-uk/auditex/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/magrathean-uk/auditex/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/magrathean-uk/auditex/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/magrathean-uk/auditex/compare/v1.1.0...v1.2.0
