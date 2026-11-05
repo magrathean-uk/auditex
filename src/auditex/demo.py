@@ -87,6 +87,7 @@ def _is_tty(stream: TextIO) -> bool:
 
 def build_demo_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
+        allow_abbrev=False,
         prog="auditex demo",
         description="Walk through Auditex on a fictional, synthetic tenant. No tenant is contacted.",
     )

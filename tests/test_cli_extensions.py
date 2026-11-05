@@ -293,6 +293,7 @@ def test_guided_run_requires_exchange_login_when_requested(monkeypatch, tmp_path
 
 def test_guided_run_exchange_setup_adds_pwsh(monkeypatch, tmp_path) -> None:  # noqa: ANN001
     seen: dict[str, object] = {}
+    monkeypatch.setattr(guided, "_current_m365_state", lambda: {})
 
     monkeypatch.setattr(
         guided,
@@ -534,6 +535,7 @@ def test_guided_run_delegated_relogs_when_azure_tenant_mismatched(monkeypatch, t
 
 def test_guided_run_app_exchange_uses_secret_m365_login(monkeypatch, tmp_path) -> None:  # noqa: ANN001
     seen: dict[str, object] = {}
+    monkeypatch.setattr(guided, "_current_m365_state", lambda: {})
 
     monkeypatch.setattr(
         guided,

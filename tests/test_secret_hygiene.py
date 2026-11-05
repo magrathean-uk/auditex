@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from azure_tenant_audit.auth_runtime import SENSITIVE_CLI_ARGS, scrub_command_line
 from azure_tenant_audit.secret_hygiene import (
+    SENSITIVE_ARG_FLAGS,
     collect_sensitive_argv_values,
     deep_sanitize,
     file_mode,
@@ -14,6 +18,32 @@ from azure_tenant_audit.secret_hygiene import (
     token_freshness,
     validate_token_claims,
 )
+
+
+@pytest.mark.parametrize("flag", sorted(SENSITIVE_ARG_FLAGS))
+@pytest.mark.parametrize("inline", [False, True])
+def test_unique_sensitive_prefixes_are_redacted(flag: str, inline: bool) -> None:
+    option = {"--client-secret": "--client-sec", "--access-token": "--access-tok"}.get(flag, flag[:-1])
+    canary = "constructed-canary-argv-zz9"
+    value_args = [f"{option}={canary}"] if inline else [option, canary]
+    argv = ["auditex", *value_args, "--tenant-name", "constructed-tenant"]
+    expected = [f"{option}=***redacted***"] if inline else [option, "***redacted***"]
+    assert redact_argv(argv) == ["auditex", *expected, "--tenant-name", "constructed-tenant"]
+    assert collect_sensitive_argv_values(argv) == {canary}
+    assert canary not in redact_command_string(" ".join(argv))
+    if flag in SENSITIVE_CLI_ARGS:
+        assert scrub_command_line(argv) == redact_argv(argv)
+
+
+def test_prefix_matching_preserves_exact_flags_and_unrelated_options() -> None:
+    flags = {"--token", "--token-cache"}
+    argv = ["--token", "constructed-token", "--token-c", "constructed-cache", "--tok", "ambiguous", "--", "positional"]
+    assert redact_argv(argv, sensitive_flags=flags) == [
+        "--token", "***redacted***", "--token-c", "***redacted***", "--tok", "ambiguous", "--", "positional",
+    ]
+    assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == {"constructed-token", "constructed-cache"}
+    assert redact_argv(["--client-sec"]) == ["--client-sec", "***redacted***"]
+    assert redact_argv(["--unrelated=constructed", "ordinary"]) == ["--unrelated=constructed", "ordinary"]
 
 
 def test_argv_redaction_covers_token_and_inline_forms() -> None:
