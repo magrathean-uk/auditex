@@ -44,7 +44,22 @@ STAGE6_POLICIES = frozenset({
     "MS.SHAREPOINT.2.1v1", "MS.SHAREPOINT.2.2v1", "MS.SHAREPOINT.3.1v1",
     "MS.SHAREPOINT.3.2v1", "MS.SHAREPOINT.3.3v2", "MS.AAD.5.1v1", "MS.AAD.7.1v1",
     "MS.AAD.7.2v1", "MS.AAD.7.3v1", "MS.AAD.8.1v1", "MS.AAD.8.2v1"})
-STAGE_POLICIES = STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE6_POLICIES | STAGE8_POLICIES
+# stage 5: SS 1.1 remains held until P4.
+STAGE5_POLICIES = frozenset({
+    "MS.EXO.1.1v2",
+    "MS.SECURITYSUITE.1.2v1",
+    "MS.SECURITYSUITE.1.3v1",
+    "MS.SECURITYSUITE.2.1v1",
+    "MS.SECURITYSUITE.2.2v1",
+    "MS.SECURITYSUITE.2.3v1",
+    "MS.SECURITYSUITE.2.4v1",
+    "MS.SECURITYSUITE.3.1v1",
+    "MS.SECURITYSUITE.3.2v1",
+    "MS.SECURITYSUITE.3.3v1",
+    "MS.SECURITYSUITE.3.4v1",
+})
+STAGE_POLICIES = (STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE5_POLICIES
+                  | STAGE6_POLICIES | STAGE8_POLICIES)
 GATE_POLICIES = frozenset(policy for policy, row in catalogue()["policies"].items()
                           if row["params"].get("environment_gate"))
 PBI_COMMON = {"section_not_collected", "licence_false", "licence_flag_unusable", "access_denied",

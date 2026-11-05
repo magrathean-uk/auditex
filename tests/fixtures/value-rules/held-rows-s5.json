@@ -1,0 +1,473 @@
+{
+  "MS.SECURITYSUITE.1.1v1": {
+    "cells": {
+      "custom_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "custom_policy_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: the anti-malware policy that applies to all recipients enables the common attachments filter for .exe, .cmd and .vbe files."
+        ],
+        "verdict": "met"
+      },
+      "custom_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_custom_policy_noncompliant",
+        "reason_texts": [
+          "Requirement not met: the anti-malware policy that applies to all recipients does not enable the common attachments filter for .exe, .cmd and .vbe files."
+        ],
+        "verdict": "not_met"
+      },
+      "custom_policy_without_rule": {
+        "cited": [
+          "anti_malware_policies",
+          "anti_malware_rules"
+        ],
+        "evidence_kind": "absent",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:absent"
+        ],
+        "reason_code": "data_unavailable_custom_policy_without_rule",
+        "reason_texts": [
+          "Data unavailable: a custom policy that does not carry the required settings exists but anti_malware_rules is empty (which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "custom_topology_unusable": {
+        "cited": [
+          "anti_malware_policies",
+          "anti_malware_rules"
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_custom_topology",
+        "reason_texts": [
+          "Data unusable: an enabled rule in anti_malware_rules does not name exactly one policy of anti_malware_policies; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "default_compliant": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "default_policy_applies_compliant",
+        "reason_texts": [
+          "Requirement met: the anti-malware policy that applies to all recipients enables the common attachments filter for .exe, .cmd and .vbe files."
+        ],
+        "verdict": "met"
+      },
+      "default_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_default_policy_noncompliant",
+        "reason_texts": [
+          "Requirement not met: the anti-malware policy that applies to all recipients does not enable the common attachments filter for .exe, .cmd and .vbe files."
+        ],
+        "verdict": "not_met"
+      },
+      "hidden_covering_rule": {
+        "cited": [
+          "anti_malware_rules"
+        ],
+        "evidence_kind": "undecidable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:undecidable"
+        ],
+        "reason_code": "data_unusable_hidden_covering_rule",
+        "reason_texts": [
+          "Data unusable: the enabled rule with the lowest Priority in anti_malware_rules applies to some recipients only and a rule with a higher Priority number covers everyone; the policy that applies to the remaining recipients was not judged; the policy was not assessed."
+        ],
+        "recommendations": [
+          "review_policy_against_baseline_text"
+        ],
+        "verdict": "not_assessed"
+      },
+      "list_element_unusable": {
+        "cited": [
+          "anti_malware_policies"
+        ],
+        "cited_variants": [
+          [
+            "anti_malware_policies"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_list_element",
+        "reason_texts": [
+          "Data unusable: anti_malware_policies holds an element that is not an object; the policy was not assessed.",
+          "Data unusable: anti_malware_rules holds an element that is not an object; the policy was not assessed.",
+          "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "partial_tier_noncompliant": {
+        "cited": [
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "evidence_kind": "undecidable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:undecidable"
+        ],
+        "reason_code": "data_unusable_partial_tier",
+        "reason_texts": [
+          "Data unusable: a policy that applies to some recipients only cannot be read; only the policy that applies to everyone is judged; the policy was not assessed."
+        ],
+        "recommendations": [
+          "review_policy_against_baseline_text"
+        ],
+        "verdict": "not_assessed"
+      },
+      "partial_tier_violation": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "partial_tier_policy_noncompliant",
+        "reason_texts": [
+          "Requirement not met: a policy that applies to some recipients only is non-compliant (the anti-malware policy that applies to all recipients does not enable the common attachments filter for .exe, .cmd and .vbe files)."
+        ],
+        "verdict": "not_met"
+      },
+      "policy_leaf_unusable": {
+        "cited": [
+          "anti_malware_policies"
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_file_filter",
+        "reason_texts": [
+          "Data unusable: EnableFileFilter or FileTypes of the applied anti-malware policy is absent, null or not usable; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_not_in_export": {
+        "cited": [
+          "anti_malware_policies"
+        ],
+        "evidence_kind": "absent",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:absent"
+        ],
+        "reason_code": "data_unavailable_applied_policy_not_exported",
+        "reason_texts": [
+          "Data unavailable: the applied policy (Default) is not in anti_malware_policies; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_unusable": {
+        "cited": [
+          "anti_malware_policies"
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_policy_record",
+        "reason_texts": [
+          "Data unusable: a policy in anti_malware_policies has no readable Identity or two policies share one; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "preset_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_preset_noncompliant",
+        "reason_texts": [
+          "Requirement not met: the anti-malware policy that applies to all recipients does not enable the common attachments filter for .exe, .cmd and .vbe files."
+        ],
+        "verdict": "not_met"
+      },
+      "preset_topology_unusable": {
+        "cited": [
+          "anti_malware_policies",
+          "protection_policy_rules"
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_preset_topology",
+        "reason_texts": [
+          "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "priority_unusable": {
+        "cited": [
+          "anti_malware_rules"
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_rule_priority",
+        "reason_texts": [
+          "Data unusable: an enabled rule in anti_malware_rules has no numeric Priority (the lowest Priority decides which rule applies); the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "rule_priority_tie": {
+        "cited": [
+          "anti_malware_rules"
+        ],
+        "evidence_kind": "undecidable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:undecidable"
+        ],
+        "reason_code": "data_unusable_rule_priority_tie",
+        "reason_texts": [
+          "Data unusable: two enabled rules in anti_malware_rules share the lowest Priority; the policy was not assessed."
+        ],
+        "recommendations": [
+          "review_policy_against_baseline_text"
+        ],
+        "verdict": "not_assessed"
+      },
+      "rule_scope_unusable": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_rules"
+        ],
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "anti_malware_rules"
+          ],
+          [
+            "accepted_domains",
+            "protection_policy_rules"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_rule_scope",
+        "reason_texts": [
+          "Data unusable: an enabled rule has a recipient scope that cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "rule_state_unusable": {
+        "cited": [
+          "anti_malware_rules"
+        ],
+        "cited_variants": [
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_rule_state",
+        "reason_texts": [
+          "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "section_not_a_list": {
+        "cited": [
+          "accepted_domains"
+        ],
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "anti_malware_policies"
+          ],
+          [
+            "anti_malware_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "evidence_kind": "unusable",
+        "limitations": [
+          "evidence_unusable",
+          "evidence_unusable:<section>:unusable"
+        ],
+        "reason_code": "data_unusable_section_not_a_list",
+        "reason_texts": [
+          "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+          "Data unusable: anti_malware_policies is not a list of objects; the policy was not assessed.",
+          "Data unusable: anti_malware_rules is not a list of objects; the policy was not assessed.",
+          "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+        ],
+        "recommendations": [
+          "recollect_unusable_evidence"
+        ],
+        "verdict": "not_assessed"
+      },
+      "section_not_collected": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "evidence_kind": null,
+        "limitations": [
+          "required_evidence_section_not_collected",
+          "required_evidence_section_not_collected:<section>"
+        ],
+        "reason_code": "required_evidence_section_not_collected",
+        "reason_texts": [
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies, anti_malware_rules, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies, anti_malware_rules.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_rules, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_rules.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+          "Data unavailable: required evidence section(s) not collected: anti_malware_policies, anti_malware_rules, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: anti_malware_policies, anti_malware_rules.",
+          "Data unavailable: required evidence section(s) not collected: anti_malware_policies, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: anti_malware_policies.",
+          "Data unavailable: required evidence section(s) not collected: anti_malware_rules, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: anti_malware_rules.",
+          "Data unavailable: required evidence section(s) not collected: protection_policy_rules."
+        ],
+        "recommendations": [
+          "collect_missing_evidence_section"
+        ],
+        "verdict": "not_assessed"
+      },
+      "standard_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "standard_preset_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: the anti-malware policy that applies to all recipients enables the common attachments filter for .exe, .cmd and .vbe files."
+        ],
+        "verdict": "met"
+      },
+      "strict_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "anti_malware_policies",
+          "anti_malware_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "strict_preset_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: the anti-malware policy that applies to all recipients enables the common attachments filter for .exe, .cmd and .vbe files."
+        ],
+        "verdict": "met"
+      }
+    },
+    "kind": "policy_cascade",
+    "params": {
+      "bad": "the anti-malware policy that applies to all recipients does not enable the common attachments filter for .exe, .cmd and .vbe files",
+      "good": "the anti-malware policy that applies to all recipients enables the common attachments filter for .exe, .cmd and .vbe files",
+      "leaf": "file_types",
+      "leaf_code": "data_unusable_file_filter",
+      "leaf_text": "EnableFileFilter or FileTypes of the applied anti-malware policy is absent, null or not usable",
+      "variant": "malware"
+    },
+    "rule_id": "MS.SECURITYSUITE.1.1v1.policy_cascade",
+    "sections": [
+      "accepted_domains",
+      "anti_malware_policies",
+      "anti_malware_rules",
+      "protection_policy_rules"
+    ]
+  }
+}

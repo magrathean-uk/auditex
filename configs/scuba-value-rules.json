@@ -1378,6 +1378,137 @@
         "authorization_policies"
       ]
     },
+    "MS.EXO.1.1v2": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "remote_domains",
+            "scuba_config"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in remote_domains shows that automatic forwarding is enabled."
+          ],
+          "verdict": "met"
+        },
+        "allow_list_unusable": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_allow_list",
+          "reason_texts": [
+            "Data unusable: the configured forwarding allow-list is not a list; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "flag_bad": {
+          "cited": [
+            "remote_domains",
+            "scuba_config"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: automatic forwarding is enabled (found in remote_domains)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_bad_unlabelled": {
+          "cited": [
+            "remote_domains"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: an object in remote_domains shows that automatic forwarding is enabled but carries no name or identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "flag_unusable": {
+          "cited": [
+            "remote_domains"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in remote_domains lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "forwarder_not_allowed": {
+          "cited": [
+            "remote_domains",
+            "scuba_config"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: automatic forwarding is enabled (found in remote_domains)."
+          ],
+          "verdict": "not_met"
+        },
+        "forwarders_all_allowed": {
+          "cited": [
+            "remote_domains",
+            "scuba_config"
+          ],
+          "reason_code": "forwarders_all_allow_listed",
+          "reason_texts": [
+            "Requirement met: every object in remote_domains that forwards automatically is on the configured allow-list."
+          ],
+          "verdict": "met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "remote_domains"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: remote_domains holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "remote_domains"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: remote_domains is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "remote_domains",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: remote_domains, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: remote_domains.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "exo_forwarding",
+      "params": {
+        "allow_list": [
+          "Exo",
+          "MS.EXO.1.1v2",
+          "AllowedForwardingDomains"
+        ],
+        "bad": true,
+        "fields": [
+          "AutoForwardEnabled"
+        ],
+        "label": "DomainName",
+        "section": "remote_domains",
+        "what": "automatic forwarding is enabled"
+      },
+      "rule_id": "MS.EXO.1.1v2.exo_forwarding",
+      "sections": [
+        "remote_domains",
+        "scuba_config"
+      ]
+    },
     "MS.EXO.13.1v1": {
       "cells": {
         "all_clear": {
@@ -4659,6 +4790,738 @@
         "environment_creation"
       ]
     },
+    "MS.SECURITYSUITE.1.2v1": {
+      "cells": {
+        "custom_covers_compliant": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "custom_policy_covers_all_recipients_compliant",
+          "reason_texts": [
+            "Requirement met: the anti-malware policy that applies to all recipients enables zero-hour auto purge."
+          ],
+          "verdict": "met"
+        },
+        "custom_noncompliant": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "applied_custom_policy_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the anti-malware policy that applies to all recipients does not enable zero-hour auto purge."
+          ],
+          "verdict": "not_met"
+        },
+        "custom_policy_without_rule": {
+          "cited": [
+            "anti_malware_policies",
+            "anti_malware_rules"
+          ],
+          "reason_code": "data_unavailable_custom_policy_without_rule",
+          "reason_texts": [
+            "Data unavailable: a custom policy that does not carry the required settings exists but anti_malware_rules is empty (which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_topology_unusable": {
+          "cited": [
+            "anti_malware_policies",
+            "anti_malware_rules"
+          ],
+          "reason_code": "data_unusable_custom_topology",
+          "reason_texts": [
+            "Data unusable: an enabled rule in anti_malware_rules does not name exactly one policy of anti_malware_policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "default_compliant": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "default_policy_applies_compliant",
+          "reason_texts": [
+            "Requirement met: the anti-malware policy that applies to all recipients enables zero-hour auto purge."
+          ],
+          "verdict": "met"
+        },
+        "default_noncompliant": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "applied_default_policy_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the anti-malware policy that applies to all recipients does not enable zero-hour auto purge."
+          ],
+          "verdict": "not_met"
+        },
+        "hidden_covering_rule": {
+          "cited": [
+            "anti_malware_rules"
+          ],
+          "reason_code": "data_unusable_hidden_covering_rule",
+          "reason_texts": [
+            "Data unusable: the enabled rule with the lowest Priority in anti_malware_rules applies to some recipients only and a rule with a higher Priority number covers everyone; the policy that applies to the remaining recipients was not judged; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "anti_malware_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: anti_malware_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: anti_malware_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "partial_tier_noncompliant": {
+          "cited": [
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_partial_tier",
+          "reason_texts": [
+            "Data unusable: a policy that applies to some recipients only cannot be read; only the policy that applies to everyone is judged; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "partial_tier_violation": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "partial_tier_policy_noncompliant",
+          "reason_texts": [
+            "Requirement not met: a policy that applies to some recipients only is non-compliant (the anti-malware policy that applies to all recipients does not enable zero-hour auto purge)."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_leaf_unusable": {
+          "cited": [
+            "anti_malware_policies"
+          ],
+          "reason_code": "data_unusable_zap_flag",
+          "reason_texts": [
+            "Data unusable: ZapEnabled of the applied anti-malware policy is absent, null or not a boolean; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_not_in_export": {
+          "cited": [
+            "anti_malware_policies"
+          ],
+          "reason_code": "data_unavailable_applied_policy_not_exported",
+          "reason_texts": [
+            "Data unavailable: the applied policy (Default) is not in anti_malware_policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_unusable": {
+          "cited": [
+            "anti_malware_policies"
+          ],
+          "reason_code": "data_unusable_policy_record",
+          "reason_texts": [
+            "Data unusable: a policy in anti_malware_policies has no readable Identity or two policies share one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_noncompliant": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "applied_preset_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the anti-malware policy that applies to all recipients does not enable zero-hour auto purge."
+          ],
+          "verdict": "not_met"
+        },
+        "preset_topology_unusable": {
+          "cited": [
+            "anti_malware_policies",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_preset_topology",
+          "reason_texts": [
+            "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "priority_unusable": {
+          "cited": [
+            "anti_malware_rules"
+          ],
+          "reason_code": "data_unusable_rule_priority",
+          "reason_texts": [
+            "Data unusable: an enabled rule in anti_malware_rules has no numeric Priority (the lowest Priority decides which rule applies); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_priority_tie": {
+          "cited": [
+            "anti_malware_rules"
+          ],
+          "reason_code": "data_unusable_rule_priority_tie",
+          "reason_texts": [
+            "Data unusable: two enabled rules in anti_malware_rules share the lowest Priority; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_scope_unusable": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_rules"
+          ],
+          "reason_code": "data_unusable_rule_scope",
+          "reason_texts": [
+            "Data unusable: an enabled rule has a recipient scope that cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_state_unusable": {
+          "cited": [
+            "anti_malware_rules"
+          ],
+          "reason_code": "data_unusable_rule_state",
+          "reason_texts": [
+            "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "accepted_domains"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_malware_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_malware_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies, anti_malware_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies, anti_malware_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_malware_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+            "Data unavailable: required evidence section(s) not collected: anti_malware_policies, anti_malware_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_malware_policies, anti_malware_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_malware_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_malware_policies.",
+            "Data unavailable: required evidence section(s) not collected: anti_malware_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_malware_rules.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules."
+          ],
+          "verdict": "not_assessed"
+        },
+        "standard_covers_compliant": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "standard_preset_covers_all_recipients_compliant",
+          "reason_texts": [
+            "Requirement met: the anti-malware policy that applies to all recipients enables zero-hour auto purge."
+          ],
+          "verdict": "met"
+        },
+        "strict_covers_compliant": {
+          "cited": [
+            "accepted_domains",
+            "anti_malware_policies",
+            "anti_malware_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "strict_preset_covers_all_recipients_compliant",
+          "reason_texts": [
+            "Requirement met: the anti-malware policy that applies to all recipients enables zero-hour auto purge."
+          ],
+          "verdict": "met"
+        }
+      },
+      "kind": "policy_cascade",
+      "params": {
+        "bad": "the anti-malware policy that applies to all recipients does not enable zero-hour auto purge",
+        "good": "the anti-malware policy that applies to all recipients enables zero-hour auto purge",
+        "leaf": "zap",
+        "leaf_code": "data_unusable_zap_flag",
+        "leaf_text": "ZapEnabled of the applied anti-malware policy is absent, null or not a boolean",
+        "variant": "malware"
+      },
+      "rule_id": "MS.SECURITYSUITE.1.2v1.policy_cascade",
+      "sections": [
+        "accepted_domains",
+        "anti_malware_policies",
+        "anti_malware_rules",
+        "protection_policy_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.1.3v1": {
+      "cells": {
+        "builtin_compliant": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "built_in_protection_policy_applies_compliant",
+          "reason_texts": [
+            "Requirement met: the safe attachments policy that applies to all recipients blocks or dynamically delivers detected malware."
+          ],
+          "verdict": "met"
+        },
+        "builtin_noncompliant": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "applied_built_in_protection_policy_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the safe attachments policy that applies to all recipients does not block detected malware (or no policy applies to all recipients)."
+          ],
+          "verdict": "not_met"
+        },
+        "builtin_rule_unusable": {
+          "cited": [
+            "built_in_protection_rules"
+          ],
+          "reason_code": "data_unusable_builtin_rule",
+          "reason_texts": [
+            "Data unusable: built_in_protection_rules holds no rule with readable exclusions; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_covers_compliant": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "custom_policy_covers_all_recipients_compliant",
+          "reason_texts": [
+            "Requirement met: the safe attachments policy that applies to all recipients blocks or dynamically delivers detected malware."
+          ],
+          "verdict": "met"
+        },
+        "custom_noncompliant": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "applied_custom_policy_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the safe attachments policy that applies to all recipients does not block detected malware (or no policy applies to all recipients)."
+          ],
+          "verdict": "not_met"
+        },
+        "custom_policy_without_rule": {
+          "cited": [
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "data_unavailable_custom_policy_without_rule",
+          "reason_texts": [
+            "Data unavailable: a custom policy that does not carry the required settings exists but safe_attachment_rules is empty (which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_topology_unusable": {
+          "cited": [
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "data_unusable_custom_topology",
+          "reason_texts": [
+            "Data unusable: an enabled rule in safe_attachment_rules does not name exactly one policy of safe_attachment_policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "hidden_covering_rule": {
+          "cited": [
+            "safe_attachment_rules"
+          ],
+          "reason_code": "data_unusable_hidden_covering_rule",
+          "reason_texts": [
+            "Data unusable: the enabled rule with the lowest Priority in safe_attachment_rules applies to some recipients only and a rule with a higher Priority number covers everyone; the policy that applies to the remaining recipients was not judged; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "atp_policy_rules"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: atp_policy_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: built_in_protection_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: safe_attachment_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: safe_attachment_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_policy_covers_all": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "no_policy_covers_all_recipients",
+          "reason_texts": [
+            "Requirement not met: no policy applies to all recipients (the safe attachments policy that applies to all recipients does not block detected malware (or no policy applies to all recipients))."
+          ],
+          "verdict": "not_met"
+        },
+        "partial_tier_may_cover": {
+          "cited": [
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "data_unusable_partial_tier_may_cover",
+          "reason_texts": [
+            "Data unusable: the built-in protection rule has exclusions and a partly scoped policy exists that may cover the excluded recipients; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "partial_tier_noncompliant": {
+          "cited": [
+            "atp_policy_rules",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "data_unusable_partial_tier",
+          "reason_texts": [
+            "Data unusable: a policy that applies to some recipients only cannot be read; only the policy that applies to everyone is judged; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "partial_tier_violation": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "partial_tier_policy_noncompliant",
+          "reason_texts": [
+            "Requirement not met: a policy that applies to some recipients only is non-compliant (the safe attachments policy that applies to all recipients does not block detected malware (or no policy applies to all recipients))."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_leaf_unusable": {
+          "cited": [
+            "safe_attachment_policies"
+          ],
+          "reason_code": "data_unusable_attachment_action",
+          "reason_texts": [
+            "Data unusable: Action of the applied safe attachments policy is absent, null or not a recognised action; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_not_in_export": {
+          "cited": [
+            "safe_attachment_policies"
+          ],
+          "reason_code": "data_unavailable_applied_policy_not_exported",
+          "reason_texts": [
+            "Data unavailable: the applied policy (Built-In Protection Policy) is not in safe_attachment_policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_unusable": {
+          "cited": [
+            "safe_attachment_policies"
+          ],
+          "reason_code": "data_unusable_policy_record",
+          "reason_texts": [
+            "Data unusable: a policy in safe_attachment_policies has no readable Identity or two policies share one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_noncompliant": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "applied_preset_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the safe attachments policy that applies to all recipients does not block detected malware (or no policy applies to all recipients)."
+          ],
+          "verdict": "not_met"
+        },
+        "preset_topology_unusable": {
+          "cited": [
+            "atp_policy_rules",
+            "safe_attachment_policies"
+          ],
+          "reason_code": "data_unusable_preset_topology",
+          "reason_texts": [
+            "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "priority_unusable": {
+          "cited": [
+            "safe_attachment_rules"
+          ],
+          "reason_code": "data_unusable_rule_priority",
+          "reason_texts": [
+            "Data unusable: an enabled rule in safe_attachment_rules has no numeric Priority (the lowest Priority decides which rule applies); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_priority_tie": {
+          "cited": [
+            "safe_attachment_rules"
+          ],
+          "reason_code": "data_unusable_rule_priority_tie",
+          "reason_texts": [
+            "Data unusable: two enabled rules in safe_attachment_rules share the lowest Priority; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_scope_unusable": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules"
+          ],
+          "reason_code": "data_unusable_rule_scope",
+          "reason_texts": [
+            "Data unusable: an enabled rule has a recipient scope that cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_state_unusable": {
+          "cited": [
+            "atp_policy_rules"
+          ],
+          "reason_code": "data_unusable_rule_state",
+          "reason_texts": [
+            "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "accepted_domains"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+            "Data unusable: atp_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: built_in_protection_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_attachment_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_attachment_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules, defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules, defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules, defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, built_in_protection_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules, defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules, defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules, defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, built_in_protection_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules, defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules, defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules, defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, built_in_protection_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules, defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules, defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules, defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: built_in_protection_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: safe_attachment_policies, safe_attachment_rules.",
+            "Data unavailable: required evidence section(s) not collected: safe_attachment_policies.",
+            "Data unavailable: required evidence section(s) not collected: safe_attachment_rules."
+          ],
+          "verdict": "not_assessed"
+        },
+        "standard_covers_compliant": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "standard_preset_covers_all_recipients_compliant",
+          "reason_texts": [
+            "Requirement met: the safe attachments policy that applies to all recipients blocks or dynamically delivers detected malware."
+          ],
+          "verdict": "met"
+        },
+        "strict_covers_compliant": {
+          "cited": [
+            "accepted_domains",
+            "atp_policy_rules",
+            "built_in_protection_rules",
+            "defender_license",
+            "safe_attachment_policies",
+            "safe_attachment_rules"
+          ],
+          "reason_code": "strict_preset_covers_all_recipients_compliant",
+          "reason_texts": [
+            "Requirement met: the safe attachments policy that applies to all recipients blocks or dynamically delivers detected malware."
+          ],
+          "verdict": "met"
+        }
+      },
+      "kind": "policy_cascade",
+      "params": {
+        "bad": "the safe attachments policy that applies to all recipients does not block detected malware (or no policy applies to all recipients)",
+        "good": "the safe attachments policy that applies to all recipients blocks or dynamically delivers detected malware",
+        "leaf": "action",
+        "leaf_code": "data_unusable_attachment_action",
+        "leaf_text": "Action of the applied safe attachments policy is absent, null or not a recognised action",
+        "licence": true,
+        "variant": "attachment"
+      },
+      "rule_id": "MS.SECURITYSUITE.1.3v1.policy_cascade",
+      "sections": [
+        "accepted_domains",
+        "atp_policy_rules",
+        "built_in_protection_rules",
+        "defender_license",
+        "safe_attachment_policies",
+        "safe_attachment_rules"
+      ]
+    },
     "MS.SECURITYSUITE.1.4v1": {
       "cells": {
         "flag_true": {
@@ -4742,6 +5605,1944 @@
       "rule_id": "MS.SECURITYSUITE.1.4v1.any_true_is_met",
       "sections": [
         "atp_policy_for_o365"
+      ]
+    },
+    "MS.SECURITYSUITE.2.1v1": {
+      "cells": {
+        "config_entry_unusable": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_config_entry",
+          "reason_texts": [
+            "Data unusable: an entry of the ScubaGear configuration list cannot be read exactly (not a string, an empty or ambiguous name;email); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "config_list_empty": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unavailable_config_list_empty",
+          "reason_texts": [
+            "Data unavailable: cannot be assessed: no operator-named accounts in the ScubaGear configuration; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "config_list_unusable": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_config_list",
+          "reason_texts": [
+            "Data unusable: the configured SensitiveUsers is not a list; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "config_shape_unusable": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_config_shape",
+          "reason_texts": [
+            "Data unusable: scuba_config is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_policy_without_rule": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unavailable_custom_policy_without_rule",
+          "reason_texts": [
+            "Data unavailable: a custom anti-phish policy that could qualify exists but no anti-phish rule is exported (the rule list is empty, which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "custom_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects every configured sensitive user with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "default_policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_default_policy",
+          "reason_texts": [
+            "Data unusable: the export does not hold exactly one Default anti-phish policy; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "default_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "default_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects every configured sensitive user with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: anti_phish_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: anti_phish_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: atp_policy_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_qualifying_policy": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "no_qualifying_policy",
+          "reason_texts": [
+            "Requirement not met: no enabled anti-phish policy that applies to all recipients protects every configured sensitive user with an acceptable action."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: anti_phish_policies holds no objects (every tenant has a Default anti-phish policy); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_field",
+          "reason_texts": [
+            "Data unusable: an anti-phish policy that could qualify has a field that is absent, null or not a recognised value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_scope_unusable": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_policy_scope",
+          "reason_texts": [
+            "Data unusable: the recipient scope of a policy that qualifies cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_record",
+          "reason_texts": [
+            "Data unusable: a policy in anti_phish_policies has no readable Identity or IsDefault flag, or two share one Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "preset_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects every configured sensitive user with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "preset_topology_unusable": {
+          "cited": [
+            "anti_phish_policies",
+            "atp_policy_rules"
+          ],
+          "reason_code": "data_unusable_preset_topology",
+          "reason_texts": [
+            "Data unusable: a Defender for Office 365 preset rule has no readable Identity; the policy was not assessed.",
+            "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
+            "Data unusable: a preset security policy rule has no readable Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "qualifier_shadowed": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_qualifier_shadowed",
+          "reason_texts": [
+            "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_state_unusable": {
+          "cited": [
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unusable_rule_state",
+          "reason_texts": [
+            "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "accepted_domains"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: atp_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "phish_exists",
+      "params": {
+        "alias": "MS.DEFENDER.2.1v1",
+        "bad": "no enabled anti-phish policy that applies to all recipients protects every configured sensitive user with an acceptable action",
+        "good": "an enabled anti-phish policy that applies to all recipients protects every configured sensitive user with an acceptable action",
+        "list_key": "SensitiveUsers",
+        "need": "users",
+        "noun": "accounts",
+        "what": "no sensitive users are listed in the ScubaGear configuration"
+      },
+      "rule_id": "MS.SECURITYSUITE.2.1v1.phish_exists",
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "atp_policy_rules",
+        "defender_license",
+        "protection_policy_rules",
+        "scuba_config"
+      ]
+    },
+    "MS.SECURITYSUITE.2.2v1": {
+      "cells": {
+        "custom_policy_without_rule": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unavailable_custom_policy_without_rule",
+          "reason_texts": [
+            "Data unavailable: a custom anti-phish policy that could qualify exists but no anti-phish rule is exported (the rule list is empty, which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "custom_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects the organisation's own domains with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "default_policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_default_policy",
+          "reason_texts": [
+            "Data unusable: the export does not hold exactly one Default anti-phish policy; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "default_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "default_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects the organisation's own domains with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: anti_phish_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: anti_phish_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: atp_policy_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_qualifying_policy": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "no_qualifying_policy",
+          "reason_texts": [
+            "Requirement not met: no enabled anti-phish policy that applies to all recipients protects the organisation's own domains with an acceptable action."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: anti_phish_policies holds no objects (every tenant has a Default anti-phish policy); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_field",
+          "reason_texts": [
+            "Data unusable: an anti-phish policy that could qualify has a field that is absent, null or not a recognised value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_scope_unusable": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_policy_scope",
+          "reason_texts": [
+            "Data unusable: the recipient scope of a policy that qualifies cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_record",
+          "reason_texts": [
+            "Data unusable: a policy in anti_phish_policies has no readable Identity or IsDefault flag, or two share one Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "preset_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects the organisation's own domains with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "preset_topology_unusable": {
+          "cited": [
+            "anti_phish_policies",
+            "atp_policy_rules"
+          ],
+          "reason_code": "data_unusable_preset_topology",
+          "reason_texts": [
+            "Data unusable: a Defender for Office 365 preset rule has no readable Identity; the policy was not assessed.",
+            "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
+            "Data unusable: a preset security policy rule has no readable Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "qualifier_shadowed": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_qualifier_shadowed",
+          "reason_texts": [
+            "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_state_unusable": {
+          "cited": [
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unusable_rule_state",
+          "reason_texts": [
+            "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "accepted_domains"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: atp_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "phish_exists",
+      "params": {
+        "bad": "no enabled anti-phish policy that applies to all recipients protects the organisation's own domains with an acceptable action",
+        "good": "an enabled anti-phish policy that applies to all recipients protects the organisation's own domains with an acceptable action",
+        "need": "org_domains"
+      },
+      "rule_id": "MS.SECURITYSUITE.2.2v1.phish_exists",
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "atp_policy_rules",
+        "defender_license",
+        "protection_policy_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.2.3v1": {
+      "cells": {
+        "config_entry_unusable": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_config_entry",
+          "reason_texts": [
+            "Data unusable: an entry of the ScubaGear configuration list cannot be read exactly (not a string, an empty or ambiguous name;email); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "config_list_empty": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unavailable_config_list_empty",
+          "reason_texts": [
+            "Data unavailable: cannot be assessed: no operator-named domains in the ScubaGear configuration; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "config_list_unusable": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_config_list",
+          "reason_texts": [
+            "Data unusable: the configured PartnerDomains is not a list; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "config_shape_unusable": {
+          "cited": [
+            "scuba_config"
+          ],
+          "reason_code": "data_unusable_config_shape",
+          "reason_texts": [
+            "Data unusable: scuba_config is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_policy_without_rule": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unavailable_custom_policy_without_rule",
+          "reason_texts": [
+            "Data unavailable: a custom anti-phish policy that could qualify exists but no anti-phish rule is exported (the rule list is empty, which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "custom_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects every configured partner domain with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "default_policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_default_policy",
+          "reason_texts": [
+            "Data unusable: the export does not hold exactly one Default anti-phish policy; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "default_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "default_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects every configured partner domain with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: anti_phish_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: anti_phish_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: atp_policy_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_qualifying_policy": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "no_qualifying_policy",
+          "reason_texts": [
+            "Requirement not met: no enabled anti-phish policy that applies to all recipients protects every configured partner domain with an acceptable action."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: anti_phish_policies holds no objects (every tenant has a Default anti-phish policy); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_field",
+          "reason_texts": [
+            "Data unusable: an anti-phish policy that could qualify has a field that is absent, null or not a recognised value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_scope_unusable": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_policy_scope",
+          "reason_texts": [
+            "Data unusable: the recipient scope of a policy that qualifies cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_record",
+          "reason_texts": [
+            "Data unusable: a policy in anti_phish_policies has no readable Identity or IsDefault flag, or two share one Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "preset_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an enabled anti-phish policy that applies to all recipients protects every configured partner domain with an acceptable action."
+          ],
+          "verdict": "met"
+        },
+        "preset_topology_unusable": {
+          "cited": [
+            "anti_phish_policies",
+            "atp_policy_rules"
+          ],
+          "reason_code": "data_unusable_preset_topology",
+          "reason_texts": [
+            "Data unusable: a Defender for Office 365 preset rule has no readable Identity; the policy was not assessed.",
+            "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
+            "Data unusable: a preset security policy rule has no readable Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "qualifier_shadowed": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_qualifier_shadowed",
+          "reason_texts": [
+            "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_state_unusable": {
+          "cited": [
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unusable_rule_state",
+          "reason_texts": [
+            "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "accepted_domains"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: atp_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "scuba_config"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules, scuba_config.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: scuba_config."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "phish_exists",
+      "params": {
+        "alias": "MS.DEFENDER.2.3v1",
+        "bad": "no enabled anti-phish policy that applies to all recipients protects every configured partner domain with an acceptable action",
+        "good": "an enabled anti-phish policy that applies to all recipients protects every configured partner domain with an acceptable action",
+        "list_key": "PartnerDomains",
+        "need": "partner_domains",
+        "noun": "domains",
+        "what": "no partner domains are listed in the ScubaGear configuration"
+      },
+      "rule_id": "MS.SECURITYSUITE.2.3v1.phish_exists",
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "atp_policy_rules",
+        "defender_license",
+        "protection_policy_rules",
+        "scuba_config"
+      ]
+    },
+    "MS.SECURITYSUITE.2.4v1": {
+      "cells": {
+        "custom_policy_without_rule": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unavailable_custom_policy_without_rule",
+          "reason_texts": [
+            "Data unavailable: a custom anti-phish policy that could qualify exists but no anti-phish rule is exported (the rule list is empty, which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "custom_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "custom_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an anti-phish policy that applies to all recipients shows all safety tips (or a preset security policy applies to all recipients)."
+          ],
+          "verdict": "met"
+        },
+        "default_policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_default_policy",
+          "reason_texts": [
+            "Data unusable: the export does not hold exactly one Default anti-phish policy; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "default_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "default_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an anti-phish policy that applies to all recipients shows all safety tips (or a preset security policy applies to all recipients)."
+          ],
+          "verdict": "met"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: anti_phish_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: anti_phish_rules holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_qualifying_policy": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "no_qualifying_policy",
+          "reason_texts": [
+            "Requirement not met: no anti-phish policy that applies to all recipients shows all safety tips."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: anti_phish_policies holds no objects (every tenant has a Default anti-phish policy); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_field_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_field",
+          "reason_texts": [
+            "Data unusable: an anti-phish policy that could qualify has a field that is absent, null or not a recognised value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_scope_unusable": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_policy_scope",
+          "reason_texts": [
+            "Data unusable: the recipient scope of a policy that qualifies cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_unusable": {
+          "cited": [
+            "anti_phish_policies"
+          ],
+          "reason_code": "data_unusable_policy_record",
+          "reason_texts": [
+            "Data unusable: a policy in anti_phish_policies has no readable Identity or IsDefault flag, or two share one Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_qualifies": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "preset_policy_qualifies",
+          "reason_texts": [
+            "Requirement met: an anti-phish policy that applies to all recipients shows all safety tips (or a preset security policy applies to all recipients)."
+          ],
+          "verdict": "met"
+        },
+        "preset_topology_unusable": {
+          "cited": [
+            "anti_phish_policies",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_preset_topology",
+          "reason_texts": [
+            "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
+            "Data unusable: a preset security policy rule has no readable Identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "qualifier_shadowed": {
+          "cited": [
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "protection_policy_rules"
+          ],
+          "reason_code": "data_unusable_qualifier_shadowed",
+          "reason_texts": [
+            "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_state_unusable": {
+          "cited": [
+            "anti_phish_rules"
+          ],
+          "reason_code": "data_unusable_rule_state",
+          "reason_texts": [
+            "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "accepted_domains"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: anti_phish_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "accepted_domains",
+            "anti_phish_policies",
+            "anti_phish_rules",
+            "defender_license",
+            "protection_policy_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_policies.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: anti_phish_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "phish_exists",
+      "params": {
+        "bad": "no anti-phish policy that applies to all recipients shows all safety tips",
+        "good": "an anti-phish policy that applies to all recipients shows all safety tips (or a preset security policy applies to all recipients)",
+        "need": "safety_tips"
+      },
+      "rule_id": "MS.SECURITYSUITE.2.4v1.phish_exists",
+      "sections": [
+        "accepted_domains",
+        "anti_phish_policies",
+        "anti_phish_rules",
+        "defender_license",
+        "protection_policy_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.3.1v1": {
+      "cells": {
+        "all_types_protected": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "all_types_protected",
+          "reason_texts": [
+            "Requirement met: enabled DLP rules cover U.S. Social Security numbers, ITINs and credit card numbers."
+          ],
+          "verdict": "met"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Purview Data Loss Prevention licence was found (a false read can also mean missing permissions or a failed command), so the DLP policies and rules could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_dlp_license is not a boolean, so it is unknown whether the DLP settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_rules."
+          ],
+          "verdict": "not_assessed"
+        },
+        "sensitive_rule_unusable": {
+          "cited": [
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "data_unusable_dlp_rule",
+          "reason_texts": [
+            "Data unusable: a DLP rule or its parent policy lacks a readable Disabled flag, IsAdvancedRule flag, info-type names, key or parent policy state, so it is unknown whether it protects the three types; the policy was not assessed.",
+            "Data unusable: a DLP rule shows a required information type only inside a condition with Operator Not (an exception), so it is unknown whether the rule protects that type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "types_missing": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "types_not_protected",
+          "reason_texts": [
+            "Requirement not met: no enabled DLP rule covers one of U.S. Social Security numbers, ITINs and credit card numbers."
+          ],
+          "verdict": "not_met"
+        }
+      },
+      "kind": "dlp_rules",
+      "params": {
+        "bad": "no enabled DLP rule covers one of U.S. Social Security numbers, ITINs and credit card numbers",
+        "good": "enabled DLP rules cover U.S. Social Security numbers, ITINs and credit card numbers",
+        "need": "types"
+      },
+      "rule_id": "MS.SECURITYSUITE.3.1v1.dlp_rules",
+      "sections": [
+        "defender_dlp_license",
+        "dlp_compliance_policies",
+        "dlp_compliance_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.3.2v1": {
+      "cells": {
+        "all_locations_covered": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "all_locations_covered",
+          "reason_texts": [
+            "Requirement met: a DLP policy protecting the three information types applies to Exchange, SharePoint, OneDrive, Teams and Devices."
+          ],
+          "verdict": "met"
+        },
+        "dlp_policy_unusable": {
+          "cited": [
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "data_unusable_dlp_policy",
+          "reason_texts": [
+            "Data unusable: a DLP policy that protects the three types has a location list or Workload that is not readable, or a rule cannot be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Purview Data Loss Prevention licence was found (a false read can also mean missing permissions or a failed command), so the DLP policies and rules could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_dlp_license is not a boolean, so it is unknown whether the DLP settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "location_not_covered": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "location_not_covered",
+          "reason_texts": [
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, OneDrive).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, OneDrive, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, OneDrive, Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, OneDrive, Teams, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint, OneDrive).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint, OneDrive, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint, OneDrive, Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint, OneDrive, Teams, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint, Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, SharePoint, Teams, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Exchange, Teams, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: OneDrive).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: OneDrive, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: OneDrive, Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: OneDrive, Teams, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint, OneDrive).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint, OneDrive, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint, OneDrive, Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint, OneDrive, Teams, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint, Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: SharePoint, Teams, Devices).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Teams).",
+            "Requirement not met: no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices (not covered: Teams, Devices)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_full_protection_rule": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "no_full_protection_rule",
+          "reason_texts": [
+            "Requirement not met: no enabled DLP rule protects all three information types (no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices)."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_rules."
+          ],
+          "verdict": "not_assessed"
+        },
+        "sensitive_rule_unusable": {
+          "cited": [
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "data_unusable_dlp_rule",
+          "reason_texts": [
+            "Data unusable: a DLP rule or its parent policy lacks a readable Disabled flag, IsAdvancedRule flag, info-type names, key or parent policy state, so it is unknown whether it protects the three types; the policy was not assessed.",
+            "Data unusable: a DLP rule shows a required information type only inside a condition with Operator Not (an exception), so it is unknown whether the rule protects that type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "dlp_rules",
+      "params": {
+        "bad": "no DLP policy protecting the three information types applies to every one of Exchange, SharePoint, OneDrive, Teams and Devices",
+        "good": "a DLP policy protecting the three information types applies to Exchange, SharePoint, OneDrive, Teams and Devices",
+        "need": "locations"
+      },
+      "rule_id": "MS.SECURITYSUITE.3.2v1.dlp_rules",
+      "sections": [
+        "defender_dlp_license",
+        "dlp_compliance_policies",
+        "dlp_compliance_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.3.3v1": {
+      "cells": {
+        "all_rules_block": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "all_full_protection_rules_block",
+          "reason_texts": [
+            "Requirement met: every enabled DLP rule protecting the three information types blocks access for everyone."
+          ],
+          "verdict": "met"
+        },
+        "block_flag_unusable": {
+          "cited": [
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "data_unusable_block_flag",
+          "reason_texts": [
+            "Data unusable: BlockAccess or BlockAccessScope of a DLP rule protecting the three types is null, absent or not a recognised value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Purview Data Loss Prevention licence was found (a false read can also mean missing permissions or a failed command), so the DLP policies and rules could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_dlp_license is not a boolean, so it is unknown whether the DLP settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_full_protection_rule": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "no_full_protection_rule",
+          "reason_texts": [
+            "Requirement not met: no enabled DLP rule protects all three information types (a DLP rule protecting the three information types does not block access for everyone, or no such rule exists)."
+          ],
+          "verdict": "not_met"
+        },
+        "rule_not_blocking": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "full_protection_rule_not_blocking",
+          "reason_texts": [
+            "Requirement not met: a DLP rule protecting the three information types does not block access for everyone, or no such rule exists."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_rules."
+          ],
+          "verdict": "not_assessed"
+        },
+        "sensitive_rule_unusable": {
+          "cited": [
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "data_unusable_dlp_rule",
+          "reason_texts": [
+            "Data unusable: a DLP rule or its parent policy lacks a readable Disabled flag, IsAdvancedRule flag, info-type names, key or parent policy state, so it is unknown whether it protects the three types; the policy was not assessed.",
+            "Data unusable: a DLP rule shows a required information type only inside a condition with Operator Not (an exception), so it is unknown whether the rule protects that type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "dlp_rules",
+      "params": {
+        "bad": "a DLP rule protecting the three information types does not block access for everyone, or no such rule exists",
+        "good": "every enabled DLP rule protecting the three information types blocks access for everyone",
+        "need": "blocking",
+        "unusable": "BlockAccess or BlockAccessScope of a DLP rule protecting the three types is null, absent or not a recognised value"
+      },
+      "rule_id": "MS.SECURITYSUITE.3.3v1.dlp_rules",
+      "sections": [
+        "defender_dlp_license",
+        "dlp_compliance_policies",
+        "dlp_compliance_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.3.4v1": {
+      "cells": {
+        "all_rules_notify": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "all_full_protection_rules_notify",
+          "reason_texts": [
+            "Requirement met: every enabled DLP rule protecting the three information types notifies at least one user."
+          ],
+          "verdict": "met"
+        },
+        "licence_false": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Microsoft Purview Data Loss Prevention licence was found (a false read can also mean missing permissions or a failed command), so the DLP policies and rules could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_dlp_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_dlp_license is not a boolean, so it is unknown whether the DLP settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "list_element_unusable": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_list_element",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies holds an element that is not an object; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules holds an element that is not an object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_full_protection_rule": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "no_full_protection_rule",
+          "reason_texts": [
+            "Requirement not met: no enabled DLP rule protects all three information types (a DLP rule protecting the three information types notifies no user, or no such rule exists)."
+          ],
+          "verdict": "not_met"
+        },
+        "notify_unusable": {
+          "cited": [
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "data_unusable_notify_user",
+          "reason_texts": [
+            "Data unusable: NotifyUser of a DLP rule protecting the three types is null, absent or not a list; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_not_notifying": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "full_protection_rule_not_notifying",
+          "reason_texts": [
+            "Requirement not met: a DLP rule protecting the three information types notifies no user, or no such rule exists."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dlp_compliance_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dlp_compliance_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: dlp_compliance_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "defender_dlp_license",
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_dlp_license.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies, dlp_compliance_rules.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_policies.",
+            "Data unavailable: required evidence section(s) not collected: dlp_compliance_rules."
+          ],
+          "verdict": "not_assessed"
+        },
+        "sensitive_rule_unusable": {
+          "cited": [
+            "dlp_compliance_policies",
+            "dlp_compliance_rules"
+          ],
+          "reason_code": "data_unusable_dlp_rule",
+          "reason_texts": [
+            "Data unusable: a DLP rule or its parent policy lacks a readable Disabled flag, IsAdvancedRule flag, info-type names, key or parent policy state, so it is unknown whether it protects the three types; the policy was not assessed.",
+            "Data unusable: a DLP rule shows a required information type only inside a condition with Operator Not (an exception), so it is unknown whether the rule protects that type; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "dlp_rules",
+      "params": {
+        "bad": "a DLP rule protecting the three information types notifies no user, or no such rule exists",
+        "good": "every enabled DLP rule protecting the three information types notifies at least one user",
+        "need": "notify",
+        "unusable": "NotifyUser of a DLP rule protecting the three types is null, absent or not a list"
+      },
+      "rule_id": "MS.SECURITYSUITE.3.4v1.dlp_rules",
+      "sections": [
+        "defender_dlp_license",
+        "dlp_compliance_policies",
+        "dlp_compliance_rules"
       ]
     },
     "MS.SECURITYSUITE.4.1v1": {
