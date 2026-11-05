@@ -1151,7 +1151,8 @@ def test_normal_manifest_salt_and_output_are_unchanged(complete_bundle, monkeypa
     assert salt == 'fed5fb19ba49484bd4e1106e433bfbb4192030f0ff496f2474fb051a39fca1b6'
     pseudonym = 'User ' + sha256((salt + '\0' + PERSON).encode()).hexdigest()[:16]
     assert pseudonym in json.dumps(projection['privileged_users'])
-    assert sha256(canonical([dict(projection), projection.report, projection.views]).encode()).hexdigest() == '156de0e68683724c0b093641edc6ca3a7f0b234efb9f6ee6e28a353ddba1e4ce'
+    # sharing_policy is no longer withheld unconditionally: without a sharingPolicy operation it is missing_artifact.
+    assert sha256(canonical([dict(projection), projection.report, projection.views]).encode()).hexdigest() == '3050ddbe748d9ae332422c070b1ed1d5cfd5b8a4640913e5087060e40dcf56af'
 
 
 @pytest.mark.parametrize('metadata', [{'error': 'Forbidden'}, {'collection_status': 'not_collected'}, {'status': 'failed'}])
