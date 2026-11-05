@@ -71,15 +71,18 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   the command line, and each case records the commit (the 12-character short commit, in `provenance.source` and
   in the oracle reviewer; the run's `summary.json` holds the full 40-character commit), policy id, test name, OPA
   version and input hash.
-  The compressed value-rule test fixture (`tests/fixtures/value-rules/`, built by
-  `scripts/build-value-rule-fixture.py`) holds 825 rows: 398 constructed synthetic
-  rows and 427 rows from the train and validation splits of the model-development
-  training pack. The pack rows derive from ScubaGear fixtures and are covered by
-  its CC0 1.0 Universal dedication. Held-out test rows and the sealed evaluation
-  rows are not included. The fixture builder replaces the two Power BI licence-cell
-  texts in the source vectors with the current fixed wording. The manifest records
-  the source and compressed-file hashes, policy counts, cell counts, verdicts and
-  row origins.
+  The compressed value-rule test fixtures (`tests/fixtures/value-rules/`, built by
+  `scripts/build-value-rule-fixture.py`) hold 1,925 rows. `vectors-v2.jsonl.xz`
+  (Power BI and MS.AAD.3.4v1) holds 825: 398 constructed synthetic rows and 427 rows
+  from the train and validation splits of the model-development training pack.
+  `vectors-v39.jsonl.xz` (the 25 Teams, Exchange Online and Defender rule policies)
+  holds 1,100: 722 constructed synthetic rows and 378 rows from the same pack's train
+  (335) and validation (43) splits. The pack rows derive from ScubaGear fixtures and
+  are covered by its CC0 1.0 Universal dedication. Held-out test-split rows, pilot rows
+  and the sealed AAD v2.1 evaluation rows are not included. The fixture builder replaces
+  the two Power BI licence-cell texts in the v2 source vectors with the current fixed
+  wording. The manifest records the source and compressed-file hashes, policy counts,
+  cell counts, verdicts and row origins.
 - The `policy` evidence object quotes up to 600 characters of baseline text per policy. CISA states
   that parts of those baselines are adapted from Microsoft documentation under CC BY 4.0, so a
   dataset that keeps `baseline_text` must carry attribution to Microsoft and CISA for that prose;

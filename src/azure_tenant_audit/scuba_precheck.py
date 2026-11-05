@@ -198,11 +198,8 @@ def precheck_policy(policy_id: str, projection: dict[str, Any], sections: list[s
         from .value_rules.catalogue import row_for
         row = row_for(policy_id)
         if row is not None:
-            # A closed gate wins before a missing dependent section. Stage 1's
-            # policies have no gate, but the order is shared with later stages.
-            gate = check_gate(policy_id, projection)
-            if gate and gate["class"] == "closed_gate":
-                return gate
+            # assess runs the whole value-rule order: the shared closed gate (rendered as the rule's
+            # closed_gate cell), then missing or marked rule sections, then the kind, which always answers.
             result = assess(policy_id, projection)
             if result is not None:
                 cited = result["cited_sections"] or list(row["sections"])
@@ -236,12 +233,14 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
     """
     if detail["class"] == "value_rule":
         from .value_rules.catalogue import row_for
-        from .value_rules.record import as_pack_response
+        from .value_rules.record import RULE_FAILURE_CELL, as_pack_response
         row = row_for(policy_item["policy_id"])
-        verdict = row["cells"][detail["cell"]]["verdict"]
-        record = {"verdict": verdict, "cited_sections": detail["section"] if verdict == "not_assessed" else None}
+        verdict = ("not_assessed" if detail["cell"] == RULE_FAILURE_CELL
+                   else row["cells"][detail["cell"]]["verdict"])
+        record = {"verdict": verdict, "cell": detail["cell"],
+                  "cited_sections": detail["section"] if verdict == "not_assessed" else None}
         response = as_pack_response(record, policy_item["criticality"], sections)
-        if verdict == "not_assessed" and named_limitations:
+        if verdict == "not_assessed" and named_limitations and detail["cell"] != RULE_FAILURE_CELL:
             response["limitations"] += ["required_evidence_section_not_collected:" + name for name in detail["section"]]
         return response
     if detail["class"] == "empty_required_list":

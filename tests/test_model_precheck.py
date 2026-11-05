@@ -87,7 +87,8 @@ def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path,
     text = "Data unavailable: required evidence section(s) not collected: " + ", ".join(row["sections"]) + "."
     row["cells"]["section_not_collected"]["reason_texts"] = [text]
     monkeypatch.setattr(value_catalogue, "catalogue", lambda: data)
-    # The rule fails, so the fallback answer is built from the patched row and must still pass the validator.
+    failure = data["rule_failure"]
+    # The rule fails, so the product-fault answer is built from the patched row and must still pass the validator.
     monkeypatch.setattr(value_rules, "assess", lambda *args: (_ for _ in ()).throw(RuntimeError("boom")))
     case = build_case(policy_id, {}, "unused")
     record = precheck_case(case, value_rules=True, rule_projection={})
@@ -101,8 +102,10 @@ def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path,
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy_id])
     served = result["policies"][0]
-    assert served["reason"] == "rule_precheck" and served["rule_precheck"]["cell"] == "section_not_collected"
-    assert served["rule_precheck"]["reason_text"] == text
+    assert served["reason"] == "rule_precheck" and served["rule_precheck"]["cell"] == "rule_evaluation_failed"
+    assert served["rule_precheck"]["reason_text"] == failure["reason_text"]
+    assert served["rule_precheck"]["section"] == row["sections"]
+    assert served["limitations"] == [] and served["recommendations"] == ["report_product_fault"]
     validate_assessment(result)
 
 
@@ -116,8 +119,14 @@ def test_rule_exception_is_a_constant_not_assessed_answer(monkeypatch, capsys, c
     case = build_case(policy_id, {}, "unused")
     with caplog.at_level("DEBUG"):
         record = precheck_case(case, value_rules=True, rule_projection={})
-    assert record["rule_precheck"]["cell"] == "section_not_collected"
-    assert record["claims"][0]["status"] == "unknown"
+    detail = record["rule_precheck"]
+    assert (detail["cell"], detail["reason_code"], detail["reason_text"]) == (
+        "rule_evaluation_failed", "rule_evaluation_failed",
+        "Not assessed: Auditex could not evaluate this policy on the collected evidence. "
+        "This is a product fault, not a tenant setting.")
+    assert record["claims"][0] == {"id": "requirement_met", "status": "unknown", "value": None,
+                                   "evidence_ids": ["e0", "e1", "e2", "e3"]}
+    assert record["limitations"] == [] and record["recommendations"] == ["report_product_fault"]
     assert secret not in json.dumps(record) + str(capsys.readouterr())
     # One line per failure: the rule id and the class name, never the message, evidence or repr.
     lines = [item for item in caplog.records if item.name == "auditex.model_precheck"]
@@ -762,3 +771,22 @@ def test_every_list_rule_is_not_met_in_the_pinned_rego(pinned_rego, tmp_path):
             assert len(target) == 1 and target[0]["RequirementMet"] is False, (pid, env, licensed, auth)
         met_33 |= any(r.get("PolicyId") == "MS.AAD.3.3v2" and r["RequirementMet"] is True for r in results)
     assert met_33
+
+
+@pytest.mark.parametrize("rule_projection", [None, {}])
+def test_rule_failure_on_case_evidence_and_rule_view(monkeypatch, caplog, rule_projection):
+    """Both value-rule inputs (the serving rule view and the case evidence) answer a raising rule with the catalogued
+    product-fault reason; nothing of the exception reaches the record or the log."""
+    from azure_tenant_audit import value_rules
+    secret = "Failure Canary DisplayName"
+    def broken(policy_id, sections):
+        raise KeyError(secret)
+    monkeypatch.setattr(value_rules, "assess", broken)
+    case = build_case("MS.TEAMS.2.2v2", {}, "unused")
+    with caplog.at_level("DEBUG"):
+        record = precheck_case(case, value_rules=True, rule_projection=rule_projection)
+    assert record["rule_precheck"]["cell"] == "rule_evaluation_failed"
+    assert record["rule_precheck"]["section"] == ["federation_configuration", "scuba_config"]
+    assert record["recommendations"] == ["report_product_fault"] and record["limitations"] == []
+    assert secret not in json.dumps(record) and secret not in caplog.text
+    assert "MS.TEAMS.2.2v2.two_flag" in caplog.text and "KeyError" in caplog.text

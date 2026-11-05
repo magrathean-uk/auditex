@@ -162,15 +162,26 @@ pack data is ignored for comparison; dry-run does not read the report pack.
 
 ### Rule pre-checks and offline product scoring
 
-Serving enables the nine Power BI and AAD 3.4 value rules in
-`configs/scuba-value-rules.json` by default. Their cell inventory and reason
-codes are checked by the `2026-11-05` assessment validator against the shipped inventory. A value rule uses the
-shared closed gate first, then its own ordered section list, then its setting
-predicate; it answers before registered missing-field and empty-list checks.
-`AUDITEX_DISABLE_VALUE_RULES=1` restores the prior serving route. The offline
-`evaluate_precheck` scorer always leaves value rules off, preserving historical
-scoring output. These rules still read the model case; a separate in-memory rule
-view is planned.
+Serving enables the 34 value rules in `configs/scuba-value-rules.json` by default
+(spec v3.9: Power BI 8 and AAD 3.4v1, then the 25 Teams, Exchange Online and Defender
+lookups of `value_rules/lookups.py` on the cross-kind helpers of `value_rules/helpers.py`).
+Their cell inventory and reason codes are checked by the `2026-11-05` assessment
+validator against the shipped inventory. A value rule uses the shared closed gate
+first (rendered by `value_rules/gates.py` as the rule's `closed_gate` cell), then its
+own ordered section list, then its kind; it answers before registered missing-field and
+empty-list checks. A rule that raises answers the catalogued `rule_evaluation_failed`
+reason with the `report_product_fault` recommendation (logged with the rule id and the
+exception class only; `MemoryError` propagates). `AUDITEX_DISABLE_VALUE_RULES=1`
+restores the prior serving route. The offline `evaluate_precheck` scorer always leaves
+value rules off, preserving historical scoring output. Serving rules read the in-memory
+rule view; tests and `precheck_case` without a rule view read the case evidence.
+
+The vector fixtures are `tests/fixtures/value-rules/vectors-v2.jsonl.xz` (the nine) and
+`vectors-v39.jsonl.xz` (the other rule policies, from the v3.9 kit's `vectors.jsonl`),
+both rebuilt byte-identically by `scripts/build-value-rule-fixture.py SOURCE OUTPUT` and
+pinned in `manifest.json`. `AUDITEX_TEST_VALUE_RULE_VECTORS=<kit vectors.jsonl>` replays
+a full source file; `AUDITEX_TEST_OPA` and `AUDITEX_TEST_SCUBAGEAR` enable the pinned
+Rego replay in `tests/test_value_rules_oracle.py`.
 
 Assessment pre-checks non-empty projections before inference. The shipped
 `configs/scuba-rule-precheck.json` is the shared authority for serving and oracle

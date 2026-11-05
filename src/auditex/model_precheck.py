@@ -20,36 +20,37 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
     sections = [item["section"] for item in case["evidence"][1:]]
     projection = {item["section"]: item["observed"] for item in case["evidence"][1:]}
     detail = None
-    if value_rules and rule_projection is not None:
+    row = None
+    if value_rules:
         from azure_tenant_audit.value_rules.catalogue import row_for
         row = row_for(case["policy_id"])
-        if row is not None:
-            rule_sections = list(row["sections"])
-            try:
-                candidate = precheck_policy(case["policy_id"], rule_projection, rule_sections,
-                                            skip_absent_sections=skip_absent_sections, value_rules=True)
-            except MemoryError:
-                raise
-            except Exception as exc:
-                # Log the rule id and the exception class name only: the message and repr can hold tenant evidence.
-                LOG.warning("Value rule %s failed (%s); the row is answered not assessed",
-                            row["rule_id"], type(exc).__name__)
-                # OPEN SPEC QUESTION: "the rule failed on collected evidence" has no cell in the value-rule spec.
-                # section_not_collected is a stand-in (the evidence was collected); the review proposes the
-                # evidence_unusable family with recollect_unusable_evidence, which needs a spec decision (main).
-                # Do not invent a reason code or text here. Never render the exception in any output.
-                cell = row["cells"]["section_not_collected"]
-                candidate = {"class": "value_rule", "rule_id": row["rule_id"],
-                             "section": rule_sections, "field": None, "value": None,
-                             "cell": "section_not_collected", "reason_code": cell["reason_code"],
-                             "reason_text": "Data unavailable: required evidence section(s) not collected: "
-                                            + ", ".join(rule_sections) + "."}
-            if candidate is not None and candidate["class"] in {"value_rule", "closed_gate"}:
-                detail = candidate
-    if detail is None:
+    if row is not None:
+        # A value-rule policy: the rule view when serving supplies one, else the case evidence.
+        rule_input, rule_sections = ((rule_projection, list(row["sections"])) if rule_projection is not None
+                                     else (projection, sections))
+        try:
+            candidate = precheck_policy(case["policy_id"], rule_input, rule_sections,
+                                        skip_absent_sections=skip_absent_sections, value_rules=True,
+                                        absent_fields=absent_fields, empty_lists=empty_lists)
+        except MemoryError:
+            raise
+        except Exception as exc:
+            # Log the rule id and the exception class name only: the message and repr can hold tenant evidence.
+            LOG.warning("Value rule %s failed (%s); the row is answered not assessed",
+                        row["rule_id"], type(exc).__name__)
+            # The fault is ours, not the evidence's (main, 5 Nov 07:12 GMT): the catalogued rule_evaluation_failed
+            # answer, a constant text and the report_product_fault recommendation. Never render the exception.
+            from azure_tenant_audit.value_rules import rule_failure
+            failed = rule_failure(case["policy_id"])
+            candidate = {"class": "value_rule", "rule_id": row["rule_id"], "section": failed["cited_sections"],
+                         "field": None, "value": None, "cell": failed["cell"],
+                         "reason_code": failed["reason_code"], "reason_text": failed["reason_text"]}
+        if rule_projection is None or candidate is not None and candidate["class"] in {"value_rule", "closed_gate"}:
+            detail = candidate
+    if detail is None and (row is None or rule_projection is not None):
         detail = precheck_policy(case["policy_id"], projection, sections,
                                  skip_absent_sections=skip_absent_sections, absent_fields=absent_fields,
-                                 empty_lists=empty_lists, value_rules=value_rules and rule_projection is None)
+                                 empty_lists=empty_lists, value_rules=False)
     if detail is None:
         return None
     return {**precheck_response(detail, case["evidence"][0]["observed"], sections,

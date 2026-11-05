@@ -53,6 +53,20 @@ bundle gains the `privileged_roles` artefact, both additive.
   `authentication_method` evidence can still be withheld by the projection, those policies may answer not assessed until the
   rules read evidence directly. The hidden `AUDITEX_DISABLE_VALUE_RULES` switch turns the rules off operationally, and the offline
   `evaluate_precheck` scorer always leaves them off.
+- **25 more policies are answered by deterministic value rules (spec v3.9).** Teams 1.1 to 1.7, 2.1 to 2.3, 4.1 and 5.1 to
+  5.3, Exchange Online 2.2, 5.1, 6.1, 6.2, 7.1 and 13.1 and Defender (`MS.SECURITYSUITE`) 1.4, 4.1, 5.1, 8.1 and 8.2 join the
+  inventory (34 policies, 314 cells). Serving answers them from the rule view instead of the model. The Teams environment gate
+  (2.2, 2.3, 4.1) is now recorded as the rule's `closed_gate` cell (class `value_rule`) instead of the `closed_gate` class; the
+  claims, limitations and recommendations are unchanged. A not-commercial environment the gate does not close, an unlabelled
+  violating object, an unusable field value, an empty or non-list section and similar evidence now answer not assessed with a
+  catalogued reason where the pinned Rego reads met or not met (spec divergences D14 to D23, D103). MS.SECURITYSUITE.4.1v1
+  requires the seventh alert, "A potentially malicious URL click was detected", as the baseline does (D103). The Power BI and
+  `MS.AAD.3.4v1` texts are unchanged by the v3.9 text review.
+- **A value rule that fails on collected evidence has its own answer.** It was answered as "section not collected"; it now
+  answers the catalogued `rule_evaluation_failed` reason ("Not assessed: Auditex could not evaluate this policy on the collected
+  evidence. This is a product fault, not a tenant setting.") with no limitation and the new recommendation `report_product_fault`
+  (report to `contact+auditex@magrathean.uk`). Both are additive within the unreleased `2026-11-05` schema. The log line still
+  names only the rule id and the exception class, and `MemoryError` still propagates.
 - **Customer-facing wording now matches what runs today.** The model-assisted path is no longer called a second opinion; the README, docs and `auditex model` help say the rules answer the Power BI policies, `MS.AAD.3.4v1` and the rows caught by the gate, missing-evidence and empty-list checks, and the model answers the rows no rule covers, mark rules-only verdicts and the optional explainer role as planned and not built, and the output contract maps the customer term "not assessed" to the unchanged internal values.
 
 ### Collection (1.2.2.dev5)

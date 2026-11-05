@@ -1687,7 +1687,9 @@ def test_rule_exception_text_never_reaches_export_artifacts_or_stderr(tmp_path, 
     monkeypatch.setattr(value_rules, 'assess', broken_rule)
     result = assess_scubagear_export(PROVIDER, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
                                      policies=['MS.POWERBI.1.1v1'])
-    assert result['policies'][0]['rule_precheck']['cell'] == 'section_not_collected'
+    row = result['policies'][0]
+    assert row['rule_precheck']['cell'] == 'rule_evaluation_failed'
+    assert row['recommendations'] == ['report_product_fault'] and row['limitations'] == []
     persisted = ''.join(p.read_text() for p in (tmp_path / 'assessed').iterdir() if p.is_file())
     assert secret not in persisted + str(capsys.readouterr())
 

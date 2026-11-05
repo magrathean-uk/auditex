@@ -1,4 +1,8 @@
-"""Value-rule vectors from constructed and train/validation cases."""
+"""Value-rule vectors from constructed and train/validation cases.
+
+Stage 1 (Power BI 8, AAD 3.4v1) replays ``vectors-v2.jsonl.xz``; stage 3 (the
+25 Teams, Exchange Online and Defender lookups) replays ``vectors-v39.jsonl.xz``.
+"""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -10,14 +14,26 @@ from pathlib import Path
 import pytest
 
 from azure_tenant_audit.resources import open_text_resource
-from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
+from azure_tenant_audit.scuba_precheck import check_gate, precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for, rule_policies
 from azure_tenant_audit.value_rules.catalogue import catalogue
+from azure_tenant_audit.value_rules.gates import closed_gate
 
 FIXTURE = Path(__file__).parent / "fixtures/value-rules/vectors-v2.jsonl.xz"
-STAGE_POLICIES = frozenset({"MS.AAD.3.4v1", "MS.POWERBI.1.1v1", "MS.POWERBI.2.1v1",
-                            "MS.POWERBI.3.1v1", "MS.POWERBI.4.1v1", "MS.POWERBI.4.2v1",
-                            "MS.POWERBI.5.1v1", "MS.POWERBI.6.1v1", "MS.POWERBI.7.1v1"})
+FIXTURE_V39 = Path(__file__).parent / "fixtures/value-rules/vectors-v39.jsonl.xz"
+STAGE1_POLICIES = frozenset({"MS.AAD.3.4v1", "MS.POWERBI.1.1v1", "MS.POWERBI.2.1v1",
+                             "MS.POWERBI.3.1v1", "MS.POWERBI.4.1v1", "MS.POWERBI.4.2v1",
+                             "MS.POWERBI.5.1v1", "MS.POWERBI.6.1v1", "MS.POWERBI.7.1v1"})
+STAGE3_POLICIES = frozenset({
+    "MS.TEAMS.1.1v1", "MS.TEAMS.1.2v2", "MS.TEAMS.1.3v1", "MS.TEAMS.1.4v1", "MS.TEAMS.1.5v1",
+    "MS.TEAMS.1.6v1", "MS.TEAMS.1.7v2", "MS.TEAMS.2.1v2", "MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2",
+    "MS.TEAMS.4.1v1", "MS.TEAMS.5.1v2", "MS.TEAMS.5.2v2", "MS.TEAMS.5.3v2",
+    "MS.EXO.2.2v3", "MS.EXO.5.1v1", "MS.EXO.6.1v1", "MS.EXO.6.2v1", "MS.EXO.7.1v1", "MS.EXO.13.1v1",
+    "MS.SECURITYSUITE.1.4v1", "MS.SECURITYSUITE.4.1v1", "MS.SECURITYSUITE.5.1v1",
+    "MS.SECURITYSUITE.8.1v1", "MS.SECURITYSUITE.8.2v1"})
+STAGE_POLICIES = STAGE1_POLICIES | STAGE3_POLICIES
+GATE_POLICIES = frozenset(policy for policy, row in catalogue()["policies"].items()
+                          if row["params"].get("environment_gate"))
 PBI_COMMON = {"section_not_collected", "licence_false", "licence_flag_unusable", "access_denied",
               "settings_not_a_list", "settings_empty", "setting_entry_missing", "setting_entry_duplicated",
               "enabled_missing", "enabled_not_boolean"}
@@ -36,24 +52,53 @@ def _rows(path: Path):
             yield json.loads(line)
 
 
-@pytest.fixture(scope="module")
-def rows_by_policy():
+def _grouped(path: Path):
     grouped = defaultdict(list)
-    for row in _rows(FIXTURE):
+    for row in _rows(path):
         grouped[row["policy"]].append(row)
     return grouped
 
 
+@pytest.fixture(scope="module")
+def rows_by_policy():
+    return _grouped(FIXTURE)
+
+
+@pytest.fixture(scope="module")
+def rows_v39():
+    return _grouped(FIXTURE_V39)
+
+
 def test_catalogue_is_shipped_and_stage_set_is_exact():
     assert json.loads(open_text_resource("configs/scuba-value-rules.json")) == catalogue()
+    assert catalogue()["spec_version"] == "v3.9"
     assert set(rule_policies()) == STAGE_POLICIES
-    assert sum(len(cells_for(policy)) for policy in STAGE_POLICIES) == 113
-    for policy, row in catalogue()["policies"].items():
+    assert sum(len(cells_for(policy)) for policy in STAGE1_POLICIES) == 113
+    assert sum(len(cells_for(policy)) for policy in STAGE3_POLICIES) == 201
+    for policy in STAGE1_POLICIES:
+        row = catalogue()["policies"][policy]
         expected = AAD_CELLS if policy == "MS.AAD.3.4v1" else PBI_COMMON | PBI_KIND[row["kind"].removeprefix("powerbi.")]
         assert set(cells_for(policy)) == expected
 
 
-@pytest.mark.parametrize("policy", sorted(STAGE_POLICIES))
+def test_catalogue_texts_are_closed_and_free_of_evidence():
+    """Every text is a constant of at most 400 characters; the closed lists (cited
+    sections, SS 4.1 alert names) are complete, so no reachable answer is missing."""
+    from itertools import combinations
+    from azure_tenant_audit.value_rules.lookups import REQUIRED_ALERTS, alert_text
+    for policy, row in catalogue()["policies"].items():
+        names = row["sections"]
+        expected = {"Data unavailable: required evidence section(s) not collected: " + ", ".join(subset) + "."
+                    for size in range(1, len(names) + 1) for subset in combinations(names, size)}
+        if policy in STAGE3_POLICIES:
+            assert set(row["cells"]["section_not_collected"]["reason_texts"]) == expected
+        for cell, entry in row["cells"].items():
+            assert all("@" not in text and len(text) <= 400 for text in entry["reason_texts"]), (policy, cell)
+    alerts = catalogue()["policies"]["MS.SECURITYSUITE.4.1v1"]["cells"]["alert_missing_or_disabled"]["reason_texts"]
+    assert set(alerts) == {alert_text(subset) for size in range(1, 8) for subset in combinations(REQUIRED_ALERTS, size)}
+
+
+@pytest.mark.parametrize("policy", sorted(STAGE1_POLICIES))
 def test_v2_vectors_through_precheck(policy, rows_by_policy):
     reached = set()
     for row in rows_by_policy[policy]:
@@ -73,6 +118,80 @@ def test_v2_vectors_through_precheck(policy, rows_by_policy):
             assert response == row["gold_response"], row["vector_id"]
         assert row.get("disagreement") is None or row["disagreement"].startswith("expected:")
     assert reached == set(cells_for(policy))
+
+
+def _strip_names(value):
+    if isinstance(value, dict):
+        return {key: _strip_names(item) for key, item in value.items() if not key.endswith("_name")}
+    if isinstance(value, list):
+        return [_strip_names(item) for item in value]
+    return value
+
+
+@pytest.mark.parametrize("policy", sorted(STAGE3_POLICIES))
+def test_v39_vectors_through_precheck(policy, rows_v39):
+    """Whole precheck order: closed gate, absent section, environment, value rule."""
+    rule = catalogue()["policies"][policy]
+    reached = set()
+    for row in rows_v39[policy]:
+        sections = row["sections"]
+        detail = precheck_policy(policy, sections, list(sections), value_rules=True,
+                                 absent_fields=True, empty_lists=True)
+        record = assess(policy, sections)
+        expected = (row["rule_verdict"], row["rule_cell"], row["rule_reason_code"], row["rule_reason_text"],
+                    row["rule_cited_sections"] or list(rule["sections"]))
+        assert (record["verdict"], record["cell"], record["reason_code"], record["reason_text"],
+                record["cited_sections"] or list(rule["sections"])) == expected, row["vector_id"]
+        # The closed gate too is rendered as the rule's closed_gate cell (gates.py, decided by check_gate).
+        assert detail["class"] == "value_rule" and detail["rule_id"] == rule["rule_id"], row["vector_id"]
+        assert (detail["cell"], detail["reason_code"], detail["reason_text"], detail["section"]) == (
+            record["cell"], record["reason_code"], record["reason_text"],
+            record["cited_sections"] or list(rule["sections"])), row["vector_id"]
+        assert rule["cells"][record["cell"]]["verdict"] == row["rule_verdict"]
+        reached.add(record["cell"])
+        response = precheck_response(detail, {"policy_id": policy, "criticality": row["criticality"]},
+                                     list(sections), named_limitations=False)
+        assert response == as_pack_response(record, row["criticality"], list(sections)), row["vector_id"]
+        if row.get("gold_response") is not None and row.get("disagreement") is None:
+            assert response == row["gold_response"], row["vector_id"]
+        assert row.get("disagreement") is None or row["disagreement"].startswith("expected:")
+        assert (row.get("disagreement") is None) is (row["rule_verdict"] == row["gold_verdict"]), row["vector_id"]
+        assert assess(policy, _strip_names(sections)) == record, row["vector_id"]
+    assert reached == set(cells_for(policy))
+
+
+def test_gates_agree_with_the_config_gate_on_every_gate_vector(rows_v39):
+    checked = 0
+    for policy in sorted(GATE_POLICIES):
+        for row in rows_v39[policy]:
+            gate = check_gate(policy, row["sections"])
+            rendered = closed_gate(policy, row["sections"])
+            assert (rendered is not None) is bool(gate and gate["class"] == "closed_gate"), row["vector_id"]
+            assert (rendered is not None) is (row["rule_cell"] == "closed_gate"), row["vector_id"]
+            checked += 1
+    assert checked == sum(len(rows_v39[policy]) for policy in GATE_POLICIES) == 230
+    for value in ("gcc", "gcchigh", "dod", "commercial", "GCC", None, 0, "other"):
+        for config in ({"M365Environment": value}, [{"M365Environment": value}]):
+            for policy in GATE_POLICIES:
+                gate = check_gate(policy, {"scuba_config": config})
+                assert (closed_gate(policy, {"scuba_config": config}) is not None) is bool(
+                    gate and gate["class"] == "closed_gate")
+
+
+def test_v39_fixture_manifest_matches_bytes_and_counts(rows_v39):
+    from hashlib import sha256
+    manifest = json.loads((FIXTURE_V39.parent / "manifest.json").read_text())[FIXTURE_V39.name]
+    rows = [row for group in rows_v39.values() for row in group]
+    assert sha256(FIXTURE_V39.read_bytes()).hexdigest() == manifest["sha256"]
+    assert len(rows) == manifest["rows"] == 1100
+    assert manifest["spec_version"] == catalogue()["spec_version"]
+    assert set(rows_v39) == STAGE3_POLICIES
+    assert {policy: len(group) for policy, group in rows_v39.items()} == manifest["by_policy"]
+    assert {row["source_kind"] for row in rows} == {"constructed", "pack-train", "pack-validation"}
+    assert not any(row["source_kind"].endswith("test") for row in rows)
+    assert sum(row.get("gold_response") is not None and row.get("disagreement") is None for row in rows) == 374
+    assert len(manifest["by_cell"]) == 201
+    assert sum(manifest["by_cell"].values()) == sum(manifest["by_source"].values()) == manifest["rows"]
 
 
 def test_fixture_manifest_matches_bytes_and_counts(rows_by_policy):
@@ -101,6 +220,72 @@ def test_reason_text_never_echoes_unbounded_evidence():
         assert result["reason_text"] in catalogue()["policies"][policy]["cells"][result["cell"]]["reason_texts"]
 
 
+CANARY = "canary.person@example.invalid"
+CANARY_NAME = "Canary Display Name"
+COMMERCIAL = {"M365Environment": "commercial", "Owner": CANARY}
+STAGE3_CANARY_CASES = [
+    ("MS.TEAMS.1.1v1", {"meeting_policies": [{"Identity": CANARY, "AllowExternalParticipantGiveRequestControl": True},
+                                             {"Identity": CANARY_NAME, "AllowExternalParticipantGiveRequestControl": "x"}]}),
+    ("MS.TEAMS.1.3v1", {"meeting_policies": [{"Identity": "Global", "AutoAdmittedUsers": CANARY,
+                                              "AllowPSTNUsersToBypassLobby": False, "Description": CANARY_NAME}]}),
+    ("MS.TEAMS.1.2v2", {"meeting_policies": [{"Identity": CANARY, "AllowAnonymousUsersToStartMeeting": False},
+                                             {"Identity": CANARY_NAME, "AllowAnonymousUsersToStartMeeting": None}]}),
+    ("MS.TEAMS.1.4v1", {"meeting_policies": [{"Identity": "Global", "AutoAdmittedUsers": "Everyone", "Owner": CANARY},
+                                             {"Identity": CANARY_NAME, "AutoAdmittedUsers": CANARY}]}),
+    ("MS.TEAMS.1.5v1", {"meeting_policies": [{"Description": CANARY, "AllowPSTNUsersToBypassLobby": True}]}),
+    ("MS.TEAMS.1.6v1", {"meeting_policies": [{"Identity": "Global", "AllowCloudRecording": False, "Owner": CANARY},
+                                             {"Identity": "Global", "AllowCloudRecording": CANARY_NAME}]}),
+    ("MS.TEAMS.1.7v2", {"broadcast_policies": [{"Identity": "Global", "BroadcastRecordingMode": "AlwaysEnabled",
+                                                "Owner": CANARY}]}),
+    ("MS.TEAMS.2.1v2", {"federation_configuration": [{"Identity": CANARY, "AllowFederatedUsers": True,
+                                                      "AllowedDomains": []}]}),
+    ("MS.TEAMS.2.2v2", {"federation_configuration": [{"Identity": CANARY_NAME, "AllowTeamsConsumerInbound": True,
+                                                      "AllowTeamsConsumer": True}], "scuba_config": COMMERCIAL}),
+    ("MS.TEAMS.2.3v2", {"federation_configuration": [{"Identity": CANARY}], "scuba_config": {"M365Environment": CANARY}}),
+    ("MS.TEAMS.4.1v1", {"client_configuration": [{"Identity": None, "AllowEmailIntoChannel": True}],
+                        "scuba_config": {**COMMERCIAL, "M365Environment": "gcc"}}),
+    ("MS.TEAMS.5.1v2", {"tenant_app_settings": [{"SettingName": "DefaultApp", "SettingValue": CANARY}],
+                        "app_policies": [{"Identity": CANARY_NAME}]}),
+    ("MS.TEAMS.5.2v2", {"tenant_app_settings": None,
+                        "app_policies": [{"Identity": CANARY, "GlobalCatalogAppsType": "BlockedAppList"}]}),
+    ("MS.TEAMS.5.3v2", {"tenant_app_settings": None, "app_policies": [{"Identity": CANARY, "PrivateCatalogAppsType": CANARY}]}),
+    ("MS.EXO.2.2v3", {"spf_records": [{"domain": CANARY, "message": CANARY_NAME, "compliant": False}]}),
+    ("MS.EXO.5.1v1", {"transport_config": [{"Name": CANARY, "SmtpClientAuthenticationDisabled": False}]}),
+    ("MS.EXO.6.1v1", {"sharing_policy": [{"Name": CANARY_NAME, "Domains": [f"*:{CANARY}:ContactsSharing"]}]}),
+    ("MS.EXO.6.2v1", {"sharing_policy": [{"Name": CANARY, "Domains": [CANARY, 3]}]}),
+    ("MS.EXO.7.1v1", {"transport_rule": [{"Name": CANARY, "State": "Enabled", "Mode": "Enforce",
+                                          "FromScope": "NotInOrganization", "PrependSubject": CANARY_NAME}]}),
+    ("MS.EXO.13.1v1", {"org_config": [{"Name": CANARY, "AuditDisabled": True}]}),
+    ("MS.SECURITYSUITE.1.4v1", {"atp_policy_for_o365": [{"Identity": CANARY, "EnableATPForSPOTeamsODB": True}]}),
+    ("MS.SECURITYSUITE.4.1v1", {"protection_alerts": [{"Name": CANARY, "Disabled": False},
+                                                      {"Name": "Messages have been delayed", "Disabled": True,
+                                                       "NotifyUser": [CANARY], "Comment": CANARY_NAME}]}),
+    ("MS.SECURITYSUITE.5.1v1", {"admin_audit_log_config": [{"Identity": CANARY_NAME, "UnifiedAuditLogIngestionEnabled": False}]}),
+    ("MS.SECURITYSUITE.8.1v1", {"conn_filter": [{"Name": CANARY, "IPAllowList": [CANARY_NAME]}]}),
+    ("MS.SECURITYSUITE.8.2v1", {"conn_filter": [{"Name": CANARY, "EnableSafeList": CANARY_NAME}]}),
+]
+
+
+def test_stage3_cases_cover_every_stage3_policy():
+    assert {policy for policy, _ in STAGE3_CANARY_CASES} == STAGE3_POLICIES
+
+
+@pytest.mark.parametrize("policy,sections", STAGE3_CANARY_CASES, ids=[case[0] for case in STAGE3_CANARY_CASES])
+def test_stage3_rule_output_never_echoes_evidence(policy, sections):
+    """Labels, values and list entries read from the rule view never reach the
+    record, the precheck detail or the pack response."""
+    record = assess(policy, sections)
+    detail = precheck_policy(policy, sections, list(catalogue()["policies"][policy]["sections"]), value_rules=True)
+    response = precheck_response(detail, {"policy_id": policy, "criticality": "Shall"}, list(sections))
+    for output in (record, detail, response):
+        dumped = json.dumps(output)
+        assert CANARY not in dumped and CANARY_NAME not in dumped and "canary" not in dumped.lower()
+    assert record["reason_text"] in catalogue()["policies"][policy]["cells"][record["cell"]]["reason_texts"]
+    assert all(value is None or isinstance(value, str) and value in {"D103", "none", "tenant_app_settings_null",
+                                                                      "certificate_auth"}
+               for value in record["detail"].values())
+
+
 def test_optional_full_source_vectors():
     path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
     if not path:
@@ -111,12 +296,15 @@ def test_optional_full_source_vectors():
         if row["policy"] not in STAGE_POLICIES:
             continue
         detail = precheck_policy(row["policy"], row["sections"], list(row["sections"]), value_rules=True)
+        record = assess(row["policy"], row["sections"])
+        assert (record["cell"], record["reason_code"]) == (row["rule_cell"], row["rule_reason_code"])
+        assert detail["class"] == "value_rule"
         assert (detail["cell"], detail["reason_code"]) == (row["rule_cell"], row["rule_reason_code"])
         assert detail["section"] == (row["rule_cited_sections"] or catalogue()["policies"][row["policy"]]["sections"])
         assert catalogue()["policies"][row["policy"]]["cells"][detail["cell"]]["verdict"] == row["rule_verdict"]
-        # The v2 source predates the v3.6 Power BI licence wording; the
-        # checked-in fixture carries the new exact text.
-        if detail["cell"] not in {"licence_false", "licence_flag_unusable"}:
+        # The v2 source (no origin field) predates the v3.6 Power BI licence
+        # wording; the checked-in fixture carries the new exact text.
+        if "origin" in row or detail["cell"] not in {"licence_false", "licence_flag_unusable"}:
             assert detail["reason_text"] == row["rule_reason_text"]
         criticality = policy_items[row["policy"]]["policy_item"]["criticality"]
         response = precheck_response(detail, {"policy_id": row["policy"], "criticality": criticality},
@@ -125,4 +313,59 @@ def test_optional_full_source_vectors():
             assert response == row["gold_response"]
         assert row.get("disagreement") is None or row["disagreement"].startswith("expected:")
         reached[row["policy"]].add(detail["cell"])
-    assert all(reached[policy] == set(cells_for(policy)) for policy in STAGE_POLICIES)
+    assert all(reached[policy] == set(cells_for(policy)) for policy in reached)
+    assert set(reached) in (STAGE1_POLICIES, STAGE_POLICIES)
+
+
+def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
+    """Served stage-3 answers (the gate rendered as the rule's closed_gate cell, a lookup verdict, an environment
+    cell and a raising rule) validate under the 2026-11-05 assessment validator and never call the model."""
+    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from azure_tenant_audit import value_rules
+    from azure_tenant_audit.model_assessment import validate_assessment
+    from test_model_serving import fake_projection
+
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"stage3"}')
+    rule_sections = {"meeting_policies": [{"Identity": "Global", "AllowExternalParticipantGiveRequestControl": True}],
+                     "federation_configuration": [{"Identity": "Global", "AllowTeamsConsumer": False}],
+                     "client_configuration": [{"Identity": "Global", "AllowEmailIntoChannel": False}],
+                     "org_config": [{"Name": "x", "AuditDisabled": False}]}
+    views = {"MS.TEAMS.2.2v2": {"M365Environment": "gcchigh"}, "MS.TEAMS.2.3v2": {"M365Environment": "Commercial"},
+             "MS.TEAMS.4.1v1": {"M365Environment": "commercial"}}
+
+    def projected(root, **options):
+        projection = fake_projection(root, {})
+        projection.rule_sections.update(rule_sections)
+        for policy, config in views.items():
+            projection.rule_views.setdefault(policy, {})["scuba_config"] = config
+        return projection
+
+    original = value_rules.assess
+
+    def failing_for_exo(policy_id, sections):
+        if policy_id == "MS.EXO.13.1v1":
+            raise TypeError("Canary Evidence Text")
+        return original(policy_id, sections)
+
+    monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
+    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr(value_rules, "assess", failing_for_exo)
+    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("a value-rule row called the model"))
+    policies = ["MS.TEAMS.1.1v1", "MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1", "MS.EXO.13.1v1"]
+    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=policies)
+    cells = {row["policy_id"]: row["rule_precheck"]["cell"] for row in result["policies"]}
+    assert cells == {"MS.TEAMS.1.1v1": "flag_bad", "MS.TEAMS.2.2v2": "closed_gate",
+                     "MS.TEAMS.2.3v2": "environment_unknown", "MS.TEAMS.4.1v1": "all_clear",
+                     "MS.EXO.13.1v1": "rule_evaluation_failed"}
+    assert all(row["rule_precheck"]["class"] == "value_rule" for row in result["policies"])
+    failed = next(row for row in result["policies"] if row["policy_id"] == "MS.EXO.13.1v1")
+    assert failed["recommendations"] == ["report_product_fault"] and failed["limitations"] == []
+    assert "Canary Evidence Text" not in json.dumps(result)
+    validate_assessment(result)
+    for key, bad in (("section", ["org_config", "org_config"]), ("reason_text", "Not assessed: other."),
+                     ("reason_code", "rule_failed")):
+        from copy import deepcopy
+        tampered = deepcopy(result)
+        next(row for row in tampered["policies"] if row["policy_id"] == "MS.EXO.13.1v1")["rule_precheck"][key] = bad
+        with pytest.raises(ValueError):
+            validate_assessment(tampered)

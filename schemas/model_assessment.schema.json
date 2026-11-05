@@ -520,7 +520,8 @@
             "minLength": 1,
             "enum": [
               "collect_missing_evidence_section",
-              "review_policy_against_baseline_text"
+              "review_policy_against_baseline_text",
+              "report_product_fault"
             ]
           },
           "uniqueItems": true

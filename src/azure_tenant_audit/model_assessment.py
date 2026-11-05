@@ -313,11 +313,17 @@ def validate_assessment(payload: Any) -> None:
             if detail["class"] == "value_rule":
                 if version != "2026-11-05":
                     raise ValueError("Value rule requires current schema")
-                from .value_rules.catalogue import row_for
+                from .value_rules.catalogue import failure_entry, row_for
                 value_row = row_for(row["policy_id"])
                 if not {"cell", "reason_code", "reason_text"} <= detail.keys():
                     raise ValueError("Missing value-rule cell or reason")
-                cell = value_row["cells"].get(detail["cell"]) if value_row else None
+                failure = failure_entry()
+                if value_row is not None and detail["cell"] == failure["cell"]:
+                    # A rule that raised: one constant answer citing every section the rule reads.
+                    cell = {"verdict": failure["verdict"], "reason_code": failure["reason_code"],
+                            "reason_texts": [failure["reason_text"]], "cited": value_row["sections"]}
+                else:
+                    cell = value_row["cells"].get(detail["cell"]) if value_row else None
                 if (value_row is None or cell is None or detail["rule_id"] != value_row["rule_id"]
                         or detail["reason_code"] != cell["reason_code"]
                             or detail["reason_text"] not in cell["reason_texts"]

@@ -146,8 +146,10 @@ model `fail`. Precedence is `closed_gate`, `absent_section`, `absent_field`, the
 the four verdict totals still sum to the policy count.
 
 Version `2026-11-05` adds the `value_rule` class and the shipped
-`configs/scuba-value-rules.json` inventory. The current route covers eight
-Power BI policies and AAD 3.4v1. Serving enables it by default. The hidden operational
+`configs/scuba-value-rules.json` inventory (value-rule spec v3.9). The current route covers 34
+policies: eight Power BI policies, AAD 3.4v1, fourteen Teams (1.1 to 1.7, 2.1 to 2.3, 4.1,
+5.1 to 5.3), six Exchange Online (2.2, 5.1, 6.1, 6.2, 7.1, 13.1) and five Defender
+(SECURITYSUITE 1.4, 4.1, 5.1, 8.1, 8.2) policies. Serving enables it by default. The hidden operational
 switch `AUDITEX_DISABLE_VALUE_RULES` turns it off: the value is stripped of whitespace and
 lower-cased, and any result that is not empty and not `0`, `false`, `no` or `off` restores the
 previous pre-check order (unset, empty, whitespace-only and those four values leave the rules on).
@@ -157,7 +159,11 @@ remain registered for rollback but are bypassed when a value rule answers.
 
 For a value-rule policy, a usable closed gate wins, then the rule's ordered read
 set determines missing or marked sections, then the value predicate answers before
-the old absent-field and empty-list checks. The `value_rule` metadata adds `cell`,
+the old absent-field and empty-list checks. The closed gate is decided by the shared
+`configs/scuba-rule-precheck.json` gate and recorded as the rule's `closed_gate` cell
+(`value_rule` class, verdict not applicable); for MS.TEAMS.2.2v2, 2.3v2 and 4.1v1 an
+M365 environment other than exactly `commercial` that the gate does not close is the
+not-assessed `environment_unknown` cell. The `value_rule` metadata adds `cell`,
 `reason_code` and `reason_text` to `rule_id`, `section`, null `field` and null
 `value`. The cell, code and reason text must match the shipped policy inventory.
 These fixed texts contain only section names, setting names, known enum names
@@ -169,10 +175,20 @@ review. The validator checks the inventory, sections, claims and text but cannot
 re-run the predicate, because the assessment bundle does not contain its input
 evidence. The prior `2026-10-29` schema is preserved separately and still validates.
 
-These rules read the model case's projected evidence. Its Power BI and
-`authentication_method` sections can still be withheld by the projection digest
-gate, producing a not-assessed section-not-collected answer on those live inputs.
-A planned in-memory rule view will bypass that gate.
+A rule that fails on collected evidence (an Auditex fault, not a tenant setting) answers
+the one catalogued `rule_failure` entry, added within `2026-11-05`: cell and reason code
+`rule_evaluation_failed`, the constant text "Not assessed: Auditex could not evaluate this
+policy on the collected evidence. This is a product fault, not a tenant setting.", the
+`unknown` claim citing every section the rule reads, no limitation and the new
+recommendation `report_product_fault`, which means: report the fault to
+`contact+auditex@magrathean.uk`. The failure is logged with the rule id and the
+exception class name only; no exception text or evidence reaches the row or the log.
+
+Serving rules read an in-memory rule view of the projected evidence, taken after
+withholding and before pruning, the shape gate, the item budget and redaction
+(`docs/reference/security-privacy.md`); it is never written to an artefact. A
+section the run or export did not collect still answers not assessed (section not
+collected).
 
 Version `2026-10-29` replaces the P1 stub with a read-only tier-1 ScubaGear
 ProviderExport projection. Incomplete, failed, sampled, truncated, malformed or
