@@ -28,6 +28,22 @@ reason. Optional Power BI or Power Platform collection not enabled retains
 `totals.scope_narrowed` stays zero. Historical model-row metadata remains readable.
 See the [output contract](../reference/output-contract.md) for exact fields and policy coverage.
 
+For SS 2.1, supply `--sensitive-users <file>` during collection (or set
+`AUDITEX_SENSITIVE_USERS_FILE`). Assessment verifies the saved private list,
+count and HMAC before passing bare lower-case addresses to that rule in memory.
+With the other required evidence, SS 2.1 can now decide; an absent or unusable
+list retains the existing not-assessed outcome. A copied bundle replays the
+same way. Addresses never enter assessment outputs or model prompts.
+SS 2.3 still needs a separate PartnerDomains input, which is not available yet.
+The ScubaGear export configuration path is unchanged.
+
+Current collection does not select `TargetedUsersToProtect`, and the bundle
+adapter does not retain that field. Supplying SensitiveUsers therefore enables
+not-met decisions for explicit non-compliant protection flags or actions, but
+cannot prove met from collected target membership. Otherwise the rule reports
+unusable policy evidence. Full met coverage needs a separate collector/privacy
+change; a supplied list alone does not establish compliance.
+
 ## Run and read the result
 
 ```sh

@@ -508,7 +508,7 @@ def test_covered_vectors_never_reach_rule_not_implemented(rule_view, monkeypatch
                 if 'scuba_config' in sections:
                     projection.rule_views[policy] = {'scuba_config': deepcopy(sections['scuba_config'])}
             records, prompts = _assess_policies(projection, [policy], items, 'synthetic', dry_run=False,
-                                               baseline={}, scope=None, max_items=40)
+                                               baseline={})
             assert not prompts and records[0]['reason'] == 'rule_precheck', row['vector_id']
             assert records[0]['rule_precheck']['class'] == 'value_rule', row['vector_id']
             cell = records[0]['rule_precheck']['cell']

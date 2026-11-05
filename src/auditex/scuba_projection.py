@@ -8,10 +8,12 @@ from __future__ import annotations
 from collections.abc import Iterator
 from copy import deepcopy
 from hashlib import sha256
+import hmac
 import json
 import os
 from pathlib import Path
 import re
+import stat
 from typing import Any
 
 from azure_tenant_audit.chunk_reader import _open_chunk
@@ -1112,9 +1114,9 @@ def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
 #                      MS.AAD.7.4v1; SCUBA_CONFIG_EXCLUSION_KEYS names the entries that differ from the policy id).
 #   MS.EXO.1.1v2       null: no allowed forwarding domains, ScubaGear's default.
 #   MS.TEAMS.*         {"M365Environment": <environment>}.
-#   MS.SECURITYSUITE.* not collected (``operator_input_required``): their rows carry the operator's sensitive users and
-#                      partner domains, an input Auditex does not take, and an empty list is a shape training never held.
-# Each view passes the same shape gate as a collected section; one that fails is withheld for that policy alone.
+#   MS.SECURITYSUITE.* model views remain not collected (``operator_input_required``). Verified SensitiveUsers are
+#                      supplied to SS 2.1's private rule view only; SS 2.3 still requires a PartnerDomains input.
+# Each model view passes the collected-section shape gate. Private operator views never enter that gate.
 SCUBA_CAP_EXCLUSION_POLICIES = frozenset({
     "MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1", "MS.AAD.3.7v1",
     "MS.AAD.3.8v1", "MS.AAD.3.9v1", "MS.AAD.9.1v1"})
@@ -1244,9 +1246,76 @@ def _break_glass(bundle: Bundle, manifest: dict[str, Any]) -> tuple[dict[str, li
     return result, {**summary, "state": "resolved", "users": len(result["Users"]), "groups": len(result["Groups"])}
 
 
+def _operator_config_views(*, sensitive_users: tuple[str, ...] | None = None,
+                           partner_domains: tuple[str, ...] | None = None) -> dict[str, Any]:
+    """Private rule configuration; neither list may enter model views or the shape gate.
+
+    PartnerDomains has no bundle loader yet. Keep its independent input slot so
+    supplying SensitiveUsers cannot accidentally enable SS 2.3 (or SS 3.2).
+    """
+    return {policy: {"SecuritySuite": {policy: {key: list(values)}}}
+            for policy, key, values in (
+                ("MS.SECURITYSUITE.2.1v1", "SensitiveUsers", sensitive_users),
+                ("MS.SECURITYSUITE.2.3v1", "PartnerDomains", partner_domains)) if values}
+
+
+def _sensitive_users_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
+    """Read only the bounded private files; emit only existing closed outcomes.
+
+    Read through a no-follow directory descriptor, then verify the captured
+    canonical list against this manifest as well as collect's verification
+    helper. No input text, path, key or digest enters diagnostics.
+    """
+    from azure_tenant_audit.sensitive_users import (
+        MAX_BYTES, MAX_ENTRIES, sensitive_users_digest, verify_sensitive_users,
+    )
+
+    try:
+        metadata = manifest["operator_inputs"]["sensitive_users"]
+        if (not isinstance(metadata, dict) or set(metadata) != {"supplied", "count", "hmac_sha256"}
+                or metadata.get("supplied") is not True
+                or type(metadata.get("count")) is not int or not 0 < metadata["count"] <= MAX_ENTRIES
+                or not isinstance(metadata.get("hmac_sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", metadata["hmac_sha256"])):
+            raise Unavailable("operator_input_required")
+        flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
+        directory = os.open(root / "operator-inputs", flags | os.O_DIRECTORY)
+        try:
+            def read(name: str, bound: int) -> bytes:
+                with os.fdopen(os.open(name, flags, dir_fd=directory), "rb") as handle:
+                    info = os.fstat(handle.fileno())
+                    if not stat.S_ISREG(info.st_mode):
+                        raise Unavailable("operator_input_required")
+                    if info.st_size > bound:
+                        raise Unavailable("oversize" if name.endswith(".txt") else "operator_input_required")
+                    data = handle.read(bound + 1)
+                    if len(data) > bound:
+                        raise Unavailable("oversize" if name.endswith(".txt") else "operator_input_required")
+                    return data
+
+            data = read("sensitive-users.txt", MAX_BYTES)
+            key = read("sensitive-users.key", 32)
+        finally:
+            os.close(directory)
+        # The bundle copy is canonical bare lower-case emails with a final newline.
+        addresses = tuple(data.decode("utf-8").removesuffix("\n").split("\n"))
+        if len(addresses) > MAX_ENTRIES:
+            raise Unavailable("oversize")
+        if (not data.endswith(b"\n") or addresses != tuple(sorted(set(addresses)))
+                or len(addresses) != metadata["count"]
+                or not hmac.compare_digest(sensitive_users_digest(addresses, key), metadata["hmac_sha256"])
+                or not verify_sensitive_users(root)):
+            raise Unavailable("operator_input_required")
+        return addresses
+    except Unavailable:
+        raise
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        raise Unavailable("operator_input_required") from None
+
+
 def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str, Any],
-                  max_items: int, max_chars: int) -> tuple[Any, dict[str, Any], dict[str, Any]]:
-    """The default ``scuba_config``, a per-policy view for each policy that reads it, and the synthesis record."""
+                  max_items: int, max_chars: int) -> tuple[Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Default config, per-policy model views, synthesis record and private rule views."""
     bundle.sources.append("run-manifest.json")
     environment, environment_basis = _environment(bundle)
     exclusions, break_glass_summary = _break_glass(bundle, manifest)
@@ -1291,12 +1360,20 @@ def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str,
         else:
             views[policy_id] = view
             outcomes[policy_id] = "projected"
+    rule_views = dict(views)
+    try:
+        private = _operator_config_views(sensitive_users=_sensitive_users_for_rules(bundle.root, manifest))
+    except Unavailable as exc:
+        outcomes["MS.SECURITYSUITE.2.1v1"] = exc.reason
+    else:
+        rule_views.update(private)
+        outcomes.update({policy: "projected" for policy in private})
     synthesis = {"source": SCUBA_CONFIG_SOURCE, "basis": "scubagear_default_config",
                  "m365_environment": {"value": environment, "basis": environment_basis},
                  "break_glass": break_glass_summary, "policies": outcomes}
     if "projected" not in outcomes.values():
         raise Unavailable()
-    return base, views, synthesis
+    return base, views, synthesis, rule_views
 
 
 def policy_section(projection: dict[str, Any], policy_id: str, section: str) -> Any:
@@ -1535,7 +1612,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             if section == "scuba_config":
                 if not manifest:
                     raise Unavailable("missing_artifact")  # no run manifest, no run to synthesise a configuration for
-                value, views, synthesis = _scuba_config(bundle, manifest, catalogue, max_items, max_chars)
+                value, views, synthesis, rule_views = _scuba_config(bundle, manifest, catalogue, max_items, max_chars)
             elif section == "tenant_id":
                 bundle.sources.append("run-manifest.json")
                 value = _tenant(bundle, manifest)
@@ -1563,7 +1640,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             if users_ok:
                 result.rule_sections[section] = deepcopy(value) if section == "privileged_users" else value
             if section == "scuba_config":
-                for policy_id, view in views.items():
+                for policy_id, view in rule_views.items():
                     result.rule_views.setdefault(policy_id, {})[section] = view
             if section in {"dmarc_records", "spf_records", "dkim_records"}:
                 # Resolver diagnostics are rule-only, as on the export path's pre-prune capture.

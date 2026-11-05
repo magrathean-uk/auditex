@@ -251,9 +251,11 @@ def _serve_rule(policy, sections):
     projection = Projection()
     projection.rule_sections = deepcopy(sections)
     projection.rule_views = {}
+    if "scuba_config" in sections:
+        projection.rule_views[policy] = {"scuba_config": deepcopy(sections["scuba_config"])}
     records, prompts = _assess_policies(
         projection, [policy], policy_catalogue(), "2026-11-05T00:00:00Z",
-        dry_run=False, baseline={}, scope=None, max_items=100)
+        dry_run=False, baseline={})
     assert not prompts
     assert projection.rule_sections == sections
     return records[0]

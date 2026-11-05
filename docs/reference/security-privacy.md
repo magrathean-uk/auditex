@@ -222,6 +222,17 @@ AI context, logs and run-copy helpers. `bundle-hashes.json` records only their
 paths and exclusion reason, never hashes or byte lengths. The key never leaves
 the private area or appears in the manifest.
 
+Assessment verifies the private list and key against the manifest before
+supplying bare lower-case addresses to SS 2.1's in-memory rule configuration.
+This configuration bypasses the model shape gate and model budgets, never the
+loader's byte/entry bounds. Addresses never enter public projection views,
+prompts, assessment records, sidecars, logs, AI context, reports, exports or
+packs. Absent or unusable input stays not collected. SS 2.3 still requires a
+separate PartnerDomains input. Current collection still excludes
+`TargetedUsersToProtect`; enabling met from collected target membership needs a
+separate privacy review. Offline copies use the same verification and private
+view; the ScubaGear export path is unchanged.
+
 This lets the operator who holds the run directory prove which list was used;
 a holder of only a customer pack cannot test guesses without the key. The count
 and HMAC may be shared. This is a consistency check, not an authenticity
