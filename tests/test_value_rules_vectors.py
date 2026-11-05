@@ -58,8 +58,19 @@ STAGE5_POLICIES = frozenset({
     "MS.SECURITYSUITE.3.3v1",
     "MS.SECURITYSUITE.3.4v1",
 })
+# stage 9: the eight AAD pilot policies, one per line.
+STAGE9_POLICIES = frozenset({
+    "MS.AAD.3.3v2",
+    "MS.AAD.3.5v2",
+    "MS.AAD.5.2v1",
+    "MS.AAD.5.3v1",
+    "MS.AAD.5.5v1",
+    "MS.AAD.5.6v1",
+    "MS.AAD.5.7v1",
+    "MS.AAD.6.1v1",
+})
 STAGE_POLICIES = (STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE5_POLICIES
-                  | STAGE6_POLICIES | STAGE8_POLICIES)
+                  | STAGE6_POLICIES | STAGE8_POLICIES | STAGE9_POLICIES)
 GATE_POLICIES = frozenset(policy for policy, row in catalogue()["policies"].items()
                           if row["params"].get("environment_gate"))
 PBI_COMMON = {"section_not_collected", "licence_false", "licence_flag_unusable", "access_denied",
@@ -202,8 +213,10 @@ def test_gates_agree_with_the_config_gate_on_every_gate_vector(rows_v39):
         for config in ({"M365Environment": value}, [{"M365Environment": value}]):
             for policy in GATE_POLICIES:
                 gate = check_gate(policy, {"scuba_config": config})
+                # Value rules require the reference's object-shaped environment section;
+                # the legacy config gate also accepts a singleton list.
                 assert (closed_gate(policy, {"scuba_config": config}) is not None) is bool(
-                    gate and gate["class"] == "closed_gate")
+                    isinstance(config, dict) and gate and gate["class"] == "closed_gate")
 
 
 def test_v39_fixture_manifest_matches_bytes_and_counts(rows_v39):

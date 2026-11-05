@@ -913,6 +913,178 @@
     "reason_text": "Not assessed: the optional Power BI / Power Platform collection was not enabled for this run."
   },
   "policies": {
+    "MS.AAD.3.3v2": {
+      "cells": {
+        "authenticator_duplicated": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_authenticator_duplicated",
+          "reason_texts": [
+            "Data unusable: more than one Microsoft Authenticator configuration; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "authenticator_entry_absent": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unavailable_authenticator_entry_absent",
+          "reason_texts": [
+            "Data unavailable: authentication_method has no Microsoft Authenticator configuration, so whether the policy applies is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "authenticator_state_unusable": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_authenticator_state",
+          "reason_texts": [
+            "Data unusable: the state of Microsoft Authenticator is not enabled or disabled, so whether the policy applies is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "closed_gate": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "policy_not_applicable_authenticator_disabled",
+          "reason_texts": [
+            "Not applicable: the policy applies only when Microsoft Authenticator is enabled; it is disabled."
+          ],
+          "verdict": "not_applicable"
+        },
+        "config_exclusion_target": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_authenticator_exclusion",
+          "reason_texts": [
+            "Data unusable: a group is excluded from the context setting, so it is not shown to all users in the baseline's sense; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "config_met": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "authenticator_context_configured",
+          "reason_texts": [
+            "Requirement met: Microsoft Authenticator shows application and location context to all users and software OATH is off."
+          ],
+          "verdict": "met"
+        },
+        "config_not_met": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "authenticator_context_not_configured",
+          "reason_texts": [
+            "Requirement not met: application context is disabled.",
+            "Requirement not met: application context is disabled; application context is not shown to all users.",
+            "Requirement not met: application context is disabled; application context is not shown to all users; location context is disabled.",
+            "Requirement not met: application context is disabled; application context is not shown to all users; location context is disabled; location context is not shown to all users.",
+            "Requirement not met: application context is disabled; application context is not shown to all users; location context is not shown to all users.",
+            "Requirement not met: application context is disabled; location context is disabled.",
+            "Requirement not met: application context is disabled; location context is disabled; location context is not shown to all users.",
+            "Requirement not met: application context is disabled; location context is not shown to all users.",
+            "Requirement not met: application context is not shown to all users.",
+            "Requirement not met: application context is not shown to all users; location context is disabled.",
+            "Requirement not met: application context is not shown to all users; location context is disabled; location context is not shown to all users.",
+            "Requirement not met: application context is not shown to all users; location context is not shown to all users.",
+            "Requirement not met: location context is disabled.",
+            "Requirement not met: location context is disabled; location context is not shown to all users.",
+            "Requirement not met: location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled.",
+            "Requirement not met: software OATH is enabled; application context is disabled.",
+            "Requirement not met: software OATH is enabled; application context is disabled; application context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; application context is disabled; application context is not shown to all users; location context is disabled.",
+            "Requirement not met: software OATH is enabled; application context is disabled; application context is not shown to all users; location context is disabled; location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; application context is disabled; application context is not shown to all users; location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; application context is disabled; location context is disabled.",
+            "Requirement not met: software OATH is enabled; application context is disabled; location context is disabled; location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; application context is disabled; location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; application context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; application context is not shown to all users; location context is disabled.",
+            "Requirement not met: software OATH is enabled; application context is not shown to all users; location context is disabled; location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; application context is not shown to all users; location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; location context is disabled.",
+            "Requirement not met: software OATH is enabled; location context is disabled; location context is not shown to all users.",
+            "Requirement not met: software OATH is enabled; location context is not shown to all users."
+          ],
+          "verdict": "not_met"
+        },
+        "config_unusable": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_authenticator_config",
+          "reason_texts": [
+            "Data unusable: IsSoftwareOathEnabled absent, null or not a boolean; the policy was not assessed.",
+            "Data unusable: the application context exclusion is unreadable; the policy was not assessed.",
+            "Data unusable: the application context setting is absent; the policy was not assessed.",
+            "Data unusable: the application context state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the application context target is absent; the policy was not assessed.",
+            "Data unusable: the location context exclusion is unreadable; the policy was not assessed.",
+            "Data unusable: the location context setting is absent; the policy was not assessed.",
+            "Data unusable: the location context state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the location context target is absent; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: authentication_method."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_singleton": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: authentication_method does not hold exactly one object; the policy was not assessed.",
+            "Data unusable: authentication_method holds 0 objects, not one; the policy was not assessed.",
+            "Data unusable: authentication_method holds 2 objects, not one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: authentication_method is not a list holding one policy object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: authentication_method has no list of authentication method configurations; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "am_context",
+      "params": {
+        "what": "Microsoft Authenticator does not show application and location context to all users"
+      },
+      "rule_id": "MS.AAD.3.3v2.am_context",
+      "sections": [
+        "authentication_method"
+      ]
+    },
     "MS.AAD.3.4v1": {
       "cells": {
         "policy_object_absent": {
@@ -1018,6 +1190,118 @@
         "authentication_method"
       ]
     },
+    "MS.AAD.3.5v2": {
+      "cells": {
+        "all_disabled": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "low_security_methods_disabled",
+          "reason_texts": [
+            "Requirement met: Sms, Voice and Email authentication are all disabled."
+          ],
+          "verdict": "met"
+        },
+        "method_enabled": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "method_enabled",
+          "reason_texts": [
+            "Requirement not met: Email authentication is enabled.",
+            "Requirement not met: Sms authentication is enabled.",
+            "Requirement not met: Sms, Email authentication is enabled.",
+            "Requirement not met: Sms, Voice authentication is enabled.",
+            "Requirement not met: Sms, Voice, Email authentication is enabled.",
+            "Requirement not met: Voice authentication is enabled.",
+            "Requirement not met: Voice, Email authentication is enabled."
+          ],
+          "verdict": "not_met"
+        },
+        "method_entry_missing": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unavailable_method_entry_absent",
+          "reason_texts": [
+            "Data unavailable: the export has no Email authentication method configuration; the policy was not assessed.",
+            "Data unavailable: the export has no Sms authentication method configuration; the policy was not assessed.",
+            "Data unavailable: the export has no Sms, Email authentication method configuration; the policy was not assessed.",
+            "Data unavailable: the export has no Sms, Voice authentication method configuration; the policy was not assessed.",
+            "Data unavailable: the export has no Sms, Voice, Email authentication method configuration; the policy was not assessed.",
+            "Data unavailable: the export has no Voice authentication method configuration; the policy was not assessed.",
+            "Data unavailable: the export has no Voice, Email authentication method configuration; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "method_state_unusable": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_method_state",
+          "reason_texts": [
+            "Data unusable: the state of Email authentication is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the state of Sms authentication is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the state of Sms, Email authentication is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the state of Sms, Voice authentication is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the state of Sms, Voice, Email authentication is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the state of Voice authentication is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: the state of Voice, Email authentication is not enabled or disabled; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: authentication_method."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_singleton": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: authentication_method does not hold exactly one object; the policy was not assessed.",
+            "Data unusable: authentication_method holds 0 objects, not one; the policy was not assessed.",
+            "Data unusable: authentication_method holds 2 objects, not one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_section_shape",
+          "reason_texts": [
+            "Data unusable: authentication_method is not a list holding one policy object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "settings_not_a_list": {
+          "cited": [
+            "authentication_method"
+          ],
+          "reason_code": "data_unusable_settings_not_a_list",
+          "reason_texts": [
+            "Data unusable: authentication_method has no list of authentication method configurations; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "am_low",
+      "params": {
+        "what": "Sms, Voice or Email authentication is enabled"
+      },
+      "rule_id": "MS.AAD.3.5v2.am_low",
+      "sections": [
+        "authentication_method"
+      ]
+    },
     "MS.AAD.5.1v1": {
       "cells": {
         "all_clear": {
@@ -1100,6 +1384,710 @@
       "rule_id": "MS.AAD.5.1v1.authz",
       "sections": [
         "authorization_policies"
+      ]
+    },
+    "MS.AAD.5.2v1": {
+      "cells": {
+        "classifications_unusable": {
+          "cited": [
+            "risky_delegated_permission_classifications"
+          ],
+          "reason_code": "data_unusable_classifications",
+          "reason_texts": [
+            "Data unusable: the risky delegated permission classifications cannot be read exactly, and the low-risk consent policy depends on them; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "flag_bad_unlabelled": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: an authorization policy that allows user consent has no string Id; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "grant_not_evaluable": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_custom_grant",
+          "reason_texts": [
+            "Data unusable: users may consent under a grant policy (custom or unrecognised) whose terms the export does not show; the policy was not assessed.",
+            "Data unusable: users may consent under a grant policy (legacy) whose terms the export does not show; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "grants_unusable": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an authorization policy has no list of default user role grant policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "low_with_risky": {
+          "cited": [
+            "authorization_policies",
+            "risky_delegated_permission_classifications"
+          ],
+          "reason_code": "low_consent_with_risky_classifications",
+          "reason_texts": [
+            "Requirement not met: users may consent under the low-risk policy while risky delegated permissions are classified."
+          ],
+          "verdict": "not_met"
+        },
+        "met_low_no_risk": {
+          "cited": [
+            "authorization_policies",
+            "risky_delegated_permission_classifications"
+          ],
+          "reason_code": "consent_low_without_risky",
+          "reason_texts": [
+            "Requirement met: users may consent only under the low-risk policy and no risky delegated permission is classified."
+          ],
+          "verdict": "met"
+        },
+        "met_no_self_grant": {
+          "cited": [
+            "authorization_policies",
+            "risky_delegated_permission_classifications"
+          ],
+          "reason_code": "no_user_consent",
+          "reason_texts": [
+            "Requirement met: users may not consent to applications on their own behalf."
+          ],
+          "verdict": "met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: authorization_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "recommended_granted": {
+          "cited": [
+            "authorization_policies",
+            "risky_delegated_permission_classifications"
+          ],
+          "reason_code": "recommended_consent_granted",
+          "reason_texts": [
+            "Requirement not met: users may consent under the Microsoft-managed (recommended) policy, which this baseline does not accept."
+          ],
+          "verdict": "not_met"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: authorization_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "authorization_policies",
+            "risky_delegated_permission_classifications"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: authorization_policies, risky_delegated_permission_classifications.",
+            "Data unavailable: required evidence section(s) not collected: authorization_policies.",
+            "Data unavailable: required evidence section(s) not collected: risky_delegated_permission_classifications."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "consent",
+      "params": {
+        "what": "user consent to applications is not restricted"
+      },
+      "rule_id": "MS.AAD.5.2v1.consent",
+      "sections": [
+        "authorization_policies",
+        "risky_delegated_permission_classifications"
+      ]
+    },
+    "MS.AAD.5.3v1": {
+      "cells": {
+        "admin_consent_off": {
+          "cited": [
+            "directory_settings"
+          ],
+          "reason_code": "admin_consent_workflow_off",
+          "reason_texts": [
+            "Requirement not met: the admin consent workflow is not enabled (EnableAdminConsentRequests is false)."
+          ],
+          "verdict": "not_met"
+        },
+        "admin_consent_on": {
+          "cited": [
+            "directory_settings"
+          ],
+          "reason_code": "admin_consent_workflow_on",
+          "reason_texts": [
+            "Requirement met: the admin consent workflow is enabled (reviewers are not part of the evidence and were not checked)."
+          ],
+          "verdict": "met"
+        },
+        "no_setting": {
+          "cited": [
+            "directory_settings"
+          ],
+          "reason_code": "data_unavailable_setting_absent",
+          "reason_texts": [
+            "Data unavailable: no directory setting named EnableAdminConsentRequests is exported; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "directory_settings"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: directory_settings is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "directory_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: directory_settings."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_conflict": {
+          "cited": [
+            "directory_settings"
+          ],
+          "reason_code": "data_unusable_setting_conflict",
+          "reason_texts": [
+            "Data unusable: EnableAdminConsentRequests is true in one settings group and false in another, so which one applies is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_unusable": {
+          "cited": [
+            "directory_settings"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: EnableAdminConsentRequests is not exactly true or false; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "admin_consent",
+      "params": {
+        "what": "the administrative consent workflow is not enabled"
+      },
+      "rule_id": "MS.AAD.5.3v1.admin_consent",
+      "sections": [
+        "directory_settings"
+      ]
+    },
+    "MS.AAD.5.5v1": {
+      "cells": {
+        "default_not_singleton": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: default_app_management_policy does not hold exactly one object; the policy was not assessed.",
+            "Data unusable: default_app_management_policy holds 2 objects, not one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "entry_missing": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unavailable_restriction_entry",
+          "reason_texts": [
+            "Data unavailable: the default policy shows no passwordAddition restriction for Application or ServicePrincipal; the policy was not assessed.",
+            "Data unavailable: the default policy shows no passwordAddition restriction for Application; the policy was not assessed.",
+            "Data unavailable: the default policy shows no passwordAddition restriction for ServicePrincipal; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_default_policy": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: default_app_management_policy is empty, so no default restriction is shown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restriction_not_met": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "restriction_not_met",
+          "reason_texts": [
+            "Requirement not met: a custom policy applies a weaker restriction to some apps: the restriction applies only to apps created after a date (password addition is not blocked for all apps).",
+            "Requirement not met: a custom policy exempts apps from the restriction (password addition is not blocked for all apps).",
+            "Requirement not met: the restriction applies only to apps created after a date (password addition is not blocked for all apps).",
+            "Requirement not met: the restriction is not enabled (password addition is not blocked for all apps)."
+          ],
+          "verdict": "not_met"
+        },
+        "restriction_unusable": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unusable_restriction",
+          "reason_texts": [
+            "Data unusable: a credential list is not a list; the policy was not assessed.",
+            "Data unusable: a custom app management policy is not an object; the policy was not assessed.",
+            "Data unusable: a custom policy exemption lists no readable apps; the policy was not assessed.",
+            "Data unusable: a custom policy has no boolean IsEnabled; the policy was not assessed.",
+            "Data unusable: a custom policy restriction cannot be read: a restriction date cannot be read; the policy was not assessed.",
+            "Data unusable: a custom policy restriction lists no readable apps; the policy was not assessed.",
+            "Data unusable: a custom policy restriction state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: a restriction date cannot be read; the policy was not assessed.",
+            "Data unusable: a restriction state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: custom policy restrictions are unreadable; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restrictions_compliant": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "restriction_compliant",
+          "reason_texts": [
+            "Requirement met: the passwordAddition restriction is enabled for every app in both scopes."
+          ],
+          "verdict": "met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: app_management_policies, default_app_management_policy.",
+            "Data unavailable: required evidence section(s) not collected: app_management_policies.",
+            "Data unavailable: required evidence section(s) not collected: default_app_management_policy."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "app_management_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: app_management_policies is not a list; the policy was not assessed.",
+            "Data unusable: default_app_management_policy is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "app_restriction",
+      "params": {
+        "app": {
+          "cred": "PasswordCredentials",
+          "maxd": null,
+          "moot": false,
+          "rtype": "passwordAddition",
+          "what": "password addition is not blocked for all apps"
+        },
+        "what": "password addition is not blocked for all apps"
+      },
+      "rule_id": "MS.AAD.5.5v1.app_restriction",
+      "sections": [
+        "app_management_policies",
+        "default_app_management_policy"
+      ]
+    },
+    "MS.AAD.5.6v1": {
+      "cells": {
+        "default_not_singleton": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: default_app_management_policy does not hold exactly one object; the policy was not assessed.",
+            "Data unusable: default_app_management_policy holds 2 objects, not one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "entry_missing": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unavailable_restriction_entry",
+          "reason_texts": [
+            "Data unavailable: the default policy shows no passwordLifetime restriction for Application or ServicePrincipal; the policy was not assessed.",
+            "Data unavailable: the default policy shows no passwordLifetime restriction for Application; the policy was not assessed.",
+            "Data unavailable: the default policy shows no passwordLifetime restriction for ServicePrincipal; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "moot_addition_blocked": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "policy_not_applicable_password_addition_blocked",
+          "reason_texts": [
+            "Not applicable: password addition is blocked for all apps, so the password lifetime limit does not apply."
+          ],
+          "verdict": "not_applicable"
+        },
+        "moot_scope_unknown": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unavailable_moot_scope",
+          "reason_texts": [
+            "Data unavailable: password addition is blocked for every app in one scope but not shown in the other, so whether the password lifetime limit applies there is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_default_policy": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: default_app_management_policy is empty, so no default restriction is shown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restriction_not_met": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "restriction_not_met",
+          "reason_texts": [
+            "Requirement not met: a custom policy applies a weaker restriction to some apps: a lifetime exceeds the limit (password lifetime is not restricted to 180 days or less).",
+            "Requirement not met: a custom policy applies a weaker restriction to some apps: the restriction applies only to apps created after a date (password lifetime is not restricted to 180 days or less).",
+            "Requirement not met: a custom policy exempts apps from the restriction (password lifetime is not restricted to 180 days or less).",
+            "Requirement not met: a lifetime exceeds the limit (password lifetime is not restricted to 180 days or less).",
+            "Requirement not met: the restriction applies only to apps created after a date (password lifetime is not restricted to 180 days or less).",
+            "Requirement not met: the restriction is not enabled (password lifetime is not restricted to 180 days or less)."
+          ],
+          "verdict": "not_met"
+        },
+        "restriction_unusable": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unusable_restriction",
+          "reason_texts": [
+            "Data unusable: a credential list is not a list; the policy was not assessed.",
+            "Data unusable: a custom app management policy is not an object; the policy was not assessed.",
+            "Data unusable: a custom policy exemption lists no readable apps; the policy was not assessed.",
+            "Data unusable: a custom policy has no boolean IsEnabled; the policy was not assessed.",
+            "Data unusable: a custom policy restriction cannot be read: a lifetime is not a whole number of days; the policy was not assessed.",
+            "Data unusable: a custom policy restriction cannot be read: a restriction date cannot be read; the policy was not assessed.",
+            "Data unusable: a custom policy restriction lists no readable apps; the policy was not assessed.",
+            "Data unusable: a custom policy restriction state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: a lifetime is not a whole number of days; the policy was not assessed.",
+            "Data unusable: a restriction date cannot be read; the policy was not assessed.",
+            "Data unusable: a restriction state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: custom policy restrictions are unreadable; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restrictions_compliant": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "restriction_compliant",
+          "reason_texts": [
+            "Requirement met: the passwordLifetime restriction is enabled for every app in both scopes within 181 days.",
+            "Requirement met: the passwordLifetime restriction is enabled for every app in the scope where password addition is permitted within 181 days."
+          ],
+          "verdict": "met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: app_management_policies, default_app_management_policy.",
+            "Data unavailable: required evidence section(s) not collected: app_management_policies.",
+            "Data unavailable: required evidence section(s) not collected: default_app_management_policy."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "app_management_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: app_management_policies is not a list; the policy was not assessed.",
+            "Data unusable: default_app_management_policy is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "app_restriction",
+      "params": {
+        "app": {
+          "cred": "PasswordCredentials",
+          "maxd": 181,
+          "moot": true,
+          "rtype": "passwordLifetime",
+          "what": "password lifetime is not restricted to 180 days or less"
+        },
+        "what": "password lifetime is not restricted to 180 days or less"
+      },
+      "rule_id": "MS.AAD.5.6v1.app_restriction",
+      "sections": [
+        "app_management_policies",
+        "default_app_management_policy"
+      ]
+    },
+    "MS.AAD.5.7v1": {
+      "cells": {
+        "default_not_singleton": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: default_app_management_policy does not hold exactly one object; the policy was not assessed.",
+            "Data unusable: default_app_management_policy holds 2 objects, not one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "entry_missing": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unavailable_restriction_entry",
+          "reason_texts": [
+            "Data unavailable: the default policy shows no asymmetricKeyLifetime restriction for Application or ServicePrincipal; the policy was not assessed.",
+            "Data unavailable: the default policy shows no asymmetricKeyLifetime restriction for Application; the policy was not assessed.",
+            "Data unavailable: the default policy shows no asymmetricKeyLifetime restriction for ServicePrincipal; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_default_policy": {
+          "cited": [
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: default_app_management_policy is empty, so no default restriction is shown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restriction_not_met": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "restriction_not_met",
+          "reason_texts": [
+            "Requirement not met: a custom policy applies a weaker restriction to some apps: a lifetime exceeds the limit (certificate lifetime is not restricted to 365 days or less).",
+            "Requirement not met: a custom policy applies a weaker restriction to some apps: the restriction applies only to apps created after a date (certificate lifetime is not restricted to 365 days or less).",
+            "Requirement not met: a custom policy exempts apps from the restriction (certificate lifetime is not restricted to 365 days or less).",
+            "Requirement not met: a lifetime exceeds the limit (certificate lifetime is not restricted to 365 days or less).",
+            "Requirement not met: the restriction applies only to apps created after a date (certificate lifetime is not restricted to 365 days or less).",
+            "Requirement not met: the restriction is not enabled (certificate lifetime is not restricted to 365 days or less)."
+          ],
+          "verdict": "not_met"
+        },
+        "restriction_unusable": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "data_unusable_restriction",
+          "reason_texts": [
+            "Data unusable: a credential list is not a list; the policy was not assessed.",
+            "Data unusable: a custom app management policy is not an object; the policy was not assessed.",
+            "Data unusable: a custom policy exemption lists no readable apps; the policy was not assessed.",
+            "Data unusable: a custom policy has no boolean IsEnabled; the policy was not assessed.",
+            "Data unusable: a custom policy restriction cannot be read: a lifetime is not a whole number of days; the policy was not assessed.",
+            "Data unusable: a custom policy restriction cannot be read: a restriction date cannot be read; the policy was not assessed.",
+            "Data unusable: a custom policy restriction lists no readable apps; the policy was not assessed.",
+            "Data unusable: a custom policy restriction state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: a lifetime is not a whole number of days; the policy was not assessed.",
+            "Data unusable: a restriction date cannot be read; the policy was not assessed.",
+            "Data unusable: a restriction state is not enabled or disabled; the policy was not assessed.",
+            "Data unusable: custom policy restrictions are unreadable; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "restrictions_compliant": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "restriction_compliant",
+          "reason_texts": [
+            "Requirement met: the asymmetricKeyLifetime restriction is enabled for every app in both scopes within 366 days."
+          ],
+          "verdict": "met"
+        },
+        "section_not_collected": {
+          "cited": [
+            "app_management_policies",
+            "default_app_management_policy"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: app_management_policies, default_app_management_policy.",
+            "Data unavailable: required evidence section(s) not collected: app_management_policies.",
+            "Data unavailable: required evidence section(s) not collected: default_app_management_policy."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "app_management_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: app_management_policies is not a list; the policy was not assessed.",
+            "Data unusable: default_app_management_policy is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "app_restriction",
+      "params": {
+        "app": {
+          "cred": "KeyCredentials",
+          "maxd": 366,
+          "moot": false,
+          "rtype": "asymmetricKeyLifetime",
+          "what": "certificate lifetime is not restricted to 365 days or less"
+        },
+        "what": "certificate lifetime is not restricted to 365 days or less"
+      },
+      "rule_id": "MS.AAD.5.7v1.app_restriction",
+      "sections": [
+        "app_management_policies",
+        "default_app_management_policy"
+      ]
+    },
+    "MS.AAD.6.1v1": {
+      "cells": {
+        "domain_unusable": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a managed domain lacks a usable verification, authentication type, root flag or password validity period; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_managed_domain": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "data_unavailable_no_managed_domain",
+          "reason_texts": [
+            "Data unavailable: no verified managed domain is exported, so no password expiry setting is shown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: domain_settings holds no domains; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "orphan_sub_domain": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "data_unusable_sub_domain_root_case",
+          "reason_texts": [
+            "Data unusable: a managed sub-domain has no managed verified root domain in the export, so its password policy is unknown; the policy was not assessed.",
+            "Data unusable: a managed sub-domain matches a managed verified root domain only when letter case is ignored, so the export does not establish that it is under that root and its password policy is unknown; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "password_expiry_set": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "password_expiry_set",
+          "reason_texts": [
+            "Requirement not met: passwords expire for 1 managed domain (user passwords expire).",
+            "Requirement not met: passwords expire for 2 managed domains (user passwords expire).",
+            "Requirement not met: passwords expire for more than two managed domains (user passwords expire)."
+          ],
+          "verdict": "not_met"
+        },
+        "passwords_never_expire": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "passwords_never_expire",
+          "reason_texts": [
+            "Requirement met: passwords never expire for every verified managed domain."
+          ],
+          "verdict": "met"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: domain_settings is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "domain_settings"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: domain_settings."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "domain_validity",
+      "params": {
+        "what": "user passwords expire"
+      },
+      "rule_id": "MS.AAD.6.1v1.domain_validity",
+      "sections": [
+        "domain_settings"
       ]
     },
     "MS.AAD.7.1v1": {
