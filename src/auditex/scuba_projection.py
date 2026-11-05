@@ -1321,6 +1321,7 @@ def rule_policy_section(projection: Projection, policy_id: str, section: str) ->
 # rule-only sections do not. scubagear_export.py does not call project_run, so these adapters never apply there.
 AREA_ADAPTER_MODULES: tuple[str, ...] = (
     # One module per line (keeps merges of the area branches small): "auditex.scuba_adapters_<area>",
+    "auditex.scuba_adapters_teams",
 )
 
 PS_SECTIONS = {
