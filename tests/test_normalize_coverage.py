@@ -22,6 +22,9 @@ _NORMALIZE_PATH = (
 _INTENTIONAL_EXCEPTIONS = {
     "security",  # sign-ins / directory-audits — too noisy to flatten
     "teams",     # overlaps with groups (M365 groups + Team flag)
+    # Opt-in rule evidence: scuba_adapters_powerplat reads tenantSettings and
+    # accessState directly from the bundle; no flattened inventory section.
+    "power_bi",
 }
 
 

@@ -9,6 +9,7 @@ import pytest
 from azure_tenant_audit.collectors.power_bi import TENANT_SETTINGS, PowerBICollector
 from azure_tenant_audit.model_assessment import COLLECTOR_ERROR_CLASSES
 from azure_tenant_audit.power_bi import POWERBI_SCOPE, PowerBIClient, PowerBIError, power_bi_client_from
+from azure_tenant_audit.profiles import PROFILES
 
 CANARY = "synthetic-powerbi-token-canary-never-retain"
 GROUP = "11111111-2222-3333-4444-555555555555"
@@ -219,15 +220,16 @@ def test_app_token_resolution_and_collector_local_client_creation(monkeypatch, t
 
 def test_collectors_stay_disabled_and_absent_from_default_presets():
     definitions = json.loads(Path("configs/collector-definitions.json").read_text())["collectors"]
-    for name in ("power_platform", "power_bi"):
-        assert not definitions.get(name, {}).get("enabled", False)
-    presets = json.loads(Path("configs/collector-presets.json").read_text())
-    def strings(value):
-        if isinstance(value, dict):
-            return [text for child in value.values() for text in strings(child)]
-        if isinstance(value, list):
-            return [text for child in value for text in strings(child)]
-        return [value] if isinstance(value, str) else []
-    opt_in = presets["presets"].pop("power-platform")
-    assert {"power_platform", "power_bi"} <= set(opt_in["include"])
-    assert not {"power_platform", "power_bi"} & set(strings(presets))
+    optional = {"power_platform", "power_bi"}
+    for name in optional:
+        assert definitions[name]["enabled"] is False, name
+    presets = json.loads(Path("configs/collector-presets.json").read_text())["presets"]
+    assert optional <= set(presets["power-platform"]["include"])
+    assert optional.isdisjoint(presets["power-platform"]["exclude"])
+    assert optional.isdisjoint(presets["full"]["include"])
+    for name, preset in presets.items():
+        if name != "power-platform":
+            assert optional.isdisjoint(preset["include"]), name
+            assert optional.isdisjoint(preset["exclude"]), name
+    for name, profile in PROFILES.items():
+        assert optional.isdisjoint(profile.default_collectors), name

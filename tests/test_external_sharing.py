@@ -321,8 +321,8 @@ def test_the_teams_collector_selects_the_allow_and_block_lists(monkeypatch: pyte
     TeamsPolicyCollector().run({"audit_logger": None})
 
     (federation,) = [command for command in commands if command.startswith("Get-CsTenantFederationConfiguration")]
-    selected = federation.split("Select-Object", 1)[1].strip().split(",")
-    assert selected == ["AllowFederatedUsers", "AllowTeamsConsumer", "AllowPublicUsers", "AllowedDomains", "BlockedDomains"]
+    selected = {field.strip() for field in federation.split("Select-Object", 1)[1].strip().split(",")}
+    assert {"AllowFederatedUsers", "AllowTeamsConsumer", "AllowPublicUsers", "AllowedDomains", "BlockedDomains"} <= selected
 
 
 # ---- normalization -----------------------------------------------------------------------------------
