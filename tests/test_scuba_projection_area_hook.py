@@ -1,14 +1,13 @@
 """Area adapter registration uses synthetic modules and evidence only."""
-import importlib.util
+from hashlib import sha256
 import json
-from pathlib import Path
-import subprocess
 import sys
 from types import ModuleType
 
 import pytest
 
 from auditex import scuba_projection
+from auditex.model_serving import canonical
 from test_scuba_projection import EXPECTED, complete_bundle
 
 
@@ -19,41 +18,21 @@ def register_modules(monkeypatch, *modules):
 
 
 @pytest.mark.parametrize("redact", [False, True])
-def test_empty_area_modules_leave_projection_unchanged(complete_bundle, tmp_path, monkeypatch, redact):
-    monkeypatch.setattr(scuba_projection, 'AREA_ADAPTER_MODULES', ())
-    # Start with HEAD~1 as reviewed; retain the pre-hook baseline after this fix is committed on top of the hook.
-    for revision in ("HEAD~1", "c29f431^"):
-        source = subprocess.run(
-            ["git", "show", f"{revision}:src/auditex/scuba_projection.py"],
-            cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=True,
-        ).stdout
-        if "\nAREA_ADAPTER_MODULES:" not in source:
-            break
-    path = tmp_path / "pre_hook_scuba_projection.py"
-    path.write_text(source, encoding="utf-8")
-    spec = importlib.util.spec_from_file_location("pre_hook_scuba_projection", path)
-    before_module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, before_module)
-    spec.loader.exec_module(before_module)
-    assert not hasattr(before_module, "AREA_ADAPTER_MODULES")
-    before = before_module.project_run(complete_bundle, redact=redact)
-
+def test_empty_area_modules_leave_projection_unchanged(complete_bundle, monkeypatch, redact):
+    # Golden output re-pinned at the rebase onto main da9d06c (sharing_policy is no longer withheld unconditionally there), originally from b41cb97: in a scratch subprocess, AST-replace the sole
+    # `for name in AREA_ADAPTER_MODULES` iterator with (), then project complete_bundle
+    # with each redaction mode. Hash canonical([dict(result), report, views, rule_sections,
+    # rule_views]). This freezes the hook-disabled output, including private rule inputs,
+    # without depending on Git history or comparing the implementation with itself.
+    expected = {
+        False: 'c6fb3e1976f02e018beed37452f9c60ec64d486b84c2dcd3a69af98a320e69c6',
+        True: 'c21cf938c6a67ba6fe585cd6d38156a94534d73f6ae0624a6560123e0504732f',
+    }
     monkeypatch.setattr(scuba_projection, "AREA_ADAPTER_MODULES", ())
     after = scuba_projection.project_run(complete_bundle, redact=redact)
 
-    # sharing_policy is the one section that deliberately differs from the pre-hook code: it used to be withheld
-    # unconditionally in project_run and is now projected by the Exchange adapter module (not registered here).
-    def comparable(projection):
-        report = {**projection.report, "sections": {k: v for k, v in projection.report["sections"].items() if k != "sharing_policy"}}
-        return (
-            {k: v for k, v in dict(projection).items() if k != "sharing_policy"},
-            report,
-            projection.views,
-            {k: v for k, v in projection.rule_sections.items() if k != "sharing_policy"},
-            projection.rule_views,
-        )
-
-    assert comparable(after) == comparable(before)
+    output = [dict(after), after.report, after.views, after.rule_sections, after.rule_views]
+    assert sha256(canonical(output).encode()).hexdigest() == expected[redact]
     if not redact:
         for section, value in EXPECTED.items():
             assert after[section] == value

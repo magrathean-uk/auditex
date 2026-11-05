@@ -1803,24 +1803,88 @@ def test_export_environment_is_retained_only_when_recognised(tmp_path, environme
             assert view == NOT_COLLECTED
 
 
-# All 102 prompt hashes and precheck details from committed d393d4ba3cc16ee0972e4363394605e866de07ce.
-# Generated with the committed export adapter, both mocktenant fixtures and default value rules.
-@pytest.mark.parametrize('source,environment,redact,expected', [
-    (PROVIDER, 'gcc', True, 'bdd4ca855fb961ee8433c2eca523ba68737c2bd02e9af859b4fb31dc487e393c'),
-    (PROVIDER, 'gcc', False, 'af6f8766f2dcf38402357092e34c158491916770b7f7f132fc09ea07a1898ac0'),
-    (PROVIDER, 'gcchigh', True, '911e6e149e663874b9d47d8bf6f8918b3b6fd1901723dd776e79cce767cffead'),
-    (PROVIDER, 'gcchigh', False, 'd54cfdd56974b838c5755c75277e2ae3004574445d3438d070907f2c9ec0bd93'),
-    (PROVIDER, 'dod', True, '645e279f706c9a443c2137f6312594ded3b0531340fdb80b6eed276ff2c1c46a'),
-    (PROVIDER, 'dod', False, '8a73491cd4bc12da5296768d9da90f5459becb49bf3dd0a1f07942eb8f131a8f'),
-    (REAL, 'gcc', True, '5cb780214c5e1068b268e202ee8b79edaa2869c9859f909ad7ed2fbac2772443'),
-    (REAL, 'gcc', False, 'b38996dc89fc1075c6c4b2cad5e6e62af343cfa205726ae40546a007a42bdba9'),
-    (REAL, 'gcchigh', True, 'f749576a5fbdba286891865957a8eacb43545e40a9effcdfa3e3478bfde57069'),
-    (REAL, 'gcchigh', False, 'b5b084ed903050114e3acdbf95e47284c091279c5a7a236549b28fb7056742e5'),
-    (REAL, 'dod', True, '702fcee1b68cdd296ac916ab3c1818a3b2e359682407fe57391ae0e61ce87669'),
-    (REAL, 'dod', False, 'e0b698ab0b040fa73e8c224abcaaab40b37c49a0bc6840ae604aeec7fa27ec6c'),
+# Baseline: git archive 9ca7ddb extracted into $TMPDIR/base (no worktree); a subprocess using this repo's
+# .venv, cwd=base and PYTHONPATH=base/src:base/tests ran _dry and the precheck loop below on both
+# mocktenant exports x gcc/gcchigh/dod x both redaction modes, with default value rules. All 1,224 prompt
+# hashes matched b41cb97. Only TEAMS 2.2/2.3/4.1 prechecks differed (36 rows): retaining recognised
+# environments lets the v3.9.1/D19 commercial-only gate fire. Pin branch signatures, baseline prompts,
+# and baseline prechecks with exactly those three approved differences restored to their frozen values.
+# The baseline precheck digest is identical for all 12 combinations; no Git history is needed at test time.
+_GOV_BASELINE_PRECHECK_SHA256 = '7aa8ac03d3f56591ab516d483ee3bfd306afc0bf4c06aaebd16923a4d2d580f7'
+_GOV_BASELINE_TEAMS_PRECHECKS = {
+    'MS.TEAMS.2.2v2': {
+        'cell': 'section_not_collected',
+        'class': 'value_rule',
+        'field': None,
+        'reason_code': 'required_evidence_section_not_collected',
+        'reason_text': 'Data unavailable: required evidence section(s) not collected: federation_configuration, scuba_config.',
+        'rule_id': 'MS.TEAMS.2.2v2.two_flag',
+        'section': ['federation_configuration', 'scuba_config'],
+        'value': None,
+    },
+    'MS.TEAMS.2.3v2': {
+        'cell': 'section_not_collected',
+        'class': 'value_rule',
+        'field': None,
+        'reason_code': 'required_evidence_section_not_collected',
+        'reason_text': 'Data unavailable: required evidence section(s) not collected: federation_configuration, scuba_config.',
+        'rule_id': 'MS.TEAMS.2.3v2.any_flag',
+        'section': ['federation_configuration', 'scuba_config'],
+        'value': None,
+    },
+    'MS.TEAMS.4.1v1': {
+        'cell': 'section_not_collected',
+        'class': 'value_rule',
+        'field': None,
+        'reason_code': 'required_evidence_section_not_collected',
+        'reason_text': 'Data unavailable: required evidence section(s) not collected: client_configuration, scuba_config.',
+        'rule_id': 'MS.TEAMS.4.1v1.any_flag',
+        'section': ['client_configuration', 'scuba_config'],
+        'value': None,
+    },
+}
+
+
+@pytest.mark.parametrize('source,environment,redact,expected,baseline_prompts', [
+    (PROVIDER, 'gcc', True,
+     'f394622ec20f9067cf351a3fe5f91d7a8d0367995cddcc5e4bcaa621b85ce4e7',
+     'd1ea70f2f5ca79675e91a0cd41e2c8c41007d22f0355f6731ac97062220f9b7d'),
+    (PROVIDER, 'gcc', False,
+     '2abf6fff8d7af516e759f16856d5279d522c8c6447a3f51dd65afed1564037bf',
+     'ae3070c7e0c538b94e5057bd3aaea20ff39b7ebf36becf31fc044144304cba77'),
+    (PROVIDER, 'gcchigh', True,
+     '57ed8e9b49ce5dee42bfdea451b86280eb42eb61c6ffe817d8893832233be8eb',
+     'f92fec3faa8bf726143db750386e50a0664a7d9a57a8bd6e918efe840a89c7dc'),
+    (PROVIDER, 'gcchigh', False,
+     'fc2c180c77f29485b80c663604c2c9497fa6b97dcfe30192b078ce86cd2a2cb4',
+     'fd497f34c018aa937c2c078bd24fda506c019bba9c4061dcd36f08a844dbd787'),
+    (PROVIDER, 'dod', True,
+     '227f76c23a8e36cb6a06d701e9f4266a4105b6c301e1cb94aeeb32faf5114dfd',
+     '78367ab0d73f86b59bc8cd12c44083bf9d69bde8a71d7a4c680eda07d2a99d2c'),
+    (PROVIDER, 'dod', False,
+     '0b7c916fa2ab2c23c1c6ce7ba89cac154e13663a08a7e3be9b7d5dbd1bbcb9ce',
+     '21d9eea35f314897dd964f8457194811198c77ca734197a8981cfeeebd86b07d'),
+    (REAL, 'gcc', True,
+     'eeccbb1ed3ab9a0856ddcf7a62d5fe5ea99be123a58c2d384e8ea6c8055658cf',
+     '116edb64cbb541724b4a4442836cb9bb2b1f5a29e8c39b3f9066866c096d9361'),
+    (REAL, 'gcc', False,
+     '7d11f91c431b8e2c04a45e805c1f74dea22d86a7794303f5a4f3f3ca5499dec6',
+     '49ef57d0809b24c400da57d11871a111271ddbce6908173cbfd2ca13456d0319'),
+    (REAL, 'gcchigh', True,
+     'c0df002977983a45dd7bd0f038ab2cad0b2794e643c4b878464fd963046e83a8',
+     '0013ac93b9edf258cd76b05552bad870f6aac88a40ea022ae38134acc47dd1aa'),
+    (REAL, 'gcchigh', False,
+     'bad32f754ea57ad4ff4ed7c2a41f37190889f1f861f3f342a345045ac5c6a54a',
+     'c94f9c544e37e496d8e67a587683e1e9fae1e81ed6f85e1b276c1e566672fa47'),
+    (REAL, 'dod', True,
+     '34d9f726ad292ca482a0150d970c2d52dd12523601ae80a855b1245c21a1a84e',
+     '7fe4f720af0681bb326c77149c72e53a41a21ac6e3e9c09410b4892595190418'),
+    (REAL, 'dod', False,
+     '86267952339f3cc91bc493da75f031df7ad32c77cda78e9989dc492090fe2a68',
+     'a422ac244557c031e4345cbba618011734eb1d5a4548abfb8fcda34e333546bb'),
 ])
 def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behaviour(
-        tmp_path, monkeypatch, source, environment, redact, expected):
+        tmp_path, monkeypatch, source, environment, redact, expected, baseline_prompts):
     from auditex.model_precheck import precheck_case
     from auditex.model_serving import ModelClient, ModelEndpointError, build_case, canonical
     from azure_tenant_audit.value_rules.catalogue import row_for
@@ -1841,8 +1905,16 @@ def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behavi
                                  value_rules=True, rule_projection=rule_input)
         prechecks[pid] = precheck['rule_precheck'] if precheck else None
         signatures[pid] = {'prompt_sha256': prompt['prompt_sha256'], 'precheck': prechecks[pid]}
-    # Equality pins every policy's prompt and precheck, including the policies left to the model.
     assert sha256(canonical(signatures).encode()).hexdigest() == expected
+    prompt_hashes = {pid: row['prompt_sha256'] for pid, row in signatures.items()}
+    assert sha256(canonical(prompt_hashes).encode()).hexdigest() == baseline_prompts
+    for pid, baseline in _GOV_BASELINE_TEAMS_PRECHECKS.items():
+        assert prechecks[pid] != baseline
+        assert prechecks[pid]['class'] == 'value_rule'
+        assert prechecks[pid]['cell'] == 'closed_gate'
+        assert prechecks[pid]['reason_code'] == 'policy_not_applicable_environment'
+    baseline_prechecks = {**prechecks, **_GOV_BASELINE_TEAMS_PRECHECKS}
+    assert sha256(canonical(baseline_prechecks).encode()).hexdigest() == _GOV_BASELINE_PRECHECK_SHA256
     for pid in ('MS.AAD.9.1v1', 'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1'):
         assert policy_section(projection, pid, 'scuba_config') == NOT_COLLECTED
         assert rule_policy_section(projection, pid, 'scuba_config')['M365Environment'] == environment
