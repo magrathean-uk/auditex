@@ -614,6 +614,18 @@ def test_non_utf8_cannot_bypass_depth_scan(monkeypatch, encoding, depth):
     assert result["error_class"] == "unexpected_shape" and response.closed
 
 
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_odd_quote_parity_cannot_bypass_depth_scan(monkeypatch, encoding):
+    # The escaped quote gives the old byte scanner odd quote parity, hiding x's
+    # 41 array levels from it while json.loads still accepts the UTF-16 body.
+    text = (json.dumps({"value": [policy_row()], "q": 'a"b'}, separators=(",", ":"))[:-1]
+            + ',"x":' + '[' * 41 + '0' + ']' * 41 + '}')
+    response = Response(body=text.encode(encoding))
+    connect(monkeypatch, [response])
+    result = rest.TeamsAdminRestAdapter().get("meetingPolicies", TOKEN, "commercial")
+    assert result.get("error_class") == "unexpected_shape" and response.closed
+
+
 @pytest.mark.parametrize("prefix", [b"", b"\xef\xbb\xbf"])
 def test_scan_and_parser_receive_same_utf8_text(monkeypatch, prefix):
     text = json.dumps({"value": [policy_row()], "extra": '∀ escaped "'}, ensure_ascii=False)

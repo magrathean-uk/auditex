@@ -150,9 +150,9 @@ def _read_attempt(url, token, deadline, max_bytes, state):
     so a blocked call cannot hold the operation open. Cancellation withholds its
     result and shuts down an accessible response socket to interrupt body reads;
     the worker closes even a response returned after expiry. Before headers, or
-    if transport internals expose no socket, the worker may remain until the peer
-    stops sending plus the socket inactivity timeout (at most 30 seconds). It
-    holds the token in memory only.
+    if transport internals expose no socket, the worker may remain for as long as
+    the peer keeps sending, then up to the 30-second socket inactivity timeout;
+    it holds the token in memory only.
     No logging or evidence writes happen in the worker.
     """
     completed, cancelled = Event(), Event()
