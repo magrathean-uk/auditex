@@ -48,7 +48,7 @@ COLLECTOR_ERROR_CLASSES = frozenset({
     "resource_not_found", "response_adapter_override_disabled", "response_argument_malformed",
     "response_argument_unsafe", "response_command_override_disabled", "response_invalid_adapter_override",
     "response_write_guard", "section_absent", "service_not_available", "session_not_connected", "toolchain_unavailable",
-    "unauthenticated", "unknown", "unknown_action", "unsupported_query",
+    "unauthenticated", "unknown", "unknown_action", "unsupported_environment", "unsupported_query",
 })
 _GRAPH_HTTP_ERROR_CLASS = re.compile(r"graph_http_[1-5][0-9]{2}")
 UNCLASSIFIED_ERROR = "unclassified"

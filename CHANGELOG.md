@@ -7,6 +7,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.
+
 - Explain unassessed Power BI / Power Platform policies when optional collection was not enabled; preserve generic reasons for unknown selection and existing failures for selected collectors.
 
 - Add value-rule contract A1 within assessment schema `2026-11-05`: distinguish collected but unusable evidence from missing collection, preserve legacy assessments and pack parity, and accept the exact 68 reason/citation contract exceptions for subsequent rule stages.

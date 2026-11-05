@@ -2599,6 +2599,35 @@ def test_collector_error_class_is_checked_against_the_collector_vocabulary(compl
         validate_assessment(result)
 
 
+@pytest.mark.parametrize('environment', ['gcchigh', 'dod', 'unknown', None])
+@pytest.mark.parametrize('error_class,reported', [
+    ('unsupported_environment', 'unsupported_environment'), ('alice_smith', 'unclassified'),
+])
+def test_teams_unsupported_environment_error_projects_and_validates(
+        complete_bundle, monkeypatch, environment, error_class, reported):
+    from azure_tenant_audit.adapters import teams_admin_rest
+
+    def no_request(*args, **kwargs):
+        pytest.fail('Unsupported Teams environments must not make a request')
+
+    monkeypatch.setattr(teams_admin_rest.requests, 'get', no_request)
+    marker = teams_admin_rest.TeamsAdminRestAdapter().get('meetingPolicies', None, environment)
+    assert marker == {'error': 'unsupported_environment', 'error_class': 'unsupported_environment'}
+    marker['error_class'] = error_class
+    operation(complete_bundle, 'teams_policy', 'meetingPolicies', [], status='error', **marker)
+    projection = project_run(complete_bundle)
+    assert projection['meeting_policies'] == NOT_COLLECTED
+    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.TEAMS.1.1v1'])
+    section = result['projection']['sections']['meeting_policies']
+    assert section['status'] == 'not_collected' and section['reason'] == 'collector_error'
+    assert section['detail'] == {'error_class': reported, 'operation': 'teams_policy.meetingPolicies'}
+    validate_assessment(result)
+    jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
+    section['detail']['error_class'] = 'alice_smith'
+    with pytest.raises(ValueError, match='error class'):
+        validate_assessment(result)
+
+
 def test_collector_error_vocabulary_covers_every_class_the_engine_writes():
     # Every error class literal under src/azure_tenant_audit: classifier returns, ``error_class`` dict values and keyword
     # arguments, and names ending in error_class. A new one must be added to COLLECTOR_ERROR_CLASSES or it reads unclassified.
