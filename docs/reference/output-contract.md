@@ -961,13 +961,17 @@ fan-out is bounded: `google_gmail_settings` reads at most 500 mailboxes without 
 so the user and group lists, and with them the fan-outs, are limited; every cut list is then
 recorded as a gap, which is the point.
 
-Reads are kept as far as they got: when a later page fails or is refused after rows were
-read, those rows stay in the evidence in both the chunked and the in-memory path, and the
-list is recorded with `pagination_failed` or `next_link_refused`. A repeated page
-URL instead stops with `incomplete_evidence` and withholds the entire section.
-Strict policy lists also withhold the section after 5,000 pages; ordinary lists
-have no default page-count ceiling. The strict validator reads one additional
-page to detect that ceiling, without publishing its rows.
+For ordinary lists in the shared Graph endpoint runner, a later-page failure or refused
+next link retains rows already read, in both the chunked and the in-memory path, with
+`pagination_failed` or `next_link_refused`. Graph paging stops a repeated page URL with
+`incomplete_evidence`. The shared endpoint runner then clears the affected endpoint's
+payload and row count; the run writer also discards its chunks, metadata sidecars and
+manifest entries. Other paging followers handle already-yielded rows themselves, so
+cycle detection alone does not guarantee that an entire section is withheld.
+Strict policy lists in the shared runner withhold the affected endpoint's evidence on
+any read or validation failure, including exceeding 5,000 pages; ordinary lists have
+no default page-count ceiling. The strict validator reads one additional page to
+detect that ceiling, without publishing its rows.
 
 The optional `directory_relationships` collector emits
 `directory_relationship_objects` and `directory_relationship_coverage`.

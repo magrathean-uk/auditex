@@ -94,8 +94,7 @@ the bundle gains the `privileged_roles` artefact, both additive.
   and add `Get-SharingPolicy`. Normalised `transportConfig` keys now use `Name`; `organizationAuditConfig` keys use
   `Identity`, changing record keys and dependent finding ids. Live organisation-identity serialisation is still unverified.
 - **Exchange 2:** save raw SPF, DKIM and DMARC answers and resolver logs for verified Email-service domains,
-  with bounded fan-out, a retry and explicit failure/truncation coverage. A CNAME-only DKIM answer is retained,
-  matching ScubaGear's DoH fallback; a dangling CNAME can read not met rather than absent or resolver failure.
+  with bounded fan-out, a retry and explicit failure/truncation coverage.
 - **Exchange 3:** project remote domains, transport rules and the sharing policy on the run path, with failed reads
   withheld and sharing partner domains retained as configuration metadata.
 - **Teams 1:** widen meeting-policy fields and add broadcast/client configuration reads without new permissions.
@@ -103,6 +102,25 @@ the bundle gains the `privileged_roles` artefact, both additive.
   `teams_policy:tenantFederationConfiguration:Global:external_federation_open`, a one-off comparison change.
 - **Teams 2:** project app-permission, client, broadcast and federation policy sections on the run path;
   only the exact open allow-list marker is treated as unrestricted federation.
+- **AAD and SharePoint 1:** collect additional AAD policy evidence: beta directory settings, app management
+  policies and their targets, the default app management policy, authentication method configurations and
+  delegated-permission classifications. Detect paging cycles for every Graph list, bound strict policy reads
+  and remove endpoint chunks when the shared endpoint runner withholds their evidence.
+- **AAD and SharePoint 2:** add private AAD Conditional Access and SharePoint rule-view variants, retried only
+  for identified shape failures, plus six AAD section adapters. Pin the ScubaGear delegated risky-permission
+  subset in `configs/risky-delegated-permissions.json`.
+- **Teams 3:** add certificate-only Teams admin API reads through five allowlisted GETs for commercial and GCC;
+  remove the unused `TeamSettings.Read.All` requirement and expose coverage reasons. REST authentication and
+  response shapes remain unverified live.
+- **Exchange 5:** a DKIM selector CNAME pointing at a non-existent target now walks on to selector2 as ScubaGear
+  does: NXDOMAIN advances the selector walk even with CNAME data; a CNAME-only NOERROR answer still stops it.
+  This RFC 6604 inference has not been observed live.
+- **Value-rule performance:** make the DMARC address regex linear and replace repeated DKIM, Safe Links and
+  Power Platform DLP scans with indexed joins or set operations, preserving verdicts.
+- **Value-rule addendum A2:** accept SS 1.3 and SS 6.x citation variants and compare AAD 3.3v2 pack parity through
+  the permitted label overrides.
+- **Held Defender rules:** enable MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1 after the unsuccessful-command projection
+  and A2 citation variants landed; deterministic rules now cover 102 policies.
 - **Defender 1:** add 14 read-only Exchange Online `Get-*` commands for Defender for Office 365 and EOP policy
   evidence, with no new Graph scope. Recipient lists are minimised; paired ATP `command_error` failures after
   a healthy EOP read are reclassified as `license_required` with `licence_inferred: true`. Other failure classes stay gaps.
