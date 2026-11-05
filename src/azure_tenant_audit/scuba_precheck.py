@@ -13,6 +13,12 @@ from .model_evidence import NOT_COLLECTED
 from .resources import open_text_resource
 
 
+def optional_collection_entry() -> dict[str, Any]:
+    """Constant, policy-scoped optional-collection contract; no evidence text."""
+    from .value_rules.catalogue import catalogue
+    return catalogue()["optional_collection"]
+
+
 def rule_catalogue() -> dict[str, Any]:
     return json.loads(open_text_resource("configs/scuba-rule-precheck.json"))
 
@@ -231,6 +237,14 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
     The named limitations are assessment-contract extensions, not new pack
     vocabulary. Offline scoring compares the original pack response vocabulary.
     """
+    optional = optional_collection_entry()
+    if detail.get("reason_code") == optional["reason_code"]:
+        return {"claims": [
+            {"id": "requirement_met", "status": "unknown", "value": None,
+             "evidence_ids": ["e0", *(f"e{i + 1}" for i, s in enumerate(sections) if s in detail["section"])]},
+            {"id": "policy_criticality", "status": "confirmed", "value": policy_item["criticality"],
+             "evidence_ids": ["e0"]},
+        ], "limitations": [optional["reason_code"]], "recommendations": []}
     if detail["class"] == "value_rule":
         from .value_rules.catalogue import row_for
         from .value_rules.record import RULE_FAILURE_CELL, as_pack_response, evidence_kind

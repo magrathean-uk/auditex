@@ -801,6 +801,117 @@
       }
     }
   },
+  "optional_collection": {
+    "policies": {
+      "MS.POWERBI.1.1v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERBI.2.1v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERBI.3.1v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERBI.4.1v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERBI.4.2v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERBI.5.1v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERBI.6.1v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERBI.7.1v1": {
+        "collector": "power_bi",
+        "sections": [
+          "powerbi_access_denied_reason",
+          "powerbi_tenant_settings"
+        ]
+      },
+      "MS.POWERPLATFORM.1.1v1": {
+        "collector": "power_platform",
+        "sections": [
+          "environment_creation"
+        ]
+      },
+      "MS.POWERPLATFORM.1.2v1": {
+        "collector": "power_platform",
+        "sections": [
+          "environment_creation"
+        ]
+      },
+      "MS.POWERPLATFORM.2.1v1": {
+        "collector": "power_platform",
+        "sections": [
+          "dlp_policies"
+        ]
+      },
+      "MS.POWERPLATFORM.2.2v1": {
+        "collector": "power_platform",
+        "sections": [
+          "dlp_policies",
+          "environment_list"
+        ]
+      },
+      "MS.POWERPLATFORM.2.3v1": {
+        "collector": "power_platform",
+        "sections": [
+          "dlp_policies"
+        ]
+      },
+      "MS.POWERPLATFORM.3.1v1": {
+        "collector": "power_platform",
+        "sections": [
+          "tenant_isolation"
+        ]
+      },
+      "MS.POWERPLATFORM.5.1v1": {
+        "collector": "power_platform",
+        "sections": [
+          "environment_creation"
+        ]
+      },
+      "MS.POWERPLATFORM.6.1v1": {
+        "collector": "power_platform",
+        "sections": [
+          "environment_creation"
+        ]
+      }
+    },
+    "reason_code": "optional_collection_not_enabled",
+    "reason_text": "Not assessed: the optional Power BI / Power Platform collection was not enabled for this run."
+  },
   "policies": {
     "MS.AAD.3.4v1": {
       "cells": {

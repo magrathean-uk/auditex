@@ -1476,6 +1476,19 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         manifest = {}
         salt = sha256(_json(manifest).encode()).hexdigest()
     bundle.manifest = manifest
+    from azure_tenant_audit.scuba_precheck import optional_collection_entry
+    optional = optional_collection_entry()
+    selection = manifest.get("selected_collectors", manifest.get("collectors"))
+    collector_names = json.loads(open_text_resource("configs/collector-definitions.json"))["collectors"]
+    omitted_sections = set()
+    # Probe manifests also list surfaces; they do not describe a run's collection opt-in.
+    # Only unique canonical registry names establish selection; ambiguous metadata stays unknown.
+    if (isinstance(selection, list) and selection
+            and all(isinstance(s, str) and s in collector_names for s in selection)
+            and len(selection) == len(set(selection))
+            and manifest.get("executed_by") != "auditex_probe" and "probe_mode" not in manifest):
+        omitted_sections = {s for policy in optional["policies"].values()
+                            if policy["collector"] not in selection for s in policy["sections"]}
     catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
     sections = sorted({s for p in catalogue.values() for s in p["sections"]})
     result = Projection()
@@ -1561,6 +1574,10 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
         except (Unavailable, ValueError, TypeError, KeyError, OverflowError) as exc:
             result[section] = dict(NOT_COLLECTED)
             reason = getattr(exc, "reason", "incomplete_shape")
+            if reason == "missing_artifact" and section in omitted_sections:
+                reason = optional["reason_code"]
+                # Only the private rule view carries the cause. Prompt evidence remains the exact marker.
+                result.rule_sections[section] = {**NOT_COLLECTED, "reason": reason}
             detail = getattr(exc, "detail", {"field": "$", "kind": "unseen_shape"})
             report[section] = {"status": "not_collected", "reason": reason, "source": list(bundle.sources)}
             # A projected-object bound is plain ``oversize``; the scan bounds say which one ran out.

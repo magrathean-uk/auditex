@@ -189,6 +189,31 @@ review. The validator checks the inventory, sections, claims and text but cannot
 re-run the predicate, because the assessment bundle does not contain its input
 evidence. The prior `2026-10-29` schema is preserved separately and still validates.
 
+Optional Power BI / Power Platform collection adds the following reason within the
+unreleased `2026-11-05` assessment schema:
+
+| Reason | Customer text | Recommendation |
+| --- | --- | --- |
+| `optional_collection_not_enabled` | Not assessed: the optional Power BI / Power Platform collection was not enabled for this run. | None |
+
+It applies only to the catalogue's Power BI / Power Platform policies and their
+optional collector sections when missing. Each collector is checked separately in
+`run-manifest.json`'s `selected_collectors` list (fallback `collectors` when the key
+is absent). An absent, empty or invalid list means unknown selection and retains
+the generic reason. A valid list contains unique names from
+`configs/collector-definitions.json`; names are canonical lowercase snake case,
+with no whitespace. Selected collectors retain their existing failure reasons.
+Probe bundles and ScubaGear exports retain the generic missing-evidence reason.
+The projection records the reason only on `not_collected` optional sections;
+licensing and tenant-ID sections remain independent. The private rule view carries
+this cause to an `absent_section` precheck with the exact constant `reason_text`,
+one `optional_collection_not_enabled` limitation and no recommendation. The
+validator checks the policy, cited sections and matching projection reasons.
+Prompt evidence remains the exact `not_collected` marker. The optional-collection
+reason survives the hidden `AUDITEX_DISABLE_VALUE_RULES` kill switch: only absence
+markers carrying this reason are forwarded to the generic precheck; collected
+private evidence is not forwarded and value-rule evaluation remains disabled.
+
 A rule that fails on collected evidence (an Auditex fault, not a tenant setting) answers
 the one catalogued `rule_failure` entry, added within `2026-11-05`: cell and reason code
 `rule_evaluation_failed`, the constant text "Not assessed: Auditex could not evaluate this
@@ -222,7 +247,7 @@ The required `projection` envelope is separate from prompt evidence:
 - `schema_version: "2026-10-29"`.
 - `sections`: every section referenced by the shipped policy catalogue, with
   `status` (`projected` or `not_collected`), `reason` (null for projected;
-  `missing_artifact`, `incomplete_shape`, `collector_error`, `oversize`, `powershell_only`,
+  `missing_artifact`, `optional_collection_not_enabled`, `incomplete_shape`, `collector_error`, `oversize`, `powershell_only`,
   `not_applicable_to_platform`, or for the DNS sections `dns_posture_not_run` and
   `dns_records_not_saved` otherwise), optional `unsupported_conditions` (CA
   field paths that cannot be represented), and `source` (relative artefact paths

@@ -509,7 +509,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?:evidence_unusable|evidence_unusable:[A-Za-z_][A-Za-z0-9_]*:(?:blocked|absent|unusable|undecidable)|required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|model_transport_failed|scope_narrowed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
+            "pattern": "^(?:optional_collection_not_enabled|evidence_unusable|evidence_unusable:[A-Za-z_][A-Za-z0-9_]*:(?:blocked|absent|unusable|undecidable)|required_evidence_section_not_collected|policy_scope_depends_on_licence|policy_not_applicable|model_response_invalid|model_endpoint_unavailable|model_transport_failed|scope_narrowed|required_evidence_section_not_collected:[A-Za-z_][A-Za-z0-9_.=,\\[\\]]*)$"
           },
           "uniqueItems": true
         },
@@ -994,7 +994,8 @@
             "not_applicable_to_platform",
             "dns_posture_not_run",
             "dns_records_not_saved",
-            "collector_error"
+            "collector_error",
+            "optional_collection_not_enabled"
           ]
         },
         "source": {

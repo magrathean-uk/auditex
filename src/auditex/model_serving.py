@@ -384,6 +384,11 @@ def _assess_policies(projection: dict[str, Any], client: ModelClient | None, sel
                                             if section in projection.rule_sections})
                     if "scuba_config" in row["sections"]:
                         rule_projection["scuba_config"] = deepcopy(rule_policy_section(projection, policy_id, "scuba_config"))
+            elif hasattr(projection, "rule_sections"):
+                # Collection provenance still applies with value rules disabled; forward no collected evidence.
+                rule_projection = {section: dict(marker) for section, marker in projection.rule_sections.items()
+                                   if isinstance(marker, dict) and marker.get("collection_status") == "not_collected"
+                                   and marker.get("reason") == "optional_collection_not_enabled"}
             record = precheck_case(case, absent_fields=True, empty_lists=True, value_rules=value_rules_enabled,
                                    rule_projection=rule_projection)
             if record is None:

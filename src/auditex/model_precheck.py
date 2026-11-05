@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
+from azure_tenant_audit.scuba_precheck import optional_collection_entry, precheck_policy, precheck_response
 
 from .model_eval import _evaluate, _invalid_constant, _load_cases, _load_responses, _pairs, _score
 
@@ -20,11 +20,22 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
     sections = [item["section"] for item in case["evidence"][1:]]
     projection = {item["section"]: item["observed"] for item in case["evidence"][1:]}
     detail = None
+    optional = optional_collection_entry()
+    optional_policy = optional["policies"].get(case["policy_id"])
+    if optional_policy and rule_projection is not None:
+        missing = [s for s in sections if s in optional_policy["sections"]
+                   and isinstance(rule_projection.get(s), dict)
+                   and rule_projection[s].get("collection_status") == "not_collected"
+                   and rule_projection[s].get("reason") == optional["reason_code"]]
+        if missing:
+            detail = {"class": "absent_section", "rule_id": "required_sections_present",
+                      "section": missing, "field": None, "value": None,
+                      "reason_code": optional["reason_code"], "reason_text": optional["reason_text"]}
     row = None
     if value_rules:
         from azure_tenant_audit.value_rules.catalogue import row_for
         row = row_for(case["policy_id"])
-    if row is not None:
+    if row is not None and detail is None:
         # A value-rule policy: the rule view when serving supplies one, else the case evidence.
         rule_input, rule_sections = ((rule_projection, list(row["sections"])) if rule_projection is not None
                                      else (projection, sections))

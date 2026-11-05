@@ -165,12 +165,19 @@ def validate_assessment(payload: Any) -> None:
     schema = json.loads(open_text_resource(ASSESSMENT_SCHEMAS[version]))
     _check(payload, schema, schema, "assessment")
     catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
+    from .scuba_precheck import optional_collection_entry
+    optional = optional_collection_entry()
+    optional_sections = {s for policy in optional["policies"].values() for s in policy["sections"]}
     if version in {"2026-10-29", "2026-11-05"}:
         projection = payload["projection"]
         sections = projection["sections"]
         if set(sections) != {s for policy in catalogue.values() for s in policy["sections"]}:
             raise ValueError("Invalid projection section catalogue")
         for section, detail in sections.items():
+            if detail["reason"] == optional["reason_code"] and (
+                    version != "2026-11-05" or section not in optional_sections
+                    or detail["status"] != "not_collected"):
+                raise ValueError("Invalid optional-collection projection reason")
             if ((detail["status"] == "projected") != (detail["reason"] is None)
                     or detail["status"] == "projected" and not detail["source"]):
                 raise ValueError("Inconsistent projection status or source")
@@ -249,6 +256,9 @@ def validate_assessment(payload: Any) -> None:
             raise ValueError("Unsupported model assessment policy")
         policy = catalogue.get(row["policy_id"])
         is_rule = row["reason"] == "rule_precheck"
+        if optional["reason_code"] in row["limitations"] and (
+                not is_rule or row.get("rule_precheck", {}).get("reason_code") != optional["reason_code"]):
+            raise ValueError("Optional-collection limitation requires its pre-check")
         if version in {"2026-10-28", "2026-10-29", "2026-11-05"}:
             counts["rule_answered"] += is_rule
             if ("rule_precheck" in row) != is_rule or "model_shadow" in row and not is_rule:
@@ -335,8 +345,22 @@ def validate_assessment(payload: Any) -> None:
                     raise ValueError("Invalid value-rule section order")
             else:
                 allowed_sections = sections
-                if set(detail) - {"class", "rule_id", "section", "field", "value"}:
+                optional_reason = detail.get("reason_code") == optional["reason_code"]
+                metadata = {"reason_code", "reason_text"} if optional_reason else set()
+                if set(detail) - ({"class", "rule_id", "section", "field", "value"} | metadata):
                     raise ValueError("Unexpected legacy pre-check metadata")
+                if optional_reason:
+                    entry = optional["policies"].get(row["policy_id"])
+                    if (version != "2026-11-05" or entry is None
+                            or detail["class"] != "absent_section"
+                            or detail["rule_id"] != "required_sections_present"
+                            or detail.get("reason_text") != optional["reason_text"]
+                            or detail["section"] != [s for s in sections if s in detail["section"]]
+                            or not set(detail["section"]) <= set(entry["sections"])
+                            or any(payload["projection"]["sections"][s]["status"] != "not_collected"
+                                   or payload["projection"]["sections"][s]["reason"] != optional["reason_code"]
+                                   for s in detail["section"])):
+                        raise ValueError("Invalid optional-collection pre-check reason")
             if not set(detail["section"]) <= set(allowed_sections):
                 raise ValueError("Unsupported rule pre-check section")
             if detail["class"] == "value_rule":

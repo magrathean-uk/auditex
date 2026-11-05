@@ -491,6 +491,16 @@ def demo_bundle(tmp_path):
     return tmp_path / "p1-demo"
 
 
+@pytest.fixture
+def optional_collection_bundle(demo_bundle):
+    # These tests exercise value rules/legacy schemas, rather than the no-opt-in reason.
+    path = demo_bundle / "run-manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["selected_collectors"] = [*manifest.get("selected_collectors", []), "power_bi", "power_platform"]
+    path.write_text(json.dumps(manifest))
+    return demo_bundle
+
+
 def snapshot(root):
     return {p.relative_to(root).as_posix(): sha256(p.read_bytes()).hexdigest() for p in root.rglob("*") if p.is_file()}
 
@@ -605,10 +615,10 @@ def test_assessment_resources_are_shipped_and_schema_is_registered():
     assert "model_assessment.schema.json" in contract_schema_manifest()["schemas"]
 
 
-def test_value_rule_schema_rejects_wrong_cell_code_section_and_text(demo_bundle, monkeypatch):
+def test_value_rule_schema_rejects_wrong_cell_code_section_and_text(optional_collection_bundle, monkeypatch):
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("value rule must not call model"))
-    result = assess_run(demo_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
+    result = assess_run(optional_collection_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
     assert result["schema_version"] == "2026-11-05"
     detail = result["policies"][0]["rule_precheck"]
     assert detail["class"] == "value_rule" and detail["cell"] == "section_not_collected"
@@ -640,10 +650,10 @@ def test_value_rule_schema_rejects_wrong_cell_code_section_and_text(demo_bundle,
             validate_assessment(missing)
 
 
-def test_value_rule_kill_switch_and_legacy_schema(demo_bundle, monkeypatch):
+def test_value_rule_kill_switch_and_legacy_schema(optional_collection_bundle, monkeypatch):
     monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("missing section pre-check must answer"))
-    result = assess_run(demo_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
+    result = assess_run(optional_collection_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
     assert result["policies"][0]["rule_precheck"]["class"] == "absent_section"
     result["schema_version"] = "2026-10-29"
     validate_assessment(result)
@@ -651,10 +661,10 @@ def test_value_rule_kill_switch_and_legacy_schema(demo_bundle, monkeypatch):
 
 @pytest.mark.parametrize("switch,enabled", [(" 1 ", False), ("y", False), ("disable", False),
                                               (" 0 ", True), ("false", True), ("", True)])
-def test_value_rule_kill_switch_values(demo_bundle, monkeypatch, switch, enabled):
+def test_value_rule_kill_switch_values(optional_collection_bundle, monkeypatch, switch, enabled):
     monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", switch)
     monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("pre-check must answer"))
-    result = assess_run(demo_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
+    result = assess_run(optional_collection_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
     assert (result["policies"][0]["rule_precheck"]["class"] == "value_rule") is enabled
 
 
