@@ -10,9 +10,60 @@ from pathlib import Path
 import signal
 import socket
 import sys
+import subprocess
 import time
 
 import pytest
+
+
+# Load rule for timing in this file
+# ---------------------------------
+# Every wall-clock budget and every deliberately short timeout below is written as the value that
+# is correct on an IDLE machine and wrapped in load_scaled(seconds). load_scaled multiplies it by
+# max(1, calibration / LOAD_REFERENCE_SECONDS), capped at LOAD_SCALE_CAP, where the calibration is
+# a fresh measurement (re-taken every LOAD_CALIBRATION_TTL seconds) of a trivial Python child spawn
+# plus a loopback round trip, the two things these tests are made of. An idle machine scales by 1,
+# so the original budgets still catch a stalled client or a waited-out stall; a loaded machine gets
+# proportionally more time, so startup and case timeouts do not fire early and budgets do not flake.
+# Rules: a timeout that must EXPIRE (SLOW, STALL, loading) and the stall that it races against are
+# scaled together, so their ratio never changes; never scale an assertion about behaviour or status;
+# never replace a budget with a retry. Tune LOAD_REFERENCE_SECONDS only if idle spawn cost shifts.
+LOAD_REFERENCE_SECONDS = 0.1
+LOAD_SCALE_CAP = 30.0
+LOAD_CALIBRATION_TTL = 15.0
+_calibration_cache = {"at": None, "scale": 1.0}
+
+
+def _measure_calibration():
+    samples = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        for _ in range(3):
+            started = time.monotonic()
+            subprocess.run([sys.executable, "-c", "import http.server, json, argparse, socket"],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with socket.create_connection(listener.getsockname(), timeout=30) as client:
+                server_side, _address = listener.accept()
+                with server_side:
+                    client.sendall(b"x")
+                    server_side.recv(1)
+            samples.append(time.monotonic() - started)
+    return sorted(samples)[1]  # median: ignores one lucky or unlucky sample
+
+
+def load_scale():
+    now = time.monotonic()
+    if _calibration_cache["at"] is None or now - _calibration_cache["at"] > LOAD_CALIBRATION_TTL:
+        measured = _measure_calibration()
+        _calibration_cache["scale"] = min(LOAD_SCALE_CAP, max(1.0, measured / LOAD_REFERENCE_SECONDS))
+        _calibration_cache["at"] = time.monotonic()
+    return _calibration_cache["scale"]
+
+
+def load_scaled(seconds):
+    """Idle-machine seconds -> seconds to use right now (never less than `seconds`)."""
+    return seconds * load_scale()
 
 
 # A deliberately small HTTP test double, not a model or inference runtime.
@@ -67,7 +118,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.connection.close()
                 return
             if request["content"].startswith("TOKENIZE_STALL"):
-                time.sleep(3)
+                time.sleep(config.get("stall", 3))
             if request["content"].startswith("TOKENIZE_FAIL"):
                 self.reply({"error": "synthetic tokenizer failure"}, 500)
                 return
@@ -181,7 +232,7 @@ def _setup(tmp_path, runner, cases=None, config=None, extra=(), reasoning_help="
     args = runner.parser().parse_args([
         "--server", str(executable), "--model", str(model), "--model-id", "SYNTHETIC_TEST_DOUBLE",
         "--cases", str(cases_path), "--output-dir", str(tmp_path / "output"),
-        "--startup-timeout", "3", "--case-timeout", "2", "--ctx-size", "64", "--max-tokens", "32",
+        "--startup-timeout", str(load_scaled(3)), "--case-timeout", str(load_scaled(2)), "--ctx-size", "64", "--max-tokens", "32",
         *extra,
     ])
     return args
@@ -215,7 +266,7 @@ def test_owned_server_local_protocol_private_outputs_and_existing_evaluator(tmp_
         manifest = runner.run_benchmark(args)
         assert manifest["process"]["port"] != unrelated_port
         assert unrelated.fileno() >= 0
-        with socket.create_connection(("127.0.0.1", unrelated_port), timeout=.2):
+        with socket.create_connection(("127.0.0.1", unrelated_port), timeout=load_scaled(.2)):
             pass
     assert manifest["status"] == "completed"
     assert manifest["case_order"] == [case["id"] for case in cases]
@@ -288,10 +339,10 @@ def test_invalid_truncated_context_and_wrong_answers_are_not_repaired_or_gold(tm
 @pytest.mark.parametrize("scenario", ["SLOW", "DISCONNECT"])
 def test_transport_failure_has_no_post_retry_aborts_remaining_and_stops_only_child(tmp_path, runner, scenario):
     args = _setup(tmp_path, runner, [_case(scenario, scenario=scenario), _case("remaining")],
-                  extra=["--case-timeout", ".25"])
+                  extra=["--case-timeout", str(load_scaled(.25))])
     started = time.monotonic()
     manifest = runner.run_benchmark(args)
-    assert time.monotonic() - started < 3
+    assert time.monotonic() - started < load_scaled(3)
     rows = _rows(args.output_dir / "records.jsonl")
     assert rows[0]["status"] == ("timeout" if scenario == "SLOW" else "transport_error")
     assert rows[1]["status"] == "not_attempted"
@@ -306,7 +357,7 @@ def test_transport_failure_has_no_post_retry_aborts_remaining_and_stops_only_chi
                                        ({"wrong_alias": True}, "server_identity_mismatch"),
                                        ({"loading": True}, "startup_timeout")])
 def test_startup_failure_preserves_all_case_failures_without_sending_prompts(tmp_path, runner, config, code):
-    args = _setup(tmp_path, runner, config=config, extra=["--startup-timeout", ".5"])
+    args = _setup(tmp_path, runner, config=config, extra=["--startup-timeout", str(load_scaled(.5))])
     manifest = runner.run_benchmark(args)
     assert manifest["startup_failure"]["code"] == code
     row = _rows(args.output_dir / "records.jsonl")[0]
@@ -560,10 +611,12 @@ def test_reasoning_fields_are_recorded_per_case_and_never_scored_or_repaired(tmp
 def test_reasoning_token_count_failure_never_changes_status_or_answer(tmp_path, runner, failure, arm):
     # The default arm matters too: llama.cpp's --reasoning-format auto returns reasoning_content there.
     cases = [_case("counted", scenario=f"REASONING_TOKENIZE_{failure}"), _case("later")]
-    args = _setup(tmp_path, runner, cases, extra=[*arm, "--case-timeout", ".5"])
+    # The server-side stall scales with the case timeout, so the timeout still has to fire to pass.
+    args = _setup(tmp_path, runner, cases, config={"stall": load_scaled(10)},
+                  extra=[*arm, "--case-timeout", str(load_scaled(.5))])
     started = time.monotonic()
     manifest = runner.run_benchmark(args)
-    assert time.monotonic() - started < 4
+    assert time.monotonic() - started < load_scaled(4)
     rows = _rows(args.output_dir / "records.jsonl")
     code = "transport_error" if failure == "DROP" else "timeout"
     # The valid completion keeps its status and its answer; only the token count is lost.
