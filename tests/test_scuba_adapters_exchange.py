@@ -112,12 +112,11 @@ def test_fixture_round_trip(tmp_path, monkeypatch, vector):
         else:
             assert exchange.ADAPTERS[section](bundle) == normalise(section, rows)
         assert rows == original
-        if section != 'sharing_policy':
-            register_isolated(monkeypatch, section)
-            p = projection.project_run(tmp_path)
-            expected = (NOT_COLLECTED if vector['family'] in WITHHELD[vector['policy']]
-                        else normalise(section, rows))
-            assert p.rule_sections[section] == expected
+        register_isolated(monkeypatch, section)
+        p = projection.project_run(tmp_path)
+        expected = (NOT_COLLECTED if vector['family'] in WITHHELD[vector['policy']]
+                    else normalise(section, rows))
+        assert p.rule_sections[section] == expected
 
 
 @pytest.mark.parametrize('section,patch', [
@@ -202,7 +201,7 @@ def test_transport_ignored_fields_record_names_only(tmp_path, monkeypatch):
     assert p.rule_sections['transport_rule'] == ROWS['transport_rule']
 
 
-@pytest.mark.parametrize('section', ['remote_domains', 'transport_rule'])
+@pytest.mark.parametrize('section', ['remote_domains', 'transport_rule', 'sharing_policy'])
 def test_rule_view_survives_model_shape_gate(tmp_path, monkeypatch, section):
     # Product may add digests later; this pins the current model/rule separation.
     make_bundle(tmp_path)
@@ -213,6 +212,18 @@ def test_rule_view_survives_model_shape_gate(tmp_path, monkeypatch, section):
     report = p.report['sections'][section]
     assert report['reason'] == 'incomplete_shape'
     assert report['detail'] == {'field': '$', 'kind': 'unseen_shape'}
+
+
+def test_sharing_policy_partner_domain_stays_in_rule_view(tmp_path):
+    canary = 'private-partner-canary.example.invalid'
+    rows = [{'Name': 'Default', 'Domains': [f'{canary}:CalendarSharingFreeBusySimple']}]
+    make_bundle(tmp_path, {'sharing_policy': rows})
+    p = projection.project_run(tmp_path)
+    assert p.rule_sections['sharing_policy'] == rows
+    assert canary in p.rule_sections['sharing_policy'][0]['Domains'][0]
+    assert canary not in json.dumps(dict(p))
+    assert canary not in json.dumps(p.report)
+    assert canary not in json.dumps(p.views)
 
 
 def test_incomplete_empty_collection_withholds_on_run_path(tmp_path, monkeypatch):
