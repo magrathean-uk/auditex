@@ -18,6 +18,36 @@ from .graph import GraphClient
 from .output import AuditWriter
 from .utils import load_env_file, parse_csv_list
 
+try:
+    from .secret_hygiene import redact_argv as _redact_argv
+except ModuleNotFoundError as exc:
+    if exc.name != f"{__package__}.secret_hygiene":
+        raise
+
+    def _redact_argv(command_line: list[str], *, sensitive_flags: set[str]) -> list[str]:
+        """Standalone kit fallback for the shared prefix-aware argv scrubber."""
+        scrubbed: list[str] = []
+        skip_next = False
+        for item in command_line:
+            if skip_next:
+                scrubbed.append("***redacted***")
+                skip_next = False
+                continue
+            option, separator, _value = item.partition("=")
+            sensitive = option in sensitive_flags or (
+                option.startswith("--")
+                and len(option) > 2
+                and any(flag.startswith(option) for flag in sensitive_flags)
+            )
+            if sensitive:
+                scrubbed.append(f"{option}=***redacted***" if separator else item)
+                skip_next = not separator
+            else:
+                scrubbed.append(item)
+        if skip_next:
+            scrubbed.append("***redacted***")
+        return scrubbed
+
 LOG = logging.getLogger("azure_tenant_audit")
 
 SENSITIVE_CLI_ARGS = {"--client-secret", "--access-token"}
@@ -30,31 +60,11 @@ GLOBAL_READER_DEFAULT_COLLECTORS = ("identity", "security", "teams", "intune")
 
 def _scrub_command_line(command_line: list[str]) -> list[str]:
     """Remove token values from command history before writing into logs/manifest."""
-    scrubbed: list[str] = []
-    skip_next = False
-    for item in command_line:
-        if skip_next:
-            scrubbed.append("***redacted***")
-            skip_next = False
-            continue
-        if item in SENSITIVE_CLI_ARGS:
-            scrubbed.append(item)
-            skip_next = True
-            continue
-        if item.startswith("--client-secret="):
-            scrubbed.append("--client-secret=***redacted***")
-            continue
-        if item.startswith("--access-token="):
-            scrubbed.append("--access-token=***redacted***")
-            continue
-        scrubbed.append(item)
-    if skip_next:
-        scrubbed.append("***redacted***")
-    return scrubbed
+    return _redact_argv(command_line, sensitive_flags=SENSITIVE_CLI_ARGS)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Microsoft tenant audit collection.")
+    parser = argparse.ArgumentParser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--tenant-name", default="tenant", help="Label for the output folder.")
     parser.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
     parser.add_argument("--client-id", default=None, help="App registration ID.")
