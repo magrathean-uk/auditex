@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from azure_tenant_audit import cli
 from auditex.rules import list_rule_inventory
 from auditex import cli as auditex_cli
@@ -20,6 +22,50 @@ def test_parser_accepts_collector_preset() -> None:
     )
 
     assert args.collector_preset == "identity-only"
+
+
+@pytest.mark.parametrize("preset_name", ["config-only", "full"])
+def test_broad_presets_select_teams_policy_after_teams(preset_name, tmp_path):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.run import build_live_run_plan
+
+    expected = [
+        "identity", "app_consent", "conditional_access", "auth_methods",
+        "external_identity", "consent_policy", "domains_hybrid", "licensing",
+        "identity_governance", "sharepoint", "teams", "teams_policy",
+    ]
+    if preset_name == "full":
+        expected = [
+            "identity", "app_consent", "security", "conditional_access", "defender",
+            "service_health", "auth_methods", "reports_usage", "external_identity",
+            "consent_policy", "domains_hybrid", "licensing", "identity_governance",
+            "intune", "sharepoint", "sharepoint_access", "onedrive_posture",
+            "teams", "teams_policy",
+        ]
+    presets = load_collector_presets()
+    assert presets[preset_name]["include"] == expected
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "constructed", "--collector-preset", preset_name,
+    ])
+    plan = build_live_run_plan(
+        args, output_dir=tmp_path,
+        collector_config=CollectorConfig.from_path(Path("configs/collector-definitions.json")),
+        permission_hints={}, collector_presets=presets,
+    )
+    assert plan.selected_collectors == expected
+
+
+def test_other_preset_lists_remain_unchanged():
+    from azure_tenant_audit.presets import load_collector_presets
+
+    presets = load_collector_presets()
+    assert {name: preset["include"] for name, preset in presets.items()
+            if name not in {"config-only", "full"}} == {
+        "identity-only": ["identity", "app_consent"],
+        "security-only": ["security", "conditional_access", "defender", "auth_methods", "identity_governance"],
+        "power-platform": ["identity", "licensing", "power_platform", "power_bi"],
+    }
 
 
 def test_collector_preset_resolves_before_profile_defaults(tmp_path: Path) -> None:

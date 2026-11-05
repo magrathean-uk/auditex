@@ -61,6 +61,21 @@ Start with delegated read access when you only have tenant login access.
 
 Generate the access plan before asking an admin to grant roles or app permissions.
 
+The `config-only` and `full` presets include Teams policy posture (`teams_policy`)
+immediately after Teams inventory (`teams`). Profile defaults and other presets are
+unchanged; Power Platform and Power BI remain off by default and require the separate
+opt-in `power-platform` preset. The setup guide derives its collector list from the
+selected preset.
+
+Without a Teams certificate token, `teams_policy` still attempts its seven existing
+`Get-Cs*` reads. The PowerShell adapter does not connect a Teams session: failures
+with `session_not_connected` produce failed coverage rows with reason
+`teams_token_unavailable`, a `partial` collector and a `partial` run (exit code 1),
+even if all other collectors succeed. Missing PowerShell instead produces
+`command_not_found` and the same partial outcome. The current CLI's client-secret
+resource tokens cannot enable the Teams admin API reader. See
+[Teams policy access and limits](admin-permission-guide.md#teams-policy-coverage-in-presets).
+
 ```bash
 auditex setup-guide m365 \
   --mode delegated \

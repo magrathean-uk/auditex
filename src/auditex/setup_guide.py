@@ -324,6 +324,17 @@ def build_m365_setup_guide(
         "Create a local client secret or certificate and store it outside git.",
         "Run app-mode probe before a full unattended run.",
     ]
+    if "teams_policy" in selected:
+        teams_step = (
+            "Review Teams policy coverage: the admin API requires a certificate-authenticated Teams token "
+            "and Global Reader on the service principal (commercial/GCC); the current CLI's client-secret "
+            "resource tokens cannot enable it. Without that token, seven existing Get-Cs* reads are still "
+            "attempted without a Teams session. session_not_connected failures produce failed coverage rows "
+            "with reason teams_token_unavailable, a partial collector and a partial run (exit code 1). "
+            "Org-wide tenant_app_settings are not collected on app-only runs."
+        )
+        delegated_steps.append(teams_step)
+        app_steps.append(teams_step)
     exchange_steps = [
         "Install Microsoft 365 CLI only if Exchange or Purview command collectors are selected.",
         "Install PowerShell and ExchangeOnlineManagement only if Exchange PowerShell policy depth is selected.",

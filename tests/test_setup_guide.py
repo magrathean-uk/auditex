@@ -46,6 +46,26 @@ def test_setup_guide_markdown_includes_commands_and_sources() -> None:
     assert "Google Workspace domain-wide delegation" in markdown
 
 
+@pytest.mark.parametrize("preset_name", ["config-only", "full"])
+@pytest.mark.parametrize("mode", ["delegated", "app"])
+def test_m365_preset_setup_guide_includes_teams_policy_and_token_limits(preset_name, mode):
+    payload = build_setup_guide(provider="m365", collector_preset=preset_name, mode=mode)
+    selected = payload["selected_collectors"]
+    assert selected[selected.index("teams") + 1] == "teams_policy"
+    row = next(row for row in payload["collector_permissions"] if row["collector"] == "teams_policy")
+    assert row["required_permissions"] == []
+    assert "certificate-authenticated Teams admin API token" in row["notes"]
+    assert "teams_token_unavailable" in row["notes"]
+    assert "Org-wide tenant_app_settings are not collected on app-only runs" in row["notes"]
+    markdown = render_setup_guide_markdown(payload)
+    assert "teams_policy" in markdown
+    assert "teams_token_unavailable" in markdown
+    assert "partial run (exit code 1)" in markdown
+    assert "teams_token_unavailable" not in render_setup_guide_markdown(
+        build_setup_guide(provider="m365", collector_preset="identity-only", mode=mode)
+    )
+
+
 def test_setup_guide_cli_json_and_markdown(capsys) -> None:
     assert auditex_cli.main(["setup-guide", "google", "--collector-preset", "identity", "--format", "json"]) == 0
     google_payload = json.loads(capsys.readouterr().out)

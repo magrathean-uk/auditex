@@ -47,6 +47,27 @@ Expected blockers on basic tenants:
 
 Auditex records these as blockers in `live-readiness.json` and `audit-plan.json`.
 
+### Teams Policy Coverage In Presets
+
+The `config-only` and `full` presets include `teams_policy` immediately after `teams`.
+Other presets and profile defaults are unchanged; Power Platform and Power BI remain
+off by default in the separate opt-in `power-platform` preset.
+
+Teams admin API reads require a certificate-authenticated Teams resource token and
+Global Reader on the service principal, in commercial or GCC environments. They add
+no Graph scope. The current CLI acquires only client-secret resource tokens, which
+this reader does not accept; a certificate-capable client must supply the Teams token.
+Org-wide `tenant_app_settings` (TEAMS 5.1-5.3) are not collected on app-only runs.
+
+Without a Teams certificate token, the existing seven `Get-Cs*` PowerShell reads
+are still attempted. The PowerShell adapter connects Exchange only, so it does not
+establish a Teams session. When those commands fail with `session_not_connected`,
+each coverage row is `failed` with reason `teams_token_unavailable`; the
+`teams_policy` collector is `partial`, and the run reports `partial` with exit code 1
+even if every other collector succeeds. If PowerShell itself is absent, the rows
+instead report `command_not_found`; the collector and run are still `partial`.
+These are read-only coverage gaps, not successful policy assessments.
+
 ### App-Readonly
 
 Use this when a customer grants an app registration for repeatable read-only audits.

@@ -24,6 +24,66 @@ class _IdentityCollector:
         )
 
 
+@pytest.mark.parametrize("preset_name", ["config-only", "full"])
+def test_preset_without_teams_token_reports_partial(tmp_path: Path, monkeypatch, preset_name) -> None:
+    """Exercise finalisation with constructed clients; never launch PowerShell or contact a tenant."""
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+    from azure_tenant_audit.presets import load_collector_presets
+
+    class _AppClient:
+        graph_endpoint = "https://graph.microsoft.com/v1.0"
+
+        def __init__(self, auth, **kwargs):
+            self.auth = auth
+
+        def app_token_for(self, scope):
+            raise AssertionError("Client-secret auth must not request a Teams token")
+
+    class _DisconnectedTeams:
+        def __init__(self):
+            self.calls = []
+
+        def run(self, command, *, log_event=None, session=None):
+            self.calls.append((command, session))
+            return {"error": "session_not_connected", "error_class": "session_not_connected"}
+
+    selected = load_collector_presets()[preset_name]["include"]
+    registry = {name: _IdentityCollector(name) for name in selected}
+    registry["teams_policy"] = TeamsPolicyCollector()
+    commands = _DisconnectedTeams()
+
+    def adapter(name):
+        assert name == "powershell_graph", "No Teams REST adapter is used without a certificate token"
+        return commands
+
+    monkeypatch.setattr(cli, "GraphClient", _AppClient)
+    monkeypatch.setattr(cli, "REGISTRY", registry)
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", adapter)
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "constructed", "--tenant-id", "constructed-tenant",
+        "--client-id", "constructed-app", "--client-secret", "constructed-secret",
+        "--collector-preset", preset_name, "--out", str(tmp_path), "--run-name", "preset",
+    ])
+
+    assert cli.run_live(args) == 1
+
+    run_dir = tmp_path / "constructed-preset"
+    manifest = json.loads((run_dir / "run-manifest.json").read_text())
+    summary = json.loads((run_dir / "summary.json").read_text())
+    coverage = json.loads((run_dir / "coverage.json").read_text())
+    assert manifest["overall_status"] == "partial"
+    rows = {row["name"]: row for row in summary["collectors"]}
+    assert list(rows) == selected
+    assert rows["teams_policy"]["status"] == "partial"
+    assert all(row["status"] == "ok" for name, row in rows.items() if name != "teams_policy")
+    assert len(coverage) == 7
+    assert all(row["status"] == "failed" and row["error_class"] == "session_not_connected"
+               and row["reason"] == "teams_token_unavailable" for row in coverage)
+    assert commands.calls == [
+        (command, {"kind": "microsoft_teams"}) for _, command in TeamsPolicyCollector.command_collectors
+    ]
+
+
 def test_offline_creates_bundle(tmp_path: Path) -> None:
     from azure_tenant_audit.cli import run_offline
 

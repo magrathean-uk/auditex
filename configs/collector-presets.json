@@ -13,7 +13,8 @@
         "licensing",
         "identity_governance",
         "sharepoint",
-        "teams"
+        "teams",
+        "teams_policy"
       ],
       "exclude": [],
       "plane": "inventory"
@@ -38,7 +39,8 @@
         "sharepoint",
         "sharepoint_access",
         "onedrive_posture",
-        "teams"
+        "teams",
+        "teams_policy"
       ],
       "exclude": [],
       "plane": "full"
