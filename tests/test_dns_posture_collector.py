@@ -419,7 +419,13 @@ def test_dns_posture_collector_uses_fallback_selectors_by_default() -> None:
         for (name, _kind) in resolver.queries
         if "._domainkey.naked.example" in name
     ]
-    # Both primary + fallback should have been probed exactly once each.
-    assert queried_dkim == [*DEFAULT_DKIM_SELECTORS, *FALLBACK_DKIM_SELECTORS]
+    # Both primary + fallback are probed exactly once each, then the two dashed
+    # ScubaGear selectors for the raw dkim_records operation.
+    assert queried_dkim == [
+        *DEFAULT_DKIM_SELECTORS,
+        *FALLBACK_DKIM_SELECTORS,
+        "selector1-naked-example",
+        "selector2-naked-example",
+    ]
     record = result.payload["domainPosture"]["value"][0]
     assert record["dkim"]["selectors_present"] == []

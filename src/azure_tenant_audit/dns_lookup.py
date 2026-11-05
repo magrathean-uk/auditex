@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Protocol
+from typing import Any, Iterable, NamedTuple, Protocol
 
 import requests
 
@@ -27,6 +27,11 @@ class DohError(RuntimeError):
     """Raised when a DoH query cannot be completed."""
 
 
+class DnsAnswer(NamedTuple):
+    records: list[str]
+    outcome: str  # answers, empty or nxdomain
+
+
 class DnsResolver(Protocol):
     def query(self, name: str, record_type: str) -> list[str]: ...
 
@@ -40,6 +45,9 @@ class DohClient:
     timeout: float = DEFAULT_TIMEOUT_SECONDS
 
     def query(self, name: str, record_type: str) -> list[str]:
+        return self.query_detailed(name, record_type).records
+
+    def query_detailed(self, name: str, record_type: str) -> DnsAnswer:
         try:
             response = self.session.get(
                 self.endpoint,
@@ -70,7 +78,7 @@ class DohClient:
             # are not evidence that the record does not exist, so the domain reads unknown, never "missing".
             raise DohError(f"DoH resolver could not answer {record_type} {name}: {_RCODE_NAMES.get(rcode, f'rcode {rcode}')}")
         if rcode == _RCODE_NXDOMAIN and not payload.get("Answer"):
-            return []
+            return DnsAnswer([], "nxdomain")
         answer = payload.get("Answer") or []
         records: list[str] = []
         for entry in answer:
@@ -80,7 +88,7 @@ class DohClient:
             if not isinstance(data, str):
                 continue
             records.append(_decode_txt(data))
-        return records
+        return DnsAnswer(records, "answers" if records else "empty")
 
 
 def _decode_txt(data: str) -> str:
@@ -89,6 +97,136 @@ def _decode_txt(data: str) -> str:
     if parts:
         return "".join(parts)
     return data.strip().strip('"')
+
+
+def _ask(resolver: DnsResolver, name: str) -> DnsAnswer:
+    return _ask_type(resolver, name, "TXT")
+
+
+def _ask_type(resolver: DnsResolver, name: str, record_type: str) -> DnsAnswer:
+    detailed = getattr(resolver, "query_detailed", None)
+    if detailed is not None:
+        return detailed(name, record_type)
+    records = resolver.query(name, record_type)
+    return DnsAnswer(records, "answers" if records else "empty")
+
+
+class CachingResolver:
+    """Share successful answers between posture and raw records; never cache DohError."""
+
+    def __init__(self, resolver: DnsResolver):
+        self.resolver = resolver
+        self.cache: dict[tuple[str, str], DnsAnswer] = {}
+
+    def query(self, name: str, record_type: str) -> list[str]:
+        return self.query_detailed(name, record_type).records
+
+    def query_detailed(self, name: str, record_type: str) -> DnsAnswer:
+        key = (name, record_type)
+        if key not in self.cache:
+            self.cache[key] = _ask_type(self.resolver, name, record_type)
+        return self.cache[key]
+
+
+def is_coexistence_domain(domain: str) -> bool:
+    """Infer ScubaGear's IsCoexistenceDomain from the .mail.onmicrosoft.com suffix.
+
+    Graph domains do not carry the Exchange coexistence property (SG-P:594-599).
+    """
+    return domain.lower().endswith(".mail.onmicrosoft.com")
+
+
+def _dns_log(name: str, answer: DnsAnswer) -> dict[str, Any]:
+    # SG-P:429-463: successful DoH log shape, including the NXDOMAIN distinction.
+    result = ("Query returned NXDomain" if answer.outcome == "nxdomain"
+              else f"Query returned {len(answer.records)} txt records")
+    return {"query_name": name, "query_method": "DoH", "query_result": result,
+            "query_answers": answer.records}
+
+
+def scuba_spf_record(domain: str, resolver: DnsResolver) -> dict[str, Any]:
+    answer = _ask(resolver, domain)
+    # SG-P:520-545: case-sensitive prefix and substring checks, all TXT answers retained.
+    spf = [r for r in answer.records if r.startswith("v=spf1 ")]
+    compliant = any(any(tag in r for tag in ("-all", "~all", "redirect")) for r in spf)
+    if compliant:
+        message = "SPF record found."
+    elif spf:
+        message = "SPF record found, but it does not fail unapproved senders or redirect to one that does."
+    elif answer.records:
+        message = "Domain name exists but no SPF records returned."
+    # SG-P:547-560: resolver failures propagate rather than become an SPF result.
+    elif answer.outcome == "nxdomain":
+        message = "Domain does not exist."
+    else:
+        message = "Domain name exists but no answers returned."
+    return {"domain": domain, "compliant": compliant, "message": message,
+            "rdata": answer.records, "log": [_dns_log(domain, answer)]}
+
+
+def scuba_dkim_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | None:
+    if is_coexistence_domain(domain):
+        return None
+    # SG-P:601-629: try four selectors in order; any answer, including CNAME, wins.
+    dashed = domain.replace(".", "-")
+    selectors = ("selector1", "selector2", f"selector1-{dashed}", f"selector2-{dashed}")
+    log = []
+    for selector in selectors:
+        name = f"{selector}._domainkey.{domain}"
+        answer = _ask(resolver, name)
+        log.append(_dns_log(name, answer))
+        if answer.records:
+            break
+    return {"domain": domain, "rdata": answer.records, "log": log}
+
+
+def _valid_dmarc(records: list[str]) -> list[str]:
+    # PowerShell -match is case-insensitive (SG-P:674,730).
+    return [r for r in records if re.match(r"^v=DMARC1", r, re.IGNORECASE)]
+
+
+def _dmarc_walk(domain: str, resolver: DnsResolver, log: list[dict[str, Any]]) -> list[str]:
+    """SG-P:698-765: RFC 9989 parent walk after the author query, at most eight total."""
+    author = [label for label in domain.split(".") if label]
+    labels = author[:]
+    queries = 1
+    selected: list[str] = []
+    policy_domain = None
+    while len(labels) > 1 and queries < 8:
+        # SG-P:707-716: long names jump to seven labels, otherwise remove one.
+        labels = labels[-7:] if len(labels) >= 8 else labels[1:]
+        parent = ".".join(labels)
+        name = f"_dmarc.{parent}"
+        answer = _ask(resolver, name)
+        queries += 1
+        log.append(_dns_log(name, answer))
+        valid = _valid_dmarc(answer.records)
+        # SG-P:724-730: zero or multiple valid answers do not end discovery.
+        if len(valid) != 1:
+            continue
+        if re.search(r"psd=y\b", valid[0], re.IGNORECASE):
+            # SG-P:739-755: prefer the policy exactly one label below the PSD.
+            start = len(author) - len(labels) - 1
+            organisational = ".".join(author[start:]) if start >= 0 else None
+            return selected if policy_domain == organisational else valid
+        selected, policy_domain = valid, parent
+        # SG-P:758-764: psd=n declares the organisational boundary itself.
+        if re.search(r"psd=n\b", valid[0], re.IGNORECASE):
+            break
+    return selected
+
+
+def scuba_dmarc_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | None:
+    # SG-P:661-665: coexistence domains cannot publish custom DMARC records.
+    if is_coexistence_domain(domain):
+        return None
+    name = f"_dmarc.{domain}"
+    answer = _ask(resolver, name)
+    log = [_dns_log(name, answer)]
+    valid = _valid_dmarc(answer.records)
+    # SG-P:674-696: only one author policy wins; other TXT does not block parents.
+    records = valid if len(valid) == 1 else _dmarc_walk(domain, resolver, log)
+    return {"domain": domain, "rdata": records, "log": log}
 
 
 def parse_spf(record: str) -> dict[str, Any] | None:

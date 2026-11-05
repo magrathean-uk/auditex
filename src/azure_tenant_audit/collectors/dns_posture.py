@@ -11,12 +11,17 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Iterable, Optional
 
+from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from ..dns_lookup import (
     DEFAULT_DOH_ENDPOINT,
+    CachingResolver,
     DohClient,
     DohError,
     DnsResolver,
     collect_domain_posture,
+    scuba_dkim_record,
+    scuba_dmarc_record,
+    scuba_spf_record,
     unknown_posture,
 )
 from ..exposure_lookup import (
@@ -36,6 +41,8 @@ DEFAULT_DKIM_SELECTORS = ("selector1", "selector2")
 FALLBACK_DKIM_SELECTORS = ("s1", "s2", "google", "default", "k1", "mail")
 # Upper bound on per-domain public HTTPS lookups so very large domain estates stay cheap.
 MAX_PUBLIC_LOOKUP_DOMAINS = 25
+# Bound only the new raw-record fanout; the existing posture loop is unchanged.
+MAX_RECORD_DOMAINS = 200
 
 
 def _policy_fetch_failed(policy: dict[str, Any]) -> bool:
@@ -60,8 +67,10 @@ class DnsPostureCollector(Collector):
     def run(self, context: dict[str, Any]) -> CollectorResult:
         client: GraphClient | None = context.get("client")
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
-        resolver: DnsResolver = context.get("dns_resolver") or DohClient(
-            endpoint=context.get("doh_endpoint", DEFAULT_DOH_ENDPOINT)
+        resolver = CachingResolver(
+            context.get("dns_resolver") or DohClient(
+                endpoint=context.get("doh_endpoint", DEFAULT_DOH_ENDPOINT)
+            )
         )
         dkim_selectors: Iterable[str] = context.get("dkim_selectors", DEFAULT_DKIM_SELECTORS)
         dkim_fallback_selectors: Iterable[str] = context.get(
@@ -189,6 +198,10 @@ class DnsPostureCollector(Collector):
                 }
             )
 
+        record_coverage: list[dict[str, Any]] = []
+        records = self._scuba_records(
+            verified_domains, resolver, record_coverage, domains_status, domains_error_class, domains_error
+        )
         payload["domains"] = {"value": domains_payload}
         payload["domainPosture"] = {"value": assessments}
         if https_fetcher is not None and verified_domains:
@@ -196,6 +209,9 @@ class DnsPostureCollector(Collector):
                 "value": self._public_footprint(verified_domains, https_fetcher, coverage)
             }
 
+        # Append after existing payload and coverage entries, including public HTTPS reads.
+        payload.update(records)
+        coverage.extend(record_coverage)
         partial = any(row.get("status") != "ok" for row in coverage)
         message = "DNS posture collection partially completed" if partial else ""
         return CollectorResult(
@@ -206,6 +222,69 @@ class DnsPostureCollector(Collector):
             message=message,
             coverage=coverage,
         )
+
+    def _scuba_records(
+        self,
+        verified_domains: list[dict[str, Any]],
+        resolver: DnsResolver,
+        coverage: list[dict[str, Any]],
+        domains_status: str,
+        domains_error_class: str | None,
+        domains_error: str | None,
+    ) -> dict[str, Any]:
+        """Save bounded ScubaGear-shaped records for Graph-verified domains.
+
+        Deliberately fail closed on resolver errors, unlike ScubaGear's error-to-empty
+        record behaviour: stop that operation, retain its prior rows, and try the others.
+        """
+        domains = [str(entry.get("id") or "").strip() for entry in verified_domains]
+        domains = [domain for domain in domains if domain]
+        cut = len(domains) > MAX_RECORD_DOMAINS
+        payload = {}
+        for operation, kind, lookup in (
+            ("spf_records", "spf", scuba_spf_record),
+            ("dkim_records", "dkim", scuba_dkim_record),
+            ("dmarc_records", "dmarc", scuba_dmarc_record),
+        ):
+            start = time.perf_counter()
+            rows = []
+            status = "ok"
+            error_class = error = None
+            if domains_status != "ok":
+                status, error_class, error = "failed", domains_error_class, domains_error
+            else:
+                try:
+                    for domain in domains[:MAX_RECORD_DOMAINS]:
+                        record = lookup(domain, resolver)
+                        if record is not None:
+                            rows.append(record)
+                except DohError as exc:
+                    status, error_class, error = "failed", "dns_resolver_error", str(exc)
+            envelope: dict[str, Any] = {"value": rows, "status": status}
+            row = {
+                "collector": self.name, "type": "dns", "name": operation,
+                "endpoint": f"doh://records/{kind}", "status": status,
+                "item_count": len(rows),
+                "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                "error_class": error_class, "error": error,
+            }
+            if status == "failed":
+                envelope.update(error_class=error_class, error=error)
+            if cut and domains_status == "ok":
+                truncation = {
+                    "collection_truncated": True, "truncation_reason": REASON_FANOUT_LIMIT,
+                    "result_limit": MAX_RECORD_DOMAINS, "rows_collected": len(rows),
+                }
+                envelope.update(truncation)
+                row.update(truncation)
+                if status == "ok":
+                    row.update(
+                        status="partial", error_class=TRUNCATION_ERROR_CLASS,
+                        error=f"{operation}: collection stopped at {MAX_RECORD_DOMAINS} domains; the list is incomplete.",
+                    )
+            payload[operation] = envelope
+            coverage.append(row)
+        return payload
 
     def _public_footprint(
         self,
