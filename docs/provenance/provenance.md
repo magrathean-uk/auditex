@@ -59,6 +59,10 @@ as an Auditex measurement.
 
 ## Oracle-labelled cases
 
+| Source | Licence | Vendored subset |
+| --- | --- | --- |
+| ScubaGear `2446ad723b7f55031cc02c8aca244d731d468cba` | CC0 1.0 Universal | `configs/risky-delegated-permissions.json`: the resource map and delegated risky permission ids with `Name` and `RiskLevel`, from `PowerShell/ScubaGear/schemas/RiskyAppPermissions.json`; application permissions omitted. |
+
 `scripts/build-oracle-cases.py` and `scripts/split-oracle-cases.py` produce model-development
 cases whose labels are the deterministic output of CISA's ScubaGear policy engine, run offline.
 

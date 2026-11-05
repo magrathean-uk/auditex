@@ -1328,6 +1328,7 @@ AREA_ADAPTER_MODULES: tuple[str, ...] = (
     "auditex.scuba_adapters_teams",
     "auditex.scuba_adapters_defender",
     "auditex.scuba_adapters_powerplat",
+    "auditex.scuba_adapters_aad",
 )
 
 PS_SECTIONS = {
@@ -1607,6 +1608,27 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             report[section]["ignored_failures"] = sorted(bundle.ignored)
         if bundle.ignored_fields:
             report[section]["ignored_fields"] = sorted(bundle.ignored_fields)
+        if ("auditex.scuba_adapters_aad" in AREA_ADAPTER_MODULES
+                and manifest_error is None and manifest.get("platform", "m365") == "m365"
+                and report[section]["status"] == "not_collected"
+                and report[section]["reason"] == "incomplete_shape"
+                and report[section].get("detail", {}).get("field") not in {
+                    "status", "read_state", "collection_status", "complete", "partial", "incomplete",
+                    "collection_truncated", "bounded_sample", "truncation_reason", "odata.nextLink"}):
+            from auditex.scuba_adapters_aad import RULE_VARIANTS
+
+            variant = RULE_VARIANTS.get(section)
+            if variant is not None:
+                bundle.reset()
+                result.rule_sections[section] = dict(NOT_COLLECTED)
+                try:
+                    result.rule_sections[section] = variant(bundle)
+                except Unavailable as exc:
+                    # A fresh source/coverage/scan failure must never become rule evidence.
+                    if exc.reason != "incomplete_shape":
+                        result.rule_sections[section] = dict(NOT_COLLECTED)
+                except (ValueError, TypeError, KeyError, OverflowError):
+                    pass
     redaction = _redact(result, salt, redact)
     for section, value in result.items():
         if value != NOT_COLLECTED and _oversize(annotate_enum_names(section, value), max_items, max_chars):
