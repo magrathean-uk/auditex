@@ -20,6 +20,7 @@ from .licensing import LicensingCollector
 from .mailbox_forwarding import MailboxForwardingCollector
 from .onedrive_posture import OneDrivePostureCollector
 from .power_platform import PowerPlatformCollector
+from .power_bi import PowerBICollector
 from .purview import PurviewCollector
 from .reports_usage import ReportsUsageCollector
 from .security import SecurityCollector
@@ -54,6 +55,7 @@ REGISTRY = {
     "identity_governance": IdentityGovernanceCollector(),
     "onedrive_posture": OneDrivePostureCollector(),
     "power_platform": PowerPlatformCollector(),
+    "power_bi": PowerBICollector(),
     "sentinel_xdr": SentinelXdrCollector(),
     "identity_protection": IdentityProtectionCollector(),
     "defender_cloud_apps": DefenderCloudAppsCollector(),

@@ -1,274 +1,237 @@
-"""Collector for Microsoft Power Platform admin posture.
-
-Capability-gated by design: if the tenant has no Power Platform admin token
-configured, the collector emits structured `service_not_available` diagnostics
-rather than failing the whole run. With a token, it enumerates environments,
-DLP policies, and tenant-level Power Platform settings. The environment and policy lists are
-followed through their ``nextLink`` to the last page; a page that cannot be read, or a list longer
-than ``MAX_LIST_PAGES`` pages, leaves the list cut and marked as a coverage gap.
-"""
+"""Inert, capability-gated Power Platform admin metadata collection."""
 from __future__ import annotations
 
+import re
 import time
-from typing import Any, Callable, Optional
+from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from ..collection_gaps import REASON_PAGINATION_FAILED, REASON_PAGINATION_NOT_FOLLOWED
-from ..power_platform import PowerPlatformClient, PowerPlatformError
+from ..power_platform import (
+    POWER_PLATFORM_ROOT, PowerPlatformClient, http_error_class, power_platform_client_from, same_origin,
+)
 from .base import Collector, CollectorResult, record_truncation
 
-# A list this long is not read to its end: the cut is recorded, never passed over.
 MAX_LIST_PAGES = 50
+TENANT_SETTINGS_METHOD = "GET"
+ENVIRONMENTS = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2023-06-01"
+DLP_POLICIES = "/providers/PowerPlatform.Governance/v2/policies?api-version=2020-10-01"
+DLP_SCOPES = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/apiPolicies?api-version=2016-11-01"
+TENANT_SETTINGS = "/providers/Microsoft.BusinessAppPlatform/listTenantSettings?api-version=2023-06-01"
+TENANT_ISOLATION = "/providers/PowerPlatform.Governance/v1/tenants/{TenantId}/tenantIsolationPolicy?api-version=2020-06-01"
+OPERATIONS = {
+    "environments": ENVIRONMENTS, "dlpPolicies": DLP_POLICIES, "dlpPolicyScopes": DLP_SCOPES,
+    "tenantSettings": TENANT_SETTINGS, "environmentCreation": TENANT_SETTINGS, "tenantIsolation": TENANT_ISOLATION,
+}
+_GUID = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+
+
+def _status(status: str = "ok", error_class: str | None = None, error: str | None = None) -> dict[str, Any]:
+    return {"status": status, "duration_ms": 0.0, "error_class": error_class, "error": error}
+
+
+def _object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 class PowerPlatformCollector(Collector):
     name = "power_platform"
-    description = (
-        "Power Platform admin posture: environments, DLP policies, and tenant settings. "
-        "Capability-gated; if no Power Platform admin token is available the collector "
-        "records a structured diagnostic instead of crashing the run."
-    )
+    description = "Optional Power Platform environments, DLP policy scopes and tenant settings."
     required_permissions: list[str] = []
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
-        client = context.get("power_platform_client")
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
         coverage: list[dict[str, Any]] = []
-        payload: dict[str, Any] = {
-            "environments": {"value": []},
-            "dlpPolicies": {"value": []},
-            "tenantSettings": {"value": []},
-        }
+        payload: dict[str, Any] = {}
 
-        if client is None:
-            for endpoint_name, endpoint in (
-                ("environments", "/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments"),
-                ("dlpPolicies", "/providers/PowerPlatform.Governance/v2/policies"),
-                ("tenantSettings", "/providers/Microsoft.BusinessAppPlatform/listTenantSettings"),
-            ):
-                coverage.append(
-                    {
-                        "collector": self.name,
-                        "type": "bap",
-                        "name": endpoint_name,
-                        "endpoint": endpoint,
-                        "status": "skipped",
-                        "item_count": 0,
-                        "duration_ms": 0.0,
-                        "error_class": "service_not_available",
-                        "error": "no Power Platform admin token configured",
-                    }
-                )
-            return CollectorResult(
-                name=self.name,
-                status="partial",
-                payload=payload,
-                item_count=0,
-                message="Power Platform collection skipped: no admin token",
-                coverage=coverage,
-            )
+        def put(name: str, rows: list[Any], status: dict[str, Any], cut: str | None = None,
+                endpoint: str | None = None) -> None:
+            row = self._coverage_row(name, endpoint or OPERATIONS[name], status, len(rows))
+            envelope = {"value": rows, "status": row["status"]}
+            if cut:
+                record_truncation(row, list_name=name, rows=len(rows), limit=None, reason=cut)
+                envelope.update(status=row["status"], collection_truncated=True, truncation_reason=cut)
+            coverage.append(row)
+            payload[name] = envelope
+            logger = context.get("audit_logger")
+            if logger:
+                logger("collector.endpoint.finished", "Collector endpoint request completed", {
+                    "collector": self.name, "endpoint_name": name, "status": row["status"],
+                    "item_count": len(rows), "duration_ms": row["duration_ms"], "error_class": row["error_class"],
+                })
 
-        environments = self._fetch_environments(client, coverage, log_event)
-        payload["environments"] = {"value": environments}
+        try:
+            client = power_platform_client_from(context)
+        except Exception:
+            client = None
+        if client is None or (hasattr(client, "token") and not client.token):
+            for name in OPERATIONS:
+                put(name, [], _status("skipped", "service_not_available", "no Power Platform admin token available"))
+        else:
+            for name, shape in (("environments", self._environment), ("dlpPolicies", self._dlp_policy),
+                                ("dlpPolicyScopes", self._dlp_scope)):
+                path = OPERATIONS[name]
+                api_version = parse_qs(urlsplit(path).query)["api-version"][0]
+                items, status, cut = self._safe_get_all(client, path, api_version=api_version)
+                try:
+                    rows = [shape(item) for item in items or [] if isinstance(item, dict)]
+                except (TypeError, ValueError):
+                    rows = []
+                    status.update(status="failed", error_class="incomplete_evidence", error="list item structure unusable")
+                put(name, rows, status, cut)
 
-        dlp_policies = self._fetch_dlp_policies(client, coverage, log_event)
-        payload["dlpPolicies"] = {"value": dlp_policies}
-        for list_name in ("environments", "dlpPolicies"):
-            cut = next((row for row in coverage if row["name"] == list_name and row.get("collection_truncated")), None)
-            if cut is not None:
-                payload[list_name].update({"collection_truncated": True, "truncation_reason": cut["truncation_reason"]})
+            raw, status = self._safe_get(client, TENANT_SETTINGS, method=TENANT_SETTINGS_METHOD)
+            if status["status"] == "ok" and not isinstance(raw, dict):
+                status.update(status="failed", error_class="incomplete_evidence", error="tenant settings object missing")
+            settings = []
+            creation = []
+            if status["status"] == "ok":
+                settings = [{
+                    "is_power_apps_enabled": raw.get("isPowerAppsEnabled"),
+                    "is_power_automate_enabled": raw.get("isPowerAutomateEnabled"),
+                    "is_dataverse_enabled": raw.get("isDataverseEnabled"),
+                }]
+                creation = [self._environment_creation(raw)]
+            put("tenantSettings", settings, status)
+            put("environmentCreation", creation, status)
 
-        settings = self._fetch_tenant_settings(client, coverage, log_event)
-        if settings:
-            payload["tenantSettings"] = {"value": [settings]}
+            tenant_id = None
+            graph = context.get("client")
+            if hasattr(graph, "get_all"):
+                try:
+                    organisations = graph.get_all("/organization", params={"$select": "id"})
+                    if isinstance(organisations, list) and len(organisations) == 1:
+                        candidate = _object(organisations[0]).get("id")
+                        if isinstance(candidate, str) and _GUID.fullmatch(candidate):
+                            tenant_id = candidate
+                except Exception:
+                    pass  # Never retain Graph errors or credentials in this collector's diagnostics.
+            if tenant_id is None:
+                put("tenantIsolation", [], _status("failed", "missing_argument", "canonical tenant GUID unavailable"))
+            else:
+                endpoint = TENANT_ISOLATION.replace("{TenantId}", tenant_id)
+                raw, status = self._safe_get(client, endpoint)
+                rows = []
+                if status["status"] == "ok":
+                    if raw is None:
+                        rows = [{"never_configured": True}]
+                    elif isinstance(raw, dict):
+                        properties = _object(raw.get("properties"))
+                        rows = [{"properties": {"isDisabled": properties["isDisabled"]} if "isDisabled" in properties else {}}]
+                    else:
+                        status.update(status="failed", error_class="incomplete_evidence", error="tenant isolation object missing")
+                put("tenantIsolation", rows, status)
 
-        partial = any(row.get("status") not in {"ok"} for row in coverage)
+        partial = any(row["status"] != "ok" for row in coverage)
         return CollectorResult(
-            name=self.name,
-            status="partial" if partial else "ok",
-            payload=payload,
-            item_count=len(environments) + len(dlp_policies),
-            message="Power Platform collection partially completed" if partial else "",
-            coverage=coverage,
+            name=self.name, status="partial" if partial else "ok", payload=payload,
+            item_count=sum(row["item_count"] for row in coverage), coverage=coverage,
+            message="Power Platform collection incomplete" if partial else "",
         )
 
-    def _fetch_environments(
-        self,
-        client: PowerPlatformClient,
-        coverage: list[dict[str, Any]],
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
-    ) -> list[dict[str, Any]]:
-        path = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments"
-        items, status, cut_reason = self._safe_get_all(client, path)
-        rows: list[dict[str, Any]] = []
-        if items is not None:
-            for env in items:
-                if not isinstance(env, dict):
-                    continue
-                properties = env.get("properties") or {}
-                rows.append(
-                    {
-                        "id": env.get("id") or env.get("name"),
-                        "name": env.get("name"),
-                        "display_name": properties.get("displayName"),
-                        "environment_sku": properties.get("environmentSku"),
-                        "is_default": bool(properties.get("isDefault")),
-                        "created_time": properties.get("createdTime"),
-                        "linked_environment_metadata": properties.get("linkedEnvironmentMetadata"),
-                    }
-                )
-        coverage.append(self._list_row("environments", path, status, len(rows), cut_reason))
-        if log_event:
-            self._log(log_event, "environments", coverage[-1], len(rows))
-        return rows
-
-    def _fetch_dlp_policies(
-        self,
-        client: PowerPlatformClient,
-        coverage: list[dict[str, Any]],
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
-    ) -> list[dict[str, Any]]:
-        path = "/providers/PowerPlatform.Governance/v2/policies"
-        items, status, cut_reason = self._safe_get_all(client, path)
-        rows: list[dict[str, Any]] = []
-        if items is not None:
-            for policy in items:
-                if not isinstance(policy, dict):
-                    continue
-                business = 0
-                non_business = 0
-                blocked = 0
-                for group in policy.get("connectorGroups", []) or []:
-                    if not isinstance(group, dict):
-                        continue
-                    classification = str(group.get("classification") or "").lower()
-                    connector_count = len(group.get("connectors") or [])
-                    if classification == "business":
-                        business += connector_count
-                    elif classification == "nonbusiness":
-                        non_business += connector_count
-                    elif classification == "blocked":
-                        blocked += connector_count
-                rows.append(
-                    {
-                        "id": policy.get("name") or policy.get("id"),
-                        "display_name": policy.get("displayName"),
-                        "environment_type": policy.get("environmentType"),
-                        "business_connector_count": business,
-                        "non_business_connector_count": non_business,
-                        "blocked_connector_count": blocked,
-                    }
-                )
-        coverage.append(self._list_row("dlpPolicies", path, status, len(rows), cut_reason))
-        if log_event:
-            self._log(log_event, "dlpPolicies", coverage[-1], len(rows))
-        return rows
-
-    def _fetch_tenant_settings(
-        self,
-        client: PowerPlatformClient,
-        coverage: list[dict[str, Any]],
-        log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]],
-    ) -> dict[str, Any] | None:
-        path = "/providers/Microsoft.BusinessAppPlatform/listTenantSettings"
-        raw, status = self._safe_get(client, path)
-        coverage.append(self._coverage_row("tenantSettings", path, status, 1 if raw else 0))
-        if log_event:
-            self._log(log_event, "tenantSettings", status, 1 if raw else 0)
-        if not isinstance(raw, dict):
-            return None
+    @staticmethod
+    def _environment(env: dict[str, Any]) -> dict[str, Any]:
+        properties = _object(env.get("properties"))
         return {
-            "is_power_apps_enabled": raw.get("isPowerAppsEnabled"),
-            "is_power_automate_enabled": raw.get("isPowerAutomateEnabled"),
-            "is_dataverse_enabled": raw.get("isDataverseEnabled"),
-            "raw": raw,
+            "id": env.get("id") or env.get("name"), "name": env.get("name"),
+            "display_name": properties.get("displayName"), "environment_sku": properties.get("environmentSku"),
+            "is_default": properties.get("isDefault"), "created_time": properties.get("createdTime"),
         }
 
     @staticmethod
-    def _safe_get(client: PowerPlatformClient, path: str) -> tuple[Any, dict[str, Any]]:
-        start = time.perf_counter()
-        try:
-            raw = client.get(path)
-            duration_ms = round((time.perf_counter() - start) * 1000, 2)
-            return raw, {"status": "ok", "duration_ms": duration_ms, "error_class": None, "error": None}
-        except PowerPlatformError as exc:
-            duration_ms = round((time.perf_counter() - start) * 1000, 2)
-            error_class = "insufficient_permissions"
-            if exc.status in (404, 410):
-                error_class = "service_not_available"
-            elif exc.status is None:
-                error_class = "client_error"
-            return None, {
-                "status": "failed",
-                "duration_ms": duration_ms,
-                "error_class": error_class,
-                "error": str(exc),
-            }
-        except Exception as exc:  # noqa: BLE001
-            duration_ms = round((time.perf_counter() - start) * 1000, 2)
-            return None, {
-                "status": "failed",
-                "duration_ms": duration_ms,
-                "error_class": "client_error",
-                "error": str(exc),
-            }
-
-    @classmethod
-    def _safe_get_all(
-        cls, client: PowerPlatformClient, path: str
-    ) -> tuple[list[Any] | None, dict[str, Any], str | None]:
-        """Every ``value`` row of a list, following ``nextLink``: ``(rows, status, cut_reason)``.
-
-        ``rows`` is ``None`` when the first page failed. ``cut_reason`` says why the list stopped before its last row:
-        a later page failed (``pagination_failed``) or the list went on past ``MAX_LIST_PAGES`` pages.
-        """
-        raw, status = cls._safe_get(client, path)
-        if not isinstance(raw, dict):
-            return None, status, None
-        items: list[Any] = list(raw.get("value") or [])
-        next_link = raw.get("nextLink") or raw.get("@odata.nextLink")
-        pages = 1
-        while isinstance(next_link, str) and next_link:
-            if pages >= MAX_LIST_PAGES:
-                return items, status, REASON_PAGINATION_NOT_FOLLOWED
-            page, page_status = cls._safe_get(client, next_link)
-            if not isinstance(page, dict):
-                return items, {**page_status, "status": "failed"}, REASON_PAGINATION_FAILED
-            items.extend(page.get("value") or [])
-            next_link = page.get("nextLink") or page.get("@odata.nextLink")
-            pages += 1
-        return items, status, None
-
-    def _list_row(
-        self, name: str, endpoint: str, status: dict[str, Any], item_count: int, cut_reason: str | None
-    ) -> dict[str, Any]:
-        row = self._coverage_row(name, endpoint, status, item_count)
-        if cut_reason:
-            record_truncation(row, list_name=name, rows=item_count, limit=None, reason=cut_reason)
-        return row
-
-    def _coverage_row(self, name: str, endpoint: str, status: dict[str, Any], item_count: int) -> dict[str, Any]:
+    def _dlp_policy(policy: dict[str, Any]) -> dict[str, Any]:
+        counts = {"business": 0, "nonbusiness": 0, "blocked": 0}
+        for group in policy.get("connectorGroups", []) or []:
+            if isinstance(group, dict):
+                classification = str(group.get("classification") or "").lower()
+                if classification in counts:
+                    counts[classification] += len(group.get("connectors") or [])
         return {
-            "collector": self.name,
-            "type": "bap",
-            "name": name,
-            "endpoint": endpoint,
-            "status": status["status"],
-            "item_count": item_count,
-            "duration_ms": status["duration_ms"],
-            "error_class": status["error_class"],
-            "error": status["error"],
+            "id": policy.get("name") or policy.get("id"), "display_name": policy.get("displayName"),
+            "environment_type": policy.get("environmentType"), "business_connector_count": counts["business"],
+            "non_business_connector_count": counts["nonbusiness"], "blocked_connector_count": counts["blocked"],
         }
 
-    def _log(self, log_event: Callable[[str, str, Optional[dict[str, Any]]], None], name: str, status: dict[str, Any], item_count: int) -> None:
-        log_event(
-            "collector.endpoint.finished",
-            "Collector endpoint request completed",
-            {
-                "collector": self.name,
-                "endpoint_name": name,
-                "status": status["status"],
-                "item_count": item_count,
-                "duration_ms": status["duration_ms"],
-                "error_class": status["error_class"],
-            },
-        )
+    @staticmethod
+    def _dlp_scope(policy: dict[str, Any]) -> dict[str, Any]:
+        properties = _object(policy.get("properties"))
+        constraint = _object(_object(properties.get("definition")).get("constraints")).get("environmentFilter1")
+        row = {}
+        if "name" in policy:
+            row["name"] = policy["name"]
+        if "displayName" in properties:
+            row["displayName"] = properties["displayName"]
+        if constraint is None:
+            row.update(environmentType="AllEnvironments", environments=[])
+        else:
+            parameters = _object(_object(constraint).get("parameters"))
+            filter_type = parameters.get("filterType")
+            row["environmentType"] = {"include": "OnlyEnvironments", "exclude": "ExceptEnvironments"}.get(
+                filter_type.lower() if isinstance(filter_type, str) else None
+            )
+            if "environments" in parameters:
+                environments = parameters["environments"]
+                if not isinstance(environments, list):
+                    raise ValueError("DLP scope environments must be a list")
+                row["environments"] = [
+                    ({"name": env["name"]} if "name" in env else {}) if isinstance(env, dict) else env
+                    for env in environments
+                ]
+        return row
+
+    @staticmethod
+    def _environment_creation(raw: dict[str, Any]) -> dict[str, Any]:
+        row = {key: raw[key] for key in (
+            "disableEnvironmentCreationByNonAdminUsers", "disableTrialEnvironmentCreationByNonAdminUsers",
+            "disablePortalsCreationByNonAdminUsers",
+        ) if key in raw}
+        platform = _object(raw.get("powerPlatform"))
+        apps = _object(platform.get("powerApps"))
+        if "disableShareWithEveryone" in apps:
+            row["powerPlatform"] = {"powerApps": {"disableShareWithEveryone": apps["disableShareWithEveryone"]}}
+        return row
+
+    @staticmethod
+    def _safe_get(client: PowerPlatformClient, path: str, *, method: str | None = None,
+                  api_version: str | None = None) -> tuple[Any, dict[str, Any]]:
+        start = time.perf_counter()
+        try:
+            kwargs = {"api_version": api_version} if api_version is not None else {}
+            raw = client.get(path, **kwargs) if method is None else client.request(method, path, **kwargs)
+            status = _status()
+        except Exception as exc:
+            raw = None
+            status = _status("failed", http_error_class(getattr(exc, "status", None)), "Power Platform read failed")
+        status["duration_ms"] = round((time.perf_counter() - start) * 1000, 2)
+        return raw, status
+
+    @classmethod
+    def _safe_get_all(cls, client: PowerPlatformClient, path: str, *,
+                      api_version: str) -> tuple[list[Any] | None, dict[str, Any], str | None]:
+        raw, status = cls._safe_get(client, path, api_version=api_version)
+        if status["status"] != "ok":
+            return None, status, None
+        items: list[Any] = []
+        pages = 0
+        while True:
+            if not isinstance(raw, dict) or not isinstance(raw.get("value"), list):
+                status.update(status="failed", error_class="incomplete_evidence", error="list response missing")
+                return items, status, REASON_PAGINATION_FAILED if pages else None
+            items.extend(raw["value"])
+            pages += 1
+            next_link = raw.get("nextLink") or raw.get("@odata.nextLink")
+            if not next_link:
+                return items, status, None
+            if not isinstance(next_link, str) or not same_origin(next_link, POWER_PLATFORM_ROOT):
+                status.update(status="failed", error_class="client_error", error="pagination URL refused")
+                return items, status, REASON_PAGINATION_FAILED
+            if pages >= MAX_LIST_PAGES:
+                return items, status, REASON_PAGINATION_NOT_FOLLOWED
+            raw, page_status = cls._safe_get(client, next_link, api_version=api_version)
+            status["duration_ms"] += page_status["duration_ms"]
+            if page_status["status"] != "ok":
+                status.update(status="failed", error_class=page_status["error_class"], error=page_status["error"])
+                return items, status, REASON_PAGINATION_FAILED
+
+    def _coverage_row(self, name: str, endpoint: str, status: dict[str, Any], item_count: int) -> dict[str, Any]:
+        return {"collector": self.name, "type": "bap", "name": name, "endpoint": endpoint,
+                "item_count": item_count, **status}

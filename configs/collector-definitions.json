@@ -213,6 +213,12 @@
         "sitePermissionsBySite"
       ]
     },
+    "power_bi": {
+      "enabled": false,
+      "description": "Optional Power BI admin tenant settings and access state",
+      "required_permissions": [],
+      "query_plan": ["tenantSettings", "accessState"]
+    },
     "power_platform": {
       "enabled": false,
       "description": "Microsoft Power Platform admin posture: environments, DLP policies, and tenant settings (capability-gated; requires admin token).",
@@ -782,6 +788,7 @@
     "sharepoint",
     "sharepoint_access",
     "onedrive_posture",
+    "power_bi",
     "power_platform",
     "sentinel_xdr",
     "identity_protection",

@@ -240,16 +240,20 @@ class _PowerPlatform:
         self.pages = pages
         self.paths: list[str] = []
 
-    def get(self, path: str) -> Any:
+    def get(self, path: str, *, api_version: str | None = None) -> Any:
         self.paths.append(path)
         page = self.pages.get(path, {})
         if isinstance(page, Exception):
             raise page
         return page
 
+    def request(self, method: str, path: str) -> Any:
+        assert method == "GET"
+        return self.get(path)
 
-ENVIRONMENTS = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments"
-POLICIES = "/providers/PowerPlatform.Governance/v2/policies"
+
+ENVIRONMENTS = "/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2023-06-01"
+POLICIES = "/providers/PowerPlatform.Governance/v2/policies?api-version=2020-10-01"
 NEXT_ENVIRONMENTS = "https://api.bap.microsoft.com/environments?page=2"
 
 
