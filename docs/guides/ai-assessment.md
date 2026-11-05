@@ -24,7 +24,7 @@ or a **model row** (one chat-completions request, retried once). Rules are check
 | `absent_section` | A section the policy needs was not collected (missing permission, licence, PowerShell-only data, failed read) | not assessed, naming the missing section |
 | `absent_field` | The section was collected but a field the policy's Rego reads is missing | not assessed, naming the field |
 | `empty_required_list` | The Conditional Access list was collected and is exactly empty, for the ten AAD policies that need at least one policy | not met |
-| `value_rule` | One of 99 registered policies is evaluated from the private rule view, including its applicability gate | met, not met, not assessed with a named reason, or not applicable |
+| `value_rule` | One of 102 registered policies is evaluated from the private rule view, including its applicability gate | met, not met, not assessed with a named reason, or not applicable |
 
 Only rows no rule decides reach the model. Gates, fields and lists are in
 `configs/scuba-rule-precheck.json`; value-rule cells are in
@@ -36,9 +36,7 @@ after source, collection-health and qualifier checks, before pruning, shape gate
 redaction. It is never persisted in prompts, assessments, sidecars or logs. A missing collector still means
 not assessed; bypassing the model gates does not create evidence.
 
-MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1 remain disabled pending the P4 projection review;
-their prepared rows stay in `tests/fixtures/value-rules/held-rows-*.json`. Teams 2.2v2, 2.3v2 and 4.1v1
-record a closed applicability gate as class `value_rule`, cell `closed_gate`.
+Teams 2.2v2, 2.3v2 and 4.1v1 record a closed applicability gate as class `value_rule`, cell `closed_gate`.
 
 A rule failure reports `rule_evaluation_failed` and recommends `report_product_fault` to
 `contact+auditex@magrathean.uk`. Collected but unusable evidence uses the `evidence_unusable` family:

@@ -129,7 +129,7 @@ supported formats, evidence references and comparison limits.
 Each finalized run contains a manifest, summary, report pack, evidence index, AI context, and validation result. The current contract version is recorded in `run-manifest.json`; required files and evidence rules are documented in [the output contract](docs/reference/output-contract.md).
 
 For an optional model-assisted SCuBA assessment, `auditex model assess <run-dir>` applies
-deterministic rules first (99 policies across Entra ID, Exchange Online, Power BI, Power Platform,
+deterministic rules first (102 policies across Entra ID, Exchange Online, Power BI, Power Platform,
 Defender, SharePoint and Teams) and asks a locally served Auditex model
 (`auditex-ministral3-8b-scuba-v10`, Ministral 3 8B with a LoRA adapter, GGUF Q5_K_M) about the rows
 no rule covers; it never changes findings. An optional model role that only explains rule results

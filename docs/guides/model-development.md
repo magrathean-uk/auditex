@@ -162,9 +162,9 @@ pack data is ignored for comparison; dry-run does not read the report pack.
 
 ### Rule pre-checks and offline product scoring
 
-Serving enables the 99 value rules in `configs/scuba-value-rules.json` by default,
+Serving enables the 102 value rules in `configs/scuba-value-rules.json` by default,
 covering Entra ID, Exchange Online, Power BI, Power Platform, Defender, SharePoint and Teams.
-The [output contract](../reference/output-contract.md) lists their exact policy ids and the three held policies.
+The [output contract](../reference/output-contract.md) lists their exact policy ids.
 The rule engine follows spec v3.9.1 and addendum A1; the catalogue retains its original `spec_version: v3.9` label.
 Their cell inventory and reason codes are checked by the `2026-11-05` assessment
 validator against the shipped inventory. A value rule uses the shared closed gate

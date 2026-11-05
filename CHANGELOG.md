@@ -74,12 +74,12 @@ the bundle gains the `privileged_roles` artefact, both additive.
 
 ### Model assessment schema
 
-- **Deterministic value rules cover 99 SCuBA policies without a model call:** Entra ID 31, Exchange Online 12,
-  Power BI 8, Power Platform 8, Defender 18, SharePoint 8 and Teams 14. The `2026-11-05` assessment schema adds
+- **Deterministic value rules cover 102 SCuBA policies without a model call:** Entra ID 31, Exchange Online 12,
+  Power BI 8, Power Platform 8, Defender 21, SharePoint 8 and Teams 14. The `2026-11-05` assessment schema adds
   class `value_rule` and inventory-validated cell, reason code and constant text; legacy `2026-10-29` is preserved.
   Both run-bundle and internal ScubaGear export paths capture a private in-memory rule view after collection-health
   withholding and before pruning, shape gates, model budgets and redaction; it is never persisted. Teams applicability
-  gates are recorded as `value_rule` / `closed_gate`. SS 1.1, 6.1 and 6.2 remain held pending the P4 projection review.
+  gates are recorded as `value_rule` / `closed_gate`.
   Rules are on by default, with hidden rollback switch `AUDITEX_DISABLE_VALUE_RULES`; offline `evaluate_precheck`
   scoring leaves them off. The model still answers uncovered rows; an optional explainer remains planned.
 - **A value rule that fails on collected evidence has its own answer.** It was answered as "section not collected"; it now

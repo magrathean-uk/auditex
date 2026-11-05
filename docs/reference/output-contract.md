@@ -147,7 +147,7 @@ the four verdict totals still sum to the policy count.
 
 Version `2026-11-05` adds the `value_rule` class and the shipped
 `configs/scuba-value-rules.json` inventory, extended through spec v3.9.1 and addendum A1.
-The route covers 99 policies (`len(policies)` in that inventory):
+The route covers 102 policies (`len(policies)` in that inventory):
 
 | Area | Policies | Policy suffixes (`MS.<area>.`) |
 | --- | --- | --- |
@@ -155,12 +155,10 @@ The route covers 99 policies (`len(policies)` in that inventory):
 | Exchange Online | 12 | `1.1v2`, `13.1v1`, `2.2v3`, `3.1v1`, `4.1v1`, `4.2v1`, `4.3v1`, `4.4v1`, `5.1v1`, `6.1v1`, `6.2v1`, `7.1v1` |
 | Power BI | 8 | `1.1v1`, `2.1v1`, `3.1v1`, `4.1v1`, `4.2v1`, `5.1v1`, `6.1v1`, `7.1v1` |
 | Power Platform | 8 | `1.1v1`, `1.2v1`, `2.1v1`, `2.2v1`, `2.3v1`, `3.1v1`, `5.1v1`, `6.1v1` |
-| Defender (SECURITYSUITE) | 18 | `1.2v1`, `1.3v1`, `1.4v1`, `2.1v1`, `2.2v1`, `2.3v1`, `2.4v1`, `3.1v1`, `3.2v1`, `3.3v1`, `3.4v1`, `4.1v1`, `5.1v1`, `7.1v1`, `7.2v1`, `7.3v1`, `8.1v1`, `8.2v1` |
+| Defender (SECURITYSUITE) | 21 | `1.1v1`, `1.2v1`, `1.3v1`, `1.4v1`, `2.1v1`, `2.2v1`, `2.3v1`, `2.4v1`, `3.1v1`, `3.2v1`, `3.3v1`, `3.4v1`, `4.1v1`, `5.1v1`, `6.1v1`, `6.2v1`, `7.1v1`, `7.2v1`, `7.3v1`, `8.1v1`, `8.2v1` |
 | SharePoint | 8 | `1.1v1`, `1.2v1`, `1.3v1`, `2.1v1`, `2.2v1`, `3.1v1`, `3.2v1`, `3.3v2` |
 | Teams | 14 | `1.1v1`, `1.2v2`, `1.3v1`, `1.4v1`, `1.5v1`, `1.6v1`, `1.7v2`, `2.1v2`, `2.2v2`, `2.3v2`, `4.1v1`, `5.1v2`, `5.2v2`, `5.3v2` |
 
-MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1 remain held pending the P4 projection review;
-prepared rows are in `tests/fixtures/value-rules/held-rows-*.json`, outside the enabled inventory.
 Serving enables value rules by default. The hidden operational
 switch `AUDITEX_DISABLE_VALUE_RULES` turns it off: the value is stripped of whitespace and
 lower-cased, and any result that is not empty and not `0`, `false`, `no` or `off` restores the

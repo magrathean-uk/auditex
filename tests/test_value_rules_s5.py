@@ -1,4 +1,4 @@
-"""Stage 5: v3.9.1+A1 vectors, held SS 1.1, strict integration and offline oracle."""
+"""Stage 5: v3.9.1+A1 vectors, SS 1.1, strict integration and offline oracle."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -29,7 +29,7 @@ from azure_tenant_audit.value_rules.record import _not_collected
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = ROOT / "tests/fixtures/value-rules"
 FIXTURE = DIRECTORY / "vectors-s5.jsonl.xz"
-HELD = "MS.SECURITYSUITE.1.1v1"
+SS11 = "MS.SECURITYSUITE.1.1v1"  # prepared here, enabled by the held-rule stage
 POLICIES = frozenset({"MS.EXO.1.1v2"} | {
     f"MS.SECURITYSUITE.{major}.{minor}v1"
     for major, minors in ((1, range(1, 4)), (2, range(1, 5)), (3, range(1, 5)))
@@ -162,14 +162,11 @@ def rows():
 
 @cache
 def rule_rows():
-    return {**catalogue()["policies"], **json.loads((DIRECTORY / "held-rows-s5.json").read_text())}
+    return catalogue()["policies"]
 
 
 def direct(policy, sections):
-    """The ordinary precheck order before the dispatch checker.
-
-    Also exercises SS 1.1 without putting its held row on the product path.
-    """
+    """The ordinary precheck order through the rule modules, before the dispatch checker."""
     row = rule_rows()[policy]
     return (closed_gate(policy, sections) or _not_collected(policy, sections, row["sections"])
             or FUNCTIONS[row["kind"]](policy, row, sections))
@@ -226,8 +223,8 @@ def test_manifest_and_stage_registration(rows):
     assert set(manifest["by_source"]) == {"constructed", "pack-train", "pack-validation", "packlic-train"}
     assert {policy: len(rule_rows()[policy]["cells"]) for policy in POLICIES} == manifest["cells_reached"]
     assert sum(manifest["cells_reached"].values()) == 202
-    assert set(rule_policies()) & POLICIES == POLICIES - {HELD}
-    assert assess(HELD, {}) is None
+    assert set(rule_policies()) & POLICIES == POLICIES
+    assert assess(SS11, {}) is not None
     assert list(catalogue()["policies"]) == sorted(catalogue()["policies"])
 
 
@@ -253,7 +250,7 @@ def test_p1_sections_and_atp_preset_dependencies():
     assert "atp_policy_rules" not in rules["MS.SECURITYSUITE.2.4v1"]["sections"]
 
 
-@pytest.mark.parametrize("policy", sorted(POLICIES - {HELD}))
+@pytest.mark.parametrize("policy", sorted(POLICIES))
 def test_product_dispatch_vectors(policy, rows):
     for vector in (row for row in rows if row["policy"] == policy):
         sections = vector["sections"]
@@ -342,9 +339,7 @@ def test_rule_view_canaries_never_leave_records_or_responses(policy, rows, capsy
             touched.add(section)
             record = direct(policy, sections)
             response = as_pack_response(record, vector["criticality"], list(sections))
-            outputs = [record, response]
-            if policy != HELD:
-                outputs.append(precheck_policy(policy, sections, list(sections), value_rules=True))
+            outputs = [record, response, precheck_policy(policy, sections, list(sections), value_rules=True)]
             captured = capsys.readouterr()
             rendered = json.dumps(outputs) + caplog.text + captured.out + captured.err
             assert all(canary not in rendered for canary in CANARIES)

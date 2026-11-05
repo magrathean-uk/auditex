@@ -31,10 +31,19 @@ STAGE3_POLICIES = frozenset({
     "MS.EXO.2.2v3", "MS.EXO.5.1v1", "MS.EXO.6.1v1", "MS.EXO.6.2v1", "MS.EXO.7.1v1", "MS.EXO.13.1v1",
     "MS.SECURITYSUITE.1.4v1", "MS.SECURITYSUITE.4.1v1", "MS.SECURITYSUITE.5.1v1",
     "MS.SECURITYSUITE.8.1v1", "MS.SECURITYSUITE.8.2v1"})
-# stage 4: live DNS and Safe Links rows; SS 6.x rows remain held until P4.
-STAGE4_POLICIES = frozenset({"MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS.EXO.4.3v1",
-                             "MS.EXO.4.4v1", "MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1",
-                             "MS.SECURITYSUITE.7.3v1"})
+# stage 4: DNS, anti-spam and Safe Links rows, one per line; SS 6.1 and 6.2 were enabled after P4.
+STAGE4_POLICIES = frozenset({
+    "MS.EXO.3.1v1",
+    "MS.EXO.4.1v1",
+    "MS.EXO.4.2v1",
+    "MS.EXO.4.3v1",
+    "MS.EXO.4.4v1",
+    "MS.SECURITYSUITE.6.1v1",
+    "MS.SECURITYSUITE.6.2v1",
+    "MS.SECURITYSUITE.7.1v1",
+    "MS.SECURITYSUITE.7.2v1",
+    "MS.SECURITYSUITE.7.3v1",
+})
 # stage 8: include the eight Power Platform policies in the exact registration gate.
 STAGE8_POLICIES = frozenset(f"MS.POWERPLATFORM.{number}v1" for number in
                             ("1.1", "1.2", "2.1", "2.2", "2.3", "3.1", "5.1", "6.1"))
@@ -44,9 +53,10 @@ STAGE6_POLICIES = frozenset({
     "MS.SHAREPOINT.2.1v1", "MS.SHAREPOINT.2.2v1", "MS.SHAREPOINT.3.1v1",
     "MS.SHAREPOINT.3.2v1", "MS.SHAREPOINT.3.3v2", "MS.AAD.5.1v1", "MS.AAD.7.1v1",
     "MS.AAD.7.2v1", "MS.AAD.7.3v1", "MS.AAD.8.1v1", "MS.AAD.8.2v1"})
-# stage 5: SS 1.1 remains held until P4.
+# stage 5: SS 1.1 was enabled after P4.
 STAGE5_POLICIES = frozenset({
     "MS.EXO.1.1v2",
+    "MS.SECURITYSUITE.1.1v1",
     "MS.SECURITYSUITE.1.2v1",
     "MS.SECURITYSUITE.1.3v1",
     "MS.SECURITYSUITE.2.1v1",

@@ -419,7 +419,7 @@ for supported exports, synthetic rehearsal files and control-mapping limits.
 ## AI assessment
 
 `auditex model assess <run-dir>` adds an optional, advisory model-assisted SCuBA assessment to a finished Microsoft 365 run:
-deterministic rules cover 99 policies across Entra ID, Exchange Online, Power BI, Power Platform,
+deterministic rules cover 102 policies across Entra ID, Exchange Online, Power BI, Power Platform,
 Defender, SharePoint and Teams; the shipped Auditex model (`auditex-ministral3-8b-scuba-v10`, served locally with
 `llama-server`) answers the rows no rule covers, and the result is compared with the findings baseline. It never
 changes findings. An optional model role that only explains rule results is planned and not built.

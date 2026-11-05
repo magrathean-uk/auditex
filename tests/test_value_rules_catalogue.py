@@ -9,7 +9,7 @@ import pytest
 
 from azure_tenant_audit.value_rules import catalogue as loader
 from azure_tenant_audit.value_rules.record import checked
-from test_value_rules_s5 import DIRECTORY, FIXTURE, HELD, POLICIES, direct, read_rows, rule_rows
+from test_value_rules_s5 import DIRECTORY, FIXTURE, POLICIES, SS11, direct, read_rows, rule_rows
 
 
 def assessment_with_comparison(template, record):
@@ -32,20 +32,10 @@ def assessment_with_comparison(template, record):
     return result
 
 
-def test_held_row_can_be_appended_without_enabling_it(monkeypatch):
-    assert HELD not in loader.catalogue()["policies"]
-    data = deepcopy(loader.catalogue())
-    data["policies"][HELD] = rule_rows()[HELD]
-    monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
-    loader.catalogue.cache_clear()
-    try:
-        loader.catalogue()
-        for vector in read_rows(FIXTURE):
-            checked(direct(vector["policy"], vector["sections"]))
-    finally:
-        monkeypatch.undo()
-        loader.catalogue.cache_clear()
-    assert HELD not in loader.catalogue()["policies"]
+def test_ss11_is_enabled_and_every_stage5_vector_passes_the_dispatch_checker():
+    assert SS11 in loader.catalogue()["policies"]
+    for vector in read_rows(FIXTURE):
+        checked(direct(vector["policy"], vector["sections"]))
 
 
 def test_fixture_origins_and_p9_correction_are_auditable():
@@ -82,28 +72,21 @@ def test_each_cell_validates_as_a_modern_assessment(tmp_path, monkeypatch):
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-stage5"}')
     template = assess_run(tmp_path, ModelConfig(model_name="contract-probe"), policies=["MS.POWERBI.1.1v1"])
-    data = deepcopy(loader.catalogue())
-    data["policies"][HELD] = rule_rows()[HELD]
-    monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
-    loader.catalogue.cache_clear()
     seen = set()
-    try:
-        for vector in read_rows(FIXTURE):
-            key = vector["policy"], vector["rule_cell"]
-            if key in seen:
-                continue
-            seen.add(key)
-            record = checked(direct(vector["policy"], vector["sections"]))
-            record["cited_sections"] = record["cited_sections"] or rule_rows()[vector["policy"]]["sections"]
-            result = assessment_with_comparison(template, record)
-            validate_assessment(result)
-            response = as_pack_response(record, vector["criticality"], list(vector["sections"]))
-            if record["verdict"] == "not_assessed":
-                expected = "required_evidence_section_not_collected" if record["cell"] == "section_not_collected" else "evidence_unusable"
-                assert response["limitations"] == [expected]
-        assert len(seen) == 202
-    finally:
-        loader.catalogue.cache_clear()
+    for vector in read_rows(FIXTURE):
+        key = vector["policy"], vector["rule_cell"]
+        if key in seen:
+            continue
+        seen.add(key)
+        record = checked(direct(vector["policy"], vector["sections"]))
+        record["cited_sections"] = record["cited_sections"] or rule_rows()[vector["policy"]]["sections"]
+        result = assessment_with_comparison(template, record)
+        validate_assessment(result)
+        response = as_pack_response(record, vector["criticality"], list(vector["sections"]))
+        if record["verdict"] == "not_assessed":
+            expected = "required_evidence_section_not_collected" if record["cell"] == "section_not_collected" else "evidence_unusable"
+            assert response["limitations"] == [expected]
+    assert len(seen) == 202
 
 
 def test_optional_current_reference_and_a1_cells():

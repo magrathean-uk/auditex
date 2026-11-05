@@ -83,9 +83,9 @@ def test_a1_exception_set_is_pinned_and_does_not_register_policies():
     assert sum(len(v) for v in VARIANTS.values() if len(v) > 1) == 190
     assert sum(map(len, VARIANTS.values())) == 193
     assert sha256(canonical(serial).encode()).hexdigest() == "00fd8197ded5350556d989e70be23d6c53c30ff536833ae426f0a15d85f192b7"
-    # stage 5 added 11 policies (held SS 1.1 still unregistered), stage 9 the eight AAD pilot rules (A1 exception
-    # contract preserved) and stage 7 sixteen AAD role and Conditional Access registrations.
-    assert len(SOURCE["policies"]) == 64 + 11 + 8 + 16
+    # stage 5 added 11 policies, stage 9 the eight AAD pilot rules (A1 exception contract preserved), stage 7
+    # sixteen AAD role and Conditional Access registrations and the held-rule stage SS 1.1, 6.1 and 6.2.
+    assert len(SOURCE["policies"]) == 64 + 11 + 8 + 16 + 3
     assert "MS.AAD.6.1v1" in SOURCE["policies"]
     assert set(TWO_CODES) == {"data_unusable_sub_domain_root_case", "data_unusable_sub_domain_without_root"}
     assert TWO_CODES == {
@@ -100,48 +100,39 @@ A2_VECTORS = [json.loads(line) for line in A2_FIXTURE.read_text().splitlines()]
 def test_a2_constructed_fixture_identity_and_held_contracts():
     assert sha256(A2_FIXTURE.read_bytes()).hexdigest() == "0351259550c0a87d27d65cfac8f98b8547334cbd1d94321af244ad06b622ac0b"
     assert len(A2_VECTORS) == 3
-    held = json.loads((A2_FIXTURE.parent / "held-rows-s4.json").read_text())
-    for policy, row in held.items():
-        assert policy not in SOURCE["policies"]
-        assert row["cells"]["rule_scope_unusable"]["cited_variants"] == VARIANTS[policy, "rule_scope_unusable"]
+    # SS 6.1 and 6.2 are registered now; their A2 rule_scope_unusable citation variants are the shared contract.
+    for policy in ("MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"):
+        assert policy in SOURCE["policies"]
+        assert SOURCE["policies"][policy]["cells"]["rule_scope_unusable"]["cited_variants"] == VARIANTS[policy, "rule_scope_unusable"]
 
 
 @pytest.mark.parametrize("vector", A2_VECTORS, ids=lambda v: v["vector_id"])
-def test_a2_constructed_exact_record_response_and_wrong_citations(vector, monkeypatch, assessment):
+def test_a2_constructed_exact_record_response_and_wrong_citations(vector, assessment):
     policy = vector["policy"]
     assert vector["origin"] == "a2-constructed" and vector["source_kind"] == "constructed"
     assert vector["gold_verdict"] is None and vector["gold_source"] is None
-    data = deepcopy(SOURCE)
-    # Test-only registration lets the held rows pass through the real dispatch checker.
-    data["policies"].update(json.loads((A2_FIXTURE.parent / "held-rows-s4.json").read_text()))
-    monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
-    loader.catalogue.cache_clear()
     before = deepcopy(vector)
-    try:
-        record = assess(policy, vector["sections"])
-        assert record == {"policy_id": policy, "detail": {}, **{
-            key: vector["rule_" + key] for key in
-            ("verdict", "cell", "reason_code", "reason_text", "cited_sections")}}
-        assert vector == before
-        checked(record)
-        row = loader.row_for(policy)
-        response = as_pack_response(record, "Shall", row["sections"])
-        cited = vector["rule_cited_sections"]
-        assert response == {
-            "claims": [
-                {"id": "requirement_met", "status": "unknown", "value": None,
-                 "evidence_ids": ["e0", *[f"e{row['sections'].index(s) + 1}" for s in cited]]},
-                {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
-            "limitations": ["evidence_unusable"], "recommendations": ["recollect_unusable_evidence"]}
-        result = assessment_for(assessment, record)
-        assert result["policies"][0]["limitations"] == [
-            "evidence_unusable", *[f"evidence_unusable:{s}:unusable" for s in cited]]
-        validate_assessment(result)
-        with pytest.raises(ValueError, match="wrong section"):
-            checked({**record, "cited_sections": ["accepted_domains"]})
-    finally:
-        loader.catalogue.cache_clear()
-    assert all(p not in SOURCE["policies"] for p in ("MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"))
+    record = assess(policy, vector["sections"])
+    assert record == {"policy_id": policy, "detail": {}, **{
+        key: vector["rule_" + key] for key in
+        ("verdict", "cell", "reason_code", "reason_text", "cited_sections")}}
+    assert vector == before
+    checked(record)
+    row = loader.row_for(policy)
+    response = as_pack_response(record, "Shall", row["sections"])
+    cited = vector["rule_cited_sections"]
+    assert response == {
+        "claims": [
+            {"id": "requirement_met", "status": "unknown", "value": None,
+             "evidence_ids": ["e0", *[f"e{row['sections'].index(s) + 1}" for s in cited]]},
+            {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
+        "limitations": ["evidence_unusable"], "recommendations": ["recollect_unusable_evidence"]}
+    result = assessment_for(assessment, record)
+    assert result["policies"][0]["limitations"] == [
+        "evidence_unusable", *[f"evidence_unusable:{s}:unusable" for s in cited]]
+    validate_assessment(result)
+    with pytest.raises(ValueError, match="wrong section"):
+        checked({**record, "cited_sections": ["accepted_domains"]})
 
 
 @pytest.mark.parametrize("number", [1, 2, 3])

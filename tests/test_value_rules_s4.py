@@ -1,4 +1,4 @@
-"""Stage 4: v3.9.1 DNS, Safe Links and held anti-spam rules; synthetic/offline only."""
+"""Stage 4: v3.9.1 DNS, Safe Links and anti-spam rules; synthetic/offline only."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -21,23 +21,19 @@ from azure_tenant_audit.value_rules.catalogue import catalogue
 from azure_tenant_audit.value_rules.defender_spam import KINDS as SPAM_KINDS
 from azure_tenant_audit.value_rules.dns import parse_dmarc, parse_uris
 from azure_tenant_audit.value_rules.helpers import PRESET_RE
-from azure_tenant_audit.value_rules.record import _not_collected, checked
+from azure_tenant_audit.value_rules.record import checked
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/value-rules"
 FIXTURE = FIXTURES / "vectors-s4.jsonl.xz"
-HELD = json.loads((FIXTURES / "held-rows-s4.json").read_text())
-# A2 confirms the prepared fixture's fourth rule_scope_unusable citation.
-# Keep held rows and shared contracts identical, rather than masking a conflict.
-for _policy, _row in HELD.items():
-    for _cell, _extension in catalogue()["cell_contracts"].get(_policy, {}).items():
-        if _cell in _row["cells"]:
-            for _key in _extension.keys() & _row["cells"][_cell].keys():
-                assert _row["cells"][_cell][_key] == _extension[_key]
-            _row["cells"][_cell].update(_extension)
+# SS 6.1 and 6.2 were prepared in this stage and enabled by the held-rule stage; the fixture keeps the rows
+# as prepared, and a test below pins the shipped rows to them.
+PREPARED = json.loads((FIXTURES / "held-rows-s4.json").read_text())
+SS6 = tuple(sorted(PREPARED))
 LIVE = {"MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS.EXO.4.3v1", "MS.EXO.4.4v1",
+        "MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1",
         "MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"}
-POLICIES = LIVE | HELD.keys()
+POLICIES = LIVE
 POLICY_ITEMS = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
 CANARY_EMAIL = "stage4-canary-private@example.invalid"
 CANARY_NAME = "Stage Four Private DisplayName"
@@ -58,15 +54,11 @@ def vectors():
 
 
 def _rule(policy):
-    return HELD[policy] if policy in HELD else catalogue()["policies"][policy]
+    return catalogue()["policies"][policy]
 
 
 def _evaluate(policy, sections):
-    if policy not in HELD:
-        return assess(policy, sections)
-    row = HELD[policy]
-    return (_not_collected(policy, sections, row["sections"])
-            or SPAM_KINDS[row["kind"]](policy, row, sections))
+    return assess(policy, sections)
 
 
 def _check_vector(row):
@@ -125,12 +117,13 @@ def test_fixture_manifest_and_exclusions(vectors):
     assert sum("pack_null_section_met" in row.get("flags", []) for row in rows) == 24
 
 
-def test_held_rows_are_prepared_but_not_enabled():
-    assert set(HELD) == {"MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"}
-    for policy, row in HELD.items():
-        assert policy not in rule_policies()
-        assert assess(policy, {}) is None
-        assert cells_for(policy) == ()
+def test_prepared_anti_spam_rows_are_enabled_exactly_as_prepared():
+    assert set(PREPARED) == {"MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"}
+    for policy, row in PREPARED.items():
+        assert policy in rule_policies()
+        assert catalogue()["policies"][policy] == row
+        assert assess(policy, {}) is not None
+        assert cells_for(policy) == tuple(row["cells"])
         assert row["kind"] in SPAM_KINDS
         assert row["rule_id"] == policy + ".spam_cascade"
 
@@ -141,9 +134,7 @@ def test_every_missing_section_combination_is_catalogued(policy, missing_state, 
     from azure_tenant_audit.model_evidence import NOT_COLLECTED
     import azure_tenant_audit.value_rules.catalogue as loader
 
-    # Include the prepared rows in validation without enabling them in the shipped catalogue.
     data = deepcopy(catalogue())
-    data["policies"].update(HELD)
     monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
     loader.catalogue.cache_clear()
     try:
@@ -175,10 +166,8 @@ def test_every_missing_section_combination_is_catalogued(policy, missing_state, 
 
 
 def test_citation_variants_are_closed(vectors, monkeypatch):
-    # Exercise the same catalogue loader for the prepared rows without enabling them in the shipped file.
     import azure_tenant_audit.value_rules.catalogue as loader
     data = deepcopy(catalogue())
-    data["policies"].update(HELD)
     monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
     loader.catalogue.cache_clear()
     try:
@@ -225,8 +214,8 @@ def test_full_external_counts_include_pilot_and_flagged_rows(external_vectors):
     assert sum("pack_null_section_met" in row.get("flags", []) for row in rows) == 24
 
 
-@pytest.mark.parametrize("policy", sorted(HELD))
-def test_a2_unreadable_preset_scope_is_accepted_and_wrong_citation_rejected(policy, vectors, monkeypatch):
+@pytest.mark.parametrize("policy", SS6)
+def test_a2_unreadable_preset_scope_is_accepted_and_wrong_citation_rejected(policy, vectors):
     row = next(row for row in vectors[policy] if row["rule_cell"] == "strict_covers_compliant")
     sections = deepcopy(row["sections"])
     strict = next(rule for rule in sections["protection_policy_rules"] if PRESET_RE[0].search(rule["Identity"]))
@@ -235,18 +224,10 @@ def test_a2_unreadable_preset_scope_is_accepted_and_wrong_citation_rejected(poli
     assert record["cell"] == "rule_scope_unusable"
     assert record["cited_sections"] == ["protection_policy_rules"]
     # A2 adds this preset-only list to A1's closed domain; the predicate is unchanged.
-    assert record["cited_sections"] in HELD[policy]["cells"][record["cell"]]["cited_variants"]
-    import azure_tenant_audit.value_rules.catalogue as loader
-    data = deepcopy(catalogue())
-    data["policies"].update(HELD)
-    monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
-    loader.catalogue.cache_clear()
-    try:
-        assert checked(record) == record
-        with pytest.raises(ValueError, match="wrong section"):
-            checked({**record, "cited_sections": ["accepted_domains"]})
-    finally:
-        loader.catalogue.cache_clear()
+    assert record["cited_sections"] in catalogue()["policies"][policy]["cells"][record["cell"]]["cited_variants"]
+    assert checked(record) == record
+    with pytest.raises(ValueError, match="wrong section"):
+        checked({**record, "cited_sections": ["accepted_domains"]})
 
 
 @pytest.mark.parametrize("policy", sorted(LIVE & {f"MS.SECURITYSUITE.7.{i}v1" for i in (1, 2, 3)}))
