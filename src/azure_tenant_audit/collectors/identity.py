@@ -20,6 +20,11 @@ _GROUP_RELATION_SELECT = "id,displayName,userPrincipalName"
 SIGNIN_ACTIVITY_SECTION = "userSignInActivity"
 SIGNIN_ACTIVITY_MAX_PAGE_SIZE = 500
 SIGNIN_ACTIVITY_GATED_ERRORS = {"license_required", "insufficient_permissions", "unauthenticated", "permission_stop"}
+# The full user read supplies administrator model input. Match the projection's row budget;
+# consecutive empty pages have a separate loop backstop. A remaining nextLink is a gap.
+USER_MAX_ROWS = 250_000
+USER_MAX_EMPTY_PAGES = 50
+USER_PAGE_SIZE = 500
 
 
 class IdentityCollector(Collector):
@@ -51,8 +56,13 @@ class IdentityCollector(Collector):
             },
             "users": {
                 "endpoint": "/users",
+                "default_page_size": USER_PAGE_SIZE,
+                "max_top": USER_PAGE_SIZE,
+                "max_rows": USER_MAX_ROWS,
+                "max_empty_pages": USER_MAX_EMPTY_PAGES,
+                "min_top": 100,
                 "params": {
-                    "$select": "id,displayName,userPrincipalName,mail,jobTitle,department,userType,accountEnabled,lastPasswordChangeDateTime,createdDateTime",
+                    "$select": "id,displayName,userPrincipalName,mail,jobTitle,department,userType,accountEnabled,lastPasswordChangeDateTime,createdDateTime,onPremisesImmutableId",
                 },
             },
             SIGNIN_ACTIVITY_SECTION: {

@@ -39,6 +39,9 @@ class _IdentityClient:
         self.requests.append((path, dict(params or {})))
         return {"value": [{"id": "org"}]} if path == "/organization" else {"value": []}
 
+    def iter_pages(self, path, params=None):  # noqa: ANN001
+        yield {"value": list(self.iter_items(path, params))}
+
     def iter_items(self, path, params=None, result_limit=None):  # noqa: ANN001, ARG002
         params = dict(params or {})
         self.requests.append((path, params))

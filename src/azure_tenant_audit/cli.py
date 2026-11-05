@@ -148,7 +148,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Explicit per-list row limit for very large tenants. By default every list is paged to its last row. "
+            "Explicit per-list row limit for very large tenants. Without it, lists are paged to the last row "
+            "except identity.users, which stops at 250,000 users with an explicit pagination_not_followed gap if more remain. "
             "A list cut by this limit is recorded as a coverage gap and the run is partial."
         ),
     )

@@ -11,8 +11,9 @@ import pytest
 
 from auditex.cli import main
 from auditex.model_precheck import precheck_case
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, canonical
+from auditex.model_serving import ModelClient, ModelConfig, assess_run, build_case, canonical
 from auditex.scuba_projection import project_run
+from azure_tenant_audit.collectors.identity import IdentityCollector
 from azure_tenant_audit.model_assessment import validate_assessment
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 
@@ -1331,6 +1332,117 @@ def test_privileged_users_projects_from_a_large_user_list_within_the_default_bud
     assert p.report['bounds'] == {'max_items': 40, 'max_chars': 12000, 'scan_max_rows': 250000,
                                   'scan_max_bytes': 268435456, 'scan_max_chunks': 10000}
     assert 'ignored_failures' not in section
+
+
+@pytest.mark.parametrize('count,page_size,admin_positions', [
+    (99, None, (1,)), (100, None, (1, 100)), (101, None, (1, 100, 101)),
+    (5000, None, (1, 100, 101, 4999)),
+    (50_001, 100, (1, 100, 101, 50_001)),
+    (25_001, 50, (1, 100, 101, 25_001)),
+])
+def test_paged_identity_users_keep_late_admins_on_the_model_path(complete_bundle, monkeypatch, count, page_size, admin_positions):
+    """The hybrid collector's first-100 sample includes guests and cannot supply late admins."""
+    users = [
+        {'id': f'00000000-0000-4000-8000-{position:012d}',
+         'displayName': f'Mocktenant user {position}',
+         'userType': 'Guest' if position % 7 == 0 else 'Member',
+         'onPremisesImmutableId': f'mocktenant-immutable-{position}'}
+        for position in range(1, count + 1)
+    ]
+    ids = [users[position - 1]['id'] for position in admin_positions]
+
+    class PagedClient:
+        def iter_pages(self, endpoint, params=None):
+            if endpoint == '/users' and params['$select'] != 'id,signInActivity':
+                selected = set(params['$select'].split(','))
+                request_size = int(params['$top'])
+                assert request_size == (100 if page_size in (50, 100) else 500)
+                for start in range(0, count, request_size):
+                    yield {'value': [{key: value for key, value in row.items() if key in selected}
+                                     for row in users[start:start + request_size]],
+                           **({'@odata.nextLink': 'https://graph.microsoft.com/v1.0/users?next=mocktenant'}
+                              if start + request_size < count else {})}
+            elif endpoint == '/roleManagement/directory/roleAssignments':
+                yield {'value': [{'id': f'assignment-{i}', 'principalId': principal,
+                                  'roleDefinitionId': 'role-global', 'directoryScopeId': '/'}
+                                 for i, principal in enumerate(ids)]}
+            else:
+                yield {'value': []}
+
+        def iter_items(self, endpoint, params=None, result_limit=None):
+            for page in self.iter_pages(endpoint, params):
+                yield from page['value']
+
+        def get_json(self, endpoint, params=None, full_url=False):
+            assert endpoint == '/organization'
+            return {'value': [{'id': TENANT}]}
+
+    def chunk_writer(collector, name, page_number, rows, metadata):
+        path = f'raw/{collector}/{name}/part-{page_number:05d}.jsonl'
+        target = complete_bundle / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(''.join(canonical(row) + '\n' for row in rows))
+        return path
+
+    result = IdentityCollector().run({'client': PagedClient(), 'top': None, 'page_size': page_size,
+                                      'chunk_writer': chunk_writer, 'run_dir': complete_bundle})
+    assert result.status == 'ok'
+    assert result.payload['users']['item_count'] == count
+    request_size = 100 if page_size in (50, 100) else 500
+    assert result.payload['users']['chunk_count'] == (count + request_size - 1) // request_size
+    write(complete_bundle, 'raw/identity.json', result.payload)
+    operation(complete_bundle, 'domains_hybrid', 'syncSampleUsers', users[:100])
+    write(complete_bundle, 'normalized/effective_admin_set.json', {'records': [
+        {'kind': 'effective_admin_set_summary', 'state': 'complete', 'unresolved_principal_count': 0,
+         'admin_count': len(ids)},
+        *[{'kind': 'effective_admin', 'state': 'complete', 'is_user': True, 'principal_id': principal,
+           'role_names': ['Global Administrator'], 'roles': [GLOBAL_ADMIN_ROLE]}
+          for principal in ids],
+    ]})
+
+    projection = project_run(complete_bundle, redact=False)
+    section = projection.report['sections']['privileged_users']
+    assert section['status'] == 'projected' and section['reason'] is None
+    assert section['scan']['rows'] == count
+    assert sum(row['userType'] == 'Guest' for row in users) == count // 7
+    assert {item['OnPremisesImmutableId'] for item in projection['privileged_users'].values()} == {
+        f'mocktenant-immutable-{position}' for position in admin_positions}
+    for policy_id in ('MS.AAD.7.1v1', 'MS.AAD.7.2v1', 'MS.AAD.7.3v1'):
+        assert precheck_case(build_case(policy_id, projection, '2026-11-04'),
+                             absent_fields=True, empty_lists=True) is None
+
+    if count == 5000:
+        monkeypatch.setattr('azure_tenant_audit.collectors.identity.USER_MAX_ROWS', 500)
+        capped = IdentityCollector().run({'client': PagedClient(), 'top': None,
+                                          'chunk_writer': chunk_writer, 'run_dir': complete_bundle})
+        assert capped.status == 'partial'
+        assert capped.payload['users']['item_count'] == 500
+        assert capped.payload['users']['collection_truncated'] is True
+        assert capped.payload['users']['truncation_reason'] == 'pagination_not_followed'
+        write(complete_bundle, 'raw/identity.json', capped.payload)
+        write(complete_bundle, 'coverage.json', {'records': capped.coverage})
+        limited = project_run(complete_bundle)
+        assert limited.report['sections']['privileged_users']['status'] == 'not_collected'
+        assert limited.report['sections']['privileged_users']['reason'] == 'collector_error'
+        for policy_id in ('MS.AAD.7.1v1', 'MS.AAD.7.2v1', 'MS.AAD.7.3v1'):
+            response = precheck_case(build_case(policy_id, limited, '2026-11-04'),
+                                     absent_fields=True, empty_lists=True)
+            assert response['claims'][0]['status'] == 'unknown'
+            assert 'required_evidence_section_not_collected' in response['limitations']
+
+        write(complete_bundle, 'raw/identity.json', result.payload)
+        write(complete_bundle, 'coverage.json', {'records': result.coverage})
+        bounded = assess_run(complete_bundle, ModelConfig(model_name='stub'),
+                             policies=['MS.AAD.7.1v1', 'MS.AAD.7.2v1', 'MS.AAD.7.3v1'],
+                             projection_scan_max_rows=100)
+        withheld = bounded['projection']['sections']['privileged_users']
+        assert withheld['status'] == 'not_collected' and withheld['reason'] == 'oversize'
+        assert withheld['detail'] == {'field': 'scan_max_rows', 'kind': 'scan_bound'}
+        for row in bounded['policies']:
+            assert row['comparison']['result'] == 'not_assessed'
+            assert row['reason'] == 'rule_precheck' and row['attempts'] == 0
+            assert row['claims'][0]['status'] == 'unknown' and row['claims'][0]['value'] is None
+            assert 'required_evidence_section_not_collected' in row['limitations']
 
 
 @pytest.mark.parametrize('chunked,bound,value', [

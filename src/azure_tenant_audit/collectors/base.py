@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
 
 from ..collection_gaps import (
     REASON_NEXT_LINK_REFUSED,
@@ -149,6 +149,47 @@ def record_truncation(
         row["error"] = truncation_message(list_name, rows, reason, limit)
 
 
+def _bounded_pages(
+    client: GraphClient,
+    endpoint: str,
+    query: dict[str, Any],
+    *,
+    collection_limit: int | None,
+    max_rows: int | None,
+    max_empty_pages: int | None,
+) -> Iterator[tuple[int, list[dict[str, Any]], bool, str | None, bool]]:
+    """Read bounded pages and report whether the current page ends the read."""
+    window = PageWindow.from_limit(collection_limit)
+    rows_so_far = 0
+    empty_pages = 0
+    for page_number, page_payload in enumerate(client.iter_pages(endpoint, params=query), start=1):
+        values = page_payload.get("value", [])
+        if not isinstance(values, list):
+            raise GraphError(f"Non-list response from {endpoint}", request=endpoint)
+        page_values = [item for item in values if isinstance(item, dict)]
+        limited_values, window = window.take(page_values)
+        remaining = max(max_rows - rows_so_far, 0) if max_rows is not None else len(limited_values)
+        selected = limited_values[:remaining]
+        rows_so_far += len(selected)
+        empty_pages = empty_pages + 1 if not page_values else 0
+        next_link = bool(page_payload.get("@odata.nextLink"))
+        if window.exhausted:
+            truncated = len(limited_values) < len(page_values) or next_link
+            reason = REASON_OPERATOR_LIMIT if truncated else None
+            stop = True
+        elif max_rows is not None and (len(selected) < len(limited_values) or rows_so_far >= max_rows):
+            truncated = len(selected) < len(limited_values) or next_link
+            reason = REASON_PAGINATION_NOT_FOLLOWED if truncated else None
+            stop = True
+        elif max_empty_pages is not None and empty_pages >= max_empty_pages and next_link:
+            truncated, reason, stop = True, REASON_PAGINATION_NOT_FOLLOWED, True
+        else:
+            truncated, reason, stop = False, None, False
+        yield page_number, selected, truncated, reason, stop
+        if stop:
+            break
+
+
 def run_graph_endpoints(
     collector: str,
     client: GraphClient,
@@ -163,12 +204,13 @@ def run_graph_endpoints(
 
     Returns both the raw payload per section and per-endpoint coverage entries.
 
-    ``top`` is the operator's explicit row limit; ``None`` (or 0) pages every list to its last
-    row. A list cut short for any reason (the limit, a failed page, a refused next link) is
+    ``top`` is the operator's explicit row limit; ``None`` (or 0) pages lists to their last
+    row unless a collector safety ceiling is reached. A list cut short for any reason is
     recorded on its coverage row and raw section as ``collection_truncated`` with a
     ``truncation_reason``. Limit hits make the row ``partial``, so the collector is not
     complete. A spec may carry ``sample_limit`` for a list that is a sample by design; hitting
-    that bound is not a gap.
+    that bound is not a gap. ``max_rows`` is a safety ceiling; a remaining next link is an
+    explicit ``pagination_not_followed`` gap. ``max_empty_pages`` stops empty-page loops.
     """
     payload: dict[str, Any] = {}
     coverage: list[dict[str, Any]] = []
@@ -190,13 +232,19 @@ def run_graph_endpoints(
             collection_limit = sample_limit
             limit_is_sample = True
         effective_top = page_size if page_size is not None else collection_limit
+        default_page_size = spec.get("default_page_size")
+        if page_size is None and isinstance(default_page_size, int) and default_page_size > 0:
+            effective_top = min(effective_top, default_page_size) if effective_top is not None else default_page_size
         if not page or not apply_top:
             # Non-collection calls often do not accept $top.
             effective_top = None
         max_top = spec.get("max_top")
         if effective_top is not None and isinstance(max_top, int) and effective_top > max_top:
             effective_top = max_top
-        query = _normalize_top(spec.get("params"), effective_top, min_top=spec.get("min_top"))
+        query = _normalize_top(
+            spec.get("params"), effective_top,
+            min_top=spec.get("min_top") if operator_limit is None else None,
+        )
         if log_event:
             log_event(
                 "collector.endpoint.started",
@@ -213,20 +261,17 @@ def run_graph_endpoints(
         streamed_rows: list[Any] = []
         collection_truncated = False
         truncation_reason: str | None = None
+        max_rows = spec.get("max_rows")
 
         try:
             if page:
                 if chunk_writer is not None and hasattr(client, "iter_pages") and not spec.get("inline"):
                     accumulator = EndpointAccumulator(sample_limit=20)
-                    window = PageWindow.from_limit(collection_limit)
-                    for page_number, page_payload in enumerate(client.iter_pages(endpoint, params=query), start=1):
-                        values = page_payload.get("value", [])
-                        if not isinstance(values, list):
-                            raise GraphError(f"Non-list response from {endpoint}", request=endpoint)
-                        if window.exhausted:
-                            break
-                        page_values = [item for item in values if isinstance(item, dict)]
-                        limited_values, window = window.take(page_values)
+                    pages = _bounded_pages(
+                        client, endpoint, query, collection_limit=collection_limit,
+                        max_rows=max_rows, max_empty_pages=spec.get("max_empty_pages") if max_rows is not None else None,
+                    )
+                    for page_number, limited_values, cut, reason, stop in pages:
                         if limited_values:
                             chunk_path = chunk_writer(
                                 collector,
@@ -238,13 +283,27 @@ def run_graph_endpoints(
                             accumulator.add_page(limited_values, chunk_file=chunk_path)
                         else:
                             accumulator.add_page(limited_values)
-                        if window.exhausted:
-                            collection_truncated = len(limited_values) < len(page_values) or bool(page_payload.get("@odata.nextLink"))
+                        if stop:
+                            collection_truncated = cut
+                            truncation_reason = reason
                             break
                     item_count = accumulator.item_count
                     payload[key] = accumulator.payload()
                 else:
-                    if hasattr(client, "iter_items"):
+                    if max_rows is not None:
+                        if not hasattr(client, "iter_pages"):
+                            raise GraphError(f"Paged client required for bounded {endpoint}", request=endpoint)
+                        for _page_number, limited_values, cut, reason, stop in _bounded_pages(
+                            client, endpoint, query, collection_limit=collection_limit,
+                            max_rows=max_rows, max_empty_pages=spec.get("max_empty_pages", 50),
+                        ):
+                            streamed_rows.extend(limited_values)
+                            if stop:
+                                collection_truncated = cut
+                                truncation_reason = reason
+                                break
+                        rows = streamed_rows
+                    elif hasattr(client, "iter_items"):
                         # One row past the limit proves the list continues without paging further.
                         probe = None if collection_limit is None else collection_limit + 1
                         # Collected one by one so the rows read before a failed later page are kept.
@@ -254,7 +313,8 @@ def run_graph_endpoints(
                     else:
                         rows = client.get_all(endpoint, params=query)
                     if isinstance(rows, list):
-                        rows, collection_truncated = limit_rows(rows, collection_limit)
+                        rows, cut_at_limit = limit_rows(rows, collection_limit)
+                        collection_truncated |= cut_at_limit
                         item_count = len(rows)
                         payload[key] = {"value": rows}
                     elif isinstance(rows, dict):
@@ -262,7 +322,7 @@ def run_graph_endpoints(
                         item_count = len(rows.get("value", [])) if isinstance(rows.get("value"), list) else 0
                     else:
                         payload[key] = {"value": rows}
-                if collection_truncated:
+                if collection_truncated and truncation_reason is None:
                     truncation_reason = REASON_OPERATOR_LIMIT
             else:
                 page_result = (
@@ -351,9 +411,18 @@ def run_graph_endpoints(
                 coverage_row,
                 list_name=key,
                 rows=item_count,
-                limit=collection_limit,
+                limit=(max_rows if truncation_reason == REASON_PAGINATION_NOT_FOLLOWED
+                       and max_rows is not None and item_count >= max_rows else
+                       None if truncation_reason == REASON_PAGINATION_NOT_FOLLOWED else collection_limit),
                 reason=truncation_reason or REASON_OPERATOR_LIMIT,
             )
+            if (page and truncation_reason == REASON_PAGINATION_NOT_FOLLOWED and max_rows is not None
+                    and item_count < max_rows and spec.get("max_empty_pages", 50) is not None):
+                # Below the row cap a bounded paged read can only have been stopped by the empty-page backstop.
+                coverage_row["error"] = (
+                    f"{key}: stopped after {spec.get('max_empty_pages', 50)} consecutive empty pages that still "
+                    f"carried a next-page link, after {item_count} rows; the list is incomplete."
+                )
         if log_event:
             log_event(
                 "collector.endpoint.finished",

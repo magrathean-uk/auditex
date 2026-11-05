@@ -288,7 +288,8 @@ def _add_google_selection_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help=(
-            "Explicit per-list row limit for very large domains. By default every directory list is paged to its last row. "
+            "Explicit per-list row limit for very large domains. By default every Google Workspace "
+            "directory list is paged to its last row. "
             "A list cut by this limit is recorded as a coverage gap and the run is partial."
         ),
     )

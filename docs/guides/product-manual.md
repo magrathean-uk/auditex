@@ -169,7 +169,7 @@ auditex google run \
 
 ## Row Limits And Coverage Gaps
 
-Auditex collects every list to its last row. Without `--top` there is no limit: Microsoft 365 users, registration details, role assignments, Conditional Access policies, groups and applications, and Google Workspace users, groups, OAuth tokens and devices are all paged to the end. `--top N` on `auditex run` and `auditex google run` caps each list at N rows for a very large tenant; `--top 0` means no limit, and `--page-size` sets the request size.
+Without `--top`, Auditex reads every list to its last row except Microsoft 365 `identity.users`, which stops at 250,000 users; that ceiling also applies with `--top 0` and with a `--top` above 250,000. A remaining next-page link ends with an explicit `pagination_not_followed` gap because the safety ceiling was hit. Registration details, role assignments, Conditional Access policies, groups and applications, and Google Workspace users, groups, OAuth tokens and devices are paged to the end. `--top N` on `auditex run` and `auditex google run` caps each list at N rows for a very large tenant; `--top 0` removes the operator limit (not the `identity.users` ceiling), and `--page-size` sets the request size (at least 100 for the Microsoft 365 user inventory without an operator limit).
 
 A list that `--top` cuts, a later page that cannot be read, or a next-page link outside Microsoft Graph that is refused is recorded as a coverage gap:
 

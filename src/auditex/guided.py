@@ -308,7 +308,11 @@ def build_guided_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auditor-profile", default="global-reader", choices=profile_choices())
     parser.add_argument("--out", default="outputs/guided")
     parser.add_argument("--run-name", default=None)
-    parser.add_argument("--top", type=int, default=None, help="Explicit per-list row limit; default is no limit.")
+    parser.add_argument("--top", type=int, default=None, help=(
+        "Explicit per-list row limit; without it lists are paged to the last row, except identity.users, "
+        "which stops at 250,000 users with a pagination_not_followed gap if more remain (also with --top 0 "
+        "or a larger --top)."
+    ))
     parser.add_argument("--page-size", type=int, default=50)
     parser.add_argument("--browser-command", default=None)
     parser.add_argument("--collectors", default=None)

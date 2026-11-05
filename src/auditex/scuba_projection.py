@@ -914,8 +914,8 @@ def _users(bundle: Bundle) -> Any:
         if row["id"] in wanted:
             _require(row["id"] not in index, "id")
             index[row["id"]] = row
-    # The identity collector's user read does not select onPremisesImmutableId; the hybrid collector's sync read does, for
-    # the users it samples. An administrator neither read holds it for keeps the field missing and withholds the section.
+    # Current identity reads select onPremisesImmutableId for every user. Older bundles can supply it from the hybrid
+    # collector's first-100 sync sample; an administrator in neither read withholds the section.
     missing = {key for key, row in index.items() if "onPremisesImmutableId" not in row}
     if missing:
         found: dict[str, Any] = {}

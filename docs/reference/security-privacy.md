@@ -23,6 +23,13 @@ SharePoint, or OneDrive file content. Metadata and settings can still contain
 personal data, including user names, email addresses, group membership, device
 metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
 Treat every bundle as confidential.
+The identity collector's user inventory selects `onPremisesImmutableId`, so raw
+`identity.users` chunks hold it for every returned user, up to the 250,000-user
+safety ceiling. Previously only the hybrid collector's first 100 sampled users
+carried it. Normalised user records, the evidence index and customer packs do
+not carry it. Model projection keeps only effective administrators and
+pseudonymises non-null values; `--no-redaction`, accepted only for a loopback
+model endpoint, sends them unmasked.
 
 The PIM role policy reads of the directory roles (`identity_governance`) collect the
 notification recipients of each policy rule: these are e-mail addresses, collected as

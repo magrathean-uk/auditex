@@ -6,8 +6,8 @@ page, a refused next-page link) records the cut on that list's coverage row. The
 ``not_assessed`` instead of ``pass``. The same facts reach the normalized ``collection_gaps``
 records and the ``truncated_lists`` of the manifest's ``coverage_gaps``.
 
-Without ``--top`` every list is paged to its last row, so a cut only happens when an
-operator asks for one or a page cannot be read.
+Without ``--top`` a list is paged to its last row unless the identity user
+safety ceiling is reached or a page cannot be read.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ SECTION_SCOPED = "section_scoped"
 REASON_OPERATOR_LIMIT = "operator_limit"
 REASON_PAGINATION_FAILED = "pagination_failed"
 REASON_NEXT_LINK_REFUSED = "next_link_refused"
-# A response that should have been one page carried an @odata.nextLink the collector did not follow.
+# A response carried an @odata.nextLink the collector did not follow, including at a safety row ceiling.
 REASON_PAGINATION_NOT_FOLLOWED = "pagination_not_followed"
 # A collector bounds how many objects it expands (members, owners, relationships); it hit that bound.
 REASON_FANOUT_LIMIT = "fanout_limit"
@@ -100,6 +100,11 @@ def truncation_message(list_name: str, rows: int, reason: str, limit: int | None
     if reason == REASON_PAGINATION_FAILED:
         return f"{list_name}: paging stopped after {rows} rows because a later page could not be read; the list is incomplete."
     if reason == REASON_PAGINATION_NOT_FOLLOWED:
+        if limit is not None:
+            return (
+                f"{list_name}: collection stopped because the collector's safety cap of "
+                f"{limit} rows was hit; the list is incomplete."
+            )
         return (
             f"{list_name}: the response carried a next-page link that was not followed after {rows} rows; "
             "the list is incomplete."

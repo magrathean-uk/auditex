@@ -13,6 +13,14 @@ MCP behaviour is unchanged. Audit collection is not: the `identity_governance` c
 gains two GET-only reads (the PIM role policies, "Collection (1.2.2.dev5)" below) and the
 bundle gains the `privileged_roles` artefact, both additive.
 
+### Microsoft 365 user inventory
+
+- **The user list now has a safety ceiling of 250,000 user objects, guests included.** Auditex reads `onPremisesImmutableId` on the
+  main user list, so administrators beyond the first 100 users reach the privileged-user checks (MS.AAD.7.1 to 7.3). A tenant larger
+  than the ceiling completes with a `pagination_not_followed` coverage gap on `identity.users` and a partial run (exit status 1);
+  user-dependent checks are reported as not assessed rather than passed. The ceiling also applies with `--top 0` and with a `--top`
+  above 250,000. Previous releases read the full list. The page size for this list is between 100 and 500 rows.
+
 ### Conditional Access projection
 
 - **The Conditional Access section is withheld only for restrictions that restrict.** `auditex.scuba_projection` withheld the whole
