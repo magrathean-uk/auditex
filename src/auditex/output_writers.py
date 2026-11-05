@@ -92,7 +92,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     # -- routed through the redaction ---------------------------------------------------------------------------
     SinkEntry("auditex.reporting:render_report", "routed", "report file in every format", "auditex.reporting:render_report"),
     SinkEntry("auditex.reporting:_write_text_artifact", "routed", "every generated customer-pack file", "auditex.reporting:_write_text_artifact"),
-    SinkEntry("auditex.reporting:_copy_source_artifact", "routed", "the pack's run-manifest copy is redacted; the other source artifacts are verbatim integrity-bound copies (NOT redacted, see the document)", "auditex.reporting:_copy_source_artifact"),
+    SinkEntry("auditex.reporting:_copy_source_artifact", "routed", "every source artifact is a redacted derivative (run-manifest.json made pack-relative, the other JSON files under customer_pack with the run salt); the hash manifest is copied only when redaction leaves it unchanged; operator-inputs/ is never copied", "auditex.reporting:_copy_source_artifact"),
     SinkEntry("auditex.reporting:write_enterprise_handoff_pack", "routed", "pack manifest", "auditex.reporting:write_enterprise_handoff_pack"),
     SinkEntry("auditex.cli:_emit_report_payload", "routed", "report payload files and stdout", "auditex.cli:_emit_report_payload"),
     SinkEntry("auditex.notify:_send_webhook", "routed", "webhook body: the payload is the redacted envelope", _NOTIFY_VIA),
@@ -129,6 +129,14 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.exposure_lookup:*", "private", "public HTTPS fetch of the audited domain's own policy files"),
     SinkEntry("azure_tenant_audit.graph:*", "private", "read-only Microsoft Graph requests and token exchange (credentials stay in the request)"),
     SinkEntry("azure_tenant_audit.output:*", "private", "run bundle working files and the private audit log"),
+    SinkEntry(
+        "azure_tenant_audit.sensitive_users:load_sensitive_users", "private",
+        "read-only open of the operator's own sensitive-users input before collection (the scan reads the flags variable as a write); nothing is written or returned to a client",
+    ),
+    SinkEntry(
+        "azure_tenant_audit.sensitive_users:read_sensitive_users_key", "private",
+        "read-only open of the private key kept below the run's operator-inputs directory (0600, excluded from the hash manifest, never copied into a pack or report)",
+    ),
     SinkEntry("azure_tenant_audit.perf_runtime:*", "private", "local timing metrics, no tenant evidence"),
     SinkEntry("azure_tenant_audit.power_bi:*", "private", "read-only Power BI requests"),
     SinkEntry("azure_tenant_audit.power_platform:*", "private", "read-only Power Platform requests"),

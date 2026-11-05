@@ -468,6 +468,8 @@ file, and the pack never carries it. Each derivative's row in `pack-manifest.jso
 transformed row only when `source_sha256` is the listed digest, and a row that claims no transformation must match
 `bundle-hashes.json` exactly.
 
+Nothing under `operator-inputs/` (the private sensitive-users copy and its key) is ever copied: its row says `redacted_operator_input`.
+
 Two limits follow. A derivative is bound to the pack by `checksums.sha256` only (it cannot equal the original), so
 someone who edits it and re-hashes the whole pack is caught only by a `checksums.sha256` digest recorded elsewhere
 (`--expect-checksums-sha256`). And `bundle-hashes.json` cannot be derived, because its bytes are what the run was
