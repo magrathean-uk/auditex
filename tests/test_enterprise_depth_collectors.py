@@ -740,7 +740,7 @@ def test_onedrive_posture_collector_distinguishes_personal_and_team_sites() -> N
 def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> None:
     transport_command = (
         "Get-TransportRule | Select-Object "
-        "Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText"
+        "Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject"
     )
     adapter = _FakeAdapter(
         {
@@ -751,11 +751,12 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled": {
                 "value": [{"Name": "Default"}]
             },
+            "Get-SharingPolicy | Select-Object Name,Domains": {"value": [{"Name": "Partners", "Domains": []}]},
             MAILBOX_FORWARDING_COMMAND: {"value": [{"DisplayName": "Alice Example"}]},
             "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled": {
                 "value": [{"UnifiedAuditLogIngestionEnabled": True}]
             },
-            "Get-OrganizationConfig | Select-Object AuditDisabled": {"value": [{"AuditDisabled": False}]},
+            "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled": {"value": [{"AuditDisabled": False}]},
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count": {
                 "value": [{"Count": 0}]
             },
@@ -765,7 +766,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled": {
                 "value": [{"Identity": "Default", "Name": "Default", "IsDefault": True, "EnableFileFilter": True, "ZapEnabled": True}]
             },
-            "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled": {
+            "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled": {
                 "value": [{"SmtpClientAuthenticationDisabled": True}]
             },
             "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count": {

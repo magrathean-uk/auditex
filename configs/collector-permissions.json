@@ -181,7 +181,7 @@
       "minimum_role_hints": [
         "Global Reader"
       ],
-      "notes": "Resolves email-auth DNS records (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI) over DoH for verified tenant domains. Live runs also make unauthenticated, read-only HTTPS GETs for those verified domains only: the MTA-STS policy file (https://mta-sts.<domain>/.well-known/mta-sts.txt, only when the _mta-sts TXT record exists, no redirects) and the public Entra OpenID discovery document (https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration). No usernames are probed. Offline runs make no lookups."
+      "notes": "Resolves email-auth DNS records (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI) over DoH for verified tenant domains. Live runs also make unauthenticated, read-only HTTPS GETs for those verified domains only: the MTA-STS policy file (https://mta-sts.<domain>/.well-known/mta-sts.txt, only when the _mta-sts TXT record exists, no redirects) and the public Entra OpenID discovery document (https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration). No usernames are probed. Offline runs make no lookups. Complete TXT answers from public DNS (no sign-in) are saved for SPF, DKIM and DMARC for the verified domains whose Graph supportedServices list includes Email (a domain without that field is kept); posture checks still cover every verified domain."
     },
     "intune": {
       "graph_scopes": [
@@ -409,7 +409,7 @@
         "Exchange Administrator",
         "Global Reader"
       ],
-      "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert is available only in Security & Compliance PowerShell (Connect-IPPSSession). Mail protection cmdlets Get-MalwareFilterPolicy, Get-TransportConfig, Get-CASMailbox (a count of the mailboxes that switch SMTP AUTH back on, never an address) and Get-DkimSigningConfig run in the same Exchange Online session and are readable with the Global Reader role the other Exchange cmdlets already use; they need no Graph scope and no further role. None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal and 'not_assessed' mail protection rules, never 'off' or a pass.",
+      "notes": "Exchange policy depth uses read-only Exchange PowerShell Get-* cmdlets and requires PowerShell plus Exchange connectivity. Detection-coverage cmdlets (Get-AdminAuditLogConfig, Get-OrganizationConfig, Get-MailboxAuditBypassAssociation counted only) need an Exchange Online PowerShell session; Get-ProtectionAlert is available only in Security & Compliance PowerShell (Connect-IPPSSession). Mail protection cmdlets Get-MalwareFilterPolicy, Get-TransportConfig, Get-CASMailbox (a count of the mailboxes that switch SMTP AUTH back on, never an address) and Get-DkimSigningConfig run in the same Exchange Online session and are readable with the Global Reader role the other Exchange cmdlets already use; they need no Graph scope and no further role. None of these cmdlets change tenant state; a missing session is reported as an 'unknown' detection signal and 'not_assessed' mail protection rules, never 'off' or a pass. Partner-sharing domain names and actions are read via Get-SharingPolicy (Name, Domains), readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet; no message content is read.",
       "command_tools": [
         "pwsh",
         "powershell_graph"
@@ -420,6 +420,7 @@
         "Get-OutboundConnector",
         "Get-AcceptedDomain",
         "Get-RemoteDomain",
+        "Get-SharingPolicy",
         "Get-EXOMailbox",
         "Get-AdminAuditLogConfig",
         "Get-OrganizationConfig",
