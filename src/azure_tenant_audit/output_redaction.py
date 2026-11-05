@@ -333,6 +333,50 @@ def _structural(text: str) -> bool:
     return any(shape.match(text) for shape in _STRUCTURAL_SHAPES)
 
 
+# Finding and policy ids are ``<namespace>:<snake_case_words>[:<guid-or-suffix>]`` (``identity:global_admin_stale_password:<guid>``).
+# A credential word inside such an id (``..._password:<guid>``) is part of the name, not an assignment, so the inline
+# secret pattern must not read it as ``password: <value>``. The exemption is deliberately narrow: the namespace is
+# one lower-case word that is not itself a credential word (``password:hunter_2`` stays a secret), the words carry at
+# least one underscore, the credential word sits after an underscore inside them, and the suffix is a GUID or one
+# lower-case word. Anything else (``password: hunter2``, ``db_password=x``, ``identity:db_password:Hunter2``) is
+# redacted as before.
+_ID_GUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_ID_TOKEN_RE = re.compile(
+    r"(?<![\w:.-])(?P<ns>[a-z][a-z0-9]*):(?P<words>[a-z][a-z0-9]*(?:_[a-z0-9]+)+)"
+    rf"(?::(?P<suffix>{_ID_GUID}|[a-z][a-z0-9]{{0,63}}(?:_[a-z0-9]+){{0,8}}))?(?![\w])"
+)
+_CREDENTIAL_NAMESPACES = frozenset(
+    {"access", "refresh", "id", "client", "secret", "password", "authorization", "api", "token", "key", "bearer"}
+)
+
+
+def _id_token_spans(text: str) -> list[tuple[int, int, int]]:
+    """``(start, end, words_start)`` of each id-shaped token in ``text`` that can carry a credential word."""
+    return [
+        (m.start(), m.end(), m.start("words"))
+        for m in _ID_TOKEN_RE.finditer(text)
+        if m["ns"] not in _CREDENTIAL_NAMESPACES and m["suffix"]
+    ]
+
+
+def _redact_inline_secrets(value: str) -> str:
+    """``INLINE_SECRET_RE`` over ``value``, except that a credential word inside an id-shaped token is left alone
+    (the rest of the match, past the token, is still scanned)."""
+    spans = _id_token_spans(value)
+
+    def inline(match: re.Match[str]) -> str:
+        start = match.start("prefix")
+        for _, end, words_start in spans:
+            if words_start < start < end and value[start - 1] == "_":
+                cut = end - start
+                return match[0][:cut] + _redact_inline_secrets(match[0][cut:])
+        raw = match["value"]
+        quote = raw[0] if len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0] else ""
+        return f"{match['prefix']}{quote}{SECRET_PLACEHOLDER}{quote}"
+
+    return INLINE_SECRET_RE.sub(inline, value)
+
+
 _IMMUTABLE_PREFIX = "Id "
 _USER_PREFIX = "User "
 _HEX16 = r"[0-9a-f]{16}"
@@ -919,12 +963,7 @@ class _Redactor:
         if minimal:
             return value
 
-        def inline(match: re.Match[str]) -> str:
-            raw = match["value"]
-            quote = raw[0] if len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0] else ""
-            return f"{match['prefix']}{quote}{SECRET_PLACEHOLDER}{quote}"
-
-        return INLINE_SECRET_RE.sub(inline, value)
+        return _redact_inline_secrets(value)
 
     def _embedded_json(self, value: str) -> str | None:
         """A string that is a JSON object or array is parsed, redacted as structure and written back the way it was

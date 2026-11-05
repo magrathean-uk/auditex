@@ -7,6 +7,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Fix the redaction of finding ids that contain a credential word: `identity:global_admin_stale_password:<guid>` was written as `identity:global_admin_stale_password:***redacted***` by the report-pack profile (so `findings.json` and `report-pack.json` disagreed and the gate said `findings_inconsistent`). Id-shaped tokens (`<namespace>:<snake_case_words>[:<guid-or-suffix>]`) are now exempt from the inline secret pattern under every profile; real `password: value` assignments are redacted as before.
+
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
 - Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`; in-memory projection integration remains a separate product change.
 

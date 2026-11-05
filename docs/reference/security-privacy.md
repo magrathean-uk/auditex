@@ -366,7 +366,19 @@ is never name-substituted; identifiers in it (GUIDs, addresses, immutable ids) a
 policy id (`MS.EXO.4.1v1`), a snake_case or UPPER_SNAKE code (`not_collected`) and the enum words in
 `_STATIC_VOCABULARY` are never substituted anywhere in free text. A user whose name equals such a value is still
 pseudonymised in the structured `display_name` field, and a name of any other shape (`DmarcPolicy`) is still
-pseudonymised in free text; the price is that a person literally named like a code keeps that spelling in prose. If two keys become equal the later one gets a `#n`
+pseudonymised in free text; the price is that a person literally named like a code keeps that spelling in prose.
+
+**Ids that contain a credential word (every profile, including `report_pack`).** A finding id has the shape
+`<namespace>:<snake_case_words>[:<guid-or-suffix>]`, for example `identity:global_admin_stale_password:<guid>`. The
+inline secret pattern (`secret_hygiene.INLINE_SECRET_RE`) would read `password:` inside it as an assignment, mask
+the GUID and make `findings.json` and `report-pack.json` disagree. A credential word is therefore left alone when it
+sits after an underscore inside the words of an id-shaped token whose namespace is one lower-case word that is not
+itself a credential word (`password`, `secret`, `token`, `key`, `client`, `access`, `refresh`, `api` and so on),
+whose words contain an underscore and whose suffix is a GUID or one lower-case word. Everything else is redacted as
+before: `password: hunter2`, `password=x`, `db_password=x`, `secret:hunter_2` (credential namespace),
+`identity:db_password:Hunter2` (not a lower-case suffix) and `password=<id>` (the assignment starts before the id).
+Anything past the id in the same run of text is still scanned. Known residue: a lower-case word that follows an
+id-shaped credential name (`identity:db_password:hunter`) is read as an id suffix and kept. If two keys become equal the later one gets a `#n`
 suffix; no value is lost. Redaction is deterministic and leaves numbers, booleans, `None` and bytes alone.
 
 ### The customer pack's verbatim files
