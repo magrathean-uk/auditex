@@ -75,7 +75,7 @@ def _resolve_requested_surfaces(surface: str, mode: str) -> list[str]:
     if not requested or "all" in requested:
         if mode == "response":
             return ["response", "toolchain"]
-        return [*DEFAULT_COLLECTOR_SURFACES, "windows365"]
+        return [*DEFAULT_COLLECTOR_SURFACES, *(["exchange_policy", "dns_posture"] if mode == "app" else []), "windows365"]
     return requested
 
 

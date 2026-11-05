@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from azure_tenant_audit.config import CollectorConfig
+from azure_tenant_audit.data_handling import collector_activity_notices
 from azure_tenant_audit.presets import load_collector_presets
 from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import (
@@ -267,15 +268,23 @@ def build_m365_setup_guide(
     config = CollectorConfig.from_path(config_path)
     profile = get_profile(auditor_profile)
     presets = load_collector_presets()
-    selected = select_collectors(
-        available=config.default_order,
-        profile_default_collectors=profile.default_collectors,
-        preset_name=collector_preset,
-        presets=presets,
-        explicit_collectors=_split_values(collectors),
-        excluded_collectors=_split_values(exclude),
-        include_exchange=include_exchange,
-    )
+
+    def selection(auth_mode: str) -> list[str]:
+        names = select_collectors(
+            available=config.default_order,
+            profile_default_collectors=profile.default_collectors,
+            preset_name=collector_preset, presets=presets,
+            explicit_collectors=_split_values(collectors),
+            excluded_collectors=_split_values(exclude),
+            include_exchange=include_exchange, auth_mode=auth_mode,
+        )
+        # Generated delegated commands cannot open the app-only policy session.
+        return names if auth_mode == "app" else [
+            name for name in names if name not in {"exchange_policy", "dns_posture"}
+        ]
+
+    selections = {auth_mode: selection(auth_mode) for auth_mode in ("app", "delegated")}
+    selected = selections["app" if mode == "app" else "delegated"]
     hints = _load_permission_hints(permission_hints_path)
     catalog = build_m365_scope_catalog(
         collector_config=config,
@@ -286,7 +295,6 @@ def build_m365_setup_guide(
     collector_rows: list[dict[str, Any]] = []
     graph_permissions: list[str] = list(aggregate["required_permissions"])
     role_hints: list[str] = _dedupe([*profile.delegated_role_hints, *aggregate["minimum_role_hints"]])
-    tool_requirements: list[str] = _dedupe([*profile.adapter_requirements, *aggregate["tool_requirements"]])
     optional_commands: list[str] = list(aggregate["optional_commands"])
     for name in selected:
         row = _mapping(catalog.get(name))
@@ -301,15 +309,44 @@ def build_m365_setup_guide(
             }
         )
 
+    authentication_plans = {}
+    for auth_mode, names in selections.items():
+        mode_aggregate = aggregate_catalog_rows(catalog, names)
+        tools = _dedupe([*profile.adapter_requirements, *mode_aggregate["tool_requirements"]])
+        if "exchange_policy" in names:
+            tools = _dedupe([*tools, "pwsh", "ExchangeOnlineManagement"])
+        elif auditor_profile in {"auto", "global-reader"}:
+            tools = [tool for tool in tools if tool not in {"pwsh", "ExchangeOnlineManagement"}]
+        authentication_plans[auth_mode] = {
+            "selected_collectors": names,
+            "graph_permissions": list(mode_aggregate["required_permissions"]),
+            "exchange_application_permissions": ["Exchange.ManageAsApp"] if "exchange_policy" in names else [],
+            "tool_requirements": tools,
+            "collection_notices": collector_activity_notices(names, auth_mode),
+        }
+    # Both modes' commands are printed, so disclose the requirements for both.
+    exchange_permissions = authentication_plans["app"]["exchange_application_permissions"]
+    exchange_blast_radius = (
+        "Write-capable Exchange application permission used read-only: read-only Get-* cmdlets only; "
+        "no mutating cmdlet is issued; the Exchange.ManageAsApp role assignment gives Global Reader only. "
+        "Tenant-wide Exchange policy visibility is granted; a write-capable scope does not authorise tenant writes."
+    )
+    tool_requirements = _dedupe([
+        tool for plan in authentication_plans.values() for tool in plan["tool_requirements"]
+    ])
     broad_permissions = [
         {
             "permission": permission,
             "risk": "write_capable",
             "note": "Permission name includes write/manage capability. Auditex remains audit-only and records observed calls.",
         }
-        for permission in graph_permissions
+        for permission in [*graph_permissions, *exchange_permissions]
         if any(token in permission for token in M365_WRITE_CAPABLE_TOKENS)
     ]
+
+    for warning in broad_permissions:
+        if warning["permission"] == "Exchange.ManageAsApp":
+            warning["note"] = exchange_blast_radius
 
     delegated_steps = [
         "Assign the operator the minimum delegated reader role that matches the selected collectors.",
@@ -330,14 +367,30 @@ def build_m365_setup_guide(
         "Keep command adapters read-only and review api-inventory.json after each run.",
     ]
 
-    app_probe_selection = ""
-    app_run_selection = ""
-    if {"power_platform", "power_bi"}.intersection(selected):
-        selected_csv = ",".join(selected)
-        app_probe_selection = f" --surface {selected_csv}"
-        if collector_preset:
-            app_run_selection = f" --collector-preset {collector_preset}"
-        app_run_selection += f" --collectors {selected_csv}"
+    if mode != "app" and not collectors and not collector_preset:
+        delegated_steps.append(
+            "Exchange policy and DNS posture profile defaults are app-mode only. "
+            "Delegated/interactive/access-token runs omit both; DNS itself needs no Exchange session."
+        )
+    delegated_steps.extend(authentication_plans["delegated"]["collection_notices"])
+    app_steps.extend(authentication_plans["app"]["collection_notices"])
+    if "exchange_policy" in selections["app"]:
+        app_steps.append(
+            "For Exchange app-only access, grant admin consent to Exchange.ManageAsApp and assign "
+            "Global Reader to the service principal; install pwsh and ExchangeOnlineManagement. "
+            + exchange_blast_radius
+        )
+
+    authentication_plans["app"]["setup_steps"] = app_steps
+    authentication_plans["delegated"]["setup_steps"] = delegated_steps
+
+    app_csv = ",".join(selections["app"])
+    delegated_csv = ",".join(selections["delegated"])
+    app_probe_selection = f" --surface {app_csv}"
+    preset_flag = f" --collector-preset {collector_preset}" if collector_preset else ""
+    app_run_selection = f"{preset_flag} --collectors {app_csv}"
+    delegated_run_selection = f"{preset_flag} --collectors {delegated_csv}"
+    delegated_probe_surface = delegated_csv
 
     return {
         "schema_version": "2026-05-22",
@@ -348,9 +401,11 @@ def build_m365_setup_guide(
         "plane": plane,
         "collector_preset": collector_preset,
         "selected_collectors": selected,
+        "authentication_plans": authentication_plans,
         "collector_permissions": collector_rows,
         "graph_permissions": graph_permissions,
         "graph_permissions_csv": ",".join(graph_permissions),
+        "exchange_application_permissions": exchange_permissions,
         "minimum_role_hints": role_hints,
         "tool_requirements": tool_requirements,
         "optional_commands": optional_commands,
@@ -369,12 +424,12 @@ def build_m365_setup_guide(
             "delegated_login": f"az login --allow-no-subscriptions --tenant {tenant_id}",
             "delegated_probe": (
                 f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --mode delegated --surface all --use-azure-cli-token"
-            ),
+                f"--auditor-profile {auditor_profile} --mode delegated --surface {delegated_probe_surface} --use-azure-cli-token"
+            ) if delegated_csv else None,
             "delegated_run": (
                 f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --plane {plane} --use-azure-cli-token --probe-first --throttle-mode safe"
-            ),
+                f"--auditor-profile {auditor_profile} --plane {plane} --use-azure-cli-token --probe-first --throttle-mode safe{delegated_run_selection}"
+            ) if delegated_csv else None,
             "app_probe": (
                 f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
                 f"--auditor-profile {auditor_profile} --mode app --client-id <app-id> --client-secret <client-secret>"
@@ -425,6 +480,10 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
         lines.extend(["", "## Microsoft Graph Permissions", ""])
         for permission in payload.get("graph_permissions") or []:
             lines.append(f"- `{permission}`")
+        if payload.get("exchange_application_permissions"):
+            lines.extend(["", "## Exchange Application Permissions", ""])
+            for permission in payload["exchange_application_permissions"]:
+                lines.append(f"- `{permission}` (Office 365 Exchange Online, not Microsoft Graph)")
         lines.extend(["", "## Role Hints", ""])
         for role in payload.get("minimum_role_hints") or []:
             lines.append(f"- {role}")
@@ -446,8 +505,18 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
         lines.append(f"{index}. {step}")
 
     lines.extend(["", "## Verify Commands", ""])
+    for auth_mode, plan in _mapping(payload.get("authentication_plans")).items():
+        lines.extend([f"## {auth_mode.title()} command requirements", ""])
+        lines.append("Collectors: " + ", ".join(plan["selected_collectors"]))
+        lines.append("Graph permissions: " + (", ".join(plan["graph_permissions"]) or "none"))
+        lines.append("Exchange application permissions: " + (", ".join(plan["exchange_application_permissions"]) or "none"))
+        lines.append("Tools: " + (", ".join(plan["tool_requirements"]) or "none"))
+        lines.extend(["", *[f"- {step}" for step in plan["setup_steps"]], ""])
+
     commands = _mapping(payload.get("commands"))
     for name, command in commands.items():
+        if command is None:
+            continue
         lines.extend([f"### {name}", "", "```bash", str(command), "```", ""])
 
     lines.extend(["## Review Artifacts", ""])

@@ -363,11 +363,13 @@ def test_a_dns_record_with_a_resolver_error_replays_as_a_failed_read(tmp_path: P
     rc_good, good_dir = _replay(tmp_path, dns(good), "dns-good")
     rc, run_dir = _replay(tmp_path, dns(good, bad), "dns-bad")
 
-    assert rc_good == 0 and rc == 1
+    assert rc_good == 0 and rc == 0
     rows = [row for row in load(run_dir / "coverage.json") if row["collector"] == "dns_posture"]
     assert [(row["name"], row["status"], row["error_class"]) for row in rows] == [("posture:bad.example", "failed", "dns_resolver_error")]
     assert "SERVFAIL" in rows[0]["error"]
     assert load(run_dir / "run-manifest.json")["overall_status"] == "partial"
+    for rule in ("dns_posture.spf_missing", "dns_posture.dmarc_missing", "dns_posture.dkim_missing"):
+        assert {status for status, _ in rule_statuses(run_dir)[rule]} == {"not_assessed"}
     assert gate_findings(run_dir=str(good_dir), fail_on="critical")["status"] == "pass"
     assert gate_findings(run_dir=str(run_dir), fail_on="critical")["status"] == "blocked"
 

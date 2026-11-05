@@ -1060,3 +1060,41 @@ def test_an_unchunked_read_keeps_its_prefix_and_marks_the_failed_page() -> None:
     assert row["collection_truncated"] is True
     assert row["truncation_reason"] == REASON_PAGINATION_FAILED
     assert payload["users"]["truncation_reason"] == REASON_PAGINATION_FAILED
+
+
+@pytest.mark.parametrize("collector,error_class,phrase", [
+    ("exchange_policy", "command_not_found", "pwsh"),
+    ("exchange_policy", "module_not_found", "ExchangeOnlineManagement"),
+    ("exchange_policy", "session_not_connected", "session failed"),
+    ("exchange_policy", "command_not_authenticated", "admin consent"),
+    ("dns_posture", "dns_resolver_error", "Cloudflare"),
+    ("dns_posture", "public_lookup_error", "HTTPS read failed"),
+    ("exchange_policy", "license_required", "licence"),
+])
+def test_default_workload_gaps_have_customer_reasons(collector, error_class, phrase):
+    from azure_tenant_audit.collection_gaps import refusal_gap_records
+
+    records = refusal_gap_records([{
+        "collector": collector, "name": "constructed_read", "status": "failed",
+        "error_class": error_class, "error": "constructed failure", "item_count": 0,
+    }])
+    assert len(records) == 1
+    assert records[0]["reason"] == "read_failed"
+    assert records[0]["customer_reason"].startswith("Not assessed:")
+    assert phrase in records[0]["customer_reason"]
+
+
+def test_shared_section_gap_reasons_do_not_contain_workload_failures():
+    from azure_tenant_audit.collection_gaps import SECTION_GAP_REASON_TEXT, collector_gap_reason
+    assert {'license_required', 'command_not_found', 'module_not_found', 'toolchain_unavailable'}.isdisjoint(SECTION_GAP_REASON_TEXT)
+    assert 'Exchange' in collector_gap_reason('exchange_policy', 'license_required')
+    assert collector_gap_reason('identity', 'license_required') is None
+
+
+def test_exchange_escalation_permission_is_only_recommended_for_exchange():
+    for collector in ('identity', 'exchange_policy'):
+        rows = build_diagnostics(
+            [{'name': collector, 'status': 'failed'}], [], {}, 'auto',
+        )
+        permissions = rows[0]['recommendations']['optional_app_escalation_permissions']
+        assert ('Exchange.ManageAsApp' in permissions) == (collector == 'exchange_policy')

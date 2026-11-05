@@ -331,3 +331,10 @@ def test_probe_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch) -> None:
     assert contexts["dns_posture"]["exchange_accepted_domains"] == envelope
     assert "exchange_accepted_domains" not in contexts["exchange_policy"]
     assert "exchange_accepted_domains" not in contexts["identity"]
+
+
+def test_app_probe_all_includes_default_workloads_but_delegated_does_not():
+    from azure_tenant_audit.probe import _resolve_requested_surfaces
+
+    assert {"exchange_policy", "dns_posture"} <= set(_resolve_requested_surfaces("all", "app"))
+    assert {"exchange_policy", "dns_posture"}.isdisjoint(_resolve_requested_surfaces("all", "delegated"))

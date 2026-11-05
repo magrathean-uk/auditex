@@ -357,3 +357,15 @@ def test_google_offline_replay_honours_markers(tmp_path: Path) -> None:
     assert rc == 1
     assert _manifest(run_dir)["overall_status"] == "partial"
     assert _ledger(run_dir)["google_policies"]["coverage_status"] != "complete_offline_sample"
+
+
+def test_ipps_explicit_skip_replays_without_reclassifying_historical_failures():
+    from azure_tenant_audit.offline_replay import replay_coverage_rows, replay_collector_status
+
+    skipped = {"protectionAlerts": {"value": [], "status": "skipped", "reason": "ipps_session_not_opened",
+                                     "error_class": "ipps_session_not_opened", "error": "constructed IPPS skip"}}
+    rows = replay_coverage_rows("exchange_policy", skipped)
+    assert len(rows) == 1 and rows[0]["status"] == "skipped" and rows[0]["section_scoped"] is True
+    assert replay_collector_status(rows) == "ok"
+    old = {"protectionAlerts": {"error_class": "session_not_connected", "error": "constructed old failure"}}
+    assert replay_collector_status(replay_coverage_rows("exchange_policy", old)) == "partial"

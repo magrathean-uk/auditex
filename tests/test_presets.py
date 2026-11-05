@@ -181,3 +181,92 @@ def test_power_platform_opt_in_selects_disabled_collectors_without_extending_def
     assert selected.execution_plane == "inventory"
     assert optional.isdisjoint(plan([]).selected_collectors)
     assert optional.isdisjoint(plan(["--collector-preset", "full"]).selected_collectors)
+
+
+def test_default_workload_selection_and_unchanged_presets(tmp_path):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.profiles import PROFILES
+    from azure_tenant_audit.run import build_live_run_plan
+
+    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
+    presets = load_collector_presets()
+    baseline = "identity app_consent security conditional_access defender service_health auth_methods reports_usage external_identity consent_policy domains_hybrid licensing identity_governance intune sharepoint onedrive_posture teams".split()
+    assert list(PROFILES["auto"].default_collectors) == baseline + ["exchange_policy", "dns_posture"]
+    reader = baseline[:15] + ["sharepoint_access"] + baseline[15:]
+    assert list(PROFILES["global-reader"].default_collectors) == reader + ["exchange_policy", "dns_posture"]
+    assert presets["full"]["include"] == reader + ["exchange_policy", "dns_posture"]
+    assert list(PROFILES["app-readonly-full"].default_collectors) == "identity app_consent security conditional_access defender service_health auth_methods reports_usage external_identity consent_policy domains_hybrid licensing identity_governance intune intune_depth sharepoint sharepoint_access onedrive_posture teams teams_policy purview ediscovery exchange exchange_policy dns_posture".split()
+    assert presets["config-only"]["include"] == "identity app_consent conditional_access auth_methods external_identity consent_policy domains_hybrid licensing identity_governance sharepoint teams".split()
+    assert presets["power-platform"]["include"] == ["identity", "licensing", "power_platform", "power_bi"]
+    unchanged = {
+        "security-reader": "identity app_consent security conditional_access defender auth_methods identity_governance",
+        "reports-reader": "identity security service_health reports_usage",
+        "exchange-reader": "exchange exchange_policy security identity",
+        "intune-reader": "intune intune_depth",
+    }
+    for profile, expected in unchanged.items():
+        assert list(PROFILES[profile].default_collectors) == expected.split()
+    for name in ("exchange_policy", "dns_posture"):
+        assert config.collectors[name].enabled is True
+    for profile in ("auto", "global-reader", "app-readonly-full"):
+        for mode_args in ([], ["--interactive"], ["--use-azure-cli-token"]):
+            args = cli.build_parser().parse_args(["--auditor-profile", profile, *mode_args])
+            plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config, permission_hints={}, collector_presets=presets)
+            if not mode_args:
+                assert {"exchange_policy", "dns_posture"} <= set(plan.selected_collectors)
+                assert plan.selection_notices == ()
+            else:
+                assert {"exchange_policy", "dns_posture"}.isdisjoint(plan.selected_collectors)
+                assert len(plan.selection_notices) == 1
+                assert "app-mode only" in plan.selection_notices[0]
+
+
+def test_deselect_default_workloads_in_both_clis(tmp_path, monkeypatch):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.run import build_live_run_plan
+
+    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
+    captured = []
+    monkeypatch.setattr(auditex_cli, "tenant_audit_main", lambda argv: captured.append(cli.build_parser().parse_args(argv)) or 0)
+    for entrypoint in ("engine", "product"):
+        for extra, absent in (
+            (["--exclude", "exchange_policy"], {"exchange_policy"}),
+            (["--exclude", "dns_posture"], {"dns_posture"}),
+            (["--collector-preset", "full", "--exclude", "exchange_policy,dns_posture"], {"exchange_policy", "dns_posture"}),
+            (["--collectors", "identity,conditional_access"], {"exchange_policy", "dns_posture"}),
+            (["--collector-preset", "config-only"], {"exchange_policy", "dns_posture"}),
+        ):
+            if entrypoint == "product":
+                assert auditex_cli.main(["run", *extra]) == 0
+                args = captured[-1]
+            else:
+                args = cli.build_parser().parse_args(extra)
+            plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config, permission_hints={}, collector_presets=load_collector_presets())
+            assert absent.isdisjoint(plan.selected_collectors)
+            if extra == ["--exclude", "exchange_policy"]:
+                assert "dns_posture" in plan.selected_collectors
+            if extra == ["--exclude", "dns_posture"]:
+                assert "exchange_policy" in plan.selected_collectors
+
+
+def test_non_app_only_explicit_collectors_override_app_default_boundary(tmp_path):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.run import build_live_run_plan
+
+    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
+    for mode in (["--interactive"], ["--use-azure-cli-token"], ["--access-token", "constructed"]):
+        for selection in (["--collectors", "exchange_policy,dns_posture"], ["--collector-preset", "full"], ["--include-exchange"]):
+            args = cli.build_parser().parse_args([*mode, *selection])
+            plan = build_live_run_plan(args, output_dir=tmp_path, collector_config=config,
+                                       permission_hints={}, collector_presets=load_collector_presets())
+            if selection[0] == "--collectors":
+                assert {"exchange_policy", "dns_posture"} <= set(plan.selected_collectors)
+                assert not plan.selection_notices
+            else:
+                assert {"exchange_policy", "dns_posture"}.isdisjoint(plan.selected_collectors)
+                assert len(plan.selection_notices) == 1
+                if selection == ["--include-exchange"]:
+                    assert "exchange" in plan.selected_collectors

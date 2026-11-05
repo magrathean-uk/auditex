@@ -4,6 +4,43 @@ from collections.abc import Mapping
 from typing import Any
 
 
+def collector_activity_notices(collectors: list[str], mode: str) -> list[str]:
+    """Disclose planned side effects; selection does not prove a session or request succeeded."""
+    if mode == "offline":
+        return (["Offline replay: no Exchange Online PowerShell session or public DNS/HTTPS requests are made."]
+                if {"exchange_policy", "dns_posture"}.intersection(collectors) else [])
+    notices = []
+    if "exchange_policy" in collectors:
+        notices.append(
+            "Selected Exchange policy collection opens an Exchange Online PowerShell session using app authentication "
+            "(Exchange.ManageAsApp plus Global Reader on the service principal). "
+            "Interactive, delegated and access-token authentication cannot open this session; a fresh PowerShell "
+            "process cannot inherit the signed-in operator's session. "
+            "Read-only Get-* commands; no Security & Compliance (IPPS) session. "
+            "Not assessed: alert policies need a Security & Compliance session, which Auditex does not open."
+        )
+    if "dns_posture" in collectors:
+        from .dns_lookup import DEFAULT_DOH_ENDPOINT
+
+        notices.append(
+            "Selected public DNS posture collection sends the tenant's domain names to the public Cloudflare "
+            f"DNS-over-HTTPS resolver ({DEFAULT_DOH_ENDPOINT}). Only domain names, no user data, are sent to the resolver. "
+            "SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange accepted domains (coexistence excluded) "
+            "when the same run collected them, else Graph verified domains with the Email service. "
+            "Posture checks and MTA-STS policy HTTPS reads where advertised and public Entra OpenID discovery "
+            "HTTPS reads stay on Graph-verified domains."
+        )
+    if notices:
+        notices.append(
+            "Deselect either with --exclude exchange_policy or --exclude dns_posture, or both with "
+            "--exclude exchange_policy,dns_posture. --collectors replaces the selection; "
+            "--collector-preset config-only omits both. Exchange/DNS failures leave dependent policies "
+            "not assessed with a coverage-gap reason and overall status partial. "
+            "The by-design IPPS skip leaves the collector and run ok when other reads succeed."
+        )
+    return notices
+
+
 def _event_rows(events: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return [dict(item) for item in events or [] if isinstance(item, Mapping)]
 
@@ -109,5 +146,6 @@ def build_data_handling_summary(
         "auth_scope_summary": scope_summary,
         "write_capable_scopes": write_capable_scopes,
         "events": event_rows,
+        "collection_notices": collector_activity_notices(collectors, mode) if platform != "google_workspace" else [],
         "provider_assertions": provider_assertions,
     }

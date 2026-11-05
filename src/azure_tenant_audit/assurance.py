@@ -4,7 +4,7 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-from .collection_gaps import list_truncations, section_gap_records, section_gap_summary, truncation_summary
+from .collection_gaps import collector_gap_reason, list_truncations, section_gap_records, section_gap_summary, truncation_summary
 from .evidence_gates import build_evidence_gate_summary
 
 
@@ -240,7 +240,8 @@ def build_coverage_gap_summary(
     for row in [*collector_rows, *coverage_rows]:
         if not isinstance(row, Mapping):
             continue
-        name = _row_name(dict(row))
+        # Coverage rows name an operation; group its error under the owning collector.
+        name = str(row.get("collector") or row.get("name") or "")
         if name:
             rows_by_collector.setdefault(name, []).append(dict(row))
 
@@ -287,6 +288,15 @@ def build_coverage_gap_summary(
                 )
             else:
                 message += f"; section-scoped reads not completed: {section_gap_summary(own_section_gaps)}"
+        customer_reasons = sorted({
+            reason for collector in collectors
+            for row in rows_by_collector.get(collector, [])
+            if row.get("status") not in {"ok", "complete_exact_scope", "complete_effective_role", "complete_equivalent_scope"}
+            and not (row.get("status") == "skipped" and row.get("section_scoped"))
+            and (reason := collector_gap_reason(collector, row.get("error_class"), row.get("error")))
+        })
+        if customer_reasons:
+            message += "; " + " ".join(customer_reasons)
         gap["message"] = message
         gaps.append(gap)
     return gaps

@@ -149,9 +149,15 @@ def replay_coverage_rows(collector: str, payload: Mapping[str, Any]) -> list[dic
         error_class = section.get("error_class")
         failed = bool(error or error_class)
         cut = section_was_cut(section)
-        # Preserve explicit Teams capability skips. Older failed Teams rows
-        # have no skipped status and retain their original failure semantics.
-        if (collector == "teams_policy" and section.get("status") == "skipped"
+        # Preserve explicit capability skips through the shared reason map. Older failed
+        # rows have no skipped status and retain their original failure semantics.
+        explicit_skip = (
+            collector == "teams_policy" and section.get("reason") in {
+                "teams_token_unavailable", "teams_powershell_not_supported",
+            }
+        ) or (collector == "exchange_policy" and name == "protectionAlerts"
+              and section.get("reason") == "ipps_session_not_opened")
+        if (explicit_skip and section.get("status") == "skipped"
                 and section.get("reason") in SECTION_GAP_REASON_TEXT and not cut):
             rows.append({
                 "collector": collector, "type": OFFLINE_ROW_TYPE, "name": str(name),

@@ -43,7 +43,7 @@ COLLECTOR_ERROR_CLASSES = frozenset({
     "app_missing_reply_url", "bad_request", "client_error", "collection_limit", "command_error", "command_exception",
     "command_not_authenticated", "command_not_available", "command_not_found", "command_optional_failure",
     "command_output_empty", "command_output_parse_error", "command_parse_error", "command_refused", "command_timeout",
-    "dns_resolver_error", "graph_transient", "incomplete_evidence", "insufficient_permissions", "invalid_object_id",
+    "dns_resolver_error", "graph_transient", "incomplete_evidence", "insufficient_permissions", "invalid_object_id", "ipps_session_not_opened",
     "lab_guard", "license_required", "missing_app_credentials", "missing_argument", "missing_intent",
     "module_compatibility_unverified", "module_incompatible", "module_not_found", "next_link_refused",
     "permission_stop", "preflight_blocked", "profile_not_allowed", "public_lookup_error", "query_page_minimum",

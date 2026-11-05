@@ -706,49 +706,49 @@
           "name": "transportRules",
           "category": "policy",
           "commands": [
-            "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject"
+            ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)"
           ]
         },
         {
           "name": "inboundConnectors",
           "category": "policy",
           "commands": [
-            "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType"
+            ",@(Get-InboundConnector | Select-Object Name,Enabled,ConnectorType)"
           ]
         },
         {
           "name": "outboundConnectors",
           "category": "policy",
           "commands": [
-            "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType"
+            ",@(Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType)"
           ]
         },
         {
           "name": "acceptedDomains",
           "category": "policy",
           "commands": [
-            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain"
+            ",@(Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain)"
           ]
         },
         {
           "name": "remoteDomains",
           "category": "policy",
           "commands": [
-            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled"
+            ",@(Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled)"
           ]
         },
         {
           "name": "sharingPolicy",
           "category": "policy",
           "commands": [
-            "Get-SharingPolicy | Select-Object Name,Domains"
+            ",@(Get-SharingPolicy | Select-Object Name,Domains)"
           ]
         },
         {
           "name": "mailboxForwarding",
           "category": "policy",
           "commands": [
-            "Get-EXOMailbox -ResultSize 501 -Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward -Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null' | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward"
+            ",@(Get-EXOMailbox -ResultSize 501 -Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward -Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null' | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward)"
           ]
         },
         {
@@ -776,14 +776,14 @@
           "name": "protectionAlerts",
           "category": "detection",
           "commands": [
-            "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"
+            ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)"
           ]
         },
         {
           "name": "malwareFilterPolicy",
           "category": "policy",
           "commands": [
-            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"
+            ",@(Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes)"
           ]
         },
         {
@@ -804,7 +804,7 @@
           "name": "dkimSigningConfig",
           "category": "policy",
           "commands": [
-            "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"
+            ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)"
           ]
         },
         {
