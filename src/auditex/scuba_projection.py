@@ -1319,7 +1319,9 @@ def rule_policy_section(projection: Projection, policy_id: str, section: str) ->
 # Area adapter modules (src/auditex/scuba_adapters_<area>.py), each exposing ADAPTERS: dict[str, Callable].
 # New model-view sections need PACK_SHAPE_DIGESTS entries (and enum domains where relevant), a shared hunk;
 # rule-only sections do not. scubagear_export.py does not call project_run, so these adapters never apply there.
-AREA_ADAPTER_MODULES: tuple[str, ...] = ()
+AREA_ADAPTER_MODULES: tuple[str, ...] = (
+    # One module per line (keeps merges of the area branches small): "auditex.scuba_adapters_<area>",
+)
 
 PS_SECTIONS = {
     "accepted_domains": ("exchange_policy", "acceptedDomains", {"Name": _text, "DomainName": _text}),
