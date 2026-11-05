@@ -158,13 +158,17 @@ class ExchangePolicyCollector(Collector):
         coverage: list[dict[str, Any]] = []
         total = 0
 
+        # Consume the PFX password before even the unrelated Exchange children start.
+        compliance_session = context.get("ipps_session")
+        if compliance_session is None:
+            compliance_session = ipps_session()
         exchange_session = _exchange_session(context.get("client"), log_event)
         enabled = ipps_enabled()
         commands = [(name, command) for name, command in self.command_collectors
                     if enabled or name not in IPPS_OPERATIONS - {"protectionAlerts"}]
         for name, command in commands:
             # Get-ProtectionAlert lives in Security & Compliance PowerShell, which needs its own session.
-            session = ipps_session() if name in IPPS_OPERATIONS else exchange_session
+            session = compliance_session if name in IPPS_OPERATIONS else exchange_session
             response = adapter.run(command, log_event=log_event, session=session)
             if name in IPPS_OPERATIONS and enabled:
                 response["ipps_enabled"] = True

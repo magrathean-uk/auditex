@@ -291,6 +291,7 @@ def run_preflight_probe(
     writer: Any,
     include_blocked: bool,
     registry: dict[str, Any],
+    ipps_session: dict[str, Any] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]], str]:
     rows: list[dict[str, Any]] = []
     runnable: list[str] = []
@@ -341,6 +342,7 @@ def run_preflight_probe(
                         "operation_checkpoint_state": {},
                         "chunk_writer": None,
                         "audit_logger": writer.log_event,
+                        "ipps_session": ipps_session,
                     }
                 )
             coverage = result.coverage or []

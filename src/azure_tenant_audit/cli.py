@@ -21,6 +21,7 @@ from .auth_runtime import (
 )
 from .collectors import REGISTRY
 from .collectors.base import normalize_collection_limit
+from .collectors.exchange_ipps_commands import ipps_session
 from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
 from .config import AuthConfig, CollectorConfig
 from .data_minimisation import minimise_user_text
@@ -446,6 +447,8 @@ def _resumed_row(name: str, state: dict[str, Any], coverage_rows: list[dict[str,
 
 
 def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None) -> int:
+    # Capture before auth/preflight/any collector starts a child process.
+    compliance_session = ipps_session()
     # Read the waiver file once, before any tenant call. A file that cannot be trusted must not
     # let the run finish with no waivers applied (or the wrong ones), and the rows loaded here
     # are the ones applied later, so a file edited mid-run cannot fail the run after collection.
@@ -631,6 +634,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
             writer=writer,
             include_blocked=args.include_blocked,
             registry=REGISTRY,
+            ipps_session=compliance_session,
         )
         if not selected:
             writer.log_event(
@@ -769,6 +773,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
                 collector_checkpoint_state=collector_checkpoint_state.get(name, {}),
                 operation_checkpoint_state=operation_checkpoint_state.get(name, {}),
                 hooks=writer_adapter.hooks(),
+                extra={"ipps_session": compliance_session},
             ),
             name=name,
         )

@@ -5,8 +5,11 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
+import sys
 import time
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from ..secret_hygiene import redact_command_string, redact_output
@@ -15,6 +18,19 @@ from .read_guard import CommandRefused, VettedCommand, check_command, refusal_re
 
 
 _ORGANIZATION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*\.onmicrosoft\.(?:com|us|de|cn)")
+_IPPS_MAX_PFX_BYTES = 64 * 1024  # Same cap as the certificate-auth branch.
+_IPPS_CHILD_PASSWORD = "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD"
+
+
+def _ipps_certificate_file_usable(value: str) -> bool:
+    """Check metadata only; Python never reads or exports the PFX/private key."""
+    try:
+        info = Path(value).lstat()
+        return (stat.S_ISREG(info.st_mode) and not info.st_mode & 0o077
+                and 0 < info.st_size <= _IPPS_MAX_PFX_BYTES
+                and (not hasattr(os, "getuid") or info.st_uid == os.getuid()))
+    except (OSError, ValueError):
+        return False
 
 
 class PowerShellGraphAdapter(Adapter):
@@ -88,21 +104,50 @@ class PowerShellGraphAdapter(Adapter):
         if session and session.get("kind") == "security_compliance":
             app_id = str(session.get("app_id") or "")
             thumbprint = str(session.get("certificate_thumbprint") or "")
+            certificate_file = str(session.get("certificate_file") or "")
+            password_env = str(session.get("certificate_password_env") or "")
             organization = str(session.get("organization") or "")
             if (not session.get("enabled") or not re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", app_id)
-                    or not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint)
+                    or bool(thumbprint) == bool(certificate_file)
                     or not _ORGANIZATION_PATTERN.fullmatch(organization)):
                 return ""
-            env.update(AUDITEX_IPPS_APP_ID=app_id, AUDITEX_IPPS_CERTIFICATE_THUMBPRINT=thumbprint,
-                       AUDITEX_IPPS_ORGANIZATION=organization)
+            if thumbprint:
+                if sys.platform != "win32" or password_env or not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint):
+                    return ""
+                env["AUDITEX_IPPS_CERTIFICATE_THUMBPRINT"] = thumbprint
+                certificate_argument = "-CertificateThumbprint $env:AUDITEX_IPPS_CERTIFICATE_THUMBPRINT "
+                load_certificate = ""
+            else:
+                if (sys.platform not in {"darwin", "linux"}
+                        or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", password_env)
+                        or not _ipps_certificate_file_usable(certificate_file)):
+                    return ""
+                provider = session.get("certificate_password_provider")
+                try:
+                    password = provider() if callable(provider) else None
+                except Exception:  # Credential-provider diagnostics must never escape.
+                    return ""
+                if not isinstance(password, str) or not password or "\x00" in password:
+                    return ""
+                env["AUDITEX_IPPS_CERTIFICATE_FILE"] = certificate_file
+                env[_IPPS_CHILD_PASSWORD] = password
+                # Let ExchangeOnlineManagement handle platform certificate loading.
+                # EphemeralKeySet is not portable to common macOS .NET runtimes.
+                load_certificate = (
+                    "$ippsPassword = ConvertTo-SecureString -String $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD "
+                    "-AsPlainText -Force; "
+                )
+                certificate_argument = "-CertificateFilePath $env:AUDITEX_IPPS_CERTIFICATE_FILE -CertificatePassword $ippsPassword "
+            env.update(AUDITEX_IPPS_APP_ID=app_id, AUDITEX_IPPS_ORGANIZATION=organization)
             return (
                 "$ErrorActionPreference = 'Stop'; "
                 "try { Import-Module ExchangeOnlineManagement -ErrorAction Stop } "
                 "catch { throw 'AUDITEX_IPPS_MODULE_NOT_FOUND' }; "
-                "try { Connect-IPPSSession -AppId $env:AUDITEX_IPPS_APP_ID "
-                "-CertificateThumbprint $env:AUDITEX_IPPS_CERTIFICATE_THUMBPRINT "
+                "try { " + load_certificate + "Connect-IPPSSession -AppId $env:AUDITEX_IPPS_APP_ID "
+                + certificate_argument +
                 "-Organization $env:AUDITEX_IPPS_ORGANIZATION -ShowBanner:$false -ErrorAction Stop | Out-Null } "
-                "catch { throw 'AUDITEX_IPPS_SESSION_NOT_CONNECTED' }; "
+                "catch { throw 'AUDITEX_IPPS_SESSION_NOT_CONNECTED' } "
+                "finally { $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD = $null }; "
             )
         if not session or session.get("kind") != "exchange_online":
             return ""
@@ -152,6 +197,10 @@ class PowerShellGraphAdapter(Adapter):
 
         ipps = bool(session and session.get("kind") == "security_compliance")
         env = dict(os.environ)
+        # Even direct adapter users must not leak a configured PFX password to
+        # unrelated PowerShell children. Collector sessions consume it earlier.
+        env.pop(os.environ.get("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", ""), None)
+        env.pop(_IPPS_CHILD_PASSWORD, None)
         prelude = self._session_prelude(session, env)
         if ipps and not prelude:
             error_class = "missing_app_credentials" if session.get("enabled") else "session_not_connected"

@@ -4,7 +4,9 @@ Every process is mocked, including Exchange reads alongside IPPS. No sign-in occ
 """
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 from types import SimpleNamespace
 
@@ -13,7 +15,7 @@ import pytest
 from auditex.scuba_projection import NOT_COLLECTED, project_run
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 from azure_tenant_audit.adapters.read_guard import check_command
-from azure_tenant_audit.collectors.exchange_ipps_commands import DLP_EXCEPTION_FIELDS, IPPS_COMMANDS, ipps_session, minimise_ipps
+from azure_tenant_audit.collectors.exchange_ipps_commands import DLP_EXCEPTION_FIELDS, DLP_LOCATION_FIELDS, IPPS_COMMANDS, ipps_session, minimise_ipps
 from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
 from azure_tenant_audit.value_rules import assess
 from azure_tenant_audit.value_rules.defender_dlp import DLP_TYPES
@@ -33,6 +35,7 @@ OUTPUT = {
         "Workload": "Exchange,SharePoint,OneDriveForBusiness,Teams,EndpointDevices",
         **{key: ["All"] for key in ("ExchangeLocation", "SharePointLocation", "OneDriveLocation", "TeamsLocation", "EndpointDlpLocation")},
         **{key: [] for key in DLP_EXCEPTION_FIELDS},
+        "AuditexExceptionPropertiesAvailable": True,
     }],
     "dlpComplianceRules": [{
         "Name": "Synthetic rule", "ParentPolicyName": "Synthetic protection", "Disabled": False,
@@ -45,10 +48,14 @@ OUTPUT = {
 @pytest.fixture(autouse=True)
 def isolate(monkeypatch):
     monkeypatch.delenv("AUDITEX_ENABLE_IPPS", raising=False)
+    for key in ("AUDITEX_IPPS_CERTIFICATE_FILE", "AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV",
+                "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("AZURE_CLIENT_ID", "11111111-1111-4111-8111-111111111111")
     monkeypatch.setenv("AUDITEX_IPPS_ORGANIZATION", "synthetic.onmicrosoft.com")
     monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_THUMBPRINT", "A" * 40)
     monkeypatch.setattr("azure_tenant_audit.adapters.powershell_graph.shutil.which", lambda _: "/mock/pwsh")
+    monkeypatch.setattr("sys.platform", "win32")
     # Default tripwire: no test may start a real subprocess, including pwsh.
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("unmocked process"))
 
@@ -238,3 +245,277 @@ def test_malformed_or_unmarked_alert_envelope_stays_uncollected(tmp_path, envelo
     p = project(tmp_path, {"protectionAlerts": envelope})
     assert p.rule_sections["protection_alerts"] == NOT_COLLECTED
     assert p.report["sections"]["protection_alerts"]["reason"] == "missing_artifact"
+
+
+@pytest.mark.parametrize("count", [0, 1, 3])
+def test_real_python_projection_preserves_all_collection_cardinalities(count):
+    # These are synthetic child JSON inputs, not pre-minimised collector rows.
+    # The matching PowerShell comma/array syntax is pinned in the next test.
+    private = "synthetic-private-scope"
+    policy = deepcopy(OUTPUT["dlpCompliancePolicies"][0])
+    policy.update({key: ["All", private, private][:count] for key in DLP_LOCATION_FIELDS})
+    policy.update({key: [private] * count for key in DLP_EXCEPTION_FIELDS})
+    rule = deepcopy(OUTPUT["dlpComplianceRules"][0])
+    rule.update(NotifyUser=[private] * count,
+                ContentContainsSensitiveInformation=[{"name": "Synthetic type", "Unselected": private}] * count)
+    responses = {"dlpCompliancePolicies": {"value": [policy]}, "dlpComplianceRules": {"value": [rule]}}
+    for name, response in responses.items():
+        minimise_ipps(name, response)  # Calls the actual pure projection used in production.
+        assert private not in json.dumps(response)
+    for key in DLP_LOCATION_FIELDS:
+        assert policy[key] == ["All", private, private][:count]  # Input was not mutated.
+        assert responses["dlpCompliancePolicies"]["value"][0][key] == ["All", "scope", "scope"][:count]
+    for key in DLP_EXCEPTION_FIELDS:
+        assert responses["dlpCompliancePolicies"]["value"][0][key] == ["scope"] * count
+    result = responses["dlpComplianceRules"]["value"][0]
+    assert result["NotifyUser"] == ["scope"] * count
+    assert result["ContentContainsSensitiveInformation"] == [{"name": "Synthetic type"}] * count
+
+
+def test_powershell_nested_arrays_and_original_property_availability_are_explicit():
+    commands = dict(IPPS_COMMANDS)
+    policies = commands["dlpCompliancePolicies"]
+    rules = commands["dlpComplianceRules"]
+    for key in (*DLP_LOCATION_FIELDS, *DLP_EXCEPTION_FIELDS, "NotifyUser"):
+        command = rules if key == "NotifyUser" else policies
+        assert "@{Name='" + key + "';Expression={ if ($null -eq $_." + key + ") { $null } else { ,@(foreach ($entry in @($_." + key + "))" in command
+    assert "else { ,@($_.ContentContainsSensitiveInformation | Select-Object name) }" in rules
+    assert "Name='AuditexExceptionPropertiesAvailable';Expression={ " in policies
+    for key in DLP_EXCEPTION_FIELDS:
+        assert "($null -ne $_.PSObject.Properties['" + key + "'])" in policies
+    assert policies.count(" -and ") == len(DLP_EXCEPTION_FIELDS) - 1
+    for _, command in IPPS_COMMANDS:
+        assert command.startswith(",@(Get-") and command.endswith(")")
+        check_command("powershell_graph", command)
+
+
+@pytest.mark.parametrize("key", DLP_EXCEPTION_FIELDS)
+@pytest.mark.parametrize("value,available,expected", [
+    ("absent", True, "not_assessed"), (None, True, "met"), ([], True, "met"),
+    (["synthetic-private-scope"], True, "not_assessed"),
+    (None, False, "not_assessed"), (None, None, "not_assessed"),
+    (None, "absent", "not_assessed"), (None, "true", "not_assessed"),
+])
+def test_exception_availability_is_separate_from_selected_value(monkeypatch, tmp_path, key, value, available, expected):
+    enabled(monkeypatch)
+    output = deepcopy(OUTPUT)
+    row = output["dlpCompliancePolicies"][0]
+    if value == "absent":
+        del row[key]
+    else:
+        row[key] = value
+    if available == "absent":
+        del row["AuditexExceptionPropertiesAvailable"]
+    else:
+        row["AuditexExceptionPropertiesAvailable"] = available
+    process(monkeypatch, output=output)
+    payload = ExchangePolicyCollector().run({}).payload
+    assert "synthetic-private-scope" not in json.dumps(payload)
+    p = project(tmp_path, payload)
+    assert [assess(policy, p.rule_sections)["verdict"] for policy in POLICIES[:4]] == [expected] * 4
+    if expected == "not_assessed":
+        assert p.rule_sections["dlp_compliance_policies"] == NOT_COLLECTED
+
+
+def pfx_configuration(monkeypatch, *, platform="darwin", mode=stat.S_IFREG | 0o600, size=2048, owner=None):
+    # Only metadata is mocked. No certificate, key or password file is ever created.
+    monkeypatch.setattr("sys.platform", platform)
+    monkeypatch.setenv("AUDITEX_ENABLE_IPPS", "true")
+    monkeypatch.delenv("AUDITEX_IPPS_CERTIFICATE_THUMBPRINT")
+    monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_FILE", "/synthetic/customer.pfx")
+    monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", "SYNTHETIC_IPPS_PASSWORD")
+    monkeypatch.setenv("SYNTHETIC_IPPS_PASSWORD", "synthetic-password-only-in-memory")
+    original = Path.lstat
+
+    def metadata(path, *args, **kwargs):
+        if str(path) == "/synthetic/customer.pfx":
+            return SimpleNamespace(st_mode=mode, st_size=size, st_uid=os.getuid() if owner is None else owner)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", metadata)
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_portable_certificate_is_child_only_and_uses_file_parameters(monkeypatch, platform):
+    pfx_configuration(monkeypatch, platform=platform)
+    calls = process(monkeypatch, output=OUTPUT)
+    events = []
+    result = ExchangePolicyCollector().run({"audit_logger": lambda *a: events.append(a)})
+    connections = [(argv, kwargs) for argv, kwargs in calls if "Connect-IPPSSession" in argv[-1]]
+    assert len(connections) == 3
+    assert "SYNTHETIC_IPPS_PASSWORD" not in os.environ
+    assert "synthetic-password-only-in-memory" not in json.dumps([events, result.payload])
+    for argv, kwargs in calls:
+        assert "synthetic-password-only-in-memory" not in str(argv)
+        assert "/synthetic/customer.pfx" not in str(argv)
+        assert "SYNTHETIC_IPPS_PASSWORD" not in kwargs["env"]
+        if "Connect-IPPSSession" in argv[-1]:
+            script = argv[-1]
+            assert "-CertificateFilePath $env:AUDITEX_IPPS_CERTIFICATE_FILE -CertificatePassword $ippsPassword " in script
+            assert "-CertificateThumbprint" not in script
+            assert "ConvertTo-SecureString -String $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD -AsPlainText -Force" in script
+            assert "EphemeralKeySet" not in script
+            assert "finally { $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD = $null }" in script
+            assert kwargs["env"]["AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD"] == "synthetic-password-only-in-memory"
+        else:
+            assert "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in kwargs["env"]
+
+
+@pytest.mark.parametrize("mode,size,owner", [
+    (stat.S_IFREG | 0o644, 2048, None), (stat.S_IFDIR | 0o700, 2048, None),
+    (stat.S_IFLNK | 0o600, 2048, None), (stat.S_IFIFO | 0o600, 2048, None),
+    (stat.S_IFREG | 0o600, 65537, None), (stat.S_IFREG | 0o600, 0, None),
+    (stat.S_IFREG | 0o600, 2048, os.getuid() + 1),
+])
+def test_pfx_metadata_rejected_without_process_or_file_read(monkeypatch, mode, size, owner):
+    pfx_configuration(monkeypatch, mode=mode, size=size, owner=owner)
+    calls = process(monkeypatch)
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=ipps_session())
+    assert result["error_class"] == "missing_app_credentials" and not calls
+
+
+@pytest.mark.parametrize("problem", ["both", "neither", "missing_file", "missing_password", "empty_password", "invalid_env", "no_env", "provider_error", "thumbprint_on_mac", "pfx_on_windows"])
+def test_certificate_selection_fails_closed_without_sensitive_diagnostics(monkeypatch, problem):
+    pfx_configuration(monkeypatch)
+    if problem == "both":
+        monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_THUMBPRINT", "A" * 40)
+    elif problem == "neither":
+        monkeypatch.delenv("AUDITEX_IPPS_CERTIFICATE_FILE")
+    elif problem == "missing_file":
+        monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_FILE", "/synthetic/absent.pfx")
+    elif problem in {"missing_password", "empty_password"}:
+        monkeypatch.setenv("SYNTHETIC_IPPS_PASSWORD", "")
+        if problem == "missing_password":
+            monkeypatch.delenv("SYNTHETIC_IPPS_PASSWORD")
+    elif problem == "invalid_env":
+        monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", "bad;variable")
+    elif problem == "no_env":
+        monkeypatch.delenv("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV")
+    elif problem == "pfx_on_windows":
+        monkeypatch.setattr("sys.platform", "win32")
+    elif problem == "thumbprint_on_mac":
+        monkeypatch.delenv("AUDITEX_IPPS_CERTIFICATE_FILE")
+        monkeypatch.delenv("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV")
+        monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_THUMBPRINT", "A" * 40)
+    session = ipps_session()
+    if problem == "provider_error":
+        def failed_provider():
+            raise ValueError("synthetic-password-only-in-memory")
+        session["certificate_password_provider"] = failed_provider
+    calls = process(monkeypatch)
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session)
+    assert result["error_class"] == "missing_app_credentials" and not calls
+    assert "synthetic-password-only-in-memory" not in str(result)
+
+
+@pytest.mark.parametrize("kind", ["none", "exchange_online", "security_compliance"])
+def test_direct_adapter_children_do_not_inherit_password_source(monkeypatch, kind):
+    pfx_configuration(monkeypatch)
+    monkeypatch.setenv("AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD", "synthetic-stale-child-password")
+    calls = process(monkeypatch)
+    session = {"kind": kind}
+    if kind == "security_compliance":
+        session = ipps_session()
+    PowerShellGraphAdapter().run("Get-DlpCompliancePolicy", session=session)
+    assert len(calls) == 1
+    assert "SYNTHETIC_IPPS_PASSWORD" not in calls[0][1]["env"]
+    if kind != "security_compliance":
+        assert "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in calls[0][1]["env"]
+
+
+@pytest.mark.parametrize("enabled_switch", ["true", "false"])
+def test_collector_consumes_password_before_any_other_child_even_when_off(monkeypatch, enabled_switch):
+    pfx_configuration(monkeypatch)
+    monkeypatch.setenv("AUDITEX_ENABLE_IPPS", enabled_switch)
+    calls = process(monkeypatch)
+    ExchangePolicyCollector().run({})
+    assert "SYNTHETIC_IPPS_PASSWORD" not in os.environ
+    assert all("SYNTHETIC_IPPS_PASSWORD" not in kwargs["env"] for _, kwargs in calls)
+
+
+@pytest.mark.parametrize("entry", ["audit", "probe"])
+def test_live_entry_captures_password_before_auth_toolchain_or_collectors(monkeypatch, tmp_path, entry):
+    from azure_tenant_audit import cli, probe
+
+    pfx_configuration(monkeypatch)
+
+    class BoundaryReached(RuntimeError):
+        pass
+
+    def first_dependency(*args, **kwargs):
+        assert "SYNTHETIC_IPPS_PASSWORD" not in os.environ
+        raise BoundaryReached
+
+    if entry == "audit":
+        monkeypatch.setattr(cli, "load_break_glass_accounts", first_dependency)
+        invoke = lambda: cli.run_live(SimpleNamespace(waiver_file=None, break_glass_accounts=None))
+    else:
+        monkeypatch.setattr(probe, "AuditWriter", first_dependency)
+        invoke = lambda: probe.run_live_probe(SimpleNamespace(output_dir=tmp_path, tenant_name="Synthetic", run_name=None))
+    with pytest.raises(BoundaryReached):
+        invoke()
+
+
+def test_prepared_session_is_reused_without_losing_consumed_password(monkeypatch):
+    pfx_configuration(monkeypatch)
+    session = ipps_session()
+    assert "synthetic-password-only-in-memory" not in repr(session)
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.ipps_session", lambda: pytest.fail("session recaptured"))
+    calls = process(monkeypatch)
+    ExchangePolicyCollector().run({"ipps_session": session})
+    children = [kwargs["env"] for argv, kwargs in calls if "Connect-IPPSSession" in argv[-1]]
+    assert len(children) == 3
+    assert all(env["AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD"] == "synthetic-password-only-in-memory" for env in children)
+
+
+@pytest.mark.parametrize("failure", ["session", "parse", "timeout"])
+def test_pfx_child_failures_never_log_password_or_provider_output(monkeypatch, failure):
+    pfx_configuration(monkeypatch)
+    session = ipps_session()
+    private = "synthetic-password-only-in-memory"
+    if failure == "timeout":
+        process(monkeypatch, exception=subprocess.TimeoutExpired(private, 1))
+        expected = "command_timeout"
+    elif failure == "parse":
+        process(monkeypatch, stdout=private)
+        expected = "command_parse_error"
+    else:
+        process(monkeypatch, code=1, stderr="AUDITEX_IPPS_SESSION_NOT_CONNECTED " + private)
+        expected = "session_not_connected"
+    events = []
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session, log_event=lambda *a: events.append(a))
+    assert result["error_class"] == expected
+    assert private not in json.dumps([events, result])
+    assert "/synthetic/customer.pfx" not in json.dumps([events, result])
+
+
+def test_preflight_reuses_the_prepared_pfx_session(monkeypatch, tmp_path):
+    from azure_tenant_audit.config import RunConfig
+    from azure_tenant_audit.run import run_preflight_probe
+
+    pfx_configuration(monkeypatch)
+    session = ipps_session()
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.ipps_session", lambda: pytest.fail("session recaptured"))
+    calls = process(monkeypatch)
+    events = []
+    artifacts = []
+
+    class Writer:
+        run_dir = tmp_path
+
+        def log_event(self, *args):
+            events.append(args)
+
+        def write_json_artifact(self, name, payload):
+            artifacts.append(payload)
+            return tmp_path / name
+
+    runnable, rows, _ = run_preflight_probe(
+        selected_collectors=["exchange_policy"], completed_collectors=set(), client=None,
+        run_cfg=RunConfig(tenant_name="Synthetic", output_dir=tmp_path, top_items=5, page_size=5),
+        writer=Writer(), include_blocked=False, registry={"exchange_policy": ExchangePolicyCollector()},
+        ipps_session=session,
+    )
+    assert runnable == ["exchange_policy"] and rows[0]["decision"] == "run"
+    assert len([argv for argv, _ in calls if "Connect-IPPSSession" in argv[-1]]) == 3
+    assert "synthetic-password-only-in-memory" not in json.dumps([events, artifacts])

@@ -4,7 +4,7 @@ from __future__ import annotations
 from auditex.scuba_adapters_defender import _listing_adapter
 from auditex.scuba_projection import Bundle, Unavailable, _require
 from azure_tenant_audit.collectors.exchange_ipps_commands import (
-    ALERT_FIELDS, DLP_EXCEPTION_FIELDS, DLP_POLICY_FIELDS, DLP_RULE_FIELDS,
+    ALERT_FIELDS, DLP_EXCEPTION_FIELDS, DLP_POLICY_FIELDS, DLP_RULE_FIELDS, EXCEPTIONS_AVAILABLE,
 )
 
 
@@ -26,8 +26,9 @@ def _dlp_license(bundle: Bundle):
 
 
 def _policies(bundle: Bundle):
-    rows = _listing_adapter("dlpCompliancePolicies", DLP_POLICY_FIELDS)(bundle)
+    rows = _listing_adapter("dlpCompliancePolicies", (*DLP_POLICY_FIELDS, EXCEPTIONS_AVAILABLE))(bundle)
     for row in rows:
+        _require(row.pop(EXCEPTIONS_AVAILABLE, None) is True, EXCEPTIONS_AVAILABLE, "unexpected_field")
         for key in DLP_EXCEPTION_FIELDS:
             # The existing rule cannot represent exclusions from a nominal All scope.
             _require(key in row and row[key] in (None, []), key, "unexpected_field")

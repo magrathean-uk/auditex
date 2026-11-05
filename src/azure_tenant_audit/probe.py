@@ -22,6 +22,7 @@ from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, 
 from .collection_gaps import sample_only
 from .collectors import REGISTRY
 from .collectors.base import run_graph_endpoints
+from .collectors.exchange_ipps_commands import ipps_session
 from .config import AuthConfig
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
 from .findings import build_findings
@@ -495,6 +496,8 @@ def _build_probe_snapshot(
 
 
 def run_live_probe(cfg: ProbeConfig) -> int:
+    # Toolchain and auth probes also spawn children: consume the password first.
+    compliance_session = ipps_session()
     writer = AuditWriter(cfg.output_dir.expanduser().resolve(), tenant_name=cfg.tenant_name, run_name=cfg.run_name)
     permission_hints = _load_permission_hints(cfg.permission_hints_path)
     profile = get_profile(cfg.auditor_profile)
@@ -734,6 +737,7 @@ def run_live_probe(cfg: ProbeConfig) -> int:
                             since=cfg.since,
                             until=cfg.until,
                             hooks=writer_adapter.hooks(),
+                            extra={"ipps_session": compliance_session},
                         ),
                         name=surface,
                         options=CollectorRunOptions(write_checkpoint=False),
