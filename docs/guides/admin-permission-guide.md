@@ -82,7 +82,7 @@ Mail protection reads `Get-MalwareFilterPolicy` (the common attachment types fil
 
 `Get-OrganizationConfig` selects `Identity`, `Name` and `AuditDisabled`. `Get-TransportRule` retains an explicit field list including `State`, `Mode`, `FromScope` and `PrependSubject`; the latter two are rule configuration and a subject-prefix setting, without reading mail. Full transport-rule objects are never selected, because conditions and exceptions can hold addresses and keywords. `Get-SharingPolicy` selects `Name` and `Domains` (partner domain names and sharing actions), readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet. No message content is read.
 
-Public DNS reads need no sign-in: DoH TXT queries cover `<domain>` for SPF, `_dmarc.<domain>` and up to seven parent labels for DMARC, and `selector1._domainkey.<domain>`, `selector2._domainkey.<domain>`, `selector1-<domain with dots as dashes>._domainkey.<domain>` and `selector2-<domain with dots as dashes>._domainkey.<domain>` for DKIM. Complete TXT answers are saved for SPF, DKIM and DMARC.
+Public DNS reads need no sign-in: DoH TXT queries cover `<domain>` for SPF, `_dmarc.<domain>` and up to seven parent labels for DMARC, and `selector1._domainkey.<domain>`, `selector2._domainkey.<domain>`, `selector1-<domain with dots as dashes>._domainkey.<domain>` and `selector2-<domain with dots as dashes>._domainkey.<domain>` for DKIM. Complete TXT answers are saved for SPF, DKIM and DMARC for the verified domains whose Graph `supportedServices` includes `Email` (a domain without that field is kept); posture checks still cover every verified domain.
 
 ## Google Workspace Access Models
 

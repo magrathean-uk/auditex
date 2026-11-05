@@ -125,8 +125,8 @@ These reads feed `report_pack["detection_coverage"]` and `report_pack["public_fo
 | `exchange_policy` | `Get-ProtectionAlert` (Security & Compliance PowerShell only) | Alert policy name, state, severity, category | <https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert> |
 | `identity_protection` (opt-in) | `GET /identityProtection/riskyUsers` (one page, `$select=id,riskLevel,riskState`) | Whether Identity Protection risk detection exists; counts only | <https://learn.microsoft.com/en-us/graph/api/riskyuser-list?view=graph-rest-1.0> |
 | `conditional_access`, `security`, `defender`, `sentinel_xdr` | existing reads | Risk-based policies, sign-in and directory audit availability, alerts API reachability | see collector definitions |
-| `dns_posture` | DoH `TXT <domain>` | Complete SPF TXT answers, public DNS without sign-in | Public DNS |
-| `dns_posture` | DoH `TXT _dmarc.<domain>` and up to seven parent labels | Complete DMARC TXT answers, public DNS without sign-in | Public DNS |
+| `dns_posture` | DoH `TXT <domain>` (verified domains with the Email service) | Complete SPF TXT answers, public DNS without sign-in | Public DNS |
+| `dns_posture` | DoH `TXT _dmarc.<domain>` and up to seven parent labels (verified domains with the Email service) | Complete DMARC TXT answers, public DNS without sign-in | Public DNS |
 | `dns_posture` | DoH `TXT selector1._domainkey.<domain>`, `selector2._domainkey.<domain>`, `selector1-<domain with dots as dashes>._domainkey.<domain>`, `selector2-<domain with dots as dashes>._domainkey.<domain>` | Complete DKIM TXT answers, public DNS without sign-in | Public DNS |
 | `dns_posture` | DoH `TXT _smtp._tls.<domain>` | TLS-RPT record (RFC 8460) | <https://datatracker.ietf.org/doc/html/rfc8460> |
 | `dns_posture` | `GET https://mta-sts.<domain>/.well-known/mta-sts.txt` | MTA-STS policy mode, only when `_mta-sts` TXT exists; no redirects, 64 KiB cap | <https://learn.microsoft.com/en-us/exchange/security-and-compliance/enhance-mail-flow-using-strict-transport-security> |

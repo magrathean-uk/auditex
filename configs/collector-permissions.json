@@ -181,7 +181,7 @@
       "minimum_role_hints": [
         "Global Reader"
       ],
-      "notes": "Resolves email-auth DNS records (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI) over DoH for verified tenant domains. Live runs also make unauthenticated, read-only HTTPS GETs for those verified domains only: the MTA-STS policy file (https://mta-sts.<domain>/.well-known/mta-sts.txt, only when the _mta-sts TXT record exists, no redirects) and the public Entra OpenID discovery document (https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration). No usernames are probed. Offline runs make no lookups. Complete TXT answers from public DNS (no sign-in) are saved for SPF, DKIM and DMARC."
+      "notes": "Resolves email-auth DNS records (SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI) over DoH for verified tenant domains. Live runs also make unauthenticated, read-only HTTPS GETs for those verified domains only: the MTA-STS policy file (https://mta-sts.<domain>/.well-known/mta-sts.txt, only when the _mta-sts TXT record exists, no redirects) and the public Entra OpenID discovery document (https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration). No usernames are probed. Offline runs make no lookups. Complete TXT answers from public DNS (no sign-in) are saved for SPF, DKIM and DMARC for the verified domains whose Graph supportedServices list includes Email (a domain without that field is kept); posture checks still cover every verified domain."
     },
     "intune": {
       "graph_scopes": [
