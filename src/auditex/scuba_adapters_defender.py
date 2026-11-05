@@ -69,6 +69,10 @@ def _defender_license(bundle: Bundle) -> bool:
     reads = frozenset({"atpPolicyForO365", "atpProtectionPolicyRules"})
     if payload is None or not reads <= payload.keys():
         raise Unavailable("missing_artifact")
+    for name in reads:
+        envelope = payload[name]
+        if isinstance(envelope, dict) and envelope.get("licence_inferred") is True:
+            raise _collector_error(envelope)
     bundle.collector_health("exchange_policy", reads, licence_optional=reads)
     return False if any(_licence_refused(payload[name]) for name in reads) else True
 

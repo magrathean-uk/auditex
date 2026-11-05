@@ -228,6 +228,27 @@ def test_real_atp_failure_never_means_licence_false(bundle, section, error_class
     assert p.report["sections"]["defender_license"]["reason"] == "collector_error"
 
 
+@pytest.mark.parametrize("inferred_sections", [ATP_SECTIONS, ATP_SECTIONS[:1], ATP_SECTIONS[1:]])
+def test_inferred_atp_licence_refusal_withholds_like_plain_failure(bundle, inferred_sections):
+    for section in ATP_SECTIONS:
+        name, _ = CONTRACT[section]
+        operation(bundle, name, [], status="failed", error_class="command_error")
+    plain_failure = project_run(bundle)
+
+    for section in ATP_SECTIONS:
+        name, _ = CONTRACT[section]
+        metadata = {"licence_inferred": True} if section in inferred_sections else {}
+        operation(bundle, name, [], status="failed", error_class="license_required", **metadata)
+    inferred_refusal = project_run(bundle)
+
+    for section in (*ATP_SECTIONS, "defender_license"):
+        assert plain_failure.rule_sections[section] == NOT_COLLECTED
+        assert inferred_refusal.rule_sections[section] == NOT_COLLECTED
+        assert inferred_refusal[section] == NOT_COLLECTED
+        assert plain_failure.report["sections"][section]["reason"] == "collector_error"
+        assert inferred_refusal.report["sections"][section]["reason"] == "collector_error"
+
+
 @pytest.mark.parametrize("section", ATP_SECTIONS)
 def test_missing_atp_operation_never_means_licence_true_or_false(bundle, section):
     path = bundle / "raw/exchange_policy.json"
