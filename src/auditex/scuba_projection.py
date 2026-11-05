@@ -1317,6 +1317,8 @@ def rule_policy_section(projection: Projection, policy_id: str, section: str) ->
 
 
 # Area adapter modules (src/auditex/scuba_adapters_<area>.py), each exposing ADAPTERS: dict[str, Callable].
+# New model-view sections need PACK_SHAPE_DIGESTS entries (and enum domains where relevant), a shared hunk;
+# rule-only sections do not. scubagear_export.py does not call project_run, so these adapters never apply there.
 AREA_ADAPTER_MODULES: tuple[str, ...] = ()
 
 PS_SECTIONS = {
@@ -1477,15 +1479,28 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 "service_plans": _plans, "privileged_users": _users, "privileged_roles": _roles}
     import importlib
 
+    valid_sections = set(sections)
+    reserved_sections = {"sharing_policy", "scuba_config", "tenant_id"}
+    registered_sections = adapters.keys() | PS_SECTIONS.keys() | {"dmarc_records", "spf_records", "dkim_records"}
     for name in AREA_ADAPTER_MODULES:
         mod = importlib.import_module(name)
         if not hasattr(mod, "ADAPTERS"):
             raise RuntimeError(f"Area adapter module {name!r} has no ADAPTERS")
         area_adapters = mod.ADAPTERS
-        collisions = adapters.keys() & area_adapters.keys()
+        if not isinstance(area_adapters, dict):
+            raise RuntimeError(f"Area adapter module {name!r} ADAPTERS must be a dict")
+        for key, adapter in area_adapters.items():
+            if key in reserved_sections:
+                raise RuntimeError(f"Area adapter module {name!r} has reserved adapter key: {key!r}")
+            if key not in valid_sections:
+                raise RuntimeError(f"Area adapter module {name!r} has unknown adapter key: {key!r}")
+            if not callable(adapter):
+                raise RuntimeError(f"Area adapter module {name!r} has non-callable adapter for key: {key!r}")
+        collisions = registered_sections & area_adapters.keys()
         if collisions:
             raise RuntimeError(f"Area adapter module {name!r} has duplicate adapter keys: {sorted(collisions)}")
         adapters.update(area_adapters)
+        registered_sections.update(area_adapters)
     for section in sections:
         bundle.reset()
         try:
