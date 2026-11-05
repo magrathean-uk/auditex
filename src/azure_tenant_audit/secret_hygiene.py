@@ -66,10 +66,11 @@ _OUTPUT_ENCODINGS = {
 # that and percent-encoded GUIDs at the cut, without scanning a whole dump.
 _OUTPUT_SAMPLE_MARGIN = 2048
 # ``key=value``, ``key: value`` and the JSON forms ``"key": "value"`` / ``'key':'value'``: the closing quote of the
-# key and a quoted value (which may hold spaces) are part of the match, so a JSON-keyed secret is not left behind.
+# key and a quoted value (which may hold spaces and backslash-escaped quotes) are part of the match, so a JSON-keyed
+# secret is not left behind and a value such as ``"plant\"tail"`` is taken whole.
 INLINE_SECRET_RE = re.compile(
     r"(?P<prefix>[\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|authorization|api[_-]?key)"
-    r"[\"']?\s*[=:]\s*)(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+    r"[\"']?\s*[=:]\s*)(?P<value>\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+)",
     re.IGNORECASE,
 )
 

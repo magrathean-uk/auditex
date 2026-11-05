@@ -254,39 +254,82 @@ payload separately from pack verification before using `--execute`.
 ## Output redaction boundary
 
 Run directories hold tenant evidence and are private working files: 0600 files in 0700 directories, for the
-operator, not redacted, because the operator and the rules need the real values. Everything that can leave the
-operator's machine passes one function, `redact_output` in `azure_tenant_audit/output_redaction.py`, at the
-last step before the bytes are written, printed or sent. `WRITER_INVENTORY` in `auditex/output_writers.py` lists every writer
-and `tests/test_output_redaction.py` checks the list against the source, so a new writer cannot skip the
-function silently.
+operator, not redacted, because the operator and the rules need the real values. The outputs listed in the
+inventory below that can leave the machine pass one function, `redact_output` in
+`azure_tenant_audit/output_redaction.py`, at the last step before the bytes are written, printed, sent or
+returned. `auditex/output_writers.py` holds three machine-readable inventories and
+`tests/test_output_redaction.py` checks them against the source (see "What the structural test enforces").
+
+### What is guaranteed, and what is not
+
+- **Guaranteed by the code and tested:** the classes in "What each profile redacts", in the representations
+  listed there, in the outputs marked routed in the inventory; determinism; idempotence for those forms (a
+  second pass changes nothing, generated pseudonyms are never re-read as names, ids or addresses); structure
+  preservation (mappings keep their keys, apart from identifier keys, which are rewritten, never dropped; lists
+  keep their order; embedded JSON is parsed, redacted and written back as valid JSON); a controlled failure
+  (`RedactionDepthError`, a `ValueError`) for a value nested more than 100 levels or referring to itself, so a
+  deep value is refused, never returned half redacted; an unknown profile name raises `KeyError`.
+- **Not guaranteed:** that no identifier survives. This is a pattern and structure redactor. A privileged
+  user's name that appears only in free text, with no structured record anywhere in the run's `normalized/`
+  files, is not known to it; names under four characters are not replaced in free text; a name that is also
+  report vocabulary (a role, a status word, a key of the structure) keeps that word in free text (the user's
+  structured `display_name` is still pseudonymised); e-mail addresses are matched in plain, `%40`, `@`,
+  `&#64;` and full-width forms only (not double-encoded); domains, group names, role names and free-text fields
+  are kept by default (decisions below).
+- **Not covered at all:** customer-pack source artifacts other than `run-manifest.json` (below), the
+  `report_pack` profile, anything in the operator-only rows, and writers, prints, sends and return values the
+  structural test cannot see.
 
 ### Inventory
 
 | Output | Writer | Audience | Handling | Can leave the machine |
 | --- | --- | --- | --- | --- |
 | Run bundle: `raw/`, `normalized/`, `findings/`, `blockers/`, `index/evidence.sqlite`, `audit-log.jsonl`, `coverage.json`, `summary.json`, `summary.md`, manifests, `validation.json`, `bundle-hashes.json` | `AuditWriter` (`output.py`), `evidence_db.py`, `run_offline` | Operator | Private working files. Not redacted. Diagnostics inside them are masked by the command-output boundary above; user-authored text is minimised at collection | Only by operator action (copying, a customer pack) |
-| `reports/report-pack.json`, `reports/action-plan.json` | `AuditWriter.write_report_pack` | Operator; copied verbatim into customer packs | `report_pack` profile: secrets only. E-mails, GUIDs and names stay exact because finding ids, proof-table rows and evidence references embed the keys of the records they cite and the validator resolves them (an e-mail masked here gives `unresolved_report_proof_table_ref`) | Yes, inside a customer pack (see the verbatim-copy decision below) |
+| `reports/report-pack.json`, `reports/action-plan.json` | `AuditWriter.write_report_pack` | Operator; copied verbatim into customer packs | `report_pack` profile: secrets only. **E-mails, GUIDs, names and paths are retained exactly** because finding ids, proof-table rows and evidence references embed the keys of the records they cite and the validator resolves them (an e-mail masked here gives `unresolved_report_proof_table_ref`) | Yes, inside a customer pack (see below) |
 | Reports: HTML, Markdown, JSON, CSV, SARIF, OSCAL; exports (`auditex export run`, built-in exporters call `render_report`) | `render_report`, `preview_report` (`reporting.py`) | Customer, reviewers, CI tools | `shareable` profile on the sections before rendering, then on the rendered text (not on JSON, SARIF or OSCAL text) | Yes |
 | Report preview returned to the CLI and the MCP tool `auditex_report_preview` | `preview_report` | Local client, AI client | `shareable`, including the citations (re-derived after masking) | Yes |
-| `report api-calls`, `permissions`, `proof-table`, `handoff` payloads, to a file or stdout | `_emit_report_payload` (`cli.py`) | Customer, reviewers | `shareable` (JSON as structure, Markdown as text) | Yes |
+| `report api-calls`, `permissions`, `proof-table`, `handoff` and `analyze`, to a file or stdout | `_emit_report_payload` (`cli.py`) | Customer, reviewers | `shareable`: the payload is redacted as structure first, then rendered (Markdown gets a markup-safe pass over the already redacted text) | Yes |
+| MCP tools `auditex_summarize_run`, `auditex_probe_summarize`, `auditex_diff_runs`, `auditex_compare_runs`, `auditex_normalize_external_assessment`, `auditex_compare_external_assessments`, `auditex_list_blockers`, `auditex_report_analyze`, `auditex_api_inventory`, `auditex_permissions_ledger`, `auditex_proof_table`, `auditex_enterprise_handoff`, `auditex_verify_customer_pack` | `mcp_server.py` functions of the same names | An AI client or any MCP caller | `shareable` over the complete returned payload, with the context of every run it was built from (a comparison uses the first run's salt); citation summaries re-derived. A pack-verification result also scrubs the pack's own path | Yes |
 | Setup guide (`setup-guide`) | `_emit_setup_guide` (`cli.py`) | Operator | Not redacted: it renders the operator's own parameters (for example `--subject`) and commands, and holds no tenant evidence | Yes, but carries no evidence |
 | Customer pack: `handoff`, `report.md`, `api-calls`, `permissions`, `proof-table`, `README.md`, `checksums.sha256`, `pack-manifest.json` and the copy of `run-manifest.json` | `write_enterprise_handoff_pack`, `_write_text_artifact`, `_copy_source_artifact` | The tenant owner and whoever they pass it to | `customer_pack` profile, with the run salt; the manifest digests are those of the redacted files | Yes |
-| Customer pack `source-artifacts/` other than `run-manifest.json` | `_copy_source_artifact` | As above | Verbatim, integrity-bound copies (`verify-pack` ties them to `bundle-hashes.json`). Not redacted. Decision pending product | Yes |
-| Notifications: Slack, Teams, SMTP, Jira, GitHub | `send_notification` (`notify.py`) | Third-party services | `shareable` before any sink; the webhook walker (`_redact_value`) stays as a second layer | Yes |
+| Customer pack `source-artifacts/` other than `run-manifest.json`: `summary.json`, `data-handling.json`, `api-inventory.json`, `audit-plan.json`, `live-readiness.json`, `reports/report-pack.json`, `validation.json`, `ai_context.json`, `bundle-hashes.json` | `_copy_source_artifact` | As above | **Verbatim, integrity-bound copies, not redacted** (`verify-pack` ties them to `bundle-hashes.json`) | Yes |
+| Notifications: Slack, Teams, SMTP, Jira, GitHub | `send_notification` (`notify.py`) | Third-party services | `shareable` over the whole envelope (payload, citations, service responses) before any sink and before the return; the run identity used for ticket de-duplication is computed first, from the real run directory, and carried as a one-way digest (`run_fingerprint`); the webhook walker (`_redact_value`) stays as a second layer | Yes |
 | Explorer page | `write_explorer` (`explorer.py`) | Operator's browser | Private working view; it exists to inspect real values. Not redacted. Decision pending product if it is to be shared | Only by operator action |
-| Model assessment files, prompts, adapter sidecar | `assess_run`, `assess_scubagear_export` (`model_serving.py`) | Operator; the model endpoint (loopback unless the operator says otherwise) | The model view is redacted by the projection (input side); the files are private. The explainer's text passes `redact_output(..., profile="explainer")`, wired by the explainer job, not by these writers | Prompts only to the configured endpoint |
+| Model assessment files, prompts, adapter sidecar | `assess_run`, `assess_scubagear_export` (`model_serving.py`) | Operator; the model endpoint (loopback unless the operator says otherwise) | The model view is redacted by the projection (input side); the files are private. The explainer's text passes `redact_output(..., profile="explainer", context=context_for_run(run))`, wired by the explainer job, not by these writers | Prompts only to the configured endpoint |
 | Logs: `audit-log.jsonl`, command samples, doctor and auth errors | Adapters, `secret_hygiene.redact_output` | Operator, support | Diagnostics boundary above: credentials, e-mail local parts, dashed GUIDs; clipped to 500 characters | Only by operator action |
-| Operator terminal output of read-only commands (`summarize`, `blockers`, `diff`) | `cli.py` | Operator | Not redacted | No (the operator's terminal) |
+| Operator terminal output of read-only commands: `auditex summarize`, `blockers`, `diff`, `compare`, `probe summarize`, `verify-pack`, `customer-pack` results (the pack path), `rules`, `auth` and model commands | `cli.py` `main`, `summarize_run_raw`, `list_blockers_raw` | Operator | Not redacted, deliberately: they print the operator's own run (the whole point of `summarize` is the real values) to the operator's terminal. If the operator redirects them to a file and sends it, that is operator action | No (the operator's terminal) |
+| MCP tools that run a command (`auditex_run_*`, `auditex_probe_live`, `auditex_google_*`) | `command_runner` | The MCP caller | The command-output boundary (diagnostic masking), not `redact_output` | Yes, masked |
+| MCP tools `auditex_auth_status`, `auditex_auth_list`, `auditex_auth_capability`, `auditex_auth_use` | `mcp_server.py` | The MCP caller | Saved connection names and tenant metadata of the operator; not run evidence; not redacted. Open item for product | Yes |
+| MCP catalogue tools (profiles, collectors, adapters, rules, exporters, schemas, setup guide) | `mcp_server.py` | The MCP caller | Shipped catalogues, no tenant data | Yes |
+
+### What the structural test enforces
+
+`tests/test_output_redaction.py` scans every module under `src/` (an AST scan) for functions that open a file for
+writing, call `Path.write_text`/`write_bytes`, `write_private_*`, `copy_private_file`, `secure_write_*`, a `shutil`
+copy, `.write()`, `json.dump`, `print()` of a non-literal value, or send through `requests`, a session, an opener,
+`smtplib` or `urlopen`. Every function found must have an entry in `SINK_INVENTORY`
+(`auditex/output_writers.py`) classified `routed` or `private` with a reason; an unknown function fails the test,
+and so does an entry that matches nothing. A `routed` function is checked to call the redaction (or to be called
+only from a function that does). Every MCP tool must be in `MCP_TOOL_INVENTORY`, and every `routed` one must call
+`redact_payload`. A self-test checks that the scan recognises each shape it claims to.
+
+Limits of that test, stated in `SCAN_LIMITS`: it reads source text by call name and receiver name, so it does not
+see a write through an alias or a stored callable, `os.write` on a raw descriptor, sqlite writes, subprocess
+commands that write, logging handlers, non-Python files or third-party code; and it does not follow data, so it
+proves that a routed function reaches the redaction, not that every value it writes has passed it. The
+guarantee of this section is therefore: outputs of the shapes above are classified, and the ones classified
+routed call the redaction. Nothing stronger is claimed.
 
 ### What each profile redacts
 
 | Class | `report_pack` | `shareable`, `customer_pack`, `explainer` |
 | --- | --- | --- |
-| Secrets: Bearer values, JWTs, `key=value` and JSON-keyed credentials (`secret_hygiene.redact_text`), and the value of exact credential keys (`client_secret`, `password`, `access_token`, `refresh_token`, `api_key` and the like) | Yes | Yes |
-| E-mail local parts, masked `***@domain` exactly as the model projection masks them | No | Yes |
-| Privileged-user display names and `onPremisesImmutableId`, pseudonymised as the projection does (`User <16 hex>`, `Id <16 hex>`; `sha256(salt NUL value)`, the salt being the SHA-256 of the canonical `run-manifest.json`), so a name matches across the model view and every output of one run | No | Yes |
+| Secrets: Bearer values, JWTs, `key=value` and JSON-keyed credentials (`secret_hygiene.INLINE_SECRET_RE`, quoted values with escaped quotes included), and the whole value, of any type, under an exact credential key (`client_secret`, `password`, `access_token`, `refresh_token`, `api_key` and the like, spelled `snake_case`, `kebab-case` or `camelCase`) | Yes | Yes |
+| E-mail local parts, masked `***@domain` exactly as the model projection masks them, also when the at sign is written `%40`, `@`, `&#64;` or full-width | No | Yes |
+| Privileged-user display names (a record with an immutable id, M365 role holders, Google users flagged `is_admin`, `is_delegated_admin` or `is_privileged`) and `onPremisesImmutableId`, pseudonymised as the projection does (`User <16 hex>`, `Id <16 hex>`; `sha256(salt NUL value)`, the salt being the SHA-256 of the canonical `run-manifest.json`), so a name matches across the model view and every output of one run. The names and ids come from every `normalized/` record of the run, so an output that selects only some sections still protects them | No | Yes |
 | Dashed GUIDs (tenant, object, application and policy ids): replaced by a valid GUID `00000000-0000-4000-8000-<12 hex>` derived from the run salt, so references inside one output stay consistent and OSCAL still validates | No | Yes (pending product, below) |
-| The operator's run paths: run-relative, or `<run-dir>` | No | Yes |
+| The operator's run paths, every occurrence: run-relative when the text starts with the path, otherwise `<run-dir>` | No | Yes |
+| JSON embedded in a string | As the profile | Parsed, redacted as structure and written back in its own layout, so escapes and quotes stay valid |
 
 Deliberately not redacted, in every profile: policy ids, finding ids and rule ids, reason codes, verdicts and
 statuses, section names, setting names and enum values, role names, numbers and booleans, and the public
@@ -294,12 +337,22 @@ baseline text. These public values are allow-listed exactly: the addresses `repo
 `cyberliaison@cisa.dhs.gov`, `reports@example.com` and `username@somedomain.com` (`PUBLIC_ADDRESSES`); the
 all-zero GUID, Microsoft first-party resource application ids and the Microsoft role template ids the product
 ships (`PUBLIC_GUIDS`, kept equal to the GUID literals under `src/` by a test); and values labelled
-`Trace ID:` or `Correlation ID:`, which stay usable for support as in the diagnostics boundary. A key is changed
-only when its text holds an identifier. Redaction is deterministic, idempotent, structure-preserving and leaves
-numbers, booleans, `None` and bytes alone. An unknown profile name raises rather than publishing.
-Privileged-user names are found from `normalized/effective_admin_set.json`, from any record that carries an
-immutable id, and from records with `principal_type: user` that hold roles; they are replaced in free text of
-the same output too (whole-word, at least four characters).
+`Trace ID:` or `Correlation ID:`, which stay usable for support as in the diagnostics boundary. A mapping key is
+rewritten only when its text holds an identifier (an e-mail address or a GUID), never by name substitution;
+values under structural keys (`status`, `severity`, `verdict`, `reason_code`, role keys and the like) and names that
+equal report vocabulary are protected from name substitution. If two keys become equal the later one gets a `#n`
+suffix; no value is lost. Redaction is deterministic and leaves numbers, booleans, `None` and bytes alone.
+
+### The customer pack's verbatim files
+
+A customer pack redacts what the product generates (`handoff.json`, `report.md`, the ledgers, `README.md`,
+`checksums.sha256`, `pack-manifest.json`) and the copy of `run-manifest.json`. It does **not** redact nine
+source artifacts, which are integrity-bound byte copies of the run's files: `summary.json`,
+`data-handling.json`, `api-inventory.json`, `audit-plan.json`, `live-readiness.json`, `reports/report-pack.json`,
+`validation.json`, `ai_context.json` and `bundle-hashes.json`. They can carry e-mail addresses, GUIDs and
+privileged names exactly as the run recorded them (the report pack in particular, per the `report_pack` row
+above). A pack therefore cannot be described as "all identifiers redacted", and the test deliberately skips
+those files. The confidentiality of the pack depends on who receives it.
 
 ### Decisions pending product
 
@@ -311,17 +364,18 @@ single constant `PENDING_PRODUCT_POLICY`; changing the field changes every write
 | GUIDs | Redacted (pseudonymised) | Tenant and object ids identify the tenant; consistent pseudonyms keep cross-references readable | `redact_guids=False` |
 | Domain names | Kept | DNS, mail-flow and accepted-domain findings are unreadable without them; the e-mail mask keeps the domain by contract | `redact_domains=True` replaces every domain seen in an e-mail address (and `RedactionContext.domains`) with `domain-<12 hex>.invalid` |
 | Group display names | Kept | The group is what an administrator acts on | `redact_group_names=True` pseudonymises records whose `principal_type` is `group` (`Group <16 hex>`) |
-| Free text (`owner`, `justification`, `comment`, `comments`, `notes` values) | Kept | Accountability fields of waivers; `reason` is not in the list because it carries reason codes | `redact_free_text=True` |
-| Role names | Kept, no flip | Built-in names are public Microsoft vocabulary, custom names are tenant text, and the output alone cannot tell them apart | Needs a product definition first |
-| Customer-pack source artifacts (`source-artifacts/*` apart from `run-manifest.json`) | Verbatim | `verify-pack` checks them against `bundle-hashes.json`; a redacted copy needs a `transformed` row like the manifest has, and a recipient who is the tenant owner may need the real values | Product to decide whether the pack carries redacted derivatives |
+| Free text (`owner`, `justification`, `comment`, `comments`, `notes` values, whatever their type) | Kept | Accountability fields of waivers; `reason` is not in the list because it carries reason codes | `redact_free_text=True` |
+| Role names | Kept; **no flip exists** (the earlier `redact_role_names` field was inert and has been removed) | Built-in names are public Microsoft vocabulary, custom names are tenant text, and the output alone cannot tell them apart | Needs a product definition first |
+| Customer-pack source artifacts (the nine above) | Verbatim | `verify-pack` checks them against `bundle-hashes.json`; a redacted copy needs a `transformed` row like the manifest has, and a recipient who is the tenant owner may need the real values | Product to decide whether the pack carries redacted derivatives |
 | `report-pack.json` in the run bundle | Secrets only | Its ids are references; see the inventory | Redact at hand-over only (the current design) |
 | Explorer page | Not redacted | Operator working view | Add a shareable variant |
+| MCP auth tools | Not redacted | Operator's saved connection metadata | Decide whether tenant ids and names in them are shared with an AI client |
 
 Limits worth knowing: after masking, two users of one domain are indistinguishable in a shared report (the
 projection's mask has the same property); a pseudonymised GUID cannot be looked up in the portal, so the operator
-reads the private run directory for that; names shorter than four characters are not replaced in free text;
-the notification fingerprint that de-duplicates Jira and GitHub tickets is now computed over the redacted payload,
-so tickets created before this change are not matched once.
+reads the private run directory for that; the notification fingerprint is the same value as before the boundary
+existed (a hash of tenant name and run directory), computed before redaction, so existing Jira and GitHub tickets
+still match and two runs of one tenant do not collide.
 
 ## Credentials and local files
 

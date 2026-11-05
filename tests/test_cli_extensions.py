@@ -150,7 +150,8 @@ def test_report_analyze_cli_dispatches(monkeypatch, capsys) -> None:
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["run_dir"] == "run-a"
+    # The analysis is printed through the shareable redaction, which replaces the run path with its placeholder.
+    assert payload["run_dir"] == "<run-dir>"
     assert payload["auditor_score"]["grade"] == "usable"
 
 

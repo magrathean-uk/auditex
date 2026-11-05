@@ -28,6 +28,7 @@ from azure_tenant_audit.output_redaction import (
     redact_output,
     run_path_roots,
     scrub_run_paths,
+    settle_citations,
 )
 from azure_tenant_audit.private_io import copy_private_file, harden_tree, make_private_dirs, write_private_text
 from azure_tenant_audit.resources import resolve_resource_path
@@ -3654,16 +3655,8 @@ _STRUCTURED_FORMATS = frozenset({"json", "sarif", "oscal"})
 
 
 def _settle_citations(payload: dict[str, Any]) -> dict[str, Any]:
-    """Re-derive the citation list and summary of a redacted payload: masking can make two citations identical,
-    and ``verify-pack`` checks that the summary matches the list it sits beside."""
-    citations = payload.get("citations")
-    if not isinstance(citations, list):
-        return payload
-    settled = dedupe_citations(citations)
-    result = {**payload, "citations": settled}
-    if "citation_summary" in payload:
-        result["citation_summary"] = build_citation_summary(settled)
-    return result
+    """Re-derive the citation list and summary of a redacted payload (``output_redaction.settle_citations``)."""
+    return settle_citations(payload)
 
 
 def _final_pass(content: str, format_name: str, context: RedactionContext) -> str:

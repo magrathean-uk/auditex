@@ -2,36 +2,51 @@
 
 Run directories, evidence stores and ``raw/`` / ``normalized/`` files are private working files (0600 in
 0700 directories) and are *not* redacted: the operator needs them whole. Everything that can leave the
-operator's machine is redacted here, at the last step before the bytes are written or sent. The inventory
-of writers and the decided boundary are in ``docs/reference/security-privacy.md`` ("Output redaction
-boundary"); ``auditex/output_writers.py`` holds the machine-readable inventory of writers (it names product modules,
-so it lives in the product layer) that ``tests/test_output_redaction.py`` checks against the source, so a new
-writer cannot bypass the function silently.
+operator's machine through a writer, sink or return value listed in the inventory is redacted here, at the
+last step before the bytes are written, printed, sent or returned. The decided boundary and its limits are in
+``docs/reference/security-privacy.md`` ("Output redaction boundary"); ``auditex/output_writers.py`` holds the
+machine-readable inventory that ``tests/test_output_redaction.py`` checks against an AST scan of ``src/``, so a
+new file write, print, network send or return path of a known shape cannot appear without being classified.
 
 API::
 
-    redact_output(value, *, profile=PROFILE_SHAREABLE, context=None)   # same shape out as in
-    context_for_run(run_dir)                                           # salt, run paths, protected names
+    redact_output(value, *, profile=PROFILE_SHAREABLE, context=None, markup=False)   # same shape out as in
+    context_for_run(run_dir)                       # salt, run paths, protected names and immutable ids
+    context_for_runs(run_dirs, paths=())           # the same for an output built from several runs
+    redact_payload(value, *, run_dirs=(), paths=())  # redact_output + context + citation summary, for returns
+    settle_citations(payload)                      # re-derive a redacted payload's citation list and summary
 
 ``value`` may be a ``str``, a mapping, a list, tuple or set, or anything else (returned unchanged). The result
-has the same shape: mappings stay mappings with their keys, lists keep their order, numbers, booleans,
-``None`` and bytes pass through. A key is changed only when the key text itself holds an identifier
-(an e-mail address or a GUID), so verdict fields, policy ids, reason codes and setting names are
-untouched. Redaction is deterministic (the pseudonym of a value depends only on the value and the salt),
-idempotent (``redact_output(redact_output(x)) == redact_output(x)``) and never raises on odd input.
+has the same shape: mappings stay mappings, lists keep their order, numbers, booleans, ``None`` and bytes pass
+through. A key is rewritten only when the key text itself holds an identifier (an e-mail address or a GUID) and
+never by name substitution, so verdict fields, policy ids, reason codes and setting names stay; if rewriting
+makes two keys equal the later one gets a ``#n`` suffix and no value is lost.
+
+What is and is not guaranteed (see the document for the full statement):
+
+* Redaction is deterministic (a pseudonym depends only on the value and the salt) and, for the forms listed
+  below, idempotent: ``redact_output(redact_output(x)) == redact_output(x)``. Generated pseudonyms are never
+  matched as names, ids or e-mail addresses again.
+* It raises ``RedactionDepthError`` (a ``ValueError``) for a value nested more than ``MAX_DEPTH`` levels,
+  including a self-referencing one, instead of returning something partly redacted; an unknown profile name
+  raises ``KeyError``. It does not otherwise raise on odd input.
+* It protects the classes below in the representations below. It is a pattern and structure redactor, not a
+  proof: free text can carry a name it was never told about (see "Limits" in the document).
 
 What a profile redacts (``PROFILES``):
 
-* secrets (``secret_hygiene.redact_text``, plus the values of exact credential keys);
-* e-mail local parts, masked as ``***@domain`` exactly like the model projection, except the exact
-  public baseline addresses in ``PUBLIC_ADDRESSES``;
-* privileged-user display names and on-premises immutable ids, pseudonymised like the projection
-  (``User <16 hex>`` / ``Id <16 hex>``, ``sha256(salt NUL text)``, so the same run salt keeps references
-  consistent within a run and across the model view);
+* secrets: Bearer values, JWTs, ``key=value`` and JSON-keyed credentials (``secret_hygiene.INLINE_SECRET_RE``),
+  and the whole value, of any type, under an exact credential key;
+* e-mail local parts, masked as ``***@domain`` exactly like the model projection (also when written
+  ``%40``, ``\\u0040``, ``&#64;`` or the full-width at sign), except the exact public baseline addresses in
+  ``PUBLIC_ADDRESSES``;
+* privileged-user display names (M365 role holders, Google admins) and on-premises immutable ids, pseudonymised
+  like the projection (``User <16 hex>`` / ``Id <16 hex>``, ``sha256(salt NUL text)``), including inside the
+  text of the same output and inside JSON embedded in a string;
 * dashed GUIDs (``PENDING_PRODUCT_POLICY.redact_guids``), except ``PUBLIC_GUIDS`` and values labelled
   ``Trace ID:`` / ``Correlation ID:``; the replacement is itself a valid GUID so schemas that demand
   one (OSCAL) still validate;
-* the operator's run paths (``RedactionContext.run_paths``).
+* the operator's run paths (``RedactionContext.run_paths``), every occurrence.
 
 Decisions the documents leave open are the single constant ``PENDING_PRODUCT_POLICY``; flip a field there
 (or pass a replacement through ``RedactionContext.policy``) and every writer follows.
@@ -45,9 +60,10 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
-from .secret_hygiene import BEARER_RE, JWT_RE, OUTPUT_EMAIL_RE, OUTPUT_GUID_RE, redact_text
+from .citations import build_citation_summary, dedupe_citations
+from .secret_hygiene import BEARER_RE, INLINE_SECRET_RE, JWT_RE, OUTPUT_EMAIL_RE, OUTPUT_GUID_RE
 
 PROFILE_REPORT_PACK = "report_pack"
 PROFILE_SHAREABLE = "shareable"
@@ -58,6 +74,17 @@ SECRET_PLACEHOLDER = "***redacted***"
 RUN_DIR_PLACEHOLDER = "<run-dir>"
 TEXT_PLACEHOLDER = "<redacted-text>"
 GROUP_PREFIX = "Group "
+
+# Values nested deeper than this (mappings, lists and JSON embedded in strings together) are refused.
+MAX_DEPTH = 100
+
+
+class RedactionError(ValueError):
+    """The value cannot be redacted safely; nothing was returned."""
+
+
+class RedactionDepthError(RedactionError):
+    """The value is nested more than ``MAX_DEPTH`` levels (or refers to itself): fail closed."""
 
 
 @dataclass(frozen=True)
@@ -76,9 +103,10 @@ class RedactionProfile:
 # a working artifact: its finding ids, proof-table rows and evidence references embed the keys of the records they
 # cite (including e-mail addresses and GUIDs), and the validator resolves them against ``normalized/``. Masking
 # an identifier there makes the references unresolvable (``unresolved_report_proof_table_ref``), and the run
-# salt (the digest of the final manifest) does not exist yet. So the pack carries secrets-redaction only; the
-# identifier classes are applied where the pack's content is rendered, exported, sent or handed over, which is
-# where every other profile applies the full set.
+# salt (the digest of the final manifest) does not exist yet. So the pack carries secrets-redaction only and
+# RETAINS e-mail addresses, GUIDs, names and paths exactly; the identifier classes are applied where the pack's
+# content is rendered, exported, sent or handed over, which is where every other profile applies the full set.
+# A copy of the pack inside a customer pack is therefore not an "all identifiers redacted" file.
 PROFILES: dict[str, RedactionProfile] = {
     PROFILE_REPORT_PACK: RedactionProfile(PROFILE_REPORT_PACK, emails=False, identities=False),
     PROFILE_SHAREABLE: RedactionProfile(PROFILE_SHAREABLE, guids=True, run_paths=True),
@@ -91,7 +119,10 @@ PROFILES: dict[str, RedactionProfile] = {
 class PendingProductPolicy:
     """Identifier classes the documents are silent or ambiguous about: conservative-but-usable defaults.
 
-    Every field is "decision pending product". ``True`` redacts the class in the shareable profiles.
+    Every field is "decision pending product". ``True`` redacts the class in the shareable profiles. Role names
+    are not a field: built-in names are public Microsoft vocabulary and custom names are tenant text, and the
+    output alone cannot tell them apart, so role names are never redacted (and are protected from being
+    mistaken for a user's name, see ``RedactionContext.vocabulary``). A flip needs a product definition first.
     """
 
     # Dashed GUIDs (tenant, object, application and policy ids). On: pseudonymised per run, so references
@@ -104,12 +135,10 @@ class PendingProductPolicy:
     # Group display names: records whose ``principal_type`` is ``group`` (``Group <16 hex>``). Off: groups
     # named in findings are what an administrator acts on.
     redact_group_names: bool = False
-    # Free-text values under ``TENANT_TEXT_KEYS`` (waiver owner, justification, comments). Off: documented as
-    # accountability fields. ``reason`` is deliberately not a key here: it carries reason codes.
+    # Free-text values under ``TENANT_TEXT_KEYS`` (waiver owner, justification, comments), whatever their
+    # type. Off: documented as accountability fields. ``reason`` is deliberately not a key here: it carries
+    # reason codes.
     redact_free_text: bool = False
-    # Role names are public Microsoft vocabulary for built-in roles and tenant text only for custom roles; the
-    # two cannot be told apart from the output alone, so role names are never redacted (no flip implemented).
-    redact_role_names: bool = False
 
 
 PENDING_PRODUCT_POLICY = PendingProductPolicy()
@@ -155,10 +184,103 @@ PUBLIC_GUIDS = frozenset(
     "e2a3a72e-5f79-4c64-b1b1-878b674786c9", "e8611ab8-c189-46e8-94e1-60213ab1f814",
     "f28a1f50-f6e7-4571-818b-6a12f2af6b6c", "f2ef992c-3afb-46b9-b7cf-a126ee74c451",
     "f8cdef31-a31e-4b4a-93e4-5f571e91255a", "fe930be7-5e62-47db-91af-98c3a49a38b1",
+        # Microsoft catalogue ids added with the risky delegated-permission list (Graph, Flow, Dataverse and other
+        # Microsoft first-party delegated scope ids) and the Teams admin API resource id: public Microsoft values.
+        "01944dba-21df-426f-bb8c-796488be96ad", "024d486e-b451-40bb-833d-3e66d98c5c73",
+        "02a5a114-36a6-46ff-a102-954d89d9ab02", "06da0dbc-49e2-44d2-8312-53f166ab848a",
+        "077fde41-7e0b-4c5b-bcd1-e9d743a30c80", "0b575251-2c95-46df-bc75-c8c43e6b7116",
+        "0b5d694c-a244-4bde-86e6-eb5cd07730fe", "0cea5a30-f6f8-42b5-87a0-84cc26822e02",
+        "0e263e50-5827-48a4-b97c-d940288653c7", "0eb56b90-a7b5-43b5-9402-8137a8083e90",
+        "10465720-29dd-4523-a11a-6a75c743c9d9", "116b7235-7cc6-461e-b163-8e55691d839e",
+        "140e747e-90d3-4de0-8618-85a0cc7a1129", "17f07f5d-fb80-4278-ba37-70ae04d476a3",
+        "181aac24-028a-486e-a649-b3742c74ec71", "185758ba-798d-4b72-9e54-429a413a2510",
+        "195adc35-e27b-454b-a7ed-1ecdffa1c09f", "199f155b-cccd-4be4-bbe6-ca9a867b24b4",
+        "1a50df37-8278-4139-9af3-3b60d57dd007", "1b8ff426-c49e-4985-a589-956c1a33c510",
+        "1ca167d5-1655-44a1-8adf-1414072e1ef9", "1d894596-c906-42b1-8422-9360440c1c0c",
+        "1ec239c2-d7c9-4623-a91a-a9775856bb36", "204e0828-b5ca-4ad8-b9f3-f32a958e7cc4",
+        "205e70e5-aba6-4c52-a976-6d2d46c48043", "2448370f-f988-42cd-909c-6528efd67c1a",
+        "2497278c-d82d-46a2-b1ce-39d4cdde5570", "258f6531-6087-4cc4-bb90-092c5fb3ed3f",
+        "266d2589-20b5-4f91-9a03-89247d1be8da", "27235839-268c-4d68-a668-351401ff623a",
+        "27608d7c-2c66-4cad-a657-951d575f5a60", "27789c5b-aca8-4cb6-94b8-bcc8964dd8ad",
+        "27c61d54-eb42-4315-8793-6e5715a19746", "2b61aa8a-6d36-4b2f-ac7b-f29867937c53",
+        "2b9c4092-424d-4249-948d-b43879977640", "2e25a044-2580-450d-8859-42eeb6e996c0",
+        "2e83d72d-8895-4b66-9eea-abb43449ab8b", "30b2d850-00c3-4802-b7ae-ece9af9de5c6",
+        "32253599-e142-4cf0-810d-4827eedd1cfa", "322b68b2-0804-416e-86a5-d772c567b6e6",
+        "38826093-1258-4dea-98f0-00003be2b8d0", "39d65650-9d3e-4223-80db-a335590d027e",
+        "3b5f3d61-589b-4a3c-a359-5dd4b5ee5bd5", "3be8fe94-2189-4d8b-89c6-dd35c5cea6ef",
+        "3d728bf5-2e5b-4ea2-8c8a-dcf9711e1208", "405a51b5-8d8d-430b-9842-8be4b0e9f324",
+        "41ce6ca6-6826-4807-84f1-1c82854f7ee5", "445002fb-a6f2-4dc1-a81e-4254a111cd29",
+        "44882612-f346-430a-b938-4f00ee1c77a7", "44d6b5f2-d42b-4fa7-b999-1c5fcab98e4d",
+        "4585ecca-5b47-432f-ac70-e1391e4951ed", "465a38f9-76ea-45b9-9f34-9e8b0d4b0b42",
+        "471f2a7f-2a42-4d45-a2bf-594d0838070d", "48ac35b8-9aa8-4d74-927d-1f4a14a0b239",
+        "48fec646-b2ba-4019-8681-8eb31435aded", "4ae1bf56-f562-4747-b7bc-2fa0874ed46f",
+        "4bae2ed4-473e-4841-a493-9829cfd51d48", "4e0d77b0-96ba-4398-af14-3baa780278f4",
+        "4e46008b-f24c-477d-8fff-7bb4ec7aafe0", "4eabc3d1-b762-40ff-9da5-0e18fdf11230",
+        "501d06f8-07b8-4f18-b5c6-c191a4af7a82", "518528c3-6969-4554-b49e-73f7f0227e7e",
+        "52dc2051-4958-4636-8f2a-281d39c6981c", "56680e0d-d2a3-4ae1-80d8-3c4f2100e3d0",
+        "570282fd-fa5c-430d-a7fd-fc8dc98a9dca", "572fea84-0151-49b2-9301-11cb16974376",
+        "5af8c3f5-baca-439a-97b0-ea58a435e269", "5b625b3d-65b6-4fb0-85d9-8a5aa26bdf36",
+        "5b9be81f-2977-4d27-8faf-bb43af8fc705", "5c28f0bf-8a70-41f1-8ab2-9032436ddb65",
+        "5df07973-7d5d-46ed-9847-1271055cbd51", "5eb43c10-865a-4259-960a-83946678f8dd",
+        "5f8c59db-677d-491f-a6b8-5f174b11ec1d", "6222dbab-a24c-4210-9d91-2f47cf565614",
+        "640ddd16-e5b7-4d71-9690-3f4022699ee7", "652390e4-393a-48de-9484-05f9b1212954",
+        "652d7d02-6ff0-4cf7-9516-cf77d33a3ae4", "6768d3af-4562-48ff-82d2-c5e19eb21b9c",
+        "6aedf524-7e1c-45a7-bd76-ded8cab8d0fc", "7504609f-c495-4c64-8542-686125a5a36f",
+        "75767999-c7a8-481e-a6b4-19458e0b30a5", "765f423e-b55d-412e-97e3-13a800c3a537",
+        "76e2ebd5-0dfb-4a5b-93c7-ed89e0362834", "76faac2a-0f20-42f1-928a-50de5b9dbe52",
+        "78ce3f0f-a1ce-49c2-8cde-64b5c0896db4", "7a27a256-301d-4359-b77b-c2b759d2e362",
+        "7ab1d787-bae7-4d5d-8db6-37ea32df9186", "7b8a2d34-6b3f-4542-a343-54651608ad81",
+        "7b9103a5-4610-446b-9670-80643382c1fa", "7e823077-d88e-468f-a337-e18f1f0e6c7c",
+        "7f33e027-4039-419b-938e-2f8ca153e68e", "7f36b48e-542f-4d3b-9bcb-8406f0ab9fdb",
+        "818c620a-27a9-40bd-a6a5-d96f7d610b4b", "82305458-296d-4edd-8b0b-74dd74c34526",
+        "82866913-39a9-4be7-8091-f4fa781088ae", "8458e264-4eb9-4922-abe9-768d58f13c7f",
+        "84bccea3-f856-4a8a-967b-dbe0a3d53a64", "863451e7-0667-486c-a5d6-d135439485f0",
+        "87f447af-9fa4-4c32-9dfa-4a57a73d18ce", "89d944f2-2011-44ad-830c-aa9bf5ef2319",
+        "89fe6a52-be36-487e-b7d8-d061c450a026", "8b01a991-5a5a-47f8-91a2-84d6bfd72c02",
+        "91e7d36d-022a-490f-a748-f8e011357b42", "948eb538-f19d-4ec5-9ccc-f059e1ea4c72",
+        "96d46335-d92d-41b8-bc9f-273a692381ea", "9769c687-087d-48ac-9cb3-c37dde652038",
+        "9aaa3660-6678-4cb8-b4b5-be92b6f4fbf0", "9be106e1-f4e3-4df5-bdff-e4bc531cbe43",
+        "9d8982ae-4365-4f57-95e9-d6032a4c0b87", "9f89e109-94b9-4c9b-b4fc-98cdaa54f574",
+        "9ff18859-b8d5-4a89-9912-448b84dfb097", "9ff7295e-131b-4d94-90e1-69fde507ac11",
+        "a0244d16-171c-4496-8ffb-7b9b6954d339", "a154be20-db9c-4678-8ab7-66f6cc099a59",
+        "a367ab51-6b49-43bf-a716-a1fb06d2a174", "a4b8392a-d8d1-4954-a029-8e668a39a170",
+        "a65f2972-a4f8-4f5e-afd7-69ccb046d5dc", "ab4f2b77-0b06-4fc1-a9de-02113fc2ab7c",
+        "ad13ac2e-ad46-4dc0-b7da-249c94395a6d", "ad902697-1014-4ef5-81ef-2b4301988e8c",
+        "b09ec548-3f99-4d0a-859c-c9b7ff53b7a9", "b11fa0e7-fdb7-4dc9-b1f1-59facd463480",
+        "b152eca8-ea73-4a48-8c98-1a6742673d99", "b271f05e-8329-4b97-baa4-91cf15b99cf1",
+        "b2f1b2fa-f35c-407c-979c-a858a808ba85", "b3f70a70-8a4b-4f95-9573-d71c496a53f4",
+        "b3fa7c4c-aab5-4f0c-8311-a36528f007b6", "b43e1ada-25ee-416f-bd5c-512976ddc74b",
+        "b7887744-6746-4312-813d-72daeaee7e2d", "b98bfd41-87c6-45cc-b104-e2de4f0dafb9",
+        "ba6d575a-1344-4516-b777-1404f5593057", "bac3b9c2-b516-4ef4-bd3b-c2ef73d8d804",
+        "bbd1ca91-75e0-4814-ad94-9c5dbbae3415", "bdfbf15f-ee85-4955-8675-146e8e5296b5",
+        "c0bdd4d3-3be2-4b90-8f94-aba44d5552eb", "c1499fe0-52b1-4b22-bed2-7a244e0e879f",
+        "c34088fb-0649-4714-af0b-bcbfec155897", "c5366453-9fb0-48a5-a156-24f0c49a4b84",
+        "c67b52c5-7c69-48b6-9d48-7b3af3ded914", "cd1cb034-c558-413b-b2ad-17bb007192da",
+        "cdcdac3a-fd45-410d-83ef-554db620e5c7", "d01b97e9-cbc0-49fe-810a-750afd5527a3",
+        "d05743e4-fb24-4dff-8a33-0f6c73c964bd", "d2bc95fc-440e-4b0e-bafd-97182de7aef5",
+        "d2e42f6b-2baf-4ff4-83ef-51e66321516e", "d36ad51d-15a2-458d-9b3a-16dbe4c51c30",
+        "d56682ec-c09e-4743-aaf4-1a3aac4caa21", "d594897b-76e7-4b2b-984b-b4adff35e109",
+        "d660a04c-7b62-4b4c-bea3-89226df00142", "d7b7f2d9-0f45-4ea1-9d42-e50810c06991",
+        "d8914f8f-9f64-4bd1-b4d3-f5a701ed8457", "d8d0355c-460d-46fd-bc17-af170848113d",
+        "da710fc9-1e83-407b-8c5c-09d225031769", "dab085de-3e14-432f-a47f-84b6457059c4",
+        "dbe6434c-63f0-42bb-be8e-122ec1bad4d2", "ddb3ca45-a192-477d-acb2-46bf9dc586de",
+        "ddd37690-e119-40c5-a821-3746ea6125c4", "df85f4d6-205c-4ac5-a5ea-6bf408dba283",
+        "e0a7cdbb-08b0-4697-8264-0069786e9674", "e383f46e-2787-4529-855e-0e479a3ffac0",
+        "e45c5562-459d-4d1b-8148-83eb1b6dcf83", "e4aa47b9-9a69-4109-82ed-36ec70d85ff1",
+        "e4c9e354-4dc5-45b8-9e7c-e1393b0b1a20", "e677843f-76d8-44d3-bcdb-ec40dea919e7",
+        "e7e732bd-932b-45c4-8ce5-40d60a7daad9", "e843bc88-e493-446d-a73c-0ded7ff1913f",
+        "e9cbd5de-0031-493e-8fb1-60712d03cc8b", "eb665d05-7f76-4d1b-b176-1cfc814e668d",
+        "ebf0f66e-9fb1-49e4-a278-222f76911cf4", "ef4b5d93-3104-4664-9053-a5c49ab44218",
+        "f266d9c0-ccb9-4fb8-a228-01ac0d8d6627", "f3076109-ca66-412a-be10-d4ee1be95d47",
+        "f501c180-9344-439a-bca0-6cbf209fd270", "f534bf13-55d4-45a9-8f3c-c92fe64d6131",
+        "f7cd536d-e34c-4fb9-bc7f-2a2c30d7de9f", "f9759906-80a4-4f4a-b010-24b832bc6a30",
+        "fb698133-92fa-453e-a9ed-688e10f2e5ac", "ff74d97f-43af-4b68-9f2a-b77ee6968c5d",
+        "ff91d191-45a0-43fd-b837-bd682c4a0b0f", "ffa91d43-2ad8-45cc-b592-09caddeb24bb",
     }
 )
 
-# Values of these keys (exact, case-insensitive, ``-`` read as ``_``) are credentials whatever their shape.
+# Values of these keys (compared as ``_norm``, so ``client_secret``, ``Client-Secret`` and ``clientSecret`` are
+# one key) are credentials whatever their shape: a non-empty value of any type is replaced whole.
 _SECRET_KEYS = frozenset(
     {
         "client_secret", "secret_text", "app_secret", "password", "access_token", "refresh_token",
@@ -166,17 +288,53 @@ _SECRET_KEYS = frozenset(
     }
 )
 
+# Keys whose string values are controlled vocabulary or structure (statuses, verdicts, ids of rules): a
+# user's name is never substituted into them.
+_CONTROLLED_KEYS = frozenset(
+    {
+        "status", "severity", "verdict", "reasoncode", "collector", "ruleid", "policyid", "priority", "kind",
+        "type", "format", "principaltype", "state", "outcome", "result", "category", "level", "role", "rolename",
+        "rolenames", "roledisplayname", "roledefinitionname",
+    }
+)
+_ROLE_KEYS = frozenset({"role", "rolename", "rolenames", "roledisplayname", "roledefinitionname", "roles"})
+# Words that read as report vocabulary: a privileged user who happens to be called one of them keeps the word in
+# free text (their structured ``display_name`` is still pseudonymised).
+_STATIC_VOCABULARY = frozenset(
+    {
+        "open", "closed", "pass", "fail", "warning", "critical", "high", "medium", "info", "error", "true", "false",
+        "none", "null", "unknown", "enabled", "disabled", "status", "severity", "verdict", "owner", "accepted",
+        "resolved", "blocked", "partial", "complete", "manual",
+    }
+)
+
 _IMMUTABLE_PREFIX = "Id "
 _USER_PREFIX = "User "
 _HEX16 = r"[0-9a-f]{16}"
 _PSEUDONYM_RE = re.compile(rf"^(?:User|Id|Group) {_HEX16}$")
+_PSEUDONYM_KEEP = rf"(?P<keep>(?<!\w)(?:User|Id|Group) {_HEX16}(?!\w))"
 _GUID_PSEUDONYM_PREFIX = "00000000-0000-4000-8000-"
 _DOMAIN_PSEUDONYM_RE = re.compile(r"^domain-[0-9a-f]{12}\.invalid$")
 _GUID_RE = OUTPUT_GUID_RE
+# The e-mail forms the plain pattern cannot see: the at sign spelled ``%40``, ``@``, ``&#64;`` or full-width.
+# Same start rules and bounds as ``OUTPUT_EMAIL_RE``; the local part may carry percent- and ``\u`` escapes.
+_ENCODED_EMAIL_RE = re.compile(
+    r"(?:(?<![\w.!#$%*=^`{}~\\-])|(?<=\\[nrtbf])|(?<=%2[07]))"
+    r"(?P<local>(?:\\u[0-9a-fA-F]{4}|%[0-9a-fA-F]{2}|[\w.!#$&'*+=?^`{|}~-]){1,64}?)"
+    r"(?P<sep>%40|\\u0040|&#64;|＠)"
+    r"(?P<domain>[\w](?:[\w.-]{0,251}[\w])?)",
+    re.IGNORECASE,
+)
+_IDENTITY_KEYS = ("onpremisesimmutableid", "immutableid")
+_ADMIN_FLAGS = ("isadmin", "isdelegatedadmin", "issuperadmin", "isprivileged")
+_NOT_USER_TYPES = frozenset({"group", "serviceprincipal", "application", "app", "device"})
 
 
 def _norm(key: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
+_SECRET_NORMS = frozenset(_norm(key) for key in _SECRET_KEYS)
 
 
 @dataclass(frozen=True)
@@ -185,8 +343,11 @@ class RedactionContext:
 
     ``salt`` is the run salt (see ``run_salt``); with an empty salt the pseudonyms are still deterministic but
     carry no run separation. ``run_paths`` are the spellings of the operator's run directory to remove.
-    ``protected_names`` are privileged-user display names the caller already knows (names found inside the
-    value are added automatically). ``domains`` extends the domain set when the domain policy is on.
+    ``protected_names`` and ``protected_ids`` are privileged-user display names and immutable ids the caller
+    already knows (``context_for_run`` reads them from the run's ``normalized/`` records, so they hold whichever
+    sections the output selects; any found inside the value are added automatically). ``vocabulary`` is
+    controlled vocabulary (role names) that a user's name must never rewrite. ``domains`` extends the domain
+    set when the domain policy is on.
     """
 
     salt: str = ""
@@ -194,6 +355,8 @@ class RedactionContext:
     protected_names: frozenset[str] = frozenset()
     domains: frozenset[str] = frozenset()
     policy: PendingProductPolicy = field(default_factory=lambda: PENDING_PRODUCT_POLICY)
+    protected_ids: frozenset[str] = frozenset()
+    vocabulary: frozenset[str] = frozenset()
 
 
 def pseudonym(salt: str, text: str) -> str:
@@ -201,21 +364,22 @@ def pseudonym(salt: str, text: str) -> str:
     return hashlib.sha256((salt + "\0" + text).encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
+def _canonical(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+
 def run_salt(run_dir: str | Path) -> str:
     """The salt ``scuba_projection.project_run`` uses: SHA-256 of the canonical ``run-manifest.json``.
 
     A missing or unusable manifest gives the digest of ``{}``, as the projection does. Never persisted.
     """
-    def canonical(value: Any) -> str:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-
     try:
         manifest = json.loads((Path(run_dir) / "run-manifest.json").read_text(encoding="utf-8"))
         if not isinstance(manifest, dict):
             raise ValueError
-        return hashlib.sha256(canonical(manifest).encode()).hexdigest()
+        return hashlib.sha256(_canonical(manifest).encode()).hexdigest()
     except (OSError, ValueError, TypeError, RecursionError, UnicodeError):
-        return hashlib.sha256(canonical({}).encode()).hexdigest()
+        return hashlib.sha256(_canonical({}).encode()).hexdigest()
 
 
 def run_path_roots(run_dir: str | Path) -> tuple[str, ...]:
@@ -225,42 +389,47 @@ def run_path_roots(run_dir: str | Path) -> tuple[str, ...]:
     return tuple(sorted((r.rstrip(os.sep) for r in roots if r and r != os.sep), key=len, reverse=True))
 
 
+_ROOT_PATTERNS: dict[tuple[str, ...], re.Pattern[str]] = {}
+
+
+def _root_pattern(roots: tuple[str, ...]) -> re.Pattern[str]:
+    pattern = _ROOT_PATTERNS.get(roots)
+    if pattern is None:
+        # A root is a whole path prefix: not the tail of a longer word or path, and not the start of a longer name
+        # (``/tmp/run2``, ``/tmp/run.bak``); a sentence's closing full stop still ends it.
+        pattern = re.compile(r"(?<![\w.~-])(?:" + "|".join(re.escape(r) for r in roots) + r")(?![\w-]|\.\w)")
+        if len(_ROOT_PATTERNS) > 64:
+            _ROOT_PATTERNS.clear()
+        _ROOT_PATTERNS[roots] = pattern
+    return pattern
+
+
 def scrub_run_paths(text: str, roots: Iterable[str]) -> str:
-    """Paths below the run become run-relative, the run itself ``<run-dir>``; other mentions are replaced."""
-    roots = [r for r in roots if r]
-    for root in roots:
+    """Paths below the run become run-relative (when the text starts with one), the run itself ``<run-dir>``;
+    every other occurrence of the run path becomes ``<run-dir>``. The result holds no root and is stable."""
+    unique = tuple(sorted({r for r in roots if r}, key=lambda r: (-len(r), r)))
+    if not unique or not text:
+        return text
+    for root in unique:
         if text == root:
             return RUN_DIR_PLACEHOLDER
         if text.startswith(root + os.sep):
-            return text[len(root) + 1:]
-    for root in roots:
-        text = text.replace(root, RUN_DIR_PLACEHOLDER)
-    return text
+            text = text[len(root) + 1:]
+            break
+    return _root_pattern(unique).sub(RUN_DIR_PLACEHOLDER, text)
 
 
-def context_for_run(run_dir: str | Path, **overrides: Any) -> RedactionContext:
-    """The context for outputs derived from one run: its salt, its path spellings and its administrators' names."""
-    run_path = Path(run_dir)
-    names: set[str] = set()
-    try:
-        payload = json.loads((run_path / "normalized" / "effective_admin_set.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeError, RecursionError):
-        payload = None
-    if isinstance(payload, Mapping):
-        _collect(payload.get("records"), names, set(), True)
-    values: dict[str, Any] = {
-        "salt": run_salt(run_path),
-        "run_paths": run_path_roots(run_path),
-        "protected_names": frozenset(names),
-    }
-    values.update(overrides)
-    return RedactionContext(**values)
+# -- identities found in the data ---------------------------------------------------------------------------------
 
 
 def _is_privileged_user(record: Mapping[Any, Any]) -> bool:
     keys = {_norm(k): v for k, v in record.items()}
+    if str(keys.get("principaltype", "")).lower() in _NOT_USER_TYPES:
+        return False
     if "onpremisesimmutableid" in keys or "immutableid" in keys:
         return True
+    if any(keys.get(flag) is True for flag in _ADMIN_FLAGS):
+        return True  # Google Workspace super and delegated administrators, and records flagged privileged
     if str(keys.get("principaltype", "")).lower() == "user" and ("roles" in keys or "rolenames" in keys or "counted" in keys):
         return True
     return keys.get("isuser") is True and ("roles" in keys or "rolenames" in keys)
@@ -270,37 +439,206 @@ def _is_group(record: Mapping[Any, Any]) -> bool:
     return str({_norm(k): v for k, v in record.items()}.get("principaltype", "")).lower() == "group"
 
 
-def _collect(
-    value: Any, names: set[str], domains: set[str], want_names: bool, want_domains: bool = False,
-    ids: set[str] | None = None,
-) -> None:
-    """Privileged-user display names and immutable ids (``want_names``) and e-mail domains (``want_domains``) found
-    anywhere in ``value``, so the same strings are replaced inside free text of the same output."""
+@dataclass
+class _Found:
+    names: set[str] = field(default_factory=set)
+    ids: set[str] = field(default_factory=set)
+    domains: set[str] = field(default_factory=set)
+    vocabulary: set[str] = field(default_factory=set)
+    keys: set[str] = field(default_factory=set)
+
+
+def _maybe_json(text: str) -> Any:
+    """The parsed value of a string that is a JSON object or array, else ``None``."""
+    stripped = text.strip()
+    if len(stripped) < 2 or stripped[0] not in "{[" or stripped[-1] not in "}]":
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except RecursionError as exc:
+        raise RedactionDepthError("embedded JSON is nested too deeply to redact") from exc
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
+    """Privileged-user display names, immutable ids, role vocabulary and key names found anywhere in ``value``
+    (JSON embedded in a string included), so the same strings are replaced inside free text of the same output."""
     stack = [value]
+    seen: set[int] = set()
     while stack:
         item = stack.pop()
         if isinstance(item, str):
-            if want_domains:
+            if domains:
                 for match in OUTPUT_EMAIL_RE.finditer(item):
-                    domains.add(match["domain"].lower())
+                    found.domains.add(match["domain"].lower())
+            if names and item[:1] in ("{", "[", " ", "\n", "\t") and len(item) < 4_000_000:
+                parsed = _maybe_json(item)
+                if parsed is not None:
+                    stack.append(parsed)
         elif isinstance(item, Mapping):
-            if want_names and _is_privileged_user(item):
-                for key, name in item.items():
-                    if _norm(key) == "displayname" and isinstance(name, str) and name and not _PSEUDONYM_RE.match(name):
-                        names.add(name)
-            if want_names and ids is not None:
-                for key, identifier in item.items():
-                    if (
-                        _norm(key) in ("onpremisesimmutableid", "immutableid")
-                        and isinstance(identifier, str)
-                        and identifier
-                        and not _PSEUDONYM_RE.match(identifier)
-                    ):
-                        ids.add(identifier)
+            if id(item) in seen:
+                continue
+            seen.add(id(item))
+            if names:
+                privileged = _is_privileged_user(item)
+                for key, member in item.items():
+                    norm = _norm(key)
+                    if isinstance(key, str) and len(key) <= 64 and "@" not in key:
+                        found.keys.add(key.lower())
+                    if privileged and norm == "displayname" and isinstance(member, str) and member and not _PSEUDONYM_RE.match(member):
+                        found.names.add(member)
+                    if norm in _IDENTITY_KEYS and isinstance(member, str) and member and not _PSEUDONYM_RE.match(member):
+                        found.ids.add(member)
+                    if norm in _ROLE_KEYS:
+                        if isinstance(member, str) and member:
+                            found.vocabulary.add(member.lower())
+                        elif isinstance(member, (list, tuple)):
+                            found.vocabulary.update(m.lower() for m in member if isinstance(m, str) and m)
             stack.extend(item.values())
-            stack.extend(k for k in item if isinstance(k, str))
+            stack.extend(k for k in item if isinstance(k, str) and domains)
         elif isinstance(item, (list, tuple)):
+            if id(item) in seen:
+                continue
+            seen.add(id(item))
             stack.extend(item)
+
+
+# -- contexts ---------------------------------------------------------------------------------------------------------
+
+_MAX_SCAN_FILES = 400
+_MAX_SCAN_BYTES = 96 * 1024 * 1024
+_SCAN_CACHE: dict[tuple[Any, ...], tuple[frozenset[str], frozenset[str], frozenset[str]]] = {}
+
+
+def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """Privileged-user names, immutable ids and role vocabulary in the run's ``normalized/`` records.
+
+    Every ``normalized/**/*.json`` is read (bounded), not just the sections a report selects, so an output that
+    shows only findings still knows who the administrators are. Cached per file signature.
+    """
+    normalized = run_path / "normalized"
+    try:
+        files = sorted(normalized.rglob("*.json"))[:_MAX_SCAN_FILES]
+        signature = tuple((str(f), f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+    except OSError:
+        return frozenset(), frozenset(), frozenset()
+    cache_key = (os.path.realpath(run_path), signature)
+    cached = _SCAN_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    found = _Found()
+    budget = _MAX_SCAN_BYTES
+    for path, _mtime, size in signature:
+        if size > budget:
+            continue
+        budget -= size
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError, RecursionError):
+            continue
+        _collect(payload, found, names=True, domains=False)
+    result = (frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary))
+    if len(_SCAN_CACHE) > 16:
+        _SCAN_CACHE.clear()
+    _SCAN_CACHE[cache_key] = result
+    return result
+
+
+def context_for_run(run_dir: str | Path, **overrides: Any) -> RedactionContext:
+    """The context for outputs derived from one run: its salt, its path spellings, its administrators' names and
+    immutable ids (from every ``normalized/`` record, whichever sections the output selects) and role vocabulary."""
+    run_path = Path(run_dir)
+    names, ids, vocabulary = _scan_run_identities(run_path)
+    values: dict[str, Any] = {
+        "salt": run_salt(run_path),
+        "run_paths": run_path_roots(run_path),
+        "protected_names": names,
+        "protected_ids": ids,
+        "vocabulary": vocabulary,
+    }
+    values.update(overrides)
+    return RedactionContext(**values)
+
+
+def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path] = ()) -> RedactionContext:
+    """One context for an output built from several runs (a diff, a comparison) or from other local paths.
+
+    The first run supplies the salt (a comparison has one); names, ids, vocabulary and path spellings of every
+    run are protected, and ``paths`` are further directories whose spellings are scrubbed (a customer pack).
+    """
+    roots: set[str] = set()
+    names: set[str] = set()
+    ids: set[str] = set()
+    vocabulary: set[str] = set()
+    salt = ""
+    for index, run_dir in enumerate(run_dirs):
+        context = context_for_run(run_dir)
+        salt = salt if index else context.salt
+        roots.update(context.run_paths)
+        names.update(context.protected_names)
+        ids.update(context.protected_ids)
+        vocabulary.update(context.vocabulary)
+    for path in paths:
+        roots.update(run_path_roots(path))
+    return RedactionContext(
+        salt=salt,
+        run_paths=tuple(sorted(roots, key=lambda r: (-len(r), r))),
+        protected_names=frozenset(names),
+        protected_ids=frozenset(ids),
+        vocabulary=frozenset(vocabulary),
+    )
+
+
+# -- redaction --------------------------------------------------------------------------------------------------------
+
+_MS_APP_ID_RE = re.compile(r"^0000000[0-9a-f]-0000-(?:0000-c000|0ff1-ce00)-000000000000$")
+_JSON_SHAPES: tuple[tuple[int | None, tuple[str, str]], ...] = (
+    (None, (", ", ": ")), (None, (",", ":")), (2, (",", ": ")), (4, (",", ": ")), (1, (",", ": ")),
+)
+
+
+def _is_microsoft_app_id(guid: str) -> bool:
+    """Microsoft's first-party resource application ids (``00000003-0000-0000-c000-000000000000`` and kin)."""
+    return bool(_MS_APP_ID_RE.match(guid))
+
+
+def _public_domains() -> frozenset[str]:
+    return frozenset(a.split("@", 1)[1] for a in PUBLIC_ADDRESSES)
+
+
+def _non_empty(value: Any) -> bool:
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, (str, bytes, list, tuple, set, frozenset, Mapping)):
+        return len(value) > 0
+    return True
+
+
+def _blank_text(value: Any) -> Any:
+    """Every string leaf of a free-text value replaced by the placeholder, whatever the container."""
+    if isinstance(value, str):
+        return TEXT_PLACEHOLDER if value else value
+    if isinstance(value, Mapping):
+        return {key: _blank_text(member) for key, member in value.items()}
+    if isinstance(value, list):
+        return [_blank_text(member) for member in value]
+    if isinstance(value, tuple):
+        return tuple(_blank_text(member) for member in value)
+    return value
+
+
+def _dump_like(original: str, parsed: Any, redacted: Any) -> str:
+    """``redacted`` serialised the way ``original`` was, when one of the usual layouts reproduces it exactly."""
+    for ensure_ascii in (True, False):
+        for indent, separators in _JSON_SHAPES:
+            try:
+                if json.dumps(parsed, ensure_ascii=ensure_ascii, indent=indent, separators=separators) == original:
+                    return json.dumps(redacted, ensure_ascii=ensure_ascii, indent=indent, separators=separators)
+            except (ValueError, TypeError):
+                continue
+    return json.dumps(redacted, ensure_ascii=original.isascii())
 
 
 class _Redactor:
@@ -310,19 +648,37 @@ class _Redactor:
         self.salt = context.salt
         self.policy = context.policy
         self.roots = context.run_paths if profile.run_paths else ()
-        names = set(context.protected_names)
-        ids: set[str] = set()
+        self.depth = 0
+        found = _Found()
+        names = set(context.protected_names) if profile.identities else set()
+        ids = set(context.protected_ids) if profile.identities else set()
         domains = {d.lower() for d in context.domains}
         want_domains = profile.emails and self.policy.redact_domains
         if profile.identities or want_domains:
-            _collect(value, names, domains, profile.identities, want_domains, ids)
-        self.names = sorted((n for n in names if len(n) >= 4 and not _PSEUDONYM_RE.match(n)), key=len, reverse=True)
+            _collect(value, found, names=profile.identities, domains=want_domains)
+        names |= found.names
+        ids |= found.ids
+        domains |= found.domains
+        # A name that is also report vocabulary (a role, a status word, a key of the structure) stays readable in
+        # free text; the user's own structured ``display_name`` is still pseudonymised.
+        vocabulary = {v.lower() for v in context.vocabulary} | found.vocabulary | _STATIC_VOCABULARY | found.keys
+        vocabulary_norms = {_norm(v) for v in vocabulary}
+        self.names = sorted(
+            (
+                n for n in names
+                if len(n) >= 4 and not _PSEUDONYM_RE.match(n) and n.lower() not in vocabulary and _norm(n) not in vocabulary_norms
+            ),
+            key=len, reverse=True,
+        )
+        # The alternation puts a generated pseudonym first, so ``User 0123...`` is never re-read as the name ``User``.
         self.name_re = (
-            re.compile(r"(?<!\w)(?:" + "|".join(re.escape(n) for n in self.names) + r")(?!\w)") if self.names else None
+            re.compile(_PSEUDONYM_KEEP + r"|(?<!\w)(?P<hit>" + "|".join(re.escape(n) for n in self.names) + r")(?!\w)")
+            if self.names else None
         )
         self.ids = sorted((i for i in ids if len(i) >= 6), key=len, reverse=True)
         self.id_re = (
-            re.compile(r"(?<![\w+/=-])(?:" + "|".join(re.escape(i) for i in self.ids) + r")(?![\w+/=-])") if self.ids else None
+            re.compile(_PSEUDONYM_KEEP + r"|(?<![\w+/=-])(?P<hit>" + "|".join(re.escape(i) for i in self.ids) + r")(?![\w+/=-])")
+            if self.ids else None
         )
         self.domains = sorted(
             (d for d in domains if d and d not in _public_domains() and not _DOMAIN_PSEUDONYM_RE.match(d)),
@@ -336,30 +692,59 @@ class _Redactor:
         )
 
     # -- text ---------------------------------------------------------------------------------------------
-    def text(self, value: str) -> str:
+    def text(self, value: str, *, names: bool = True, key: bool = False) -> str:
+        """``value`` as text. ``key`` is a mapping key: identifiers only, no name or id substitution, no embedded
+        JSON. ``names=False`` is a controlled-vocabulary value: no name or id substitution."""
         if not value:
             return value
         profile = self.profile
+        if not key:
+            embedded = self._embedded_json(value)
+            if embedded is not None:
+                return embedded
         if self.roots:
             value = scrub_run_paths(value, self.roots)
         if profile.secrets:
-            if self.markup:
-                # Rendered JSON, HTML, CSV and Markdown: ``key=value`` secrets were redacted in the structure
-                # before rendering; the inline-secret pattern would run on into closing quotes and tags here.
-                value = JWT_RE.sub("***redacted-jwt***", BEARER_RE.sub("Bearer ***redacted***", value))
-            else:
-                value = redact_text(value)
+            value = self._secrets(value, minimal=key or self.markup)
         if profile.emails:
             value = OUTPUT_EMAIL_RE.sub(self._mask_email, value)
+            value = _ENCODED_EMAIL_RE.sub(self._mask_encoded_email, value)
         if profile.guids and self.policy.redact_guids:
             value = _GUID_RE.sub(self._mask_guid, value)
-        if self.name_re is not None:
-            value = self.name_re.sub(lambda m: _USER_PREFIX + pseudonym(self.salt, m[0]), value)
-        if self.id_re is not None:
-            value = self.id_re.sub(lambda m: _IMMUTABLE_PREFIX + pseudonym(self.salt, m[0]), value)
+        if names and not key:
+            if self.name_re is not None:
+                value = self.name_re.sub(self._name, value)
+            if self.id_re is not None:
+                value = self.id_re.sub(self._identifier, value)
         if self.domain_re is not None:
             value = self.domain_re.sub(lambda m: f"domain-{pseudonym(self.salt, m['d'].lower())[:12]}.invalid", value)
         return value
+
+    @staticmethod
+    def _secrets(value: str, *, minimal: bool) -> str:
+        # ``minimal``: rendered JSON, HTML, CSV and Markdown, and keys. ``key=value`` secrets were redacted in the
+        # structure before rendering; the inline pattern cannot tell where a value ends in markup.
+        value = JWT_RE.sub("***redacted-jwt***", BEARER_RE.sub("Bearer ***redacted***", value))
+        if minimal:
+            return value
+
+        def inline(match: re.Match[str]) -> str:
+            raw = match["value"]
+            quote = raw[0] if len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0] else ""
+            return f"{match['prefix']}{quote}{SECRET_PLACEHOLDER}{quote}"
+
+        return INLINE_SECRET_RE.sub(inline, value)
+
+    def _embedded_json(self, value: str) -> str | None:
+        """A string that is a JSON object or array is parsed, redacted as structure and written back the way it was
+        laid out, so escapes and quotes stay valid; anything else is ``None`` (redact it as text)."""
+        parsed = _maybe_json(value)
+        if parsed is None:
+            return None
+        stripped = value.strip()
+        lead, trail = value[: len(value) - len(value.lstrip())], value[len(value.rstrip()):]
+        redacted = self.walk(parsed)
+        return lead + _dump_like(stripped, parsed, redacted) + trail
 
     @staticmethod
     def _mask_email(match: re.Match[str]) -> str:
@@ -367,6 +752,15 @@ class _Redactor:
         if f"{local}@{domain}".lower() in PUBLIC_ADDRESSES or domain.replace(".", "").isdigit():
             return match[0]
         return f"{match['field'] or ''}{match['quote']}***@{domain}"
+
+    @staticmethod
+    def _mask_encoded_email(match: re.Match[str]) -> str:
+        from urllib.parse import unquote
+
+        local, domain = match["local"], match["domain"]
+        if f"{unquote(local)}@{domain}".lower() in PUBLIC_ADDRESSES or domain.replace(".", "").isdigit():
+            return match[0]
+        return f"***{match['sep']}{domain}"
 
     def _mask_guid(self, match: re.Match[str]) -> str:
         if match["label"]:
@@ -376,31 +770,45 @@ class _Redactor:
             return match[0]
         return _GUID_PSEUDONYM_PREFIX + pseudonym(self.salt, guid)[:12]
 
+    def _name(self, match: re.Match[str]) -> str:
+        return match["keep"] or _USER_PREFIX + pseudonym(self.salt, match["hit"])
+
+    def _identifier(self, match: re.Match[str]) -> str:
+        return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.salt, match["hit"])
+
     # -- structure ----------------------------------------------------------------------------------------
-    def walk(self, value: Any, key: str = "") -> Any:
+    def walk(self, value: Any, controlled: bool = False) -> Any:
         if isinstance(value, str):
-            return self.text(value)
-        if isinstance(value, Mapping):
-            return self.mapping(value)
-        if isinstance(value, list):
-            return [self.walk(item, key) for item in value]
-        if isinstance(value, tuple):
-            return tuple(self.walk(item, key) for item in value)
-        if isinstance(value, (set, frozenset)):
-            return type(value)(self.walk(item, key) for item in value)
-        return value
+            return self.text(value, names=not controlled)
+        if not isinstance(value, (Mapping, list, tuple, set, frozenset)):
+            return value
+        self.depth += 1
+        try:
+            if self.depth > MAX_DEPTH:
+                raise RedactionDepthError(f"value is nested more than {MAX_DEPTH} levels")
+            if isinstance(value, Mapping):
+                return self.mapping(value)
+            if isinstance(value, list):
+                return [self.walk(item, controlled) for item in value]
+            if isinstance(value, tuple):
+                return tuple(self.walk(item, controlled) for item in value)
+            return type(value)(self.walk(item, controlled) for item in value)
+        finally:
+            self.depth -= 1
 
     def mapping(self, record: Mapping[Any, Any]) -> dict[Any, Any]:
         profile = self.profile
         user = profile.identities and _is_privileged_user(record)
         group = profile.identities and self.policy.redact_group_names and _is_group(record)
-        out: dict[Any, Any] = {}
+        rows: list[tuple[Any, Any, Any]] = []
         for key, item in record.items():
             norm = _norm(key)
-            if isinstance(item, str) and item:
-                if profile.secrets and str(key).lower().replace("-", "_") in _SECRET_KEYS:
-                    item = SECRET_PLACEHOLDER
-                elif profile.identities and norm in ("onpremisesimmutableid", "immutableid"):
+            if profile.secrets and norm in _SECRET_NORMS and _non_empty(item):
+                item = SECRET_PLACEHOLDER
+            elif isinstance(item, str):
+                if not item:
+                    pass
+                elif profile.identities and norm in _IDENTITY_KEYS:
                     item = item if _PSEUDONYM_RE.match(item) else _IMMUTABLE_PREFIX + pseudonym(self.salt, item)
                 elif user and norm == "displayname":
                     item = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.salt, item)
@@ -409,29 +817,29 @@ class _Redactor:
                 elif profile.identities and self.policy.redact_free_text and str(key).lower() in TENANT_TEXT_KEYS:
                     item = TEXT_PLACEHOLDER
                 else:
-                    item = self.text(item)
+                    item = self.text(item, names=norm not in _CONTROLLED_KEYS)
+            elif profile.identities and self.policy.redact_free_text and str(key).lower() in TENANT_TEXT_KEYS:
+                item = _blank_text(item)
             else:
-                item = self.walk(item, str(key))
-            new_key = self.text(key) if isinstance(key, str) and key else key
-            if new_key != key and new_key in out:
-                suffix = 2
-                while f"{new_key}#{suffix}" in out:
-                    suffix += 1
-                new_key = f"{new_key}#{suffix}"
-            out[new_key] = item
+                item = self.walk(item, norm in _CONTROLLED_KEYS)
+            new_key = self.text(key, key=True) if isinstance(key, str) and key else key
+            rows.append((key, new_key, item))
+        # Output keys are reserved whether they changed or not, so a rewritten key can never displace one that was
+        # already there; a collision takes ``#n`` from a counter kept per rewritten name (linear overall).
+        used = {new for old, new, _ in rows if new == old}
+        counters: dict[Any, int] = {}
+        out: dict[Any, Any] = {}
+        for old, new, item in rows:
+            if new != old:
+                if new in used:
+                    suffix = counters.get(new, 2)
+                    while f"{new}#{suffix}" in used:
+                        suffix += 1
+                    counters[new] = suffix + 1
+                    new = f"{new}#{suffix}"
+                used.add(new)
+            out[new] = item
         return out
-
-
-_MS_APP_ID_RE = re.compile(r"^0000000[0-9a-f]-0000-(?:0000-c000|0ff1-ce00)-000000000000$")
-
-
-def _is_microsoft_app_id(guid: str) -> bool:
-    """Microsoft's first-party resource application ids (``00000003-0000-0000-c000-000000000000`` and kin)."""
-    return bool(_MS_APP_ID_RE.match(guid))
-
-
-def _public_domains() -> frozenset[str]:
-    return frozenset(a.split("@", 1)[1] for a in PUBLIC_ADDRESSES)
 
 
 def redact_output(
@@ -441,22 +849,57 @@ def redact_output(
     context: RedactionContext | None = None,
     markup: bool = False,
 ) -> Any:
-    """``value`` with the identifiers ``profile`` protects removed; same shape, same keys, idempotent.
+    """``value`` with the identifiers ``profile`` protects removed; same shape, deterministic, idempotent.
 
     ``markup=True`` is for text that is already rendered (HTML, CSV, Markdown, serialised JSON): it skips the
     inline ``key=value`` secret pattern, which cannot tell where a value ends in markup. Redact the structure
     before rendering; use ``markup=True`` only for the final pass over the rendered text.
 
     ``profile`` is a name from ``PROFILES`` or a ``RedactionProfile``. An unknown name raises ``KeyError``
-    (a typo must not silently publish). ``context`` carries the run salt, run paths and known names; omit it
-    for text with no run (pseudonyms are then unsalted).
+    (a typo must not silently publish). A value nested deeper than ``MAX_DEPTH`` raises ``RedactionDepthError``.
+    ``context`` carries the run salt, run paths and known names; omit it for text with no run (pseudonyms are
+    then unsalted).
     """
     chosen = profile if isinstance(profile, RedactionProfile) else PROFILES[profile]
-    return _Redactor(chosen, context or RedactionContext(), value, markup).walk(value)
+    try:
+        return _Redactor(chosen, context or RedactionContext(), value, markup).walk(value)
+    except RecursionError as exc:
+        raise RedactionDepthError("value is nested too deeply to redact") from exc
 
 
 def redact_for_run(
     value: Any, run_dir: str | Path, *, profile: str | RedactionProfile = PROFILE_SHAREABLE, markup: bool = False
 ) -> Any:
-    """``redact_output`` with the context of ``run_dir`` (its salt, path spellings and administrators' names)."""
+    """``redact_output`` with the context of ``run_dir`` (its salt, path spellings, names and immutable ids)."""
     return redact_output(value, profile=profile, context=context_for_run(run_dir), markup=markup)
+
+
+def settle_citations(payload: Any) -> Any:
+    """A redacted payload with its citation list de-duplicated and its ``citation_summary`` re-derived.
+
+    Masking can make two citations identical, and a summary computed before masking would then disagree with the
+    list it sits beside (``verify-pack`` checks that). Other payloads are returned unchanged.
+    """
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("citations"), list):
+        return payload
+    settled = dedupe_citations(payload["citations"])
+    result = {**payload, "citations": settled}
+    if "citation_summary" in payload:
+        result["citation_summary"] = build_citation_summary(settled)
+    return result
+
+
+def redact_payload(
+    value: Any,
+    *,
+    run_dirs: Iterable[str | Path] = (),
+    paths: Iterable[str | Path] = (),
+    profile: str | RedactionProfile = PROFILE_SHAREABLE,
+    markup: bool = False,
+    transform: Callable[[Any], Any] | None = None,
+) -> Any:
+    """The complete payload a tool or command returns, redacted with the context of the runs it was built from
+    and with its citation summary re-derived. For return values that can leave the machine (MCP tools, notifications)."""
+    context = context_for_runs(run_dirs, paths)
+    redacted = redact_output(value, profile=profile, context=context, markup=markup)
+    return settle_citations(transform(redacted) if transform else redacted)

@@ -14,7 +14,7 @@ import requests
 
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 
-from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, context_for_run, redact_output
+from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, redact_payload
 
 from .run_bundle import RunBundle
 
@@ -86,14 +86,19 @@ def _redact_value(value: Any, current_key: str = "") -> Any:
 def _run_fingerprint(payload: dict[str, Any]) -> str:
     """Stable per-run fingerprint used to dedup notify-sink tickets.
 
-    Hash includes tenant_name + run_dir basename so re-running ``auditex
-    notify send`` against the same bundle hits the deduplication path
-    instead of creating a fresh ticket on each invocation.
+    Hash includes tenant_name + run_dir (as the operator wrote it) so re-running ``auditex notify send`` against
+    the same bundle hits the deduplication path instead of creating a fresh ticket on each invocation, and two
+    runs of one tenant never share a fingerprint. ``send_notification`` computes it from the real run directory
+    BEFORE the payload is redacted (redaction replaces the run path) and carries the 16-hex digest in the
+    payload as ``run_fingerprint``; it is a one-way hash of the path, so the path itself never leaves.
 
     The 16-char hex prefix is short enough to embed in a Jira label
     (50-char max per label) and long enough that collisions across an
     operator's portfolio are vanishingly unlikely.
     """
+    carried = payload.get("run_fingerprint")
+    if isinstance(carried, str) and re.fullmatch(r"[0-9a-f]{16}", carried):
+        return carried
     tenant = str(payload.get("tenant_name") or "")
     run_dir = str(payload.get("run_dir") or "")
     digest = hashlib.sha256(f"{tenant}|{run_dir}".encode("utf-8")).hexdigest()
@@ -631,28 +636,43 @@ def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
 def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[str, Any]:
     payload = _build_payload(run_dir)
     citations, evidence_missing = _notification_proof(run_dir, payload)
-    # Every sink leaves the machine: the payload passes the shared output redaction (with the run's salt and path
-    # spellings) after the proof is built from the real paths and before any sink or dry-run result sees it.
-    payload = redact_output(payload, profile=PROFILE_SHAREABLE, context=context_for_run(run_dir))
-    base = {
-        "sink": sink,
-        "payload": payload,
-        "citations": citations,
-        "citation_summary": build_citation_summary(citations),
-        "evidence_missing": evidence_missing,
-    }
+    # The run identity is computed from the real run directory before redaction replaces it, and travels in the
+    # payload as a one-way digest, so the ticket de-duplication of every sink keeps telling two runs apart.
+    payload = {**payload, "run_fingerprint": _run_fingerprint(payload)}
+    # Every sink leaves the machine, and so does the envelope this function returns (the preview reaches MCP
+    # clients). The payload, the citations (built from the real paths) and every service response pass the shared
+    # output redaction with the run's salt and path spellings; the citation summary is re-derived from the
+    # redacted list. Nothing unredacted is handed to a sink or returned.
+    envelope = _redact_envelope(
+        {
+            "sink": sink,
+            "payload": payload,
+            "citations": citations,
+            "citation_summary": build_citation_summary(citations),
+            "evidence_missing": evidence_missing,
+        },
+        run_dir,
+    )
+    payload = envelope["payload"]
+    base = envelope
     if dry_run:
         return {"status": "planned", "dry_run": True, **base}
     if sink in WEBHOOK_ENV:
         result = _send_webhook(sink, payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     if sink == "smtp":
         result = _send_smtp(payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     if sink == "jira":
         result = _send_jira(payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     if sink == "github":
         result = _send_github(payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     return {"status": "blocked", "dry_run": False, "reason": "unsupported sink", **base}
+
+
+def _redact_envelope(envelope: dict[str, Any], run_dir: str) -> dict[str, Any]:
+    """The shareable redaction over a whole notification result (payload, citations, service responses)."""
+    redacted = redact_payload(envelope, run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    return dict(redacted)
