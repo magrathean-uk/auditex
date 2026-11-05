@@ -275,6 +275,40 @@ def test_dns_posture_collector_skips_unverified_domains() -> None:
     assert domains_assessed == ["live.example"]
 
 
+def test_record_domains_require_email_service_but_posture_keeps_all_verified() -> None:
+    domains = [
+        {"id": "sharepoint.example", "isVerified": True, "supportedServices": ["Sharepoint"]},
+        {"id": "mail.example", "isVerified": True, "supportedServices": ["Email", "Sharepoint"]},
+        {"id": "legacy.example", "isVerified": True},
+        {"id": "mixed.example", "isVerified": True, "supportedServices": ["eMaIl"]},
+        {"id": "unknown.example", "isVerified": True, "supportedServices": "Sharepoint"},
+        {"id": "null.example", "isVerified": True, "supportedServices": None},
+        {"id": "empty.example", "isVerified": True, "supportedServices": []},
+        {"id": "invalid.example", "isVerified": True, "supportedServices": [None, 1]},
+        {"id": "pending.example", "isVerified": False, "supportedServices": ["Email"]},
+    ]
+
+    class Graph(_GraphClientStub):
+        def get_all(self, path, params=None):
+            assert params["$select"] == "id,authenticationType,isDefault,isVerified,isRoot,supportedServices"
+            return super().get_all(path, params)
+
+    resolver = _DnsResolverStub({})
+    result = DnsPostureCollector().run({"client": Graph(domains), "dns_resolver": resolver})
+    assert result.status == "ok"
+    assert [r["domain"] for r in result.payload["domainPosture"]["value"]] == [
+        entry["id"] for entry in domains if entry["isVerified"]
+    ]
+    for operation in ("spf_records", "dkim_records", "dmarc_records"):
+        assert [r["domain"] for r in result.payload[operation]["value"]] == [
+            "mail.example", "legacy.example", "mixed.example", "unknown.example", "null.example",
+        ]
+    assert ("sharepoint.example", "TXT") in resolver.queries
+    assert next(c for c in result.coverage if c["name"] == "posture:sharepoint.example")["status"] == "ok"
+    # The dashed selector is record-only; non-mail domains never enter that path.
+    assert ("selector1-sharepoint-example._domainkey.sharepoint.example", "TXT") not in resolver.queries
+
+
 def test_dns_posture_collector_handles_graph_failure_gracefully() -> None:
     from azure_tenant_audit.graph import GraphError
 

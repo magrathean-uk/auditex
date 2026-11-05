@@ -232,12 +232,19 @@ class DnsPostureCollector(Collector):
         domains_error_class: str | None,
         domains_error: str | None,
     ) -> dict[str, Any]:
-        """Save bounded ScubaGear-shaped records for Graph-verified domains.
+        """Save bounded ScubaGear-shaped records for verified mail domains.
 
         Deliberately fail closed on resolver errors, unlike ScubaGear's error-to-empty
         record behaviour: stop that operation, retain its prior rows, and try the others.
         """
-        domains = [str(entry.get("id") or "").strip() for entry in verified_domains]
+        # ScubaGear iterates Get-AcceptedDomain; Email support is the closest
+        # Graph-only approximation. Coexistence domain handling is a cross-collector follow-up.
+        domains = [
+            str(entry.get("id") or "").strip() for entry in verified_domains
+            if not isinstance(entry.get("supportedServices"), list)
+            or any(isinstance(service, str) and service.casefold() == "email"
+                   for service in entry["supportedServices"])
+        ]
         domains = [domain for domain in domains if domain]
         cut = len(domains) > MAX_RECORD_DOMAINS
         payload = {}
@@ -329,7 +336,7 @@ class DnsPostureCollector(Collector):
     def _fetch_domains(client: GraphClient | None) -> list[dict[str, Any]]:
         if client is None:
             raise GraphError("graph client unavailable", request="/domains")
-        params = {"$select": "id,authenticationType,isDefault,isVerified,isRoot"}
+        params = {"$select": "id,authenticationType,isDefault,isVerified,isRoot,supportedServices"}
         if hasattr(client, "get_all"):
             payload = client.get_all("/domains", params=params)
             if isinstance(payload, list):

@@ -254,6 +254,40 @@ def test_doh_query_errors_agree(payload, stage):
     assert str(legacy.value) == str(detailed.value)
 
 
+def test_doh_carries_answer_types_without_changing_query_strings():
+    client = dns.DohClient(session=Session({'Status': 0, 'Answer': [
+        {'type': 5, 'data': 'target.invalid'}, {'type': 16, 'data': 5},
+        {'type': 16, 'data': '"v=DKIM1; p=key"'}, {}, {'data': 'untyped'},
+    ]}))
+    records = ['target.invalid', 'v=DKIM1; p=key', 'untyped']
+    assert client.query('example.invalid', 'TXT') == records
+    assert client.query_detailed('example.invalid', 'TXT') == dns.DnsAnswer(
+        records, 'answers', (5, 16, None))
+
+
+@pytest.mark.parametrize('with_txt', [False, True])
+def test_dkim_ignores_typed_cname_and_keeps_txt(with_txt):
+    first = 'selector1._domainkey.example.invalid'
+    second = 'selector2._domainkey.example.invalid'
+
+    class DkimSession(Session):
+        def get(self, *args, **kwargs):
+            name = kwargs['params']['name']
+            entries = [{'type': 5, 'data': 'target.invalid'}] if name == first else []
+            if name == second or with_txt:
+                entries.append({'type': 16, 'data': '"v=DKIM1; p=key"'})
+            self.payload = {'Status': 0, 'Answer': entries}
+            return self
+
+    resolver = dns.CachingResolver(dns.DohClient(session=DkimSession(None)))
+    result = dns.scuba_dkim_record('example.invalid', resolver)
+    assert result['rdata'] == ['v=DKIM1; p=key']
+    assert [entry['query_name'] for entry in result['log']] == ([first] if with_txt else [first, second])
+    assert result['log'][0]['query_answers'] == (['v=DKIM1; p=key'] if with_txt else [])
+    # Posture and the query API still see the original CNAME data in the shared cache.
+    assert resolver.query(first, 'TXT') == ['target.invalid'] + (['v=DKIM1; p=key'] if with_txt else [])
+
+
 def test_cache_shares_both_interfaces_and_does_not_cache_errors():
     resolver = DetailedResolver({'x': dns.DnsAnswer([], 'nxdomain')})
     cached = dns.CachingResolver(resolver)
@@ -269,6 +303,19 @@ def test_cache_shares_both_interfaces_and_does_not_cache_errors():
     legacy.answers['x'] = ['recovered']
     assert cached.query_detailed('x', 'TXT').records == ['recovered']
     assert len(legacy.calls) == 3
+
+
+def test_cache_does_not_share_mutable_record_lists():
+    source = ['original']
+    resolver = DetailedResolver({'x': dns.DnsAnswer(source, 'answers', (16,))})
+    cached = dns.CachingResolver(resolver)
+    cached.query('x', 'TXT').append('query caller mutation')
+    detailed = cached.query_detailed('x', 'TXT')
+    assert detailed == dns.DnsAnswer(['original'], 'answers', (16,))
+    detailed.records.clear()
+    source.append('upstream mutation')
+    assert cached.query('x', 'TXT') == ['original']
+    assert resolver.calls == [('x', 'TXT')]
 
 
 def happy_resolver():
@@ -300,6 +347,61 @@ def test_collector_raw_records_and_projection(tmp_path):
         assert projection.rule_sections[operation] == expected
         assert projection[operation] == expected
         assert 'log' in report['sections'][operation]['ignored_fields']
+
+
+def test_collector_noerror_empty_spf_reaches_the_rule_view(tmp_path):
+    resolver = DetailedResolver({'example.invalid': dns.DnsAnswer([], 'empty')})
+    result = run(resolver)
+    assert result.status == 'ok'
+    row = result.payload['spf_records']['value'][0]
+    assert row['domain'] == 'example.invalid'
+    assert row['rdata'] == []
+    assert row['compliant'] is False
+    assert row['message'] == 'Domain name exists but no answers returned.'
+    projection, report = bundle(tmp_path, result.payload, result.coverage)
+    # Rules read the in-memory rule view, captured after the adapter and before the shape gate:
+    # the empty-rdata row reaches MS.EXO.2.2 and 3.1 (product, 5 Nov 2026).
+    assert projection.rule_sections['spf_records'] == [{k: v for k, v in row.items() if k != 'log'}]
+    # Only the model view is withheld by the digest gate; this part may flip or become irrelevant
+    # when the model fallback is removed.
+    assert projection['spf_records'] == NOT_COLLECTED
+    section = report['sections']['spf_records']
+    assert section['status'] == 'not_collected'
+    assert section['reason'] == 'incomplete_shape'
+    assert section['detail'] == {'field': '$', 'kind': 'unseen_shape'}
+
+
+@pytest.mark.parametrize('operation,bad_name,answer', [
+    ('spf_records', 'a.invalid', 'v=spf1 -all'),
+    ('dkim_records', 'selector1-a-invalid._domainkey.a.invalid', 'v=DKIM1; p=key'),
+    ('dmarc_records', '_dmarc.invalid', 'v=DMARC1; p=reject; psd=n'),
+])
+@pytest.mark.parametrize('failures', [1, 2])
+def test_record_retry_is_bounded_and_operations_are_isolated(operation, bad_name, answer, failures):
+    class Flaky(Resolver):
+        def query(self, name, record_type):
+            records = super().query(name, record_type)
+            if name == bad_name and self.calls.count((name, record_type)) <= failures:
+                raise dns.DohError('transient resolver failure')
+            return records
+
+    resolver = Flaky({bad_name: [answer]})
+    coverage = []
+    # Isolate the record path so posture cannot supply an implicit earlier retry.
+    payload = collector.DnsPostureCollector()._scuba_records(
+        [{'id': 'a.invalid'}], dns.CachingResolver(resolver), coverage, 'ok', None, None)
+    assert resolver.calls.count((bad_name, 'TXT')) == 2
+    envelope = payload[operation]
+    if failures == 1:
+        assert envelope['status'] == 'ok'
+        assert envelope['value'][0]['rdata'] == [answer]
+    else:
+        assert envelope == {'value': [], 'status': 'failed', 'error_class': 'dns_resolver_error',
+                            'error': 'transient resolver failure'}
+    for other in set(OPERATIONS) - {operation}:
+        assert payload[other]['status'] == 'ok'
+        assert len(payload[other]['value']) == 1
+    assert next(c for c in coverage if c['name'] == operation)['status'] == envelope['status']
 
 
 @pytest.mark.parametrize('failed_operation,bad_name', [

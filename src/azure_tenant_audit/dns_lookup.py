@@ -30,6 +30,7 @@ class DohError(RuntimeError):
 class DnsAnswer(NamedTuple):
     records: list[str]
     outcome: str  # answers, empty or nxdomain
+    record_types: tuple[int | None, ...] = ()  # aligned with records, when supplied by the resolver
 
 
 class DnsResolver(Protocol):
@@ -81,6 +82,7 @@ class DohClient:
             return DnsAnswer([], "nxdomain")
         answer = payload.get("Answer") or []
         records: list[str] = []
+        record_types: list[int | None] = []
         for entry in answer:
             if not isinstance(entry, dict):
                 continue
@@ -88,7 +90,9 @@ class DohClient:
             if not isinstance(data, str):
                 continue
             records.append(_decode_txt(data))
-        return DnsAnswer(records, "answers" if records else "empty")
+            record_types.append(entry.get("type"))
+        return DnsAnswer(records, "answers" if records else "empty",
+                         tuple(record_types) if any(t is not None for t in record_types) else ())
 
 
 def _decode_txt(data: str) -> str:
@@ -111,6 +115,14 @@ def _ask_type(resolver: DnsResolver, name: str, record_type: str) -> DnsAnswer:
     return DnsAnswer(records, "answers" if records else "empty")
 
 
+def _record_ask(resolver: DnsResolver, name: str) -> DnsAnswer:
+    """Retry a record question once; a second resolver failure still propagates."""
+    try:
+        return _ask(resolver, name)
+    except DohError:
+        return _ask(resolver, name)
+
+
 class CachingResolver:
     """Share successful answers between posture and raw records; never cache DohError."""
 
@@ -124,8 +136,10 @@ class CachingResolver:
     def query_detailed(self, name: str, record_type: str) -> DnsAnswer:
         key = (name, record_type)
         if key not in self.cache:
-            self.cache[key] = _ask_type(self.resolver, name, record_type)
-        return self.cache[key]
+            answer = _ask_type(self.resolver, name, record_type)
+            self.cache[key] = answer._replace(records=list(answer.records))
+        answer = self.cache[key]
+        return answer._replace(records=list(answer.records))
 
 
 def is_coexistence_domain(domain: str) -> bool:
@@ -145,7 +159,7 @@ def _dns_log(name: str, answer: DnsAnswer) -> dict[str, Any]:
 
 
 def scuba_spf_record(domain: str, resolver: DnsResolver) -> dict[str, Any]:
-    answer = _ask(resolver, domain)
+    answer = _record_ask(resolver, domain)
     # SG-P:520-545: case-sensitive prefix and substring checks, all TXT answers retained.
     spf = [r for r in answer.records if r.startswith("v=spf1 ")]
     compliant = any(any(tag in r for tag in ("-all", "~all", "redirect")) for r in spf)
@@ -167,13 +181,18 @@ def scuba_spf_record(domain: str, resolver: DnsResolver) -> dict[str, Any]:
 def scuba_dkim_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | None:
     if is_coexistence_domain(domain):
         return None
-    # SG-P:601-629: try four selectors in order; any answer, including CNAME, wins.
+    # SG-P:601-629: try four selectors in order; the first string answer wins.
     dashed = domain.replace(".", "-")
     selectors = ("selector1", "selector2", f"selector1-{dashed}", f"selector2-{dashed}")
     log = []
     for selector in selectors:
         name = f"{selector}._domainkey.{domain}"
-        answer = _ask(resolver, name)
+        answer = _record_ask(resolver, name)
+        # SG-P:297-303: traditional DNS keeps TXT strings, not CNAME targets.
+        # Untyped injected resolvers retain the historical DoH-fallback behaviour.
+        if answer.record_types:
+            records = [r for r, kind in zip(answer.records, answer.record_types) if kind != 5]
+            answer = DnsAnswer(records, answer.outcome if records else "empty")
         log.append(_dns_log(name, answer))
         if answer.records:
             break
@@ -197,7 +216,7 @@ def _dmarc_walk(domain: str, resolver: DnsResolver, log: list[dict[str, Any]]) -
         labels = labels[-7:] if len(labels) >= 8 else labels[1:]
         parent = ".".join(labels)
         name = f"_dmarc.{parent}"
-        answer = _ask(resolver, name)
+        answer = _record_ask(resolver, name)
         queries += 1
         log.append(_dns_log(name, answer))
         valid = _valid_dmarc(answer.records)
@@ -221,7 +240,7 @@ def scuba_dmarc_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | N
     if is_coexistence_domain(domain):
         return None
     name = f"_dmarc.{domain}"
-    answer = _ask(resolver, name)
+    answer = _record_ask(resolver, name)
     log = [_dns_log(name, answer)]
     valid = _valid_dmarc(answer.records)
     # SG-P:674-696: only one author policy wins; other TXT does not block parents.
