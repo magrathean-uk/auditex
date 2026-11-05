@@ -76,14 +76,18 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   in the oracle reviewer; the run's `summary.json` holds the full 40-character commit), policy id, test name, OPA
   version and input hash.
   The value-rule engine (`src/azure_tenant_audit/value_rules/`) ports the reviewed
-  Auditex spec v3.9.1 and addendum A1, retaining the v2 Power BI/AAD rules and v3.9
+  Auditex spec v3.9.1 with addenda A1 and A2 (the catalogue is `spec_version: v3.9.1`: 102 policies, 1,084 cells),
+  retaining the v2 Power BI/AAD rules and v3.9
   stages whose policy semantics did not change. The reference oracle is the pinned
   CISA-derived ScubaGear Rego at the revision above, evaluated offline with OPA 1.20.2;
   it is not a runtime dependency. Tests check the Rego file hashes against the pinned
   hash inventory in `auditex/scubagear_prune_proof.py`.
   The compressed fixtures under `tests/fixtures/value-rules/` contain 16,980 rows across
-  `vectors-v2`, `vectors-v39` and `vectors-s4` to `vectors-s9` (`.jsonl.xz`). They include
-  rows for MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1, whose rules are now enabled.
+  `vectors-v2`, `vectors-v39` and `vectors-s4` to `vectors-s9` (`.jsonl.xz`), plus the 2,233-row
+  `vectors-v391-sample.jsonl.xz` cut from the spec's 26,898 vectors, constructed and pack train/validation kinds only
+  (every cell, with ADDENDUM-A2's three constructed vectors and exact label overrides;
+  `scripts/build-value-rule-sample-v391.py`). They include
+  prepared rows for the three policies that were held and are now enabled.
   Only constructed synthetic rows and model-pack train/validation rows are included;
   pack rows derive from ScubaGear fixtures under CC0 1.0 Universal. Held-out test rows,
   pilot rows and sealed AAD v2.1 freeze rows are excluded. Each vector has an id and

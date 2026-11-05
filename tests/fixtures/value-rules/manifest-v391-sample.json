@@ -1,0 +1,23 @@
+{
+  "a2_label_overrides_sha256": "74639d1775267bb7d8e3d7cdf777b5eac4449e636ec383c16e21f79b3d8e1fa1",
+  "a2_vectors_sha256": "0351259550c0a87d27d65cfac8f98b8547334cbd1d94321af244ad06b622ac0b",
+  "by_source": {
+    "aad-pack-train": 4,
+    "constructed": 1840,
+    "pack-train": 292,
+    "pack-validation": 33,
+    "packlic-train": 11,
+    "pbi-pack-train": 47,
+    "pbi-pack-validation": 6
+  },
+  "cells_reached": 1084,
+  "overrides": 3,
+  "overrides_sha256": "d760c1ae07d8fc03ad6bca9da1462606fb7c2d5da959283e9144767b4f246118",
+  "policies": 102,
+  "rows": 2233,
+  "sample_sha256": "c7af2f217d305b4a7757ba5150fcd397a7792cac78e2a5229908d0ea55767a49",
+  "selection": "per cell: smallest vector and smallest agreeing real pack row; per policy and divergence id: smallest vector; the three A2 constructed vectors; exact A2 overrides of selected rows; no test, pilot or sealed freeze rows",
+  "source_vectors": 26898,
+  "source_vectors_sha256": "3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e",
+  "spec_version": "v3.9.1+A2"
+}

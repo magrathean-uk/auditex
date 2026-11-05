@@ -349,15 +349,24 @@ def validate_assessment(payload: Any) -> None:
             if detail["class"] == "value_rule":
                 if version != "2026-11-05":
                     raise ValueError("Value rule requires current schema")
-                from .value_rules.catalogue import cell_entry, citation_variants, failure_entry, reason_matches, row_for
+                from .value_rules.catalogue import (cell_entry, citation_variants, reason_matches, row_for,
+                                                    shared_reason)
+                from .value_rules.record import RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE, is_shared_reason
                 value_row = row_for(row["policy_id"])
                 if not {"cell", "reason_code", "reason_text"} <= detail.keys():
                     raise ValueError("Missing value-rule cell or reason")
-                failure = failure_entry()
-                if value_row is not None and detail["cell"] == failure["cell"]:
-                    # A rule that raised: one constant answer citing every section the rule reads.
-                    cell = {"verdict": failure["verdict"], "reason_code": failure["reason_code"],
-                            "reason_texts": [failure["reason_text"]], "cited": value_row["sections"]}
+                if detail["cell"] in {RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE}:
+                    raise ValueError("Legacy rule-failure sentinel: a shared reason is not a cell, its cell must be null")
+                if detail["cell"] is None:
+                    # A1.2: a failed rule, dispatched before any cell lookup. The cell is null, the text is the
+                    # catalogued constant and the answer cites every section the rule reads. A policy without a rule
+                    # is a row-level reason (rule_not_implemented), never a rule record.
+                    if not is_shared_reason(detail["reason_code"]) or value_row is None or (
+                            detail["rule_id"] != value_row["rule_id"]):
+                        raise ValueError("Unsupported value-rule cell or reason")
+                    shared = shared_reason(detail["reason_code"])
+                    cell = {"verdict": shared["verdict"], "reason_code": shared["reason_code"],
+                            "reason_texts": [shared["reason_text"]], "cited": list(value_row["sections"])}
                 else:
                     cell = cell_entry(row["policy_id"], detail["cell"], value_row) if value_row else None
                 if (value_row is None or cell is None or detail["rule_id"] != value_row["rule_id"]

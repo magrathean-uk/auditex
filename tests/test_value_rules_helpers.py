@@ -12,7 +12,7 @@ import pytest
 
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.value_rules import assess, rule_failure
-from azure_tenant_audit.value_rules.catalogue import catalogue, failure_entry
+from azure_tenant_audit.value_rules.catalogue import catalogue, shared_reason
 from azure_tenant_audit.value_rules.helpers import (
     PRESET_RE, _accepted, _cover, _env_cell, _flag, _gate_slider, _int, _licence_cell, _list_state, _lst, _p2_gate,
     _preset_pair, _scan_bad_wins, _scan_good_wins, _shape, _state,
@@ -257,14 +257,15 @@ def test_checked_refuses_answers_outside_the_inventory():
 
 
 def test_rule_failure_entry_is_catalogued_once():
-    entry = failure_entry()
-    assert entry == {"cell": "rule_evaluation_failed", "verdict": "not_assessed", "reason_code": "rule_evaluation_failed",
+    entry = shared_reason("rule_evaluation_failed")
+    assert entry == {"verdict": "not_assessed", "reason_code": "rule_evaluation_failed",
                      "reason_text": ("Not assessed: Auditex could not evaluate this policy on the collected evidence. "
                                      "This is a product fault, not a tenant setting."),
-                     "recommendation": "report_product_fault", "support": "contact+auditex@magrathean.uk"}
-    assert all(entry["cell"] not in row["cells"] for row in catalogue()["policies"].values())
+                     "recommendation": "report_product_fault"}
+    assert all(entry["reason_code"] not in row["cells"] for row in catalogue()["policies"].values())
     record = rule_failure("MS.TEAMS.2.2v2")
     assert record["cited_sections"] == ["federation_configuration", "scuba_config"]
+    # A1: the failure is not a cell; its record has a null cell.
     assert (record["cell"], record["reason_code"], record["reason_text"]) == (
-        entry["cell"], entry["reason_code"], entry["reason_text"])
+        None, entry["reason_code"], entry["reason_text"])
     assert json.dumps(record["detail"]) == "{}"

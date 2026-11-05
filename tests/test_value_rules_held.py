@@ -30,6 +30,7 @@ SS11, SS61, SS62 = "MS.SECURITYSUITE.1.1v1", "MS.SECURITYSUITE.6.1v1", "MS.SECUR
 POLICIES = (SS11, SS61, SS62)
 PREPARED = {**json.loads((FIXTURES / "held-rows-s5.json").read_text()),
             **json.loads((FIXTURES / "held-rows-s4.json").read_text())}
+A1_EVIDENCE_FIELDS = ("evidence_kind", "limitations", "recommendations")
 AREA_COUNTS = {"AAD": 31, "EXO": 12, "POWERBI": 8, "POWERPLATFORM": 8, "SECURITYSUITE": 21, "SHAREPOINT": 8, "TEAMS": 14}
 
 
@@ -51,7 +52,7 @@ def _expected(row, policy):
             row["rule_cited_sections"] or catalogue()["policies"][policy]["sections"])
 
 
-def test_rows_are_enabled_exactly_as_prepared_and_the_file_is_canonical():
+def test_rows_are_enabled_as_prepared_plus_the_a1_evidence_fields_and_the_file_is_canonical():
     path = ROOT / "configs/scuba-value-rules.json"
     data = json.loads(path.read_text())
     assert path.read_text() == json.dumps(data, indent=2, ensure_ascii=False) + "\n"
@@ -59,7 +60,15 @@ def test_rows_are_enabled_exactly_as_prepared_and_the_file_is_canonical():
     assert set(PREPARED) == set(POLICIES)
     for policy in POLICIES:
         assert policy in rule_policies()
-        assert data["policies"][policy] == PREPARED[policy]
+        # v3.9.1 (A1) adds the evidence fields to every not-assessed cell. The SS 6.1 and 6.2 record predates them;
+        # the SS 1.1 record already carries them. Either way the shipped row equals the record plus, where the record
+        # lacks them, exactly those three additive fields.
+        shipped = deepcopy(data["policies"][policy])
+        for name, cell in shipped["cells"].items():
+            for key in A1_EVIDENCE_FIELDS:
+                if key not in PREPARED[policy]["cells"][name]:
+                    cell.pop(key, None)
+        assert shipped == PREPARED[policy]
         assert set(cells_for(policy)) == set(PREPARED[policy]["cells"])
     assert len(data["policies"]) == 102 == len(policy_catalogue()["policies"])
     assert set(data["policies"]) == set(policy_catalogue()["policies"])
