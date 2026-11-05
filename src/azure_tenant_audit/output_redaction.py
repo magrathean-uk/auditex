@@ -47,13 +47,14 @@ What a profile redacts (``PROFILES``):
 * privileged-user display names (M365 role holders, Google admins) and on-premises immutable ids, pseudonymised
   like the projection (``User <16 hex>`` / ``Id <16 hex>``, ``sha256(salt NUL text)``), including inside the
   text of the same output and inside JSON embedded in a string;
-* dashed GUIDs (``PENDING_PRODUCT_POLICY.redact_guids``), except ``PUBLIC_GUIDS`` and values labelled
+* dashed GUIDs (``PROFILE_POLICY[profile].redact_guids``), except ``PUBLIC_GUIDS`` and values labelled
   ``Trace ID:`` / ``Correlation ID:``; the replacement is itself a valid GUID so schemas that demand
   one (OSCAL) still validate;
 * the operator's run paths (``RedactionContext.run_paths``), every occurrence.
 
-Decisions the documents leave open are the single constant ``PENDING_PRODUCT_POLICY``; flip a field there
-(or pass a replacement through ``RedactionContext.policy``) and every writer follows.
+What each profile redacts beyond its fixed rules is the table ``PROFILE_POLICY`` (GUIDs, domains, group names and
+free-text keys; ``ProfilePolicy``); change a field there (or pass a replacement through ``RedactionContext.policy``)
+and every writer follows.
 """
 from __future__ import annotations
 
@@ -65,6 +66,7 @@ import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Iterable
 
 from .citations import build_citation_summary, dedupe_citations
@@ -93,7 +95,29 @@ class RedactionDepthError(RedactionError):
 
 
 class ContextIncompleteError(RedactionError):
-    """The run's identities could not all be discovered (see ``RedactionContext.incomplete``): fail closed."""
+    """The run's identities could not all be discovered (see ``RedactionContext.incomplete``): fail closed.
+
+    The message and the attributes name each unusable file by a *safe label* (its run-relative path with every
+    segment that is not a plain section name replaced by ``<redacted-segment-N>``) and a reason class
+    (``unreadable``, ``malformed JSON``, ``oversize``, ``non-regular``, ``dangling link``, ``limit``, ``outside run``,
+    ``changed during scan``). Never file content, an operating-system message or the absolute run path.
+
+    ``files`` is the sorted list shown, at most ``_MAX_LISTED_FILES`` ``(label, reason class)`` pairs; ``omitted``
+    counts the unusable files beyond it.
+    """
+
+    def __init__(self, files: Iterable[tuple[str, str]] = (), omitted: int = 0) -> None:
+        listed = tuple((str(label), str(reason)) for label, reason in files)
+        shown, rest = listed[:_MAX_LISTED_FILES], max(0, int(omitted)) + max(0, len(listed) - _MAX_LISTED_FILES)
+        self.files: tuple[tuple[str, str], ...] = shown
+        self.omitted: int = rest
+        total = len(shown) + rest
+        names = "; ".join(f"{label} ({reason})" for label, reason in shown) or "no file could be named"
+        more = f"; and {rest} more" if rest else ""
+        super().__init__(
+            f"identity discovery was incomplete for {total} file(s): {names}{more}. Nothing was redacted or returned. "
+            "Repair or remove the listed files and retry"
+        )
 
 
 @dataclass(frozen=True)
@@ -125,32 +149,48 @@ PROFILES: dict[str, RedactionProfile] = {
 
 
 @dataclass(frozen=True)
-class PendingProductPolicy:
-    """Identifier classes the documents are silent or ambiguous about: conservative-but-usable defaults.
+class ProfilePolicy:
+    """The identifier classes one redaction profile redacts beyond its fixed rules (decided by product, 5 Nov 2026).
 
-    Every field is "decision pending product". ``True`` redacts the class in the shareable profiles. Role names
-    are not a field: built-in names are public Microsoft vocabulary and custom names are tenant text, and the
-    output alone cannot tell them apart, so role names are never redacted (and are protected from being
-    mistaken for a user's name, see ``RedactionContext.vocabulary``). A flip needs a product definition first.
+    ``True`` redacts the class in that profile. There is no role-name field: built-in role names are public
+    Microsoft vocabulary and custom names are tenant text the output cannot tell apart, so role names are never
+    redacted (and are protected from being mistaken for a user's name, see ``RedactionContext.vocabulary``).
     """
 
-    # Dashed GUIDs (tenant, object, application and policy ids). On: pseudonymised per run, so references
-    # inside one report stay usable and nothing ties back to the tenant.
+    # Dashed GUIDs (tenant, object, application and policy ids): pseudonymised per run, so references inside one
+    # report stay usable and nothing ties back to the tenant. Only applies to a profile that handles GUIDs at all
+    # (``RedactionProfile.guids``; the secrets-only ``report_pack`` keeps its references exact).
     redact_guids: bool = True
-    # Domain names. Off: DNS, mail-flow and accepted-domain findings are unreadable without them, and the
-    # e-mail mask keeps the domain by contract. On: every domain seen in an e-mail address in the output
-    # (and ``RedactionContext.domains``), with its subdomains, becomes ``domain-<12 hex>.invalid``.
+    # Domain names. Off everywhere: DNS, mail-flow and accepted-domain findings are unreadable without them, and the
+    # e-mail mask keeps the domain by contract. On: every domain seen in an e-mail address in the output (and
+    # ``RedactionContext.domains``), with its subdomains, becomes ``domain-<12 hex>.invalid``.
     redact_domains: bool = False
-    # Group display names: records whose ``principal_type`` is ``group`` (``Group <16 hex>``). Off: groups
-    # named in findings are what an administrator acts on.
+    # Group display names: records whose ``principal_type`` is ``group`` (``Group <16 hex>``). Off everywhere:
+    # groups named in findings are what an administrator acts on.
     redact_group_names: bool = False
-    # Free-text values under ``TENANT_TEXT_KEYS`` (waiver owner, justification, comments), whatever their
-    # type. Off: documented as accountability fields. ``reason`` is deliberately not a key here: it carries
-    # reason codes.
-    redact_free_text: bool = False
+    # Every string under a ``TENANT_TEXT_KEYS`` key (waiver owner, justification, comments, notes), whatever the
+    # container. On for the customer pack and the explainer, off in the local report and the report pack.
+    redact_free_text_keys: bool = False
 
 
-PENDING_PRODUCT_POLICY = PendingProductPolicy()
+_SHAREABLE_POLICY = ProfilePolicy()
+# The setting per profile. ``report_pack`` is the secrets-only working artifact (it keeps GUIDs, names and free text
+# so its references resolve); ``shareable`` is the operator's own report, MCP payloads and notifications; the customer
+# pack and the explainer are the two outputs that leave the operator's control. A flip is one edit here.
+PROFILE_POLICY: Mapping[str, ProfilePolicy] = MappingProxyType(
+    {
+        PROFILE_REPORT_PACK: ProfilePolicy(redact_guids=False),
+        PROFILE_SHAREABLE: _SHAREABLE_POLICY,
+        PROFILE_CUSTOMER_PACK: ProfilePolicy(redact_free_text_keys=True),
+        PROFILE_EXPLAINER: ProfilePolicy(redact_free_text_keys=True),
+    }
+)
+
+
+def policy_for(profile: RedactionProfile) -> ProfilePolicy:
+    """The policy of ``profile`` (a profile that is not in the table gets the shareable one)."""
+    return PROFILE_POLICY.get(profile.name, _SHAREABLE_POLICY)
+
 
 TENANT_TEXT_KEYS = frozenset({"owner", "justification", "comment", "comments", "notes"})
 
@@ -333,48 +373,73 @@ def _structural(text: str) -> bool:
     return any(shape.match(text) for shape in _STRUCTURAL_SHAPES)
 
 
-# Finding and policy ids are ``<namespace>:<snake_case_words>[:<guid-or-suffix>]`` (``identity:global_admin_stale_password:<guid>``).
+# Finding ids are ``<namespace>:<snake_case_words>[:<guid-or-digest>]`` (``identity:global_admin_stale_password:<guid>``).
 # A credential word inside such an id (``..._password:<guid>``) is part of the name, not an assignment, so the inline
-# secret pattern must not read it as ``password: <value>``. The exemption is deliberately narrow: the namespace is
-# one lower-case word that is not itself a credential word (``password:hunter_2`` stays a secret), the words carry at
-# least one underscore, the credential word sits after an underscore inside them, and the suffix is a GUID or one
-# lower-case word. Anything else (``password: hunter2``, ``db_password=x``, ``identity:db_password:Hunter2``) is
-# redacted as before.
-_ID_GUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-_ID_TOKEN_RE = re.compile(
-    r"(?<![\w:.-])(?P<ns>[a-z][a-z0-9]*):(?P<words>[a-z][a-z0-9]*(?:_[a-z0-9]+)+)"
-    rf"(?::(?P<suffix>{_ID_GUID}|[a-z][a-z0-9]{{0,63}}(?:_[a-z0-9]+){{0,8}}))?(?![\w])"
+# secret pattern must not read it as ``password: <value>``. The exemption is deliberately narrow and exact:
+#
+# * the namespace is one of ``_ID_NAMESPACES`` (the namespaces the finding producers under ``src/`` emit; a test scans
+#   the producers and fails when one is missing), never a credential word;
+# * the words carry at least one underscore, lower case only;
+# * the optional suffix is a dashed GUID, a lower-case hex digest of 16 to 64 digits or a decimal number;
+# * the token is not preceded by a word, ``:``, ``.`` or ``-`` and is not followed by a word character, ``:`` or ``=``,
+#   so ``identity:db_password:hunter2``, ``identity:db_password=x``, ``config:db_password:x`` and
+#   ``identity:global_admin_stale_password:<guid>:hunter`` are all still read as credentials and redacted.
+#
+# Everything is one regular expression run in one left-to-right pass (the id alternative is tried first at every
+# position, the inline secret pattern second): linear in the text, no recursion, no second scan.
+_ID_NAMESPACES = (
+    "admin_set_unknown", "app", "app_consent", "app_credentials", "attack_path", "category", "conditional_access",
+    "conditional_access_policy", "conditional_access_relationship", "consent_policy", "coverage_gap",
+    "cross_tenant_access", "detection_coverage", "dns_posture", "exchange", "exchange_policy", "exchange_remote_domain",
+    "exchange_transport", "exposure", "external_identity", "google_admin_resilience", "google_policies", "identity",
+    "identity_governance", "intune", "intune_depth", "mailbox_forwarding", "onedrive_posture", "reports_usage",
+    "response", "secure_score", "security_directory_audit", "security_signin", "service_health", "sharepoint",
+    "sharepoint_permission", "sharepoint_site_posture", "sharepoint_tenant", "teams_policy",
 )
 _CREDENTIAL_NAMESPACES = frozenset(
     {"access", "refresh", "id", "client", "secret", "password", "authorization", "api", "token", "key", "bearer"}
 )
-
-
-def _id_token_spans(text: str) -> list[tuple[int, int, int]]:
-    """``(start, end, words_start)`` of each id-shaped token in ``text`` that can carry a credential word."""
-    return [
-        (m.start(), m.end(), m.start("words"))
-        for m in _ID_TOKEN_RE.finditer(text)
-        if m["ns"] not in _CREDENTIAL_NAMESPACES and m["suffix"]
-    ]
+_ID_GUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_ID_TOKEN = (
+    r"(?-i:(?<![\w:.-])(?:" + "|".join(sorted(_ID_NAMESPACES, key=len, reverse=True)) + r")"
+    r":[a-z][a-z0-9]*(?:_[a-z0-9]+)+"
+    rf"(?::(?:{_ID_GUID}|[0-9a-f]{{16,64}}|[0-9]{{1,20}}))?(?![\w:=]))"
+)
+_INLINE_OR_ID_RE = re.compile(rf"(?P<idtoken>{_ID_TOKEN})|{INLINE_SECRET_RE.pattern}", INLINE_SECRET_RE.flags)
 
 
 def _redact_inline_secrets(value: str) -> str:
-    """``INLINE_SECRET_RE`` over ``value``, except that a credential word inside an id-shaped token is left alone
-    (the rest of the match, past the token, is still scanned)."""
-    spans = _id_token_spans(value)
+    """``INLINE_SECRET_RE`` over ``value``, except that a credential word inside a finding id is left alone."""
 
     def inline(match: re.Match[str]) -> str:
-        start = match.start("prefix")
-        for _, end, words_start in spans:
-            if words_start < start < end and value[start - 1] == "_":
-                cut = end - start
-                return match[0][:cut] + _redact_inline_secrets(match[0][cut:])
+        if match["idtoken"] is not None:
+            return match[0]
         raw = match["value"]
         quote = raw[0] if len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0] else ""
         return f"{match['prefix']}{quote}{SECRET_PLACEHOLDER}{quote}"
 
-    return INLINE_SECRET_RE.sub(inline, value)
+    return _INLINE_OR_ID_RE.sub(inline, value)
+
+
+# Credentials carried by a URL: the password of ``scheme://user:password@host`` and the value of a credential-looking
+# query or fragment parameter (OAuth tokens and codes, shared-access-signature fields, API keys). The URL syntax stays.
+_URL_USERINFO_RE = re.compile(r"(?P<head>\b[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\s/@:?#\"'<>]*:)(?P<password>[^\s/@?#\"'<>]+)(?=@)")
+_URL_PARAMETERS = (
+    "access_token", "refresh_token", "id_token", "token", "sig", "signature", "code", "password", "passwd", "pwd",
+    "secret", "client_secret", "key", "api_key", "apikey", "sv", "se", "sp", "sr", "spr", "st", "skoid", "sktid",
+    "sas", "sastoken", "auth", "authorization", "assertion", "jwt", "bearer",
+)
+_URL_PARAMETER_RE = re.compile(
+    r"(?P<lead>[?&;#])(?P<name>" + "|".join(_URL_PARAMETERS) + r")(?P<eq>=)(?P<value>[^&;\s#\"'<>]*)", re.IGNORECASE
+)
+
+
+def _redact_url_credentials(value: str) -> str:
+    """URL userinfo passwords and credential parameters of ``value`` replaced by ``SECRET_PLACEHOLDER``."""
+    if "=" not in value and "://" not in value:
+        return value
+    value = _URL_USERINFO_RE.sub(lambda m: m["head"] + SECRET_PLACEHOLDER, value)
+    return _URL_PARAMETER_RE.sub(lambda m: m["lead"] + m["name"] + m["eq"] + SECRET_PLACEHOLDER, value)
 
 
 _IMMUTABLE_PREFIX = "Id "
@@ -416,18 +481,22 @@ class RedactionContext:
     already knows (``context_for_run`` reads them from the run's ``normalized/`` records, so they hold whichever
     sections the output selects; any found inside the value are added automatically). ``vocabulary`` is
     controlled vocabulary (role names) that a user's name must never rewrite. ``domains`` extends the domain
-    set when the domain policy is on.
+    set when the domain policy is on. ``policy`` replaces the profile's own ``PROFILE_POLICY`` entry (``None``: use it).
     """
 
     salt: str = ""
     run_paths: tuple[str, ...] = ()
     protected_names: frozenset[str] = frozenset()
     domains: frozenset[str] = frozenset()
-    policy: PendingProductPolicy = field(default_factory=lambda: PENDING_PRODUCT_POLICY)
+    policy: ProfilePolicy | None = None
     protected_ids: frozenset[str] = frozenset()
     vocabulary: frozenset[str] = frozenset()
     incomplete: bool = False
+    # What made the context incomplete, as safe ``(label, reason class)`` pairs (see ``ContextIncompleteError``) and
+    # the same as ``"<label>: <reason class>"`` strings; ``incomplete_omitted`` counts problems beyond the kept ones.
     incomplete_reasons: tuple[str, ...] = ()
+    incomplete_files: tuple[tuple[str, str], ...] = ()
+    incomplete_omitted: int = 0
 
 
 def pseudonym(salt: str, text: str) -> str:
@@ -517,6 +586,15 @@ class _Found:
     domains: set[str] = field(default_factory=set)
     vocabulary: set[str] = field(default_factory=set)
     keys: set[str] = field(default_factory=set)
+    limit_hits: int = 0  # JSON-looking strings above ``_MAX_EMBEDDED_JSON_CHARS`` that were not parsed
+
+    def merge(self, other: "_Found") -> None:
+        self.names |= other.names
+        self.ids |= other.ids
+        self.domains |= other.domains
+        self.vocabulary |= other.vocabulary
+        self.keys |= other.keys
+        self.limit_hits += other.limit_hits
 
 
 class _Num:
@@ -536,9 +614,19 @@ def _reject_constant(name: str) -> Any:
     raise ValueError(f"{name} is not JSON")
 
 
+# JSON embedded in a string is parsed (to find identities in it and to redact it as structure) up to this many
+# characters. A longer string that looks like JSON is not parsed and is never passed on as if it had been: discovery
+# and redaction both treat it as an incomplete context and fail closed (``_EmbeddedLimitError``).
+_MAX_EMBEDDED_JSON_CHARS = 16 * 1024 * 1024
+_JSON_START_RE = re.compile(r"\s*[\[{]")
+
+
 def _maybe_json(text: str) -> Any:
     """The parsed value of a string that is a JSON object or array, else ``None``. Numbers are ``_Num``; the
-    non-standard ``NaN`` and ``Infinity`` make the text not JSON."""
+    non-standard ``NaN`` and ``Infinity`` make the text not JSON. Raises ``_EmbeddedLimitError`` for a string longer
+    than ``_MAX_EMBEDDED_JSON_CHARS`` that starts like JSON."""
+    if len(text) > _MAX_EMBEDDED_JSON_CHARS and _JSON_START_RE.match(text):
+        raise _EmbeddedLimitError
     stripped = text.strip()
     if len(stripped) < 2 or stripped[0] not in "{[" or stripped[-1] not in "}]":
         return None
@@ -566,8 +654,12 @@ def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
                     found.domains.add(match["domain"].lower())
                 for match in _ENCODED_EMAIL_RE.finditer(item):
                     found.domains.add(match["domain"].lower())
-            if names and item[:1] in ("{", "[", " ", "\n", "\t") and len(item) < 4_000_000:
-                parsed = _maybe_json(item)
+            if names and item[:1] in ("{", "[", " ", "\n", "\t"):
+                try:
+                    parsed = _maybe_json(item)
+                except _EmbeddedLimitError:
+                    found.limit_hits += 1
+                    continue
                 if parsed is not None:
                     stack.append(parsed)
         elif isinstance(item, Mapping):
@@ -591,7 +683,7 @@ def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
                             found.vocabulary.update(m.lower() for m in member if isinstance(m, str) and m)
             stack.extend(item.values())
             stack.extend(k for k in item if isinstance(k, str) and domains)
-        elif isinstance(item, (list, tuple)):
+        elif isinstance(item, (list, tuple, set, frozenset)):
             if id(item) in seen:
                 continue
             seen[id(item)] = item
@@ -604,139 +696,441 @@ def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
 _MAX_SCAN_FILES = 5_000            # ``normalized/**/*.json`` files per run
 _MAX_FILE_BYTES = 32 * 1024 * 1024  # one file; a larger one is not read
 _MAX_SCAN_BYTES = 128 * 1024 * 1024  # all files of one run together
-_MAX_REASONS = 20
-_SCAN_CACHE: dict[tuple[Any, ...], tuple[frozenset[str], frozenset[str], frozenset[str], tuple[str, ...]]] = {}
+_MAX_SCAN_DEPTH = 32               # directory levels below ``normalized/``
+_MAX_REASONS = 20                  # problems a context keeps (the rest is only counted)
+_MAX_LISTED_FILES = 10             # problems a refusal names (the rest is only counted)
+
+# Why a file could not be used. A label and one of these classes are all a refusal ever says about a file.
+REASON_UNREADABLE = "unreadable"
+REASON_MALFORMED = "malformed JSON"
+REASON_OVERSIZE = "oversize"
+REASON_NON_REGULAR = "non-regular"
+REASON_DANGLING = "dangling link"
+REASON_LIMIT = "limit"
+REASON_OUTSIDE = "outside run"
+REASON_CHANGED = "changed during scan"
+
+_SAFE_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}(?:\.json)?$")
+_CREDENTIAL_WORD_RE = re.compile(r"password|passwd|secret|token|apikey|api_key|authorization|bearer|credential", re.IGNORECASE)
+_LONG_DIGITS_RE = re.compile(r"[0-9]{6,}")
+
+
+def _safe_label(parts: Iterable[str]) -> str:
+    """A run-relative path that is safe to show: a segment is kept only when it is a short lower-case snake_case
+    section name (``normalized``, ``identity_users.json``) with no credential word and no long digit run; every
+    other segment (a name, an address, a GUID, a credential or anything else a file can be called) becomes
+    ``<redacted-segment-N>``, N being its 1-based position in the path. The run directory is never part of it."""
+    shown = []
+    for index, part in enumerate(parts, start=1):
+        keep = bool(_SAFE_SEGMENT_RE.match(part)) and not _CREDENTIAL_WORD_RE.search(part) and not _LONG_DIGITS_RE.search(part)
+        shown.append(part if keep else f"<redacted-segment-{index}>")
+    return "/".join(shown) or "<run>"
+
+
+class _EmbeddedLimitError(Exception):
+    """A JSON-looking string is longer than ``_MAX_EMBEDDED_JSON_CHARS`` (internal; becomes a ``limit`` reason)."""
+
+
+class _Unsafe(Exception):
+    """A file or directory cannot be used; ``reason`` is one of the ``REASON_*`` classes."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+_DIR_MODE = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_FILE_MODE = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
 def _inside(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
-def _plan_scan(run_path: Path) -> tuple[list[tuple[str, str, int, int]], list[str]]:
-    """The ``normalized/**/*.json`` files to read and why anything cannot be read.
-
-    Nothing is opened here. A file is read only when it is a regular file; a symlink is followed only to a regular
-    file inside the run directory. Everything else (FIFO, device, socket, dangling or escaping link, symlinked
-    directory, unreadable directory) is recorded as a reason, never read and never waited for.
-    """
-    entries: list[tuple[str, str, int, int]] = []
-    reasons: list[str] = []
-    run_real = os.path.realpath(run_path)
-    root = os.path.join(run_path, "normalized")
+def _open_dir_at(parent_fd: int, name: str, expected: os.stat_result | None = None) -> int:
+    """A directory descriptor for ``name`` below ``parent_fd``, opened without following a link and checked on the
+    descriptor (type, and identity when ``expected`` is the earlier ``lstat``)."""
     try:
-        root_stat = os.stat(root)
-    except FileNotFoundError:
-        return entries, reasons
+        descriptor = os.open(name, _DIR_MODE, dir_fd=parent_fd)
+    except FileNotFoundError as exc:
+        raise _Unsafe(REASON_CHANGED) from exc
+    except PermissionError as exc:
+        raise _Unsafe(REASON_UNREADABLE) from exc
+    except OSError as exc:  # a symlink or a non-directory in the way: the tree changed under us
+        raise _Unsafe(REASON_CHANGED) from exc
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISDIR(info.st_mode) or (expected is not None and (info.st_dev, info.st_ino) != (expected.st_dev, expected.st_ino)):
+            raise _Unsafe(REASON_CHANGED)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _read_file_at(parent_fd: int, name: str, expected: os.stat_result) -> bytes:
+    """The bytes of regular file ``name`` below ``parent_fd``: never following a link, never blocking, identity and
+    type re-checked on the descriptor, at most ``_MAX_FILE_BYTES``."""
+    try:
+        descriptor = os.open(name, _FILE_MODE, dir_fd=parent_fd)
+    except FileNotFoundError as exc:
+        raise _Unsafe(REASON_CHANGED) from exc
+    except PermissionError as exc:
+        raise _Unsafe(REASON_UNREADABLE) from exc
     except OSError as exc:
-        return entries, [f"normalized: unreadable ({type(exc).__name__})"]
-    if not stat.S_ISDIR(root_stat.st_mode):
-        return entries, ["normalized: not a directory"]
-    if not _inside(os.path.realpath(root), run_real):
-        return entries, ["normalized: resolves outside the run directory"]
-
-    def relative(path: str) -> str:
-        return os.path.relpath(path, run_path)
-
-    def on_error(exc: OSError) -> None:
-        reasons.append(f"{relative(str(exc.filename or root))}: directory unreadable ({type(exc).__name__})")
-
-    for directory, dirnames, filenames in os.walk(root, topdown=True, onerror=on_error, followlinks=False):
-        dirnames.sort()
-        for name in dirnames:
-            if os.path.islink(os.path.join(directory, name)):
-                reasons.append(f"{relative(os.path.join(directory, name))}: symlinked directory not followed")
-        for name in sorted(filenames):
-            if not name.lower().endswith(".json"):
-                continue
-            full = os.path.join(directory, name)
-            rel = relative(full)
-            if len(entries) >= _MAX_SCAN_FILES:
-                reasons.append(f"{rel}: more than {_MAX_SCAN_FILES} files, limit reached; the rest are not read")
-                return entries, reasons
-            try:
-                info = os.lstat(full)
-                target = full
-                if stat.S_ISLNK(info.st_mode):
-                    target = os.path.realpath(full)
-                    info = os.stat(target)
-                    if not _inside(target, run_real):
-                        reasons.append(f"{rel}: symlink resolves outside the run directory")
-                        continue
-            except OSError as exc:
-                reasons.append(f"{rel}: unreadable or dangling ({type(exc).__name__})")
-                continue
-            if not stat.S_ISREG(info.st_mode):
-                reasons.append(f"{rel}: not a regular file")
-                continue
-            if info.st_size > _MAX_FILE_BYTES:
-                reasons.append(f"{rel}: larger than {_MAX_FILE_BYTES} bytes, not read")
-                continue
-            entries.append((rel, target, info.st_mtime_ns, info.st_size))
-    return entries, reasons
-
-
-def _read_regular(path: str, limit: int) -> bytes | None:
-    """The bytes of a regular file of at most ``limit`` bytes, else ``None``. Opens without blocking and without
-    following a link, and re-checks the type on the descriptor."""
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-    descriptor = os.open(path, flags)
+        raise _Unsafe(REASON_CHANGED) from exc
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            return None
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise _Unsafe(REASON_NON_REGULAR)
+        if (info.st_dev, info.st_ino) != (expected.st_dev, expected.st_ino):
+            raise _Unsafe(REASON_CHANGED)
+        if info.st_size > _MAX_FILE_BYTES:
+            raise _Unsafe(REASON_OVERSIZE)
         chunks: list[bytes] = []
         total = 0
         while True:
-            chunk = os.read(descriptor, min(1 << 20, limit + 1 - total))
+            chunk = os.read(descriptor, min(1 << 20, _MAX_FILE_BYTES + 1 - total))
             if not chunk:
                 return b"".join(chunks)
             total += len(chunk)
-            if total > limit:
-                return None
+            if total > _MAX_FILE_BYTES:
+                raise _Unsafe(REASON_OVERSIZE)
             chunks.append(chunk)
+    except OSError as exc:
+        raise _Unsafe(REASON_UNREADABLE) from exc
     finally:
         os.close(descriptor)
 
 
-def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str], frozenset[str], tuple[str, ...]]:
-    """Privileged-user names, immutable ids, role vocabulary and the reasons discovery was incomplete.
+def _open_chain(root_fd: int, parts: tuple[str, ...]) -> tuple[int, str]:
+    """``(directory descriptor, final name)`` for the file ``parts`` below ``root_fd``, every directory opened
+    without following links (an ancestor swapped for a symlink is refused). The caller closes the descriptor."""
+    current = os.dup(root_fd)
+    try:
+        for part in parts[:-1]:
+            nxt = _open_dir_at(current, part)
+            os.close(current)
+            current = nxt
+        return current, parts[-1]
+    except BaseException:
+        os.close(current)
+        raise
+
+
+def _link_reader(run_real: str, dir_fd: int, parts: tuple[str, ...], name: str) -> tuple[Callable[[], bytes], int] | None:
+    """A symlink below ``normalized/``: a ``.json`` link to a regular file inside the run is read through its
+    resolved path (every ancestor opened without following links); a link to a directory is not followed.
+
+    Returns ``(reader, size)``, ``None`` for a link that is not a ``.json`` file, or raises ``_Unsafe``.
+    """
+    is_json = name.lower().endswith(".json")
+    try:
+        target_info = os.stat(name, dir_fd=dir_fd)
+    except FileNotFoundError:
+        if is_json:
+            raise _Unsafe(REASON_DANGLING) from None
+        return None
+    except OSError:
+        if is_json:
+            raise _Unsafe(REASON_UNREADABLE) from None
+        return None
+    if stat.S_ISDIR(target_info.st_mode):
+        raise _Unsafe(REASON_NON_REGULAR)  # a symlinked directory is not followed
+    if not is_json:
+        return None
+    target = os.path.realpath(os.path.join(run_real, *parts, name))
+    if not _inside(target, run_real) or target == run_real:
+        raise _Unsafe(REASON_OUTSIDE)
+    if not stat.S_ISREG(target_info.st_mode):
+        raise _Unsafe(REASON_NON_REGULAR)
+    relative = tuple(Path(target).relative_to(run_real).parts)
+
+    def reader() -> bytes:
+        root_fd = os.open(run_real, _DIR_MODE)
+        try:
+            parent_fd, leaf = _open_chain(root_fd, relative)
+        finally:
+            os.close(root_fd)
+        try:
+            return _read_file_at(parent_fd, leaf, target_info)
+        finally:
+            os.close(parent_fd)
+
+    return reader, target_info.st_size
+
+
+class _Scan:
+    def __init__(self, run_real: str) -> None:
+        self.run_real = run_real
+        self.found = _Found()
+        self.problems: list[tuple[tuple[str, ...], str]] = []
+        self.files = 0
+        self.budget = _MAX_SCAN_BYTES
+
+    def problem(self, parts: tuple[str, ...], reason: str) -> None:
+        self.problems.append((parts, reason))
+
+    def collect(self, parts: tuple[str, ...], data: bytes) -> None:
+        try:
+            payload = json.loads(data.decode("utf-8"))
+            local = _Found()
+            _collect(payload, local, names=True, domains=False)
+        except (ValueError, RecursionError):  # malformed JSON, bad encoding, too deeply nested
+            self.problem(parts, REASON_MALFORMED)
+            return
+        self.found.merge(local)
+        if local.limit_hits:
+            self.problem(parts, REASON_LIMIT)
+
+    def take(self, parts: tuple[str, ...], reader: Callable[[], bytes], size: int) -> None:
+        if self.files >= _MAX_SCAN_FILES:
+            self.problem(parts, REASON_LIMIT)
+            return
+        self.files += 1
+        if size > _MAX_FILE_BYTES:
+            self.problem(parts, REASON_OVERSIZE)
+            return
+        if size > self.budget:
+            self.problem(parts, REASON_LIMIT)
+            return
+        self.budget -= size
+        try:
+            data = reader()
+        except _Unsafe as exc:
+            self.problem(parts, exc.reason)
+            return
+        self.collect(parts, data)
+
+    def symlink(self, dir_fd: int, parts: tuple[str, ...], name: str) -> None:
+        """A symlink below ``normalized/`` (see ``_link_reader``)."""
+        here = (*parts, name)
+        try:
+            resolved = _link_reader(self.run_real, dir_fd, parts, name)
+        except _Unsafe as exc:
+            self.problem(here, exc.reason)
+            return
+        if resolved is not None:
+            self.take(here, *resolved)
+
+    def _enter(self, frames: list["_Frame"], descriptor: int, parts: tuple[str, ...], depth: int) -> None:
+        """Push the directory ``descriptor`` (owned from here on) unless it is too deep or cannot be listed."""
+        try:
+            if depth > _MAX_SCAN_DEPTH:
+                self.problem(parts, REASON_LIMIT)
+            else:
+                frames.append(_Frame(descriptor, parts, sorted(os.listdir(descriptor))))
+                return
+        except OSError:
+            self.problem(parts, REASON_UNREADABLE)
+        os.close(descriptor)
+
+    def walk(self, root_fd: int, root_parts: tuple[str, ...]) -> None:
+        """Every ``*.json`` below the descriptor (which is closed here), depth first, names sorted; nothing but a
+        regular file is opened, and at most ``_MAX_SCAN_DEPTH`` + 1 descriptors are open at once."""
+        frames: list[_Frame] = []
+        try:
+            self._enter(frames, root_fd, root_parts, 0)
+            while frames:
+                frame = frames[-1]
+                if frame.position >= len(frame.names):
+                    os.close(frame.descriptor)
+                    frames.pop()
+                    continue
+                name = frame.names[frame.position]
+                frame.position += 1
+                here = (*frame.parts, name)
+                try:
+                    info = os.stat(name, dir_fd=frame.descriptor, follow_symlinks=False)
+                except OSError:
+                    self.problem(here, REASON_CHANGED)
+                    continue
+                mode = info.st_mode
+                if stat.S_ISDIR(mode):
+                    try:
+                        child = _open_dir_at(frame.descriptor, name, info)
+                    except _Unsafe as exc:
+                        self.problem(here, exc.reason)
+                    else:
+                        self._enter(frames, child, here, len(frames))
+                elif stat.S_ISLNK(mode):
+                    self.symlink(frame.descriptor, frame.parts, name)
+                elif not name.lower().endswith(".json"):
+                    continue
+                elif not stat.S_ISREG(mode):
+                    self.problem(here, REASON_NON_REGULAR)  # FIFO, socket, device: never opened
+                else:
+                    self.take(here, lambda d=frame.descriptor, n=name, i=info: _read_file_at(d, n, i), info.st_size)
+        finally:
+            for frame in frames:
+                os.close(frame.descriptor)
+
+
+class _Frame:
+    __slots__ = ("descriptor", "parts", "names", "position")
+
+    def __init__(self, descriptor: int, parts: tuple[str, ...], names: list[str]) -> None:
+        self.descriptor = descriptor
+        self.parts = parts
+        self.names = names
+        self.position = 0
+
+
+def read_run_json(run_dir: str | Path, relative: str, fallback: Any = None) -> Any:
+    """The parsed JSON of one file below a run directory, read with the guarded reader, else ``fallback``.
+
+    Used for every ``normalized/`` record a report reads: the file is opened below a descriptor of the run directory,
+    no component may be a symlink (a link to a regular file inside the run is the one exception), the descriptor is
+    checked to be a regular file of at most ``_MAX_FILE_BYTES``, and nothing ever blocks (FIFO, device, socket).
+    """
+    parts = tuple(part for part in relative.replace("\\", "/").split("/") if part not in ("", "."))
+    if not parts or ".." in parts:
+        return fallback
+    run_real = os.path.realpath(run_dir)
+    try:
+        run_fd = os.open(run_real, _DIR_MODE)
+    except OSError:
+        return fallback
+    try:
+        parent_fd, leaf = _open_chain(run_fd, parts)
+        try:
+            entry = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+            if stat.S_ISLNK(entry.st_mode):
+                resolved = _link_reader(run_real, parent_fd, parts[:-1], leaf)
+                if resolved is None:
+                    return fallback
+                data = resolved[0]()
+            elif stat.S_ISREG(entry.st_mode):
+                data = _read_file_at(parent_fd, leaf, entry)
+            else:
+                return fallback
+        finally:
+            os.close(parent_fd)
+        return json.loads(data.decode("utf-8"))
+    except (OSError, _Unsafe, ValueError, RecursionError):
+        return fallback
+    finally:
+        os.close(run_fd)
+
+
+def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
+    """The top-level ``normalized/<section>.json`` records of a run, parsed, for a report.
+
+    The same guarded reader as identity discovery: only a bounded regular file (or a link to one inside the run) is
+    opened, never a FIFO, device, socket, escaping or dangling link, never without ``O_NONBLOCK`` and never through a
+    symlinked directory. A file that cannot be used is left out here; ``context_for_run`` names it and the
+    redaction profiles that pseudonymise identities then refuse, so nothing is published without it. Empty
+    sections are not returned. Never raises for a missing or unreadable ``normalized/``.
+    """
+    sections: dict[str, Any] = {}
+    run_real = os.path.realpath(run_dir)
+    try:
+        run_fd = os.open(run_real, _DIR_MODE)
+    except OSError:
+        return sections
+    try:
+        try:
+            info = os.stat("normalized", dir_fd=run_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(info.st_mode):
+                return sections
+            root_fd = _open_dir_at(run_fd, "normalized", info)
+        except (OSError, _Unsafe):
+            return sections
+        try:
+            budget = _MAX_SCAN_BYTES
+            for name in sorted(os.listdir(root_fd)):
+                if not name.lower().endswith(".json"):
+                    continue
+                try:
+                    entry = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                    if stat.S_ISLNK(entry.st_mode):
+                        resolved = _link_reader(run_real, root_fd, ("normalized",), name)
+                        if resolved is None:
+                            continue
+                        reader, size = resolved
+                    elif stat.S_ISREG(entry.st_mode):
+                        size = entry.st_size
+                        reader = lambda d=root_fd, n=name, i=entry: _read_file_at(d, n, i)  # noqa: E731
+                    else:
+                        continue
+                    if size > budget:
+                        continue
+                    budget -= size
+                    payload = json.loads(reader().decode("utf-8"))
+                except (OSError, _Unsafe, ValueError, RecursionError):
+                    continue
+                if payload not in ({}, [], None):
+                    sections[name[: -len(".json")]] = payload
+        finally:
+            os.close(root_fd)
+    finally:
+        os.close(run_fd)
+    return sections
+
+
+def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str], frozenset[str], list[tuple[str, str]]]:
+    """Privileged-user names, immutable ids, role vocabulary and the files discovery could not use.
 
     Every ``normalized/**/*.json`` is read (bounded), not just the sections a report selects, so an output that
     shows only findings still knows who the administrators are. Discovery never gives up silently: a file that
-    cannot be read, or a limit that is hit, is a reason, the identities found elsewhere are kept, and the caller
-    gets the reasons (``RedactionContext.incomplete``). Cached per file signature.
+    cannot be read, or a limit that is hit, is a problem (a safe label and a reason class), the identities found
+    elsewhere are kept, and the caller gets the problems (``RedactionContext.incomplete``).
+
+    Every directory is opened below a descriptor of the run directory without following links, every file is
+    checked on its descriptor (regular, same identity as listed, size) and nothing is cached: a file replaced,
+    swapped, made unreadable or edited between two calls is seen by the next one.
     """
-    entries, reasons = _plan_scan(run_path)
-    signature = tuple((rel, target, mtime, size) for rel, target, mtime, size in entries)
-    cache_key = (os.path.realpath(run_path), signature, tuple(reasons))
-    cached = _SCAN_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    found = _Found()
-    problems = list(reasons)
-    budget = _MAX_SCAN_BYTES
-    for rel, target, _mtime, size in entries:
-        if size > budget:
-            problems.append(f"{rel}: total size limit reached, not read")
-            continue
-        budget -= size
+    run_real = os.path.realpath(run_path)
+    try:
+        run_fd = os.open(run_real, _DIR_MODE)
+    except FileNotFoundError:
+        return frozenset(), frozenset(), frozenset(), []
+    except OSError:
+        return frozenset(), frozenset(), frozenset(), [("<run>", REASON_UNREADABLE)]
+    scan = _Scan(run_real)
+    try:
         try:
-            data = _read_regular(target, _MAX_FILE_BYTES)
-            if data is None:
-                problems.append(f"{rel}: not a regular file or larger than the limit, not read")
-                continue
-            payload = json.loads(data.decode("utf-8"))
-            _collect(payload, found, names=True, domains=False)
-        except OSError as exc:
-            problems.append(f"{rel}: unreadable ({type(exc).__name__})")
-        except (ValueError, RecursionError):  # malformed JSON, bad encoding, too deeply nested
-            problems.append(f"{rel}: not valid JSON or nested too deeply, not read")
-    if len(problems) > _MAX_REASONS:
-        problems = problems[:_MAX_REASONS] + [f"and {len(problems) - _MAX_REASONS} more"]
-    result = (frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary), tuple(problems))
-    if len(_SCAN_CACHE) > 16:
-        _SCAN_CACHE.clear()
-    _SCAN_CACHE[cache_key] = result
-    return result
+            info = os.stat("normalized", dir_fd=run_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            info = None  # no normalized directory: nothing to discover
+        except OSError:
+            scan.problem(("normalized",), REASON_UNREADABLE)
+            info = None
+        if info is not None:
+            if stat.S_ISLNK(info.st_mode):
+                try:
+                    os.stat("normalized", dir_fd=run_fd)
+                    scan.problem(("normalized",), REASON_NON_REGULAR)  # a symlinked root is a symlinked ancestor
+                except FileNotFoundError:
+                    scan.problem(("normalized",), REASON_DANGLING)
+                except OSError:
+                    scan.problem(("normalized",), REASON_UNREADABLE)
+            elif not stat.S_ISDIR(info.st_mode):
+                scan.problem(("normalized",), REASON_NON_REGULAR)
+            else:
+                try:
+                    root_fd = _open_dir_at(run_fd, "normalized", info)
+                except _Unsafe as exc:
+                    scan.problem(("normalized",), exc.reason)
+                else:
+                    scan.walk(root_fd, ("normalized",))  # closes the descriptor
+    finally:
+        os.close(run_fd)
+    labelled = []
+    for index, (parts, reason) in enumerate(sorted(set(scan.problems)), start=1):
+        label = _safe_label(parts)
+        labelled.append((f"{label}#{index}" if "<redacted-segment-" in label else label, reason))
+    found = scan.found
+    return frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary), labelled
+
+
+def _problem_fields(problems: list[tuple[str, str]], prefix: str = "") -> tuple[tuple[tuple[str, str], ...], int]:
+    kept = tuple((f"{prefix}{label}", reason) for label, reason in problems[:_MAX_REASONS])
+    return kept, max(0, len(problems) - _MAX_REASONS)
+
+
+def _reason_strings(files: tuple[tuple[str, str], ...], omitted: int) -> tuple[str, ...]:
+    return (*(f"{label}: {reason}" for label, reason in files), *((f"and {omitted} more",) if omitted else ()))
 
 
 def context_for_run(run_dir: str | Path, **overrides: Any) -> RedactionContext:
@@ -744,9 +1138,12 @@ def context_for_run(run_dir: str | Path, **overrides: Any) -> RedactionContext:
     immutable ids (from every ``normalized/`` record, whichever sections the output selects) and role vocabulary."""
     run_path = Path(run_dir)
     names, ids, vocabulary, problems = _scan_run_identities(run_path)
+    files, omitted = _problem_fields(problems)
     values: dict[str, Any] = {
         "incomplete": bool(problems),
-        "incomplete_reasons": problems,
+        "incomplete_reasons": _reason_strings(files, omitted),
+        "incomplete_files": files,
+        "incomplete_omitted": omitted,
         "salt": run_salt(run_path),
         "run_paths": run_path_roots(run_path),
         "protected_names": names,
@@ -767,11 +1164,15 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
     names: set[str] = set()
     ids: set[str] = set()
     vocabulary: set[str] = set()
-    reasons: list[str] = []
+    files: list[tuple[str, str]] = []
+    omitted = 0
+    incomplete = False
     salt = ""
     for index, run_dir in enumerate(run_dirs):
         context = context_for_run(run_dir)
-        reasons.extend(f"run {index + 1}: {reason}" for reason in context.incomplete_reasons)
+        incomplete = incomplete or context.incomplete
+        files.extend((f"run {index + 1}: {label}", reason) for label, reason in context.incomplete_files)
+        omitted += context.incomplete_omitted
         salt = salt if index else context.salt
         roots.update(context.run_paths)
         names.update(context.protected_names)
@@ -779,14 +1180,18 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         vocabulary.update(context.vocabulary)
     for path in paths:
         roots.update(run_path_roots(path))
+    kept = tuple(files[:_MAX_REASONS])
+    omitted += max(0, len(files) - _MAX_REASONS)
     return RedactionContext(
         salt=salt,
         run_paths=tuple(sorted(roots, key=lambda r: (-len(r), r))),
         protected_names=frozenset(names),
         protected_ids=frozenset(ids),
         vocabulary=frozenset(vocabulary),
-        incomplete=bool(reasons),
-        incomplete_reasons=tuple(reasons),
+        incomplete=incomplete,
+        incomplete_reasons=_reason_strings(kept, omitted),
+        incomplete_files=kept,
+        incomplete_omitted=omitted,
     )
 
 
@@ -813,19 +1218,6 @@ def _non_empty(value: Any) -> bool:
     if isinstance(value, (str, bytes, list, tuple, set, frozenset, Mapping)):
         return len(value) > 0
     return True
-
-
-def _blank_text(value: Any) -> Any:
-    """Every string leaf of a free-text value replaced by the placeholder, whatever the container."""
-    if isinstance(value, str):
-        return TEXT_PLACEHOLDER if value else value
-    if isinstance(value, Mapping):
-        return {key: _blank_text(member) for key, member in value.items()}
-    if isinstance(value, list):
-        return [_blank_text(member) for member in value]
-    if isinstance(value, tuple):
-        return tuple(_blank_text(member) for member in value)
-    return value
 
 
 def _dump(value: Any, ensure_ascii: bool, indent: int | None, separators: tuple[str, str], level: int = 0) -> str:
@@ -871,16 +1263,15 @@ class _Redactor:
         self.profile = profile
         self.markup = markup
         self.salt = context.salt
-        self.policy = context.policy
+        self.policy = context.policy or policy_for(profile)
         self.roots = context.run_paths if profile.run_paths else ()
         self.depth = 0
+        self.blank = 0  # > 0 while walking the value of a free-text key whose strings are replaced
         if profile.identities and context.incomplete:
             # Fail closed: the names and ids of this run were not all discovered, so free text may carry ones this
             # redactor was never told about. The shareable profiles refuse rather than return a partial result.
-            shown = "; ".join(context.incomplete_reasons) or "reason not recorded"
             raise ContextIncompleteError(
-                f"identity discovery for this run was incomplete ({shown}); nothing was redacted or returned. "
-                "Repair or remove the listed files and retry"
+                context.incomplete_files or (("<context>", "incomplete"),), context.incomplete_omitted
             )
         found = _Found()
         names = set(context.protected_names) if profile.identities else set()
@@ -889,6 +1280,8 @@ class _Redactor:
         want_domains = profile.emails and self.policy.redact_domains
         if profile.identities or want_domains:
             _collect(value, found, names=profile.identities, domains=want_domains)
+        if profile.identities and found.limit_hits:
+            raise ContextIncompleteError((("<output value>", REASON_LIMIT),))
         names |= found.names
         ids |= found.ids
         domains |= found.domains
@@ -908,18 +1301,27 @@ class _Redactor:
             re.compile(_PSEUDONYM_KEEP + r"|(?<!\w)(?P<hit>" + "|".join(re.escape(n) for n in self.names) + r")(?!\w)")
             if self.names else None
         )
-        self.ids = sorted((i for i in ids if len(i) >= 6 and not _structural(i)), key=len, reverse=True)
+        # Immutable ids are protected by value, whatever their shape and case (``planted_immutable_id`` is as much an id
+        # as a base64 one); the pseudonym is that of the id as discovered, so every spelling gets the same one.
+        self.id_canonical = {i.lower(): i for i in sorted(ids, reverse=True) if len(i) >= 6 and not _PSEUDONYM_RE.match(i)}
+        self.ids = sorted(self.id_canonical.values(), key=len, reverse=True)
         self.id_re = (
-            re.compile(_PSEUDONYM_KEEP + r"|(?<![\w+/=-])(?P<hit>" + "|".join(re.escape(i) for i in self.ids) + r")(?![\w+/=-])")
+            re.compile(
+                _PSEUDONYM_KEEP + r"|(?<![\w+/=-])(?P<hit>" + "|".join(re.escape(i) for i in self.ids) + r")(?![\w+/=-])",
+                re.IGNORECASE,
+            )
             if self.ids else None
         )
         self.domains = sorted(
             (d for d in domains if d and d not in _public_domains() and not _DOMAIN_PSEUDONYM_RE.match(d)),
             key=len, reverse=True,
         ) if want_domains else []
+        # The domain itself (with the boundary rules); its subdomain labels are taken leftwards by ``_mask_domains``,
+        # so the search is one linear pass whatever dotted text surrounds it.
         self.domain_re = (
             re.compile(
-                r"(?:(?<![\w-])|(?<=%40)|(?<=\\u0040))(?:[\w-]+\.)*(?P<d>" + "|".join(re.escape(d) for d in self.domains) + r")(?![\w-])", re.IGNORECASE
+                r"(?:(?<![\w-])|(?<=%40)|(?<=\\u0040))(?P<d>" + "|".join(re.escape(d) for d in self.domains) + r")(?![\w-])",
+                re.IGNORECASE,
             )
             if self.domains else None
         )
@@ -932,6 +1334,8 @@ class _Redactor:
         if not value:
             return value
         profile = self.profile
+        if self.blank and not key:
+            return TEXT_PLACEHOLDER  # a string below a free-text key (the policy of this profile)
         if not key:
             embedded = self._embedded_json(value)
             if embedded is not None:
@@ -951,8 +1355,29 @@ class _Redactor:
             if self.id_re is not None:
                 value = self.id_re.sub(self._identifier, value)
         if self.domain_re is not None:
-            value = self.domain_re.sub(lambda m: f"domain-{pseudonym(self.salt, m['d'].lower())[:12]}.invalid", value)
+            value = self._mask_domains(value)
         return value
+
+    def _mask_domains(self, value: str) -> str:
+        """Each known domain, with the subdomain labels written before it, becomes ``domain-<12 hex>.invalid``.
+        One left-to-right search for the domain; the labels are then taken leftwards, never past the previous match."""
+        assert self.domain_re is not None
+        out: list[str] = []
+        done = 0
+        for match in self.domain_re.finditer(value):
+            start = match.start()
+            while start > done and value[start - 1] == ".":
+                label = start - 1
+                while label > done and (value[label - 1].isalnum() or value[label - 1] in "_-"):
+                    label -= 1
+                if label == start - 1:
+                    break
+                start = label
+            out.append(value[done:start])
+            out.append(f"domain-{pseudonym(self.salt, match['d'].lower())[:12]}.invalid")
+            done = match.end()
+        out.append(value[done:])
+        return "".join(out)
 
     @staticmethod
     def _secrets(value: str, *, minimal: bool) -> str:
@@ -960,6 +1385,7 @@ class _Redactor:
         # before rendering; the inline pattern cannot tell where a value ends in markup. Mapping keys use the full
         # pattern (a key such as ``password=value`` carries its credential in the key text).
         value = JWT_RE.sub("***redacted-jwt***", BEARER_RE.sub("Bearer ***redacted***", value))
+        value = _redact_url_credentials(value)
         if minimal:
             return value
 
@@ -968,7 +1394,12 @@ class _Redactor:
     def _embedded_json(self, value: str) -> str | None:
         """A string that is a JSON object or array is parsed, redacted as structure and written back the way it was
         laid out, so escapes and quotes stay valid; anything else is ``None`` (redact it as text)."""
-        parsed = _maybe_json(value)
+        try:
+            parsed = _maybe_json(value)
+        except _EmbeddedLimitError:
+            if self.profile.identities:
+                raise ContextIncompleteError((("<output value>", REASON_LIMIT),)) from None
+            return None
         if parsed is None:
             return None
         stripped = value.strip()
@@ -1004,7 +1435,7 @@ class _Redactor:
         return match["keep"] or _USER_PREFIX + pseudonym(self.salt, match["hit"])
 
     def _identifier(self, match: re.Match[str]) -> str:
-        return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.salt, match["hit"])
+        return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.salt, self.id_canonical.get(match["hit"].lower(), match["hit"]))
 
     # -- structure ----------------------------------------------------------------------------------------
     def walk(self, value: Any, controlled: bool = False) -> Any:
@@ -1030,6 +1461,7 @@ class _Redactor:
         profile = self.profile
         user = profile.identities and _is_privileged_user(record)
         group = profile.identities and self.policy.redact_group_names and _is_group(record)
+        free_text = self.policy.redact_free_text_keys
         rows: list[tuple[Any, Any, Any]] = []
         for key, item in record.items():
             norm = _norm(key)
@@ -1038,18 +1470,26 @@ class _Redactor:
             elif isinstance(item, str):
                 if not item:
                     pass
+                elif self.blank:
+                    item = TEXT_PLACEHOLDER
                 elif profile.identities and norm in _IDENTITY_KEYS:
                     item = item if _PSEUDONYM_RE.match(item) else _IMMUTABLE_PREFIX + pseudonym(self.salt, item)
                 elif user and norm == "displayname":
                     item = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.salt, item)
                 elif group and norm == "displayname":
                     item = item if _PSEUDONYM_RE.match(item) else GROUP_PREFIX + pseudonym(self.salt, item)
-                elif profile.identities and self.policy.redact_free_text and str(key).lower() in TENANT_TEXT_KEYS:
+                elif free_text and str(key).lower() in TENANT_TEXT_KEYS:
                     item = TEXT_PLACEHOLDER
                 else:
                     item = self.text(item, names=norm not in _CONTROLLED_KEYS)
-            elif profile.identities and self.policy.redact_free_text and str(key).lower() in TENANT_TEXT_KEYS:
-                item = _blank_text(item)
+            elif free_text and str(key).lower() in TENANT_TEXT_KEYS:
+                # Every string below a free-text key is replaced, but the value still goes through the ordinary walk:
+                # its mapping keys are masked and a credential key still replaces its whole value.
+                self.blank += 1
+                try:
+                    item = self.walk(item, norm in _CONTROLLED_KEYS)
+                finally:
+                    self.blank -= 1
             else:
                 item = self.walk(item, norm in _CONTROLLED_KEYS)
             new_key = self.text(key, key=True) if isinstance(key, str) and key else key

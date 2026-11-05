@@ -5,10 +5,17 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.output_redaction import read_run_json
 from azure_tenant_audit.tenant_identity import IDENTITY_FIELDS, reconcile_tenant_identity
 
 
 def _read_json(path: Path, fallback: Any) -> Any:
+    parts = path.parts
+    if "normalized" in parts:
+        # A record under ``normalized/`` goes through the guarded reader of the redaction boundary: bounded regular
+        # files only, never blocking on a FIFO or following a symlinked directory.
+        index = len(parts) - 1 - parts[::-1].index("normalized")
+        return read_run_json(Path(*parts[:index]), "/".join(parts[index:]), fallback)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):

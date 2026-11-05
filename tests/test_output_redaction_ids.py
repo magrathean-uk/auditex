@@ -28,7 +28,9 @@ PLACEHOLDER = orx.SECRET_PLACEHOLDER
 GUID = "3f2b8c1e-5a6d-4e7f-9a1b-2c3d4e5f6a7b"
 PROFILES = [PROFILE_REPORT_PACK, PROFILE_SHAREABLE, PROFILE_CUSTOMER_PACK, PROFILE_EXPLAINER]
 CONTEXT = RedactionContext(salt="s")
-# Ids with a credential word in the name part, the GUID suffix the findings engine appends, a word suffix, none.
+# Ids with a credential word in the name part: the GUID suffix the findings engine appends, a hex digest, none.
+# Only a known finding namespace with a GUID, hex digest or number suffix is exempt (see the third-round tests).
+HEX = "ab" * 16
 IDS = [
     f"identity:global_admin_stale_password:{GUID}",
     f"identity:app_secret_expiring:{GUID}",
@@ -36,8 +38,7 @@ IDS = [
     f"identity:api_key_without_rotation:{GUID}",
     "intune:compliance_policy:windows10",
     "identity:stale_password_policy",
-    "identity:global_admin_stale_password:windows",
-    "mail:legacy_password_reset:disabled",
+    f"identity:global_admin_stale_password:{HEX}",
 ]
 REAL = [
     ("password: hunter2", "hunter2"),
@@ -47,6 +48,8 @@ REAL = [
     ("secret:hunter_2", "hunter_2"),
     ("password:hunter_2", "hunter_2"),
     ("identity:db_password:Hunter2", "Hunter2"),
+    ("identity:db_password:hunter", "hunter"),
+    ("identity:global_admin_stale_password:windows", "windows"),
     ("access_token=abc.def", "abc.def"),
     ("password=identity:global_admin_stale_password:" + GUID, GUID),
 ]
@@ -92,10 +95,10 @@ def test_real_credentials_are_still_redacted(profile: str, text: str, secret: st
 def test_an_id_and_a_credential_in_the_same_sentence_are_handled_independently(profile: str) -> None:
     out = redact_output(f"{IDS[4]} and {IDS[6]} but password: hunter2, and ({IDS[2]}) token=ok", profile=profile, context=CONTEXT)
     assert "hunter2" not in out and "intune:compliance_policy:windows10" in out
-    assert "identity:global_admin_stale_password:windows" in out and PLACEHOLDER not in out.replace("password: " + PLACEHOLDER, "")
+    assert IDS[6] in out and PLACEHOLDER not in out.replace("password: " + PLACEHOLDER, "")
     # a credential that follows an id inside one whitespace-free run is still found
     tail = redact_output(f"{IDS[6]}&client_secret=hunter2", profile=profile, context=CONTEXT)
-    assert "hunter2" not in tail and "identity:global_admin_stale_password:windows" in tail
+    assert "hunter2" not in tail and IDS[6] in tail
 
 
 def test_the_report_pack_writer_keeps_the_finding_id_so_the_files_agree(tmp_path: Path) -> None:

@@ -31,7 +31,7 @@ from azure_tenant_audit import output_redaction as orx
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.output import AuditWriter
 from azure_tenant_audit.output_redaction import (
-    PENDING_PRODUCT_POLICY,
+    PROFILE_POLICY,
     PROFILE_CUSTOMER_PACK,
     PROFILE_EXPLAINER,
     PROFILE_REPORT_PACK,
@@ -236,17 +236,17 @@ def test_the_pending_product_decisions_each_flip_with_one_field() -> None:
     assert GUID not in json.dumps(default)
     flipped = redact_output(
         value,
-        context=RedactionContext(policy=replace(PENDING_PRODUCT_POLICY, redact_guids=False, redact_domains=True,
-                                                redact_group_names=True, redact_free_text=True)),
+        context=RedactionContext(policy=replace(PROFILE_POLICY[PROFILE_SHAREABLE], redact_guids=False, redact_domains=True,
+                                                redact_group_names=True, redact_free_text_keys=True)),
     )
     dumped = json.dumps(flipped)
     assert GUID in dumped and DOMAIN not in dumped and "Planted Owner" not in dumped and "Planted Finance Group" not in dumped
     assert re.search(r"\*\*\*@domain-[0-9a-f]{12}\.invalid", dumped)
     assert redact_output(flipped, context=RedactionContext(policy=replace(
-        PENDING_PRODUCT_POLICY, redact_guids=False, redact_domains=True, redact_group_names=True, redact_free_text=True,
+        PROFILE_POLICY[PROFILE_SHAREABLE], redact_guids=False, redact_domains=True, redact_group_names=True, redact_free_text_keys=True,
     ))) == flipped
     # The public baseline address stays whole even when domains are redacted.
-    domains_on = RedactionContext(policy=replace(PENDING_PRODUCT_POLICY, redact_domains=True))
+    domains_on = RedactionContext(policy=replace(PROFILE_POLICY[PROFILE_SHAREABLE], redact_domains=True))
     assert redact_output({"a": PUBLIC, "b": EMAIL}, context=domains_on)["a"] == PUBLIC
 
 

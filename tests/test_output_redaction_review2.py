@@ -17,7 +17,7 @@ from auditex import mcp_server
 from azure_tenant_audit import output_redaction as orx
 from azure_tenant_audit.citations import build_citation_summary
 from azure_tenant_audit.output_redaction import (
-    PENDING_PRODUCT_POLICY,
+    PROFILE_POLICY,
     PROFILE_CUSTOMER_PACK,
     PROFILE_EXPLAINER,
     PROFILE_REPORT_PACK,
@@ -193,7 +193,7 @@ def test_s4_a_fifo_named_like_a_record_never_blocks_discovery(tmp_path: Path) ->
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
     assert context.incomplete and "Priya Nairplanted" in context.protected_names
-    assert any("not a regular file" in reason for reason in context.incomplete_reasons)
+    assert any("non-regular" in reason for reason in context.incomplete_reasons)
 
 
 def test_s4_symlinks_are_followed_only_inside_the_run_and_only_to_regular_files(tmp_path: Path) -> None:
@@ -267,7 +267,7 @@ def test_s6_non_standard_constants_are_not_parsed_and_never_emitted_as_json() ->
 
 @pytest.mark.parametrize("address", ["canary%40review.example", "canary＠review.example", "canary&#64;review.example", "canary\\u0040review.example"])
 def test_s7_the_domain_flip_discovers_domains_in_every_address_representation(address: str) -> None:
-    context = RedactionContext(policy=replace(PENDING_PRODUCT_POLICY, redact_domains=True))
+    context = RedactionContext(policy=replace(PROFILE_POLICY[PROFILE_SHAREABLE], redact_domains=True))
     out = redact_output({"a": address, "b": "see review.example for details", "c": "canary@review.example"}, context=context)
     text = json.dumps(out)
     assert "review.example" not in text and "canary" not in text

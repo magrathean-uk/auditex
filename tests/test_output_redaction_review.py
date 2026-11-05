@@ -376,8 +376,8 @@ def test_r1_report_analyze_cli_prints_a_redacted_payload(run_dir: Path, capsys: 
 def test_free_text_flip_covers_container_values_and_the_inert_role_flag_is_gone() -> None:
     from dataclasses import fields, replace
 
-    assert "redact_role_names" not in {f.name for f in fields(orx.PendingProductPolicy)}
-    context = RedactionContext(policy=replace(orx.PENDING_PRODUCT_POLICY, redact_free_text=True))
+    assert "redact_role_names" not in {f.name for f in fields(orx.ProfilePolicy)}
+    context = RedactionContext(policy=replace(orx.PROFILE_POLICY[orx.PROFILE_SHAREABLE], redact_free_text_keys=True))
     out = redact_output({"comments": ["Planted comment", {"by": "Planted Person"}], "owner": "Planted Owner", "notes": []}, context=context)
     text = json.dumps(out)
     assert "Planted" not in text and out["notes"] == [] and redact_output(out, context=context) == out

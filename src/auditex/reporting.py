@@ -25,6 +25,7 @@ from azure_tenant_audit.output_redaction import (
     PROFILE_SHAREABLE,
     RedactionContext,
     context_for_run,
+    read_normalized_sections,
     redact_output,
     run_path_roots,
     scrub_run_paths,
@@ -380,16 +381,8 @@ def load_section_registry(path: Path | None = None) -> list[dict[str, Any]]:
 
 
 def _load_normalized_sections(run_path: Path) -> dict[str, Any]:
-    normalized_dir = run_path / "normalized"
-    if not normalized_dir.is_dir():
-        return {}
-
-    sections: dict[str, Any] = {}
-    for path in sorted(normalized_dir.glob("*.json"), key=lambda item: item.name):
-        payload = _read_json(path, {})
-        if payload not in ({}, [], None):
-            sections[path.stem] = payload
-    return sections
+    # The guarded reader of the redaction boundary: bounded regular files only, never blocking on a FIFO.
+    return read_normalized_sections(run_path)
 
 
 def _preview_section_citations(
@@ -1710,7 +1703,9 @@ def _copy_source_artifact(
     if isinstance(payload, Mapping):
         row["source_sha256"] = _sha256_file(source)
         row["transformed"] = _PACK_RELATIVE_PATHS
-        manifest_copy = redact_output(_pack_relative_run_manifest(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=context)
+        manifest_copy = _settle_citations(
+            redact_output(_pack_relative_run_manifest(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=context)
+        )
         write_private_text(destination, json.dumps(manifest_copy, indent=2, ensure_ascii=False) + "\n")
     else:
         copy_private_file(source, destination)
@@ -2002,7 +1997,7 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     manifest["pack_manifest_path"] = "pack-manifest.json"
     write_private_text(
         manifest_path,
-        _json(redact_output(manifest, profile=PROFILE_CUSTOMER_PACK, context=redaction)) + "\n",
+        _json(_settle_citations(redact_output(manifest, profile=PROFILE_CUSTOMER_PACK, context=redaction))) + "\n",
     )
     harden_tree(target_dir)
     # The caller gets the pack's location; the file on disk keeps pack-relative paths only.
@@ -3697,7 +3692,9 @@ def preview_report(
     # rules such as privileged-user names apply in every format) and the rendered text is passed through the
     # same function again (idempotent) as the last step. Citations above were built from the real paths.
     redaction = context_for_run(run_path)
-    safe_sections = redact_output(selected, profile=PROFILE_SHAREABLE, context=redaction)
+    # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
+    # redaction, before any format renders the sections.
+    safe_sections = _settle_citations(redact_output(selected, profile=PROFILE_SHAREABLE, context=redaction))
     safe_citations = _settle_citations(
         {"citations": redact_output(citations, profile=PROFILE_SHAREABLE, context=redaction), "citation_summary": None}
     )
