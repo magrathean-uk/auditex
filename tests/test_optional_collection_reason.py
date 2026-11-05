@@ -48,7 +48,7 @@ AMBIGUOUS_SELECTIONS = [
 ]
 
 
-@pytest.fixture(autouse=True, params=[False, True], ids=["rules-enabled", "rules-disabled"])
+@pytest.fixture(autouse=True, params=[False, True], ids=["legacy-switch-unset", "legacy-switch-ignored"])
 def offline(monkeypatch, request):
     if request.param:
         monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
@@ -217,7 +217,9 @@ def test_validator_rejects_reason_outside_contract(tmp_path, mutation):
 
 
 def test_legacy_bundles_validate(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+    from auditex.model_precheck import precheck_case
+    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+        case, **{**kw, "value_rules": False}))
     manifest(tmp_path, selected_collectors=["power_bi", "power_platform"])
     result = answer(tmp_path)
     result["schema_version"] = "2026-10-29"

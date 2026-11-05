@@ -89,76 +89,31 @@ The starter pack therefore has `job_ready: false` and no training rows.
 
 ## Running the assessment
 
-P1 adds an optional assessment using an OpenAI-compatible chat-completions server.
-Start and configure the server separately; Auditex does not download or load weights.
+`auditex model assess <run-dir>` is a local rule-only operation. It needs no server or model name and
+never calls the parked model client. It writes private `model_assessment.json` (`endpoint_host: "none"`,
+`model_name: "rules-only"`, no `serving` object); `--dry-run` exports private development prompts.
+Sealed outputs cannot be replaced. Findings and sealed artefacts stay unchanged.
 
 ```sh
-export AUDITEX_MODEL_NAME='your-served-model'
-export AUDITEX_MODEL_ENDPOINT='http://127.0.0.1:8080/v1'
-.venv/bin/auditex model doctor
+.venv/bin/auditex model assess outputs/ci-contract/ci-contract
 .venv/bin/auditex model assess outputs/ci-contract/ci-contract --dry-run
-.venv/bin/auditex model assess outputs/ci-contract/ci-contract --policies MS.AAD.7.3v1,MS.SHAREPOINT.1.1v1
 ```
 
-`--endpoint` and `--model` override the environment. `AUDITEX_MODEL_API_KEY` is
-optional and is sent only in the Authorization header; configuration output omits it.
-`AUDITEX_MODEL_TIMEOUT` defaults to 120 seconds per socket read, rather than a
-total request deadline. Doctor uses
-`GET /models`, checks that the configured model is listed, and exits 2 on failure.
-Assessment requires a model name; dry-run works without one and makes no endpoint call.
-A non-loopback endpoint prints one warning that evidence will leave the machine;
-the assessment records its host. An API key over non-loopback plain HTTP is
-refused unless `AUDITEX_MODEL_ALLOW_INSECURE=1`; use HTTPS for remote servers.
-HTTP proxies and redirects are disabled.
+Legacy endpoint, model, redaction and shadow flags, all `AUDITEX_MODEL_*` configuration and
+`AUDITEX_DISABLE_VALUE_RULES` are ignored with one evidence-free warning per invocation. Redaction stays
+enabled and rules stay enabled. All 102 catalogue policies have value rules; a policy without one (none
+today) would return `rule_not_implemented` with the constant text
+"Not assessed: Auditex has no rule for this policy yet."
 
-Dry-run writes `model_assessment_prompts.jsonl`, with exact system/user messages and
-hashes for available policies, and explicit skip rows for IDs absent from the catalogue.
-Assessment writes `model_assessment.json`. Both files are private (0600) optional
-post-finalisation outputs. Repeated commands replace their own unsealed output;
-an output already covered by `bundle-hashes.json` is refused. Existing sealed
-artefacts and findings are never changed. Treat prompts and answers as confidential
-tenant evidence. **The model never changes findings.**
+The model client/configuration, prompt builders, catalogue and offline tools remain parked for development.
+`auditex model doctor` still uses explicit endpoint configuration and `GET /models`, exiting 2 on failure.
+Direct client experiments retain request negotiation, transport retry and structured response validation;
+none of these can answer a product policy. Historical model/shadow files remain readable. An optional
+explainer of rule results remains planned and unimplemented.
 
-The shipped map contains all 102 v7 pack policy items and ordered dependencies,
-including verbatim baseline excerpts and the `applicability` key on eight policies.
-MS.POWERPLATFORM.2.3v1 retains its trained empty `baseline_text`. Policy items are
-emitted in full, with sorted keys. Only IDs absent from the catalogue are skipped,
-as `policy_not_in_catalogue`. Case IDs are serving-generated and cannot reproduce
-pack row IDs; user prompts otherwise follow the training serialisation byte for byte.
-P1's `scuba_projection.project_run` returns `{}`; every dependent section is
-`{"collection_status": "not_collected"}`. P2 will project
-`normalized/*.json` evidence. A successful request is therefore not proof of tenant
-compliance or model quality. No live serving parity or model accuracy is claimed.
-
-Requests use the verbatim, SHA-256-pinned training system prompt, `named-enums-v1`,
-temperature 0, max_tokens 1024 and `chat_template_kwargs: {"enable_thinking": false}`,
-matching training. A 400 explicitly rejecting `response_format` causes a plain-format
-fallback; a 400 rejecting `chat_template_kwargs` retries without that field. Each
-fallback is remembered for the client session. Each policy records `thinking_disabled`
-(whether its final request sent the setting) and `thinking_stripped` (whether a leading
-`<think>...</think>` block was removed on any attempt before JSON parsing).
-Requests also send `cache_prompt: false`, as the benchmark protocol did, so llama-server does not reuse a cached
-prompt prefix. A 400 rejecting `cache_prompt` retries without it, remembered like the other fallbacks; the server
-default (prompt reuse) then applies, and the assessment envelope's `serving.cache_prompt` reads `server_default`
-instead of `disabled`, so that departure from the measured protocol is visible (`serving.response_format` records the
-format fallback the same way). Each request is
-tried at most twice (negotiation re-sends aside). Assistant text that fails the answer contract is retried at once; a
-second failure yields unknown claims, status `invalid` and `model_response_invalid`. A reply lost in transit (a
-connection error or timeout, a cut-short, empty or non-JSON body, a body without a chat-completion choice or without
-assistant text) is retried after a 2 s pause; a second loss yields unknown claims, status `unknown` and
-`model_transport_failed`, with no response hash. The last failure names the row. An HTTP error status or a reply over
-4 MiB yields unknown claims and `model_endpoint_unavailable` without a retry. Model rows record the final reply's
-`finish_reason` (`stop`, `length`, ...; null when none arrived or the server sent a non-token value).
-Answers are checked against requested claims, evidence IDs and candidate codes;
-known requirement verdicts require every dependent section to be collected, except
-an inferred not-applicable answer with `policy_not_applicable` and no recommendation.
-Verdict limitation and recommendation lists must match the system prompt exactly;
-these checks do not establish semantic entailment. Comparison with rule-based
-SCuBA alignment is informational: only confirmed model verdicts and rule `pass`/
-`fail` statuses can agree or disagree; other cases are `not_assessed`. Baseline IDs
-match exactly first, then by ID without the version suffix when there is one unique
-match; `baseline_match` records `exact`, `version_mismatch` or `none`. Malformed report
-pack data is ignored for comparison; dry-run does not read the report pack.
+The frozen catalogue retains all 102 training policy items and ordered dependencies; only unknown IDs are
+skipped. Development prompt serialisation and hashes remain pinned. Comparisons use confirmed rule verdicts
+and baseline pass/fail values; other cases are `not_assessed`. See [AI assessment](ai-assessment.md).
 
 ### Rule pre-checks and offline product scoring
 
@@ -172,8 +127,8 @@ first (rendered by `value_rules/gates.py` as the rule's `closed_gate` cell), the
 own ordered section list, then its kind; it answers before registered missing-field and
 empty-list checks. A rule that raises answers the catalogued `rule_evaluation_failed`
 reason with the `report_product_fault` recommendation (logged with the rule id and the
-exception class only; `MemoryError` propagates). `AUDITEX_DISABLE_VALUE_RULES=1`
-restores the prior serving route. The offline `evaluate_precheck` scorer always leaves
+exception class only; `MemoryError` propagates). `AUDITEX_DISABLE_VALUE_RULES` is a legacy option,
+ignored with one warning; it cannot disable rules. The offline `evaluate_precheck` scorer always leaves
 value rules off, preserving historical scoring output. Serving rules read the in-memory
 rule view; tests and `precheck_case` without a rule view read the case evidence.
 
@@ -184,7 +139,7 @@ excluding held-out test, pilot and sealed freeze rows. See [provenance](../prove
 `AUDITEX_TEST_VALUE_RULE_VECTORS=<kit vectors.jsonl>` replays a full source file;
 `AUDITEX_TEST_OPA` and `AUDITEX_TEST_SCUBAGEAR` enable pinned offline Rego replay.
 
-Assessment pre-checks non-empty projections before inference. The shipped
+Assessment applies deterministic rules to the private rule view. The shipped
 `configs/scuba-rule-precheck.json` is the shared authority for serving and oracle
 generation; `learn_gates` remains discovery for unregistered policies. Generation
 checks the evidence actually shown after removed sections become markers, rejects
@@ -219,9 +174,8 @@ Sharing values mean `0` organisation only, `1` new/existing guests, `2` anyone,
 numeric strings, fractional and out-of-range values cannot close a gate. String
 gates use exact exported values. Singleton object arrays and objects are supported;
 empty/ambiguous objects and missing, null or invalid gate fields produce unknown.
-AAD's separate phishing-resistant MFA applicability branch is **not rule-gated: no
-deterministic field**. It requires conditional-access semantics and exclusions;
-an enabled Authenticator leaves that branch to the model. All eight applicability
+AAD phishing-resistant MFA applicability is evaluated by the registered Conditional Access value rule;
+an enabled Authenticator does not delegate any decision to the model. All eight applicability
 policies have at least one deterministic gate; no whole policy in this group lacks one.
 
 Precedence matches the training system prompt: a present, usable gate section and
@@ -231,16 +185,13 @@ when another dependent section is missing or marked `not_collected`. Otherwise a
 missing/unusable gate section or field, or any missing dependency for any policy,
 produces `absent_section`, requirement `unknown` with null value, and names the
 unavailable sections or field in the row limitations. Gate section markers are
-unusable. With neither condition there is no rule answer; the model decides.
+unusable. Covered policies then use their value rule. Policies without a registered value rule report
+`rule_not_implemented`; no model decides a policy.
 The generator permits a closed gate to override an oracle default on a partial
 input; it still rejects contradictory evaluated verdicts when all sections are
 available. Section-drop rows follow this same precedence.
-Rule answers make no model requests by default. `--shadow-model-on-precheck` opts
-into recording the normal model-client result in `model_shadow`; it cannot affect
-the verdict, comparison or totals. The entire empty P1 projection is exempt so demo
-bundles retain their model path, with one envelope limitation,
-`projection_not_implemented`. P2 projection is not implemented by this change.
-See the [assessment contract](../reference/output-contract.md) for version `2026-10-28`.
+Product assessment makes no model requests. Shadow mode is removed; the legacy
+`--shadow-model-on-precheck` flag is ignored with one warning. Historical shadow records remain readable.
 
 Score a frozen case file locally, without loading a model or contacting an endpoint:
 
@@ -317,7 +268,7 @@ rows through the gate input.
 A fourth class answers a collected list that is exactly `[]` for a policy that passes only
 when some entry of that list satisfies it. Its rules are `list_rules` in
 `configs/scuba-rule-precheck.json`: `policy_id`, `section`, `unless` (conditions that
-leave the row to the model) and `source`/`complete`. The answer is the oracle's not-met
+leave the row for recorded model scoring in offline development) and `source`/`complete`. The answer is the oracle's not-met
 shape, identical in all 1,424 v10 not-met rows of these policies: requirement `confirmed`
 false citing `e0` and every section, no limitations, `review_policy_against_baseline_text`.
 Precedence: closed gate, `absent_section`, `absent_field`, then this class, so a missing
@@ -784,11 +735,11 @@ against the allow-list, `State` and `ExcludeRoles`. The ignored conditions mean 
 passes in ScubaGear although Entra would not apply the control tenant-wide; the labels follow the oracle and the rows are tagged
 `ca_condition` with the axis in the template, so a stricter reading can drop them by template.
 
-The product does not rely on the model to flag this. `auditex model assess` runs a deterministic scope post-check after the verdict
-(`configs/scuba-scope-blind.json`, built from the table of ignored conditions in the v9 dataset card): a met row of one of those ten
-policies is marked `scope_narrowed`, with the policies and condition paths, when an enabled policy that could have decided it (one that
-carries every check the Rego makes of a deciding policy) is scoped and no compliant unscoped policy could have decided it too.
-The verdict stays the oracle's and the prompt is unchanged. See "Scope post-check" in the output contract.
+Current `auditex model assess` retains the deterministic scope envelope (`configs/scuba-scope-blind.json`)
+for local review without calling a model. Rule rows are excluded from `scope_narrowed` marking, so its
+current total is zero. Historical model assessments may carry that row marker when an enabled scoped
+policy could have decided a met answer and no compliant unscoped policy could decide it too. Those
+historical fields remain readable. See "Scope post-check" in the output contract.
 
 `assign_v9_splits(new_cases)` assigns whole templates to train or validation, about 85/15 within each source family, never test. It also keeps
 every swept value learnable: a template moves to validation only if each coverage key it holds (the swept value overall, the field group per policy)

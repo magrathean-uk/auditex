@@ -244,6 +244,15 @@ def validate_assessment(payload: Any) -> None:
     counts = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0}
     if version in {"2026-10-28", "2026-10-29", "2026-11-05"}:
         counts["rule_answered"] = 0
+    # A rules-only file (2026-11-05) is marked by its envelope or by an uncovered row; any marker binds all of
+    # them: no endpoint, no model name, no serving block, no model-answered or shadow row. Legacy files unchanged.
+    if any(row["reason"] == "rule_not_implemented" for row in payload["policies"]) or (
+            version == "2026-11-05" and (payload["endpoint_host"] == "none" or payload["model_name"] == "rules-only")):
+        if (payload["endpoint_host"] != "none" or payload["model_name"] != "rules-only"
+                or "serving" in payload or any(
+                    row["reason"] not in {"rule_precheck", "rule_not_implemented", "policy_not_in_catalogue"}
+                    or "model_shadow" in row for row in payload["policies"])):
+            raise ValueError("Inconsistent rules-only assessment")
     ids = set()
     scope_rows = 0
     for row in payload["policies"]:
@@ -255,6 +264,8 @@ def validate_assessment(payload: Any) -> None:
         ):
             raise ValueError("Unsupported model assessment policy")
         policy = catalogue.get(row["policy_id"])
+        if "reason_text" in row and row["reason"] != "rule_not_implemented":
+            raise ValueError("Unexpected uncovered-policy text")
         is_rule = row["reason"] == "rule_precheck"
         if optional["reason_code"] in row["limitations"] and (
                 not is_rule or row.get("rule_precheck", {}).get("reason_code") != optional["reason_code"]):
@@ -423,6 +434,16 @@ def validate_assessment(payload: Any) -> None:
                 shadow_totals[category] = 1
                 validate_assessment({**payload, "totals": shadow_totals,
                                      "policies": [{**shadow, "comparison": comparison}]})
+            continue
+        if row["reason"] == "rule_not_implemented":
+            if (version != "2026-11-05" or status != "unknown" or row["attempts"] != 0
+                    or row["latency_ms"] != 0 or row["prompt_sha256"] is not None
+                    or row["response_sha256"] is not None or row["thinking_disabled"]
+                    or row["thinking_stripped"] or "finish_reason" in row
+                    or row.get("reason_text") != "Not assessed: Auditex has no rule for this policy yet."
+                    or row["limitations"] or row["recommendations"]
+                    or any(c["status"] != "unknown" or c["evidence_ids"] for c in claims)):
+                raise ValueError("Invalid uncovered-policy assessment")
             continue
         if row["attempts"] < 1 or row["prompt_sha256"] is None:
             raise ValueError("Missing model assessment attempt provenance")

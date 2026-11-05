@@ -37,7 +37,10 @@ _calibration_cache = {"at": None, "scale": 1.0}
 def _measure_calibration():
     samples = []
     with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
+        try:
+            listener.bind(("127.0.0.1", 0))
+        except PermissionError:
+            pytest.skip("Execution sandbox forbids binding the benchmark calibration loopback socket")
         listener.listen()
         for _ in range(3):
             started = time.monotonic()
@@ -387,7 +390,10 @@ def test_interruption_is_recorded_and_owned_process_is_reaped(tmp_path, runner, 
 
 def test_local_transport_ignores_proxy_environment_and_never_follows_redirects(tmp_path, runner, monkeypatch):
     with socket.socket() as trap:
-        trap.bind(("127.0.0.1", 0))
+        try:
+            trap.bind(("127.0.0.1", 0))
+        except PermissionError:
+            pytest.skip("Execution sandbox forbids binding the benchmark proxy-trap loopback socket")
         trap.listen()
         url = f"http://127.0.0.1:{trap.getsockname()[1]}/should-not-be-called"
         monkeypatch.setenv("HTTP_PROXY", url)

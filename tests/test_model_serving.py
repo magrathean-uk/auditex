@@ -407,30 +407,17 @@ def test_lone_surrogate_answer_is_invalid_retried_and_hashed_without_raising():
 
 
 @pytest.mark.parametrize("rejected", [None, "cache_prompt", "response_format"])
-def test_assessment_records_negotiated_serving_settings(tmp_path, monkeypatch, rejected):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
-    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
-
-    def reply(self, method, path, payload=None):
+def test_client_records_negotiated_serving_settings(monkeypatch, rejected):
+    client = ModelClient(ModelConfig(model_name="test-model"))
+    def reply(method, path, payload=None):
         if rejected and rejected in payload:
             raise HTTPError("http://localhost/v1", 400, "bad request", {}, io.BytesIO(f"unknown field {rejected}".encode()))
         return envelope(sample_answer())
-
-    monkeypatch.setattr(ModelClient, "_request", reply)
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
-    assert result["serving"] == {"cache_prompt": "server_default" if rejected == "cache_prompt" else "disabled",
-                                 "response_format": "not_sent" if rejected == "response_format" else "json_object"}
-    assert result["policies"][0]["validation_status"] == "valid"
-    assert result['policies'][0]['reason'] is None
-    assert result['policies'][0]['attempts'] == (2 if rejected else 1)
-    assert json.loads((tmp_path / "model_assessment.json").read_text())["serving"] == result["serving"]
-    for tampered in ({**result, "serving": {"cache_prompt": "enabled", "response_format": "json_object"}},
-                     {**result, "serving": {"cache_prompt": "disabled"}}):
-        with pytest.raises(ValueError):
-            validate_assessment(tampered)
-    legacy = {key: value for key, value in result.items() if key != "serving"}
-    validate_assessment(legacy)
+    client._request = reply
+    row = client.assess(sample_case())
+    assert row["reason"] is None and row["attempts"] == (2 if rejected else 1)
+    assert client.serving() == {"cache_prompt": "server_default" if rejected == "cache_prompt" else "disabled",
+                                "response_format": "not_sent" if rejected == "response_format" else "json_object"}
 
 def test_nonloopback_warns_once_and_secrets_are_not_in_configuration(capsys):
     config = ModelConfig("https://model.example.invalid/v1", "test-model", "private-key")
@@ -533,27 +520,20 @@ def test_dry_run_cli_on_demo_bundle_is_offline_private_and_preserves_seal(demo_b
 
 
 def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundle, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
-    def reply(self, method, path, payload):
-        case = json.loads(payload["messages"][1]["content"])
-        answer = missing_answer()
-        answer["claims"][1]["value"] = case["evidence"][0]["observed"]["criticality"]
-        return envelope(answer)
-    monkeypatch.setattr(ModelClient, "_request", reply)
+    monkeypatch.setattr(ModelClient, "__init__", lambda *args: pytest.fail("Rules-only assessment built a model client"))
     before = snapshot(demo_bundle)
-    result = assess_run(demo_bundle, ModelConfig(model_name="test-model"))
-    assert result["totals"] == {"answered": 0, "unknown": 102, "invalid": 0, "skipped": 0, "rule_answered": 99,
+    result = assess_run(demo_bundle)
+    assert result["totals"] == {"answered": 24, "unknown": 78, "invalid": 0, "skipped": 0, "rule_answered": 102,
                                 "scope_narrowed": 0}
     assert result["limitations"] == []
     assert {name for name, detail in result["projection"]["sections"].items()
             if detail["status"] == "projected"} == {"service_plans", "tenant_id", "privileged_users", "scuba_config",
                                                     "accepted_domains"}
-    # The three rules that read only the projected privileged users reach the model; the rest are rule answers.
-    model_rows = {row["policy_id"] for row in result["policies"] if row["reason"] != "rule_precheck"}
-    assert model_rows == {"MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"}
-    assert all(row["attempts"] == (0 if row["policy_id"] not in model_rows else 1) for row in result["policies"])
-    assert result["endpoint_host"] == "127.0.0.1" and result["run_id"] == "demo"
-    assert all(row["comparison"]["result"] == "not_assessed" for row in result["policies"])
+    # Every catalogue policy has a value rule, so every demo row is a rule answer and none is uncovered.
+    assert all(row["reason"] == "rule_precheck" for row in result["policies"])
+    assert all(row["attempts"] == 0 for row in result["policies"])
+    assert result["endpoint_host"] == "none" and result["model_name"] == "rules-only" and result["run_id"] == "demo"
+    assert "serving" not in result
     validate_assessment(result)
     schema = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
     jsonschema.Draft202012Validator.check_schema(schema)
@@ -572,29 +552,25 @@ def test_assessment_writes_valid_optional_artifact_and_unknown_totals(demo_bundl
 @pytest.mark.parametrize("rule_status,value,expected", [("pass", True, "agree"), ("pass", False, "disagree"),
                                                        ("fail", False, "agree"), ("accepted_risk", False, "not_assessed")])
 def test_assessment_baseline_comparison(tmp_path, monkeypatch, rule_status, value, expected):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+    pid = "MS.EXO.13.1v1"
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports/report-pack.json").write_text(canonical({"baseline_alignment": {"frameworks": {
-        "cisa_scuba": {"controls": [{"control_id": POLICY, "status": rule_status}]}}}}))
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
-    answer = sample_answer()
-    answer["claims"][0]["value"] = value
-    answer["recommendations"] = [] if value else ["review_policy_against_baseline_text"]
-    monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(answer))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
+        "cisa_scuba": {"controls": [{"control_id": pid, "status": rule_status}]}}}}))
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(
+        root, {"org_config": [{"Name": "Synthetic", "AuditDisabled": not value}], "scuba_config": {}}))
+    result = assess_run(tmp_path, policies=[pid])
     assert result["policies"][0]["comparison"]["result"] == expected
-    assert result['policies'][0]['reason'] is None and result['policies'][0]['attempts'] == 1
+    assert result["policies"][0]["reason"] == "rule_precheck" and result["policies"][0]["attempts"] == 0
     assert result["totals"]["answered"] == 1
 
 
-def test_invalid_policy_or_missing_model_fails_before_output(tmp_path, capsys):
+def test_invalid_policy_fails_and_assessment_needs_no_model(tmp_path, capsys):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
-    assert main(["model", "assess", str(tmp_path)]) == 2
-    assert "required" in capsys.readouterr().err
     assert main(["model", "assess", str(tmp_path), "--dry-run", "--policies", "unknown"]) == 2
     assert not (tmp_path / "model_assessment.json").exists()
     assert not (tmp_path / "model_assessment_prompts.jsonl").exists()
+    assert main(["model", "assess", str(tmp_path)]) == 0
 
 
 def test_sealed_or_symlink_output_is_refused(tmp_path):
@@ -659,31 +635,31 @@ def test_value_rule_schema_rejects_wrong_cell_code_section_and_text(optional_col
             validate_assessment(missing)
 
 
-def test_value_rule_kill_switch_and_legacy_schema(optional_collection_bundle, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
-    monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("missing section pre-check must answer"))
-    result = assess_run(optional_collection_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
-    assert result["policies"][0]["rule_precheck"]["class"] == "absent_section"
+def test_value_rule_still_requires_current_schema(optional_collection_bundle):
+    result = assess_run(optional_collection_bundle, policies=["MS.POWERBI.1.1v1"])
+    assert result["policies"][0]["rule_precheck"]["class"] == "value_rule"
     result["schema_version"] = "2026-10-29"
-    validate_assessment(result)
+    with pytest.raises(ValueError):
+        validate_assessment(result)
 
 
-@pytest.mark.parametrize("switch,enabled", [(" 1 ", False), ("y", False), ("disable", False),
-                                              (" 0 ", True), ("false", True), ("", True)])
-def test_value_rule_kill_switch_values(optional_collection_bundle, monkeypatch, switch, enabled):
+@pytest.mark.parametrize("switch", [" 1 ", "y", "disable", " 0 ", "false", ""])
+def test_value_rule_legacy_switch_is_ignored(optional_collection_bundle, monkeypatch, capsys, switch):
+    expected = assess_run(optional_collection_bundle, policies=["MS.POWERBI.1.1v1"])
+    capsys.readouterr()
     monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", switch)
-    monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("pre-check must answer"))
-    result = assess_run(optional_collection_bundle, ModelConfig(model_name="test-model"), policies=["MS.POWERBI.1.1v1"])
-    assert (result["policies"][0]["rule_precheck"]["class"] == "value_rule") is enabled
+    result = assess_run(optional_collection_bundle, policies=["MS.POWERBI.1.1v1"])
+    assert result["policies"] == expected["policies"]
+    warning = capsys.readouterr().err
+    assert len(warning.splitlines()) == 1 and "ignored" in warning
 
 
 @pytest.mark.parametrize("mutation", ["evidence", "criticality", "policy", "comparison", "nonfinite", "boolean_number"])
 def test_optional_artifact_validation_rejects_tampering(tmp_path, monkeypatch, mutation):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
     monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(sample_answer()))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
+    result = assess_historical_model(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     row = result["policies"][0]
     if mutation == "evidence":
         row["claims"][0]["evidence_ids"].append("e999")
@@ -702,15 +678,14 @@ def test_optional_artifact_validation_rejects_tampering(tmp_path, monkeypatch, m
 
 
 def test_transport_failure_is_written_as_unknown_and_validated(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
     monkeypatch.setattr(ModelClient, "_request", lambda *args: b"")
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
+    result = assess_historical_model(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     row = result["policies"][0]
     assert (row["validation_status"], row["reason"], row["attempts"]) == ("unknown", "model_transport_failed", 2)
     assert row["finish_reason"] is None and result["totals"]["unknown"] == 1 and result["totals"]["invalid"] == 0
-    assert json.loads((tmp_path / "model_assessment.json").read_text())["policies"][0]["reason"] == "model_transport_failed"
+    validate_assessment(result)
     for mutate in (lambda r: r.update(response_sha256="0" * 64), lambda r: r.update(limitations=["model_endpoint_unavailable"]),
                    lambda r: r.update(validation_status="invalid"), lambda r: r.update(finish_reason="<b>")):
         tampered = deepcopy(result)
@@ -731,13 +706,12 @@ def test_rule_rows_carry_no_finish_reason(tmp_path, monkeypatch):
 
 
 def test_assessment_schema_checker_handles_large_json_integer(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(missing_answer()))
     # This checks numeric range handling, independently of zero-latency rule provenance.
     monkeypatch.setattr("auditex.model_serving.project_run",
                         lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
+    result = assess_historical_model(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     result["policies"][0]["latency_ms"] = 10 ** 400
     validate_assessment(result)  # Finite integers must not overflow a float conversion.
 
@@ -942,13 +916,12 @@ def test_malformed_optional_assessment_warns_without_changing_gate(demo_bundle, 
 
 
 def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"run"}')
     monkeypatch.setattr(ModelClient, '_request', lambda *a: envelope(missing_answer()))
     # Legacy schema dispatch is checked using an actual model row.
     monkeypatch.setattr('auditex.model_serving.project_run',
                         lambda root, **kwargs: fake_projection(root, {'privileged_users': {}}))
-    result = assess_run(tmp_path, ModelConfig(model_name='test-model'), policies=[POLICY])
+    result = assess_historical_model(tmp_path, ModelConfig(model_name='test-model'), policies=[POLICY])
     result['schema_version'] = '2026-10-27'
     del result['limitations'], result['projection'], result['totals']['rule_answered']
     del result['scope_post_check'], result['totals']['scope_narrowed'], result['serving']
@@ -997,7 +970,6 @@ def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
 def test_lone_surrogate_in_a_faked_section_does_not_abort_the_live_assessment(tmp_path, monkeypatch):
     """The projection refuses text with a lone surrogate, so this cannot happen from a real bundle; as defence in depth the
     serving path hashes and sends with surrogatepass, so even a faked section records a row instead of raising."""
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     from auditex.model_serving import ModelClient as _Client, ModelConfig as _Config, assess_run as _assess
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     # The kill switch keeps this defence-in-depth check on the model route.
@@ -1008,8 +980,22 @@ def test_lone_surrogate_in_a_faked_section_does_not_abort_the_live_assessment(tm
         sent.append(payload['messages'])
         return envelope(sample_answer())
     monkeypatch.setattr(_Client, "_request", reply)
-    result = _assess(tmp_path, _Config(model_name="stub"), policies=[POLICY])
+    result = assess_historical_model(tmp_path, _Config(model_name="stub"), policies=[POLICY])
     row = result["policies"][0]
     assert row["validation_status"] == "valid" and row['attempts'] == len(sent) == 1
     assert "x\ud800y" in sent[0][1]['content']
     assert row["prompt_sha256"] == sha256(canonical(sent[0]).encode('utf-8', 'surrogatepass')).hexdigest()
+
+
+def assess_historical_model(root, config, *, policies, **kwargs):
+    """Build a historical fixture via ModelClient directly, outside product assessment."""
+    from auditex.model_serving import _comparison, _totals
+    result = assess_run(root, policies=policies, **kwargs)
+    projection = __import__('auditex.model_serving', fromlist=['project_run']).project_run(root)
+    client = ModelClient(config)
+    records = [client.assess(build_case(pid, projection, 'synthetic')) for pid in policies]
+    for row in records:
+        row['comparison'] = _comparison(row['policy_id'], row, {})
+    result.update(policies=records, totals=_totals(records), endpoint_host=config.endpoint_host,
+                  model_name=config.model_name, serving=client.serving())
+    return result

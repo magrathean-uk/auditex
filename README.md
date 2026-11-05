@@ -128,15 +128,15 @@ supported formats, evidence references and comparison limits.
 
 Each finalized run contains a manifest, summary, report pack, evidence index, AI context, and validation result. The current contract version is recorded in `run-manifest.json`; required files and evidence rules are documented in [the output contract](docs/reference/output-contract.md).
 
-For an optional model-assisted SCuBA assessment, `auditex model assess <run-dir>` applies
-deterministic rules first (102 policies across Entra ID, Exchange Online, Power BI, Power Platform,
-Defender, SharePoint and Teams) and asks a locally served Auditex model
-(`auditex-ministral3-8b-scuba-v10`, Ministral 3 8B with a LoRA adapter, GGUF Q5_K_M) about the rows
-no rule covers; it never changes findings. An optional model role that only explains rule results
-is planned and not built. The model's public download is pending; see
-[AI assessment](docs/guides/ai-assessment.md) for serving, reading the result and its measured accuracy
-(419/435 on a synthetic test set for the rules and model together, 403/435 for the model alone, measured before the value rules, with caveats). `auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` are the
-model-development tools; see [model development](docs/guides/model-development.md).
+For an optional rule-only SCuBA assessment, `auditex model assess <run-dir>` applies
+value rules to all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
+SharePoint and Teams. A policy without a rule (none today) reports not assessed
+(`rule_not_implemented`): "Not assessed: Auditex has no rule for this policy yet."
+The model layer is parked and never called by assessment; no endpoint or model name is required.
+An optional explainer for rule results remains planned and unimplemented. Findings are unchanged.
+See [AI assessment](docs/guides/ai-assessment.md) for coverage and output.
+`auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` remain available for
+[offline model development](docs/guides/model-development.md).
 
 ```bash
 auditex report render <run-dir> --format md

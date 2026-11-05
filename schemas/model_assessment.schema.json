@@ -571,7 +571,8 @@
             "model_response_invalid",
             "model_endpoint_unavailable",
             "model_transport_failed",
-            "rule_precheck"
+            "rule_precheck",
+            "rule_not_implemented"
           ]
         },
         "finish_reason": {
@@ -645,6 +646,9 @@
         },
         "model_shadow": {
           "$ref": "#/$defs/model_shadow"
+        },
+        "reason_text": {
+          "const": "Not assessed: Auditex has no rule for this policy yet."
         },
         "post_check": {
           "$ref": "#/$defs/post_check"

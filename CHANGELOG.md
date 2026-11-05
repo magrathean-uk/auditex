@@ -17,6 +17,21 @@ engine/product boundary rework, plus the deterministic value-rule route and coll
 The `identity_governance` collector also gains two GET-only PIM role-policy reads and
 the bundle gains the `privileged_roles` artefact, both additive.
 
+### Rule-only SCuBA assessment
+
+- **Rules answer every policy; the model is never called.** The model verdict fallback and shadow mode are removed.
+  All 102 catalogue policies have value rules. A policy without a rule (none today) reports not assessed with
+  `rule_not_implemented` and "Not assessed: Auditex has no rule for this policy yet." The model layer is parked.
+- **`model_assessment.json` changed shape** within the unreleased `2026-11-05` schema: `endpoint_host` is `none`,
+  `model_name` is `rules-only` and `serving` is gone. A file that carries either marker must carry both and no
+  serving block, model-answered row or shadow; historical assessment files still validate.
+- **`model assess` no longer exits 2 when no model name is given.** Legacy `--endpoint`, `--model`,
+  `--no-redaction`, `--shadow-model-on-precheck`, `AUDITEX_MODEL_*` and `AUDITEX_DISABLE_VALUE_RULES` are accepted,
+  ignored and warned once without echoing values; they cannot change answers.
+- **`--no-redaction` can no longer unmask anything.** It used to leave e-mail local parts in the Conditional Access
+  policy names listed under `scope_post_check` when the endpoint was a loopback host; redaction now always stays on.
+  Model client, configuration and offline tooling remain available for development. An optional explainer remains planned.
+
 ### Command-output privacy
 
 - Mask e-mail and UPN local parts and dashed GUIDs in adapter audit-log samples,
@@ -80,8 +95,8 @@ the bundle gains the `privileged_roles` artefact, both additive.
   Both run-bundle and internal ScubaGear export paths capture a private in-memory rule view after collection-health
   withholding and before pruning, shape gates, model budgets and redaction; it is never persisted. Teams applicability
   gates are recorded as `value_rule` / `closed_gate`.
-  Rules are on by default, with hidden rollback switch `AUDITEX_DISABLE_VALUE_RULES`; offline `evaluate_precheck`
-  scoring leaves them off. The model still answers uncovered rows; an optional explainer remains planned.
+  Rules are always enabled in product assessment; legacy `AUDITEX_DISABLE_VALUE_RULES` is ignored. Offline
+  `evaluate_precheck` scoring leaves them off. An optional explainer remains planned.
 - **A value rule that fails on collected evidence has its own answer.** It was answered as "section not collected"; it now
   answers the catalogued `rule_evaluation_failed` reason ("Not assessed: Auditex could not evaluate this policy on the collected
   evidence. This is a product fault, not a tenant setting.") with no limitation and the new recommendation `report_product_fault`
@@ -174,13 +189,14 @@ the bundle gains the `privileged_roles` artefact, both additive.
     The demo bundle now writes `privileged_roles.json` (four roles), but the section is still withheld: the whole-shape
     gate of the frozen v7 pack holds no expiration rule without `NotificationRecipients` and `Setting` and no approval rule without
     `IsExpirationRequired`, `MaximumDuration` and `NotificationRecipients`, which Graph does not return (the pack has no null or empty
-    form to stand in, and the rows are ScubaGear Rego test inputs, not exporter output; nothing is padded), so the status moves from `missing_artifact` to `incomplete_shape` (detail `unseen_shape`). The demo still
-    projects three sections, 99 rule rows and three model rows. Notification recipients are e-mail addresses, collected as
-    evidence and masked by the projection's redaction by default; `--no-redaction` (loopback endpoints only) sends them unmasked.
+    form to stand in, and the rows are ScubaGear Rego test inputs, not exporter output; nothing is padded), so the status moves from `missing_artifact` to `incomplete_shape` (detail `unseen_shape`). The demo now
+    projects five sections; all 102 policies receive value-rule answers.
+    Notification recipients are e-mail addresses, collected as evidence and masked in local prompt exports;
+    legacy `--no-redaction` is ignored and assessment calls no model endpoint.
 
-### Shipped model and serving parity
+### Historical model and serving parity (superseded by rule-only assessment)
 
-- **One shipped model, catalogued.** `configs/model-sources.json` (catalogue `schema_version` `2026-10-30`) gains
+- **One model catalogued for development.** `configs/model-sources.json` (catalogue `schema_version` `2026-10-30`) gains
   the `product_model` entry `auditex-ministral3-8b-scuba-v10`: Ministral 3 8B Instruct 2512 (BF16 base at
   `f6fae979...`) with LoRA checkpoint-500 trained on oracle pack v10, merged and quantised Q5_K_M with llama.cpp
   `620d2225...` (`model-Q5_K_M.gguf`, 6,058,747,104 bytes, sha256 `840fb447...`, two `split` parts with their
@@ -200,7 +216,7 @@ the bundle gains the `privileged_roles` artefact, both additive.
   pinned revision on 31 October 2026: Apache-2.0. The catalogue now records the merged and quantised weights as
   distributed under Apache-2.0 as a modified work, with the training labels CC0 1.0; the licence is no longer "to be
   verified". The Hugging Face upload is still pending.
-- **Serving matches the benchmark protocol more closely.** Requests send `cache_prompt: false` (a 400 rejecting it
+- **Historical serving protocol (superseded by rule-only assessment above).** Requests send `cache_prompt: false` (a 400 rejecting it
   is negotiated away like `response_format`). A reply lost in transit (connection error, timeout, cut-short, empty
   or non-JSON body, no chat-completion choice or assistant text) is now retried once after a 2 s pause and, if lost
   again, recorded as `unknown` with the new reason `model_transport_failed` and no response hash, instead of
@@ -210,7 +226,7 @@ the bundle gains the `privileged_roles` artefact, both additive.
   reason and limitation, the optional `finish_reason` (rejected on rule and skipped rows) and `attempts` up to 5.
 - **Review fix-ups.** The product entry's `serving` now separates `benchmark_protocol` (the recorded G4 benchmark
   manifest's request verbatim, `max_tokens` 512, `seed` 42, `top_k` 1, no `response_format`) from
-  `production_request` (what `auditex model assess` sends, `max_tokens` 1024 and `response_format` `json_object`;
+  `production_request` (what the parked development client sends, `max_tokens` 1024 and `response_format` `json_object`;
   a test pins it to the client's payload), with `protocol_difference` stating that production parity was checked
   only on the two P5 bundles. Catalogue validation is stricter: required fields must be non-empty and well typed,
   nested `base`, `adapter`, `conversion`, `training`, `serving` and `parts` contracts are checked, part sizes must
@@ -224,12 +240,16 @@ the bundle gains the `privileged_roles` artefact, both additive.
   Evidence text containing a lone surrogate (a JSON `\ud800` escape) is refused by the projection's typed field checks
   (the section withholds as an invalid type), and the serving client hashes prompts and encodes request bodies with
   `surrogatepass` as defence in depth, so such a value records a row instead of aborting the assessment.
-- **Operator chapter.** `docs/guides/ai-assessment.md`: what rules and the model decide (four rule classes, scope
+- **Historical operator chapter (superseded by rule-only assessment above).** `docs/guides/ai-assessment.md`: historical rule and model behaviour (four rule classes, scope
   post-check, shadow mode), obtaining and verifying the model, serving it with `llama-server`, memory needs, running
   and reading the assessment, the measured accuracy with its caveats and the January 2027 re-pick. README, index,
   product manual, model-development guide, output contract and provenance notes point to it.
 
-### Model serving (new, optional)
+### Historical model serving (removed from product assessment)
+
+The following notes record superseded development stages. Current assessment answers all 102 policies
+with value rules. The model is parked, shadow mode is removed,
+legacy model options are ignored, and projection is implemented. Historical file contracts remain readable.
 
 - **`scuba_config` is synthesised, no longer withheld.** The 19 policies that read ScubaGear's operator
   configuration were answered unknown by rule on every real tenant. `auditex model assess` now synthesises the
@@ -253,7 +273,7 @@ the bundle gains the `privileged_roles` artefact, both additive.
   per-section projection/provenance report, privacy counters and configurable
   bounds (40 items or 12,000 characters by default). Person names and immutable
   IDs use stable run-salted pseudonyms; e-mail local parts are masked.
-  `--no-redaction` requires a loopback endpoint. The `2026-10-28` schema is
+  The former `--no-redaction` option required a loopback endpoint; it is now ignored. The `2026-10-28` schema is
   preserved byte-for-byte. Complete object shapes and enum domains from the frozen
   v7 packs gate every projection; unsupported CA restrictions, failed evidence and
   unseen variants withhold the whole section. The salt stays in memory. Synthetic
@@ -380,12 +400,12 @@ the bundle gains the `privileged_roles` artefact, both additive.
   untouched, and no report or explorer surface renders assessment rows, so the "met per ScubaGear, scope narrowed"
   wording is specified for renderers in the output contract. On the synthetic demo the raw payload is read and no
   enabled policy is scoped (count 0).
-- **Deterministic pre-checks (1.2.2.dev3).** A shared, shipped SCuBA rule catalogue answers closed
+- **Historical deterministic pre-checks (1.2.2.dev3; model and shadow routes now removed).** A shared, shipped SCuBA rule catalogue answers closed
   applicability gates as inferred true and unavailable inputs as unknown before inference, citing all
   blockers, including the Power BI licence flag alongside missing tenant settings. Oracle generation
   uses the same gates and citation selection and rejects contradictory evaluated verdicts while retaining
-  justified missing-input overrides. `--shadow-model-on-precheck` records the model result without changing
-  the rule verdict. `model_assessment` schema `2026-10-28` adds pre-check records, shadow results and totals;
+  justified missing-input overrides. At that stage `--shadow-model-on-precheck` recorded the model result
+  without changing the rule verdict; the flag is now ignored. `model_assessment` schema `2026-10-28` adds pre-check records, shadow results and totals;
   the older assessment schemas remain available. `scripts/score-model-precheck.py` scores pre-checks against
   frozen packs and can combine them with recorded model responses for the remaining cases.
   - A present, usable closed gate now takes precedence over absent dependent evidence, matching
@@ -416,9 +436,9 @@ the bundle gains the `privileged_roles` artefact, both additive.
   `scripts/build-oracle-cases.py`). `configs/scuba-policy-sections.json` carries the 102 policies with their
   dependent ScubaGear sections, criticality, baseline text and applicability (CISA ScubaGear CC0, Microsoft
   CC BY 4.0; see provenance). A 56-row fixture across all seven products asserts byte equality.
-- **Evidence projection.** `auditex.scuba_projection.project_run` is a stub returning no sections, so every
-  dependent section is reported as not collected and the model answers `unknown`; the projection from
-  `normalized/*.json` is the next package.
+- **Original evidence projection.** `auditex.scuba_projection.project_run` was initially a stub returning no
+  sections, so every dependency was reported as not collected. Projection from saved evidence was implemented
+  in later stages; current assessment uses the separate in-memory rule view.
 - **Validator.** The shared response validator (`auditex.model_eval`) now rejects a met or not-met verdict while any
   dependent section is not collected (the inferred not-applicable answer excepted) and contradictory
   limitation/recommendation sets; `evaluate` and `combine` outputs for the shipped fixtures are unchanged.

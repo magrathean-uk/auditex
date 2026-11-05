@@ -265,7 +265,9 @@ def test_undecidable_keeps_baseline_review_and_missing_stays_missing(assessment)
 
 
 def test_legacy_schema_and_model_non_rule_fixture_bytes(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+    # Build a historical precheck fixture explicitly; the removed switch cannot select this route.
+    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+        case, **{**kw, "value_rules": False}))
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-contract"}')
     result = assess_run(tmp_path, ModelConfig(model_name="contract-probe"), policies=["MS.POWERBI.1.1v1"])
     for version in ("2026-10-29", "2026-11-05"):

@@ -5,7 +5,8 @@ Stage 1 (Power BI 8, AAD 3.4v1) replays ``vectors-v2.jsonl.xz``; stage 3 (the
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
+from copy import deepcopy
 import json
 import lzma
 import os
@@ -471,3 +472,53 @@ def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
         next(row for row in tampered["policies"] if row["policy_id"] == "MS.EXO.13.1v1")["rule_precheck"][key] = bad
         with pytest.raises(ValueError):
             validate_assessment(tampered)
+
+
+# Every catalogue policy has a value rule; a policy that loses its rule fails this guard.
+EXPECTED_UNCOVERED = frozenset()
+
+
+def test_expected_uncovered_policies_matches_registry():
+    from auditex.model_serving import policy_catalogue
+    catalogue = set(policy_catalogue()['policies'])
+    assert catalogue - set(rule_policies()) == EXPECTED_UNCOVERED
+    assert len(rule_policies()) == len(catalogue) - len(EXPECTED_UNCOVERED) == 102
+
+
+@pytest.mark.parametrize('rule_view', [False, True], ids=['case-evidence', 'production-rule-view'])
+def test_covered_vectors_never_reach_rule_not_implemented(rule_view, monkeypatch, record_property):
+    from auditex.model_serving import ModelClient, _assess_policies, policy_catalogue
+    from auditex.scuba_projection import Projection
+    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No model client'))
+    items = policy_catalogue()
+    reached = defaultdict(set)
+    by_cell = Counter()
+    by_fixture = Counter()
+    for path in sorted(FIXTURE.parent.glob('vectors-*.jsonl.xz')):
+        for row in _rows(path):
+            policy = row['policy']
+            if policy not in rule_policies():
+                continue
+            sections = deepcopy(row['sections'])
+            projection = Projection() if rule_view else {}
+            projection.update(sections)
+            if rule_view:
+                projection.rule_sections = deepcopy(sections)
+                projection.rule_views = {}
+                if 'scuba_config' in sections:
+                    projection.rule_views[policy] = {'scuba_config': deepcopy(sections['scuba_config'])}
+            records, prompts = _assess_policies(projection, [policy], items, 'synthetic', dry_run=False,
+                                               baseline={}, scope=None, max_items=40)
+            assert not prompts and records[0]['reason'] == 'rule_precheck', row['vector_id']
+            assert records[0]['rule_precheck']['class'] == 'value_rule', row['vector_id']
+            cell = records[0]['rule_precheck']['cell']
+            reached[policy].add(cell)
+            by_cell[f'{policy}:{cell}'] += 1
+            by_fixture[path.name] += 1
+    record_property('vector_counts', json.dumps({'total': sum(by_cell.values()), 'by_fixture': dict(by_fixture),
+                                                'by_cell': dict(sorted(by_cell.items()))}, sort_keys=True))
+    assert set(reached) == set(rule_policies())
+    # The plain case route deliberately lacks rule-only dependencies from the frozen model catalogue.
+    # Full cell reach is a production-view assertion; both routes must keep every covered vector in rules.
+    if rule_view:
+        assert all(set(cells_for(policy)) - {'rule_evaluation_failed'} <= cells for policy, cells in reached.items())

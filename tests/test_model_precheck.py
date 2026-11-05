@@ -360,8 +360,10 @@ def test_evaluator_scores_absent_field_only_on_request(tmp_path):
 
 
 def run_assessment(tmp_path, monkeypatch, projection, **kwargs):
-    # stage 6: these legacy precheck-contract tests keep the value-rule route off explicitly.
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+    # Exercise the legacy precheck contract explicitly; no environment flag changes production routing.
+    from auditex.model_precheck import precheck_case
+    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+        case, **{**kw, "value_rules": False}))
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
     from test_model_serving import fake_projection
     monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, projection))
@@ -383,32 +385,12 @@ def test_rule_rows_are_valid_and_never_call_model(tmp_path, monkeypatch, project
     jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
 
 
-@pytest.mark.parametrize("shadow_failure", [False, True])
-def test_shadow_records_real_client_answer_without_changing_verdict(tmp_path, monkeypatch, shadow_failure):
-    calls = []
-    def request(self, method, path, payload):
-        calls.append(payload)
-        if shadow_failure:
-            return b"broken"
-        case = json.loads(payload["messages"][1]["content"])
-        answer = {"claims": [
-            {"id": "requirement_met", "status": "confirmed", "value": False, "evidence_ids": ["e0", "e1"]},
-            {"id": "policy_criticality", "status": "confirmed", "value": case["evidence"][0]["observed"]["criticality"],
-             "evidence_ids": ["e0"]}], "limitations": [], "recommendations": ["review_policy_against_baseline_text"]}
-        return canonical({"choices": [{"message": {"content": canonical(answer)}}]}).encode()
-    monkeypatch.setattr(ModelClient, "_request", request)
-    monkeypatch.setattr("auditex.model_serving.sleep", lambda seconds: None)
-    result = run_assessment(tmp_path, monkeypatch, {"SPO_tenant": [{"SharingCapability": 0}]}, shadow_model_on_precheck=True)
-    row = result["policies"][0]
-    assert len(calls) == (2 if shadow_failure else 1)
-    assert row["claims"][0]["status"] == "inferred" and row["claims"][0]["value"] is True
-    assert row["attempts"] == 0 and result["totals"]["answered"] == 1
-    assert row["comparison"]["model_status"] is None
-    # A non-JSON body is a reply lost in transit, not a model answer.
-    assert row["model_shadow"]["validation_status"] == ("unknown" if shadow_failure else "valid")
-    assert row["model_shadow"]["reason"] == ("model_transport_failed" if shadow_failure else None)
-    validate_assessment(result)
-    jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
+def test_legacy_shadow_option_never_calls_model(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(ModelClient, "__init__", lambda *a: pytest.fail("no model client"))
+    result = run_assessment(tmp_path, monkeypatch, {"SPO_tenant": [{"SharingCapability": 0}]},
+                            shadow_model_on_precheck=True)
+    assert "model_shadow" not in result["policies"][0]
+    assert len(capsys.readouterr().err.splitlines()) == 1
 
 
 def test_shadow_flag_reaches_serving(tmp_path, monkeypatch, capsys):
@@ -418,7 +400,7 @@ def test_shadow_flag_reaches_serving(tmp_path, monkeypatch, capsys):
         return {}
     monkeypatch.setattr("auditex.model_serving.assess_run", assess)
     assert main(["model", "assess", str(tmp_path), "--model", "test", "--shadow-model-on-precheck"]) == 0
-    assert seen["shadow_model_on_precheck"] is True
+    assert seen["shadow_model_on_precheck"] is True  # accepted for compatibility; assess_run ignores it
 
 
 @pytest.mark.parametrize("mutation", ["attempts", "prompt", "response", "reason", "class", "value", "section", "field",
@@ -765,6 +747,9 @@ def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
         projection.views[pid] = {"scuba_config": {"CapExclusions": {}}}
         return projection
     monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    from auditex.model_precheck import precheck_case
+    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+        case, **{**kw, "value_rules": False}))
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[pid])
     row = result["policies"][0]

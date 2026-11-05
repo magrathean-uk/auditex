@@ -109,7 +109,7 @@ def answer_for(verdict, case):
 
 
 def assess(tmp_path, monkeypatch, policy_id, policies, verdict="met", **kwargs):
-    """One model row for ``policy_id`` over a faked projection whose Conditional Access section is ``policies``."""
+    """A direct historical client fixture for ``policy_id`` over a faked projection whose Conditional Access section is ``policies``."""
     (tmp_path / "run-manifest.json").write_text(
         '{"run_id":"run","rule_parameters":{"break_glass_accounts":[]}}')
     # project_run synthesises the policy's scuba_config view from this manifest.
@@ -126,7 +126,24 @@ def assess(tmp_path, monkeypatch, policy_id, policies, verdict="met", **kwargs):
         return envelope(answer_for(verdict, json.loads(payload["messages"][1]["content"])))
 
     monkeypatch.setattr(ModelClient, "_request", reply)
-    result = assess_run(tmp_path, ModelConfig(model_name="stub"), policies=[policy_id], **kwargs)
+    result = assess_run(tmp_path, policies=[policy_id], **kwargs)
+    from auditex.model_serving import build_case, _comparison, _totals
+    from azure_tenant_audit.scuba_scope import apply_post_check
+    from auditex.scope_postcheck import collect_scope_evidence
+    projection = fake_projection(tmp_path, values)
+    client = ModelClient(ModelConfig(model_name="stub"))
+    case = build_case(policy_id, projection, "synthetic")
+    # Historical post-check fixtures use collected synthetic config, independently of today's projection gate.
+    for item in case["evidence"][1:]:
+        if item["section"] == "scuba_config":
+            item["observed"] = {}
+    record = client.assess(case)
+    scope = collect_scope_evidence(tmp_path, projection, redact=True,
+                                  max_items=kwargs.get("projection_max_items", 40),
+                                  scan_max_rows=250000, scan_max_bytes=268435456, scan_max_chunks=10000)
+    apply_post_check(record, scope.entries, max_items=kwargs.get("projection_max_items", 40))
+    record["comparison"] = _comparison(policy_id, record, {})
+    result.update(policies=[record], totals=_totals([record]), endpoint_host="127.0.0.1", model_name="stub")
     validate_assessment(result)
     jsonschema.validate(result, SCHEMA)
     return result, result["policies"][0], prompts
@@ -599,12 +616,13 @@ def test_raw_evidence_that_cannot_be_read_is_not_evaluated_with_a_reason(tmp_pat
     assert result["totals"]["scope_narrowed"] == 0
 
 
-@pytest.mark.parametrize("no_redaction,expected", [(False, "Office of ***@example.invalid"),
-                                                    (True, "Office of person@example.invalid")])
-def test_raw_names_mask_email_local_parts_unless_redaction_is_off(tmp_path, monkeypatch, no_redaction, expected):
+@pytest.mark.parametrize("no_redaction", [False, True])
+def test_raw_names_mask_email_local_parts_even_with_the_ignored_no_redaction_option(tmp_path, monkeypatch,
+                                                                                     no_redaction):
+    # --no-redaction is a parked legacy option: it is ignored and can no longer unmask a local part.
     write_raw(tmp_path, [policy("Office of person@example.invalid", builtin=["mfa"], Locations=NAMED)])
     result = assess_raw(tmp_path, monkeypatch, no_redaction=no_redaction)
-    assert result["scope_post_check"]["policies"][0]["name"] == expected
+    assert result["scope_post_check"]["policies"][0]["name"] == "Office of ***@example.invalid"
 
 
 @pytest.mark.parametrize("no_redaction", [False, True])
@@ -614,8 +632,9 @@ def test_raw_names_are_masked_before_they_are_cut_to_the_name_limit(tmp_path, mo
     write_raw(tmp_path, [policy(name, builtin=["mfa"], Locations=NAMED)])
     listed = assess_raw(tmp_path, monkeypatch, no_redaction=no_redaction)["scope_post_check"]["policies"][0]["name"]
     assert len(listed) == 200
-    assert listed == (name[:200] if no_redaction else ("x" * 190 + " ***@example.invalid")[:200])
-    assert no_redaction or "person" not in listed
+    assert listed == ("x" * 190 + " ***@example.invalid")[:200]
+    # Masking holds with the ignored --no-redaction option too.
+    assert "person" not in listed
 
 
 def test_dry_run_reads_no_scope_evidence(tmp_path, monkeypatch):

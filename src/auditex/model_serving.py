@@ -1,4 +1,4 @@
-"""Optional SCuBA model assessment; never feeds or changes deterministic findings."""
+"""Optional rule-only SCuBA assessment and parked offline model client."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -348,9 +348,32 @@ def _baseline_statuses(pack_path: Path) -> dict[str, str]:
         return {}
 
 
-def _assess_policies(projection: dict[str, Any], client: ModelClient | None, selected: list[str],
+RULE_NOT_IMPLEMENTED_TEXT = "Not assessed: Auditex has no rule for this policy yet."
+
+
+def legacy_model_options_set() -> bool:
+    return "AUDITEX_DISABLE_VALUE_RULES" in os.environ or any(
+        name.startswith("AUDITEX_MODEL_") for name in os.environ)
+
+
+def warn_ignored_model_options() -> None:
+    print("Warning: legacy model options are ignored for assessment; the model layer is parked and redaction stays enabled.",
+          file=sys.stderr)
+
+
+def _uncovered_record(case: dict[str, Any]) -> dict[str, Any]:
+    return {"policy_id": case["policy_id"],
+            "claims": [{"id": item["id"], "status": "unknown", "value": None, "evidence_ids": []}
+                       for item in case["requested_claims"]],
+            "limitations": [], "recommendations": [], "validation_status": "unknown",
+            "reason": "rule_not_implemented", "reason_text": RULE_NOT_IMPLEMENTED_TEXT,
+            "latency_ms": 0, "attempts": 0, "prompt_sha256": None, "response_sha256": None,
+            "thinking_disabled": False, "thinking_stripped": False}
+
+
+def _assess_policies(projection: dict[str, Any], selected: list[str],
                      catalogue: dict[str, Any], generated_at: str, *, dry_run: bool,
-                     baseline: dict[str, str], scope: Any, shadow_model_on_precheck: bool,
+                     baseline: dict[str, str], scope: Any,
                      max_items: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     records, prompts = [], []
     for policy_id in selected:
@@ -370,11 +393,10 @@ def _assess_policies(projection: dict[str, Any], client: ModelClient | None, sel
                                 "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(),
                                 "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
                 continue
-            value_rules_enabled = os.getenv("AUDITEX_DISABLE_VALUE_RULES", "").strip().lower() in {"", "0", "false", "no", "off"}
+            from azure_tenant_audit.value_rules.catalogue import row_for
+            row = row_for(policy_id)
             rule_projection = None
-            if value_rules_enabled and hasattr(projection, "rule_sections"):
-                from azure_tenant_audit.value_rules.catalogue import row_for
-                row = row_for(policy_id)
+            if hasattr(projection, "rule_sections"):
                 if row:
                     rule_projection = {section: deepcopy(projection.rule_sections.get(section, NOT_COLLECTED))
                                        for section in row["sections"] if section != "scuba_config"}
@@ -384,17 +406,10 @@ def _assess_policies(projection: dict[str, Any], client: ModelClient | None, sel
                                             if section in projection.rule_sections})
                     if "scuba_config" in row["sections"]:
                         rule_projection["scuba_config"] = deepcopy(rule_policy_section(projection, policy_id, "scuba_config"))
-            elif hasattr(projection, "rule_sections"):
-                # Collection provenance still applies with value rules disabled; forward no collected evidence.
-                rule_projection = {section: dict(marker) for section, marker in projection.rule_sections.items()
-                                   if isinstance(marker, dict) and marker.get("collection_status") == "not_collected"
-                                   and marker.get("reason") == "optional_collection_not_enabled"}
-            record = precheck_case(case, absent_fields=True, empty_lists=True, value_rules=value_rules_enabled,
-                                   rule_projection=rule_projection)
+            record = (precheck_case(case, absent_fields=True, empty_lists=True, value_rules=True,
+                                    rule_projection=rule_projection) if row else None)
             if record is None:
-                record = client.assess(case)
-            elif shadow_model_on_precheck:
-                record["model_shadow"] = client.assess(case)
+                record = _uncovered_record(case)
         if scope is not None and scope.entries:
             apply_post_check(record, scope.entries, max_items=max_items)
         record["comparison"] = _comparison(policy_id, record, baseline)
@@ -417,20 +432,18 @@ def _totals(records: list[dict[str, Any]]) -> dict[str, int]:
     return totals
 
 
-def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] | None = None,
-               dry_run: bool = False, shadow_model_on_precheck: bool = False,
+def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, policies: list[str] | None = None,
+               dry_run: bool = False, shadow_model_on_precheck: bool = False, legacy_options: bool = False,
                no_redaction: bool = False, projection_max_items: int = DEFAULT_MAX_ITEMS,
                projection_max_chars: int = DEFAULT_MAX_CHARS, projection_scan_max_rows: int = DEFAULT_SCAN_MAX_ROWS,
                projection_scan_max_bytes: int = DEFAULT_SCAN_MAX_BYTES,
                projection_scan_max_chunks: int = DEFAULT_SCAN_MAX_CHUNKS) -> dict[str, Any]:
-    if no_redaction and not _is_loopback(config.endpoint_host):
-        raise ValueError("--no-redaction requires a loopback model endpoint host")
+    if config is not None or no_redaction or shadow_model_on_precheck or legacy_options or legacy_model_options_set():
+        warn_ignored_model_options()
     root = Path(run_dir).expanduser().resolve()
     manifest = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
     if not isinstance(manifest, dict) or not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
         raise ValueError("Run manifest requires a run_id")
-    if not dry_run and not config.model_name.strip():
-        raise ValueError("AUDITEX_MODEL_NAME or --model is required")
     catalogue = policy_catalogue()
     selected = list(catalogue["policies"]) if policies is None else policies
     if not selected or len(set(selected)) != len(selected) or any(
@@ -446,20 +459,18 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
     if target.is_symlink():
         raise ValueError("Model output must not be a symbolic link")
     generated_at = datetime.now(timezone.utc).isoformat()
-    projection = project_run(root, redact=not no_redaction, max_items=projection_max_items,
+    projection = project_run(root, redact=True, max_items=projection_max_items,
                              max_chars=projection_max_chars, scan_max_rows=projection_scan_max_rows,
                              scan_max_bytes=projection_scan_max_bytes, scan_max_chunks=projection_scan_max_chunks)
     baseline = {} if dry_run else _baseline_statuses(root / "reports" / "report-pack.json")
     # Read-only and verdict-independent: which enabled Conditional Access policies carry a scope condition the
     # pinned Rego ignores. A met row is marked after its verdict is known; nothing here reaches a prompt.
     scope = None if dry_run else collect_scope_evidence(
-        root, projection, redact=not no_redaction, max_items=projection_max_items,
+        root, projection, redact=True, max_items=projection_max_items,
         scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
         scan_max_chunks=projection_scan_max_chunks)
-    client = ModelClient(config) if not dry_run else None
-    records, prompts = _assess_policies(projection, client, selected, catalogue, generated_at,
+    records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
                                         dry_run=dry_run, baseline=baseline, scope=scope,
-                                        shadow_model_on_precheck=shadow_model_on_precheck,
                                         max_items=projection_max_items)
     if dry_run:
         write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
@@ -467,9 +478,9 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
                 "skipped": sum(row.get("skipped", False) for row in prompts)}
     totals = _totals(records)
     result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at, "run_id": manifest["run_id"],
-              "endpoint_host": config.endpoint_host, "model_name": config.model_name,
+              "endpoint_host": "none", "model_name": "rules-only",
               "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
-              "totals": totals, "policies": records, "serving": client.serving(),
+              "totals": totals, "policies": records,
               "projection": projection.report, "scope_post_check": scope.summary,
               "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
     from azure_tenant_audit.model_assessment import validate_assessment
@@ -478,9 +489,9 @@ def assess_run(run_dir: str | Path, config: ModelConfig, *, policies: list[str] 
     return result
 
 
-def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, config: ModelConfig, *,
+def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, config: ModelConfig | None = None, *,
                             results_path: str | Path | None = None, policies: list[str] | None = None,
-                            dry_run: bool = False, no_redaction: bool = False,
+                            dry_run: bool = False, no_redaction: bool = False, legacy_options: bool = False,
                             projection_max_items: int = DEFAULT_MAX_ITEMS,
                             projection_max_chars: int = DEFAULT_MAX_CHARS,
                             verdict_map: dict[str, str] | None = None) -> dict[str, Any]:
@@ -492,11 +503,9 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
     if verdict_map is None:
         verdict_map = VERDICT_MAP
     _valid_map(verdict_map)
-    if no_redaction and not _is_loopback(config.endpoint_host):
-        raise ValueError("--no-redaction requires a loopback model endpoint host")
+    if config is not None or no_redaction or legacy_options or legacy_model_options_set():
+        warn_ignored_model_options()
     target_dir = resolve_output_directory(output_dir)
-    if not dry_run and not config.model_name.strip():
-        raise ValueError("AUDITEX_MODEL_NAME or --model is required")
     catalogue = policy_catalogue()
     selected = list(catalogue["policies"]) if policies is None else policies
     if not selected or len(set(selected)) != len(selected) or any(
@@ -504,7 +513,7 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
     ):
         raise ValueError("Policies must be unique SCuBA policy IDs")
     loaded = load_export(export_path)
-    projection, extras = project_export(loaded, catalogue["policies"], redact=not no_redaction,
+    projection, extras = project_export(loaded, catalogue["policies"], redact=True,
                                         max_items=projection_max_items, max_chars=projection_max_chars)
     verdict_error = False
     if results_path is not None:
@@ -538,11 +547,10 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
         verdict_state = "readable"
     generated_at = datetime.now(timezone.utc).isoformat()
     scope = None if dry_run else scope_from_export(projection, extras["raw_ca"],
-                                                   redact=not no_redaction, max_items=projection_max_items)
-    client = ModelClient(config) if not dry_run else None
-    records, prompts = _assess_policies(projection, client, selected, catalogue, generated_at,
+                                                   redact=True, max_items=projection_max_items)
+    records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
                                         dry_run=dry_run, baseline=baseline, scope=scope,
-                                        shadow_model_on_precheck=False, max_items=projection_max_items)
+                                        max_items=projection_max_items)
     sidecar = build_sidecar(loaded, projection, extras, catalogue["policies"], selected, baseline,
                             reasons, unmappable, verdict_source, verdict_state, verdict_map, generated_at, scope)
     filename = "model_assessment_prompts.jsonl" if dry_run else "model_assessment.json"
@@ -555,10 +563,10 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
     else:
         run_suffix = loaded.report_uuid or loaded.sha256[:16]
         result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at,
-                  "run_id": "scubagear-" + run_suffix, "endpoint_host": config.endpoint_host,
-                  "model_name": config.model_name, "prompt_convention": PROMPT_CONVENTION,
+                  "run_id": "scubagear-" + run_suffix, "endpoint_host": "none",
+                  "model_name": "rules-only", "prompt_convention": PROMPT_CONVENTION,
                   "system_prompt_sha256": SYSTEM_PROMPT_SHA256, "totals": _totals(records),
-                  "policies": records, "serving": client.serving(), "projection": projection.report,
+                  "policies": records, "projection": projection.report,
                   "scope_post_check": scope.summary,
                   "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
         from azure_tenant_audit.model_assessment import validate_assessment

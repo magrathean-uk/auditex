@@ -39,7 +39,7 @@ checkout or executes report content.
 
 ## Model-development references
 
-`configs/model-sources.json` pins the shipped Auditex model (`product_model`: base revision, adapter archive and
+`configs/model-sources.json` pins the catalogued, parked Auditex model (`product_model`: base revision, adapter archive and
 adapter weights file hashes, GGUF hash, base and distribution licence, llama.cpp revision, training pack and scores) and the inspected OpenAdmin and M365 Expert
 model artifacts, OpenAdmin public dataset and source pipeline, and proposed
 base checkpoints. Reference models, original data and sparse source copies
@@ -83,7 +83,7 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   hash inventory in `auditex/scubagear_prune_proof.py`.
   The compressed fixtures under `tests/fixtures/value-rules/` contain 16,980 rows across
   `vectors-v2`, `vectors-v39` and `vectors-s4` to `vectors-s9` (`.jsonl.xz`). They include
-  prepared rows for the three held policies, without enabling those rules.
+  rows for MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1, whose rules are now enabled.
   Only constructed synthetic rows and model-pack train/validation rows are included;
   pack rows derive from ScubaGear fixtures under CC0 1.0 Universal. Held-out test rows,
   pilot rows and sealed AAD v2.1 freeze rows are excluded. Each vector has an id and

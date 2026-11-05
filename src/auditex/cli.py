@@ -598,15 +598,15 @@ def gate_findings(
 def _build_model_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="auditex model",
-        description="Prepare model-development materials and optionally assess runs using a model endpoint.",
+        description="Prepare model-development materials and assess runs using deterministic rules.",
     )
     commands = parser.add_subparsers(dest="model_command", required=True)
     commands.add_parser("sources", help="List pinned model and dataset reference metadata.")
-    assess = commands.add_parser("assess", help="Write an optional model-assisted assessment (rules answer the rows they cover, the model the rest) without changing findings.")
+    assess = commands.add_parser("assess", help="Write a rule-only assessment; rows without a rule are not assessed. The model layer is parked.")
     assess.add_argument("run_dir", help="Existing audit run directory.")
     assess.add_argument("--policies", help="Comma-separated SCuBA policy IDs; defaults to the shipped policy set.")
-    assess.add_argument("--dry-run", action="store_true", help="Write prompts without calling the endpoint.")
-    assess.add_argument("--no-redaction", action="store_true", help="Keep personal values; requires a loopback endpoint host.")
+    assess.add_argument("--dry-run", action="store_true", help="Write development prompts locally; no model is called.")
+    assess.add_argument("--no-redaction", action="store_true", help=argparse.SUPPRESS)
     assess.add_argument("--projection-max-items", type=int, default=40,
                         help="Projection budget: maximum items in each projected section, counted on the "
                              "projected object, not the source (default: 40).")
@@ -623,11 +623,11 @@ def _build_model_parser() -> argparse.ArgumentParser:
                         help="Scan bound: most chunk files listed by one source read; beyond it the section is "
                              "withheld as oversize/scan_bound (default: 10000).")
     assess.add_argument("--shadow-model-on-precheck", action="store_true",
-                        help="Record model answers for rule-answered rows without using them as answers.")
+                        help=argparse.SUPPRESS)
     doctor = commands.add_parser("doctor", help="Check the endpoint models and print configuration without the API key.")
     for command in (assess, doctor):
-        command.add_argument("--endpoint", help="OpenAI-compatible base URL (AUDITEX_MODEL_ENDPOINT).")
-        command.add_argument("--model", help="Served model name (AUDITEX_MODEL_NAME).")
+        command.add_argument("--endpoint", help=("OpenAI-compatible base URL (AUDITEX_MODEL_ENDPOINT)." if command is doctor else argparse.SUPPRESS))
+        command.add_argument("--model", help=("Served model name (AUDITEX_MODEL_NAME)." if command is doctor else argparse.SUPPRESS))
     stage = commands.add_parser("stage", help="Deduplicate public conversations into an unreviewed corpus.")
     stage.add_argument("--manifest", required=True, help="Pinned source manifest with training and evaluation paths.")
     stage.add_argument("--output-dir", required=True, help="New or empty destination outside finalized audit runs.")
@@ -912,12 +912,13 @@ def main(argv: list[str] | None = None) -> int:
             elif args.model_command in {"assess", "doctor"}:
                 from .model_serving import ModelClient, ModelConfig, assess_run
 
-                config = ModelConfig.from_environment(endpoint=args.endpoint, model=args.model)
                 if args.model_command == "doctor":
+                    config = ModelConfig.from_environment(endpoint=args.endpoint, model=args.model)
                     payload = ModelClient(config).doctor()
                     _emit_assessment(payload, None)
                     return 0 if payload["ok"] else 2
-                payload = assess_run(args.run_dir, config, dry_run=args.dry_run,
+                payload = assess_run(args.run_dir, dry_run=args.dry_run,
+                                     legacy_options=(args.endpoint is not None or args.model is not None),
                                      no_redaction=args.no_redaction, projection_max_items=args.projection_max_items,
                                      projection_max_chars=args.projection_max_chars,
                                      projection_scan_max_rows=args.projection_scan_max_rows,

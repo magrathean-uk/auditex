@@ -256,46 +256,27 @@ def test_default_redaction_is_stable_per_run_and_changes_between_runs(complete_b
 
 
 @pytest.mark.parametrize('no_redaction', [False, True])
-def test_endpoint_prompts_respect_redaction_and_all_dependencies(complete_bundle, monkeypatch, no_redaction):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
-    calls = []
-    def reply(self, method, path, payload):
-        case = json.loads(payload['messages'][1]['content'])
-        calls.append(payload)
-        assert all(e['observed'] != NOT_COLLECTED for e in case['evidence'][1:])
-        answer = {'claims': [
-            {'id': 'requirement_met', 'status': 'confirmed', 'value': True,
-             'evidence_ids': [e['id'] for e in case['evidence']]},
-            {'id': 'policy_criticality', 'status': 'confirmed',
-             'value': case['evidence'][0]['observed']['criticality'], 'evidence_ids': ['e0']}],
-            'limitations': [], 'recommendations': []}
-        return canonical({'choices': [{'message': {'content': canonical(answer)}}]}).encode()
-    monkeypatch.setattr(ModelClient, '_request', reply)
+def test_assessment_never_calls_model_and_keeps_redaction(complete_bundle, monkeypatch, no_redaction):
+    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
     args = ['model', 'assess', str(complete_bundle), '--model', 'stub']
     if no_redaction:
         args.append('--no-redaction')
     assert main(args) == 0
-    prompts = canonical(calls)
-    assert (PERSON in prompts) is no_redaction
-    projected = project_run(complete_bundle, redact=not no_redaction)
-    assert (PERSON in canonical(projected)) is no_redaction
-    # Conditional Access prompts reach the model now that scuba_config projects: the address is masked unless the
-    # operator chose --no-redaction (loopback endpoints only).
-    assert ('sensitive.local' in prompts) is no_redaction
-    assert ('sensitive.local' in canonical(projected)) is no_redaction
     result = json.loads((complete_bundle / 'model_assessment.json').read_text())
-    assert result['projection']['redaction']['enabled'] is not no_redaction
+    assert result['projection']['redaction']['enabled']
     assert 'salt' not in result['projection']['redaction']
-    assert len(calls) + result['totals']['rule_answered'] == 102
+    assert all(row['attempts'] == 0 for row in result['policies'])
+    assert PERSON not in canonical(result) and 'sensitive.local' not in canonical(result)
     validate_assessment(result)
 
 
 @pytest.mark.parametrize('host', ['model.example.invalid', '127.0.0.1.example.invalid', '192.168.1.2'])
-def test_no_redaction_refused_off_loopback_before_reads_or_calls(tmp_path, host, monkeypatch):
-    monkeypatch.setattr(ModelClient, '_request', lambda *a: pytest.fail('Refusal must precede transport'))
-    with pytest.raises(ValueError, match='loopback'):
-        assess_run(tmp_path, ModelConfig(endpoint=f'https://{host}/v1', model_name='test'), no_redaction=True)
-    assert list(tmp_path.iterdir()) == []
+def test_no_redaction_ignored_for_any_model_host(tmp_path, host, monkeypatch):
+    write(tmp_path, 'run-manifest.json', {'run_id': 'run'})
+    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
+    result = assess_run(tmp_path, ModelConfig(endpoint=f'https://{host}/v1', model_name='test'), no_redaction=True)
+    assert result['projection']['redaction']['enabled'] and result['endpoint_host'] == 'none'
+    validate_assessment(result)
 
 
 def test_other_platform_and_absent_bundle_are_all_markers(tmp_path, monkeypatch):
@@ -305,7 +286,7 @@ def test_other_platform_and_absent_bundle_are_all_markers(tmp_path, monkeypatch)
     assert {v['reason'] for v in p.report['sections'].values()} == {'not_applicable_to_platform'}
     monkeypatch.setattr(ModelClient, '_request', lambda *a: pytest.fail('Absent sections called model'))
     result = assess_run(tmp_path, ModelConfig(model_name='stub'))
-    assert result['totals']['rule_answered'] == result['totals']['unknown'] == 102
+    assert result['totals']['rule_answered'] == 102 and result['totals']['unknown'] == 102
     assert result['limitations'] == ['projection_not_implemented']
 
 
@@ -366,30 +347,20 @@ def test_runtime_shapes_and_enum_domains_match_complete_pack_goldens():
 
 
 def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     from auditex.demo import DEMO_AS_OF, DEMO_SAMPLE
     from azure_tenant_audit.cli import run_offline
+    monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     assert run_offline(ROOT / DEMO_SAMPLE, tmp_path, 'p2', 'demo', plane='full', as_of=DEMO_AS_OF) == 0
     root = tmp_path / 'p2-demo'
     findings = json.loads((root / 'findings/findings.json').read_text())
     assert {r['rule_id']: r['severity'] for r in findings if r['rule_id'] in {
         'sharepoint.default_link_type_broad', 'sharepoint.external_sharing_broad'}} == {
         'sharepoint.default_link_type_broad': 'high', 'sharepoint.external_sharing_broad': 'high'}
-    calls = []
-    def reply(self, method, path, payload):
-        case = json.loads(payload['messages'][1]['content'])
-        assert precheck_case(case) is None
-        assert all(e['observed'] != NOT_COLLECTED for e in case['evidence'][1:])
-        calls.append(payload)
-        answer = {'claims': [
-            {'id': 'requirement_met', 'status': 'unknown', 'value': None, 'evidence_ids': ['e0']},
-            {'id': 'policy_criticality', 'status': 'confirmed',
-             'value': case['evidence'][0]['observed']['criticality'], 'evidence_ids': ['e0']}],
-            'limitations': ['required_evidence_section_not_collected'],
-            'recommendations': ['collect_missing_evidence_section']}
-        return canonical({'choices': [{'message': {'content': canonical(answer)}}]}).encode()
-    monkeypatch.setattr(ModelClient, '_request', reply)
-    result = assess_run(root, ModelConfig(model_name='local-stub'))
+    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('Rules-only assessment built a model client'))
+    returned = assess_run(root)
+    written_text = (root / 'model_assessment.json').read_text(encoding='utf-8')
+    result = json.loads(written_text)
+    assert result == returned
     sections = result['projection']['sections']
     assert sections['SPO_tenant']['detail'] == {'field': 'FileAnonymousLinkType', 'kind': 'missing_field'}
     assert sections['authorization_policies']['detail'] == {
@@ -399,22 +370,28 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
     # The sample's accepted domains carry fields the training shape does not know: ignored and named, never withholding.
     assert sections['accepted_domains']['status'] == 'projected'
     assert sections['accepted_domains']['ignored_fields'] == ['Default', 'DomainType', 'Identity']
-    # The privileged-user section projects, so the three rules that read only it reach the model; the other
-    # 99 rows stay rule answers with no model call.
-    assert result['totals'] == {'answered': 0, 'unknown': 102, 'invalid': 0, 'skipped': 0, 'rule_answered': 99,
+    # Every catalogue policy has a value rule: all 102 rows are rule answers, none reaches a model. This file turns
+    # the area adapters off (autouse fixture), so more rows abstain than in test_model_serving's demo (24 answered).
+    assert result['totals'] == {'answered': 13, 'unknown': 89, 'invalid': 0, 'skipped': 0, 'rule_answered': 102,
                                 'scope_narrowed': 0}
-    assert len(calls) == 3
-    assert sum(r['attempts'] for r in result['policies']) == 3
-    demo = json.loads((ROOT / DEMO_SAMPLE).read_text())
-    prompts = canonical(calls)
-    for user in demo['identity']['users']['value']:
-        assert user['displayName'] not in prompts
-        # A local part such as 'accounts' also occurs in immutable policy prose.
-        # Check address tokens; the dedicated privacy fixture uses a unique local part.
-        assert user['userPrincipalName'].split('@')[0] + '@' not in prompts
+    assert (result['endpoint_host'], result['model_name']) == ('none', 'rules-only') and 'serving' not in result
+    assert result['projection']['redaction']['enabled']
     for row in result['policies']:
-        if row['reason'] == 'rule_precheck':
-            assert row['attempts'] == 0 and row['prompt_sha256'] is None
+        assert row['reason'] == 'rule_precheck' and 'model_shadow' not in row
+        assert row['attempts'] == 0 and row['prompt_sha256'] is None and row['response_sha256'] is None
+    # Privacy: neither the written assessment nor the locally written development prompts carry a demo user's
+    # display name or e-mail address.
+    assert assess_run(root, dry_run=True)['prompts'] == 102
+    prompts_text = (root / 'model_assessment_prompts.jsonl').read_text(encoding='utf-8')
+    demo = json.loads((ROOT / DEMO_SAMPLE).read_text())
+    users = demo['identity']['users']['value']
+    assert users
+    for text in (written_text, prompts_text):
+        for user in users:
+            assert user['displayName'] not in text
+            # A local part such as 'accounts' also occurs in immutable policy prose.
+            # Check address tokens; the dedicated privacy fixture uses a unique local part.
+            assert user['userPrincipalName'].split('@')[0] + '@' not in text
     validate_assessment(result)
 
 
@@ -465,12 +442,16 @@ def test_effective_admin_set_requires_all_counted_users_and_redacts_immutable_id
 
 @pytest.mark.parametrize('version', ['2026-10-28', '2026-10-29'])
 def test_legacy_assessments_continue_to_validate(complete_bundle, monkeypatch, version):
-    monkeypatch.setenv('AUDITEX_DISABLE_VALUE_RULES', '1')
+    # Construct the historical precheck fixture explicitly; the legacy switch no longer selects a route.
+    from auditex.model_precheck import precheck_case
+    monkeypatch.setattr('auditex.model_serving.precheck_case', lambda case, **kw: precheck_case(
+        case, **{**kw, 'value_rules': False}))
     payload = assess_run(complete_bundle, ModelConfig(model_name='unused'), policies=['MS.POWERBI.1.1v1'])
     assert payload['policies'][0]['rule_precheck']['class'] != 'value_rule'
     payload['schema_version'] = version
     if version == '2026-10-28':
-        del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed'], payload['serving']
+        del payload['projection'], payload['scope_post_check'], payload['totals']['scope_narrowed']
+        payload.pop('serving', None)
     validate_assessment(payload)
     jsonschema.validate(payload, json.loads((ROOT / f'schemas/model_assessment-{version}.schema.json').read_text()))
 

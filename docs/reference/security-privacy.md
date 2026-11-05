@@ -35,8 +35,9 @@ serialised into prompts, assessment files, sidecars or logs. This includes
 Defender ATP preset-rule recipient and exclusion lists (`SentTo`,
 `SentToMemberOf`, `RecipientDomainIs` and their `ExceptIf*` counterparts),
 DNS resolver `log` entries and the Security Suite unsuccessful-command ledger.
-Only the gated model view reaches the model endpoint, redacted unless `--no-redaction` is used
-with a loopback endpoint. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
+The model layer is parked: neither assessment route calls an endpoint. Dry-run exports only the
+gated, redacted model view locally. Legacy model flags and `AUDITEX_DISABLE_VALUE_RULES` are ignored
+with one warning per invocation, without values; redaction remains enabled. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
 view receives the not-collected marker. The private rule view can retain recognised
 government environments while the model view remains withheld.
 Conditional Access policy display names in `scope_post_check` are retained as
@@ -48,15 +49,14 @@ The identity collector's user inventory selects `onPremisesImmutableId`, so raw
 safety ceiling. Previously only the hybrid collector's first 100 sampled users
 carried it. Normalised user records, the evidence index and customer packs do
 not carry it. Model projection keeps only effective administrators and
-pseudonymises non-null values; `--no-redaction`, accepted only for a loopback
-model endpoint, sends them unmasked.
+pseudonymises non-null values in local prompt exports; legacy `--no-redaction` is ignored.
 
 The PIM role policy reads of the directory roles (`identity_governance`) collect the
 notification recipients of each policy rule: these are e-mail addresses, collected as
 evidence like the other directory identifiers (they sit in `raw/` and in
 `normalized/governance_objects.json` and `normalized/privileged_roles.json`, which stay local). The
-projection masks them by default (the local part of every e-mail address); `--no-redaction`, which is accepted
-only for a loopback endpoint, sends them unmasked to that endpoint.
+projection masks their e-mail local parts in local prompt exports. Assessment calls no model endpoint;
+legacy `--no-redaction` cannot disable masking.
 The approvers' names and ids of an approval rule are not stored. Nothing else of these reads
 leaves the machine, and the reads are GET-only.
 

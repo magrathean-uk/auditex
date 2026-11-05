@@ -43,6 +43,8 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 ## Evidence discipline
 
 `model_assessment.json` is an optional root artefact written by `auditex model assess`.
+Assessment is rules only: the model is parked and never called. Current outputs use
+`endpoint_host: "none"`, `model_name: "rules-only"` and omit `serving`.
 Its schema is `schemas/model_assessment.schema.json` (version `2026-11-05`), listed
 by the schema manifest and checked when present by bundle validation. The known
 older versions `2026-10-27`, `2026-10-27.1`, `2026-10-28` and `2026-10-29` use their
@@ -51,6 +53,8 @@ Malformed or unknown-version optional assessments produce warnings and never cha
 the deterministic gate result. It contains
 `generated_at`, `run_id`, `endpoint_host`, `model_name`, prompt convention
 `named-enums-v1`, the pinned `system_prompt_sha256`, totals and policy rows.
+Historical model records remain valid, including serving and shadow provenance.
+The following attempt/hash descriptions apply to those historical records; current rule rows make no requests.
 Each row records claims, limitations, recommendations, `validation_status`, reason,
 `latency_ms`, HTTP POST `attempts` (including format, thinking and `cache_prompt` negotiation; at most 5),
 `thinking_disabled`, `thinking_stripped`, prompt and response
@@ -86,6 +90,17 @@ validation retries (whose claims are unknown), and `skipped` counts policy IDs a
 from the catalogue (`policy_not_in_catalogue`). All 102 shipped policy items preserve
 their training text, including the intentionally empty Power Platform excerpt.
 
+A catalogue policy without a registered value rule (none today: all 102 have one) uses
+`reason: "rule_not_implemented"` and exact
+`reason_text: "Not assessed: Auditex has no rule for this policy yet."`. Its status is `unknown`,
+both claims are unknown with null values and empty evidence IDs, limitations and recommendations
+are empty, latency and attempts are zero, hashes are null and thinking flags are false. No
+`finish_reason`, `rule_precheck`, `model_shadow` or `post_check` is permitted. A rules-only file is
+marked by `endpoint_host: "none"`, by `model_name: "rules-only"` or by any such row; any one marker
+requires the whole file to have both envelope values, no `serving` and no model-answered or shadow rows.
+Mixed files fail validation. Preserved legacy schemas reject this reason and keep their earlier envelope
+checks; the unreleased `2026-11-05` schema is extended in place.
+
 **Customer term and internal values.** Customer-facing text says met, not met, not assessed and not applicable.
 The contract keeps the internal values and does not rename them. A row's `requirement_met` claim carries the
 `status` (`confirmed`, `inferred` or `unknown`) and `value` (`true`, `false` or null); `comparison.model_status`
@@ -97,14 +112,16 @@ is `pass`, `fail` or null. The value-rule inventory (`configs/scuba-value-rules.
 | met | `confirmed`, `true` | `pass` | no limitation |
 | not met | `confirmed`, `false` | `fail` | recommendation `review_policy_against_baseline_text` |
 | not assessed | `unknown`, null | null | missing sections: `required_evidence_section_not_collected`, `collect_missing_evidence_section`; collected but unusable evidence: `evidence_unusable` and the reason-specific recommendation below |
+| not assessed | `unknown`, null | null | `rule_not_implemented`, constant `reason_text`, empty limitations and recommendations |
 | not applicable | `inferred`, `true` | null | limitation `policy_not_applicable` |
 
 A model row that abstains (`unknown`), fails to answer (`invalid`) or is skipped has no customer verdict and reads
 as not assessed; the comparison `result` is `not_assessed` whenever the row has no `pass` or `fail` status or the
 baseline has none. That `result` value and the baseline's `not_assessed` status are the same customer term. The
 four verdict totals (`answered`, `unknown`, `invalid`, `skipped`) are internal counters and keep their names.
-Rules answer rows they cover with these values; the model still answers every other row today. A rule-set that
-decides every verdict, and an optional explainer role for the model, are planned and not part of this contract.
+Rules decide all product answers; every catalogue policy has a value rule, so no current row reports
+`rule_not_implemented`.
+The model never answers a product policy; an optional explainer remains planned and unimplemented.
 
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
@@ -123,7 +140,8 @@ The product and oracle generator share the gate evaluator and its data; the gene
 4. Otherwise a registered list rule whose section was collected as exactly `[]` produces
    `empty_required_list`: requirement `confirmed` false (the ten AAD policies that need a
    matching Conditional Access policy; `docs/guides/model-development.md`).
-5. Otherwise there is no rule answer; the model decides.
+5. The historical offline scorer leaves undecided rows for recorded-model scoring. Current product
+   assessment uses the registered value rule or returns `rule_not_implemented`; no model decides.
 
 Explicit null sections retain their model/default semantics outside registered
 gate fields. A visibly closed gate makes the other dependent evidence moot, as
@@ -159,13 +177,10 @@ The route covers 102 policies (`len(policies)` in that inventory):
 | SharePoint | 8 | `1.1v1`, `1.2v1`, `1.3v1`, `2.1v1`, `2.2v1`, `3.1v1`, `3.2v1`, `3.3v2` |
 | Teams | 14 | `1.1v1`, `1.2v2`, `1.3v1`, `1.4v1`, `1.5v1`, `1.6v1`, `1.7v2`, `2.1v2`, `2.2v2`, `2.3v2`, `4.1v1`, `5.1v2`, `5.2v2`, `5.3v2` |
 
-Serving enables value rules by default. The hidden operational
-switch `AUDITEX_DISABLE_VALUE_RULES` turns it off: the value is stripped of whitespace and
-lower-cased, and any result that is not empty and not `0`, `false`, `no` or `off` restores the
-previous pre-check order (unset, empty, whitespace-only and those four values leave the rules on).
-Offline `evaluate_precheck` scoring always leaves value rules off,
-so historical pack scores remain comparable. The Power BI field rules
-remain registered for rollback but are bypassed when a value rule answers.
+Serving always enables the 102 registered value rules. `AUDITEX_DISABLE_VALUE_RULES` is a legacy option:
+accepted, ignored and warned once, just like model configuration flags. It cannot change answers.
+Offline `evaluate_precheck` scoring leaves value rules off to preserve historical scoring. Legacy
+field and empty-list prechecks remain available to that scorer.
 
 For a value-rule policy, a usable closed gate wins, then the rule's ordered read
 set determines missing or marked sections, then the value predicate answers before
@@ -192,7 +207,7 @@ written `2026-11-05` answers retain the earlier vocabulary and still validate.
 A1 accepts exactly 68 contract cells through `cited_variants` and `cell_contracts`: the
 exact citation variants for 64 cells, the two paired reason codes/texts
 for AAD 6.1 `orphan_sub_domain`, and the specified citation order for the three SS 7.x
-`preset_rule_unusable` cells. Catalogue-level contracts also cover held policies without registering them. Other
+`preset_rule_unusable` cells. Catalogue-level contracts also cover MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1. Other
 codes, texts, citation lists and citation orders are rejected.
 A met or not-met answer confirms the
 requirement and cites every section in the model case; not-met recommends baseline
@@ -221,9 +236,8 @@ this cause to an `absent_section` precheck with the exact constant `reason_text`
 one `optional_collection_not_enabled` limitation and no recommendation. The
 validator checks the policy, cited sections and matching projection reasons.
 Prompt evidence remains the exact `not_collected` marker. The optional-collection
-reason survives the hidden `AUDITEX_DISABLE_VALUE_RULES` kill switch: only absence
-markers carrying this reason are forwarded to the generic precheck; collected
-private evidence is not forwarded and value-rule evaluation remains disabled.
+reason is independent of legacy `AUDITEX_DISABLE_VALUE_RULES`, which is ignored. Only
+explicit optional-collection provenance selects it; value rules remain enabled.
 
 A rule that fails on collected evidence (an Auditex fault, not a tenant setting) answers
 the one catalogued `rule_failure` entry, added within `2026-11-05`: cell and reason code
@@ -392,12 +406,11 @@ The required `projection` envelope is separate from prompt evidence:
     the distinct plans.
   Row-level pack limitation IDs are unchanged.
 
-`--no-redaction` is accepted only for literal loopback IP addresses or
-`localhost` (case-insensitive, optional final dot), including dry-run. Other
-hosts are refused before bundle reads, output writes or endpoint calls. Redirects
-and proxy environment variables cannot move model requests to another destination.
-Default redaction also applies to model shadow requests. Prompt assembly, policy
-items and evidence-ID ordering retain the frozen v7 convention.
+Legacy `--no-redaction`, `--endpoint`, `--model` and `--shadow-model-on-precheck` options are
+accepted, ignored and hidden from assessment help. They and `AUDITEX_MODEL_*` configuration or
+`AUDITEX_DISABLE_VALUE_RULES` produce one evidence-free warning per invocation. Redaction stays
+enabled, including dry-run. Prompt assembly, policy items and evidence-ID ordering retain the
+frozen v7 convention; dry-run exports prompts locally without a model call.
 
 Projection reads inline `raw/<collector>.json`, offline `raw/sample_input.json`,
 or export-only `raw/<collector>/<operation>/summary.json`. Non-empty `chunk_files`
@@ -472,11 +485,8 @@ counts, shortened settings or renamed labels cannot recreate missing values.
 
 The synthetic offline demo projects `service_plans`, `tenant_id` and `privileged_users`
 (its 46 users are scanned, its seven administrators projected). Across 102 catalogue
-policies, 99 receive rule answers and three reach the model without a shadow flag:
-`MS.AAD.7.1v1`, `MS.AAD.7.2v1` and `MS.AAD.7.3v1`, which read only `privileged_users`
-(previously two sections, 102 rule rows and no model rows, while the projection budget
-applied to the 46-row source and withheld that section as `oversize`; before the shape
-gate, seven sections, 88 rule rows and 14 model rows). Its original
+policies, all 102 receive value-rule answers and none reports `rule_not_implemented`. No model is
+called. Its original
 anonymous SharePoint defaults, high-severity sharing findings and explorer score of
 65 remain intact. Missing SharePoint fields, unsupported CA scope, failed coverage,
 source bounds and sparse PowerShell records are withheld rather than upgraded.
@@ -502,14 +512,16 @@ relax the frozen model shape gate; collected sections can reach rules while rema
 | Power Platform | `dlp_policies`, `environment_creation`, `environment_list` and `tenant_isolation` have adapters. Environment `display_name` is discarded; only machine identifiers and rule settings are retained. `domain_settings` remains absent on the run path. |
 | Power BI | `powerbi_access_denied_reason`, `powerbi_license_found` and `powerbi_tenant_settings` have adapters for explicit access/licence state and tenant settings. |
 
-By default rule rows make zero model calls. `--shadow-model-on-precheck` records the
-ordinary model-client result under `model_shadow`, including failures and attempt
-hashes, without changing the rule verdict, comparison or totals. A shadow cannot
-contain another shadow or pre-check; its policy must match its parent. Invalid raw
-model text is not retained. Original model attempts and hashes belong to the nested
-shadow only; the parent remains a zero-attempt rule decision.
+All product rows make zero model calls. Shadow mode is removed; its legacy flag is ignored.
+Historical model/shadow records still validate under their recorded contracts, with the original
+attempt, hash and nested-policy consistency checks.
 
 #### Scope post-check
+
+
+Current rule-only assessment still collects the scope envelope for local review. Rule rows are excluded
+from row marking, so current `totals.scope_narrowed` is zero. The row-marking contract below describes
+historical model assessments, which remain readable; it does not extend marking to value-rule rows.
 
 ScubaGear's Rego ignores the scoping of a Conditional Access policy, so a policy applied to one office,
 one platform, one device filter or one client-application set still gives a clean verdict (the v9 oracle
@@ -528,12 +540,9 @@ version is bumped. The shipped table is `configs/scuba-scope-blind.json`
   3.1v1, and that test ignores location, platform and device conditions as blindly as 3.1v1 does, so a
   phishing-resistant policy scoped to one office makes 3.3v2 not applicable just as it satisfies 3.1v1. The
   post-check does not look behind a not-applicable answer.
-- **Reach today.** The projection withholds the whole Conditional Access section when an enabled policy carries a
-  non-empty `locations`, `platforms`, `devices` or service-principal key (a null or empty one, or one on a policy
-  that is not enabled, does not), so a verdict of met cannot yet rest on such a
-  policy: the model rows are `unknown` and no row is marked for them. Only a client-application-type set, a
-  named agent service principal or an `OR` grant can mark a row today. Location, platform and device scoping reach
-  the envelope record now, from the raw payload, and will mark rows as soon as the projection reads those fields.
+- **Current reach.** Saved Conditional Access evidence can populate the envelope from the projection or
+  raw payload. Current rule rows are never marked; `scope_narrowed` row metadata is retained only for
+  historical model assessments. The model projection's shape restrictions do not limit the private rule view.
 - **Which policies count.** An enabled policy (`State` `enabled`; report-only and disabled policies never
   decide) that could have decided the item. It must carry a grant of the item (`block`; a phishing-resistant-only
   authentication strength for 3.1v1 and 3.6v1; `mfa` or a general-MFA strength for 3.2v2; a compliant or
@@ -576,8 +585,8 @@ version is bumped. The shipped table is `configs/scuba-scope-blind.json`
   extension of the row (like the named `required_evidence_section_not_collected:<section>` limitations), never
   added to the catalogue's closed `limitation_ids`, to a prompt, to a pack row or to `model_shadow`.
   `totals.scope_narrowed` counts the marked rows (it is written whenever the check ran, `0` included).
-  Names are display names from the saved bundle, masked for e-mail local parts like the projection unless
-  `--no-redaction` (the mask runs first, so a cut cannot leave part of an address), and then cut to 200 characters.
+  Names are display names from the saved bundle, masked for e-mail local parts like the projection; legacy
+  `--no-redaction` is ignored (the mask runs first, so a cut cannot leave part of an address), and then cut to 200 characters.
 - **Envelope record.** `scope_post_check`, whatever the verdicts: `status` (`evaluated` or `not_evaluated`),
   `source` (`projection` when the Conditional Access section was projected, else `raw`: the bundle's own
   `conditional_access` payload, read through the projection's reader with its health checks and scan bounds, so

@@ -35,6 +35,8 @@ from azure_tenant_audit.model_assessment import validate_assessment
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 
 ROOT = Path(__file__).resolve().parents[1]
+IGNORED_OPTIONS_WARNING = ("Warning: legacy model options are ignored for assessment; the model layer is parked "
+                           "and redaction stays enabled.")
 FIXTURES = ROOT / "tests/fixtures/scubagear-export"
 PROVIDER = FIXTURES / "mocktenant-provider-export.json"
 REAL = FIXTURES / "mocktenant-realformat-export.json"
@@ -1523,13 +1525,15 @@ def test_internal_script_and_surface(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", [str(module_path), str(PROVIDER), "--output-dir", str(occupied),
                                   "--dry-run", "--model", "test-model"])
     assert module.main() == 2
-    assert capsys.readouterr().err.startswith("ScubaGear assessment failed: ")
+    warning, failure = capsys.readouterr().err.splitlines()
+    assert warning == IGNORED_OPTIONS_WARNING and failure.startswith("ScubaGear assessment failed: ")
     invalid = _save(tmp_path, {"Raw": [], "MetaData": {}}, "invalid.json")
     refused = tmp_path / "refused"
     monkeypatch.setattr(sys, "argv", [str(module_path), str(invalid), "--output-dir", str(refused),
                                   "--dry-run", "--model", "test-model"])
     assert module.main() == 2
-    assert capsys.readouterr().err.startswith("ScubaGear assessment failed: Invalid ScubaGear export")
+    warning, failure = capsys.readouterr().err.splitlines()
+    assert warning == IGNORED_OPTIONS_WARNING and failure.startswith("ScubaGear assessment failed: Invalid ScubaGear export")
     assert not refused.exists()
 
 
@@ -1573,10 +1577,10 @@ def test_non_dry_run_validates_without_model_request(tmp_path):
     result2 = assess_scubagear_export(PROVIDER, tmp_path / "clear", ModelConfig(model_name="test-model"),
                                       policies=["MS.AAD.3.3v2"], no_redaction=True)
     validate_assessment(result2)
-    with pytest.raises(ValueError, match="loopback model endpoint host"):
-        assess_scubagear_export(PROVIDER, tmp_path / "remote", ModelConfig(endpoint="https://example.invalid/v1",
-                               model_name="test-model"), no_redaction=True, dry_run=True)
-    assert not (tmp_path / "remote").exists()
+    remote = assess_scubagear_export(PROVIDER, tmp_path / "remote", ModelConfig(endpoint="https://example.invalid/v1",
+                                     model_name="test-model"), no_redaction=True)
+    assert remote["projection"]["redaction"]["enabled"] and remote["endpoint_host"] == "none"
+    validate_assessment(remote)
 
 
 @pytest.mark.parametrize('section,value', [
@@ -1885,9 +1889,9 @@ def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behavi
     monkeypatch.setattr(ModelClient, '_request', unavailable)
     result = assess_scubagear_export(export, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
                                      no_redaction=not redact)
-    assert set(calls) == {pid for pid, precheck in prechecks.items() if precheck is None}
-    assert len(calls) == len(set(calls))
-    assert {row['policy_id']: row.get('rule_precheck') for row in result['policies']} == prechecks
+    assert not calls
+    assert {row['policy_id']: row.get('rule_precheck') for row in result['policies']} == {
+        pid: detail if row_for(pid) else None for pid, detail in prechecks.items()}
 
 
 @pytest.mark.parametrize('operator', ['AND', 'OR', None])
@@ -1961,99 +1965,51 @@ def test_unaffected_export_prompt_hashes_match_pre_rule_view_fixture(tmp_path, s
     assert sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest() == expected
 
 
-@pytest.mark.parametrize("clear", [False, True])
-@pytest.mark.parametrize("transport", ["loopback", "in_process"])
-def test_non_dry_run_loopback_stub_and_comparisons(tmp_path, monkeypatch, clear, transport):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
-    spec = importlib.util.spec_from_file_location("existing_model_tests", ROOT / "tests/test_model_serving.py")
-    existing = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(existing)
-    selected = ["MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1", "MS.AAD.7.4v1", "MS.AAD.1.1v1"]
-    projection, _ = project_export(load_export(PROVIDER), policy_catalogue()['policies'])
-    answer = {"claims": [
-        {"id": "requirement_met", "status": "unknown", "value": None, "evidence_ids": ["e0"]},
-        {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
-        "limitations": ["required_evidence_section_not_collected"],
-        "recommendations": ["collect_missing_evidence_section"]}
-    answers = []
-    for pid, value in zip(selected, (True, False, True, True, False)):
-        case = existing.build_case(pid, projection, 'unused')
-        confirmed = deepcopy(answer)
-        confirmed["claims"][0].update(status="confirmed", value=value,
-                                      evidence_ids=[item['id'] for item in case['evidence']])
-        confirmed["claims"][1]["value"] = case['evidence'][0]['observed']['criticality']
-        confirmed["limitations"] = []
-        confirmed["recommendations"] = [] if value else ["review_policy_against_baseline_text"]
-        answers.append(confirmed)
-    actions = [(200, existing.envelope(item), 0) for item in answers]
-    if transport == 'in_process':
-        # Exercise the same assertions even on hosts that forbid binding a loopback socket.
-        calls = []
-        def reply(self, method, path, payload):
-            calls.append({'method': method, 'path': path, 'body': payload})
-            status, body, delay = actions.pop(0)
-            assert status == 200 and delay == 0
-            return body
-        monkeypatch.setattr(existing.ModelClient, '_request', reply)
-        server = nullcontext((ModelConfig().endpoint, calls))
-    else:
-        server = existing.stub_server(actions)
-    with server as (endpoint, calls):
-        result = assess_scubagear_export(PROVIDER, tmp_path / "stub", ModelConfig(endpoint=endpoint,
-            model_name="test-model"), results_path=RESULTS, policies=selected, no_redaction=clear)
-    validate_assessment(result)
-    assert (tmp_path / "stub/model_assessment.json").is_file()
-    assert result["scope_post_check"]["source"] == "projection"
-    comparisons = {row["policy_id"]: row["comparison"] for row in result["policies"]}
-    assert [comparisons[pid]["baseline_status"] for pid in selected] == [
-        "pass", "fail", "fail", "not_assessed", "not_assessed"]
-    # With value rules disabled, all five collected policies exercise the model route.
-    assert [comparisons[pid]["result"] for pid in selected[:3]] == ["agree", "agree", "disagree"]
-    assert any(call["method"] == "POST" for call in calls)
-    posts = sum(call["method"] == "POST" for call in calls)
-    assert posts == len(selected) and actions == []
-    assert [json.loads(call['body']['messages'][1]['content'])['policy_id']
-            for call in calls if call['method'] == 'POST'] == selected
-    assert all(row["validation_status"] == "valid" and row["attempts"] == 1
-               for row in result["policies"] if row["reason"] != "rule_precheck")
-    assert result["totals"]["invalid"] == 0
-    assert result["totals"]["answered"] == len(selected) and result["totals"]["rule_answered"] == 0
-
-
-def test_model_comparison_agreement_and_disagreement_without_socket(tmp_path, monkeypatch):
-    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+@pytest.mark.parametrize("baseline_status,expected", [("pass", "agree"), ("fail", "disagree")])
+def test_rule_export_comparisons_without_model(tmp_path, monkeypatch, baseline_status, expected):
     from auditex.model_serving import ModelClient
-    spec = importlib.util.spec_from_file_location("existing_model_tests", ROOT / "tests/test_model_serving.py")
-    existing = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(existing)
-    # Pin the model route explicitly; these user policies have collected fixture evidence.
-    selected = ["MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"]
-    projection, _ = project_export(load_export(PROVIDER), policy_catalogue()['policies'])
-    responses = []
-    for pid, value in zip(selected, (True, False, True)):
-        case = existing.build_case(pid, projection, 'unused')
-        answer = {"claims": [
-            {"id": "requirement_met", "status": "confirmed", "value": value,
-             "evidence_ids": [item['id'] for item in case['evidence']]},
-            {"id": "policy_criticality", "status": "confirmed",
-             "value": case['evidence'][0]['observed']['criticality'], "evidence_ids": ["e0"]}],
-            "limitations": [], "recommendations": [] if value else ["review_policy_against_baseline_text"]}
-        responses.append(existing.envelope(answer))
-    calls = iter(responses)
-    requested = []
-    def reply(self, method, path, payload):
-        requested.append(json.loads(payload['messages'][1]['content'])['policy_id'])
-        return next(calls)
-    monkeypatch.setattr(ModelClient, "_request", reply)
-    result = assess_scubagear_export(PROVIDER, tmp_path / "comparisons", ModelConfig(model_name="test-model"),
-                                     results_path=RESULTS, policies=selected)
+    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
+    pid = "MS.EXO.13.1v1"
+    raw = json.loads(PROVIDER.read_text())
+    raw['org_config'] = [{'Name': 'Synthetic', 'AuditDisabled': False}]
+    source = _save(tmp_path, raw)
+    results = tmp_path / 'verdicts.json'
+    results.write_text(json.dumps([{'PolicyId': pid, 'RequirementMet': baseline_status == 'pass',
+                                  'Criticality': 'Shall', 'Commandlet': ['Get-Mock']}]))
+    result = assess_scubagear_export(source, tmp_path / 'assessment', results_path=results, policies=[pid])
+    row = result['policies'][0]
+    assert row['reason'] == 'rule_precheck' and row['attempts'] == 0
+    assert row['comparison']['result'] == expected
     validate_assessment(result)
-    assert [row["comparison"]["result"] for row in result["policies"]] == ["agree", "agree", "disagree"]
-    assert result["totals"]["invalid"] == 0
-    assert result["totals"]["answered"] == 3 and result["totals"]["rule_answered"] == 0
-    assert all(row['attempts'] == 1 and row['reason'] is None for row in result['policies'])
-    assert list(calls) == []
-    assert requested == selected
+
+
+FORMERLY_HELD = ['MS.SECURITYSUITE.1.1v1', 'MS.SECURITYSUITE.6.1v1', 'MS.SECURITYSUITE.6.2v1']
+
+
+def test_export_formerly_held_policies_are_rule_rows_without_model(tmp_path, monkeypatch):
+    from auditex.model_serving import ModelClient
+    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
+    result = assess_scubagear_export(PROVIDER, tmp_path / 'assessment', results_path=RESULTS, policies=FORMERLY_HELD)
+    assert [row['policy_id'] for row in result['policies']] == FORMERLY_HELD
+    assert all(row['reason'] == 'rule_precheck' and row['rule_precheck']['class'] == 'value_rule'
+               and row['attempts'] == 0 for row in result['policies'])
+    validate_assessment(result)
+
+
+def test_export_policy_without_a_rule_is_uncovered_without_model(tmp_path, monkeypatch):
+    from auditex.model_serving import ModelClient
+    from azure_tenant_audit.value_rules import catalogue as rule_catalogue
+    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
+    # Every catalogue policy has a rule today: withdraw one to reach the uncovered path through the export flow.
+    original, withdrawn = rule_catalogue.row_for, FORMERLY_HELD[0]
+    monkeypatch.setattr(rule_catalogue, 'row_for', lambda pid: None if pid == withdrawn else original(pid))
+    result = assess_scubagear_export(PROVIDER, tmp_path / 'assessment', results_path=RESULTS, policies=FORMERLY_HELD)
+    rows = {row['policy_id']: row for row in result['policies']}
+    assert rows[withdrawn]['reason'] == 'rule_not_implemented'
+    assert rows[withdrawn]['comparison']['result'] == 'not_assessed'
+    assert all(rows[pid]['reason'] == 'rule_precheck' for pid in FORMERLY_HELD[1:])
+    assert (result['endpoint_host'], result['model_name']) == ('none', 'rules-only') and 'serving' not in result
+    validate_assessment(result)
 
 
 def _env_path(name: str) -> Path | None:

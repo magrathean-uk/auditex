@@ -252,8 +252,8 @@ def _serve_rule(policy, sections):
     projection.rule_sections = deepcopy(sections)
     projection.rule_views = {}
     records, prompts = _assess_policies(
-        projection, None, [policy], policy_catalogue(), "2026-11-05T00:00:00Z",
-        dry_run=False, baseline={}, scope=None, shadow_model_on_precheck=False, max_items=100)
+        projection, [policy], policy_catalogue(), "2026-11-05T00:00:00Z",
+        dry_run=False, baseline={}, scope=None, max_items=100)
     assert not prompts
     assert projection.rule_sections == sections
     return records[0]
