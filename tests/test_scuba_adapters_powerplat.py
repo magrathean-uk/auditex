@@ -21,6 +21,8 @@ from azure_tenant_audit.value_rules import assess
 
 FIXTURES = Path(__file__).parent / "fixtures"
 RAW = json.loads((FIXTURES / "powerplat/raw-cases.json").read_text())
+SAMPLE = FIXTURES / "powerplat/pp-vectors-sample.jsonl.xz"
+SAMPLE_META = RAW["_meta"]["vector_sample"]
 READS = {
     "environment_creation": ("power_platform", "environmentCreation"),
     "tenant_isolation": ("power_platform", "tenantIsolation"),
@@ -201,16 +203,72 @@ def test_inverter_still_rejects_unmapped_invalid_tenant_ids(tenant):
 
 
 def vector_rows():
-    for fixture, prefix in (("value-rules/vectors-v2.jsonl.xz", "MS.POWERBI"),
-                            ("powerplat/pp-vectors-sample.jsonl.xz", "MS.POWERPLATFORM")):
-        with lzma.open(FIXTURES / fixture, "rt") as handle:
-            for line in handle:
-                row = json.loads(line)
-                if row["policy"].startswith(prefix):
-                    yield row
+    with lzma.open(SAMPLE, "rt") as handle:
+        for line in handle:
+            yield json.loads(line)
 
 
 VECTORS = list(vector_rows())
+
+
+def assert_allowed_origin(row):
+    assert isinstance(row["vector_id"], str) and row["vector_id"]
+    kind, source, split = row["source_kind"], row["source_file"], row["split"]
+    if kind == "constructed":
+        assert source == "constructed by build_vectors.py"
+        assert split is None
+    else:
+        assert kind in {"pack-train", "pack-validation", "packlic-train"}
+        assert source == "20261030-oracle-pack-v10/.../approved-cases.jsonl"
+        assert split == kind.rsplit("-", 1)[-1]
+    assert row["vector_id"].startswith(kind + ":")
+
+
+def test_fixture_provenance():
+    assert RAW["_meta"]["provenance"] == (
+        "constructed rows and pack train and validation rows from v3.9.1; "
+        "held-out test and pilot rows excluded")
+    assert SAMPLE_META["spec_version"] == "v3.9.1 FINAL"
+    assert len(SAMPLE_META["source_sha256"]) == 64
+    assert sha256(SAMPLE.read_bytes()).hexdigest() == SAMPLE_META["sha256"]
+    assert len(VECTORS) == SAMPLE_META["rows"] == 581
+    assert Counter(v["source_kind"] for v in VECTORS) == SAMPLE_META["by_source"] == {
+        "constructed": 516, "pack-train": 60, "pack-validation": 5}
+    assert Counter(v["policy"].split(".")[1] for v in VECTORS) == SAMPLE_META["by_area"] == {
+        "POWERBI": 376, "POWERPLATFORM": 205}
+    raw_rows = RAW["_meta"]["rows"]
+    expected_paths = {f"/raw/{collector}/{operation}"
+                      for collector, operations in RAW["raw"].items() for operation in operations}
+    expected_paths.update(f"/{group}/{i}" for group in ("failure_modes", "cases", "plans")
+                          for i in range(len(RAW[group])))
+    assert len(raw_rows) == len(expected_paths) == 46
+    assert {row["path"] for row in raw_rows} == expected_paths
+    assert Counter(row["source_kind"] for row in raw_rows) == {"constructed": 46}
+    ids = [row["vector_id"] for row in VECTORS + raw_rows]
+    assert len(ids) == len(set(ids))
+    for row in VECTORS + raw_rows:
+        assert_allowed_origin(row)
+    for row in raw_rows:
+        assert row["vector_id"] == (
+            "constructed:powerplat-1c:raw:" + row["path"].strip("/").replace("/", ":"))
+
+
+@pytest.mark.parametrize("changes", [
+    {"source_kind": kind, "vector_id": kind + ":forbidden"}
+    for kind in ("pack-test", "pbi-frozen", "pbi-diagnostic", "pbi-dropped",
+                 "aad-frozen", "ss6-frozen", "pbi-pack-train", "aad-pack-train")
+] + [
+    {"source_kind": "pack-train", "vector_id": "pack-train:wrong-split", "split": "validation"},
+    {"source_file": "20261104-aad-section-pilot-v2.1/sealed.jsonl"},
+    {"split": "train"},
+    {"source_file": "constructed by v391_vectors.py"},
+    {"vector_id": "pack-test:mismatched-id"},
+])
+def test_fixture_origin_rejects_forbidden_or_inconsistent_metadata(changes):
+    row = {"vector_id": "constructed:origin-probe", "source_kind": "constructed",
+           "source_file": "constructed by build_vectors.py", "split": None}
+    with pytest.raises(AssertionError):
+        assert_allowed_origin({**row, **changes})
 
 
 def supported_assessment(policy, sections):
@@ -223,7 +281,7 @@ def supported_assessment(policy, sections):
 
 
 @pytest.mark.parametrize("vector", VECTORS,
-                         ids=[f"{r['policy']}:{r['rule_cell']}:{i}" for i, r in enumerate(VECTORS)])
+                         ids=[r["vector_id"] for r in VECTORS])
 def test_vector_round_trip_and_verdict(tmp_path, vector):
     inverted = invert(vector["sections"])
     if isinstance(inverted, str):
@@ -244,19 +302,26 @@ def test_vector_round_trip_and_verdict(tmp_path, vector):
 def test_vector_counts_and_sample_contract(capsys):
     counts = defaultdict(Counter)
     cells = Counter()
+    exercised_cells = set()
     for vector in VECTORS:
+        cell = f"{vector['policy']}:{vector['rule_cell']}"
+        cells[cell] += 1
+        assert set(vector) == {"vector_id", "source_kind", "source_file", "split", "policy",
+                               "rule_cell", "rule_verdict", "rule_reason_code", "family_name", "sections"}
         result = invert(vector["sections"])
         count = counts[vector["policy"]]
         if isinstance(result, str):
             count["skipped:" + result] += 1
         else:
+            exercised_cells.add(cell)
             count["used"] += 1
             if supported_assessment(vector["policy"], vector["sections"]) is not None:
                 count["verdict_equal"] += 1
-        if vector["policy"].startswith("MS.POWERPLATFORM"):
-            assert set(vector) == {"policy", "rule_cell", "rule_verdict", "sections"}
-            cells[vector["policy"], vector["rule_cell"]] += 1
-    assert max(cells.values()) <= 6
+    assert max(count for cell, count in cells.items() if cell.startswith("MS.POWERPLATFORM.")) <= 6
+    assert dict(cells) == SAMPLE_META["by_cell"]
+    assert len(cells) == 154
+    assert exercised_cells == set(SAMPLE_META["exercised_cells"])
+    assert len(exercised_cells) == 108
     catalogue = json.loads((FIXTURES.parents[1] / "configs/scuba-policy-sections.json").read_text())["policies"]
     policies = {policy for policy in catalogue
                 if policy.startswith(("MS.POWERBI.", "MS.POWERPLATFORM."))}
@@ -334,7 +399,7 @@ def test_all_seven_rule_sections_and_model_view_unchanged(tmp_path):
         "environment_creation": [{"disableEnvironmentCreationByNonAdminUsers": True}],
         "tenant_isolation": [{"properties": {"isDisabled": False}}],
         "dlp_policies": [{"value": []}],
-        "environment_list": [{"EnvironmentName": "test", "IsDefault": False}],
+        "environment_list": [{"EnvironmentName": "powerplat-fixture-env", "IsDefault": False}],
         "powerbi_tenant_settings": [{"settingName": "PublishToWeb", "enabled": False}],
         "powerbi_license_found": True,
         "powerbi_access_denied_reason": "",
