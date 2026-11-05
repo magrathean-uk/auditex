@@ -348,7 +348,7 @@ def demo_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root / "halcyon-demo"
 
 
-def test_a_customer_pack_redacts_what_it_generates_and_still_verifies(demo_run: Path, tmp_path: Path) -> None:
+def test_a_customer_pack_redacts_everything_it_carries_and_still_verifies(demo_run: Path, tmp_path: Path) -> None:
     pack = tmp_path / "pack"
     write_enterprise_handoff_pack(demo_run, pack)
     assert verify_enterprise_handoff_pack(pack)["valid"] is True
@@ -363,8 +363,6 @@ def test_a_customer_pack_redacts_what_it_generates_and_still_verifies(demo_run: 
         relative = path.relative_to(pack).as_posix()
         text = path.read_text(encoding="utf-8")
         assert str(demo_run) not in text and str(demo_run.resolve()) not in text, relative
-        if relative.startswith("source-artifacts/") and relative != "source-artifacts/run-manifest.json":
-            continue  # verbatim, integrity-bound copies (decision pending product)
         leaked = [m for m in address.findall(text) if m.lower() not in orx.PUBLIC_ADDRESSES]
         assert not leaked, (relative, leaked[:3])
         loose = [
