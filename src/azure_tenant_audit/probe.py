@@ -28,7 +28,7 @@ from .findings import build_findings
 from .graph import GraphClient
 from .output import AuditWriter
 from .profiles import get_profile
-from .secret_hygiene import sanitize_token_claims
+from .secret_hygiene import redact_output, sanitize_token_claims
 
 SUPPORTED_PROBE_MODES = ("delegated", "app", "response")
 DEFAULT_COLLECTOR_SURFACES = ("identity", "security", "auth_methods", "intune", "sharepoint", "teams", "exchange")
@@ -117,6 +117,15 @@ def _subprocess_probe(command: list[str], *, timeout: int = 120) -> tuple[int, s
     return completed.returncode, completed.stdout, completed.stderr
 
 
+def _mask_toolchain_details(value: Any) -> Any:
+    """Mask readiness diagnostics after parsing; these are not collector evidence."""
+    if isinstance(value, dict):
+        return {redact_output(str(key)): _mask_toolchain_details(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_mask_toolchain_details(item) for item in value]
+    return redact_output(value) if isinstance(value, str) else value
+
+
 def _toolchain_row(
     *,
     name: str,
@@ -144,9 +153,9 @@ def _toolchain_row(
     if error_class:
         row["error_class"] = error_class
     if error:
-        row["error"] = error
+        row["error"] = redact_output(error)
     if details:
-        row["details"] = details
+        row["details"] = _mask_toolchain_details(details)
     return row
 
 

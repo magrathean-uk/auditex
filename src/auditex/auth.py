@@ -14,7 +14,7 @@ from azure_tenant_audit.auth_context import (
     default_auth_contexts_path,
 )
 from azure_tenant_audit.m365_home import m365_subprocess_kwargs
-from azure_tenant_audit.secret_hygiene import secure_write_json, secure_write_text
+from azure_tenant_audit.secret_hygiene import redact_output, secure_write_json, secure_write_text
 from azure_tenant_audit.utils import load_env_file
 
 from . import auth_runtime
@@ -179,7 +179,7 @@ def _pwsh_exchange_module_status() -> dict[str, Any]:
         "status": "blocked",
         "pwsh_path": pwsh_exe,
         "error_class": "module_not_found",
-        "error": stderr or stdout or f"return_code:{completed.returncode}",
+        "error": redact_output(stderr or stdout) or f"return_code:{completed.returncode}",
     }
 
 

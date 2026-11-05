@@ -8,7 +8,7 @@ import time
 from typing import Any, Callable, Optional
 
 from ..m365_home import m365_subprocess_kwargs
-from ..secret_hygiene import collect_sensitive_argv_values, redact_command_string, redact_text
+from ..secret_hygiene import collect_sensitive_argv_values, redact_command_string, redact_output
 from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, check_command, refusal_response
 
@@ -78,8 +78,8 @@ class M365CLIAdapter(Adapter):
                 "error_class": error_class,
                 "command": safe_command,
                 "return_code": return_code,
-                "stdout": redact_text(stdout, sensitive_values),
-                "stderr": redact_text(stderr, sensitive_values),
+                "stdout": redact_output(stdout, sensitive_values),
+                "stderr": redact_output(stderr, sensitive_values),
             }
 
         if not stdout.strip():
@@ -87,8 +87,8 @@ class M365CLIAdapter(Adapter):
                 "command": safe_command,
                 "error": "command_output_empty",
                 "error_class": "command_output_empty",
-                "stdout": redact_text(stdout, sensitive_values),
-                "stderr": redact_text(stderr, sensitive_values),
+                "stdout": redact_output(stdout, sensitive_values),
+                "stderr": redact_output(stderr, sensitive_values),
             }
 
         if self._looks_like_help_output(stdout):
@@ -96,8 +96,8 @@ class M365CLIAdapter(Adapter):
                 "command": safe_command,
                 "error": "command_output_invalid_help",
                 "error_class": "command_parse_error",
-                "stdout": redact_text(stdout, sensitive_values),
-                "stderr": redact_text(stderr, sensitive_values),
+                "stdout": redact_output(stdout, sensitive_values),
+                "stderr": redact_output(stderr, sensitive_values),
             }
 
         try:
@@ -107,8 +107,8 @@ class M365CLIAdapter(Adapter):
                 "command": safe_command,
                 "error": "command_output_parse_error",
                 "error_class": "command_parse_error",
-                "stdout": redact_text(stdout, sensitive_values),
-                "stderr": redact_text(stderr, sensitive_values),
+                "stdout": redact_output(stdout, sensitive_values),
+                "stderr": redact_output(stderr, sensitive_values),
             }
 
         response = self._normalize_payload(parsed)
@@ -186,7 +186,7 @@ class M365CLIAdapter(Adapter):
                         "status": status,
                         "stdout_bytes": len(stdout),
                         "stderr_bytes": len(stderr),
-                        "stdout_sample": redact_text(stdout, sensitive_values)[:500],  # redact first: a secret cut at the sample edge is not recognised
+                        "stdout_sample": redact_output(stdout, sensitive_values),
                     },
                 )
 
@@ -197,19 +197,19 @@ class M365CLIAdapter(Adapter):
                 log_event(
                     "command.failed",
                     "Exchange command failed",
-                    {"command": safe_command, "return_code": exc.returncode, "error": str(exc)},
+                    {"command": safe_command, "return_code": exc.returncode, "error": redact_output(str(exc), sensitive_values)},
                 )
             return {
                 "error": f"command_failed:{exc.returncode}",
                 "error_class": "command_error",
                 "command": safe_command,
-                "output": redact_text(str(exc.output), sensitive_values),
+                "output": redact_output(exc.output, sensitive_values),
             }
         except Exception as exc:  # noqa: BLE001
             if log_event:
                 log_event(
                     "command.failed",
                     "Exchange command exception",
-                    {"command": safe_command, "error": str(exc)},
+                    {"command": safe_command, "error": redact_output(str(exc), sensitive_values)},
                 )
-            return {"error": redact_text(str(exc), sensitive_values), "error_class": "command_exception", "command": safe_command}
+            return {"error": redact_output(str(exc), sensitive_values), "error_class": "command_exception", "command": safe_command}

@@ -23,6 +23,7 @@ from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import build_m365_scope_catalog
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.secret_hygiene import (
+    redact_output,
     sanitize_token_claims,
     secure_write_json,
     token_freshness as safe_token_freshness,
@@ -132,7 +133,7 @@ def _default_exchange_module_status() -> dict[str, Any]:
         "status": "blocked",
         "pwsh_path": pwsh_exe,
         "error_class": "module_not_found",
-        "error": stderr or stdout or f"return_code:{completed.returncode}",
+        "error": redact_output(stderr or stdout) or f"return_code:{completed.returncode}",
     }
 
 
@@ -215,7 +216,7 @@ class ProductAuthRuntime:
                 result["azure_cli"]["user_name"] = user.get("name")
                 result["azure_cli"]["user_type"] = user.get("type")
         else:
-            result["azure_cli"]["error"] = (azure.get("stderr") or azure.get("stdout") or "").strip()
+            result["azure_cli"]["error"] = redact_output((azure.get("stderr") or azure.get("stdout") or "").strip())
 
         if m365.get("payload"):
             payload = m365["payload"]
@@ -232,13 +233,13 @@ class ProductAuthRuntime:
                     }
                 )
         else:
-            result["m365"]["error"] = (m365.get("stderr") or m365.get("stdout") or "").strip()
+            result["m365"]["error"] = redact_output((m365.get("stderr") or m365.get("stdout") or "").strip())
             result["m365"]["authenticated"] = False
 
         if connections.get("payload") is not None:
             result["m365"]["saved_connections"] = connections.get("payload")
         elif connections.get("status") == "blocked":
-            result["m365"]["saved_connections_error"] = (connections.get("stderr") or connections.get("stdout") or "").strip()
+            result["m365"]["saved_connections_error"] = redact_output((connections.get("stderr") or connections.get("stdout") or "").strip())
 
         return result
 
@@ -246,14 +247,14 @@ class ProductAuthRuntime:
         self.adapters.load_local_auth_env()
         response = self.adapters.json_command(["m365", "connection", "list", "--output", "json"])
         if response["status"] == "blocked":
-            raise RuntimeError((response.get("stderr") or response.get("stdout") or "unable to list connections").strip())
+            raise RuntimeError(redact_output((response.get("stderr") or response.get("stdout") or "unable to list connections").strip()))
         return {"connections": response.get("payload") or []}
 
     def use_connection(self, name: str) -> dict[str, Any]:
         self.adapters.load_local_auth_env()
         response = self.adapters.json_command(["m365", "connection", "use", "--name", name, "--output", "json"])
         if response["status"] == "blocked":
-            raise RuntimeError((response.get("stderr") or response.get("stdout") or "unable to switch connection").strip())
+            raise RuntimeError(redact_output((response.get("stderr") or response.get("stdout") or "unable to switch connection").strip()))
         payload = response.get("payload")
         return payload if isinstance(payload, dict) else {"connectionName": name}
 
@@ -572,7 +573,7 @@ class ToolchainRuntime:
         result = self.adapters.run_json_command(command)
         if result["status"] != "supported":
             error = (result.get("stderr") or result.get("stdout") or result.get("error") or "").strip() or "version_check_failed"
-            return None, error
+            return None, redact_output(error)
         output = (result.get("stdout") or result.get("stderr") or "").strip()
         if not output:
             return None, "empty_version_output"
@@ -580,11 +581,11 @@ class ToolchainRuntime:
             try:
                 parsed = parser(output)
             except Exception as exc:  # noqa: BLE001
-                return None, str(exc)
+                return None, redact_output(str(exc))
             if not parsed:
                 return None, "empty_version_output"
-            return parsed, None
-        return output, None
+            return redact_output(parsed), None
+        return redact_output(output), None
 
     def tool_status(
         self,
@@ -639,7 +640,7 @@ class ToolchainRuntime:
             "status": "blocked",
             "path": None,
             "selector": str(self.select_python_script),
-            "error": (result.get("stderr") or result.get("stdout") or result.get("error") or "").strip() or "no_supported_python",
+            "error": redact_output((result.get("stderr") or result.get("stdout") or result.get("error") or "").strip()) or "no_supported_python",
         }
 
     def venv_status(self) -> dict[str, Any]:

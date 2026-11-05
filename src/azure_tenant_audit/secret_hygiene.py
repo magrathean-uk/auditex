@@ -27,7 +27,38 @@ SENSITIVE_KEY_RE = re.compile(
 )
 
 BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
-JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+JWT_RE = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]++\.[A-Za-z0-9_-]++\.[A-Za-z0-9_-]+")
+# Include guest UPNs (#EXT#), Unicode local parts and single-label UPN suffixes.
+_OUTPUT_EMAIL_RE = re.compile(
+    # Keep familiar diagnostic field labels; otherwise mask an ambiguous '=' with
+    # the local part, which may legitimately contain it.
+    # Apostrophes inside a name are allowed, but surrounding single quotes stay intact.
+    # Every atom that can continue a local part also blocks a fresh start.
+    # Slash is a URL path separator, not part of a diagnostic local part.
+    r"(?:(?<![\w.!#$%&'*+=?^`{|}~\\-])|(?<=\\[nrtbf]))"
+    r"(?P<field>(?i:SentTo|UserPrincipalName|UPN|EmailAddress|Email|Recipient|From|To)='?)?"
+    r"(?P<quote>'?)"
+    r'(?P<local>\\?"(?:\\u[0-9a-fA-F]{4}|[^"\\\r\n]){1,64}\\?"|'
+    r"(?:\\u[0-9a-fA-F]{4}|[\w.!#$%&*+=?^`{|}~-])"
+    r"(?:\\u[0-9a-fA-F]{4}|[\w.!#$%&'*+=?^`{|}~-]){0,63})"
+    r"@(?P<domain>[\w](?:[\w.-]{0,251}[\w])?)"
+)
+_OUTPUT_GUID_RE = re.compile(
+    r"(?P<label>(?:Trace ID|Correlation ID):[ \t]*)?"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])",
+    re.IGNORECASE,
+)
+# Decode only representations needed for identifier matching; never execute a
+# general escape decoder on arbitrary command output. One pass, no recursion.
+_OUTPUT_ENCODING_RE = re.compile(r"%40|%7b|%7d|%2d|\\u0040|&#64;|＠", re.IGNORECASE)
+_OUTPUT_ENCODINGS = {
+    "%40": "@", "%7b": "{", "%7d": "}", "%2d": "-",
+    r"\u0040": "@", "&#64;": "@", "＠": "@",
+}
+# 320 covers a plain 64-character local part plus a 253-character domain.
+# JSON can spell each local character as six bytes (\uXXXX); 2048 also covers
+# that and percent-encoded GUIDs at the cut, without scanning a whole dump.
+_OUTPUT_SAMPLE_MARGIN = 2048
 # ``key=value``, ``key: value`` and the JSON forms ``"key": "value"`` / ``'key':'value'``: the closing quote of the
 # key and a quoted value (which may hold spaces) are part of the match, so a JSON-keyed secret is not left behind.
 INLINE_SECRET_RE = re.compile(
@@ -132,6 +163,44 @@ def redact_text(value: str, sensitive_values: Iterable[str] | None = None) -> st
     redacted = JWT_RE.sub("***redacted-jwt***", redacted)
     redacted = INLINE_SECRET_RE.sub(lambda match: f"{match.group('prefix')}***redacted***", redacted)
     return redacted
+
+
+def redact_output(
+    value: str | bytes | None,
+    sensitive_values: Iterable[str] | None = None,
+    *,
+    limit: int | None = 500,
+) -> str:
+    """Mask diagnostic output, then bound it; never use on collected evidence rows.
+
+    Domains, punctuation and error wording remain useful. ``limit=None`` is for full
+    MCP command responses, which are not log samples and must not be clipped.
+    """
+    text = value or ""
+    clipped = limit is not None and len(text) > max(0, limit) + _OUTPUT_SAMPLE_MARGIN
+    if limit is not None:
+        text = text[:max(0, limit) + _OUTPUT_SAMPLE_MARGIN]
+    text = text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
+    text = _OUTPUT_ENCODING_RE.sub(lambda match: _OUTPUT_ENCODINGS[match[0].lower()], text)
+    redacted = redact_text(text, sensitive_values)
+
+    def mask_email(match: re.Match[str]) -> str:
+        # Package versions and the conventional Git SSH user are diagnostics.
+        version = match["domain"].replace(".", "").isdigit()
+        git_ssh = match["local"] == "git" and match["domain"].lower().startswith(("git", "ssh."))
+        if version or git_ssh:
+            return match[0]
+        return f"{match['field'] or ''}{match['quote']}***@{match['domain']}"
+
+    redacted = _OUTPUT_EMAIL_RE.sub(mask_email, redacted)
+    redacted = _OUTPUT_GUID_RE.sub(lambda match: match[0] if match['label'] else "<redacted-guid>", redacted)
+    if clipped:
+        # Masking can shrink the window below the requested limit. Discard its
+        # last token: the scan boundary may have cut an address before its '@'.
+        trailing = re.split(r"[\s,;:\"'<>()\[\]{}]", redacted)[-1]
+        if trailing:
+            redacted = redacted[:-len(trailing)]
+    return redacted if limit is None else redacted[:limit]
 
 
 def redact_argv(

@@ -9,9 +9,29 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 Model-development tooling (round 2 of the specialist-model programme) and an internal
 engine/product boundary rework. `CONTRACT_VERSION` stays `2026-10-22`; report, export and
-MCP behaviour is unchanged. Audit collection is not: the `identity_governance` collector
+MCP tool contracts are unchanged; command-response diagnostics are masked as described below.
+Audit collection changes too: the `identity_governance` collector
 gains two GET-only reads (the PIM role policies, "Collection (1.2.2.dev5)" below) and the
 bundle gains the `privileged_roles` artefact, both additive.
+
+### Command-output privacy
+
+- Mask e-mail and UPN local parts and dashed GUIDs in adapter audit-log samples,
+  adapter error dictionaries (`stdout`, `stderr`, `output`, `error`), doctor/auth errors
+  and toolchain probe details (including the capability matrix), alongside existing
+  credential redaction. These diagnostics are now clipped to 500 characters;
+  collected evidence and classification/parsing inputs retain their original values.
+- Mask full MCP command-response streams without clipping, preserving explicitly
+  supplied operator identifiers and resolved output/run paths so clients can chain
+  tools. Exemptions cannot start inside another e-mail local part; credential
+  redaction takes precedence over them.
+- Bound e-mail matching and make JWT matching linear, preventing crafted output
+  from stalling diagnostics. Inspect only a sample plus a fixed safety margin when
+  clipping, dropping the trailing non-delimiter run if the input exceeded that
+  window. Decode common address/GUID separators once and emit the decoded forms;
+  retain URL hosts and paths, numeric npm versions, conventional Git SSH addresses,
+  undashed hashes and labelled trace/correlation IDs. Graph request IDs retain the
+  ordinary dashed-GUID masking rule.
 
 ### Model projection correctness
 

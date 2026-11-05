@@ -91,9 +91,40 @@ a method check and write no per-call audit events, so Google bundles say
 collectors' use of list and get methods; the `dns_posture`, exposure and `power_platform`
 lookups use their own GET-only sessions rather than `GraphClient`, and the
 `probe` toolchain checks that start `pwsh` or `az` directly are outside the
-adapters; `command.completed` events keep a redacted sample of command output
-(redacted first and then cut to 500 characters, so a secret that straddles the cut is not
-left behind; JSON-keyed secrets such as `"client_secret": "..."` are redacted too).
+adapters.
+
+Command-output diagnostics mask credentials (including JSON-keyed secrets), e-mail
+and UPN local parts, and dashed GUIDs. This applies to `command.completed` samples,
+adapter error dictionaries (`stdout`, `stderr`, `output`, `error`), doctor/auth errors
+and toolchain probe details, including the `capability_matrix`. Each diagnostic is
+clipped to 500 characters after masking. Matching inspects at most the requested
+sample plus 2,048 characters: 320 covers an ordinary address, while the larger margin
+also covers a 64-character local part represented by JSON `\uXXXX` escapes and a
+253-character domain, or a percent-encoded GUID straddling the cut. If the input
+exceeds that window, its trailing non-delimiter run is dropped after masking so
+shrinking earlier matches cannot expose a partial identifier at the scan edge.
+E-mail local parts, including quoted ones, are bounded to 64 characters for matching.
+Common encoded separators (`%40`, `\u0040`, `&#64;`, fullwidth `＠`, `%7B`/`%7D`,
+`%2D`) are decoded once for masking, and those decoded forms are emitted, including
+in MCP responses. URL schemes, hosts and paths are retained around masked local
+parts; numeric npm versions, Git SSH addresses with user `git` and hosts starting
+with `git` or `ssh.`, undashed hashes and labelled `Trace ID:`/`Correlation ID:`
+values remain usable for support. Graph `request-id` and `client-request-id` labels
+remain visible; their values follow the ordinary dashed-GUID masking rule.
+Known limitations include double-encoded or unsupported separator forms (`%2540`,
+double-escaped `\\u0040`, `&#x40;`, `\x40`, `%u0040`), GUIDs immediately followed
+by a hexadecimal character, and e-mail local parts longer than 64 characters.
+
+Live MCP command-response streams are masked without clipping. Values explicitly
+supplied through `--tenant-name`, `--tenant-id`, `--out`, `--run-name`, `--target`,
+`--subject`, `--domain` and `--run-dir`, including resolved output/run paths, are
+preserved for tool chaining only where not preceded by an e-mail local-part
+character; an operator address does not exempt a suffix of another address.
+Credentials are redacted before those exemptions.
+Collected evidence and raw inputs to parsers and error classifiers retain their
+original values. This is a boundary for command diagnostics, not a guarantee that
+all other exception messages or API logs are anonymised.
+
 Customer packs contain no absolute path of the operator's machine and no file their manifest does not list
 (`verify-pack` reports `unexpected_file`); a symbolic link, or an unlisted file where the product reads, is an
 integrity mismatch and the pack is refused. The effective boundary against a mistake in any of these is the

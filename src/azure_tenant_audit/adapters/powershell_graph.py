@@ -9,7 +9,7 @@ import subprocess
 import time
 from typing import Any, Callable, Optional
 
-from ..secret_hygiene import redact_command_string, redact_text
+from ..secret_hygiene import redact_command_string, redact_output
 from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
 
@@ -45,6 +45,15 @@ class PowerShellGraphAdapter(Adapter):
             or ("sign in" in lowered and "denied" in lowered)
             or "connect-exchangeonline" in lowered
             or "unauthorized" in lowered
+        )
+
+    @staticmethod
+    def _looks_like_module_missing(text: str) -> bool:
+        lowered = text.lower()
+        return (
+            "microsoft365dsc module not installed" in lowered
+            or "cannot find path" in lowered
+            or "import-module" in lowered and "microsoft365dsc" in lowered and "not" in lowered
         )
 
     @staticmethod
@@ -178,12 +187,15 @@ class PowerShellGraphAdapter(Adapter):
                             "duration_ms": duration_ms,
                             "stdout_bytes": len(stdout),
                             "stderr_bytes": len(stderr),
-                            "stdout_sample": redact_text(stdout)[:500],  # redact first: a secret cut at the sample edge is not recognised
+                            "stdout_sample": redact_output(stdout),
                         },
                     )
 
             if result.returncode != 0 or self._looks_like_not_found(combined) or self._looks_like_auth_required(combined):
-                if self._looks_like_not_found(combined) and session is not None and not prelude:
+                module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
+                if module_missing:
+                    error_class = "module_not_found"
+                elif self._looks_like_not_found(combined) and session is not None and not prelude:
                     # Exchange/Teams cmdlets only exist inside a connected session.
                     error_class = "session_not_connected"
                 elif self._looks_like_not_found(combined):
@@ -194,12 +206,12 @@ class PowerShellGraphAdapter(Adapter):
                     error_class = "command_error"
                 completed(error_class)
                 return {
-                    "error": f"command_failed:{result.returncode}",
+                    "error": "module_not_found" if module_missing else f"command_failed:{result.returncode}",
                     "error_class": error_class,
                     "command": safe_command,
                     "return_code": result.returncode,
-                    "stdout": redact_text(stdout),
-                    "stderr": redact_text(stderr),
+                    "stdout": redact_output(stdout),
+                    "stderr": redact_output(stderr),
                 }
 
             if not stdout.strip():
@@ -208,8 +220,8 @@ class PowerShellGraphAdapter(Adapter):
                     "error": "command_output_empty",
                     "error_class": "command_output_empty",
                     "command": safe_command,
-                    "stdout": redact_text(stdout),
-                    "stderr": redact_text(stderr),
+                    "stdout": redact_output(stdout),
+                    "stderr": redact_output(stderr),
                 }
 
             try:
@@ -220,8 +232,8 @@ class PowerShellGraphAdapter(Adapter):
                     "error": "command_output_parse_error",
                     "error_class": "command_parse_error",
                     "command": safe_command,
-                    "stdout": redact_text(stdout),
-                    "stderr": redact_text(stderr),
+                    "stdout": redact_output(stdout),
+                    "stderr": redact_output(stderr),
                 }
 
             completed(None)
@@ -241,7 +253,7 @@ class PowerShellGraphAdapter(Adapter):
                 log_event(
                     "command.failed",
                     "PowerShell command failed",
-                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": str(exc)},
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": redact_output(str(exc))},
                 )
             return {"error": f"command_failed:{exc.returncode}", "error_class": "command_error", "command": safe_command}
         except Exception as exc:  # noqa: BLE001
@@ -249,6 +261,6 @@ class PowerShellGraphAdapter(Adapter):
                 log_event(
                     "command.failed",
                     "PowerShell command exception",
-                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": str(exc)},
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": redact_output(str(exc))},
                 )
-            return {"error": redact_text(str(exc)), "error_class": "command_exception", "command": safe_command}
+            return {"error": redact_output(str(exc)), "error_class": "command_exception", "command": safe_command}

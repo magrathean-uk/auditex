@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional
 
 from . import auth_context
 from .graph import GraphClient
-from .secret_hygiene import redact_argv, sanitize_token_claims
+from .secret_hygiene import redact_argv, redact_output, sanitize_token_claims
 
 
 SENSITIVE_CLI_ARGS = {"--client-secret", "--access-token"}
@@ -60,9 +60,9 @@ def acquire_azure_cli_access_token(
             log_event(
                 "auth.cli.token.failed",
                 "Azure CLI token acquisition failed.",
-                {"tenant_id": tenant_id or "organizations", "duration_ms": duration_ms, "error": message},
+                {"tenant_id": tenant_id or "organizations", "duration_ms": duration_ms, "error": redact_output(message)},
             )
-        raise RuntimeError(f"Azure CLI token fetch failed: {message}")
+        raise RuntimeError(f"Azure CLI token fetch failed: {redact_output(message)}")
 
     try:
         payload = json.loads(completed.stdout)

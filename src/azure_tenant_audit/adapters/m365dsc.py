@@ -35,15 +35,6 @@ class M365DSCAdapter(Adapter):
     def dependency_check(self) -> bool:
         return shutil.which("pwsh") is not None
 
-    @staticmethod
-    def _looks_like_module_missing(text: str) -> bool:
-        lowered = text.lower()
-        return (
-            "microsoft365dsc module not installed" in lowered
-            or "cannot find path" in lowered
-            or "import-module" in lowered and "microsoft365dsc" in lowered and "not" in lowered
-        )
-
     def compatibility_check(
         self,
         *,
@@ -121,10 +112,7 @@ class M365DSCAdapter(Adapter):
         )
         response = powershell.run(wrapped, log_event=log_event)
         if response.get("error"):
-            stderr = str(response.get("stderr") or response.get("error") or "")
-            if self._looks_like_module_missing(stderr):
-                response["error_class"] = "module_not_found"
-                response["error"] = "module_not_found"
+            # PowerShell classifies the raw streams before masking and clipping.
             response.setdefault("source", "m365dsc")
             response.setdefault("command", command)
             response["module_compatibility"] = compatibility
