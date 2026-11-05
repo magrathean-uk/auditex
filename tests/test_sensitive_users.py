@@ -539,3 +539,313 @@ def test_simulated_live_run_reads_once_before_collection(tmp_path, monkeypatch, 
     for artifact in run.rglob("*"):
         if artifact.is_file() and artifact != private:
             assert CANARIES[0].encode() not in artifact.read_bytes().lower(), artifact.relative_to(run)
+
+
+SS21 = "MS.SECURITYSUITE.2.1v1"
+SS23 = "MS.SECURITYSUITE.2.3v1"
+
+
+def rule_input_bundle(tmp_path, addresses=CANARIES):
+    """A real private operator copy and constructed Exchange operation envelopes."""
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, "mocktenant", "sensitive-rules")
+    writer.write_sensitive_users(SensitiveUsers(addresses))
+    writer.write_bundle({"collectors": [], "overall_status": "ok"})
+    root = writer.run_dir
+    (root / "raw").mkdir(exist_ok=True)
+    operations = {
+        "acceptedDomains": [], "antiPhishRules": [], "eopProtectionPolicyRules": [],
+        "atpProtectionPolicyRules": [], "atpPolicyForO365": [],
+        "antiPhishPolicies": [{"Identity": "Default", "Name": "Default", "Enabled": True,
+                               "IsDefault": True, "EnableTargetedUserProtection": True,
+                               "TargetedUserProtectionAction": "Quarantine",
+                               "TargetedUsersToProtect": list(addresses)}],
+    }
+    (root / "raw/exchange_policy.json").write_text(json.dumps({
+        name: {"value": rows, "status": "ok"} for name, rows in operations.items()}))
+    return root
+
+
+def private_config(projection):
+    from auditex.scuba_projection import rule_policy_section
+
+    return rule_policy_section(projection, SS21, "scuba_config")
+
+
+@pytest.mark.parametrize("damage", [
+    "missing", "tampered", "count", "bool-count", "hmac", "false", "absent", "bad-shape",
+    "bad-metadata", "extra-metadata", "missing-key", "short-key", "directory", "symlink", "parent-symlink",
+    "key-symlink", "fifo", "unreadable", "oversize", "entries", "noncanonical",
+])
+def test_rule_input_rejects_mutation(tmp_path, monkeypatch, damage, capsys, caplog):
+    from auditex.scuba_projection import project_run
+    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+    from azure_tenant_audit.sensitive_users import MAX_ENTRIES
+
+    root = rule_input_bundle(tmp_path)
+    target, key_path = root / BUNDLE_PATH, root / KEY_PATH
+    manifest_path = root / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    metadata = manifest["operator_inputs"]["sensitive_users"]
+    if damage == "missing":
+        target.unlink()
+    elif damage == "tampered":
+        target.write_text(CANARIES[0] + "\n")
+    elif damage in {"count", "bool-count", "hmac", "false"}:
+        field, value = {"count": ("count", 1), "bool-count": ("count", True),
+                        "hmac": ("hmac_sha256", "0" * 64), "false": ("supplied", False)}[damage]
+        metadata[field] = value
+    elif damage == "absent":
+        manifest.pop("operator_inputs")
+    elif damage == "bad-shape":
+        manifest["operator_inputs"] = []
+    elif damage == "bad-metadata":
+        manifest["operator_inputs"]["sensitive_users"] = []
+    elif damage == "extra-metadata":
+        metadata["unexpected"] = True
+    elif damage == "missing-key":
+        key_path.unlink()
+    elif damage == "short-key":
+        key_path.write_bytes(b"short")
+    elif damage in {"directory", "symlink", "fifo"}:
+        target.unlink()
+        if damage == "directory":
+            target.mkdir()
+        elif damage == "fifo":
+            os.mkfifo(target)
+        else:
+            target.symlink_to(root / "run-manifest.json")
+    elif damage == "parent-symlink":
+        private = root / "operator-inputs"
+        moved = tmp_path / "outside-private"
+        private.rename(moved)
+        private.symlink_to(moved, target_is_directory=True)
+    elif damage == "key-symlink":
+        key_path.unlink()
+        key_path.symlink_to(target)
+    elif damage == "unreadable":
+        original = os.open
+
+        def denied(path, *args, **kwargs):
+            if str(path) == "sensitive-users.txt":
+                raise PermissionError("constructed sanitisation canary " + CANARIES[0])
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", denied)
+    elif damage == "oversize":
+        target.write_bytes(b"x" * (MAX_BYTES + 1))
+    elif damage == "entries":
+        target.write_text("a@b.invalid\n" * (MAX_ENTRIES + 1))
+    elif damage == "noncanonical":
+        target.write_text("\n".join(reversed(CANARIES)) + "\n")
+    manifest_path.write_text(json.dumps(manifest))
+    projection = project_run(root)
+    assert private_config(projection) == NOT_COLLECTED
+    outcome = projection.report["sections"]["scuba_config"]["synthesis"]["policies"][SS21]
+    assert outcome == ("oversize" if damage in {"oversize", "entries"} else "operator_input_required")
+    captured = capsys.readouterr()
+    public = json.dumps([projection, projection.views, projection.report]) + captured.out + captured.err + caplog.text
+    assert all(address not in public for address in CANARIES)
+
+
+def test_rule_input_private_capture_ignores_model_budgets_and_never_enters_gate(tmp_path, monkeypatch):
+    from auditex import scuba_projection as module
+    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+
+    addresses = tuple(f"private-{i:04}@example.invalid" for i in range(100))
+    root = rule_input_bundle(tmp_path, addresses)
+    for name in ("_seen_shape", "_oversize"):
+        original = getattr(module, name)
+
+        def guarded(*args, _original=original, **kwargs):
+            assert not any(address in repr(args) for address in addresses)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, guarded)
+    for redact in (True, False):
+        # Avoid raw tenant-policy canaries: this check isolates the operator copy.
+        (root / "raw/exchange_policy.json").unlink(missing_ok=True)
+        projection = module.project_run(root, redact=redact, max_items=1, max_chars=10)
+        assert private_config(projection) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(addresses)}}}
+        assert module.policy_section(projection, SS21, "scuba_config") == NOT_COLLECTED
+        public = json.dumps([projection, projection.views, projection.report, projection.rule_sections])
+        assert all(address not in public for address in addresses)
+        assert module.rule_policy_section(projection, SS23, "scuba_config") == NOT_COLLECTED
+
+
+def test_rule_input_does_not_consume_extra_private_files_or_unmanifested_input(tmp_path, monkeypatch):
+    from auditex.scuba_projection import project_run
+    from azure_tenant_audit.bundle_integrity import build_bundle_hash_manifest, verify_bundle_hashes
+
+    root = rule_input_bundle(tmp_path)
+    before = project_run(root)
+    (root / "bundle-hashes.json").write_text(json.dumps(build_bundle_hash_manifest(root)))
+    extra = root / "operator-inputs/unrelated.txt"
+    extra.write_text("unrelated-private-canary@example.invalid\n")
+    after = project_run(root)
+    assert after == before and after.views == before.views and after.rule_views == before.rule_views
+    assert extra.relative_to(root).as_posix() in verify_bundle_hashes(root)["unlisted"]
+    manifest_path = root / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.pop("operator_inputs")
+    manifest_path.write_text(json.dumps(manifest))
+    baseline = project_run(root)
+    # False / absent metadata must not open any private file and must preserve
+    # all public bytes, including the existing synthesis record and prompt view.
+    original = os.open
+
+    def denied(path, *args, **kwargs):
+        assert "operator-inputs" not in str(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", denied)
+    manifest["operator_inputs"] = {"sensitive_users": {"supplied": False}}
+    manifest_path.write_text(json.dumps(manifest))
+    absent = project_run(root)
+    assert json.dumps([absent, absent.views, absent.report], sort_keys=True) == json.dumps(
+        [baseline, baseline.views, baseline.report], sort_keys=True)
+
+
+@pytest.mark.parametrize("action,cell", [("Quarantine", "policy_field_unusable"),
+                                         ("NoAction", "no_qualifying_policy")])
+def test_rule_input_assessment_replay_and_all_public_outputs_are_private(
+    tmp_path, monkeypatch, capsys, caplog, action, cell,
+):
+    from copy import deepcopy
+    import shutil
+    from auditex import scuba_projection as module
+    from auditex.model_serving import ModelClient, assess_run, assess_scubagear_export, policy_catalogue
+    from auditex.scubagear_export import load_export, project_export
+    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.value_rules import assess
+
+    caplog.set_level("DEBUG")
+    root = rule_input_bundle(tmp_path)
+    operations_path = root / "raw/exchange_policy.json"
+    operations = json.loads(operations_path.read_text())
+    operations["antiPhishPolicies"]["value"][0]["TargetedUserProtectionAction"] = action
+    operations_path.write_text(json.dumps(operations))
+    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
+    projection = module.project_run(root)
+    sections = deepcopy(projection.rule_sections)
+    sections["scuba_config"] = private_config(projection)
+    assert assess(SS21, sections)["cell"] == cell
+    public_outputs = [projection, projection.views, projection.report]
+    result = assess_run(root, policies=[SS21, SS23])
+    validate_assessment(result)
+    assert result["policies"][0]["rule_precheck"]["cell"] == cell
+    assert result["policies"][1]["rule_precheck"]["cell"] == "section_not_collected"
+    public_outputs.append(result)
+    public_outputs.append(assess_run(root, policies=[SS21], dry_run=True))
+    replay = tmp_path / "offline-replay"
+    shutil.copytree(root, replay)
+    replay_result = assess_run(replay, policies=[SS21, SS23])
+    assert replay_result["policies"] == result["policies"]
+    public_outputs.append(replay_result)
+    # Export configuration remains provider-owned. Adjacent bundle inputs must
+    # never get imported; today's export withholding and public outputs stay intact.
+    provider = json.loads(Path("tests/fixtures/scubagear-export/mocktenant-provider-export.json").read_text())
+    provider.update({section: deepcopy(value) for section, value in sections.items()
+                     if section != "scuba_config"})
+    provider["scuba_config"] = private_config(projection)
+    export_path = tmp_path / "provider.json"
+    export_path.write_text(json.dumps(provider))
+    exported, extra = project_export(load_export(export_path), policy_catalogue()["policies"])
+    public_outputs.extend([exported, exported.views, exported.report, extra])
+    export_result = assess_scubagear_export(export_path, tmp_path / "export-assessment", policies=[SS21])
+    validate_assessment(export_result)
+    public_outputs.append(export_result)
+    public_outputs.append(assess_scubagear_export(
+        export_path, tmp_path / "export-dry", policies=[SS21], dry_run=True))
+    captured = capsys.readouterr()
+    text = json.dumps(public_outputs) + captured.out + captured.err + caplog.text
+    assert all(address not in text for address in CANARIES)
+    # Synthetic source evidence and the explicitly private copies are the only
+    # exemptions; assessment JSON, prompts, adapter sidecars and logs are scanned.
+    exemptions = {export_path, operations_path, replay / "raw/exchange_policy.json",
+                  root / BUNDLE_PATH, root / KEY_PATH, replay / BUNDLE_PATH, replay / KEY_PATH}
+    for artifact in tmp_path.rglob("*"):
+        if artifact.is_file() and artifact not in exemptions:
+            assert all(address.encode() not in artifact.read_bytes().lower() for address in CANARIES), artifact
+
+
+def test_rule_input_verified_configuration_reaches_every_compatible_vector_cell(tmp_path, record_property):
+    """Replay existing synthetic/train/validation vectors through the real list loader.
+
+    Raw rule evidence is supplied directly, as in the vector harness. This is
+    deliberately distinct from collection: the current collector and adapter
+    do not supply TargetedUsersToProtect. Four malformed/empty config cells
+    cannot be produced by a verified canonical list; the ordinary s5 harness
+    still tests them, together with all other SS 2.1 cells.
+    """
+    from collections import Counter
+    from copy import deepcopy
+    import lzma
+    from auditex.scuba_projection import project_run
+    from azure_tenant_audit.value_rules import assess, cells_for
+    from test_value_rules_s4 import _serve_rule
+
+    source = Path("tests/fixtures/value-rules/vectors-s5.jsonl.xz")
+    counts = Counter()
+    with lzma.open(source, "rt") as handle:
+        rows = [row for line in handle if (row := json.loads(line))["policy"] == SS21]
+    for index, vector in enumerate(rows):
+        config = vector["sections"].get("scuba_config")
+        if not isinstance(config, dict):
+            continue
+        block = config.get("SecuritySuite", {}).get(SS21, {}) if isinstance(config.get("SecuritySuite"), dict) else {}
+        if not block and isinstance(config.get("Defender"), dict):
+            block = config["Defender"].get("MS.DEFENDER.2.1v1", {})
+        values = block.get("SensitiveUsers") if isinstance(block, dict) else None
+        if not isinstance(values, list):
+            continue
+        local = tmp_path / str(index)
+        local.mkdir()
+        input_path = local / "input.txt"
+        input_path.write_text(json.dumps(values))
+        try:
+            supplied = load_sensitive_users(input_path)
+        except SensitiveUsersError:
+            continue
+        root = rule_input_bundle(local, supplied.addresses)
+        sections = deepcopy(vector["sections"])
+        sections["scuba_config"] = private_config(project_run(root))
+        record = assess(SS21, sections)
+        served = _serve_rule(SS21, sections)
+        assert (record["cell"], record["verdict"], record["reason_code"], record["reason_text"]) == (
+            vector["rule_cell"], vector["rule_verdict"], vector["rule_reason_code"], vector["rule_reason_text"])
+        assert served["rule_precheck"]["cell"] == record["cell"]
+        counts[record["cell"]] += 1
+    assert len(rows) == 264
+    assert set(counts) == set(cells_for(SS21)) - {
+        "config_shape_unusable", "config_list_unusable", "config_list_empty", "config_entry_unusable"}
+    assert {"default_qualifies", "custom_qualifies", "preset_qualifies", "no_qualifying_policy"} <= counts.keys()
+    record_property("sensitive_users_vector_counts", json.dumps({
+        "total": sum(counts.values()), "by_cell": dict(sorted(counts.items()))}))
+
+
+def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path, monkeypatch, capsys, caplog):
+    """Test the downstream privacy boundary without pretending collection supplies targets."""
+    from auditex.model_serving import assess_run
+    from auditex.scuba_projection import project_run
+    from azure_tenant_audit.model_assessment import validate_assessment
+
+    root = rule_input_bundle(tmp_path)
+    projection = project_run(root)
+    # Only this constructed rule evidence has targets. The production adapter
+    # deliberately omits them; the separate replay test pins that limitation.
+    projection.rule_sections["anti_phish_policies"][0]["TargetedUsersToProtect"] = list(CANARIES)
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda *args, **kwargs: projection)
+    result = assess_run(root, policies=[SS21])
+    validate_assessment(result)
+    assert result["policies"][0]["rule_precheck"]["cell"] == "default_qualifies"
+    dry = assess_run(root, policies=[SS21], dry_run=True)
+    captured = capsys.readouterr()
+    public = json.dumps([result, dry, projection, projection.views, projection.report])
+    public += captured.out + captured.err + caplog.text
+    assert all(address not in public for address in CANARIES)
+    for artifact in root.rglob("*"):
+        if artifact.is_file() and artifact.relative_to(root).as_posix() not in {
+            BUNDLE_PATH, KEY_PATH, "raw/exchange_policy.json"}:
+            assert all(address.encode() not in artifact.read_bytes().lower() for address in CANARIES), artifact

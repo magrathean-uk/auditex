@@ -7,8 +7,10 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Let SS 2.1 decide from verified SensitiveUsers operator input in its private in-memory rule view, including offline bundle replay; retain existing not-assessed outcomes for missing or unusable input. Addresses never enter model views or assessment outputs. Current collection still excludes `TargetedUsersToProtect`, so proving met from target membership needs a separate collector/privacy change. SS 2.3 still needs PartnerDomains; the ScubaGear export path is unchanged.
+
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
-- Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`; in-memory projection integration remains a separate product change.
+- Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`. SS 2.1 private rule-view integration is described above.
 
 - Skip the Teams reads and say so when no Teams certificate token is available, instead of failing the run; record teams_token_unavailable as a collector error class; with a token, messaging and app setup are skipped as teams_powershell_not_supported.
 - Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.
