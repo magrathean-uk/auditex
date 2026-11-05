@@ -1,7 +1,9 @@
 """Offline run-path contract for Defender's in-memory rule evidence."""
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
+from hashlib import sha256
 import importlib
 import json
 from pathlib import Path
@@ -63,8 +65,77 @@ def operation(root, name, rows, **metadata):
 
 
 @pytest.fixture(scope="module")
-def cases():
+def fixture_document():
     return json.loads((Path(__file__).parent / "fixtures/defender/exchange-defender-ops.json").read_text())
+
+
+@pytest.fixture(scope="module")
+def cases(fixture_document):
+    # Store only verbatim, traceable vector objects. Adapter edge cases are local
+    # constructions, so they cannot accidentally copy an unidentified pack row.
+    result = {}
+    for name, payload in fixture_document.items():
+        if name == "_meta":
+            continue
+        good = deepcopy(payload["good"])
+        absent = deepcopy(good[:1])
+        absent[0].pop("ExceptIfSentTo", None)
+        integer = deepcopy(good[:1])
+        if "State" in integer[0]:
+            integer[0]["State"] = 1
+        result[name] = {
+            "good": good,
+            "empty": [],
+            "absent_exceptif": absent,
+            "enum_as_int": integer,
+            "error_row": [{"error": "Synthetic failure", "error_class": "command_error"}],
+        }
+    return result
+
+
+def test_fixture_provenance_covers_every_stored_row(fixture_document, cases):
+    meta = fixture_document["_meta"]
+    assert meta["provenance"] == (
+        "constructed rows and pack train and validation rows from v3.9.1; "
+        "held-out test and pilot rows excluded"
+    )
+    assert meta["spec_version"] == "v3.9.1 FINAL"
+    assert meta["source"] == "value-rules-v391/vectors.jsonl"
+    assert len(meta["source_sha256"]) == 64
+    assert set(meta["rows"]) == set(cases) == set(meta["before"]["rows"])
+    counts = Counter()
+    before_counts = Counter()
+    for section, (name, _) in CONTRACT.items():
+        assert set(fixture_document[name]) == {"good"}
+        rows = fixture_document[name]["good"]
+        origins = meta["rows"][name]
+        before = meta["before"]["rows"][name]
+        assert len(origins) == len(rows) == len(before["good"])
+        assert set(before) == set(cases[name])
+        for variant, originals in before.items():
+            assert len(originals) == len(cases[name][variant])
+            before_counts.update(record["source_kind"] for record in originals)
+        for row, origin in zip(rows, origins, strict=True):
+            kind = origin["source_kind"]
+            assert kind in {"constructed", "pack-train", "pack-validation", "packlic-train"}
+            assert origin["vector_id"].startswith(f"{kind}:")
+            if kind == "constructed":
+                assert origin["source_file"] == "constructed by build_vectors.py"
+                assert "split" not in origin
+            else:
+                assert origin["source_file"].startswith("20261030-oracle-pack-v10/")
+                assert origin["split"] == ("validation" if kind == "pack-validation" else "train")
+            assert origin["section"] == section
+            assert type(origin["section_row"]) is int and origin["section_row"] >= 0
+            assert origin["policy"].startswith("MS.SECURITYSUITE.")
+            assert origin["rule_cell"] and origin["rule_reason_code"]
+            content = json.dumps(row, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+            assert sha256(content).hexdigest() == origin["row_sha256"]
+            counts[kind] += 1
+    assert counts == meta["after_by_source_kind"]
+    assert sum(counts.values()) == 30
+    assert before_counts == meta["before"]["by_source_kind"]
+    assert sum(len(rows) for variants in cases.values() for rows in variants.values()) == 78
 
 
 @pytest.fixture
