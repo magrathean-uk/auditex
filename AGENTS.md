@@ -1,79 +1,100 @@
 # Auditex agent guide
 
-Auditex is a read-only Microsoft 365 and Google Workspace tenant-audit toolkit: a Python
-CLI (`auditex`, `azure-tenant-audit`) and a local MCP server (`auditex-mcp`) that collect
-evidence, normalise it, derive findings, and produce a validated run bundle plus reports,
-exports and customer packs. Remote: `magrathean-uk/auditex` (public). Python 3.11+.
+Auditex is a read-only Microsoft 365 and Google Workspace tenant-audit toolkit: a Python CLI
+(`auditex`, `azure-tenant-audit`) and a local MCP server (`auditex-mcp`) that collect evidence,
+normalise it, answer the CISA SCuBA baselines with deterministic value rules, and write a validated
+run bundle plus reports, exports and customer packs. Remote `magrathean-uk/auditex` (public).
+Python 3.11+. Claude Code reads this file through `CLAUDE.md`; Codex reads it directly.
 
-## Start here
+## Boundaries (never cross)
 
-`README.md` and `docs/development/runbook.md` for setup and commands. Before changing a
-surface, read its doc: `docs/reference/output-contract.md` (bundle artifacts),
-`docs/reference/security-privacy.md` (data handling), `docs/provenance/provenance.md`
-(third-party reuse). The architecture is documented in `docs/`; this file is the
-environment, safety and command contract. Check `git status --short` before editing.
+- Audit, probe, report, export, MCP audit tools and customer-pack flows never write to a tenant and
+  never read message bodies or file content. A write-capable scope never authorises a mutating
+  call; record the blast radius of any scope you add.
+- Response features stay off unless `AUDITEX_ENABLE_RESPONSE` is truthy (lab only).
+- Never commit credentials, tokens, OAuth caches, keys, live tenant evidence, held-out or sealed
+  evaluation rows, workstation paths (`/Users/...`, `/Volumes/...`) or session URLs and trailers.
+  The repo is public; everything else may go in it. No external telemetry.
+- Keep local and git-ignored: `.venv/`, `.secrets/`, `outputs/`, `audit-output/`, `site/`,
+  `.pytest_cache/`, tenant-bootstrap run and secret folders. Outputs holding live evidence stay on
+  the encrypted internal disk.
+- CLI parsers use `allow_abbrev=False`; every flag that can carry a secret is in the argv redaction
+  list with a test (1.2.2 and 1.2.3 fixed a leak through abbreviated flags).
+- `tests/conftest.py` redirects auth and secret paths to a temp dir; keep new ones behind it.
+- Legal files are owner-controlled. Product page `https://magrathean.uk/solutions/auditex/`, support
+  `contact+auditex@magrathean.uk`; do not reintroduce retired domains, `/apps/` paths or `contact@`.
+
+## Architecture
+
+- `src/azure_tenant_audit/` is the M365 engine (collection, normalisation, value rules, findings,
+  bundle finalisation, the `azure-tenant-audit` CLI) and never imports from `auditex`.
+- `src/auditex/` is the product layer (the `auditex` CLI, guided flows, Google Workspace provider,
+  reporting, exporters, compare and drift, MCP server: `mcp_registry.py`, `mcp_server.py`).
+- SCuBA answers come only from `src/azure_tenant_audit/value_rules/` and
+  `configs/scuba-value-rules.json` (spec v3.9.1). There is no model fallback; the local model and
+  the template explainer never decide a verdict.
+- Collection scope is data-driven from `configs/`. Shipped content (`configs/`, `profiles/`,
+  `schemas/`, `docs/`, `agent/`, `skills/`, `assets/`, `examples/`) is listed in both
+  `pyproject.toml` `[tool.setuptools.data-files]` and `shipped_content.py`; a test checks they match.
 
 ## Commands
 
-Run commands directly; Clean Development 0.6.0 routing is loaded by `~/dev/machine/env.zsh`, e.g. `make test`.
-
 ```sh
-make install                 # editable install into .venv (never system Python)
-make lint                    # compileall src and tests
-make test                    # pytest via scripts/select-python.sh
-.venv/bin/python -m pytest tests/test_cli.py -k offline   # one test
-make contract-smoke          # recreate outputs/ci-contract, validate bundle
-auditex doctor --json ; auditex-mcp --help
+make install                          # editable install into .venv (may be a link; see Environment)
+.venv/bin/python -m pytest tests/test_cli.py -k offline   # focused tests while iterating
+make lint                             # compileall only, not a style check
+make test                             # full suite
+make contract-smoke                   # rebuild outputs/ci-contract and validate the bundle
+python3 scripts/generate-rule-packs.py   # after rule changes; a test checks drift
+make release-check                    # lint, test, smoke, drift, taint scan, gitleaks
+gitleaks git --pre-commit --staged --redact --no-banner
 ```
 
-`pytest.ini` sets `pythonpath = src`. Run the contract smoke when changing collectors,
-normalisation, findings, reports, schemas, evidence references, API inventory or
-customer-pack behaviour. After rule changes run `python3 scripts/generate-rule-packs.py`
-(a test checks for drift). State any skipped check and its blocker.
+`pytest.ini` sets `pythonpath = src`. Setup and the full command list: `docs/development/runbook.md`.
 
-## Architecture (map; detail in docs/)
+## Checks by changed surface
 
-Two packages under `src/` with a one-way dependency: `azure_tenant_audit/` is the M365
-engine (collection, normalisation, findings, bundle finalisation, the
-`azure-tenant-audit` CLI) and must not import from `auditex`; `auditex/` is the product
-layer (the `auditex` CLI, guided flows, Google Workspace provider, reporting, exporters,
-compare/drift, MCP server). Collection scope is data-driven from `configs/`. Shipped
-content (`configs/`, `profiles/`, `schemas/`, `docs/`, `agent/`, `skills/`, `assets/`,
-`examples/`) is packaged via `[tool.setuptools.data-files]` and resolved by
-`azure_tenant_audit/resources.py`; adding a shipped file updates both `pyproject.toml` and
-`shipped_content.py` (a test asserts they match). MCP tools: `auditex/mcp_registry.py`
-(specs, read-only annotations) and `auditex/mcp_server.py`.
+| Change | Required before merge |
+|---|---|
+| Collectors, normalisation, findings, reports, schemas, evidence refs, API inventory, customer packs | focused tests, `make contract-smoke`, independent review |
+| Value rules or rule configs | focused rule and vector tests, `generate-rule-packs.py` with no drift |
+| Shipped content | the shipped-content parity test |
+| CLI flags or argv handling | abbreviation and redaction tests |
+| Docs only | none beyond a read-through |
+| Release | `make release-check` |
 
-## Safety boundaries
+Merging into `main` also runs `make test` once per batch. State every skipped check and why.
 
-Public audit, probe, report, export, MCP audit tools and customer-pack flows must not
-write to production tenants and must not read message bodies or file content. Treat tenant
-evidence and credentials as confidential; never commit tokens, OAuth caches, keys, secrets
-or evidence; no external telemetry. Keep `.venv/`, `.secrets/`, `.pytest_cache/`,
-`outputs/`, `audit-output/`, `site/` and tenant-bootstrap run/secret folders local. A
-write-capable scope does not authorise a mutating operation; record its blast radius.
-Response features stay disabled unless `AUDITEX_ENABLE_RESPONSE` is truthy (lab only).
-`tests/conftest.py` redirects auth/secret paths to a temp dir; keep new ones behind it.
+## Read before changing
 
-## Legal and product URLs
+`docs/reference/output-contract.md` for bundle artifacts, `docs/reference/security-privacy.md` for
+data handling and redaction profiles, `docs/provenance/provenance.md` for third-party reuse,
+`docs/development/runbook.md` for setup and release. Read only the one your change touches.
 
-Legal files are owner-controlled. The product-site and support-address migration is done
-(1.1.0): the product page is `https://magrathean.uk/solutions/auditex/` and support is
-`contact+auditex@magrathean.uk`. The former product-site domains, the `/apps/` paths and the shared
-`contact@` address are retired for this product; do not reintroduce them. `CLAUDE.md` only imports
-this file.
+## Parallel work
 
-## Models
+- Check `git status --short` first. One writer per worktree; worktrees live outside the repo on
+  the external build volume (path in the operator plan) on branch `wt/<task>`, cut from current `main`.
+- One integrator merges into `main`, one branch at a time, then pushes `main` (fast-forward,
+  gitleaks over the new range; no test gate on the push itself). Nobody else pushes.
+- Independent review (a fresh session, ideally the other provider) is mandatory for collector
+  scope, schemas, customer packs, auth and anything touching secrets. Review a frozen commit against
+  the brief, not the author's summary. Two repair rounds, then re-scope.
+- Commits are signed and gitleaks-clean, one coherent change each, with plain subject lines.
+- Remove the worktree and branch after merge.
 
-Claude Code (Fable/Opus 5.5 for cross-cutting work, Sonnet 5.5 for routine, Haiku 5.5 for
-extraction) or Codex `gpt-6.1-sol`; `gpt-6-luna` for swarm exploration. Independent review
-of collector-scope, schema and customer-pack changes.
+## Environment and storage
 
-<!-- clean-development-policy:v4 (clean-development 0.6.0; canonical: bolyki-dev/clean-development/docs/policy-snippet.md) -->
-## Clean development (mandatory)
+Clean Development 0.6 routing is loaded by `~/dev/machine/env.zsh` in every shell; never wrap,
+override or unset it. Temp files go to `$TMPDIR`, throwaway builds to `$CLEAN_DEV_BUILDS`, caches
+where their variables point. Nothing is written into `~`, `~/dev` or this repo outside its
+git-ignored build directories. In internal mode, stop and ask before any download or build over
+5 GB. `.clean-development.json` (schema v2) lists the git-ignored `buildDirs` and `depDirs`; keep
+it accurate. No dot-folders in `~` or `~/dev`; `.env` files stay ignored and unread unless needed.
+`.venv` may be a link to `$DEVCACHE/venvs/auditex` on the external volume; when that volume is
+away, `rm .venv` and `make install` rebuild it locally.
 
-- Storage is routed for you: every zsh loads `~/dev/machine/env.zsh`; hooks pin the mode per session (`$CLEAN_DEV_MODE` is `external` when the 4TB is attached, else `internal`). Do not wrap commands, override or unset the routed variables.
-- Temp files go to `$TMPDIR` (session scratch, deleted at session end), throwaway build output to `$CLEAN_DEV_BUILDS`, caches wherever their variables point. Never write caches, builds or temp files into `~`, `~/dev` or this repo outside its git-ignored build directories.
-- Internal mode: before any download or build likely over 5 GB, stop and ask G (suggest waiting for the 4TB).
-- This repo's `.clean-development.json` (schema v2) lists its git-ignored `buildDirs`/`depDirs`; keep it accurate when the build layout changes.
-- No dot-folders in `~` or `~/dev`. `.env` files stay git-ignored; read them only when the task needs them; never commit them.
+## Completion report
+
+What behaviour changed; the commit or branch; each check run with its result; checks skipped and
+why; remaining risks or follow-ups. Keep it short; long logs stay in files.
