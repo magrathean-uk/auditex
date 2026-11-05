@@ -43,6 +43,7 @@ bundle gains the `privileged_roles` artefact, both additive.
   `authentication_method` evidence can still be withheld by the projection, those policies may answer not assessed until the
   rules read evidence directly. The hidden `AUDITEX_DISABLE_VALUE_RULES` switch turns the rules off operationally, and the offline
   `evaluate_precheck` scorer always leaves them off.
+- **Customer-facing wording now matches what runs today.** The model-assisted path is no longer called a second opinion; the README, docs and `auditex model` help say the rules answer the Power BI policies, `MS.AAD.3.4v1` and the rows caught by the gate, missing-evidence and empty-list checks, and the model answers the rows no rule covers, mark rules-only verdicts and the optional explainer role as planned and not built, and the output contract maps the customer term "not assessed" to the unchanged internal values.
 
 ### Collection (1.2.2.dev5)
 

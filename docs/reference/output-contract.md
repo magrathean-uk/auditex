@@ -86,6 +86,26 @@ validation retries (whose claims are unknown), and `skipped` counts policy IDs a
 from the catalogue (`policy_not_in_catalogue`). All 102 shipped policy items preserve
 their training text, including the intentionally empty Power Platform excerpt.
 
+**Customer term and internal values.** Customer-facing text says met, not met, not assessed and not applicable.
+The contract keeps the internal values and does not rename them. A row's `requirement_met` claim carries the
+`status` (`confirmed`, `inferred` or `unknown`) and `value` (`true`, `false` or null); `comparison.model_status`
+is `pass`, `fail` or null. The value-rule inventory (`configs/scuba-value-rules.json`) uses the cell outcomes
+`met`, `not_met` and `not_assessed` (its loader also accepts `not_applicable`). Mapping for rule rows, as the code writes it (the `requirement_met` and `comparison.model_status` columns hold for every row; a model row can carry other limitations and recommendations):
+
+| Customer term | `requirement_met` claim | `comparison.model_status` | Other fields |
+| --- | --- | --- | --- |
+| met | `confirmed`, `true` | `pass` | no limitation |
+| not met | `confirmed`, `false` | `fail` | recommendation `review_policy_against_baseline_text` |
+| not assessed | `unknown`, null | null | limitation `required_evidence_section_not_collected`, recommendation `collect_missing_evidence_section` |
+| not applicable | `inferred`, `true` | null | limitation `policy_not_applicable` |
+
+A model row that abstains (`unknown`), fails to answer (`invalid`) or is skipped has no customer verdict and reads
+as not assessed; the comparison `result` is `not_assessed` whenever the row has no `pass` or `fail` status or the
+baseline has none. That `result` value and the baseline's `not_assessed` status are the same customer term. The
+four verdict totals (`answered`, `unknown`, `invalid`, `skipped`) are internal counters and keep their names.
+Rules answer rows they cover with these values; the model still answers every other row today. A rule-set that
+decides every verdict, and an optional explainer role for the model, are planned and not part of this contract.
+
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
 The product and oracle generator share the gate evaluator and its data; the generator applies the first two classes below (closed gate, absent section) and leaves the field-level and empty-list classes off, while serving enables all four. In order:

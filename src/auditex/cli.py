@@ -602,7 +602,7 @@ def _build_model_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="model_command", required=True)
     commands.add_parser("sources", help="List pinned model and dataset reference metadata.")
-    assess = commands.add_parser("assess", help="Write an optional model assessment without changing findings.")
+    assess = commands.add_parser("assess", help="Write an optional model-assisted assessment (rules answer the rows they cover, the model the rest) without changing findings.")
     assess.add_argument("run_dir", help="Existing audit run directory.")
     assess.add_argument("--policies", help="Comma-separated SCuBA policy IDs; defaults to the shipped policy set.")
     assess.add_argument("--dry-run", action="store_true", help="Write prompts without calling the endpoint.")
@@ -623,7 +623,7 @@ def _build_model_parser() -> argparse.ArgumentParser:
                         help="Scan bound: most chunk files listed by one source read; beyond it the section is "
                              "withheld as oversize/scan_bound (default: 10000).")
     assess.add_argument("--shadow-model-on-precheck", action="store_true",
-                        help="Record model answers for rule-answered rows without using them for verdicts.")
+                        help="Record model answers for rule-answered rows without using them as answers.")
     doctor = commands.add_parser("doctor", help="Check the endpoint models and print configuration without the API key.")
     for command in (assess, doctor):
         command.add_argument("--endpoint", help="OpenAI-compatible base URL (AUDITEX_MODEL_ENDPOINT).")

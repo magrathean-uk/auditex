@@ -128,12 +128,14 @@ supported formats, evidence references and comparison limits.
 
 Each finalized run contains a manifest, summary, report pack, evidence index, AI context, and validation result. The current contract version is recorded in `run-manifest.json`; required files and evidence rules are documented in [the output contract](docs/reference/output-contract.md).
 
-For an optional AI second opinion on SCuBA policies, `auditex model assess <run-dir>`
-asks a locally served Auditex model (`auditex-ministral3-8b-scuba-v10`, Ministral 3 8B
-with a LoRA adapter, GGUF Q5_K_M) after deterministic rule pre-checks; it never changes
-findings. Its public download is pending; see [AI assessment](docs/guides/ai-assessment.md)
-for serving, reading the result and its measured accuracy (419/435 on a synthetic test set,
-with caveats). `auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` are the
+For an optional model-assisted SCuBA assessment, `auditex model assess <run-dir>` applies
+deterministic rules first (today they cover the Power BI policies and MS.AAD.3.4v1, plus a few
+gate, missing-evidence and empty-list checks) and asks a locally served Auditex model
+(`auditex-ministral3-8b-scuba-v10`, Ministral 3 8B with a LoRA adapter, GGUF Q5_K_M) about the rows
+no rule covers; it never changes findings. Rules for more policies, and an optional model role that
+only explains rule results, are planned and not built. The model's public download is pending; see
+[AI assessment](docs/guides/ai-assessment.md) for serving, reading the result and its measured accuracy
+(419/435 on a synthetic test set for the rules and model together, 403/435 for the model alone, measured before the value rules, with caveats). `auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` are the
 model-development tools; see [model development](docs/guides/model-development.md).
 
 ```bash

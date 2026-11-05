@@ -5,7 +5,7 @@
   "external_execution": true,
   "inference_executed": true,
   "training_executed": true,
-  "assembly_method": "One base, one LoRA adapter: Ministral 3 8B Instruct trained on the SCuBA oracle pack, merged into the BF16 base and quantised once for llama.cpp serving. Training, conversion and benchmarks ran on a European HPC system; the training data is synthetic and no tenant evidence was used in training. No cross-architecture weight merge. Listing this catalogue fetches and executes nothing.",
+  "assembly_method": "Planned role: an optional explainer of rule verdicts, off by default, which never sets or overrides a verdict; the explainer integration is not built and this model has not been evaluated as an explainer. One base, one LoRA adapter: Ministral 3 8B Instruct trained on the SCuBA oracle pack, merged into the BF16 base and quantised once for llama.cpp serving. Training, conversion and benchmarks ran on a European HPC system; the training data is synthetic and no tenant evidence was used in training. No cross-architecture weight merge. Listing this catalogue fetches and executes nothing.",
   "sources": [
     {
       "id": "auditex-ministral3-8b-scuba-v10",
@@ -107,11 +107,11 @@
           }
         },
         "protocol_difference": "The scores were measured with benchmark_protocol; auditex model assess sends production_request. It leaves the other sampling fields at llama-server defaults (temperature 0 decodes greedily, so seed, top_k, top_p and min_p should not change the answer; inferred from llama.cpp behaviour, not measured), allows 1024 tokens instead of 512 (only an answer longer than 512 tokens, a benchmark failure, can differ) and asks for a JSON object (response_format), which the benchmark did not. A server that rejects response_format, chat_template_kwargs or cache_prompt is asked again without it, and model_assessment.json records what was sent (serving and per-row thinking_disabled). Production parity with the benchmark was checked only on two collection bundles of one real tenant, used for evaluation only (none of its data is in the training, validation or test rows), not on the 435-row test set.",
-        "client": "auditex model assess (system prompt pinned by SYSTEM_PROMPT_SHA256, prompt convention named-enums-v1)",
+        "client": "auditex model assess, which today sets verdicts for the rows no rule covers (system prompt pinned by SYSTEM_PROMPT_SHA256, prompt convention named-enums-v1); no explainer client exists yet",
         "guide": "docs/guides/ai-assessment.md"
       },
       "evaluated_at": "2026-10-30",
-      "evaluation": "Independently run by Auditex on the frozen synthetic test-v7 (435 rows, 12 policies), greedy, one sample, strict JSON parse without repair. The test set also chose between candidate builds, so the scores are mildly optimistic. Synthetic cases say nothing direct about real tenants.",
+      "evaluation": "Evaluation as a verdict-setting model, the role it has today for rows no rule covers; the planned explainer role has not been evaluated. Independently run by Auditex on the frozen synthetic test-v7 (435 rows, 12 policies), greedy, one sample, strict JSON parse without repair. The test set also chose between candidate builds, so the scores are mildly optimistic. Synthetic cases say nothing direct about real tenants.",
       "scores": [
         {
           "id": "strict_model_alone",
