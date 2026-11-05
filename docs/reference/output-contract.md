@@ -164,8 +164,8 @@ model `fail`. Precedence is `closed_gate`, `absent_section`, `absent_field`, the
 the four verdict totals still sum to the policy count.
 
 Version `2026-11-05` adds the `value_rule` class and the shipped
-`configs/scuba-value-rules.json` inventory, extended through spec v3.9.1 and addendum A1.
-The route covers 102 policies (`len(policies)` in that inventory):
+`configs/scuba-value-rules.json` inventory (`spec_version` `v3.9.1`, addenda A1 and A2).
+The route covers 102 policies and 1,084 cells (`len(policies)` in that inventory):
 
 | Area | Policies | Policy suffixes (`MS.<area>.`) |
 | --- | --- | --- |
@@ -202,13 +202,20 @@ schema: collected but unusable evidence uses `evidence_unusable` plus
 `recollect_unusable_evidence`, `recollect_unusable_evidence` and
 `review_policy_against_baseline_text`. Customer text reads not assessed plus the constant
 catalogued reason; no evidence text is interpolated and these recommendation ids define
-no display wording. Offline pack parity (`as_pack_response(..., legacy=True)`) and previously
-written `2026-11-05` answers retain the earlier vocabulary and still validate.
-A1 accepts exactly 68 contract cells through `cited_variants` and `cell_contracts`: the
-exact citation variants for 64 cells, the two paired reason codes/texts
-for AAD 6.1 `orphan_sub_domain`, and the specified citation order for the three SS 7.x
-`preset_rule_unusable` cells. Catalogue-level contracts also cover MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1. Other
-codes, texts, citation lists and citation orders are rejected.
+no display wording. Offline pack parity (`as_pack_response(..., legacy=True)`) retains the earlier vocabulary.
+Previously written `2026-11-05` answers keep the earlier limitation and recommendation vocabulary and still
+validate, with one exception: a rule fault written before this change carries the cell `rule_evaluation_failed`,
+the validator now rejects it, and the fault record's cell is `null`. Complete assessment-byte preservation
+therefore cannot be claimed for that path; re-run the assessment to obtain the current record.
+A1 and A2 are accepted exactly: 68 contract cells carry their contract on the cell itself, through
+`cited_variants`, and `reason_texts_by_code` with `reason_codes`: the exact citation variants for 64 cells (A2 adds
+`[protection_policy_rules]` to SS 6.1 and 6.2 `rule_scope_unusable` and `[built_in_protection_rules]` to SS 1.3
+`list_element_unusable`), the two paired reason codes and texts for AAD 6.1 `orphan_sub_domain`, and the specified
+citation order for the three SS 7.x `preset_rule_unusable` cells. Every not-assessed cell carries `evidence_kind`
+(null for `section_not_collected`), its `limitations` and its `recommendations`, which the loader checks against the
+reason code; the closed text lists that name any subset (missing sections, AAD 3.5v2 methods, SS 3.2 locations, SS 4.1
+alerts) hold every reachable text. Other codes, texts, citation lists and citation orders are rejected; the former
+separate `cell_contracts` table and `rule_failure` entry are rejected too.
 A met or not-met answer confirms the
 requirement and cites every section in the model case; not-met recommends baseline
 review. The validator checks the inventory, sections, claims and text but cannot
@@ -240,13 +247,20 @@ reason is independent of legacy `AUDITEX_DISABLE_VALUE_RULES`, which is ignored.
 explicit optional-collection provenance selects it; value rules remain enabled.
 
 A rule that fails on collected evidence (an Auditex fault, not a tenant setting) answers
-the one catalogued `rule_failure` entry, added within `2026-11-05`: cell and reason code
-`rule_evaluation_failed`, the constant text "Not assessed: Auditex could not evaluate this
-policy on the collected evidence. This is a product fault, not a tenant setting.", the
-`unknown` claim citing every section the rule reads, no limitation and the new
+the shared reason `rule_evaluation_failed`, catalogued once under `shared_reasons` and added within
+`2026-11-05`. It is not a cell: `rule_precheck.cell` is `null` (the assessment schema allows a null cell from this
+version) and it is dispatched before any cell lookup. The reason code is `rule_evaluation_failed`, the constant text
+"Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a
+tenant setting.", the `unknown` claim citing every section the rule reads, no limitation and the new
 recommendation `report_product_fault`, which means: report the fault to
 `contact+auditex@magrathean.uk`. The failure is logged with the rule id and the
-exception class name only; no exception text or evidence reaches the row or the log.
+exception class name only; no exception text or evidence reaches the row or the log. The earlier representation, a
+cell named `rule_evaluation_failed`, is rejected by the dispatch checker, the pre-check response builder, the
+validator and the explainer adapter. A policy without a value rule has the second shared reason,
+`rule_not_implemented` ("Not assessed: Auditex has no rule for this policy yet.", no limitation and no
+recommendation). Serving answers it as the row-level reason described above, never as a `rule_precheck` record (the
+rule-record checkers refuse that code); the catalogue holds its constant text and a test pins the serving constant to it.
+No route produces it today because every catalogued policy has a rule.
 
 Serving rules read an in-memory rule view on both the run-bundle and internal
 ScubaGear export paths, taken after

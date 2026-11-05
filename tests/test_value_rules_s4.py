@@ -121,7 +121,13 @@ def test_prepared_anti_spam_rows_are_enabled_exactly_as_prepared():
     assert set(PREPARED) == {"MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"}
     for policy, row in PREPARED.items():
         assert policy in rule_policies()
-        assert catalogue()["policies"][policy] == row
+        # The prepared record predates A1: the shipped row is the record plus exactly its three additive evidence fields.
+        shipped = deepcopy(catalogue()["policies"][policy])
+        for name, cell in shipped["cells"].items():
+            for key in ("evidence_kind", "limitations", "recommendations"):
+                if key not in row["cells"][name]:
+                    cell.pop(key, None)
+        assert shipped == row
         assert assess(policy, {}) is not None
         assert cells_for(policy) == tuple(row["cells"])
         assert row["kind"] in SPAM_KINDS
@@ -253,7 +259,7 @@ def _serve_rule(policy, sections):
     projection.rule_views = {}
     records, prompts = _assess_policies(
         projection, [policy], policy_catalogue(), "2026-11-05T00:00:00Z",
-        dry_run=False, baseline={}, scope=None, max_items=100)
+        dry_run=False, baseline={})
     assert not prompts
     assert projection.rule_sections == sections
     return records[0]

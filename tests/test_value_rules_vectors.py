@@ -99,7 +99,9 @@ STAGE7_POLICIES = frozenset({
     "MS.AAD.7.9v1",
     "MS.AAD.9.1v1",
 })
-STAGE_POLICIES = (STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE5_POLICIES
+# v3.9.1: the three policies that were held for the P4 projection review are registered with the rest.
+STAGE_V391_POLICIES = frozenset({"MS.SECURITYSUITE.1.1v1", "MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"})
+STAGE_POLICIES = (STAGE1_POLICIES | STAGE_V391_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE5_POLICIES
                   | STAGE6_POLICIES | STAGE7_POLICIES | STAGE8_POLICIES | STAGE9_POLICIES)
 GATE_POLICIES = frozenset(policy for policy, row in catalogue()["policies"].items()
                           if row["params"].get("environment_gate"))
@@ -143,7 +145,7 @@ def test_catalogue_is_shipped_and_stage_set_is_exact():
     assert json.loads(text) == catalogue()
     assert text == json.dumps(catalogue(), indent=2, ensure_ascii=False) + "\n"
     assert catalogue()["spec_version"] == "v3.9.1"
-    assert set(rule_policies()) == STAGE_POLICIES
+    assert set(rule_policies()) == STAGE_POLICIES and len(STAGE_POLICIES) == 102
     assert sum(len(cells_for(policy)) for policy in STAGE1_POLICIES) == 113
     assert sum(len(cells_for(policy)) for policy in STAGE3_POLICIES) == 201
     for policy in STAGE1_POLICIES:
@@ -257,7 +259,7 @@ def test_v39_fixture_manifest_matches_bytes_and_counts(rows_v39):
     rows = [row for group in rows_v39.values() for row in group]
     assert sha256(FIXTURE_V39.read_bytes()).hexdigest() == manifest["sha256"]
     assert len(rows) == manifest["rows"] == 1100
-    assert manifest["spec_version"] == catalogue()["spec_version"]
+    assert manifest["spec_version"] == catalogue()["spec_version"] == "v3.9.1"
     assert set(rows_v39) == STAGE3_POLICIES
     assert {policy: len(group) for policy, group in rows_v39.items()} == manifest["by_policy"]
     assert {row["source_kind"] for row in rows} == {"constructed", "pack-train", "pack-validation"}
@@ -359,15 +361,13 @@ def test_stage3_rule_output_never_echoes_evidence(policy, sections):
                for value in record["detail"].values())
 
 
+# Rows of the spec's full source whose gold response cites sections the rule no longer reads (keyed by the source's own
+# parity marker, never by row id): one SS 3.2 row (D90) and three AAD 3.3v2 rows (D94), 4 in all over the 26,898 vectors.
 FULL_SOURCE_PARITY_EXEMPT = {
-    "pack-train:scuba-securitysuite-ms-securitysuite-3-2v1-376939a16c":
-        "D90: the gold response cites scuba_config, which the rule does not read from v3.6",
-    **dict.fromkeys((
-        "pack-validation:scuba-aad-ms-aad-3-3v2-0430461ff5",
-        "aad-frozen:scuba-aad-ms-aad-3-3v2-801ffdfc6a-nc",
-        "aad-frozen:scuba-aad-ms-aad-3-3v2-aeff53ba22-nc",
-    ), "D94: the gold response cites conditional_access_policies or scuba_config, which the rule does not read from v3.7"),
+    "D90": "D90: the gold response cites scuba_config, which the rule does not read from v3.6",
+    "D94": "D94: the gold response cites conditional_access_policies or scuba_config, which the rule does not read from v3.7",
 }
+FULL_SOURCE_PARITY_EXEMPT_COUNTS = {"D90": 1, "D94": 3}
 
 
 def test_optional_full_source_vectors():
@@ -400,9 +400,9 @@ def test_optional_full_source_vectors():
                 # Match the reference checker: these twins' gold predates the
                 # licence section. All exact rule assertions above still run.
                 licence_excluded += 1
-            elif row["vector_id"] in FULL_SOURCE_PARITY_EXEMPT:
-                marker = row.get("parity_exempt")
-                assert marker == FULL_SOURCE_PARITY_EXEMPT[row["vector_id"]]
+            elif (row.get("parity_exempt") or "")[:3] in FULL_SOURCE_PARITY_EXEMPT:
+                marker = row["parity_exempt"]
+                assert marker == FULL_SOURCE_PARITY_EXEMPT[marker[:3]]
                 assert row["vector_id"] not in parity_exempt
                 parity_exempt[row["vector_id"]] = marker
             else:
@@ -415,7 +415,8 @@ def test_optional_full_source_vectors():
     assert set(reached) in (STAGE1_POLICIES, STAGE_POLICIES)
     if set(reached) == STAGE_POLICIES:
         assert licence_excluded == 45
-        assert parity_exempt == FULL_SOURCE_PARITY_EXEMPT
+        assert {key: sum(m[:3] == key for m in parity_exempt.values())
+                for key in FULL_SOURCE_PARITY_EXEMPT} == FULL_SOURCE_PARITY_EXEMPT_COUNTS
     else:
         assert licence_excluded == 0 and parity_exempt == {}
 
@@ -459,7 +460,7 @@ def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
     cells = {row["policy_id"]: row["rule_precheck"]["cell"] for row in result["policies"]}
     assert cells == {"MS.TEAMS.1.1v1": "flag_bad", "MS.TEAMS.2.2v2": "closed_gate",
                      "MS.TEAMS.2.3v2": "environment_unknown", "MS.TEAMS.4.1v1": "all_clear",
-                     "MS.EXO.13.1v1": "rule_evaluation_failed"}
+                     "MS.EXO.13.1v1": None}
     assert all(row["rule_precheck"]["class"] == "value_rule" for row in result["policies"])
     failed = next(row for row in result["policies"] if row["policy_id"] == "MS.EXO.13.1v1")
     assert failed["recommendations"] == ["report_product_fault"] and failed["limitations"] == []
@@ -508,7 +509,7 @@ def test_covered_vectors_never_reach_rule_not_implemented(rule_view, monkeypatch
                 if 'scuba_config' in sections:
                     projection.rule_views[policy] = {'scuba_config': deepcopy(sections['scuba_config'])}
             records, prompts = _assess_policies(projection, [policy], items, 'synthetic', dry_run=False,
-                                               baseline={}, scope=None, max_items=40)
+                                               baseline={})
             assert not prompts and records[0]['reason'] == 'rule_precheck', row['vector_id']
             assert records[0]['rule_precheck']['class'] == 'value_rule', row['vector_id']
             cell = records[0]['rule_precheck']['cell']

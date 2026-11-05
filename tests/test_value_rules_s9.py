@@ -524,7 +524,8 @@ def test_rule_exceptions_use_existing_failure_handler(tmp_path, monkeypatch, cap
     monkeypatch.setattr(value_rules, "_REGISTRY", registry)
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=sorted(STAGE9_POLICIES))
     validate_assessment(result)
-    assert all(row["rule_precheck"]["cell"] == "rule_evaluation_failed" for row in result["policies"])
+    assert all(row["rule_precheck"]["cell"] is None and row["rule_precheck"]["reason_code"] == "rule_evaluation_failed"
+               for row in result["policies"])
     assert all(row["recommendations"] == ["report_product_fault"] for row in result["policies"])
     outputs = [json.dumps(result), caplog.text]
     outputs.extend(path.read_text() for path in tmp_path.rglob("*") if path.is_file())

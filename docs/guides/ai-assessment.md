@@ -22,7 +22,7 @@ redaction. Source, ledger, collector-error, qualifier and scan checks still appl
 not assessed or not applicable result carries its cell, reason code and constant text. Missing evidence
 uses `section_not_collected`; collected but unusable evidence uses `evidence_unusable` and the relevant
 reason. Optional Power BI or Power Platform collection not enabled retains
-`optional_collection_not_enabled`. A rule fault reports `rule_evaluation_failed` with
+`optional_collection_not_enabled`. A rule fault reports `rule_evaluation_failed` (a shared reason with a null cell, not a catalogue cell) with
 `report_product_fault`. Teams 2.2v2, 2.3v2 and 4.1v1 record a closed applicability gate as class
 `value_rule`, cell `closed_gate`. The scope envelope is still collected for review. Row-level scope marking has been removed;
 `totals.scope_narrowed` stays zero. Historical model-row metadata remains readable.

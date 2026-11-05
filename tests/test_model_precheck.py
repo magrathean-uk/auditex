@@ -87,7 +87,7 @@ def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path,
     text = "Data unavailable: required evidence section(s) not collected: " + ", ".join(row["sections"]) + "."
     row["cells"]["section_not_collected"]["reason_texts"] = [text]
     monkeypatch.setattr(value_catalogue, "catalogue", lambda: data)
-    failure = data["rule_failure"]
+    failure = data["shared_reasons"]["rule_evaluation_failed"]
     # The rule fails, so the product-fault answer is built from the patched row and must still pass the validator.
     monkeypatch.setattr(value_rules, "assess", lambda *args: (_ for _ in ()).throw(RuntimeError("boom")))
     case = build_case(policy_id, {}, "unused")
@@ -102,7 +102,8 @@ def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path,
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy_id])
     served = result["policies"][0]
-    assert served["reason"] == "rule_precheck" and served["rule_precheck"]["cell"] == "rule_evaluation_failed"
+    assert served["reason"] == "rule_precheck" and served["rule_precheck"]["cell"] is None
+    assert served["rule_precheck"]["reason_code"] == "rule_evaluation_failed"
     assert served["rule_precheck"]["reason_text"] == failure["reason_text"]
     assert served["rule_precheck"]["section"] == row["sections"]
     assert served["limitations"] == [] and served["recommendations"] == ["report_product_fault"]
@@ -121,7 +122,7 @@ def test_rule_exception_is_a_constant_not_assessed_answer(monkeypatch, capsys, c
         record = precheck_case(case, value_rules=True, rule_projection={})
     detail = record["rule_precheck"]
     assert (detail["cell"], detail["reason_code"], detail["reason_text"]) == (
-        "rule_evaluation_failed", "rule_evaluation_failed",
+        None, "rule_evaluation_failed",
         "Not assessed: Auditex could not evaluate this policy on the collected evidence. "
         "This is a product fault, not a tenant setting.")
     assert record["claims"][0] == {"id": "requirement_met", "status": "unknown", "value": None,
@@ -713,7 +714,7 @@ def test_empty_list_rows_are_not_met_in_every_frozen_v10_row(name):
         assert {key: record[key] for key in ("claims", "limitations", "recommendations")} == {
             key: row["expected"][key] for key in ("claims", "limitations", "recommendations")}, row["id"]
     # P6 requires a usable AAD 9.1 M365Environment before evaluating the CA list.
-    # Row scuba-aad-ms-aad-9-1v1-a4f3ce848e occurs in both files with a null
+    # One AAD 9.1 row occurs in both files with a null
     # environment and CA=[]: empty_required_list -> absent_section, so 1 -> 0
     # in test.jsonl and 7 -> 6 in approved-cases.jsonl. Other list rows stay put.
     assert fired == (0 if name == "test.jsonl" else 6)
@@ -740,6 +741,8 @@ def test_evaluator_scores_empty_list_only_on_request(tmp_path):
 def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
     from test_model_serving import fake_projection
     pid = "MS.AAD.1.1v1"
+    # AAD 1.1 has a value rule (stage 7), which answers first; this is the legacy empty-list class kept for rollback.
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
     def projected(root, **kw):
         projection = fake_projection(root, {"conditional_access_policies": [],
@@ -840,7 +843,7 @@ def test_rule_failure_on_case_evidence_and_rule_view(monkeypatch, caplog, rule_p
     case = build_case("MS.TEAMS.2.2v2", {}, "unused")
     with caplog.at_level("DEBUG"):
         record = precheck_case(case, value_rules=True, rule_projection=rule_projection)
-    assert record["rule_precheck"]["cell"] == "rule_evaluation_failed"
+    assert record["rule_precheck"]["cell"] is None and record["rule_precheck"]["reason_code"] == "rule_evaluation_failed"
     assert record["rule_precheck"]["section"] == ["federation_configuration", "scuba_config"]
     assert record["recommendations"] == ["report_product_fault"] and record["limitations"] == []
     assert secret not in json.dumps(record) and secret not in caplog.text

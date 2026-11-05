@@ -247,16 +247,22 @@ def precheck_response(detail: dict[str, Any], policy_item: dict[str, Any], secti
         ], "limitations": [optional["reason_code"]], "recommendations": []}
     if detail["class"] == "value_rule":
         from .value_rules.catalogue import row_for
-        from .value_rules.record import RULE_FAILURE_CELL, as_pack_response, evidence_kind
+        from .value_rules.record import (RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE, as_pack_response,
+                                         evidence_kind, is_shared_reason)
+        # A1.2: a shared reason (failed rule, no rule) has no cell and is dispatched before any cell lookup.
+        shared = detail["cell"] is None
+        if detail["cell"] in {RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE}:
+            raise ValueError("Legacy rule-failure sentinel: a shared reason is not a cell, its cell must be null")
+        if shared and not is_shared_reason(detail["reason_code"]):
+            raise ValueError("A value-rule answer without a cell must carry a shared reason")
         row = row_for(policy_item["policy_id"])
-        verdict = ("not_assessed" if detail["cell"] == RULE_FAILURE_CELL
-                   else row["cells"][detail["cell"]]["verdict"])
+        verdict = "not_assessed" if shared else row["cells"][detail["cell"]]["verdict"]
         record = {"verdict": verdict, "cell": detail["cell"], "reason_code": detail["reason_code"],
                   "cited_sections": detail["section"] if verdict == "not_assessed" else None}
         # The unnamed form is offline pack scoring; retain its original vocabulary.
         legacy = not named_limitations if legacy is None else legacy
         response = as_pack_response(record, policy_item["criticality"], sections, legacy=legacy)
-        if verdict == "not_assessed" and named_limitations and detail["cell"] != RULE_FAILURE_CELL:
+        if verdict == "not_assessed" and named_limitations and not shared:
             kind = None if legacy else evidence_kind(detail["reason_code"])
             response["limitations"] += [(f"evidence_unusable:{name}:{kind}" if kind else
                                          "required_evidence_section_not_collected:" + name)

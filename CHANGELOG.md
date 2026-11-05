@@ -12,6 +12,17 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Skip the Teams reads and say so when no Teams certificate token is available, instead of failing the run; record teams_token_unavailable as a collector error class; with a token, messaging and app setup are skipped as teams_powershell_not_supported.
 - Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.
 - Use complete same-run Exchange accepted domains for SPF, DKIM and DMARC TXT records, excluding coexistence domains and preserving first-seen spelling; fall back to Graph-verified mail domains when evidence is unusable. HTTPS reads remain limited to Graph-verified domains.
+- Move the value-rule catalogue and loader from the v3.9 content to spec v3.9.1 content with addenda A1 and A2. The shipped
+  catalogue already carried the `v3.9.1` label, 102 policies and 1,084 cells; the migration adds `evidence_kind`, `limitations` and
+  `recommendations` to the 746 not-assessed cells that lacked them (all 761 now carry them), moves the citation variants (A1 and A2)
+  and the AAD 6.1 two-code pairing from the separate `cell_contracts` table onto the cells, and replaces the
+  `rule_failure` entry by `shared_reasons`. The loader pins the variant contract by digest and refuses the old table and entry.
+  A rule that raised was answered as a catalogue cell named `rule_evaluation_failed`; it is now a shared reason with a null
+  cell, dispatched before any cell lookup, so the fault record's `cell` changes from `rule_evaluation_failed` to `null`. Assessment
+  schema `2026-11-05` accepts a null `rule_precheck.cell` and the validator rejects the old sentinel: a fault record written before
+  this change no longer validates, so assessment bytes are not preserved for that one path. `rule_not_implemented` stays the
+  row-level reason of the rule-only route; its constant text is catalogued under `shared_reasons`. A v3.9.1 vectors replay (a
+  bounded sample by default, all 26,898 vectors plus A2's as an explicit acceptance job) checks the engine.
 
 - Explain unassessed Power BI / Power Platform policies when optional collection was not enabled; preserve generic reasons for unknown selection and existing failures for selected collectors.
 

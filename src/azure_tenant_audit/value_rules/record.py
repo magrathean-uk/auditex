@@ -43,7 +43,7 @@ def _marker(value: Any) -> bool:
     return isinstance(value, dict) and value.get("collection_status") == NOT_COLLECTED["collection_status"]
 
 
-def _rec(policy_id: str, verdict: str, code: str, text: str, cell: str,
+def _rec(policy_id: str, verdict: str, code: str, text: str, cell: str | None,
          cited: list[str] | None = None, **detail: Any) -> dict[str, Any]:
     """Build a record. The shipped inventory is enforced once, by ``checked`` at the dispatch boundary."""
     return {"policy_id": policy_id, "verdict": verdict, "reason_code": code,
@@ -56,10 +56,30 @@ def _A(policy_id: str, code: str, text: str, cell: str, cited: list[str],
     return _rec(policy_id, "not_assessed", code, text, cell, cited, **detail)
 
 
+def is_shared_reason(code: Any) -> bool:
+    """A reason a rule record carries with a null cell. ``rule_not_implemented`` is not one: product answers it as a
+    row-level reason (``model_serving._uncovered_record``) before any rule record exists."""
+    return code == RULE_FAILURE_CODE
+
+
 def checked(record: dict[str, Any]) -> dict[str, Any]:
-    """Refuse any answer that is not a (cell, verdict, code, text, cited) of the shipped inventory."""
-    from .catalogue import cell_entry, citation_variants, reason_matches, row_for
+    """Refuse any answer that is not a (cell, verdict, code, text, cited) of the shipped inventory.
+
+    A1.2: ``rule_evaluation_failed`` is dispatched first, before any cell lookup; it is not a cell, so its record
+    has ``cell`` None and the catalogued constant text.
+    """
+    from .catalogue import cell_entry, citation_variants, reason_matches, row_for, shared_reason
     row = row_for(record["policy_id"])
+    if record["cell"] in {RULE_FAILURE_CODE, RULE_NOT_IMPLEMENTED_CODE}:
+        raise ValueError("Legacy rule-failure sentinel: a shared reason is not a cell, the record's cell must be null")
+    if is_shared_reason(record["reason_code"]) or record["cell"] is None:
+        shared = shared_reason(record["reason_code"]) if is_shared_reason(record["reason_code"]) else None
+        if (shared is None or record["cell"] is not None or record["verdict"] != shared["verdict"]
+                or record["reason_text"] != shared["reason_text"]):
+            raise ValueError("Value-rule shared reason is not in the shipped catalogue")
+        if record["reason_code"] == RULE_FAILURE_CODE and (row is None or record["cited_sections"] != list(row["sections"])):
+            raise ValueError("Value-rule failure must cite every section the rule reads")
+        return record
     entry = cell_entry(record["policy_id"], record["cell"], row) if row else None
     if (entry is None or entry["verdict"] != record["verdict"]
             or not reason_matches(entry, record["reason_code"], record["reason_text"])):
@@ -93,11 +113,14 @@ def as_pack_response(record: dict[str, Any], criticality: str, section_order: li
                      legacy: bool = False) -> dict[str, Any]:
     refs = {name: f"e{index + 1}" for index, name in enumerate(section_order)}
     verdict = record["verdict"]
-    if record.get("cell") == RULE_FAILURE_CELL:
-        # Our fault, not the evidence's: no missing-evidence limitation, one product-fault recommendation.
+    if is_shared_reason(record["reason_code"]):
+        # Our fault, not the evidence's: no missing-evidence limitation; the catalogued recommendation
+        # (report_product_fault).
+        from .catalogue import shared_reason
         claim = {"id": "requirement_met", "status": "unknown", "value": None,
                  "evidence_ids": _evidence_ids(record["cited_sections"], refs)}
-        limits, recommendations = [], [RULE_FAILURE_RECOMMENDATION]
+        recommendation = shared_reason(record["reason_code"])["recommendation"]
+        limits, recommendations = [], [recommendation] if recommendation else []
     elif verdict == "not_assessed":
         claim = {"id": "requirement_met", "status": "unknown", "value": None,
                  "evidence_ids": _evidence_ids(record["cited_sections"], refs)}
@@ -120,15 +143,14 @@ def as_pack_response(record: dict[str, Any], criticality: str, section_order: li
             "limitations": limits, "recommendations": recommendations}
 
 
-# A rule that raises on collected evidence (main, 5 Nov 07:12 GMT): additive, catalogued once in
-# configs/scuba-value-rules.json ("rule_failure"); the loader checks these constants against it.
-RULE_FAILURE_CELL = "rule_evaluation_failed"
-RULE_FAILURE_RECOMMENDATION = "report_product_fault"
+# A1.2: the shared reasons are catalogued once, under "shared_reasons" in configs/scuba-value-rules.json.
+RULE_FAILURE_CODE = "rule_evaluation_failed"
+RULE_NOT_IMPLEMENTED_CODE = "rule_not_implemented"
 
 
 def rule_failure(policy_id: str) -> dict[str, Any]:
-    """The constant answer for a rule that raised: every section the rule reads, no evidence text."""
-    from .catalogue import catalogue, row_for
-    entry, row = catalogue()["rule_failure"], row_for(policy_id)
-    return _rec(policy_id, entry["verdict"], entry["reason_code"], entry["reason_text"], entry["cell"],
-                list(row["sections"]))
+    """The constant answer for a rule that raised: every section the rule reads, no evidence text, no cell."""
+    from .catalogue import row_for, shared_reason
+    entry, row = shared_reason(RULE_FAILURE_CODE), row_for(policy_id)
+    return _rec(policy_id, entry["verdict"], entry["reason_code"], entry["reason_text"], None, list(row["sections"]))
+
