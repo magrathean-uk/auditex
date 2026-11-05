@@ -13,6 +13,16 @@ MCP behaviour is unchanged. Audit collection is not: the `identity_governance` c
 gains two GET-only reads (the PIM role policies, "Collection (1.2.2.dev5)" below) and the
 bundle gains the `privileged_roles` artefact, both additive.
 
+### Model projection correctness
+
+- **ScubaGear export assessments:** a policy whose `scuba_config` view was not
+  projected now receives not-collected evidence. On the shipped export fixtures,
+  this changes prompts for MS.SECURITYSUITE.2.1v1, 2.3v1 and 3.2v1. Real exports
+  can change more: declared break-glass exclusions affect nine AAD Conditional
+  Access policies and MS.AAD.7.4v1; a non-commercial M365 environment affects
+  MS.AAD.9.1v1, MS.TEAMS.2.2v2, MS.TEAMS.2.3v2 and MS.TEAMS.4.1v1. These are correct outcomes of
+  withheld policy views. Run-bundle assessments are unchanged.
+
 ### Microsoft 365 user inventory
 
 - **The user list now has a safety ceiling of 250,000 user objects, guests included.** Auditex reads `onPremisesImmutableId` on the

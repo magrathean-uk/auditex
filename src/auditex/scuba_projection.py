@@ -42,6 +42,9 @@ class Projection(dict):
 
     report: dict[str, Any]
     views: dict[str, dict[str, Any]]
+    # In-memory evidence for deterministic rules. Never serialise these attributes.
+    rule_sections: dict[str, Any]
+    rule_views: dict[str, dict[str, Any]]
 
 
 class Unavailable(ValueError):
@@ -1298,7 +1301,17 @@ def policy_section(projection: dict[str, Any], policy_id: str, section: str) -> 
     views = getattr(projection, "views", None) or {}
     if section in views.get(policy_id, {}):
         return views[policy_id][section]
+    if section == "scuba_config" and hasattr(projection, "views"):
+        # A policy without a projected synthesis cannot inherit the base config.
+        return dict(NOT_COLLECTED)
     return projection.get(section, dict(NOT_COLLECTED))
+
+
+def rule_policy_section(projection: Projection, policy_id: str, section: str) -> Any:
+    """Read a policy's private rule evidence without exposing it in a model case."""
+    if section == "scuba_config":
+        return projection.rule_views.get(policy_id, {}).get(section, dict(NOT_COLLECTED))
+    return projection.rule_sections.get(section, dict(NOT_COLLECTED))
 
 
 
@@ -1453,6 +1466,8 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
     sections = sorted({s for p in catalogue.values() for s in p["sections"]})
     result = Projection()
     result.views = {}
+    result.rule_sections = {section: dict(NOT_COLLECTED) for section in sections}
+    result.rule_views = {}
     report = {}
     synthesis = None
     adapters = {"SPO_tenant": _spo, "conditional_access_policies": _ca, "authorization_policies": _authorization,
@@ -1486,6 +1501,19 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             _require(value is not None)
             if value in ([], {}):
                 _require(bundle.complete)
+            users_ok = True
+            if section == "privileged_users":
+                try:
+                    _user_entries(value)
+                except Unavailable:
+                    users_ok = False
+            # Redaction rewrites privileged users in place. Other model sections
+            # are replaced, and serving copies only a rule's own read set.
+            if users_ok:
+                result.rule_sections[section] = deepcopy(value) if section == "privileged_users" else value
+            if section == "scuba_config":
+                for policy_id, view in views.items():
+                    result.rule_views.setdefault(policy_id, {})[section] = view
             _seen_shape(section, value)
             if section == "privileged_users":
                 _user_entries(value)

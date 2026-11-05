@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from datetime import datetime, timezone
 from hashlib import sha256
 from http.client import HTTPException
@@ -30,7 +31,7 @@ from .model_precheck import precheck_case
 from .scope_postcheck import collect_scope_evidence
 from .scuba_projection import (
     DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS,
-    policy_section, project_run,
+    policy_section, project_run, rule_policy_section,
 )
 
 SCHEMA_VERSION = "2026-11-05"
@@ -370,7 +371,17 @@ def _assess_policies(projection: dict[str, Any], client: ModelClient | None, sel
                                 "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
                 continue
             value_rules_enabled = os.getenv("AUDITEX_DISABLE_VALUE_RULES", "").strip().lower() in {"", "0", "false", "no", "off"}
-            record = precheck_case(case, absent_fields=True, empty_lists=True, value_rules=value_rules_enabled)
+            rule_projection = None
+            if value_rules_enabled and hasattr(projection, "rule_sections"):
+                from azure_tenant_audit.value_rules.catalogue import row_for
+                row = row_for(policy_id)
+                if row:
+                    rule_projection = {section: deepcopy(projection.rule_sections.get(section, NOT_COLLECTED))
+                                       for section in row["sections"] if section != "scuba_config"}
+                    if "scuba_config" in row["sections"]:
+                        rule_projection["scuba_config"] = deepcopy(rule_policy_section(projection, policy_id, "scuba_config"))
+            record = precheck_case(case, absent_fields=True, empty_lists=True, value_rules=value_rules_enabled,
+                                   rule_projection=rule_projection)
             if record is None:
                 record = client.assess(case)
             elif shadow_model_on_precheck:

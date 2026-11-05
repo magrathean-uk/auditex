@@ -507,6 +507,8 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
         sections = sorted({section for item in catalogue.values() for section in item["sections"]})
         projection = Projection()
         projection.views = {}
+        projection.rule_sections = {section: dict(NOT_COLLECTED) for section in sections}
+        projection.rule_views = {}
         report: dict[str, dict] = {}
         pruning = {s: {"verdict": r["verdict"], "pruned_keys": 0, "outcome": "absent", "qualifier_withheld": False}
                    for s, r in proof.items()}
@@ -564,9 +566,24 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                                 pruning[section]["qualifier_withheld"] = True
                             exc = Unavailable(field=marker["field"], kind=marker["kind"])
                             raise exc
+                    users_ok = True
+                    if section == "privileged_users":
+                        try:
+                            _user_entries(value)
+                        except Unavailable:
+                            users_ok = False
+                    # Serving copies a policy's read set; only privileged users need
+                    # a capture copy because model redaction rewrites them in place.
+                    if users_ok:
+                        projection.rule_sections[section] = deepcopy(value) if section == "privileged_users" else value
                     if section in proof:
                         value, pruning[section]["pruned_keys"] = prune_section(
                             section, value, proof, removed_paths=removed)
+                if section == "scuba_config":
+                    projection.rule_sections[section] = value
+                    for policy_id, outcome in synthesis["policies"].items():
+                        view = views[policy_id] if outcome == "projected" else dict(NOT_COLLECTED)
+                        projection.rule_views.setdefault(policy_id, {})[section] = view
                 _seen_shape(section, value)
                 if section == "privileged_users":
                     _user_entries(value)
@@ -589,8 +606,10 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                         info["ignored_fields"] = names
                 if section == "scuba_config":
                     info["synthesis"] = synthesis
-                    for policy_id, view in views.items():
-                        projection.views.setdefault(policy_id, {})[section] = view
+                    for policy_id in synthesis["policies"]:
+                        projection.views.setdefault(policy_id, {})[section] = (
+                            views[policy_id] if synthesis["policies"][policy_id] == "projected"
+                            else dict(NOT_COLLECTED))
                 report[section] = info
                 if section in pruning:
                     pruning[section]["outcome"] = "projected"

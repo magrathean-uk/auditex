@@ -19,7 +19,7 @@ import pytest
 from auditex.model_serving import ModelConfig, assess_scubagear_export, policy_catalogue
 from auditex.scuba_projection import (
     PACK_ENUM_DOMAINS, PACK_SHAPE_DIGESTS, SCUBA_CAP_EXCLUSION_POLICIES,
-    SCUBA_ROLE_EXCLUSION_POLICIES, _json, _seen_shape,
+    SCUBA_ROLE_EXCLUSION_POLICIES, _json, _seen_shape, policy_section, rule_policy_section,
 )
 from auditex.scubagear_export import (
     CA_RESTRICTION_NAMES, NOT_ASSESSED_REASONS, SECTION_LEDGERS, UNMAPPABLE_REGO_POLICIES, VERDICT_MAP,
@@ -1574,6 +1574,136 @@ def test_non_dry_run_validates_without_model_request(tmp_path):
         assess_scubagear_export(PROVIDER, tmp_path / "remote", ModelConfig(endpoint="https://example.invalid/v1",
                                model_name="test-model"), no_redaction=True, dry_run=True)
     assert not (tmp_path / "remote").exists()
+
+
+@pytest.mark.parametrize('section,value', [
+    ('powerbi_tenant_settings', [{'settingName': 'synthetic', 'enabled': True}] * 41),
+    ('authentication_method', [{'state': 'enabled'}]),
+    ('remote_domains', [{'DomainName': 'example.invalid'}]),
+    ('dlp_policies', [{'name': 'synthetic'}]),
+    ('environment_creation', [{'name': 'synthetic'}]),
+    ('environment_list', [{'name': 'synthetic'}]),
+    ('tenant_isolation', [{'properties': {'isDisabled': False}}]),
+    ('anti_malware_rules', [{'Priority': 7}]),
+    ('safe_attachment_rules', [{'Priority': 3}]),
+])
+def test_digestless_export_sections_reach_only_private_rule_view(tmp_path, section, value):
+    raw = json.loads(PROVIDER.read_text())
+    raw[section] = value
+    for prefix in SECTION_LEDGERS[section]:
+        raw[prefix + '_successful_commands'] = []
+        raw[prefix + '_unsuccessful_commands'] = []
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections[section] == value
+    assert projection[section] == NOT_COLLECTED
+
+
+def test_export_rule_view_preserves_log_null_and_absent_and_withholds_qualifiers(tmp_path):
+    raw = json.loads(REAL.read_text())
+    raw['spf_records'][0]['log'] = 'synthetic DNS log'
+    raw['privileged_roles'][0]['Assignments'][0]['EndDateTime'] = None
+    raw['privileged_roles'][0]['Assignments'][0].pop('StartDateTime', None)
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections['spf_records'][0]['log'] == 'synthetic DNS log'
+    assignment = projection.rule_sections['privileged_roles'][0]['Assignments'][0]
+    assert assignment['EndDateTime'] is None and 'StartDateTime' not in assignment
+    assert projection.rule_views['MS.SECURITYSUITE.2.1v1']['scuba_config'] == NOT_COLLECTED
+    assert rule_policy_section(projection, 'MS.SECURITYSUITE.2.1v1', 'scuba_config') == NOT_COLLECTED
+    assert policy_section(projection, 'MS.SECURITYSUITE.2.1v1', 'scuba_config') == NOT_COLLECTED
+    raw['conditional_access_policies'][0]['Conditions']['Locations'] = {'IncludeLocations': ['All']}
+    withheld, _ = project_export(load_export(_save(tmp_path, raw, 'restricted.json')),
+                                 policy_catalogue()['policies'])
+    assert withheld.rule_sections['conditional_access_policies'] == NOT_COLLECTED
+    raw['securitysuite_unsuccessful_commands'] = ['Get-SyntheticFailure']
+    failed, _ = project_export(load_export(_save(tmp_path, raw, 'failed.json')),
+                               policy_catalogue()['policies'])
+    assert failed.rule_sections['safe_links_policies'] == NOT_COLLECTED
+
+
+def test_rule_view_canaries_never_enter_outputs_or_logs(tmp_path, caplog, capsys):
+    canary_email = 'rule-view-canary@example.invalid'
+    canary_name = 'Rule View Canary DisplayName'
+    raw = json.loads(PROVIDER.read_text())
+    # The shipped Power BI value rule reads these settings; the canaries reach
+    # that input while the model shape gate withholds the section.
+    raw['powerbi_access_denied_reason'] = ''
+    raw['powerbi_license_found'] = True
+    raw['powerbi_tenant_settings'] = [{'settingName': 'PublishToWeb', 'enabled': canary_name,
+                                       'Sender': canary_email}]
+    source = _save(tmp_path, raw)
+    projection, _ = project_export(load_export(source), policy_catalogue()['policies'])
+    assert canary_email in repr(projection.rule_sections['powerbi_tenant_settings'])
+    assert canary_name in repr(projection.rule_sections['powerbi_tenant_settings'])
+    assert projection['powerbi_tenant_settings'] == NOT_COLLECTED
+    with caplog.at_level('DEBUG'):
+        _dry(tmp_path / 'dry', source)
+        assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+                                policies=['MS.POWERBI.1.1v1'])
+    written = ''.join(path.read_text() for folder in ('dry/assessment', 'assessed')
+                      for path in (tmp_path / folder).iterdir() if path.is_file())
+    assert canary_email not in written + caplog.text + str(capsys.readouterr())
+    assert canary_name not in written + caplog.text + str(capsys.readouterr())
+
+
+def test_bad_guid_keyed_user_is_shape_withheld_before_user_detail(tmp_path):
+    raw = json.loads(PROVIDER.read_text())
+    guid = next(iter(raw['privileged_users']))
+    del raw['privileged_users'][guid]['DisplayName']
+    source = _save(tmp_path, raw)
+    projection, _ = project_export(load_export(source), policy_catalogue()['policies'])
+    assert projection.rule_sections['privileged_users'] == NOT_COLLECTED
+    result = assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+                                     policies=['MS.POWERBI.1.1v1'])
+    assert result['projection']['sections']['privileged_users']['detail'] == {
+        'field': '$', 'kind': 'unseen_shape'}
+    assert (tmp_path / 'assessed/model_assessment.json').is_file()
+    assert guid not in ''.join(p.read_text() for p in (tmp_path / 'assessed').iterdir() if p.is_file())
+
+
+def test_one_rule_cannot_mutate_later_policy_evidence(tmp_path, monkeypatch):
+    from azure_tenant_audit import value_rules
+    raw = json.loads(PROVIDER.read_text())
+    raw['powerbi_access_denied_reason'] = ''
+    raw['powerbi_license_found'] = True
+    raw['powerbi_tenant_settings'] = [{'settingName': 'PublishToWeb', 'enabled': True}]
+    source = _save(tmp_path, raw)
+    original = value_rules.assess
+    seen = []
+    def mutating_rule(policy_id, sections):
+        seen.append(len(sections['powerbi_tenant_settings']))
+        sections['powerbi_tenant_settings'].append({'settingName': 'injected', 'enabled': False})
+        return original(policy_id, sections)
+    monkeypatch.setattr(value_rules, 'assess', mutating_rule)
+    assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+                            policies=['MS.POWERBI.1.1v1', 'MS.POWERBI.2.1v1'])
+    assert seen == [1, 1]
+
+
+def test_rule_exception_text_never_reaches_export_artifacts_or_stderr(tmp_path, monkeypatch, capsys):
+    from azure_tenant_audit import value_rules
+    secret = 'canary.person@example.invalid'
+    def broken_rule(*args):
+        raise RuntimeError(secret)
+    monkeypatch.setattr(value_rules, 'assess', broken_rule)
+    result = assess_scubagear_export(PROVIDER, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+                                     policies=['MS.POWERBI.1.1v1'])
+    assert result['policies'][0]['rule_precheck']['cell'] == 'section_not_collected'
+    persisted = ''.join(p.read_text() for p in (tmp_path / 'assessed').iterdir() if p.is_file())
+    assert secret not in persisted + str(capsys.readouterr())
+
+
+@pytest.mark.parametrize('source,expected', [
+    (PROVIDER, 'c8e526c5e27692b2884a9215389428a309571e6b8683a3e3558c75c36da2ef14'),
+    (REAL, '12b876594566f27bdebf3cc688ada165c809efb250adf539cbc474243a534cdb'),
+])
+def test_unaffected_export_prompt_hashes_match_pre_rule_view_fixture(tmp_path, source, expected):
+    changed_by_m5 = {'MS.SECURITYSUITE.2.1v1', 'MS.SECURITYSUITE.2.3v1', 'MS.SECURITYSUITE.3.2v1'}
+    prompts = _dry(tmp_path / source.stem, source)[2]
+    assert len(prompts) == 102
+    hashes = {row['policy_id']: row['prompt_sha256'] for row in prompts
+              if row['policy_id'] not in changed_by_m5}
+    assert len(hashes) == 99
+    assert sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest() == expected
 
 
 @pytest.mark.parametrize("clear", [False, True])

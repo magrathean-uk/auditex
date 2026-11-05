@@ -3,21 +3,53 @@ from __future__ import annotations
 
 from collections import Counter
 import json
+import logging
 from typing import Any
 
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 
 from .model_eval import _evaluate, _invalid_constant, _load_cases, _load_responses, _pairs, _score
 
+LOG = logging.getLogger(__name__)
+
 
 def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
                   named_limitations: bool = True, absent_fields: bool = False,
-                  empty_lists: bool = False, value_rules: bool = False) -> dict[str, Any] | None:
+                  empty_lists: bool = False, value_rules: bool = False,
+                  rule_projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
     sections = [item["section"] for item in case["evidence"][1:]]
     projection = {item["section"]: item["observed"] for item in case["evidence"][1:]}
-    detail = precheck_policy(case["policy_id"], projection, sections,
-                             skip_absent_sections=skip_absent_sections, absent_fields=absent_fields,
-                             empty_lists=empty_lists, value_rules=value_rules)
+    detail = None
+    if value_rules and rule_projection is not None:
+        from azure_tenant_audit.value_rules.catalogue import row_for
+        row = row_for(case["policy_id"])
+        if row is not None:
+            rule_sections = list(row["sections"])
+            try:
+                candidate = precheck_policy(case["policy_id"], rule_projection, rule_sections,
+                                            skip_absent_sections=skip_absent_sections, value_rules=True)
+            except MemoryError:
+                raise
+            except Exception as exc:
+                # Log the rule id and the exception class name only: the message and repr can hold tenant evidence.
+                LOG.warning("Value rule %s failed (%s); the row is answered not assessed",
+                            row["rule_id"], type(exc).__name__)
+                # OPEN SPEC QUESTION: "the rule failed on collected evidence" has no cell in the value-rule spec.
+                # section_not_collected is a stand-in (the evidence was collected); the review proposes the
+                # evidence_unusable family with recollect_unusable_evidence, which needs a spec decision (main).
+                # Do not invent a reason code or text here. Never render the exception in any output.
+                cell = row["cells"]["section_not_collected"]
+                candidate = {"class": "value_rule", "rule_id": row["rule_id"],
+                             "section": rule_sections, "field": None, "value": None,
+                             "cell": "section_not_collected", "reason_code": cell["reason_code"],
+                             "reason_text": "Data unavailable: required evidence section(s) not collected: "
+                                            + ", ".join(rule_sections) + "."}
+            if candidate is not None and candidate["class"] in {"value_rule", "closed_gate"}:
+                detail = candidate
+    if detail is None:
+        detail = precheck_policy(case["policy_id"], projection, sections,
+                                 skip_absent_sections=skip_absent_sections, absent_fields=absent_fields,
+                                 empty_lists=empty_lists, value_rules=value_rules and rule_projection is None)
     if detail is None:
         return None
     return {**precheck_response(detail, case["evidence"][0]["observed"], sections,

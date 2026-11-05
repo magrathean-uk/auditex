@@ -1943,6 +1943,121 @@ def test_scuba_config_unread_sections_keep_their_own_value(complete_bundle):
     assert policy_section({'scuba_config': AAD_DEFAULT}, 'MS.AAD.1.1v1', 'scuba_config') == AAD_DEFAULT
 
 
+def test_rule_capture_precedes_model_budget_and_preserves_distinct_role_dates(complete_bundle):
+    from auditex.scuba_projection import rule_policy_section
+    operation(complete_bundle, 'teams_policy', 'meetingPolicies', [PS['meeting_policies'][2]] * 41)
+    roles_path = complete_bundle / 'normalized/privileged_roles.json'
+    roles = json.loads(roles_path.read_text())
+    roles['records'][0]['Assignments'][0]['EndDateTime'] = None
+    roles['records'][0]['Assignments'][0]['StartDateTime'] = None
+    roles['records'][1]['Assignments'][0].pop('EndDateTime', None)
+    roles['records'][1]['Assignments'][0].pop('StartDateTime', None)
+    write(complete_bundle, 'normalized/privileged_roles.json', roles)
+    p = project_run(complete_bundle)
+    assert len(p.rule_sections['meeting_policies']) == 41
+    assert p['meeting_policies'] == NOT_COLLECTED
+    assert p.rule_sections['privileged_users']['User1']['DisplayName'] == PERSON
+    assert p['privileged_users']['User1']['DisplayName'] != PERSON
+    assignments = [role['Assignments'][0] for role in p.rule_sections['privileged_roles']]
+    assert assignments[0]['EndDateTime'] is None and assignments[0]['StartDateTime'] is None
+    assert 'EndDateTime' not in assignments[1] and 'StartDateTime' not in assignments[1]
+    assert rule_policy_section(p, 'MS.SECURITYSUITE.2.1v1', 'scuba_config') == NOT_COLLECTED
+
+
+def test_rule_capture_honours_run_scan_and_collector_withholding(complete_bundle):
+    operation(complete_bundle, 'teams_policy', 'meetingPolicies', [PS['meeting_policies'][2]] * 2)
+    p = project_run(complete_bundle, scan_max_rows=1)
+    assert p.rule_sections['meeting_policies'] == NOT_COLLECTED
+    operation(complete_bundle, 'teams_policy', 'meetingPolicies',
+              {'error': 'synthetic secret', 'error_class': 'permission_denied'})
+    p = project_run(complete_bundle)
+    assert p.rule_sections['meeting_policies'] == NOT_COLLECTED
+
+
+def test_serving_rules_use_private_view_while_model_case_keeps_marker():
+    from azure_tenant_audit.value_rules.catalogue import row_for
+    policy = 'MS.POWERBI.1.1v1'
+    setting = row_for(policy)['params']['setting_name']
+    private = {'powerbi_license_found': True, 'powerbi_access_denied_reason': '',
+               'powerbi_tenant_settings': [{'settingName': setting, 'enabled': True}] * 41}
+    case = build_case(policy, {}, '2026-11-05')
+    assert all(e['observed'] == NOT_COLLECTED for e in case['evidence'][1:])
+    record = precheck_case(case, value_rules=True, rule_projection=private)
+    assert record['rule_precheck']['class'] == 'value_rule'
+    assert record['rule_precheck']['cell'] == 'setting_entry_duplicated'
+    assert 'powerbi_tenant_settings' in record['rule_precheck']['section']
+
+
+def test_run_rule_view_canaries_never_enter_prompts_or_assessment(complete_bundle, caplog, capsys):
+    canary_email = 'rule-view-run-canary@example.invalid'
+    canary_name = 'Rule View Run Canary DisplayName'
+    path = complete_bundle / 'normalized/privileged_roles.json'
+    roles = json.loads(path.read_text())
+    role = roles['records'][0]
+    role['DisplayName'] = canary_name
+    role['Rules'][0]['NotificationRecipients'] = [canary_email]
+    roles['records'] = [role] * 41
+    write(complete_bundle, 'normalized/privileged_roles.json', roles)
+    projection = project_run(complete_bundle)
+    assert canary_email in repr(projection.rule_sections['privileged_roles'])
+    assert canary_name in repr(projection.rule_sections['privileged_roles'])
+    assert projection['privileged_roles'] == NOT_COLLECTED
+    with caplog.at_level('DEBUG'):
+        assess_run(complete_bundle, ModelConfig(model_name='stub'), dry_run=True)
+        assess_run(complete_bundle, ModelConfig(model_name='stub'),
+                   policies=['MS.POWERBI.1.1v1'])
+    written = (complete_bundle / 'model_assessment_prompts.jsonl').read_text() + (
+        complete_bundle / 'model_assessment.json').read_text()
+    assert canary_email not in written + caplog.text + str(capsys.readouterr())
+    assert canary_name not in written + caplog.text
+
+
+def test_run_rule_reads_unredacted_canary_without_persisting_it(complete_bundle, monkeypatch, caplog, capsys):
+    import auditex.model_serving as serving
+    from azure_tenant_audit import value_rules
+    canary_email = 'rule-input-canary@example.invalid'
+    canary_name = 'Rule Input Canary DisplayName'
+    original_project = serving.project_run
+    original_assess = value_rules.assess
+    seen = []
+
+    def with_private_evidence(root, **options):
+        projection = original_project(root, **options)
+        projection.rule_sections.update({
+            'powerbi_access_denied_reason': '', 'powerbi_license_found': True,
+            'powerbi_tenant_settings': [{'settingName': 'PublishToWeb', 'enabled': canary_name,
+                                         'Owner': canary_email}],
+        })
+        return projection
+
+    def reading_rule(policy_id, sections):
+        seen.append((sections['powerbi_tenant_settings'][0]['enabled'],
+                     sections['powerbi_tenant_settings'][0]['Owner']))
+        return original_assess(policy_id, sections)
+
+    monkeypatch.setattr(serving, 'project_run', with_private_evidence)
+    monkeypatch.setattr(value_rules, 'assess', reading_rule)
+    with caplog.at_level('DEBUG'):
+        result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    assert seen == [(canary_name, canary_email)]
+    assert result['policies'][0]['rule_precheck']['cell'] == 'enabled_not_boolean'
+    written = (complete_bundle / 'model_assessment.json').read_text()
+    assert canary_email not in written + caplog.text + str(capsys.readouterr())
+    assert canary_name not in written + caplog.text
+
+
+def test_unaffected_run_prompt_hashes_match_pre_rule_view_fixture(complete_bundle):
+    from auditex.model_serving import messages_for, policy_catalogue
+    projection = project_run(complete_bundle)
+    hashes = {}
+    for policy_id in policy_catalogue()['policies']:
+        messages = messages_for(build_case(policy_id, projection, '2026-11-05'))
+        hashes[policy_id] = sha256(canonical(messages).encode()).hexdigest()
+    assert len(hashes) == 102
+    assert sha256(canonical(hashes).encode()).hexdigest() == (
+        'a57bba64c13c01be52bb609e00d22d2fb4d18e359d8822445d1704a22a0b2047')
+
+
 @pytest.mark.parametrize('kwargs,environment,basis', [
     ({}, 'commercial', 'assumed_default'),
     ({'footprint': [footprint()]}, 'commercial', 'openid_discovery'),

@@ -75,6 +75,80 @@ def test_value_rules_are_off_in_offline_scoring_by_default():
     assert enabled["rule_precheck"]["class"] == "value_rule"
 
 
+def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path, monkeypatch):
+    from azure_tenant_audit import value_rules
+    from azure_tenant_audit.value_rules import catalogue as value_catalogue
+    policy_id = "MS.POWERBI.1.1v1"
+    data = deepcopy(value_catalogue.catalogue())
+    row = data["policies"][policy_id]
+    row["sections"] = list(reversed(row["sections"]))
+    for entry in row["cells"].values():
+        entry["cited"] = [name for name in row["sections"] if name in entry["cited"]]
+    text = "Data unavailable: required evidence section(s) not collected: " + ", ".join(row["sections"]) + "."
+    row["cells"]["section_not_collected"]["reason_texts"] = [text]
+    monkeypatch.setattr(value_catalogue, "catalogue", lambda: data)
+    # The rule fails, so the fallback answer is built from the patched row and must still pass the validator.
+    monkeypatch.setattr(value_rules, "assess", lambda *args: (_ for _ in ()).throw(RuntimeError("boom")))
+    case = build_case(policy_id, {}, "unused")
+    record = precheck_case(case, value_rules=True, rule_projection={})
+    case_sections = [item["section"] for item in case["evidence"][1:]]
+    ids = {name: f"e{index}" for index, name in enumerate(case_sections, 1)}
+    assert record["claims"][0]["evidence_ids"] == ["e0"] + [ids[name] for name in row["sections"] if name in ids]
+    # End to end: the served envelope, built from the same patched row, validates.
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
+    from test_model_serving import fake_projection
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, {}))
+    monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
+    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy_id])
+    served = result["policies"][0]
+    assert served["reason"] == "rule_precheck" and served["rule_precheck"]["cell"] == "section_not_collected"
+    assert served["rule_precheck"]["reason_text"] == text
+    validate_assessment(result)
+
+
+def test_rule_exception_is_a_constant_not_assessed_answer(monkeypatch, capsys, caplog):
+    from azure_tenant_audit import value_rules
+    secret = "canary.person@example.invalid"
+    def broken(*args):
+        raise RuntimeError(secret)
+    monkeypatch.setattr(value_rules, "assess", broken)
+    policy_id = "MS.POWERBI.1.1v1"
+    case = build_case(policy_id, {}, "unused")
+    with caplog.at_level("DEBUG"):
+        record = precheck_case(case, value_rules=True, rule_projection={})
+    assert record["rule_precheck"]["cell"] == "section_not_collected"
+    assert record["claims"][0]["status"] == "unknown"
+    assert secret not in json.dumps(record) + str(capsys.readouterr())
+    # One line per failure: the rule id and the class name, never the message, evidence or repr.
+    lines = [item for item in caplog.records if item.name == "auditex.model_precheck"]
+    assert len(lines) == 1 and lines[0].exc_info is None
+    text = lines[0].getMessage()
+    assert "MS.POWERBI.1.1v1" in text
+    assert "RuntimeError" in text and secret not in text and secret not in caplog.text
+    assert secret not in repr(lines[0].__dict__)
+
+
+def test_rule_memory_error_is_not_swallowed(monkeypatch, caplog):
+    from azure_tenant_audit import value_rules
+    def exhausted(*args):
+        raise MemoryError
+    monkeypatch.setattr(value_rules, "assess", exhausted)
+    case = build_case("MS.POWERBI.1.1v1", {}, "unused")
+    with pytest.raises(MemoryError):
+        precheck_case(case, value_rules=True, rule_projection={})
+    assert not caplog.records
+
+
+def test_every_rule_catalogue_has_the_full_section_fallback_text():
+    from azure_tenant_audit.value_rules.catalogue import catalogue
+    for policy_id, row in catalogue()["policies"].items():
+        text = ("Data unavailable: required evidence section(s) not collected: "
+                + ", ".join(row["sections"]) + ".")
+        cell = row["cells"].get("section_not_collected")
+        assert cell is not None, policy_id
+        assert text in cell["reason_texts"], policy_id
+
+
 @pytest.mark.parametrize("pid", ["MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1"])
 @pytest.mark.parametrize("value,expected", [("gcc", "closed_gate"), ("gcchigh", "closed_gate"),
     ("dod", "closed_gate"), ("commercial", None), ("GCC", "absent_section"),
@@ -606,9 +680,12 @@ def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
     from test_model_serving import fake_projection
     pid = "MS.AAD.1.1v1"
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
-    monkeypatch.setattr("auditex.model_serving.project_run",
-                        lambda root, **kw: fake_projection(root, {"conditional_access_policies": [],
-                                                                  "scuba_config": {"CapExclusions": {}}}))
+    def projected(root, **kw):
+        projection = fake_projection(root, {"conditional_access_policies": [],
+                                            "scuba_config": {"CapExclusions": {}}})
+        projection.views[pid] = {"scuba_config": {"CapExclusions": {}}}
+        return projection
+    monkeypatch.setattr("auditex.model_serving.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[pid])
     row = result["policies"][0]

@@ -24,13 +24,18 @@ personal data, including user names, email addresses, group membership, device
 metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
 Treat every bundle as confidential.
 Value-rule records carry policy, cell, code, section names and controlled reason
-text, not tenant evidence values. The current rules evaluate the same projected case that
-the local model would see. The planned rule-view projection is designed to retain
-unredacted values only in process, after collection checks but before shape,
-size and redaction gates; it must never enter prompts, assessment files, sidecars
-or logs. This matters for rules that compare bare e-mail addresses, which
-redaction would make indistinguishable within a domain. That rule view is not
-implemented yet.
+text, not tenant evidence values. Serving rules read a separate in-memory view
+after source, ledger, collector-error, qualifier and scan checks, before the
+model view's shape, size and redaction gates. The rule view retains unredacted
+e-mail addresses and display names so rules can distinguish users; it is never
+serialised into prompts, assessment files, sidecars or logs. Only the gated
+model view reaches the model endpoint, redacted unless `--no-redaction` is used
+with a loopback endpoint. A policy whose `scuba_config`
+synthesis was not projected sees the not-collected marker in both views.
+Conditional Access policy display names in `scope_post_check` are retained as
+tenant configuration metadata, with e-mail local parts masked, as specified in
+the output contract. Administrators can put personal names in those labels;
+assessment bundles containing them remain confidential.
 The identity collector's user inventory selects `onPremisesImmutableId`, so raw
 `identity.users` chunks hold it for every returned user, up to the 250,000-user
 safety ceiling. Previously only the hybrid collector's first 100 sampled users

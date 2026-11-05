@@ -6,6 +6,32 @@ The adapter uses the unchanged `scuba_projection` shape gate. That gate admits 4
 
 The gate admits compliant configurations preferentially. For example `authorization_policies` projects only when `AllowInvitesFrom` is `adminsAndGuestInviters`, the passing value for MS.AAD.8.2. Any measured yield or model score on the assessed set therefore skews towards passes. The report's `ceiling` is a statement about this validated gate and the synthetic fixtures, not about actual tenant coverage.
 
+## In-memory rule view
+
+`project_export` also captures `Projection.rule_sections` and per-policy
+`rule_views` after repair and command-ledger checks, canonicalisation and
+qualifier checks, before proof pruning, the unchanged shape gate, the model
+budget and redaction. Digest-less sections and lists over the model's 40-item
+budget can therefore reach deterministic value rules while the model still
+sees the not-collected marker. The capture is kept in memory; prompts, the
+assessment envelope and the sidecar serialise only the model projection and
+safe diagnostics. An unprojected `scuba_config` policy view is not collected
+for both rules and the model, even when the shared base config was projected.
+Capture reuses validated section objects except for `privileged_users`, which
+model redaction edits in place, and keeps the raw section alive for as long as
+the projection lives (about 100 MiB held for a 33 MiB file once the loader is
+released). Serving deep-copies the sections each rule reads once per policy, to
+stop a rule from changing a later policy's input, so the copy cost multiplies by
+the number of rules that read a section. The file cap of 64 MiB bounds the
+input. Measured on synthetic 200,000-row sections: a section no rule reads cost
+nothing extra (27.4 s against 27.2 s for the full assessment), while
+`powerbi_tenant_settings`, which eight rules read, raised the peak from 247.7 to
+262.2 MiB and the assessment from 25.5 s to 70.0 s, under a machine load of
+about 26. These are single local measurements on synthetic input, not a
+performance promise or a production figure.
+One failed Security Suite command still withholds all sections tied to that
+ledger; this is a coverage limit of the current adapter.
+
 ## Evidence boundaries and privacy
 
 The projection reads catalogue section keys, provider command ledgers and four relevant `scuba_config` keys. Baseline comparison reads `Results` control IDs and result labels, or the corresponding TestResults fields. The parser reads `MetaData.ToolVersion` and `MetaData.ReportUUID`, or the provider export's `module_version` and `report_uuid`; only validated forms reach output. `tenant_details.TenantId` is consulted only to detect a conflict with `tenant_id`. Other export keys, including connectors, `cap_table_data`, licence detail, arbitrary `tenant_details` fields and credential-shaped configuration fields, are not put into prompts, the envelope or the sidecar. The provider export, `Raw` when wrapped, is canonicalised in memory for the redaction salt; its content is not emitted. The parser accepts equal top-level `accepted_domains` copies, withholds that section when the copies differ and refuses every other duplicate; it rejects non-finite JSON and lone surrogates, and caps a file at 64 MiB. Its one ScubaGear repair turns a missing JSON value after a key into `[]`; the enclosing section or provider ledger is withheld because repaired data is not evidence. A repair pattern inside a string is refused. The sidecar lists only fixed known section or ledger names, capped at 64, and counts all other repaired key names without emitting them.

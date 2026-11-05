@@ -110,8 +110,13 @@ def answer_for(verdict, case):
 
 def assess(tmp_path, monkeypatch, policy_id, policies, verdict="met", **kwargs):
     """One model row for ``policy_id`` over a faked projection whose Conditional Access section is ``policies``."""
-    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
-    values = {section: {} for section in policy_catalogue()["policies"][policy_id]["sections"]}
+    (tmp_path / "run-manifest.json").write_text(
+        '{"run_id":"run","rule_parameters":{"break_glass_accounts":[]}}')
+    # project_run synthesises the policy's scuba_config view from this manifest.
+    # Leave that view in place: fake_projection replaces ordinary evidence and
+    # clears per-policy views for any section it replaces.
+    values = {section: {} for section in policy_catalogue()["policies"][policy_id]["sections"]
+              if section != "scuba_config"}
     values[CA] = policies
     monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **options: fake_projection(root, values))
     prompts = []
