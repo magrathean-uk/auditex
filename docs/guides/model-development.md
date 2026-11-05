@@ -20,7 +20,7 @@ reports record the applied `tokenizer_fix_mistral_regex` boolean.
 ## Available materials
 
 Run `auditex model sources` to inspect the pinned source inventory. The prepared
-external materials live under `/Volumes/4TB/dev/auditex-data/`:
+external materials live under `<model-root>` (set as `AUDITEX_MODEL_ROOT`):
 
 - Two downloaded, checksum-verified Q4_K_M GGUF comparison models: OpenAdmin 8B
   and M365 Expert v3, approximately 10.2 GB combined. These are inference
@@ -51,10 +51,18 @@ change. Exported examples remain unreviewed proposals.
 From the repository root, select the prepared kit directory. Use new output
 paths; commands refuse to replace existing results.
 
+Replace `<model-root>` with your local model-data directory and
+`<clean-development-env>` with your Clean Development environment script. The
+layout below uses `<model-root>/development-kit` for the prepared kit and
+`<model-root>/reviews` for saved reviews. Set `AUDITEX_KIT` to a different prepared
+kit directory when needed, including a dated subdirectory of `development-kit`;
+it can be outside `AUDITEX_MODEL_ROOT`. Source the environment script if your
+shell has not already loaded it.
+
 ```sh
-source ~/dev/machine/env.zsh
-export AUDITEX_MODEL_ROOT=/Volumes/4TB/dev/auditex-data
-export AUDITEX_KIT=/absolute/path/to/the/prepared/development-kit
+source "<clean-development-env>"
+export AUDITEX_MODEL_ROOT="<model-root>"
+export AUDITEX_KIT="$AUDITEX_MODEL_ROOT/development-kit"
 
 clean-development run --session session-only -- .venv/bin/auditex model sources
 clean-development run --session session-only -- .venv/bin/auditex model stage \
@@ -817,7 +825,8 @@ Policies with no Prowler counterpart (so every case is `policy_not_mapped`): AAD
 EXO 2.2, 4.3, 4.4 and 6.1; SecuritySuite 1.2, 2.1 to 2.3, 3.1 to 3.4, 4.1 and 6.1; SharePoint 1.2, 2.1, 2.2 and 3.1 to 3.3;
 Teams 1.4, 1.7 and 5.1 to 5.3; every Power Platform and Power BI policy.
 
-Setup, once per session. The reference checkout `~/dev/opensource/auditex-references/prowler` is pinned at commit
+Setup, once per session. Replace `<prowler-root>` below with your local reference checkout directory and set
+`AUDITEX_TEST_PROWLER_ROOT` to that directory when running tests. The checkout is pinned at commit
 `f45173997b8331e6cba3deac78bc2e1043b9281d` and sparse to `mcp_server`, `prowler` and `tests/providers/m365` (69 MB; its
 `sparse_paths` in `sources.json`), so it goes straight into `--prowler-root` and nothing is cloned for a run. Prowler's
 classifiers list Python 3.10 to 3.13 and its models use `pydantic.v1`, which pydantic does not support on 3.14, so use 3.12.
@@ -826,7 +835,7 @@ Prowler's own `pyproject.toml` pins (its `dependencies` and `[tool.uv] constrain
 file). It is about 190 MB under `$CLEAN_DEV_BUILDS`.
 
 ```sh
-P=~/dev/opensource/auditex-references/prowler; B="$CLEAN_DEV_BUILDS/prowler-m365"; mkdir -p "$B"
+P="<prowler-root>"; B="$CLEAN_DEV_BUILDS/prowler-m365"; mkdir -p "$B"
 uv venv --python 3.12 "$B/venv"
 "$B/venv/bin/python" - "$P/pyproject.toml" "$B/constraints.txt" <<'EOF'
 import sys, tomllib
@@ -845,9 +854,9 @@ The project `.venv` lacks Prowler's dependencies, so `tests/test_prowler_cases.p
 (the map, evidence-helper, consensus and parsing tests still run); in the 3.12 environment all of them run, including one
 offline real-check test per product (Entra, Exchange, Defender with Purview, SharePoint, Teams) with `socket.connect`,
 `sendto` and `getaddrinfo` blocked, and a consensus-count test on a tiny synthetic kit. The test that checks every mapped
-policy against the miner's policy list reads `AUDITEX_TEST_ORACLE_KIT` (default: the 20261019 kit under
-`~/dev/machine/work/auditex-data/development-kit`) and skips when it is absent. The output directory is new; an existing
-one is refused. `--products` defaults to AAD. It holds:
+policy against the miner's policy list reads `AUDITEX_TEST_ORACLE_KIT`; set it explicitly to the 20261019 kit, for example
+`<model-root>/development-kit/20261019-oracle-cases`, to override the test's local default. It skips when the kit is absent.
+The output directory is new; an existing one is refused. `--products` defaults to AAD. It holds:
 
 - `verdicts.jsonl`: one row per (variant file, policy, check): `variant`, `scubagear_policy`, `prowler_check`, `status`
   (`PASS`, `FAIL`, `MANUAL`) and `status_extended`, plus `confidence`, `assumptions` and `input_sha256`. `status` is
@@ -1023,7 +1032,7 @@ SecuritySuite 91, Teams 89).
   `AllowTeamsConsumer` off, which ScubaGear accepts and Prowler's inbound-only check fails. 18 cases are not compared because
   ScubaGear counts MS.TEAMS.2.2v2, 2.3v2 and 4.1v1 as met without testing them in `gcc`, `gcchigh` and `dod` variants.
 
-The 20261020 run is saved under `~/dev/machine/work/auditex-data/reviews/20261020-prowler-consensus/`
+The 20261020 run is saved under `<model-root>/reviews/20261020-prowler-consensus/`
 (`manifest.json` holds the commits, the checksums of the script and the map, and the counts).
 
 Treat `agree` as corroboration and `disagree` as a review queue, not as an automatic relabel: the two engines read the same
