@@ -262,7 +262,14 @@ check. There is no enabled POST fallback. No live GET acceptance has been verifi
 
 ## Optional IPPS policy inventory
 
-`AUDITEX_ENABLE_IPPS=true` enables exactly these three read-only tenant cmdlets through the existing `powershell_graph` adapter. Disabled mode performs no IPPS process or sign-in and retains the previous five policy gaps. Fixed session plumbing uses `Import-Module ExchangeOnlineManagement` and `Connect-IPPSSession -AppId -CertificateThumbprint -Organization`; the existing enum conversion uses `Get-Command`. Authentication commands are internal plumbing, never admitted by the caller read guard. Credential selectors travel through the child environment. Missing module/session/credentials, refused commands and licence errors produce existing typed gaps; raw output and exception text are withheld from diagnostics.
+`AUDITEX_ENABLE_IPPS=true` enables exactly these three read-only tenant cmdlets through the existing `powershell_graph` adapter. Disabled mode performs no IPPS process or sign-in and retains the previous five policy gaps. Fixed session plumbing uses `Import-Module ExchangeOnlineManagement` and `Connect-IPPSSession -AppId -Organization` with one platform-specific certificate branch:
+
+- Windows: `-CertificateThumbprint`, using `AUDITEX_IPPS_CERTIFICATE_THUMBPRINT` to select an existing certificate with its private key from the Windows certificate store.
+- macOS and Linux: `-CertificateFilePath -CertificatePassword`, using `AUDITEX_IPPS_CERTIFICATE_FILE` for the PFX path and `AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV` to name the environment variable holding its non-empty password. The PowerShell child builds a `SecureString` for the password; ExchangeOnlineManagement loads the certificate. File gates and password isolation are detailed in the [admin guide](../guides/admin-permission-guide.md#optional-security--compliance-app-only-reads).
+
+Keychain-loaded certificate objects passed with `-Certificate` are deliberately omitted because their private-key access and key-store side effects have not been established offline. The PFX branch delegates certificate loading to ExchangeOnlineManagement; its platform/module behaviour is inferred from documentation and still requires playground verification.
+
+The existing enum conversion uses `Get-Command`. Authentication commands are internal plumbing, never admitted by the caller read guard. Credential selectors travel through the child environment. Missing module/session/credentials, refused commands and licence errors produce existing typed gaps; raw output and exception text are withheld from diagnostics.
 
 | Operation | Cmdlet | Explicit Select-Object fields | Learn URL (offline applicability: Inference) |
 | --- | --- | --- | --- |
