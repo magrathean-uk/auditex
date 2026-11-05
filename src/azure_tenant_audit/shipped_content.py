@@ -16,10 +16,10 @@ class ShippedContentArea:
 # The globs include the SCuBA catalogues and current/legacy model_assessment
 # schemas, including the byte-preserved 2026-10-28 projection predecessor.
 SHIPPED_CONTENT_AREAS: tuple[ShippedContentArea, ...] = (
-    ShippedContentArea("configs", "configs", "auditex/configs", ("configs/*.json",), "configs under `configs/`"),
+    ShippedContentArea("configs", "configs", "auditex/configs", ("configs/*.json", "configs/explainer-*.json"), "configs under `configs/`"),
     ShippedContentArea("assets", "assets", "auditex/assets", ("assets/*",), "product assets under `assets/`"),
     ShippedContentArea("profiles", "profiles", "auditex/profiles", ("profiles/*.md",), "profiles under `profiles/`"),
-    ShippedContentArea("schemas", "schemas", "auditex/schemas", ("schemas/*.json",), "schemas under `schemas/`"),
+    ShippedContentArea("schemas", "schemas", "auditex/schemas", ("schemas/*.json", "schemas/explainer.schema.json"), "schemas under `schemas/`"),
     ShippedContentArea(
         "docs_provenance",
         "docs/provenance",

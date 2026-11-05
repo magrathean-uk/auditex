@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Deterministic rule explainer (compact result only)",
+  "description": "Compact result: at most 80 explanation words and 3 sentences; at most 6 steps of 30 words each, except whole approved executable pre blocks which are exempt from the word limit only. Word/sentence limits, plain text, ordered references within the cited View and verdict-specific behaviour are enforced by the renderer. render_full is an expanded-baseline UI result outside this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["explanation", "remediation_steps", "evidence_refs"],
+  "properties": {
+    "explanation": {"type": "string", "minLength": 1},
+    "remediation_steps": {"type": "array", "maxItems": 6, "items": {"type": "string", "minLength": 1}},
+    "evidence_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^e[0-9]+$"}}
+  }
+}

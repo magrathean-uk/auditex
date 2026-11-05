@@ -67,9 +67,9 @@ auditex = ["explorer_assets/*.css", "explorer_assets/*.html", "explorer_assets/*
 [tool.setuptools.data-files]
 # Includes SCuBA catalogues and current/legacy model_assessment schemas (including 2026-10-28).
 "auditex/assets" = ["assets/*"]
-"auditex/configs" = ["configs/*.json"]
+"auditex/configs" = ["configs/*.json", "configs/explainer-*.json"]
 "auditex/profiles" = ["profiles/*.md"]
-"auditex/schemas" = ["schemas/*.json"]
+"auditex/schemas" = ["schemas/*.json", "schemas/explainer.schema.json"]
 "auditex/docs" = ["docs/*.md"]
 "auditex/docs/guides" = ["docs/guides/*.md"]
 "auditex/docs/reference" = ["docs/reference/*.md"]

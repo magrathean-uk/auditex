@@ -1,0 +1,60 @@
+{
+  "reason": "R4: preserve executable pre blocks, comments and continuations; frozen source pins remain unchanged. Navigation pre units retain historical prose limits.",
+  "changes": [
+    {
+      "policy": "MS.AAD.6.1v1",
+      "cell": "password_expiry_set",
+      "form": "remediation_steps_full",
+      "old_start": 3,
+      "new_start": 3,
+      "old_text": [
+        "Connect-MgGraph -Scopes \"Domain.ReadWrite.All\" # or alternatively \"Domain.Read.All\" for determining which domains are in a non-compliant state.; $NonCompliantDomains = (Invoke-MgGraphRequest -Method GET -Uri \"https://graph.microsoft.com/v1.0/domains\").value | Where-Object {; $_.isRoot -and $_.isVerified -and",
+        "$null -ne $_.passwordValidityPeriodInDays -and; $_.passwordValidityPeriodInDays -ne [int32]::MaxValue; }; Write-Host $NonCompliantDomains | Format-List; Remediate each non-compliant domain; Invoke-MgGraphRequest -Method PATCH -Uri \"https://graph.microsoft.com/v1.0/domains/example.com\" -Body @{ passwordValidityPeriodInDays = [int32]::MaxValue }; Verify domain configurations",
+        "$AllDomains = (Invoke-MgGraphRequest -Method GET -Uri \"https://graph.microsoft.com/v1.0/domains\").value | Where-Object {; $_.isRoot -and $_.isVerified; }; Write-Host \"All current domain password expiration policies\"; foreach ($Domain in $AllDomains) {",
+        "Write-Host \"Domain passwordValidityPeriodInDays: $($Domain.id) $($Domain.passwordValidityPeriodInDays)\"; }"
+      ],
+      "new_text": [
+        "Connect-MgGraph -Scopes \"Domain.ReadWrite.All\" # or alternatively \"Domain.Read.All\" for determining which domains are in a non-compliant state.\n$NonCompliantDomains = (Invoke-MgGraphRequest -Method GET -Uri \"https://graph.microsoft.com/v1.0/domains\").value | Where-Object {\n$_.isRoot -and $_.isVerified -and\n$null -ne $_.passwordValidityPeriodInDays -and\n$_.passwordValidityPeriodInDays -ne [int32]::MaxValue\n}\nWrite-Host $NonCompliantDomains | Format-List\n# Remediate each non-compliant domain\nInvoke-MgGraphRequest -Method PATCH -Uri \"https://graph.microsoft.com/v1.0/domains/example.com\" -Body @{ passwordValidityPeriodInDays = [int32]::MaxValue }\n# Verify domain configurations\n$AllDomains = (Invoke-MgGraphRequest -Method GET -Uri \"https://graph.microsoft.com/v1.0/domains\").value | Where-Object {\n$_.isRoot -and $_.isVerified\n}\nWrite-Host \"All current domain password expiration policies\"\nforeach ($Domain in $AllDomains) {\nWrite-Host \"Domain passwordValidityPeriodInDays: $($Domain.id) $($Domain.passwordValidityPeriodInDays)\"\n}"
+      ]
+    },
+    {
+      "policy": "MS.AAD.7.3v1",
+      "cell": "federated_admin_found",
+      "form": "remediation_steps_full",
+      "old_start": 6,
+      "new_start": 6,
+      "old_text": [
+        "Connect-MgGraph; Get-MgBetaUser -Filter \"userPrincipalName eq 'username@somedomain.com'\" | FL"
+      ],
+      "new_text": [
+        "Connect-MgGraph\nGet-MgBetaUser -Filter \"userPrincipalName eq 'username@somedomain.com'\" | FL"
+      ]
+    },
+    {
+      "policy": "MS.POWERPLATFORM.6.1v1",
+      "cell": "flag_bad",
+      "form": "remediation_steps",
+      "old_start": 3,
+      "new_start": 3,
+      "old_text": [
+        "$tenantSettings = Get-TenantSettings; $tenantSettings.powerPlatform.powerApps.disableShareWithEveryone = $true; Set-TenantSettings $tenantSettings"
+      ],
+      "new_text": [
+        "$tenantSettings = Get-TenantSettings\n$tenantSettings.powerPlatform.powerApps.disableShareWithEveryone = $true\nSet-TenantSettings $tenantSettings"
+      ]
+    },
+    {
+      "policy": "MS.POWERPLATFORM.6.1v1",
+      "cell": "flag_bad",
+      "form": "remediation_steps_full",
+      "old_start": 3,
+      "new_start": 3,
+      "old_text": [
+        "$tenantSettings = Get-TenantSettings; $tenantSettings.powerPlatform.powerApps.disableShareWithEveryone = $true; Set-TenantSettings $tenantSettings"
+      ],
+      "new_text": [
+        "$tenantSettings = Get-TenantSettings\n$tenantSettings.powerPlatform.powerApps.disableShareWithEveryone = $true\nSet-TenantSettings $tenantSettings"
+      ]
+    }
+  ]
+}

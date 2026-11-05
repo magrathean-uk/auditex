@@ -1,0 +1,38 @@
+{
+  "fixture_sha256": {
+    "catalogue-v391-fixture.json.gz": "a34fdf51b09a3b5bef2708c4aba669462d9470a07c3ed03d4126c51c867f5d7e",
+    "fault-vectors.jsonl": "eccdac84d8ae19acd594bf44b03bccfe49115f9c18c9992e338202d5b1c4a56a",
+    "source-step-pins.json.gz": "84105d499b45b96c3114a1dca921aa894b8504acce676a84dec02ca53c29f08f"
+  },
+  "fixture_sha256_note": "sha256 of the logical (decompressed) bytes of each stored fixture.",
+  "historical_counts": {
+    "R_preamble_occurrences": 29,
+    "S_preamble_occurrences": 30,
+    "S_truncated_policies": 30
+  },
+  "integration_sources_sha256": {
+    "explainer/PRODUCT-BRIEF.md": "7268f7cf3d5c358790868b3eec01a35e110fda98ff199c4f11eb8f65487d6002",
+    "explainer/S/MANIFEST.sha256": "8574c4f728f30bc7753e62968cb281f5cbc12ce6810fb3c695d46a5fc36c729a",
+    "value-rules-v391/ADDENDUM-A1.md": "6a0cffba983fc4b3c9fe525818ee6c30194dc5b3c369c33dec36464ee92206c8",
+    "value-rules-v391/NOTE-rule_evaluation_failed.md": "82b871caba5bfef8540f233b6f11efca2f02bc2ea9482c612589105141706032",
+    "value-rules-v391/cell-catalogue.json": "a34fdf51b09a3b5bef2708c4aba669462d9470a07c3ed03d4126c51c867f5d7e"
+  },
+  "licence": "Product-authored rule/collection fixtures follow the repository licence; extracted public baseline text retains CISA CC0 and Microsoft CC BY 4.0 notices and source links in baselines.json.",
+  "origin": "Frozen S v3.9.1; test-only independent pins, not product approval of collection wording. The former copies of the shipped baselines and collection configs are not stored: tests read configs/ directly.",
+  "part3_original_shared_contract_deviation": "PRODUCT-BRIEF fixed fault contract takes precedence over S A1 customer wording; rule_not_implemented is outside this part contract.",
+  "shared_contract_deviation": "Integration: main-approved A1 governs both shared reasons; old NOTE wording is rejected; exact current product sentinel normalises to null. Product current literal already equals A1.",
+  "source_sha256": {
+    "explainer/S/A/baselines.py": "b5c9592142ce79b6556a1a641fff7c3189bcd4a3c007ae8a41633ef7017bb739",
+    "explainer/S/B/build.py": "4e330f1041ff21e63130c71c2de0cbb8b2dca7e35b671e47f9f43550f9f84ea7",
+    "explainer/S/B/render.py": "7a5f5c8d8268aa1e1de6def429a32f34f4284071c233a1eec2f6a81605c38592",
+    "explainer/S/B/scrub-audit.json": "39e3e522370670384bcd20b4fd795feec4cbb035901e3272146b08cf0e9ebca5",
+    "explainer/S/B/template.json": "85a23574520642622a833c3d0f39ee7410032d77a7180ceb2f0f249ddf5c9116",
+    "explainer/S/B/textkit.py": "c3478dc33c9a163e7b3ef76fb5211fa6410e92d1849642df8da1e09b28450c25",
+    "explainer/S/B/what_to_collect.json": "2d6089554bc9d591f6177cbe9468e875fae64747c0c38a6c2fc9da878645e046",
+    "explainer/S/MANIFEST.sha256": "8574c4f728f30bc7753e62968cb281f5cbc12ce6810fb3c695d46a5fc36c729a",
+    "value-rules-v391/ADDENDUM-A1.md": "6a0cffba983fc4b3c9fe525818ee6c30194dc5b3c369c33dec36464ee92206c8",
+    "value-rules-v391/NOTE-rule_evaluation_failed.md": "82b871caba5bfef8540f233b6f11efca2f02bc2ea9482c612589105141706032",
+    "value-rules-v391/cell-catalogue.json": "a34fdf51b09a3b5bef2708c4aba669462d9470a07c3ed03d4126c51c867f5d7e",
+    "value-rules-v391/rule-eval-failed/vectors.jsonl": "8df5597d6b88a75bf440dbda3962d4391cc46e13a42f423d76cbfdd4eb6ce889"
+  }
+}

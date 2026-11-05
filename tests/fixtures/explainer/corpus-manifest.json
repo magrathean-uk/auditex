@@ -1,0 +1,121 @@
+{
+ "inputs_sha256": {
+  "configs/explainer-baselines.json": "4a9000213454d7a5b8234f52ded5d2abf14ae78d45a6742e0096957b541362fc",
+  "configs/explainer-template.json": "daa26b1c142759f0afe3d7ffaeae7080c410d4156bbd0c5555fcc8975a443cb4",
+  "configs/explainer-what-to-collect.json": "39caf38c74dd9bc5ed5878b6d2a4200d0af796c0ba63c27d7d848e1d27a8b4a9",
+  "configs/scuba-value-rules.json": "467a6b228b74e182163c74ccf9718e2390e8069f532f9a1076458bf668b3d197",
+  "tests/fixtures/explainer/checks/english-words.txt": "b619cca2de479ba35eb5a2c4fd7f3012089b503dd2bca29ccdcf6ff647d70ee9",
+  "tests/fixtures/explainer/checks/train-identifiers.json": "47380fc645a8be404c5649c06a1788667f9b8d65b628a09f8eaf003fb285ac60"
+ },
+ "mutations": {
+  "benign": 2522,
+  "by_group": {
+   "S": 6636,
+   "a": 2787,
+   "b": 6058,
+   "benign": 2822,
+   "c": 830,
+   "d": 1020,
+   "e": 930,
+   "e2": 190,
+   "e3": 603
+  },
+  "harmful": 19354,
+  "known_miss_note": "19,350 of 19,354 harmful mutants are flagged by an expected check (99.979%); the four misses are documented checker gaps (a/c on the qualifier_shadowed cell once its no-conclusion sentence is removed or replaced; e on a paraphrase that flips a state word). No benign control fails.",
+  "known_misses": [
+   "X0684/a31_not_assessed_drops_no_conclusion_sentence",
+   "X0684/c06_unknown_replaces_no_conclusion",
+   "X0447/e06_paraphrase_fail_state_flip",
+   "X1203/e06_paraphrase_fail_state_flip"
+  ],
+  "rows": 21876,
+  "stream_sha256": "66194a7fdbf530b79210826814131db00b74b31705fce77a74c17b03032adac2",
+  "types": 160
+ },
+ "note": "Pins for generated test material. Nothing listed here is stored: the pool is the allowed value-rule vector fixtures, the test set, pairs and mutants are generated from it (tests/explainer_checks), and the hashes below detect any drift in the pool, the engine, the template or the generators.",
+ "pairs": {
+  "base": 1384,
+  "by_verdict": {
+   "met": 228,
+   "not_applicable": 40,
+   "not_assessed": 851,
+   "not_met": 265
+  },
+  "shared": 2,
+  "stream_sha256": "6e83fc9ce97c34fd1d7b6ca06031dff6918b74af464b91494fb17586cd284a4c",
+  "twins_per_pair": 5
+ },
+ "pool": {
+  "by_kind": {
+   "constructed": 12146,
+   "pack-train": 4313,
+   "pack-validation": 527
+  },
+  "cells": 1084,
+  "policies": 102,
+  "vector_ids_sha256": "9fcfa6dccb0d5247d41f2added0f1fb144be9aa2ce176528400ef6c71a9914ae",
+  "vectors": 16986
+ },
+ "schema_version": 1,
+ "seed": "explainer-testset-20261105",
+ "testset": {
+  "counts": {
+   "by_kind": {
+    "constructed": 792,
+    "pack-train": 457,
+    "pack-validation": 135
+   },
+   "cells_in_pool": 1084,
+   "core": 1084,
+   "core_by_area": {
+    "AAD": 288,
+    "EXO": 124,
+    "POWERBI": 104,
+    "POWERPLATFORM": 50,
+    "SECURITYSUITE": 313,
+    "SHAREPOINT": 79,
+    "TEAMS": 126
+   },
+   "core_by_verdict": {
+    "met": 148,
+    "not_applicable": 10,
+    "not_assessed": 761,
+    "not_met": 165
+   },
+   "depth": 300,
+   "depth_by_verdict": {
+    "met": 80,
+    "not_applicable": 30,
+    "not_assessed": 90,
+    "not_met": 100
+   },
+   "depth_shortfall": {},
+   "distinct_rule_kinds": 37,
+   "over_cap_rows": 1,
+   "pilot": 96,
+   "policies_covered": 102,
+   "policies_in_pool": 102,
+   "pool": 16986,
+   "pool_by_kind": {
+    "constructed": 12146,
+    "pack-train": 4313,
+    "pack-validation": 527
+   },
+   "stage_B": 300,
+   "stage_B_by_verdict": {
+    "met": 63,
+    "not_applicable": 25,
+    "not_assessed": 118,
+    "not_met": 94
+   },
+   "stage_pilot_by_verdict": {
+    "met": 20,
+    "not_applicable": 8,
+    "not_assessed": 38,
+    "not_met": 30
+   },
+   "total": 1384
+  },
+  "rows_sha256": "f9e3da598df40bccc860d9cba78baefc9f3fcf00664881107c5b35ec3d960e6a"
+ }
+}

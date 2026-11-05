@@ -1,0 +1,11 @@
+{
+  "files": {
+    "README.md": "f83a19c0ba019ce8b9f5023629c2c70ff2d933e5014c4449b46f36e3bead9293",
+    "WORDLIST-NOTICE.md": "27e860a93baa2958504ac9269129f89764413adc96797a0bb0bbb8e284f8ebb1",
+    "baseline-expectations.json": "4e6299df5a878ac722f6a569e2c4ad0deb88363b79a33cdf987f59cfbdede139",
+    "english-words.txt": "b619cca2de479ba35eb5a2c4fd7f3012089b503dd2bca29ccdcf6ff647d70ee9",
+    "source-pins.json": "c28508ad677f63a662a05c6a837dd41fd559d5cc897354cc99389c495fc273be"
+  },
+  "note": "sha256 of logical (decompressed) bytes; baseline-expectations.json is stored as .gz",
+  "schema_version": 1
+}
