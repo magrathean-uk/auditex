@@ -67,7 +67,7 @@ def _check_failure_entry(entry: Any) -> None:
 def catalogue() -> dict[str, Any]:
     data = json.loads(open_text_resource("configs/scuba-value-rules.json"))
     if (data.get("schema_version") != 1 or data.get("scubagear_revision") != "2446ad72"
-            or data.get("spec_version") != "v3.9" or not isinstance(data.get("policies"), dict)):
+            or data.get("spec_version") != "v3.9.1" or not isinstance(data.get("policies"), dict)):
         raise ValueError("Invalid value-rule catalogue")
     _check_failure_entry(data.get("rule_failure"))
     contracts = data.get("cell_contracts", {})

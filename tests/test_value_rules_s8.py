@@ -65,7 +65,7 @@ def test_vectors_match_reference_and_reach_every_cell(policy, rows):
 def test_manifest_and_split_exclusions(rows):
     manifest = json.loads(MANIFEST.read_text())[FIXTURE.name]
     assert sha256(FIXTURE.read_bytes()).hexdigest() == manifest["sha256"]
-    assert manifest["spec_version"] == "v3.9" and manifest["stage"] == 8
+    assert manifest["spec_version"] == "v3.9.1" and manifest["stage"] == 8
     assert len(rows) == manifest["rows"] == 298
     assert len({row["vector_id"] for row in rows}) == len(rows)
     assert dict(Counter(row["policy"] for row in rows)) == manifest["by_policy"]

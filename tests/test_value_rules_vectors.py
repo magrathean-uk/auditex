@@ -138,8 +138,10 @@ def rows_v39():
 
 
 def test_catalogue_is_shipped_and_stage_set_is_exact():
-    assert json.loads(open_text_resource("configs/scuba-value-rules.json")) == catalogue()
-    assert catalogue()["spec_version"] == "v3.9"
+    text = open_text_resource("configs/scuba-value-rules.json")
+    assert json.loads(text) == catalogue()
+    assert text == json.dumps(catalogue(), indent=2, ensure_ascii=False) + "\n"
+    assert catalogue()["spec_version"] == "v3.9.1"
     assert set(rule_policies()) == STAGE_POLICIES
     assert sum(len(cells_for(policy)) for policy in STAGE1_POLICIES) == 113
     assert sum(len(cells_for(policy)) for policy in STAGE3_POLICIES) == 201
@@ -356,12 +358,25 @@ def test_stage3_rule_output_never_echoes_evidence(policy, sections):
                for value in record["detail"].values())
 
 
+FULL_SOURCE_PARITY_EXEMPT = {
+    "pack-train:scuba-securitysuite-ms-securitysuite-3-2v1-376939a16c":
+        "D90: the gold response cites scuba_config, which the rule does not read from v3.6",
+    **dict.fromkeys((
+        "pack-validation:scuba-aad-ms-aad-3-3v2-0430461ff5",
+        "aad-frozen:scuba-aad-ms-aad-3-3v2-801ffdfc6a-nc",
+        "aad-frozen:scuba-aad-ms-aad-3-3v2-aeff53ba22-nc",
+    ), "D94: the gold response cites conditional_access_policies or scuba_config, which the rule does not read from v3.7"),
+}
+
+
 def test_optional_full_source_vectors():
     path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
     if not path:
         pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
     policy_items = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
     reached = defaultdict(set)
+    licence_excluded = 0
+    parity_exempt = {}
     for row in _rows(Path(path)):
         if row["policy"] not in STAGE_POLICIES:
             continue
@@ -380,11 +395,28 @@ def test_optional_full_source_vectors():
         response = precheck_response(detail, {"policy_id": row["policy"], "criticality": criticality},
                                      list(row["sections"]), named_limitations=False)
         if row.get("gold_response") is not None and row.get("disagreement") is None:
-            assert response == row["gold_response"]
+            if row["source_kind"].startswith("packlic-"):
+                # Match the reference checker: these twins' gold predates the
+                # licence section. All exact rule assertions above still run.
+                licence_excluded += 1
+            elif row["vector_id"] in FULL_SOURCE_PARITY_EXEMPT:
+                marker = row.get("parity_exempt")
+                assert marker == FULL_SOURCE_PARITY_EXEMPT[row["vector_id"]]
+                assert row["vector_id"] not in parity_exempt
+                parity_exempt[row["vector_id"]] = marker
+            else:
+                # S2 markers and the other D94 rows already match this legacy
+                # vocabulary; keep checking them instead of blanket exemption.
+                assert response == row["gold_response"], row["vector_id"]
         assert row.get("disagreement") is None or row["disagreement"].startswith("expected:")
         reached[row["policy"]].add(detail["cell"])
     assert all(reached[policy] == set(cells_for(policy)) for policy in reached)
     assert set(reached) in (STAGE1_POLICIES, STAGE_POLICIES)
+    if set(reached) == STAGE_POLICIES:
+        assert licence_excluded == 45
+        assert parity_exempt == FULL_SOURCE_PARITY_EXEMPT
+    else:
+        assert licence_excluded == 0 and parity_exempt == {}
 
 
 def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):

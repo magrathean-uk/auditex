@@ -292,10 +292,11 @@ def test_all_external_final_vectors_have_valid_contracts(monkeypatch, tmp_path):
         row = deepcopy(row)
         row.update(rule_id=policy + "." + row["kind"], params={})
         row["cells"]["section_not_collected"]["cited"] = row["sections"]
-        # Reuse the shipped single source for previously added variants.
-        for cell, entry in SOURCE["policies"].get(policy, {}).get("cells", {}).items():
-            if "cited_variants" in entry:
-                row["cells"][cell]["cited_variants"] = entry["cited_variants"]
+        # The immutable source inventory predates A2. Merge the exact shared
+        # contracts too, including SS 1.3's fourth variant held outside its row.
+        for (variant_policy, cell), variants in VARIANTS.items():
+            if variant_policy == policy:
+                row["cells"][cell]["cited_variants"] = deepcopy(variants)
         data["policies"][policy] = row
     monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
     loader.catalogue.cache_clear()

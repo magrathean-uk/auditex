@@ -67,7 +67,7 @@ def test_manifest_hash_counts_and_complete_cell_coverage(rows_s6):
     rows = [row for group in rows_s6.values() for row in group]
     assert sha256(FIXTURE.read_bytes()).hexdigest() == manifest["sha256"]
     assert set(rows_s6) == STAGE6_POLICIES
-    assert manifest["spec_version"] == catalogue()["spec_version"] == "v3.9"
+    assert manifest["spec_version"] == catalogue()["spec_version"] == "v3.9.1"
     assert manifest["rows"] == len(rows) == 1208
     assert manifest["by_policy"] == {policy: len(group) for policy, group in rows_s6.items()}
     assert manifest["by_cell"] == dict(Counter(f"{row['policy']}:{row['rule_cell']}" for row in rows))
