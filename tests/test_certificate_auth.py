@@ -491,8 +491,13 @@ def test_certificate_cache_never_enters_persisted_run_state(monkeypatch, tmp_pat
     # Check before these persistence boundaries as well as checking the saved artefacts.
     real_log = output.AuditLogger.log
     real_write = output.AuditWriter._write_text_atomic
+    log_violations = []
     def safe_log(self, event, message, details=None):
-        assert_safe(json.dumps([event, message, details], default=str))
+        text = json.dumps([event, message, details], default=str)
+        if any(value in text for value in (token, assertion, "test-only-private-cache", "_certificate_tokens")):
+            # _emit() swallows callback exceptions; record without writing sensitive data.
+            log_violations.append("certificate state in audit log event")
+            return
         return real_log(self, event, message, details)
     def safe_write(self, path, content):
         assert_safe(content)
@@ -505,6 +510,7 @@ def test_certificate_cache_never_enters_persisted_run_state(monkeypatch, tmp_pat
     assert cli.main(["--tenant-name", "test-only", "--tenant-id", "test-only-tenant",
                      "--client-id", "test-only-app", "--certificate-keychain-sha256", "00" * 32,
                      "--collectors", "identity", "--throttle-mode", "fast", "--out", str(tmp_path)]) == 0
+    assert not log_violations
     assert fills == [clients[0].auth.graph_scope]
     assert clients[0]._certificate_tokens
     assert_safe(repr(clients[0]) + caplog.text)
@@ -534,6 +540,8 @@ def test_certificate_cli_rejects_abbreviations_before_run(monkeypatch, flag, joi
     called = []
     monkeypatch.setattr(cli, "run_live", lambda *a, **k: called.append(True))
     args = [flag + "=test-only-selector"] if joined else [flag, "test-only-selector"]
+    if flag == "--certificate-password-en":
+        args += ["--certificate-pfx", "test-only-memory.pfx"]
     with pytest.raises(SystemExit) as caught:
         cli.main(args)
     assert caught.value.code == 2
