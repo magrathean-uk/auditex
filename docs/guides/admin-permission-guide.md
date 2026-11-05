@@ -51,6 +51,40 @@ that separate input `PartnerDomains`; this file does not supply it. Connecting
 the sensitive-user copy to the in-memory `scuba_config` rule view is a separate
 product integration; collection alone does not enable the assessment.
 
+### Local partner domains for SS 2.3
+
+Use `--partner-domains FILE` on `auditex run`, `azure-tenant-audit` or
+`auditex guided-run`, or set `AUDITEX_PARTNER_DOMAINS_FILE`; the flag wins.
+Offline replay accepts it too. This local input needs no additional tenant
+permission. Domains are not personal data but are customer-confidential.
+
+Supply a regular UTF-8 file (optional initial BOM), one bare domain per line or
+a JSON array of strings, at most 256 KiB and 10,000 entries. Blank text lines
+are ignored; comments and `name;domain` are rejected. Entries are trimmed,
+lower-cased, stripped of one trailing dot, sorted and de-duplicated. Use ASCII
+DNS names with at least one dot, labels 1-63 characters and total length at most
+253; no leading or trailing hyphen. Non-ASCII input is rejected; ASCII punycode
+is accepted. Do not use e-mail addresses, URLs, `@` prefixes or wildcards.
+Explicit subdomains are literal domains; SS 2.3 v3.9.1 matches exact strings.
+Errors show physical line numbers without exposing entries or the source path.
+
+Only `<run-dir>/operator-inputs/partner-domains.txt` persists the normalised list
+(0600 in a 0700 directory). A **separate** per-run 32-byte raw HMAC key is kept in
+`operator-inputs/partner-domains.key` (0600), never reused from sensitive users.
+Do not share either file. The manifest field `operator_inputs.partner_domains`
+holds only `supplied` and, when supplied, unique `count` and `hmac_sha256`.
+No list is uploaded or included in logs, evidence, AI context, reports, exports
+or customer packs; the source path is redacted from command arguments. Demos
+ignore the operator environment. Projection integration is a separate product
+change, and any rule view must remain in memory only.
+
+Resume replaces this input while keeping its key; omit the input to clear its
+list and key. The sibling input is preserved. An existing HMAC with an unusable
+key stops the run. Support can use
+`azure_tenant_audit.partner_domains.verify_partner_domains(run_dir)` locally;
+it checks consistency with the private files, not authenticity against someone
+able to rewrite them. The output contract describes the schema handoff to product.
+
 ### Delegated Read Login
 
 Use this when an operator signs in with a tenant account.

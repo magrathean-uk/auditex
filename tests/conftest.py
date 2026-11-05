@@ -60,6 +60,7 @@ def _no_break_glass_list_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None
     """An operator's AUDITEX_BREAK_GLASS_ACCOUNTS must not reach a test that expects no list."""
     monkeypatch.delenv("AUDITEX_BREAK_GLASS_ACCOUNTS", raising=False)
     monkeypatch.delenv("AUDITEX_SENSITIVE_USERS_FILE", raising=False)
+    monkeypatch.delenv("AUDITEX_PARTNER_DOMAINS_FILE", raising=False)
 
 
 @pytest.fixture(autouse=True)

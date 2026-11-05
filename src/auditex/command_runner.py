@@ -10,6 +10,8 @@ from azure_tenant_audit.secret_hygiene import collect_sensitive_argv_values, red
 
 
 SENSITIVE_ARGS = {
+    "--sensitive-users",
+    "--partner-domains",
     "--access-token",
     "--client-secret",
     "--token",

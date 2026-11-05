@@ -310,6 +310,7 @@ def build_guided_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", default="outputs/guided")
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--sensitive-users", metavar="FILE", help="Local sensitive-user list (else AUDITEX_SENSITIVE_USERS_FILE).")
+    parser.add_argument("--partner-domains", metavar="FILE", help="Local partner-domain list (else AUDITEX_PARTNER_DOMAINS_FILE).")
     parser.add_argument("--top", type=int, default=None, help=(
         "Explicit per-list row limit; without it lists are paged to the last row, except identity.users, "
         "which stops at 250,000 users with a pagination_not_followed gap if more remain (also with --top 0 "
@@ -416,10 +417,12 @@ def _run_ga_setup_flow(
 
 def run_guided(args: argparse.Namespace) -> int:
     from azure_tenant_audit.sensitive_users import SensitiveUsersError, load_sensitive_users
+    from azure_tenant_audit.partner_domains import PartnerDomainsError, load_partner_domains
 
     try:
         sensitive_users = load_sensitive_users(getattr(args, "sensitive_users", None))
-    except SensitiveUsersError as exc:
+        partner_domains = load_partner_domains(getattr(args, "partner_domains", None))
+    except (SensitiveUsersError, PartnerDomainsError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
     flow = _resolve_flow(args)
@@ -550,6 +553,8 @@ def run_guided(args: argparse.Namespace) -> int:
     renderer = ProgressRenderer()
     started = time.time()
     input_kwargs = {"sensitive_users": sensitive_users} if sensitive_users.addresses else {}
+    if partner_domains.domains:
+        input_kwargs["partner_domains"] = partner_domains
     rc = tenant_cli.main(argv, event_listener=renderer, **input_kwargs)
     duration = round(time.time() - started, 2)
     print(f"Done in {duration}s")

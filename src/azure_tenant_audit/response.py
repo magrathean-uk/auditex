@@ -19,7 +19,7 @@ from .secret_hygiene import redact_argv, sanitize_token_claims
 
 LAB_TENANT_ENV = "AUDITEX_LAB_TENANT_IDS"
 DEFAULT_LAB_TENANT_IDS: tuple[str, ...] = ()
-RESPONSE_SENSITIVE_ARGS = {"--command-override", "--adapter-override", "--access-token", "--client-secret", "--token"}
+RESPONSE_SENSITIVE_ARGS = {"--sensitive-users", "--partner-domains", "--command-override", "--adapter-override", "--access-token", "--client-secret", "--token"}
 ALLOWED_RESPONSE_ADAPTERS = tuple(sorted(ADAPTERS.keys()))
 SAFE_RESPONSE_FIELD_BLACKLIST = frozenset("\x00\r\n\t;&|`$<>\"'")
 MAX_RESPONSE_FIELD_LENGTH = 512

@@ -33,6 +33,7 @@ from typing import Any
 
 from .evidence_refs import HASH_ALGORITHM, confined_file, file_sha256
 from .sensitive_users import BUNDLE_PATH, KEY_PATH
+from .partner_domains import BUNDLE_PATH as PARTNER_DOMAINS_PATH, KEY_PATH as PARTNER_DOMAINS_KEY_PATH
 
 BUNDLE_HASHES_PATH = "bundle-hashes.json"
 BUNDLE_HASHES_SCHEMA_VERSION = "2026-10-22"
@@ -43,7 +44,9 @@ _APPEND_ONLY_LOGS = frozenset({"audit-log.jsonl", "audit-command-log.jsonl", "au
 _SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 EVIDENCE_DB_SIDECARS = tuple(f"{EVIDENCE_DB_PATH}{suffix}" for suffix in _SIDECAR_SUFFIXES)
 _IGNORED_NAMES = frozenset({".DS_Store"})
-_PRIVATE_OPERATOR_INPUTS = frozenset({BUNDLE_PATH, KEY_PATH, "operator-inputs/.gitignore"})
+_PRIVATE_OPERATOR_INPUTS = frozenset({
+    BUNDLE_PATH, KEY_PATH, PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH, "operator-inputs/.gitignore",
+})
 _LIST_LIMIT = 100
 
 # Outputs written on request after finalisation, outside the original seal.

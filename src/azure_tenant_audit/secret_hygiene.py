@@ -19,6 +19,7 @@ SENSITIVE_ARG_FLAGS = frozenset(
         "--command-override",
         "--adapter-override",
         "--sensitive-users",
+        "--partner-domains",
     }
 )
 

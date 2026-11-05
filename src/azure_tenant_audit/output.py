@@ -17,6 +17,10 @@ from .data_minimisation import minimise_user_text
 from .findings import apply_coverage_gaps_to_report_pack
 from .tenant_identity import IDENTITY_FIELDS
 from .private_io import write_private_bytes, write_private_text
+from .partner_domains import (
+    BUNDLE_PATH as PARTNER_DOMAINS_PATH, KEY_PATH as PARTNER_DOMAINS_KEY_PATH,
+    PartnerDomains, PartnerDomainsError, read_partner_domains_key,
+)
 from .sensitive_users import (
     BUNDLE_PATH as SENSITIVE_USERS_PATH, KEY_PATH as SENSITIVE_USERS_KEY_PATH,
     SensitiveUsers, SensitiveUsersError, read_sensitive_users_key,
@@ -357,8 +361,12 @@ class AuditWriter:
                 for relative in private_paths:
                     (self.run_dir / relative).unlink(missing_ok=True)
                     self.clear_result_file(relative)
-                (target.parent / ".gitignore").unlink(missing_ok=True)
-                self.clear_result_file("operator-inputs/.gitignore")
+                if not any(
+                    item.startswith("operator-inputs/") and item not in private_paths
+                    for item in self._manifest.get("redacted_artifacts", [])
+                ):
+                    (target.parent / ".gitignore").unlink(missing_ok=True)
+                    self.clear_result_file("operator-inputs/.gitignore")
         except OSError:
             raise SensitiveUsersError("Unable to write the private sensitive-users bundle artefact.") from None
         self._manifest["operator_inputs"] = {
@@ -366,6 +374,49 @@ class AuditWriter:
         }
         redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
         self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if supplied.addresses else [])
+
+    def write_partner_domains(self, supplied: PartnerDomains) -> None:
+        """The sole private copy, outside evidence and report inputs. Replace or clear on resume."""
+        target = self.run_dir / PARTNER_DOMAINS_PATH
+        key_path = self.run_dir / PARTNER_DOMAINS_KEY_PATH
+        private_paths = (PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH)
+        key = b""
+        try:
+            if target.parent.is_symlink():
+                raise OSError("linked operator-input directory")
+            if supplied.domains:
+                self._mkdir_private(target.parent)
+                if key_path.exists() or key_path.is_symlink():
+                    key = read_partner_domains_key(self.run_dir)
+                elif "hmac_sha256" in self._manifest.get("operator_inputs", {}).get("partner_domains", {}):
+                    # Never silently invalidate the previous run's verification key.
+                    raise PartnerDomainsError("The private partner-domains key is missing; unable to resume.")
+                else:
+                    key = secrets.token_bytes(32)
+                write_private_bytes(key_path, key)
+                self._record_artifact(key_path)
+                ignore = target.parent / ".gitignore"
+                write_private_text(ignore, "*\n")
+                self._record_artifact(ignore)
+                write_private_text(target, "\n".join(supplied.domains) + "\n")
+                self._record_artifact(target)
+            else:
+                for relative in private_paths:
+                    (self.run_dir / relative).unlink(missing_ok=True)
+                    self.clear_result_file(relative)
+                if not any(
+                    item.startswith("operator-inputs/") and item not in private_paths
+                    for item in self._manifest.get("redacted_artifacts", [])
+                ):
+                    (target.parent / ".gitignore").unlink(missing_ok=True)
+                    self.clear_result_file("operator-inputs/.gitignore")
+        except OSError:
+            raise PartnerDomainsError("Unable to write the private partner-domains bundle artefact.") from None
+        self._manifest["operator_inputs"] = {
+            **self._manifest.get("operator_inputs", {}), "partner_domains": supplied.manifest(key),
+        }
+        redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
+        self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if supplied.domains else [])
 
     def artifact_paths(self) -> list[str]:
         return list(self._manifest.get("artifacts", []))

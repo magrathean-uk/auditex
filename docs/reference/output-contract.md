@@ -62,10 +62,81 @@ The projection integration is a separate product change. In v3.9.1, SS 2.1
 uses `SensitiveUsers`; SS 2.3 uses the distinct `PartnerDomains` input. This
 channel supplies only sensitive users and does not supply partner domains.
 
+## Local partner-domain operator input (additive)
+
+Microsoft 365 runs (`auditex run`, `azure-tenant-audit`), offline replay and
+`auditex guided-run` accept `--partner-domains FILE` or
+`AUDITEX_PARTNER_DOMAINS_FILE`; the flag wins and an empty environment value
+means unset. Demos never read the operator's file. These domains are not personal
+data, but they are customer-confidential. The file is opened once with `O_RDONLY`,
+`O_NOFOLLOW` where available and `fstat` to require a regular file; special files
+and links are rejected. The limits are 256 KiB and 10,000 entries before
+uniquing. UTF-8 with an optional initial BOM is accepted; NUL, invalid UTF-8,
+empty lists and invalid entries are usage errors naming a physical line, never
+source content or its path.
+
+Use one bare domain per line or a JSON array of domain strings. Blank text lines
+are ignored; `#` comment lines and `name;domain` entries are rejected. Normalisation
+trims whitespace, lower-cases, strips one trailing dot, then sorts unique entries.
+A domain must have at least one dot, at most 253 characters after normalisation,
+and labels of 1-63 ASCII letters, digits or hyphens, without leading or trailing
+hyphens. Non-ASCII domains are rejected with a sanitised error; supply an ASCII
+DNS name (punycode is accepted). E-mail addresses, leading `@`, URLs and wildcards
+are rejected. An explicit subdomain is a literal domain, without expansion.
+This follows v3.9.1 SS 2.3's `PartnerDomains` shape and exact trimmed, lower-case
+set comparison; it defines no IDNA conversion or wildcard semantics.
+
+`run-manifest.json` records `operator_inputs.partner_domains` as
+`{"supplied": false}` when absent, otherwise:
+
+```json
+{"supplied": true, "count": 2, "hmac_sha256": "<64 lower-case hexadecimal characters>"}
+```
+
+Only the unique count and HMAC are recorded, never the domains or source path.
+The HMAC covers the normalised UTF-8 newline-joined list **without** a final
+newline. Each run uses a random 32-byte key from `secrets.token_bytes(32)`,
+**separate from the sensitive-users key**. The private copy is
+`<run-dir>/operator-inputs/partner-domains.txt`: bare sorted normalised domains,
+one per line with a final newline. Its raw key is exactly 32 bytes at
+`<run-dir>/operator-inputs/partner-domains.key`. Both files are 0600 in a 0700
+directory and appear in the manifest's `artifacts` and `redacted_artifacts`.
+The shared `operator-inputs/.gitignore` contains `*` and stays while either
+operator input is supplied.
+
+Both exact paths and `.gitignore` are excluded from bundle hashes with
+`redacted_operator_input`, without file checksum or byte length. Other files
+planted under `operator-inputs/` are hashed at finalisation or reported as unlisted
+afterwards. The domains and key never enter evidence, its index, AI context,
+logs, reports, built-in exports or customer packs; the flag's path is redacted
+in command lines, including command-runner, response and Google redactors.
+Packs may carry relative exclusion paths and manifest metadata, never the private
+files. No list is uploaded. Rule views containing these domains must stay in
+memory; projection integration is a separate product change.
+
+Resume replaces the list using the same private key and recomputes the HMAC.
+No supplied input clears only this channel's list, key and metadata; the other
+channel remains intact. A missing, short, linked or otherwise invalid key for
+an existing HMAC is an error, never silent rotation. Supplying again after
+clearing generates a new key. Support can call
+`azure_tenant_audit.partner_domains.verify_partner_domains(run_dir)` to compare
+manifest count and HMAC against the private files using `hmac.compare_digest`.
+It returns false for absent, malformed or inconsistent inputs. This establishes
+consistency, not authenticity against someone able to rewrite all three files.
+
+Schema integration is reserved for product: add
+`properties.operator_inputs.properties.partner_domains` to
+`schemas/run_manifest.schema.json`, identical to `sensitive_users` (boolean
+`supplied`; when true require positive integer `count` and a lower-case 64-hex
+`hmac_sha256`; when false forbid both; reject other properties). Until that
+product-owned definition is integrated, the existing schema does not constrain
+this field, and the partner-domain schema vectors are skipped.
+
 ## Contract history
 
-The optional `operator_inputs.sensitive_users` and `redacted_artifacts` manifest
-keys and the private-input integrity exclusion above are additive under this version.
+The optional `operator_inputs.sensitive_users`, `operator_inputs.partner_domains`
+and `redacted_artifacts` manifest keys and the private-input integrity exclusions
+above are additive under this version.
 
 Contract version: `2026-10-22`. This version makes evidence traceable. The validator resolves every evidence reference against the bundle; references carry `collected_at`, `content_hash` and `resolved`; a proof row is `supported` only when its reference resolved and a finding's `confidence` follows from how many resolved; finalization writes `bundle-hashes.json`, which handoff, the explorer and customer-pack creation recompute; and the OSCAL export is OSCAL 1.1.2 Assessment Results that validates against the official schema, with the run manifest's `created_utc` as its collection time. It adds the validation codes `unresolved_evidence_ref`, `evidence_ref_hash_mismatch`, `unresolved_report_proof_table_ref`, `unresolved_report_evidence_ref` and `legacy_unresolved_ref` (see "Evidence references and traceability"). Bundles written under earlier versions stay readable, but the validator now reports any of their references that do not resolve, and handoff, the explorer and the gates recompute validation, so an older bundle with such references reads as invalid; its files are not rewritten. It also adds the validation codes `unwaived_accepted_status` and `unknown_finding_status` (see "Finding status"), the manifest key `rule_parameters` (see "Rule parameters and reassessment"), and, additively, the coverage rows of an offline replay, the ledger's `graph.redirects`, the gate codes `bundle_integrity_mismatch`, `bundle_integrity_invalid`, `bundle_integrity_absent`, `expected_manifest_sha256_mismatch` and `expected_manifest_sha256_invalid`, the manifest key `replay_source` and the rule parameter `break_glass_accounts`, and, from the third product review, `coverage_gaps[].section_gaps` and `surface_coverage[].section_gap_collectors` (see "Collection limits and coverage gaps"), the warnings `section_gap_not_recorded` and `observed_call_outside_declared`, `observed_ledger.log.empty`, the replay row error class `section_absent`, the per-collector `since` and `until` of a checkpoint, the `casMailboxSmtpAuth` section of `exchange_policy_objects`, the reasons of "Rules that need the whole input" and, from the PIM role policy reads of `identity_governance` (see "PIM role policy reads"), the normalized artefact `normalized/privileged_roles.json`, the `governance_objects` record kinds `role_management_policy_assignment` and `role_management_policy_rule`, the coverage rows `roleManagementPolicyAssignments`, `roleManagementPolicyRules` and `roleManagementPolicyRulesFanout`, and the `collection_gaps` reasons `endpoint_unavailable` and `artefact_withheld` (with its `reasons` field); none of these needs a new contract version while `2026-10-22` is unreleased.
 
@@ -533,7 +604,7 @@ Graph camelCase is converted recursively for the selected fields.
 | `privileged_roles` | An existing `normalized/privileged_roles.json` with ProviderExport-shaped `records`: `DisplayName`, `RoleTemplateId`, complete assignments (`PrincipalId`, start/end timestamps when present, each null or `/Date(ms)/`) and PIM `Rules` with source metadata and typed expiration, notification or approval settings. The `identity_governance` collector reads the PIM role policies of the directory roles and the normaliser writes this file when every read behind it succeeded in full ("PIM role policy reads" below); a refused, missing or cut read leaves no file, so the section is `missing_artifact`, never an empty list (a refused schedule read, which the section reads itself, is reported first as `collector_error`); so does an artefact the builder withholds although every read succeeded, which is named in `collection_gaps` as `identity_governance.privileged_roles` (reason `artefact_withheld`, see "PIM role policy reads"), and the section lists that gap under `ignored_failures`. Rows may carry the normalized `key`, which is never projected. No frozen v7 rule shape matches an expiration or an approval rule as Graph returns it: every frozen rule that carries `IsExpirationRequired` also carries `NotificationRecipients` and a `Setting` object, every frozen rule with a `Setting` object also carries `IsExpirationRequired`, `MaximumDuration` and `NotificationRecipients`, and the pack has no null or empty form of any of them on those rules. The pack rows are ScubaGear Rego unit-test inputs, not exporter output; the pinned exporter writes the properties Graph returns for each rule type and pads nothing. The normaliser does not pad either: a rule carries exactly the properties Graph returned for its type, so an artefact built from Graph rules matches no frozen whole shape and is withheld as `incomplete_shape` with detail `{field: "$", kind: "unseen_shape"}` until a pack that holds its shape (or real exports) is frozen (`PACK_SHAPE_DIGESTS` changes with the pinned model, never before). No rule defaults are fabricated, and no null or empty value stands in for a property Graph did not return. |
 | `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus a complete scan of raw `identity.users` (streamed; only the administrators' rows are kept). Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The identity collector selects the immutable ID on its existing paged user read, including users after the hybrid sample's first 100; this adds no endpoint or per-user reads and needs no new permission. That read requests 100 to 500 rows per page without an operator row limit and stops at 250,000 users. A remaining next link is a `pagination_not_followed` coverage gap, never a complete user inventory. A run of 50 consecutive empty pages that still carry next links is also stopped as a gap, and its coverage message says so. Live collection writes each page to a chunk and retains only a 20-row sample in memory; projection scans at most 250,000 rows, 256 MiB or 10,000 chunks. Older bundles can supply the same property from `domains_hybrid.syncSampleUsers` for users in that sample (conflicting duplicates withhold). An administrator neither read holds withholds the section (`missing_field`). A cut identity user list is a coverage gap and withholds the section (`collector_error`); a projection scan bound withholds it as `oversize` with `kind: scan_bound`. Those withheld sections produce an unknown requirement with `required_evidence_section_not_collected` in the existing model precheck. Without Entra ID P2 the PIM schedule reads are refused with `license_required`; such a refusal with no rows is the no-P2 case, the admin set comes from the directory role assignments (the effective admin set records the schedule sources `not_applicable`) and the refused reads are listed in `ignored_failures`. Any other refusal of a schedule read withholds (`collector_error`). `privileged_roles` has no such variant: every frozen shape carries PIM `Rules`, so a refused schedule read withholds it as `collector_error`. |
 | `tenant_id` | Canonical non-zero Entra UUID from the run identity in `run-manifest.json` or saved raw organisation evidence. Recorded and observed UUIDs must agree; a conflict or domain/authority alias cannot become a tenant ID. Synthetic demo UUIDs remain synthetic, without upgrading the run identity's verification status. |
-| `scuba_config` | **Synthesised, not collected** (ScubaGear's operator configuration file has no tenant source): ScubaGear's default configuration, the tenant's cloud and the run's emergency-access list (`rule_parameters.break_glass_accounts`), shown to each reading policy in the shape its training rows carry. AAD policies see `{"Aad": null, "CapExclusions": <empty lists>, "RoleExclusions": <empty lists>}`, MS.AAD.9.1v1 with `M365Environment`; MS.EXO.1.1v2 sees `null` (no allowed forwarding domains); Teams policies see `{"M365Environment": ...}`; the three SecuritySuite policies stay `not_collected` (`operator_input_required`): their rows carry the operator's sensitive users and partner domains, which Auditex does not take, and an empty list is a shape training never held. `M365Environment`: the public OpenID discovery `dns_posture` saves (`tenant_region_sub_scope` `GCC` is `gcc`; under the US Government scope, `DODCON` is `gcchigh` and `DOD` is `dod`), else licence SKUs sold only in a US Government cloud, else `commercial` (`assumed_default`); disagreeing signals withhold the four environment-gated policies (`environment_ambiguous`). An emergency-access list is resolved as `--break-glass-accounts` is, to object IDs (never the entered names), and placed under the `Aad[...]` entry the policy's Rego reads (for MS.AAD.3.2v2 that is `MS.AAD.3.2v1`, a shape the training data never held, so that policy is withheld as `unseen_shape` whenever an exclusion list exists) for the policies whose Rego honours an exclusion: `CapExclusions` for MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.7v1, 3.8v1, 3.9v1 and `RoleExclusions` for MS.AAD.7.4v1. An unresolved entry, an unreadable user or group list, or a manifest that did not record the list withholds those ten (`break_glass_unresolved`); a view whose whole shape training never held (users and groups together on MS.AAD.3.8v1 or 7.4v1) is withheld for that policy (`unseen_shape`). The section's top-level value is the AAD default; each policy's own view is what its prompt carries. |
+| `scuba_config` | **Synthesised, not collected** (ScubaGear's operator configuration file has no tenant source): ScubaGear's default configuration, the tenant's cloud and the run's emergency-access list (`rule_parameters.break_glass_accounts`), shown to each reading policy in the shape its training rows carry. AAD policies see `{"Aad": null, "CapExclusions": <empty lists>, "RoleExclusions": <empty lists>}`, MS.AAD.9.1v1 with `M365Environment`; MS.EXO.1.1v2 sees `null` (no allowed forwarding domains); Teams policies see `{"M365Environment": ...}`; the three SecuritySuite policies stay `not_collected` (`operator_input_required`): their rows require the operator's sensitive users and partner domains; the local input channels keep these private, but projection integration is a separate product change, and an empty list is a shape training never held. `M365Environment`: the public OpenID discovery `dns_posture` saves (`tenant_region_sub_scope` `GCC` is `gcc`; under the US Government scope, `DODCON` is `gcchigh` and `DOD` is `dod`), else licence SKUs sold only in a US Government cloud, else `commercial` (`assumed_default`); disagreeing signals withhold the four environment-gated policies (`environment_ambiguous`). An emergency-access list is resolved as `--break-glass-accounts` is, to object IDs (never the entered names), and placed under the `Aad[...]` entry the policy's Rego reads (for MS.AAD.3.2v2 that is `MS.AAD.3.2v1`, a shape the training data never held, so that policy is withheld as `unseen_shape` whenever an exclusion list exists) for the policies whose Rego honours an exclusion: `CapExclusions` for MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.7v1, 3.8v1, 3.9v1 and `RoleExclusions` for MS.AAD.7.4v1. An unresolved entry, an unreadable user or group list, or a manifest that did not record the list withholds those ten (`break_glass_unresolved`); a view whose whole shape training never held (users and groups together on MS.AAD.3.8v1 or 7.4v1) is withheld for that policy (`unseen_shape`). The section's top-level value is the AAD default; each policy's own view is what its prompt carries. |
 | `dmarc_records` | Saved raw `dns_posture.dmarc_records` with `{domain, rdata[]}` containing complete TXT answers. Parsed posture alone is insufficient. |
 | `spf_records` | Saved raw `dns_posture.spf_records` in a complete observed pack shape, including its `compliant`/`message` fields where present. Only explicit `domain`, historic `doamin`, `rdata`, `compliant` and `message` fields are permitted; missing values or spelling variants are never synthesised. |
 | `dkim_records` | Saved raw `dns_posture.dkim_records` with `{domain, rdata[]}` containing complete TXT answers. |
@@ -723,7 +794,7 @@ What the finding builders cite, so that every reference resolves in a bundle the
 
 `bundle-hashes.json` is the last file finalization writes (schema: `schemas/bundle_hashes.schema.json`). It holds `schema_version`, `algorithm` (`sha256`), `run_id`, `created_utc` (the run manifest's), `artifact_count`, `artifacts` (`path`, `sha256`, `bytes` for every non-excluded file under the run directory, sorted by path) and `excluded`. The append-only logs (`audit-log.jsonl`, `audit-command-log.jsonl`, `audit-debug.log`) and operating-system metadata change after finalization by design, so they are named under `excluded` with a `reason` and not hashed. The manifest does not hash itself. `index/evidence.sqlite` is closed before it is hashed, so the file holds the whole index and not a stub with the data in a `-wal` sidecar, and no sidecar exists to hash. A SQLite sidecar (`index/evidence.sqlite-wal`, `-shm`, `-journal`) that turns up afterwards is an unlisted file the check refuses (`unexpected`, below): SQLite would replay a `-wal` file over the hashed index, so it could change what every consumer reads while the hashed file stays as it was. The `sqlite_sidecar` value of `excluded[].reason` is no longer written; older manifests may carry it. Its path is fixed; `run-manifest.json` lists it under `artifacts`.
 
-Exactly three `operator-inputs/` paths, the private list `operator-inputs/sensitive-users.txt`, its key `operator-inputs/sensitive-users.key` and the local `operator-inputs/.gitignore`, appear only in `excluded` with reason `redacted_operator_input`, without `sha256` or `bytes`; any other file under that directory is hashed at finalisation or reported as unlisted afterwards. This also applies to the customer pack copy of the hash manifest.
+Exactly five `operator-inputs/` paths, the private lists `operator-inputs/sensitive-users.txt` and `operator-inputs/partner-domains.txt`, their separate keys `operator-inputs/sensitive-users.key` and `operator-inputs/partner-domains.key`, and the local `operator-inputs/.gitignore`, appear only in `excluded` with reason `redacted_operator_input`, without `sha256` or `bytes`; any other file under that directory is hashed at finalisation or reported as unlisted afterwards. This also applies to the customer pack copy of the hash manifest.
 
 Consumers read the index read-only (`azure_tenant_audit.evidence_db.open_index_read_only`: SQLite `mode=ro&immutable=1`, which writes nothing, creates no sidecar, opens on read-only media and ignores a `-wal` file). When `bundle-hashes.json` lists the index and a sidecar stands beside it, `load_run_index_summary` returns nothing (callers fall back to the manifest) and the read-only validation copies the hashed file alone. An index no hash manifest covers (a bundle from before it existed) is still read with its sidecar, because its data may still sit there.
 

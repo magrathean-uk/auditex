@@ -7,6 +7,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Add `--partner-domains` and `AUDITEX_PARTNER_DOMAINS_FILE` for bounded local customer-confidential SS 2.3 input, with sanitised domain validation, private bundle storage, separate per-run HMAC key, resume consistency and report/export/pack exclusions; schema and in-memory projection integration remain product-owned.
+
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
 - Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`; in-memory projection integration remains a separate product change.
 
