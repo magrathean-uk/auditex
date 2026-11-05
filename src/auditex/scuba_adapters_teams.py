@@ -6,13 +6,8 @@ the responsibility of the projection's existing shape gate.
 from __future__ import annotations
 
 from collections.abc import Callable
+import re
 from typing import Any
-
-from azure_tenant_audit.external_sharing import (
-    FEDERATION_ALLOW_LIST,
-    FEDERATION_OPEN,
-    federation_allow_list,
-)
 
 from .scuba_projection import Bundle, _boolean, _fields, _nullable_text, _require, _text
 
@@ -41,15 +36,33 @@ def _allowed_domains_value(raw: Any) -> list:
             _require(isinstance(item, dict), "AllowedDomains", "invalid_type")
             domains = item.get("AllowedDomain")
             _require(isinstance(domains, list) and bool(domains), "AllowedDomains", "invalid_type")
+            _require(all(str(entry).strip().casefold() != "allowallknowndomains" for entry in domains),
+                     "AllowedDomains", "invalid_type")
             total += len(domains)
-    else:
-        state, total = federation_allow_list(raw)
-        if state == FEDERATION_OPEN:
+    elif isinstance(raw, dict):
+        if raw == {}:
             return []
-        # Bare domain text is outside the supported cmdlet object contract.
+        # Read only recognised allow-list attributes, never marker substrings.
+        total = 0
+        for name, value in raw.items():
+            if re.sub(r"[^a-z0-9]", "", str(name).lower()) not in {
+                "alloweddomain", "alloweddomains", "domains", "domain", "alloweddomainsasalist",
+            }:
+                continue
+            if isinstance(value, (list, tuple)):
+                domains = [entry for entry in value if entry not in (None, "")]
+            elif isinstance(value, str) and value.strip():
+                domains = [value]
+            else:
+                continue
+            _require(all(str(entry).strip().casefold() != "allowallknowndomains" for entry in domains),
+                     "AllowedDomains", "invalid_type")
+            total = len(domains)
+            break
         # An empty allow list permits nobody; mapping it to [] would mean open.
-        _require(state == FEDERATION_ALLOW_LIST and isinstance(raw, dict) and total >= 1,
-                 "AllowedDomains", "invalid_type")
+        _require(total >= 1, "AllowedDomains", "invalid_type")
+    else:
+        _require(False, "AllowedDomains", "invalid_type")
     return [{"AllowedDomain": ["Domain=<withheld>"] * total}]
 
 

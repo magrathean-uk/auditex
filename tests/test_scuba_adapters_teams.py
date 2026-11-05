@@ -63,7 +63,7 @@ def put(root, section, rows):
 def expected_rows(section, rows):
     """Independent fixture oracle for field presence and scalar types.
 
-    Federation vectors include REST lists and two recognised open cmdlet forms.
+    Federation vectors include REST lists and the exact open cmdlet marker.
     This deliberately does not call adapter helpers.
     """
     if not isinstance(rows, list):
@@ -75,7 +75,7 @@ def expected_rows(section, rows):
         item = {field: row[field] for field in VALID[section]}
         for field, value in item.items():
             if field == "AllowedDomains":
-                if value == "AllowAllKnownDomains" or value == {"AllowAllKnownDomains": {}}:
+                if value == "AllowAllKnownDomains" or value == {}:
                     item[field] = []
                     continue
                 if not isinstance(value, list):
@@ -117,7 +117,7 @@ def test_fixture_projection_counts():
         "broadcast_policies": [16, 12],
         "client_configuration": [25, 18],
         "app_policies": [104, 40],
-        "federation_configuration": [51, 48],
+        "federation_configuration": [50, 49],
     }
 
 
@@ -128,7 +128,18 @@ def test_fixture_projection_counts():
      [{"AllowedDomain": [SENTINEL] * 3}]),
     ({}, []),
     ({"AllowedDomain": PARTNERS}, [{"AllowedDomain": [SENTINEL] * 2}]),
+    ({"AllowedDomains": PARTNERS}, [{"AllowedDomain": [SENTINEL] * 2}]),
+    ({"Domains": PARTNERS}, [{"AllowedDomain": [SENTINEL] * 2}]),
+    ({"Domain": PARTNERS[0]}, [{"AllowedDomain": [SENTINEL]}]),
+    ({"AllowedDomainsAsAList": PARTNERS}, [{"AllowedDomain": [SENTINEL] * 2}]),
+    ({" allowed-domain ": PARTNERS}, [{"AllowedDomain": [SENTINEL] * 2}]),
     ({"AllowedDomain": []}, NOT_COLLECTED),
+    ({"AllowedDomain": None, "Description": "AllowAllKnownDomains"}, NOT_COLLECTED),
+    ({"AllowAllKnownDomains": {}}, NOT_COLLECTED),
+    ({"Unrecognised": "partner.invalid AllowAllKnownDomains"}, NOT_COLLECTED),
+    ({"Description": "allowallknowndomains.partner.invalid"}, NOT_COLLECTED),
+    ({"AllowedDomain": ["AllowAllKnownDomains"]}, NOT_COLLECTED),
+    ({"AllowedDomain": "AllowAllKnownDomains"}, NOT_COLLECTED),
     ("AllowAllKnownDomains", []),
     ("allowallknowndomains", []),
     (" \tALLOWALLKNOWNDOMAINS\n", []),
@@ -139,6 +150,11 @@ def test_fixture_projection_counts():
     (", ".join(PARTNERS), NOT_COLLECTED),
     ("allowallknowndomains.partner.invalid", NOT_COLLECTED),
     ("partner.invalid, AllowAllKnownDomains", NOT_COLLECTED),
+    ([{"AllowedDomain": ["AllowAllKnownDomains"]}], NOT_COLLECTED),
+    ([{"AllowedDomain": [" \tALLOWALLKNOWNDOMAINS\n"]}], NOT_COLLECTED),
+    ([{"AllowedDomain": [PARTNERS[0], "AllowAllKnownDomains"]}], NOT_COLLECTED),
+    ([{"AllowedDomain": ["allowallknowndomains.partner.invalid"]}],
+     [{"AllowedDomain": [SENTINEL]}]),
     ([{"AllowedDomain": []}], NOT_COLLECTED),
     ([{"AllowedDomain": [PARTNERS[0]]}, {"AllowedDomain": []}], NOT_COLLECTED),
     ([PARTNERS[0]], NOT_COLLECTED),
