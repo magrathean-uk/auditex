@@ -70,8 +70,9 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   (public domain dedication). Used: the Rego policies (`PowerShell/ScubaGear/Rego/`), the unit-test
   fixtures and their `json.patch` mutations (`Testing/Unit/Rego/`) and the baseline markdown
   (`baselines/*.md`). The policies are evaluated with Open Policy Agent 1.20.2 (Apache-2.0, the version
-  ScubaGear pins; not redistributed) over fictional tenant configurations. No original ScubaGear code, fixture
-  file or complete baseline file is vendored or shipped in the product; the scripts read a local checkout supplied on
+  ScubaGear pins; not redistributed) over fictional tenant configurations. The oracle scripts do not ship
+  original ScubaGear code or fixtures; the explainer baseline extraction and test-source exception is
+  documented below. The scripts read a local checkout supplied on
   the command line, and each case records the commit (the 12-character short commit, in `provenance.source` and
   in the oracle reviewer; the run's `summary.json` holds the full 40-character commit), policy id, test name, OPA
   version and input hash.
@@ -176,3 +177,30 @@ not a legal opinion or proof of rights for a new contribution. Review new
 third-party material before adding it, retain applicable notices, and update
 the CSV and [third-party notices](../legal/third-party-notices.md) when a
 material relationship changes.
+
+## Deterministic explainer baseline prose
+
+The explainer vendors extracted public requirements, criticalities and
+Instructions in configs/explainer-baselines.json, and derived prose and source
+metadata in configs/explainer-template.json. Original pinned baseline markdown
+and LICENSE are retained in test fixtures for independent parsing. This qualifies
+the oracle tooling's earlier no-vendored-baseline statement.
+
+Source: CISA SCuBA / ScubaGear commit
+2446ad723b7f55031cc02c8aca244d731d468cba, CC0 1.0 Universal. Portions of aad.md,
+powerplatform.md and securitysuite.md adapt Microsoft documentation under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); credit both CISA and
+Microsoft. TLP:CLEAR permits sharing subject to copyright and implies no
+endorsement. Source links, hashes, file/line provenance, Microsoft licence links
+and a statement of changes accompany the data and the
+[extraction record](explainer-baselines.md). Changes include plain-text extraction,
+splitting complete instructions and commands, markdown/link removal, omissions
+and explicit cross-reference resolution. Owner-controlled legal files are
+unchanged; this engineering record does not replace owner review.
+
+Synthetic regression, mutation and canary test material includes no tenant evidence
+and is generated, not stored: it is derived in memory from the value-rule vector
+fixtures, which hold only constructed rows and model-pack train and validation rows.
+The small explainer fixtures that are stored (including the pinned baseline markdown)
+use lossless gzip where large; hashes cover the decompressed bytes. Held-out test rows,
+pilot rows, sealed freeze rows and diagnostic rows are never stored or used.

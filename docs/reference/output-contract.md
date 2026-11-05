@@ -1326,3 +1326,54 @@ Both tools are read-only and make no tenant or inference calls. See
 [external assessment comparison](../guides/external-assessments.md).
 
 `auditex_summarize_run` returns the same contract status and evidence index path exposed by CLI output. `auditex_api_inventory` exposes the API call ledger, `auditex_permissions_ledger` exposes required and missing scopes, `auditex_proof_table` exposes finding-to-evidence rows, `auditex_enterprise_handoff` exposes the customer handoff index for review, and `auditex_verify_customer_pack` verifies generated customer pack integrity. `auditex_contract_schema_manifest` lists shipped schema files and the active contract version so MCP clients can detect drift before interpreting a bundle.
+
+## Explainer (planned output)
+
+The deterministic template port provides
+`azure_tenant_audit.explainer.explain(record, redacted_sections, section_order)`.
+It returns exactly an Explainer object:
+`{explanation: string, remediation_steps: [string], evidence_refs: [string]}`.
+References are non-empty, unique View ids ordered by the approved record citations
+(with e0 first, including A1 order exceptions); the compact result permits at
+most 80 words and three sentences, six steps and 30 words per step. Public
+baseline attribution and internal provenance are resource metadata, not extra
+customer-output fields. The explainer never changes a verdict, claim or evidence
+id. A controlled `ExplainerError` means the caller suppresses the explanation
+and retains the original assessment.
+
+This object is **not yet part of report schema 2026-11-05**. No report or CLI
+output is changed by this port; adding an optional policy-row object requires
+a product schema and output-redaction decision. The expanded `render_full`
+helper is outside the compact schema and is not the integration entry point.
+
+A1 (5 November 2026, 11:25 GMT) governs these shared reasons, dispatched before
+cell lookup. Neither adds a decision cell to the 1,084-cell v3.9.1 inventory:
+
+| Reason | Exact reason and explanation | Action |
+| --- | --- | --- |
+| `rule_evaluation_failed` | Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting. | `report_product_fault`; fixed step: Report this fault to the product team at contact+auditex@magrathean.uk. |
+| `rule_not_implemented` | Not assessed: Auditex has no rule for this policy yet. | No recommendation; fixed step: No action is possible until a rule exists for this policy. |
+
+Both use `verdict: not_assessed`, `cell: null`, no collection or baseline
+steps, and no exception diagnostics. The fault requires the fixed collected
+policy read set. The product now emits exactly this representation, so the adapter
+no longer normalises anything: a shared reason with a non-null cell, including the
+old cell named `rule_evaluation_failed`, is rejected with a clear error. The
+superseded NOTE text is rejected. No-rule routing is still a product
+decision: the entry point conservatively accepts known template policies with
+their complete fixed read set, and does not route or invent policies.
+
+The product catalogue is v3.9.1 (102 policies, 1,084 cells) and the template is
+generated from it (`scripts/generate-explainer.py`; the catalogue's canonical digest is
+`input_sha256.catalogue`). The drift gates run against the shipped catalogue and
+fail until the template is regenerated. The independent pin is the spec's byte-exact
+`cell-catalogue.json` (`tests/fixtures/explainer/renderer/catalogue-v391-fixture.json.gz`);
+the shipped catalogue differs from it only in documented product metadata and closed
+text sets, which a test recomputes live. `tests/fixtures/explainer/integration/catalogue-gap.json`
+keeps a summary of the measure taken before the migration (746 not-assessed cells lacked the
+A1 evidence fields).
+
+The explainer's test material is generated, not stored: the test set, base pairs and mutation
+corpus are derived in memory from the value-rule vector fixtures (constructed rows and pack
+train and validation rows only) by `tests/explainer_checks`, and a small manifest pins counts
+and stream digests. See `tests/fixtures/explainer/README.md` for the fixture rule.

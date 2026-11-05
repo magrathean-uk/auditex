@@ -1,0 +1,182 @@
+[
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.1.1v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.2.1v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.2.3v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.3.1v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.3.2v2",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.3.6v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.3.7v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.3.8v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.3.9v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "restricted_policy_only",
+    "finding": "T4",
+    "new_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (limited by risk level, client app type, user action, authentication flow or context, application filter, device platform, location, device or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "old_text": "Data unusable: the only Conditional Access policy whose controls match the requirement applies to part of the sign-ins only (a risk level, client app type, user action, authentication flow, device platform, location, device condition or workload identity), so the evidence does not show whether it covers the requirement on its own; the policy was not assessed.",
+    "policy_id": "MS.AAD.9.1v1",
+    "reason_code": "data_unusable_policy_set",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "domain_noncompliant.agency_contact_missing",
+    "finding": "T3",
+    "new_text": "Requirement not met: the DMARC record of at least one domain names no agency contact other than the CISA address in its aggregate reports, its failure reports or both.",
+    "old_text": "Requirement not met: the DMARC record of at least one domain names no agency contact other than the CISA address in its aggregate or failure reports.",
+    "policy_id": "MS.EXO.4.4v1",
+    "reason_code": "domain_noncompliant",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_met"
+  },
+  {
+    "cell": "partial_tier_noncompliant",
+    "finding": "T1",
+    "new_text": "Data unusable: a policy that applies to some recipients only cannot be read; only the policy that applies to everyone is judged; the policy was not assessed.",
+    "old_text": "Data unusable: a policy that applies to some recipients only does not carry the required settings or cannot be read; only the policy that applies to everyone is judged; the policy was not assessed.",
+    "policy_id": "MS.SECURITYSUITE.1.1v1",
+    "reason_code": "data_unusable_partial_tier",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "partial_tier_noncompliant",
+    "finding": "T1",
+    "new_text": "Data unusable: a policy that applies to some recipients only cannot be read; only the policy that applies to everyone is judged; the policy was not assessed.",
+    "old_text": "Data unusable: a policy that applies to some recipients only does not carry the required settings or cannot be read; only the policy that applies to everyone is judged; the policy was not assessed.",
+    "policy_id": "MS.SECURITYSUITE.1.2v1",
+    "reason_code": "data_unusable_partial_tier",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "partial_tier_noncompliant",
+    "finding": "T1",
+    "new_text": "Data unusable: a policy that applies to some recipients only cannot be read; only the policy that applies to everyone is judged; the policy was not assessed.",
+    "old_text": "Data unusable: a policy that applies to some recipients only does not carry the required settings or cannot be read; only the policy that applies to everyone is judged; the policy was not assessed.",
+    "policy_id": "MS.SECURITYSUITE.1.3v1",
+    "reason_code": "data_unusable_partial_tier",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "qualifier_shadowed",
+    "finding": "T2",
+    "new_text": "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed.",
+    "old_text": "Data unusable: a policy that qualifies exists, but a higher-precedence policy that does not qualify applies to some or all recipients (the check does not rank policies by precedence); the policy was not assessed.",
+    "policy_id": "MS.SECURITYSUITE.2.1v1",
+    "reason_code": "data_unusable_qualifier_shadowed",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "qualifier_shadowed",
+    "finding": "T2",
+    "new_text": "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed.",
+    "old_text": "Data unusable: a policy that qualifies exists, but a higher-precedence policy that does not qualify applies to some or all recipients (the check does not rank policies by precedence); the policy was not assessed.",
+    "policy_id": "MS.SECURITYSUITE.2.2v1",
+    "reason_code": "data_unusable_qualifier_shadowed",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "qualifier_shadowed",
+    "finding": "T2",
+    "new_text": "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed.",
+    "old_text": "Data unusable: a policy that qualifies exists, but a higher-precedence policy that does not qualify applies to some or all recipients (the check does not rank policies by precedence); the policy was not assessed.",
+    "policy_id": "MS.SECURITYSUITE.2.3v1",
+    "reason_code": "data_unusable_qualifier_shadowed",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  },
+  {
+    "cell": "qualifier_shadowed",
+    "finding": "T2",
+    "new_text": "Data unusable: a policy that qualifies exists, but a policy of higher or undetermined precedence that does not qualify, or cannot be read, may apply to some or all recipients; the policy was not assessed.",
+    "old_text": "Data unusable: a policy that qualifies exists, but a higher-precedence policy that does not qualify applies to some or all recipients (the check does not rank policies by precedence); the policy was not assessed.",
+    "policy_id": "MS.SECURITYSUITE.2.4v1",
+    "reason_code": "data_unusable_qualifier_shadowed",
+    "source_hash": "6a9f077c50b6cc9156ef669710cae4ed0b89799e845cfab66f605af3566bf661",
+    "verdict": "not_assessed"
+  }
+]

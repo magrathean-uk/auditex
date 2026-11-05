@@ -1,0 +1,44 @@
+{
+ "before_migration": {
+  "changed_cell_counts_by_key": {
+   "cited": 102,
+   "cited_variants": 6,
+   "evidence_kind": 746,
+   "limitations": 746,
+   "reason_codes": 1,
+   "reason_texts": 18,
+   "reason_texts_by_code": 1,
+   "recommendations": 746
+  },
+  "extra_cells": [],
+  "extra_policies": [],
+  "measured": {
+   "note": "Historical measure taken before the migration (the per-cell detail is recomputable from that commit); the residual after the migration is recomputed live by tests/test_explainer_integration.py.",
+   "product_commit": "e1ee9df",
+   "product_sha256": "e2c2d37d584a3cbbe2532a27f152378bf3d926dd4e78051d2b2f0ddccbe4490f",
+   "product_spec": "v3.9",
+   "v391_sha256": "a34fdf51b09a3b5bef2708c4aba669462d9470a07c3ed03d4126c51c867f5d7e",
+   "v391_source": "value-rules-v391/cell-catalogue.json (A1 catalogue, before A2)"
+  },
+  "missing_cells": [],
+  "missing_policies": [],
+  "product_cells": 1084,
+  "product_only_wrapper": {
+   "cell_contracts_cells": 58,
+   "cell_contracts_policies": 27,
+   "optional_collection_policies": 16,
+   "rule_failure": {
+    "cell": "rule_evaluation_failed",
+    "reason_code": "rule_evaluation_failed",
+    "reason_text": "Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting.",
+    "recommendation": "report_product_fault",
+    "support": "contact+auditex@magrathean.uk",
+    "verdict": "not_assessed"
+   }
+  },
+  "product_policies": 102,
+  "v391_cells": 1084,
+  "v391_policies": 102
+ },
+ "schema": "catalogue-gap-summary/1"
+}

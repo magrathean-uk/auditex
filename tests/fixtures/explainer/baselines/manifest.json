@@ -1,0 +1,55 @@
+{
+  "files": {
+    "LICENSE.scubagear.txt": {
+      "licence": "CC0-1.0",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "source": "LICENSE"
+    },
+    "raw/aad.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "4c97316840915c0f8880fc007da222ac7097481c92711d88ec678c30bee32dbe",
+      "source": "PowerShell/ScubaGear/baselines/aad.md"
+    },
+    "raw/exo.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "15a983a0655eb5e8cfc8b64ff2a563a64719555103dbcdd510e8542129212407",
+      "source": "PowerShell/ScubaGear/baselines/exo.md"
+    },
+    "raw/powerbi.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "ce312233876ace8c7cc567e00b1ffd5fcbeb19e905e0c2b51977b925201f6ae0",
+      "source": "PowerShell/ScubaGear/baselines/powerbi.md"
+    },
+    "raw/powerplatform.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "84d13edd6fc320ea2068fb5767b23cccf0ca980c7fc870b651e301a93fc2c08c",
+      "source": "PowerShell/ScubaGear/baselines/powerplatform.md"
+    },
+    "raw/removedpolicies.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "b822cce9ae3190d53e65c5934c408d2fe7e9c7687a1399fab6b98cab74e8903c",
+      "source": "PowerShell/ScubaGear/baselines/removedpolicies.md"
+    },
+    "raw/securitysuite.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "a657e513ab230b01a8b10ea1ce6eedcfeb597cb0b457ee0ec3001bfb60143177",
+      "source": "PowerShell/ScubaGear/baselines/securitysuite.md"
+    },
+    "raw/sharepoint.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "2c2fce6f004aed462a7f7b8334f79197dc23b0b82373e60dff51401d138fcbaf",
+      "source": "PowerShell/ScubaGear/baselines/sharepoint.md"
+    },
+    "raw/teams.md": {
+      "licence": "CC0-1.0; Microsoft-adapted portions CC-BY-4.0 (see headers)",
+      "sha256": "eb321abde2ce40513b52f5acaf2308dc06c40643439217613f9cbabff5b4944e",
+      "source": "PowerShell/ScubaGear/baselines/teams.md"
+    },
+    "source-reader.json": {
+      "licence": "Auditex-generated extraction; CISA CC0-1.0 and Microsoft CC-BY-4.0 prose",
+      "sha256": "8998acc5418a79bbe1eafac70b93049691417d171994849aa0c82ce6e609e0c2",
+      "source": "S/A/baselines.py; pinned baseline markdown"
+    }
+  },
+  "source_commit": "2446ad723b7f55031cc02c8aca244d731d468cba"
+}

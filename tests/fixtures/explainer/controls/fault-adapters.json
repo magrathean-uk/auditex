@@ -1,0 +1,44 @@
+{
+  "a1": {
+    "cell": null,
+    "cited_sections": [
+      "conditional_access_policies"
+    ],
+    "detail": {},
+    "policy_id": "MS.AAD.1.1v1",
+    "reason_code": "rule_evaluation_failed",
+    "reason_text": "Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting.",
+    "verdict": "not_assessed"
+  },
+  "decision": "Frozen S follows A1; integration must explicitly reconcile the note, product sentinel and port-brief output. No ordinary cell is added.",
+  "note": {
+    "cell": null,
+    "cited_sections": [
+      "app_management_policies",
+      "default_app_management_policy"
+    ],
+    "detail": {},
+    "policy_id": "MS.AAD.5.6v1",
+    "reason_code": "rule_evaluation_failed",
+    "reason_text": "The policy was not assessed because its check could not be completed; report this to the product team.",
+    "verdict": "not_assessed"
+  },
+  "port_brief_explainer": {
+    "evidence_refs": [
+      "e0",
+      "e1"
+    ],
+    "explanation": "The check could not be completed for the collected evidence. Report this to the product team.",
+    "remediation_steps": [
+      "Report this to the product team."
+    ]
+  },
+  "product": {
+    "cell": "rule_evaluation_failed",
+    "reason_code": "rule_evaluation_failed",
+    "reason_text": "Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting.",
+    "recommendation": "report_product_fault",
+    "support": "contact+auditex@magrathean.uk",
+    "verdict": "not_assessed"
+  }
+}

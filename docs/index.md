@@ -21,7 +21,7 @@ questions and issue reports, see [SUPPORT.md](../.github/SUPPORT.md).
 ## Assurance and contracts
 
 - [Security and Privacy Model](reference/security-privacy.md): authorization boundary, read-only rules, no-content-read policy, local evidence, auth material, and telemetry.
-- [Output Contract](reference/output-contract.md): finalized bundle artifacts, validation, evidence references, and MCP contract surfaces.
+- [Output Contract](reference/output-contract.md): finalized bundle artifacts, validation, evidence references, and MCP contract surfaces; [planned explainer](reference/output-contract.md#explainer-planned-output).
 - [API Call Catalog](reference/api-call-catalog.md): the API inventory and permission ledger used for customer review.
 - [Framework Mappings](reference/framework-mappings.md): benchmark versions and sources, mapping method, baseline alignment, Secure Score reconciliation, and how to map a new rule.
 
@@ -33,6 +33,7 @@ questions and issue reports, see [SUPPORT.md](../.github/SUPPORT.md).
 
 ## Provenance
 
+- [Explainer Baselines](provenance/explainer-baselines.md): pinned CISA/Microsoft prose, attribution and extraction changes.
 - [Provenance Notes](provenance/provenance.md): retained third-party and research provenance.
 
 ## Product boundary

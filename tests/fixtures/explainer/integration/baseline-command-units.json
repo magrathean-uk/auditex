@@ -1,0 +1,92 @@
+{
+  "MS.AAD.6.1v1": [
+    {
+      "command": true,
+      "kind": "pre",
+      "label": null,
+      "level": 0,
+      "source": {
+        "file": "aad.md",
+        "line_end": 863,
+        "line_start": 839,
+        "policy_id": "MS.AAD.6.1v1"
+      },
+      "text": "Connect-MgGraph -Scopes \"Domain.ReadWrite.All\" # or alternatively \"Domain.Read.All\" for determining which domains are in a non-compliant state.\n$NonCompliantDomains = (Invoke-MgGraphRequest -Method GET -Uri \"https://graph.microsoft.com/v1.0/domains\").value | Where-Object {\n$_.isRoot -and $_.isVerified -and\n$null -ne $_.passwordValidityPeriodInDays -and\n$_.passwordValidityPeriodInDays -ne [int32]::MaxValue\n}\nWrite-Host $NonCompliantDomains | Format-List\n# Remediate each non-compliant domain\nInvoke-MgGraphRequest -Method PATCH -Uri \"https://graph.microsoft.com/v1.0/domains/example.com\" -Body @{ passwordValidityPeriodInDays = [int32]::MaxValue }\n# Verify domain configurations\n$AllDomains = (Invoke-MgGraphRequest -Method GET -Uri \"https://graph.microsoft.com/v1.0/domains\").value | Where-Object {\n$_.isRoot -and $_.isVerified\n}\nWrite-Host \"All current domain password expiration policies\"\nforeach ($Domain in $AllDomains) {\nWrite-Host \"Domain passwordValidityPeriodInDays: $($Domain.id) $($Domain.passwordValidityPeriodInDays)\"\n}"
+    }
+  ],
+  "MS.AAD.7.3v1": [
+    {
+      "command": true,
+      "kind": "pre",
+      "label": null,
+      "level": 0,
+      "source": {
+        "file": "aad.md",
+        "line_end": 1068,
+        "line_start": 1065,
+        "policy_id": "MS.AAD.7.3v1"
+      },
+      "text": "Connect-MgGraph\nGet-MgBetaUser -Filter \"userPrincipalName eq 'username@somedomain.com'\" | FL"
+    }
+  ],
+  "MS.EXO.2.2v3": [
+    {
+      "command": true,
+      "kind": "pre",
+      "label": null,
+      "level": 0,
+      "source": {
+        "file": "exo.md",
+        "line_end": 185,
+        "line_start": 183,
+        "policy_id": "MS.EXO.2.2v3"
+      },
+      "text": "Resolve-DnsName example.onmicrosoft.com txt"
+    }
+  ],
+  "MS.EXO.4.1v1": [
+    {
+      "command": true,
+      "kind": "pre",
+      "label": null,
+      "level": 0,
+      "source": {
+        "file": "exo.md",
+        "line_end": 372,
+        "line_start": 370,
+        "policy_id": "MS.EXO.4.1v1"
+      },
+      "text": "Resolve-DnsName _dmarc.example.com txt"
+    }
+  ],
+  "MS.POWERPLATFORM.5.1v1": [
+    {
+      "command": true,
+      "kind": "pre",
+      "label": null,
+      "level": 0,
+      "source": {
+        "file": "powerplatform.md",
+        "line_end": 443,
+        "line_start": 441,
+        "policy_id": "MS.POWERPLATFORM.5.1v1"
+      },
+      "text": "Set-TenantSettings -RequestBody @{ “disablePortalsCreationByNonAdminUsers” = $true }"
+    }
+  ],
+  "MS.POWERPLATFORM.6.1v1": [
+    {
+      "command": true,
+      "kind": "pre",
+      "label": null,
+      "level": 0,
+      "source": {
+        "file": "powerplatform.md",
+        "line_end": 488,
+        "line_start": 484,
+        "policy_id": "MS.POWERPLATFORM.6.1v1"
+      },
+      "text": "$tenantSettings = Get-TenantSettings\n$tenantSettings.powerPlatform.powerApps.disableShareWithEveryone = $true\nSet-TenantSettings $tenantSettings"
+    }
+  ]
+}

@@ -284,3 +284,48 @@ If sensitive auth material is found in a bundle or pack, stop handoff, remove
 the pack from its transfer channel, rotate the exposed material, regenerate the
 run or pack after correcting the source, verify the pack again, and record the
 incident through the customer's process.
+
+## Deterministic explainer boundary (planned output)
+
+The template explainer uses only the rule's cited, already redacted sections.
+Null citations resolve to the fixed policy read set, never all supplied
+sections. Evidence ids retain positions in the supplied full section order.
+Each observed section is capped at 6,000 canonical JSON characters after the
+existing projection redaction; oversize values become `{not_shown: "size"}`.
+Only `M365Environment` and `collection_status` survive in `scuba_config`;
+null is preserved and other shapes become `{not_shown: "shape"}`.
+
+Pass the redacted view as is, without extra pseudonymisation. The existing
+idempotent email-local-part guard remains on section values and reason text.
+Projection already pseudonymises privileged-user DisplayName and non-null
+OnPremisesImmutableId with the run salt. Domains, GUIDs, roles, free text and
+dictionary keys may remain visible; this is not full anonymisation. Internal
+rule views, detail, labels, tenant/run identifiers, paths, timestamps,
+credentials and uncited records are not explainer inputs. Public baseline
+Instructions retain their example addresses until final output redaction.
+
+Every returned explanation, step and reference must pass the product's output
+redaction before serialisation or display. That report boundary could not be
+identified in the current writer trace: `auditex.reporting.render_report`
+(`src/auditex/reporting.py:3641`) calls `write_private_text` at line 3657;
+`AuditWriter.write_report_pack` (`src/azure_tenant_audit/output.py:571`)
+calls `_write_json_atomic` at line 573, which serialises at line 239.
+These writers restrict filesystem permissions, but do not redact payloads.
+Integration tests plant synthetic addresses and identifiers to pin that fact.
+`reporting._pack_safe` (line 1820) only removes local run paths;
+`scuba_projection._redact` (line 1413) is input projection redaction.
+Neither establishes complete output handling. No equivalent coverage is
+claimed for the diagnostic helper `secret_hygiene.redact_text`.
+
+Report/CLI wiring therefore remains with product, together with identifying or
+implementing the actual output-redaction function and testing all returned
+strings through it. The entry point raises a controlled error on rendering or
+validation failure; callers suppress explanations without changing verdicts.
+It has no inference dependency, endpoint or model fallback. Model use is parked;
+if separately authorised later, it must be loopback only, with this same input
+and output boundary and no `--no-redaction` path.
+
+Explainer test material follows the public-repository fixture rule: stored fixtures hold only constructed rows and
+model-pack train and validation rows, each with a vector id and an origin; held-out test rows (pack or pilot), sealed
+pilot rows, diagnostic rows, machine paths and files over 1 MB are refused by `tests/test_explainer_fixtures.py`, and the
+expanded test set, pairs and mutants are generated in memory from the allowed fixtures rather than stored.

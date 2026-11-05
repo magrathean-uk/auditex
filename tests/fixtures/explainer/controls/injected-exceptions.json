@@ -1,0 +1,90 @@
+[
+  {
+    "claim": {
+      "id": "requirement_met",
+      "status": "unknown",
+      "value": null
+    },
+    "expected_explainer": {
+      "evidence_refs": [
+        "e0",
+        "e1",
+        "e2"
+      ],
+      "explanation": "Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting.",
+      "remediation_steps": [
+        "Report this fault to the product team at contact+auditex@magrathean.uk."
+      ]
+    },
+    "expected_limitations": [],
+    "expected_recommendations": [
+      "report_product_fault"
+    ],
+    "expected_record": {
+      "cell": null,
+      "cited_sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "detail": {},
+      "policy_id": "MS.AAD.1.1v1",
+      "reason_code": "rule_evaluation_failed",
+      "reason_text": "Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting.",
+      "verdict": "not_assessed"
+    },
+    "id": "injected-evaluation-runtime",
+    "injection": {
+      "exception_type": "RuntimeError",
+      "message": "SYNTHETIC_FAULT_INPUT_DO_NOT_ECHO"
+    },
+    "policy_id": "MS.AAD.1.1v1",
+    "sections": {
+      "conditional_access_policies": [],
+      "scuba_config": {}
+    }
+  },
+  {
+    "claim": {
+      "id": "requirement_met",
+      "status": "unknown",
+      "value": null
+    },
+    "expected_explainer": {
+      "evidence_refs": [
+        "e0",
+        "e1",
+        "e2"
+      ],
+      "explanation": "Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting.",
+      "remediation_steps": [
+        "Report this fault to the product team at contact+auditex@magrathean.uk."
+      ]
+    },
+    "expected_limitations": [],
+    "expected_recommendations": [
+      "report_product_fault"
+    ],
+    "expected_record": {
+      "cell": null,
+      "cited_sections": [
+        "conditional_access_policies",
+        "scuba_config"
+      ],
+      "detail": {},
+      "policy_id": "MS.AAD.1.1v1",
+      "reason_code": "rule_evaluation_failed",
+      "reason_text": "Not assessed: Auditex could not evaluate this policy on the collected evidence. This is a product fault, not a tenant setting.",
+      "verdict": "not_assessed"
+    },
+    "id": "injected-evaluation-value",
+    "injection": {
+      "exception_type": "ValueError",
+      "message": "SYNTHETIC_FAULT_INPUT_DO_NOT_ECHO"
+    },
+    "policy_id": "MS.AAD.1.1v1",
+    "sections": {
+      "conditional_access_policies": [],
+      "scuba_config": {}
+    }
+  }
+]

@@ -26,6 +26,14 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   this change no longer validates, so assessment bytes are not preserved for that one path. `rule_not_implemented` stays the
   row-level reason of the rule-only route; its constant text is catalogued under `shared_reasons`. A v3.9.1 vectors replay (a
   bounded sample by default, all 26,898 vectors plus A2's as an explicit acceptance job) checks the engine.
+- Add the deterministic template explainer (`azure_tenant_audit.explainer`): a pinned CISA ScubaGear baseline reader and vendored baseline data, product-owned
+  collection wording, a renderer that derives every cell's closed explanation, remediation and evidence references from the
+  v3.9.1 catalogue, and a generated template (`scripts/generate-explainer.py`, drift-gated). It never calls a model, changes a
+  verdict or reads evidence outside the rule's cited, redacted sections. Eight independent hard checks (S, a, b, c, d, e, e2, e3)
+  test it: the test set, base pairs, mutants (19,354 harmful, 2,522 benign) and canary twins are generated in memory from the
+  value-rule vector fixtures, which hold only constructed rows and pack train/validation rows, and a small manifest pins counts and
+  stream digests; the red-team candidates are re-bound to allowed bases at test time. Fixtures stay under 1 MB and a test refuses test-split, pilot,
+  sealed or diagnostic rows, machine paths and large files. Report wiring is not part of this change.
 
 - Explain unassessed Power BI / Power Platform policies when optional collection was not enabled; preserve generic reasons for unknown selection and existing failures for selected collectors.
 
