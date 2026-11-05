@@ -85,6 +85,25 @@ class PowerShellGraphAdapter(Adapter):
     @staticmethod
     def _session_prelude(session: Optional[dict[str, Any]], env: dict[str, str]) -> str:
         """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line."""
+        if session and session.get("kind") == "security_compliance":
+            app_id = str(session.get("app_id") or "")
+            thumbprint = str(session.get("certificate_thumbprint") or "")
+            organization = str(session.get("organization") or "")
+            if (not session.get("enabled") or not re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", app_id)
+                    or not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint)
+                    or not _ORGANIZATION_PATTERN.fullmatch(organization)):
+                return ""
+            env.update(AUDITEX_IPPS_APP_ID=app_id, AUDITEX_IPPS_CERTIFICATE_THUMBPRINT=thumbprint,
+                       AUDITEX_IPPS_ORGANIZATION=organization)
+            return (
+                "$ErrorActionPreference = 'Stop'; "
+                "try { Import-Module ExchangeOnlineManagement -ErrorAction Stop } "
+                "catch { throw 'AUDITEX_IPPS_MODULE_NOT_FOUND' }; "
+                "try { Connect-IPPSSession -AppId $env:AUDITEX_IPPS_APP_ID "
+                "-CertificateThumbprint $env:AUDITEX_IPPS_CERTIFICATE_THUMBPRINT "
+                "-Organization $env:AUDITEX_IPPS_ORGANIZATION -ShowBanner:$false -ErrorAction Stop | Out-Null } "
+                "catch { throw 'AUDITEX_IPPS_SESSION_NOT_CONNECTED' }; "
+            )
         if not session or session.get("kind") != "exchange_online":
             return ""
         token = session.get("access_token")
@@ -131,6 +150,13 @@ class PowerShellGraphAdapter(Adapter):
                     )
                 return refusal_response(safe_command, exc)
 
+        ipps = bool(session and session.get("kind") == "security_compliance")
+        env = dict(os.environ)
+        prelude = self._session_prelude(session, env)
+        if ipps and not prelude:
+            error_class = "missing_app_credentials" if session.get("enabled") else "session_not_connected"
+            return {"error": error_class, "error_class": error_class, "command": safe_command}
+
         exe = shutil.which("pwsh")
         if exe is None:
             if log_event:
@@ -141,8 +167,6 @@ class PowerShellGraphAdapter(Adapter):
                 )
             return {"error": "command_not_found:pwsh", "error_class": "command_not_found", "command": safe_command}
 
-        env = dict(os.environ)
-        prelude = self._session_prelude(session, env)
         prepared = f"{prelude}{self._json_pipeline(script)}"
         try:
             if log_event:
@@ -187,7 +211,7 @@ class PowerShellGraphAdapter(Adapter):
                             "duration_ms": duration_ms,
                             "stdout_bytes": len(stdout),
                             "stderr_bytes": len(stderr),
-                            "stdout_sample": redact_output(stdout),
+                            **({} if ipps else {"stdout_sample": redact_output(stdout)}),
                         },
                     )
 
@@ -204,7 +228,16 @@ class PowerShellGraphAdapter(Adapter):
                     error_class = "command_not_authenticated"
                 else:
                     error_class = "command_error"
+                if ipps:
+                    if "auditex_ipps_module_not_found" in combined:
+                        error_class = "module_not_found"
+                    elif "auditex_ipps_session_not_connected" in combined:
+                        error_class = "session_not_connected"
+                    elif any(marker in combined for marker in ("not licensed", "license required", "licence required", "requires a license")):
+                        error_class = "license_required"
                 completed(error_class)
+                if ipps:
+                    return {"error": error_class, "error_class": error_class, "command": safe_command}
                 return {
                     "error": "module_not_found" if module_missing else f"command_failed:{result.returncode}",
                     "error_class": error_class,
@@ -220,8 +253,7 @@ class PowerShellGraphAdapter(Adapter):
                     "error": "command_output_empty",
                     "error_class": "command_output_empty",
                     "command": safe_command,
-                    "stdout": redact_output(stdout),
-                    "stderr": redact_output(stderr),
+                    **({} if ipps else {"stdout": redact_output(stdout), "stderr": redact_output(stderr)}),
                 }
 
             try:
@@ -232,10 +264,14 @@ class PowerShellGraphAdapter(Adapter):
                     "error": "command_output_parse_error",
                     "error_class": "command_parse_error",
                     "command": safe_command,
-                    "stdout": redact_output(stdout),
-                    "stderr": redact_output(stderr),
+                    **({} if ipps else {"stdout": redact_output(stdout), "stderr": redact_output(stderr)}),
                 }
 
+            # IPPS commands explicitly wrap listings in arrays. An unexpected JSON envelope
+            # must not smuggle output/credentials into the evidence or look like a clean read.
+            if ipps and (not isinstance(parsed, list) or any(not isinstance(row, dict) for row in parsed)):
+                completed("command_parse_error")
+                return {"error": "command_parse_error", "error_class": "command_parse_error", "command": safe_command}
             completed(None)
             response = self._normalize_payload(parsed)
             response["command"] = safe_command
@@ -253,7 +289,7 @@ class PowerShellGraphAdapter(Adapter):
                 log_event(
                     "command.failed",
                     "PowerShell command failed",
-                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": redact_output(str(exc))},
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": "command_error" if ipps else redact_output(str(exc))},
                 )
             return {"error": f"command_failed:{exc.returncode}", "error_class": "command_error", "command": safe_command}
         except Exception as exc:  # noqa: BLE001
@@ -261,6 +297,6 @@ class PowerShellGraphAdapter(Adapter):
                 log_event(
                     "command.failed",
                     "PowerShell command exception",
-                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": redact_output(str(exc))},
+                    {"adapter": adapter_label, "command": safe_command, "command_words": list(command_words), "error": "command_exception" if ipps else redact_output(str(exc))},
                 )
-            return {"error": redact_output(str(exc)), "error_class": "command_exception", "command": safe_command}
+            return {"error": "command_exception" if ipps else redact_output(str(exc)), "error_class": "command_exception", "command": safe_command}

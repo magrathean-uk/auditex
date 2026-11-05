@@ -68,6 +68,9 @@ class FakeAdapter:
 
 
 def collect(monkeypatch, *, fail_sharing=False):
+    # Exercise every declared command with fake sessions; the default-off path has dedicated IPPS tests.
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.ipps_enabled", lambda: True)
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.ipps_session", lambda: {"kind": "security_compliance"})
     adapter = FakeAdapter(fail_sharing)
     monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _name: adapter)
     return ExchangePolicyCollector().run({"audit_logger": None})

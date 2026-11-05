@@ -1327,6 +1327,7 @@ AREA_ADAPTER_MODULES: tuple[str, ...] = (
     "auditex.scuba_adapters_exchange",
     "auditex.scuba_adapters_teams",
     "auditex.scuba_adapters_defender",
+    "auditex.scuba_adapters_ipps",
     "auditex.scuba_adapters_powerplat",
     "auditex.scuba_adapters_aad",
 )

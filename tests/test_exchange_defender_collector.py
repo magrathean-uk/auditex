@@ -44,6 +44,9 @@ class _FakeAdapter:
 
 
 def _run(monkeypatch, **overrides):
+    # Exercise every declared command with fake sessions; the default-off path has dedicated IPPS tests.
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.ipps_enabled", lambda: True)
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.ipps_session", lambda: {"kind": "security_compliance"})
     commands = dict(ExchangePolicyCollector.command_collectors)
     responses = {command: {"value": []} for command in commands.values()}
     responses.update({commands[name]: value for name, value in overrides.items()})
@@ -246,7 +249,8 @@ def test_defender_scope_config_matches_the_shipped_commands():
         if name in NEW_OPERATIONS:
             assert entry["category"] == "policy"
     index = definition["query_plan"].index("dkimSigningConfig") + 1
-    assert tuple(definition["query_plan"][index:]) == NEW_OPERATIONS
+    assert tuple(definition["query_plan"][index:index + len(NEW_OPERATIONS)]) == NEW_OPERATIONS
+    assert definition["query_plan"][index + len(NEW_OPERATIONS):] == ["dlpCompliancePolicies", "dlpComplianceRules"]
 
 
 def test_defender_permissions_add_only_the_new_optional_commands():

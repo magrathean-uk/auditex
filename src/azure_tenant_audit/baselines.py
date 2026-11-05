@@ -213,7 +213,7 @@ _LICENCE_GATED_SECTIONS = {
 _MTA_STS_POLICY_RULES = frozenset({"dns_posture.mta_sts_policy_invalid", "dns_posture.mta_sts_testing_mode"})
 # Rules judged on the rows they read, not on whether their whole collector completed. ``exchange_policy`` runs a dozen
 # commands and is partial whenever one of them is not available (``Get-ProtectionAlert`` needs a Security & Compliance
-# session that app-only runs never open), which would keep these rules, and CIS 2.1.9 and SCuBA MS.EXO.3.1v1 with them,
+# session opened only with the explicit IPPS opt-in), which would keep these rules, and CIS 2.1.9 and SCuBA MS.EXO.3.1v1 with them,
 # from ever reading ``pass``. Each rule's own command rows are checked by ``exchange_protection.inputs_gap``.
 INPUT_JUDGED_RULES = frozenset(exchange_protection.RULES)
 _NOT_ASSESSED = "not_assessed"

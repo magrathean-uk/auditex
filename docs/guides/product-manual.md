@@ -239,7 +239,7 @@ licensed and the alerts API answers; an API that answers with nothing to show fo
 `score` counts only signals with evidence; `unknown` means not collected or
 blocked and is never treated as `off`. `off` signals raise `detection.*`
 findings. Exchange cmdlets need an Exchange Online PowerShell session, and
-`Get-ProtectionAlert` needs Security & Compliance PowerShell. Enable the
+`Get-ProtectionAlert` needs Security & Compliance PowerShell. This and the DLP policy/rule reads are off by default; the certificate-only `AUDITEX_ENABLE_IPPS=true` option is documented in the [admin permission guide](admin-permission-guide.md#optional-security--compliance-app-only-reads). Enable the
 `identity_protection` collector (`IdentityRiskyUser.Read.All`, Entra ID P2) to
 assess risk detection.
 

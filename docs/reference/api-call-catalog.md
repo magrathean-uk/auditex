@@ -258,3 +258,18 @@ describes the customer-side setup and write-capable administrative blast radius.
 `listTenantSettings` is a read. `TENANT_SETTINGS_METHOD` remains pinned GET; POST
 is only a possible later fallback if GET is refused, to be decided after a playground
 check. There is no enabled POST fallback. No live GET acceptance has been verified.
+
+
+## Optional IPPS policy inventory
+
+`AUDITEX_ENABLE_IPPS=true` enables exactly these three read-only tenant cmdlets through the existing `powershell_graph` adapter. Disabled mode performs no IPPS process or sign-in and retains the previous five policy gaps. Fixed session plumbing uses `Import-Module ExchangeOnlineManagement` and `Connect-IPPSSession -AppId -CertificateThumbprint -Organization`; the existing enum conversion uses `Get-Command`. Authentication commands are internal plumbing, never admitted by the caller read guard. Credential selectors travel through the child environment. Missing module/session/credentials, refused commands and licence errors produce existing typed gaps; raw output and exception text are withheld from diagnostics.
+
+| Operation | Cmdlet | Explicit Select-Object fields | Learn URL (offline applicability: Inference) |
+| --- | --- | --- | --- |
+| protectionAlerts | Get-ProtectionAlert | Name, Disabled, Severity, Category, IsSystemRule | https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert |
+| dlpCompliancePolicies | Get-DlpCompliancePolicy | Name, Enabled, Mode, Workload, ExchangeLocation, SharePointLocation, OneDriveLocation, TeamsLocation, EndpointDlpLocation; each corresponding LocationException | https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-dlpcompliancepolicy |
+| dlpComplianceRules | Get-DlpComplianceRule | Name, ParentPolicyName, Disabled, IsAdvancedRule, ContentContainsSensitiveInformation (name only), BlockAccess, BlockAccessScope, NotifyUser (cardinality only), NotifyUserType | https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-dlpcompliancerule |
+
+Calculated selections keep the `All` location sentinel and replace each other scope entry, and each notification recipient, with a placeholder before JSON conversion. Raw `AdvancedRule` is not selected; advanced rules remain not assessed. Policy names and joins are kept as settings. No mailbox, message, file, match or incident content is selected. Field shapes are inferred from documentation and the pinned ScubaGear rule contract, not observed tenant output. App-only permission and RBAC limitations are in the [admin guide](../guides/admin-permission-guide.md#optional-security--compliance-app-only-reads).
+
+DLP location exception lists retain cardinality only. A populated or missing exception field withholds DLP policy projection: the existing rules cannot represent exclusions from an `All` scope. Exception property availability is inferred and must be verified in the playground.

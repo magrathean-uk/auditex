@@ -73,6 +73,7 @@ from ..adapters import get_adapter
 from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from .base import Collector, CollectorResult
 from .exchange_defender_commands import DEFENDER_COMMANDS, minimise_recipients, reclassify_licence_refusals
+from .exchange_ipps_commands import IPPS_COMMANDS, IPPS_OPERATIONS, ipps_enabled, ipps_session, minimise_ipps
 
 
 EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
@@ -137,7 +138,7 @@ class ExchangePolicyCollector(Collector):
             "mailboxAuditBypass",
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count",
         ),
-        ("protectionAlerts", "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"),
+        IPPS_COMMANDS[0],
         ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"),
         ("transportConfig", "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled"),
         # An aggregate, so the answer is never empty (an empty output is read as a failed command) and no mailbox is named.
@@ -147,6 +148,7 @@ class ExchangePolicyCollector(Collector):
         ),
         ("dkimSigningConfig", "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"),
         *DEFENDER_COMMANDS,
+        *IPPS_COMMANDS[1:],
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
@@ -157,16 +159,22 @@ class ExchangePolicyCollector(Collector):
         total = 0
 
         exchange_session = _exchange_session(context.get("client"), log_event)
-        for name, command in self.command_collectors:
+        enabled = ipps_enabled()
+        commands = [(name, command) for name, command in self.command_collectors
+                    if enabled or name not in IPPS_OPERATIONS - {"protectionAlerts"}]
+        for name, command in commands:
             # Get-ProtectionAlert lives in Security & Compliance PowerShell, which needs its own session.
-            session = {"kind": "security_compliance"} if name == "protectionAlerts" else exchange_session
+            session = ipps_session() if name in IPPS_OPERATIONS else exchange_session
             response = adapter.run(command, log_event=log_event, session=session)
+            if name in IPPS_OPERATIONS and enabled:
+                response["ipps_enabled"] = True
+                minimise_ipps(name, response)
             response.setdefault("command", command)
             minimise_recipients(name, response)
             payload[name] = response
 
         reclassify_licence_refusals(payload)
-        for name, command in self.command_collectors:
+        for name, command in commands:
             response = payload[name]
             values = response.get("value")
             cut = (
