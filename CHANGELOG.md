@@ -40,8 +40,10 @@ bundle gains the `privileged_roles` artefact, both additive.
   this changes prompts for MS.SECURITYSUITE.2.1v1, 2.3v1 and 3.2v1. Real exports
   can change more: declared break-glass exclusions affect nine AAD Conditional
   Access policies and MS.AAD.7.4v1; a non-commercial M365 environment affects
-  MS.AAD.9.1v1, MS.TEAMS.2.2v2, MS.TEAMS.2.3v2 and MS.TEAMS.4.1v1. These are correct outcomes of
-  withheld policy views. Run-bundle assessments are unchanged.
+  MS.AAD.9.1v1, MS.TEAMS.2.2v2, MS.TEAMS.2.3v2 and MS.TEAMS.4.1v1. These model policy views
+  remain withheld for non-commercial environments, including `gcchigh` and `dod`, as before.
+  Private rule views retain recognised environments (`commercial`, `gcc`, `gcchigh`, `dod`).
+  Run-bundle assessments are unchanged.
 
 ### Microsoft 365 user inventory
 
@@ -90,6 +92,10 @@ bundle gains the `privileged_roles` artefact, both additive.
 - **Customer-facing wording now matches what runs today.** The model-assisted path is no longer called a second opinion; the README, docs and `auditex model` help say the rules answer the Power BI policies, `MS.AAD.3.4v1` and the rows caught by the gate, missing-evidence and empty-list checks, and the model answers the rows no rule covers, mark rules-only verdicts and the optional explainer role as planned and not built, and the output contract maps the customer term "not assessed" to the unchanged internal values.
 
 ### Collection (1.2.2.dev5)
+
+- **PIM schedule start dates preserve explicit nulls.** The `privileged_roles` artefact now keeps
+  `StartDateTime: null` when Graph returns `scheduleInfo.startDateTime: null`; an omitted source key
+  stays omitted. This lets AAD 7.5 distinguish the rule's non-PIM signal from missing evidence.
 
 - **PIM role policy collection (new reads, no new required scope).** The `identity_governance` collector reads the PIM role
   policies of the directory roles with two GET-only operations: `roleManagementPolicyAssignments`

@@ -23,7 +23,7 @@ from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 from .scuba_projection import (
     ASSIGNMENT_HARMLESS, PACK_SHAPE_DIGESTS, PROJECTION_VERSION, ROLE_HARMLESS,
     SCUBA_CAP_EXCLUSION_POLICIES, SCUBA_CONFIG_EXCLUSION_KEYS, SCUBA_ENVIRONMENT_POLICIES,
-    SCUBA_ROLE_EXCLUSION_POLICIES, _EMPTY_CAP, _EMPTY_ROLE, _FIELD_NAME, _annotation,
+    SCUBA_ROLE_EXCLUSION_POLICIES, RULE_ONLY_SECTIONS, _EMPTY_CAP, _EMPTY_ROLE, _FIELD_NAME, _annotation,
     _blank, _oversize, _redact, _rule_target, _seen_shape, _user_entries, _json,
     Bundle, Projection, Unavailable,
 )
@@ -32,7 +32,6 @@ from .scope_postcheck import ScopeEvidence, _mask_email
 
 _MAX_EXPORT_BYTES = 64 * 1024 * 1024
 _REPAIR = re.compile(r'("[^"]+"\s*:\s*)(?=,|\})')
-_LEDGER_TOKEN = re.compile(r'[A-Z][a-z]+-[A-Za-z0-9]+')
 _VERSION = re.compile(r'\d+(?:\.\d+){1,3}')
 _POLICY = re.compile(r'MS\.[A-Z]+\.\d+\.\d+v\d+')
 _INVALID = "Invalid ScubaGear export"
@@ -436,7 +435,8 @@ def _ignored_names(paths: list[tuple[str, ...]]) -> list[str]:
     return sorted(names)[:64]
 
 
-def _config_view(raw: Any, catalogue: dict[str, Any], max_items: int, max_chars: int) -> tuple[Any, dict, dict]:
+def _config_view(raw: Any, catalogue: dict[str, Any], max_items: int, max_chars: int,
+                 *, rule_view: bool = False) -> tuple[Any, dict, dict]:
     if not isinstance(raw, dict):
         raise Unavailable()
     aad = raw.get("Aad")
@@ -455,7 +455,9 @@ def _config_view(raw: Any, catalogue: dict[str, Any], max_items: int, max_chars:
             elif isinstance(item, dict):
                 stack.extend(item.values())
     environment = raw.get("M365Environment", "commercial")
-    environment = "commercial" if environment == "commercial" else None
+    # The model path must retain its existing withholding until its environment gate lands.
+    environments = {"commercial", "gcc", "gcchigh", "dod"} if rule_view else {"commercial"}
+    environment = environment if isinstance(environment, str) and environment in environments else None
     base = {"Aad": None, "CapExclusions": deepcopy(_EMPTY_CAP), "RoleExclusions": deepcopy(_EMPTY_ROLE)}
     views, outcomes = {}, {}
     for policy_id in sorted(pid for pid, data in catalogue.items() if "scuba_config" in data["sections"]):
@@ -507,8 +509,14 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
         sections = sorted({section for item in catalogue.values() for section in item["sections"]})
         projection = Projection()
         projection.views = {}
-        projection.rule_sections = {section: dict(NOT_COLLECTED) for section in sections}
+        projection.rule_sections = {section: dict(NOT_COLLECTED) for section in set(sections) | RULE_ONLY_SECTIONS}
         projection.rule_views = {}
+        # The ledger itself is evidence even when it names a failed command. Such a failure still
+        # withholds every Security Suite section below; never mistake its empty output for success.
+        ledger_keys = ("securitysuite_successful_commands", "securitysuite_unsuccessful_commands")
+        if all(key not in loaded.repaired_keys and isinstance(raw.get(key), list)
+               and all(isinstance(command, str) for command in raw[key]) for key in ledger_keys):
+            projection.rule_sections["securitysuite_unsuccessful_commands"] = raw[ledger_keys[1]]
         report: dict[str, dict] = {}
         pruning = {s: {"verdict": r["verdict"], "pruned_keys": 0, "outcome": "absent", "qualifier_withheld": False}
                    for s, r in proof.items()}
@@ -531,6 +539,8 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                     raise Unavailable()
                 if section == "scuba_config":
                     value, views, synthesis = _config_view(raw[section], catalogue, max_items, max_chars)
+                    rule_value, rule_views, rule_synthesis = _config_view(
+                        raw[section], catalogue, max_items, max_chars, rule_view=True)
                 else:
                     failed = False
                     for prefix in SECTION_LEDGERS[section]:
@@ -580,9 +590,9 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                         value, pruning[section]["pruned_keys"] = prune_section(
                             section, value, proof, removed_paths=removed)
                 if section == "scuba_config":
-                    projection.rule_sections[section] = value
-                    for policy_id, outcome in synthesis["policies"].items():
-                        view = views[policy_id] if outcome == "projected" else dict(NOT_COLLECTED)
+                    projection.rule_sections[section] = rule_value
+                    for policy_id, outcome in rule_synthesis["policies"].items():
+                        view = rule_views[policy_id] if outcome == "projected" else dict(NOT_COLLECTED)
                         projection.rule_views.setdefault(policy_id, {})[section] = view
                 _seen_shape(section, value)
                 if section == "privileged_users":
@@ -807,8 +817,8 @@ def build_sidecar(loaded: LoadedExport, projection: Projection, extras: dict[str
     for prefix in _PROVIDER_SECTIONS:
         failed = loaded.raw.get(prefix + "_unsuccessful_commands")
         failed = failed if isinstance(failed, list) else []
-        ledger[prefix] = {"unsuccessful_count": len(failed),
-                          "commands": sorted({v for v in failed if isinstance(v, str) and _LEDGER_TOKEN.fullmatch(v)})}
+        # Ledger strings are untrusted evidence, even when they resemble command identifiers.
+        ledger[prefix] = {"unsuccessful_count": len(failed)}
     return {
         "adapter_report_version": 1, "generated_at": generated_at,
         "input": {"kind": loaded.kind, "sha256": loaded.sha256, "bytes": loaded.bytes,

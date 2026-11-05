@@ -31,6 +31,8 @@ DEFAULT_MAX_CHARS = 12_000
 DEFAULT_SCAN_MAX_ROWS = 250_000
 DEFAULT_SCAN_MAX_BYTES = 256 * 1024 * 1024
 DEFAULT_SCAN_MAX_CHUNKS = 10_000
+# Provider metadata read only by rules; keep the model catalogue and its prompts frozen.
+RULE_ONLY_SECTIONS = frozenset({"securitysuite_unsuccessful_commands"})
 
 
 class Projection(dict):
@@ -1377,7 +1379,8 @@ def _dns(bundle: Bundle, section: str, manifest: dict[str, Any]) -> Any:
         raise Unavailable("dns_records_not_saved" if ran else "dns_posture_not_run") from None
     result = []
     for row in rows:
-        allowed = {"domain": _text, "doamin": _text, "rdata": _strings, "compliant": _boolean, "message": _text}
+        allowed = {"domain": _text, "doamin": _text, "rdata": _strings, "compliant": _boolean, "message": _text,
+                   "log": _any}
         bundle.known_fields(row, set(allowed))
         item = _fields(row, {k: v for k, v in allowed.items() if k in row})
         result.append(item)
@@ -1477,7 +1480,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
     sections = sorted({s for p in catalogue.values() for s in p["sections"]})
     result = Projection()
     result.views = {}
-    result.rule_sections = {section: dict(NOT_COLLECTED) for section in sections}
+    result.rule_sections = {section: dict(NOT_COLLECTED) for section in set(sections) | RULE_ONLY_SECTIONS}
     result.rule_views = {}
     report = {}
     synthesis = None
@@ -1547,6 +1550,9 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             if section == "scuba_config":
                 for policy_id, view in views.items():
                     result.rule_views.setdefault(policy_id, {})[section] = view
+            if section in {"dmarc_records", "spf_records", "dkim_records"}:
+                # Resolver diagnostics are rule-only, as on the export path's pre-prune capture.
+                value = [{k: v for k, v in row.items() if k != "log"} for row in value]
             _seen_shape(section, value)
             if section == "privileged_users":
                 _user_entries(value)

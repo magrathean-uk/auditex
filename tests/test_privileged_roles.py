@@ -348,6 +348,20 @@ def test_privileged_roles_is_written_in_the_export_shape_with_the_pack_date_conv
 
 
 # The properties Graph returns for each rule type (the fields the collector keeps), and so all a rule row may carry.
+@pytest.mark.parametrize("start,present", [(None, True), (None, False), ("2026-10-01T09:30:00Z", True)])
+def test_schedule_start_preserves_null_absent_and_dated_values_through_normalisation(start, present) -> None:
+    schedule = {**SCHEDULES[0], "scheduleInfo": {"expiration": {"type": "noExpiration"}}}
+    if present:
+        schedule["scheduleInfo"]["startDateTime"] = start
+    normalized = snapshot(collect(PolicyClient(schedules=[schedule])))
+    role = next(row for row in normalized["privileged_roles"]["records"] if row["RoleTemplateId"] == GA)
+    assignment = role["Assignments"][0]
+    assert ("StartDateTime" in assignment) is present
+    if present:
+        assert assignment["StartDateTime"] == (None if start is None else "/Date(1790847000000)/")
+    assert assignment["EndDateTime"] is None
+
+
 FAMILY_KEYS = {
     "Expiration_": {"Id", "IsExpirationRequired", "MaximumDuration", "RuleSource", "RuleSourceType"},
     "Notification_": {"Id", "NotificationRecipients", "NotificationType", "RuleSource", "RuleSourceType"},

@@ -1,6 +1,7 @@
 """Projection contract tests use synthetic evidence only; no tenant or web calls."""
 from __future__ import annotations
 
+from copy import deepcopy
 from hashlib import sha256
 import json
 import os
@@ -1919,6 +1920,9 @@ def test_scuba_config_default_shape_per_family(complete_bundle):
     assert {k for k, v in synthesis['policies'].items() if v != 'projected'} == {
         'MS.SECURITYSUITE.2.1v1', 'MS.SECURITYSUITE.2.3v1', 'MS.SECURITYSUITE.3.2v1'}
     assert set(synthesis['policies'].values()) == {'projected', 'operator_input_required'}
+    from auditex.scuba_projection import rule_policy_section
+    for pid in ('MS.AAD.9.1v1', 'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1'):
+        assert rule_policy_section(p, pid, 'scuba_config')['M365Environment'] == 'commercial'
 
 
 def test_scuba_config_environment_evidence_that_cannot_be_read_fails_closed(complete_bundle):
@@ -1983,6 +1987,41 @@ def test_rule_capture_honours_run_scan_and_collector_withholding(complete_bundle
               {'error': 'synthetic secret', 'error_class': 'permission_denied'})
     p = project_run(complete_bundle)
     assert p.rule_sections['meeting_policies'] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('section', ['spf_records', 'dkim_records', 'dmarc_records'])
+def test_dns_resolver_log_is_private_on_run_path(complete_bundle, section, caplog, capsys):
+    canary = 'dns-log-canary@example.invalid'
+    before = project_run(complete_bundle)
+    rows = deepcopy(EXPECTED[section])
+    rows[0]['log'] = [{'query_result': 'Domain name exists but no answers returned.', 'detail': canary}]
+    operation(complete_bundle, 'dns_posture', section, rows)
+    projection = project_run(complete_bundle)
+    assert projection.rule_sections[section] == rows
+    assert projection[section] == before[section]
+    assert canary not in json.dumps(projection) + json.dumps(projection.report)
+    with caplog.at_level('DEBUG'):
+        assess_run(complete_bundle, ModelConfig(model_name='stub'), dry_run=True)
+    written = (complete_bundle / 'model_assessment_prompts.jsonl').read_text()
+    assert canary not in written + caplog.text + str(capsys.readouterr())
+    bounded = project_run(complete_bundle, scan_max_rows=1, scan_max_bytes=1)
+    assert bounded.rule_sections[section] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('operator', ['AND', 'OR', None])
+def test_ca_operator_survives_run_rule_capture(complete_bundle, operator):
+    ca = deepcopy(CA)
+    ca['GrantControls']['Operator'] = operator
+    operation(complete_bundle, 'conditional_access', 'conditionalAccessPolicies', [graph(ca)])
+    projection = project_run(complete_bundle)
+    assert projection.rule_sections['conditional_access_policies'][0]['GrantControls']['Operator'] == operator
+
+
+def test_defender_run_path_does_not_invent_uncollected_provider_evidence(complete_bundle):
+    projection = project_run(complete_bundle)
+    for section in ('defender_license', 'defender_dlp_license', 'atp_policy_rules',
+                    'securitysuite_unsuccessful_commands'):
+        assert projection.rule_sections[section] == NOT_COLLECTED
 
 
 def test_serving_rules_use_private_view_while_model_case_keeps_marker():

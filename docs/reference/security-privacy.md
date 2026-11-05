@@ -28,7 +28,11 @@ text, not tenant evidence values. Serving rules read a separate in-memory view
 after source, ledger, collector-error, qualifier and scan checks, before the
 model view's shape, size and redaction gates. The rule view retains unredacted
 e-mail addresses and display names so rules can distinguish users; it is never
-serialised into prompts, assessment files, sidecars or logs. Only the gated
+serialised into prompts, assessment files, sidecars or logs. This includes
+Defender ATP preset-rule recipient and exclusion lists (`SentTo`,
+`SentToMemberOf`, `RecipientDomainIs` and their `ExceptIf*` counterparts),
+DNS resolver `log` entries and the Security Suite unsuccessful-command ledger.
+Only the gated
 model view reaches the model endpoint, redacted unless `--no-redaction` is used
 with a loopback endpoint. A policy whose `scuba_config`
 synthesis was not projected sees the not-collected marker in both views.

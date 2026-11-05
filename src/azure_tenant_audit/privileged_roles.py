@@ -96,9 +96,11 @@ def _assignment(row: Mapping[str, Any]) -> dict[str, Any]:
     if not principal or not isinstance(expiration, Mapping):
         raise Unreadable("assignment")
     item: dict[str, Any] = {"PrincipalId": principal}
-    # A schedule without a start is left without one; an end is null only when the schedule says it does not expire.
-    if info.get("startDateTime") is not None:
-        item["StartDateTime"] = _date(info["startDateTime"])
+    # Preserve Graph's presence semantics: a returned null is evidence, an omitted key is not.
+    # An end is null only when the schedule explicitly says it does not expire.
+    if "startDateTime" in info:
+        start = info["startDateTime"]
+        item["StartDateTime"] = None if start is None else _date(start)
     if expiration.get("type") == "noExpiration":
         item["EndDateTime"] = None
     else:

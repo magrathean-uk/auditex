@@ -537,8 +537,10 @@ def test_service_plan_budget_and_config_outcomes(tmp_path):
     projection, _ = project_export(load_export(_save(tmp_path, candidate, "gcc.json")),
                                    policy_catalogue()["policies"])
     outcomes = projection.report["sections"]["scuba_config"]["synthesis"]["policies"]
-    assert {pid for pid, outcome in outcomes.items() if outcome == "environment_ambiguous"} == {
-        "MS.AAD.9.1v1", "MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1"}
+    for pid in ("MS.AAD.9.1v1", "MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1"):
+        assert outcomes[pid] == "environment_ambiguous"
+        assert policy_section(projection, pid, "scuba_config") == NOT_COLLECTED
+        assert rule_policy_section(projection, pid, "scuba_config")["M365Environment"] == "gcc"
 
 
 def test_baselines_map_and_reasons():
@@ -1643,6 +1645,237 @@ def test_rule_view_canaries_never_enter_outputs_or_logs(tmp_path, caplog, capsys
                       for path in (tmp_path / folder).iterdir() if path.is_file())
     assert canary_email not in written + caplog.text + str(capsys.readouterr())
     assert canary_name not in written + caplog.text + str(capsys.readouterr())
+
+
+@pytest.mark.parametrize('section', ['defender_license', 'defender_dlp_license'])
+@pytest.mark.parametrize('value', [True, False, None, 'unreadable'])
+def test_defender_licence_flags_reach_rules_without_coercion(tmp_path, section, value):
+    raw = json.loads(PROVIDER.read_text())
+    raw[section] = value
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections[section] == value
+    assert projection[section] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('failed', [[], ['Get-EOPProtectionPolicyRule'], ['Get-HostedContentFilterRule'],
+                                   ['Get-ATPProtectionPolicyRule']])
+def test_securitysuite_failure_ledger_reaches_rules_and_still_withholds_provider_sections(tmp_path, failed):
+    raw = json.loads(PROVIDER.read_text())
+    raw['securitysuite_unsuccessful_commands'] = failed
+    raw['defender_license'] = True
+    raw['atp_policy_rules'] = []
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections['securitysuite_unsuccessful_commands'] == failed
+    assert 'securitysuite_unsuccessful_commands' not in projection
+    if failed:
+        for section in ('atp_policy_rules', 'defender_license', 'safe_links_policies'):
+            assert projection.rule_sections[section] == NOT_COLLECTED
+            assert projection.report['sections'][section]['reason'] == 'collector_error'
+    else:
+        assert projection.rule_sections['atp_policy_rules'] == []
+        assert projection.rule_sections['defender_license'] is True
+
+
+@pytest.mark.parametrize('bad', [None, 'Get-Mock', [None], {'error': 'private'}])
+def test_unusable_securitysuite_ledger_is_not_an_empty_success(tmp_path, bad):
+    raw = json.loads(PROVIDER.read_text())
+    raw['securitysuite_unsuccessful_commands'] = bad
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections['securitysuite_unsuccessful_commands'] == NOT_COLLECTED
+    assert projection.rule_sections['safe_links_policies'] == NOT_COLLECTED
+
+
+def test_repaired_or_missing_securitysuite_ledger_is_not_trusted(tmp_path):
+    raw = json.loads(PROVIDER.read_text())
+    raw.pop('securitysuite_unsuccessful_commands')
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections['securitysuite_unsuccessful_commands'] == NOT_COLLECTED
+    raw['securitysuite_unsuccessful_commands'] = []
+    source = _save(tmp_path, raw)
+    source.write_text(source.read_text().replace('"securitysuite_unsuccessful_commands": []',
+                                               '"securitysuite_unsuccessful_commands": '))
+    projection, _ = project_export(load_export(source), policy_catalogue()['policies'])
+    assert projection.rule_sections['securitysuite_unsuccessful_commands'] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('pid', [f'MS.SECURITYSUITE.{number}v1' for number in ('2.1', '2.2', '2.3', '7.1', '7.2', '7.3')])
+def test_atp_preset_rule_scope_reaches_each_private_policy_reader(tmp_path, pid):
+    raw = json.loads(PROVIDER.read_text())
+    atp = [{'Identity': 'Standard Preset Security Policy', 'State': 'Enabled',
+            'SentTo': ['atp-recipient@example.invalid'], 'SentToMemberOf': ['Synthetic Group'],
+            'RecipientDomainIs': ['example.invalid'], 'ExceptIfSentTo': ['except@example.invalid'],
+            'ExceptIfSentToMemberOf': [], 'ExceptIfRecipientDomainIs': []}]
+    raw['atp_policy_rules'] = atp
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert rule_policy_section(projection, pid, 'atp_policy_rules') == atp
+    assert projection['atp_policy_rules'] == NOT_COLLECTED
+
+
+@pytest.mark.parametrize('redact', [True, False])
+@pytest.mark.parametrize('failed_ledger', [False, True])
+def test_atp_recipients_and_ledger_never_enter_persisted_outputs(
+        tmp_path, monkeypatch, caplog, capsys, redact, failed_ledger):
+    from azure_tenant_audit import value_rules
+    from azure_tenant_audit.value_rules import catalogue
+    canary = 'atp-private-canary@example.invalid'
+    ledger_canary = 'John-Smith'
+    raw = json.loads(PROVIDER.read_text())
+    raw['securitysuite_unsuccessful_commands'] = [ledger_canary] if failed_ledger else []
+    raw['securitysuite_successful_commands'].append(ledger_canary)
+    raw['atp_policy_rules'] = [{'Identity': 'Standard Preset Security Policy', 'State': 'Enabled',
+                               'SentTo': [canary], 'ExceptIfSentTo': [], 'SentToMemberOf': [],
+                               'RecipientDomainIs': [], 'ExceptIfSentToMemberOf': [], 'ExceptIfRecipientDomainIs': []}]
+    raw['powerbi_access_denied_reason'] = ''
+    raw['powerbi_license_found'] = True
+    raw['powerbi_tenant_settings'] = [{'settingName': 'PublishToWeb', 'enabled': True}]
+    source = _save(tmp_path, raw)
+    original_row, original_assess = catalogue.row_for, value_rules.assess
+    seen = []
+
+    # The Defender kinds land in later stages. Exercise today's serving read-set boundary with a shipped rule.
+    def with_atp_read_set(pid):
+        row = original_row(pid)
+        return {**row, 'sections': [*row['sections'], 'atp_policy_rules',
+                                   'securitysuite_unsuccessful_commands']} if row else row
+
+    def reading_rule(pid, sections):
+        seen.append((sections['atp_policy_rules'], sections['securitysuite_unsuccessful_commands']))
+        # Keep the shipped rule's result contract while exercising an additional private input.
+        with monkeypatch.context() as context:
+            context.setattr(catalogue, 'row_for', original_row)
+            record = original_assess(pid, sections)
+        return {**record, 'cited_sections': original_row(pid)['sections']}
+
+    monkeypatch.setattr(catalogue, 'row_for', with_atp_read_set)
+    monkeypatch.setattr(value_rules, 'assess', reading_rule)
+    with caplog.at_level('DEBUG'):
+        _, sidecar, _ = _dry(tmp_path / 'dry', source, no_redaction=not redact)
+        assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+                                policies=['MS.POWERBI.1.1v1'], no_redaction=not redact)
+    # The serving read-set passes the failed ledger privately while withholding its provider sections.
+    assert seen == [(NOT_COLLECTED if failed_ledger else raw['atp_policy_rules'],
+                     [ledger_canary] if failed_ledger else [])]
+    projection, _ = project_export(load_export(source), policy_catalogue()['policies'])
+    assert projection.rule_sections['securitysuite_unsuccessful_commands'] == (
+        [ledger_canary] if failed_ledger else [])
+    assert projection.rule_sections['atp_policy_rules'] == (NOT_COLLECTED if failed_ledger else raw['atp_policy_rules'])
+    assert sidecar['ledger']['securitysuite'] == {'unsuccessful_count': int(failed_ledger)}
+    assert all(set(row) == {'unsuccessful_count'} for row in sidecar['ledger'].values())
+    written = ''.join(path.read_text() for folder in ('dry/assessment', 'assessed')
+                      for path in (tmp_path / folder).rglob('*') if path.is_file())
+    emitted = written + caplog.text + str(capsys.readouterr())
+    assert canary not in emitted
+    assert ledger_canary not in emitted
+
+
+@pytest.mark.parametrize('section', ['spf_records', 'dkim_records', 'dmarc_records'])
+def test_export_dns_log_stays_private_after_capture(tmp_path, section):
+    raw = json.loads(REAL.read_text())
+    canary = 'export-dns-log-canary@example.invalid'
+    raw[section][0]['log'] = [{'query_result': 'No answers returned.', 'detail': canary}]
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections[section][0]['log'] == raw[section][0]['log']
+    assert canary not in json.dumps(projection) + json.dumps(projection.report)
+
+
+@pytest.mark.parametrize('key', ['EndDateTime', 'StartDateTime'])
+def test_export_role_dates_distinguish_null_from_absent(tmp_path, key):
+    raw = json.loads(PROVIDER.read_text())
+    first = raw['privileged_roles'][0]['Assignments'][0]
+    first[key] = None
+    absent = {k: v for k, v in first.items() if k != key}
+    raw['privileged_roles'][0]['Assignments'] = [first, absent]
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assignments = projection.rule_sections['privileged_roles'][0]['Assignments']
+    assert assignments[0][key] is None and key not in assignments[1]
+
+
+@pytest.mark.parametrize('environment', ['commercial', 'gcc', 'gcchigh', 'dod', 'GCC', None, [], 'unknown'])
+def test_export_environment_is_retained_only_when_recognised(tmp_path, environment):
+    raw = json.loads(PROVIDER.read_text())
+    raw['scuba_config']['M365Environment'] = environment
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    for pid in ('MS.AAD.9.1v1', 'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1'):
+        view = rule_policy_section(projection, pid, 'scuba_config')
+        if isinstance(environment, str) and environment in {'commercial', 'gcc', 'gcchigh', 'dod'}:
+            assert view['M365Environment'] == environment
+        else:
+            assert view == NOT_COLLECTED
+
+
+# All 102 prompt hashes and precheck details from committed d393d4ba3cc16ee0972e4363394605e866de07ce.
+# Generated with the committed export adapter, both mocktenant fixtures and default value rules.
+@pytest.mark.parametrize('source,environment,redact,expected', [
+    (PROVIDER, 'gcc', True, 'bdd4ca855fb961ee8433c2eca523ba68737c2bd02e9af859b4fb31dc487e393c'),
+    (PROVIDER, 'gcc', False, 'af6f8766f2dcf38402357092e34c158491916770b7f7f132fc09ea07a1898ac0'),
+    (PROVIDER, 'gcchigh', True, '911e6e149e663874b9d47d8bf6f8918b3b6fd1901723dd776e79cce767cffead'),
+    (PROVIDER, 'gcchigh', False, 'd54cfdd56974b838c5755c75277e2ae3004574445d3438d070907f2c9ec0bd93'),
+    (PROVIDER, 'dod', True, '645e279f706c9a443c2137f6312594ded3b0531340fdb80b6eed276ff2c1c46a'),
+    (PROVIDER, 'dod', False, '8a73491cd4bc12da5296768d9da90f5459becb49bf3dd0a1f07942eb8f131a8f'),
+    (REAL, 'gcc', True, '5cb780214c5e1068b268e202ee8b79edaa2869c9859f909ad7ed2fbac2772443'),
+    (REAL, 'gcc', False, 'b38996dc89fc1075c6c4b2cad5e6e62af343cfa205726ae40546a007a42bdba9'),
+    (REAL, 'gcchigh', True, 'f749576a5fbdba286891865957a8eacb43545e40a9effcdfa3e3478bfde57069'),
+    (REAL, 'gcchigh', False, 'b5b084ed903050114e3acdbf95e47284c091279c5a7a236549b28fb7056742e5'),
+    (REAL, 'dod', True, '702fcee1b68cdd296ac916ab3c1818a3b2e359682407fe57391ae0e61ce87669'),
+    (REAL, 'dod', False, 'e0b698ab0b040fa73e8c224abcaaab40b37c49a0bc6840ae604aeec7fa27ec6c'),
+])
+def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behaviour(
+        tmp_path, monkeypatch, source, environment, redact, expected):
+    from auditex.model_precheck import precheck_case
+    from auditex.model_serving import ModelClient, ModelEndpointError, build_case, canonical
+    from azure_tenant_audit.value_rules.catalogue import row_for
+
+    monkeypatch.delenv('AUDITEX_DISABLE_VALUE_RULES', raising=False)
+    raw = json.loads(source.read_text())
+    raw['scuba_config']['M365Environment'] = environment
+    export = _save(tmp_path, raw)
+    projection, _ = project_export(load_export(export), policy_catalogue()['policies'], redact=redact)
+    prompts = _dry(tmp_path / 'dry', export, no_redaction=not redact)[2]
+    assert len(prompts) == 102
+    signatures, prechecks = {}, {}
+    for prompt in prompts:
+        pid = prompt['policy_id']
+        row = row_for(pid)
+        rule_input = {s: deepcopy(rule_policy_section(projection, pid, s)) for s in row['sections']} if row else None
+        precheck = precheck_case(build_case(pid, projection, 'unused'), absent_fields=True, empty_lists=True,
+                                 value_rules=True, rule_projection=rule_input)
+        prechecks[pid] = precheck['rule_precheck'] if precheck else None
+        signatures[pid] = {'prompt_sha256': prompt['prompt_sha256'], 'precheck': prechecks[pid]}
+    # Equality pins every policy's prompt and precheck, including the policies left to the model.
+    assert sha256(canonical(signatures).encode()).hexdigest() == expected
+    for pid in ('MS.AAD.9.1v1', 'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1'):
+        assert policy_section(projection, pid, 'scuba_config') == NOT_COLLECTED
+        assert rule_policy_section(projection, pid, 'scuba_config')['M365Environment'] == environment
+    assert prechecks['MS.AAD.9.1v1']['class'] == 'absent_section'
+    assert prechecks['MS.AAD.9.1v1']['section'] == ['scuba_config']
+
+    calls = []
+    original_assess = ModelClient.assess
+
+    def guarded_assess(client, case):
+        pid = case['policy_id']
+        assert prechecks[pid] is None, f'{pid} must retain its committed precheck'
+        calls.append(pid)
+        return original_assess(client, case)
+
+    def unavailable(*args, **kwargs):
+        raise ModelEndpointError('Synthetic endpoint unavailable')
+
+    monkeypatch.setattr(ModelClient, 'assess', guarded_assess)
+    monkeypatch.setattr(ModelClient, '_request', unavailable)
+    result = assess_scubagear_export(export, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+                                     no_redaction=not redact)
+    assert set(calls) == {pid for pid, precheck in prechecks.items() if precheck is None}
+    assert len(calls) == len(set(calls))
+    assert {row['policy_id']: row.get('rule_precheck') for row in result['policies']} == prechecks
+
+
+@pytest.mark.parametrize('operator', ['AND', 'OR', None])
+def test_export_ca_operator_is_retained_in_private_view(tmp_path, operator):
+    raw = json.loads(PROVIDER.read_text())
+    raw['conditional_access_policies'][0]['GrantControls']['Operator'] = operator
+    projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()['policies'])
+    assert projection.rule_sections['conditional_access_policies'][0]['GrantControls']['Operator'] == operator
 
 
 def test_bad_guid_keyed_user_is_shape_withheld_before_user_detail(tmp_path):

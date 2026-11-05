@@ -30,7 +30,58 @@ nothing extra (27.4 s against 27.2 s for the full assessment), while
 about 26. These are single local measurements on synthetic input, not a
 performance promise or a production figure.
 One failed Security Suite command still withholds all sections tied to that
-ledger; this is a coverage limit of the current adapter.
+ledger; this is a coverage limit of the current adapter. The validated
+`securitysuite_unsuccessful_commands` list itself is also available in the
+private rule view, including when non-empty. Missing, repaired or malformed
+ledgers remain not collected; failed provider sections remain withheld. The
+ledger is outside the frozen model catalogue and is never added to prompts.
+The sidecar persists only unsuccessful-command counts per provider; it never
+copies command strings from a ledger.
+
+The existing export capture retains `defender_license` and
+`defender_dlp_license` without coercion, so false, null and absent remain
+distinct. It also retains ATP preset rules (`atp_policy_rules`) for SS 2.1-2.3
+and 7.1-7.3: `Identity`, `State`, `SentTo`, `SentToMemberOf`,
+`RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf` and
+`ExceptIfRecipientDomainIs`. Recipient emails reach rules only in memory;
+these digest-less sections remain withheld from the model projection even
+when redaction is disabled. The stage-3 rule catalogue must add
+`defender_license` to SS 1.3 and 7.1-7.3, `defender_dlp_license` to SS 3.1,
+3.3 and 3.4, and `atp_policy_rules` to SS 2.1-2.3 and 7.1-7.3. The model
+catalogue is unchanged. No complete source or adapter for these Defender
+sections or the provider ledger exists on the run-bundle path; that path
+continues to supply not-collected evidence for them.
+
+DNS `log` survives privately on both paths, when saved by the source. The
+run adapter removes it from the model view after capture; the export adapter
+already captures it before proof pruning. This does not add a DNS collector
+read or reconstruct records that the collector did not save. Preserving the
+log does not itself implement the successful-empty-answer rule (spec Q12).
+
+Both paths already preserve `GrantControls.Operator` and distinguish a null
+role-assignment date from an absent key. The M6 collector correction now also
+preserves Graph's explicit null `scheduleInfo.startDateTime` upstream of the
+run projection. Source semantics: the output contract's privileged-role
+section identifies `roleAssignmentSchedules`, including its known scope and
+instance limitations; v3.9 spec section 3.5 and Q26 treat null start/end as
+non-PIM/permanent signals and absent keys as unusable evidence. The change
+preserves source values; it does not establish live Graph behaviour or change
+which schedules are read.
+
+`scuba_config.M365Environment` reaches AAD 9.1 and the three environment-bound
+Teams private rule views on both paths. Private export rule views accept the exact
+values `commercial`, `gcc`, `gcchigh` and `dod`; malformed or unknown values
+withhold those views. The export model views retain their existing behaviour:
+only `commercial` projects, and `gcc`, `gcchigh` and `dod` remain withheld until
+the model environment gate lands. An omitted environment retains the existing
+commercial default. The export synthesis diagnostic describes the model views
+and keeps its existing `assumed_default` basis vocabulary for these configuration
+assumptions; it does not assert a
+detected tenant cloud. Run bundles retain their discovery/SKU/default evidence
+and ambiguity handling. The rule-view expansion leaves export model prompts
+and prechecks unchanged; the frozen shape gate is unchanged. Break-glass and
+Security Suite operator-input withholding remain
+in force.
 
 ## Evidence boundaries and privacy
 
