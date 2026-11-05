@@ -123,10 +123,18 @@ def pp_dlp(policy_id: str, row: dict, sections: dict) -> dict:
            for item in environments):
         return _answer(policy_id, row, "environment_list_unusable", ["environment_list"])
     nondefault = {item["EnvironmentName"] for item in environments if item["IsDefault"] is False}
-    covered = set()
+    # An environment is covered by an Only policy that lists it, or by an Except policy that does not. Uncovered ones are
+    # those no Only policy lists and every Except policy lists: ``nondefault - names`` once per Except policy was
+    # quadratic, so intersect the Except sets (each step is bounded by the smaller set) and subtract the Only union.
+    only: set[str] = set()
+    excepted: set[str] | None = None
     for kind, names in policies:
-        covered |= names if kind == "OnlyEnvironments" else nondefault - names
-    if not nondefault - covered:
+        if kind == "OnlyEnvironments":
+            only |= names
+        else:
+            excepted = set(names) if excepted is None else excepted & names
+    uncovered = (nondefault if excepted is None else nondefault & excepted) - only
+    if not uncovered:
         return _answer(policy_id, row, "all_environments_covered" if nondefault else "no_nondefault_environments")
     if unreadable:
         return _answer(policy_id, row, "dlp_structure_unusable", ["dlp_policies"])

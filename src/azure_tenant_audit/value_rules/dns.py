@@ -17,7 +17,12 @@ _DMARC_V = re.compile(r"^[vV]\s*=\s*DMARC1\s*(?:;|$)")
 _TAG = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)\s*=\s*(.*)$", re.S)
 
 
-_URI = re.compile(r"^mailto:([^\s,!;]+@[^\s,!;]+?)(?:![0-9]+[kKmMgGtT]?)?$", re.I)
+# The reference pattern was ^mailto:([^\s,!;]+@[^\s,!;]+?)(?:![0-9]+[kKmMgGtT]?)?$ (re.I). Its first class holds "@", so on
+# a long run of "@" followed by a failing tail it tried every split (quadratic in the string length). The body is the maximal
+# run of characters that are none of whitespace , ! ; (the optional size suffix can only start at the first other character),
+# so one linear pattern finds it and "@" is then looked for at an index with a character on each side: the same language,
+# the same group, no backtracking over the body.
+_URI = re.compile(r"^mailto:([^\s,!;]+)(?:![0-9]+[kKmMgGtT]?)?$", re.I)
 
 
 DHS_ADDRESS = "reports@dmarc.cyber.dhs.gov"
@@ -54,7 +59,7 @@ def parse_uris(value):
     addrs, junk = [], 0
     for p in value.split(","):
         m = _URI.match(p.strip())
-        if m:
+        if m and m.group(1).find("@", 1, len(m.group(1)) - 1) != -1:
             addrs.append(m.group(1).lower())
         else:
             junk += 1
@@ -216,6 +221,15 @@ def _parser(policy_id, sp, sections):
     cfg = [e for e in sections["dkim_config"] if isinstance(e, dict)]
     recs = [e for e in sections["dkim_records"] if isinstance(e, dict)]
     coexist = {c["Domain"] for c in cfg if type(c.get("Domain")) is str and c["Domain"].endswith(".mail.onmicrosoft.com")}
+    # Indexed once, keyed exactly as the loop compared (== on a string domain, input order kept per domain): the per-domain
+    # list scans were quadratic in the number of domains.
+    cfg_by_domain, rec_by_domain = {}, {}
+    for c in cfg:
+        if type(c.get("Domain")) is str:
+            cfg_by_domain.setdefault(c["Domain"], []).append(c)
+    for r in recs:
+        if type(r.get("domain")) is str:
+            rec_by_domain.setdefault(r["domain"], []).append(r)
     res, seen = [], set()
     for e in (x for x in sections["spf_records"] if isinstance(x, dict)):
         d = e.get("domain")
@@ -225,7 +239,7 @@ def _parser(policy_id, sp, sections):
         if d in seen or d in coexist:
             continue
         seen.add(d)
-        mine = [c for c in cfg if c.get("Domain") == d]
+        mine = cfg_by_domain.get(d, [])
         if not mine:
             res.append(("bad", "no_signing_config", True))
             continue
@@ -233,7 +247,7 @@ def _parser(policy_id, sp, sections):
         if not any(f is True for f in flags):
             res.append(("bad", "dkim_not_enabled", True) if all(f is False for f in flags) else ("unusable", "enabled_flag_unusable", True))
             continue
-        rr = [r for r in recs if r.get("domain") == d]
+        rr = rec_by_domain.get(d, [])
         if not rr:
             res.append(("bad", "no_dkim_record_entry", True))
             continue

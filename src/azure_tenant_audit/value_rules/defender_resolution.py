@@ -112,17 +112,23 @@ def _safelinks_core(policy_id, sp, sections, trace):
     # rule at all) gives those recipients its policy; when that policy is exported with a flag off, the named recipients get a non-compliant policy: not_met. A partial rule
     # whose precedence or policy cannot be read is left as in v3.6 (it does not decide).
     low_cov = min(r["Priority"] for r in cand) if cand else None
+    # Policies by Identity, built once (a string Identity is the only thing a string name equals): one list scan per
+    # partial rule was quadratic in rules times policies.
+    by_identity: dict = {}
+    for e in sections["safe_links_policies"]:
+        if isinstance(e, dict) and type(e.get("Identity")) is str:
+            by_identity.setdefault(e["Identity"], []).append(e)
     for r in partial:
         pr = r.get("Priority")
         if cand and not (_is_num(pr) and pr < low_cov):
             continue
         name = r.get("SafeLinksPolicy")
-        pp = [e for e in sections["safe_links_policies"] if isinstance(e, dict) and type(name) is str and e.get("Identity") == name]
+        pp = by_identity.get(name, []) if type(name) is str else []
         if len(pp) == 1 and any(type(pp[0].get(f)) is bool and not pp[0][f] for f in sp["flags"]):
             return _rec(policy_id, "not_met", "partial_scope_policy_flag_off",
                         f"Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable {sp['what']}, so those recipients get a non-compliant policy.",
                         "partial_rule_noncompliant", None, div="D98")
-    pols = [e for e in sections["safe_links_policies"] if isinstance(e, dict) and e.get("Identity") == applied]
+    pols = by_identity.get(applied, [])
     if not pols:
         return _A(policy_id, "data_unavailable_applied_policy_not_exported",
                   "Data unavailable: the applied Safe Links policy is not in safe_links_policies; the policy was not assessed.", "policy_not_in_export",
