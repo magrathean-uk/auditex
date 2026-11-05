@@ -28,6 +28,11 @@ def _rows(bundle: Bundle, operation: str, spec: dict[str, Callable[[Any], bool]]
 
 
 def _allowed_domains_value(raw: Any) -> list:
+    if isinstance(raw, str):
+        # Only the complete cmdlet marker means open, never embedded domain text.
+        _require(raw.strip().casefold() == "allowallknowndomains",
+                 "AllowedDomains", "invalid_type")
+        return []
     if isinstance(raw, list):
         if not raw:
             return []
