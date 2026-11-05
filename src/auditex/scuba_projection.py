@@ -1316,6 +1316,9 @@ def rule_policy_section(projection: Projection, policy_id: str, section: str) ->
 
 
 
+# Area adapter modules (src/auditex/scuba_adapters_<area>.py), each exposing ADAPTERS: dict[str, Callable].
+AREA_ADAPTER_MODULES: tuple[str, ...] = ()
+
 PS_SECTIONS = {
     "accepted_domains": ("exchange_policy", "acceptedDomains", {"Name": _text, "DomainName": _text}),
     "dkim_config": ("exchange_policy", "dkimSigningConfig", {"Domain": _text, "Enabled": _boolean}),
@@ -1472,6 +1475,17 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
     synthesis = None
     adapters = {"SPO_tenant": _spo, "conditional_access_policies": _ca, "authorization_policies": _authorization,
                 "service_plans": _plans, "privileged_users": _users, "privileged_roles": _roles}
+    import importlib
+
+    for name in AREA_ADAPTER_MODULES:
+        mod = importlib.import_module(name)
+        if not hasattr(mod, "ADAPTERS"):
+            raise RuntimeError(f"Area adapter module {name!r} has no ADAPTERS")
+        area_adapters = mod.ADAPTERS
+        collisions = adapters.keys() & area_adapters.keys()
+        if collisions:
+            raise RuntimeError(f"Area adapter module {name!r} has duplicate adapter keys: {sorted(collisions)}")
+        adapters.update(area_adapters)
     for section in sections:
         bundle.reset()
         try:
