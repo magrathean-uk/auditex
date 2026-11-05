@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 from hashlib import sha256
 import importlib.util
+from itertools import combinations
 import json
 import lzma
 import os
@@ -124,6 +125,45 @@ def test_held_rows_are_prepared_but_not_enabled():
         assert cells_for(policy) == ()
         assert row["kind"] in SPAM_KINDS
         assert row["rule_id"] == policy + ".spam_cascade"
+
+
+@pytest.mark.parametrize("policy", sorted(POLICIES))
+@pytest.mark.parametrize("missing_state", ["absent", "marked", "mixed"])
+def test_every_missing_section_combination_is_catalogued(policy, missing_state, vectors, monkeypatch):
+    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+    import azure_tenant_audit.value_rules.catalogue as loader
+
+    # Include the prepared rows in validation without enabling them in the shipped catalogue.
+    data = deepcopy(catalogue())
+    data["policies"].update(HELD)
+    monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
+    loader.catalogue.cache_clear()
+    try:
+        rule = _rule(policy)
+        missing_sets = [list(subset) for size in range(1, len(rule["sections"]) + 1)
+                        for subset in combinations(rule["sections"], size)]
+        texts = ["Data unavailable: required evidence section(s) not collected: "
+                 + ", ".join(missing) + "." for missing in missing_sets]
+        assert rule["cells"]["section_not_collected"]["reason_texts"] == sorted(texts)
+        base = next(row["sections"] for row in vectors[policy] if row["rule_verdict"] == "met")
+        for missing, text in zip(missing_sets, texts):
+            sections = deepcopy(base)
+            for index, name in enumerate(missing):
+                if missing_state == "marked" or missing_state == "mixed" and index % 2:
+                    sections[name] = dict(NOT_COLLECTED)
+                else:
+                    sections.pop(name, None)
+            record = checked(_evaluate(policy, sections))
+            assert (record["verdict"], record["cell"], record["reason_code"], record["reason_text"],
+                    record["cited_sections"]) == (
+                "not_assessed", "section_not_collected", "required_evidence_section_not_collected", text, missing)
+            if policy in LIVE:
+                detail = precheck_policy(policy, sections, rule["sections"], value_rules=True)
+                assert (detail["class"], detail["cell"], detail["reason_code"], detail["reason_text"],
+                        detail["section"]) == (
+                    "value_rule", "section_not_collected", "required_evidence_section_not_collected", text, missing)
+    finally:
+        loader.catalogue.cache_clear()
 
 
 def test_citation_variants_are_closed(vectors, monkeypatch):
@@ -367,6 +407,27 @@ def _builder():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_builder_round_trips_committed_fixture_bytes(tmp_path):
+    # Origin metadata is discarded by the builder; restore valid metadata for each retained source kind.
+    rows = []
+    for original in _rows(FIXTURE):
+        row = {**original, "origin": "fixture-round-trip"}
+        if row["source_kind"] == "constructed":
+            row.update(source_file="constructed by v39_vectors.py", split=None)
+        else:
+            split = {"pack-train": "train", "pack-validation": "validation"}[row["source_kind"]]
+            row.update(source_file=f"20261030-oracle-pack-v10/{split}.jsonl", split=split)
+        rows.append(row)
+    source, target = tmp_path / "source.jsonl", tmp_path / FIXTURE.name
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    expected = json.loads((FIXTURES / "manifest-s4.json").read_text())[FIXTURE.name]
+    for _ in range(2):
+        manifest = _builder().build(source, target)
+        assert target.read_bytes() == FIXTURE.read_bytes()
+        assert {key: value for key, value in manifest.items() if key != "source_sha256"} == {
+            key: value for key, value in expected.items() if key != "source_sha256"}
 
 
 def test_builder_rejects_unexpected_and_excludes_all_pilots_and_test_rows(vectors, tmp_path):
