@@ -35,6 +35,26 @@ CREATION_KEYS = {
     "disablePortalsCreationByNonAdminUsers", "powerPlatform",
 }
 TENANT = "11111111-1111-4111-8111-111111111111"
+TENANT_ID_SUBSTITUTIONS = {
+    "Test Id": TENANT,
+    "TestId": "22222222-2222-4222-8222-222222222222",
+}
+
+
+def canonical_fixture_sections(value):
+    """Replace only known synthetic tenant IDs and their default-environment names."""
+    if isinstance(value, dict):
+        return {key: canonical_fixture_sections(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [canonical_fixture_sections(item) for item in value]
+    if isinstance(value, str):
+        substitutions = {
+            **TENANT_ID_SUBSTITUTIONS,
+            **{f"Default-{source}": f"Default-{tenant}"
+               for source, tenant in TENANT_ID_SUBSTITUTIONS.items()},
+        }
+        return substitutions.get(value, value)
+    return value
 
 
 def write(root, path, payload):
@@ -86,9 +106,11 @@ def plan_rows(name="POWER_BI_STANDARD", status="Success"):
 def invert(sections):
     """Return raw C1 evidence and its reduced rule view, or a counted exclusion.
 
-    Older denial prose reduces to the fixed C1 string. Invalid tenant identifiers
-    are never repaired: the existing tenant adapter requires a canonical UUID.
+    Older denial prose reduces to the fixed C1 string. Known synthetic tenant IDs
+    and default-environment references use a fixed GUID substitution; all other
+    invalid tenant identifiers remain exclusions.
     """
+    sections = canonical_fixture_sections(sections)
     raw, reduced = {}, {}
     for section, value in sections.items():
         if section == "tenant_id":
@@ -149,6 +171,35 @@ def invert(sections):
     return raw, reduced
 
 
+@pytest.mark.parametrize("source,tenant", TENANT_ID_SUBSTITUTIONS.items())
+def test_inverter_substitutes_tenant_and_default_environment_references(source, tenant):
+    sections = {
+        "tenant_id": source,
+        "dlp_policies": [{"value": [{
+            "environmentType": "OnlyEnvironments",
+            "environments": [{"name": f"Default-{source}"}, {"name": f"NotDefault-{source}"}],
+        }]}],
+        "environment_list": [{"EnvironmentName": f"Default-{source}", "IsDefault": True}],
+    }
+    raw, reduced = invert(sections)
+    assert canonical_tenant_uuid(tenant) == tenant
+    assert raw["identity"]["organization"] == [{"id": tenant}]
+    assert reduced["tenant_id"] == tenant
+    environments = [{"name": f"Default-{tenant}"}, {"name": f"NotDefault-{source}"}]
+    assert raw["power_platform"]["dlpPolicyScopes"][0]["environments"] == environments
+    assert reduced["dlp_policies"][0]["value"][0]["environments"] == environments
+    assert raw["power_platform"]["environments"] == [{"name": f"Default-{tenant}", "is_default": True}]
+    assert reduced["environment_list"] == [{"EnvironmentName": f"Default-{tenant}", "IsDefault": True}]
+    assert sections["tenant_id"] == source
+    assert sections["dlp_policies"][0]["value"][0]["environments"][0]["name"] == f"Default-{source}"
+    assert sections["environment_list"][0]["EnvironmentName"] == f"Default-{source}"
+
+
+@pytest.mark.parametrize("tenant", [None, NOT_COLLECTED, "", "unmapped-tenant"])
+def test_inverter_still_rejects_unmapped_invalid_tenant_ids(tenant):
+    assert invert({"tenant_id": tenant}) == "tenant_id_unproducible"
+
+
 def vector_rows():
     for fixture, prefix in (("value-rules/vectors-v2.jsonl.xz", "MS.POWERBI"),
                             ("powerplat/pp-vectors-sample.jsonl.xz", "MS.POWERPLATFORM")):
@@ -206,6 +257,11 @@ def test_vector_counts_and_sample_contract(capsys):
             assert set(vector) == {"policy", "rule_cell", "rule_verdict", "sections"}
             cells[vector["policy"], vector["rule_cell"]] += 1
     assert max(cells.values()) <= 6
+    catalogue = json.loads((FIXTURES.parents[1] / "configs/scuba-policy-sections.json").read_text())["policies"]
+    policies = {policy for policy in catalogue
+                if policy.startswith(("MS.POWERBI.", "MS.POWERPLATFORM."))}
+    assert set(counts) == policies
+    assert all(counts[policy]["used"] > 0 for policy in policies), dict(counts)
     with capsys.disabled():
         print("\nVector counts: " + json.dumps(dict(counts), sort_keys=True))
 
