@@ -767,12 +767,12 @@ def test_exchange_domain_spelling_matches_dkim_config(monkeypatch, tmp_path):
 
     class Adapter:
         def run(self, command, **kwargs):
-            if command.startswith('Get-AcceptedDomain '):
+            if command.startswith(',@(Get-AcceptedDomain '):
                 return {'value': [
                     {'DomainName': 'Contoso.com', 'IsCoexistenceDomain': False},
                     {'DomainName': 'contoso.COM', 'IsCoexistenceDomain': False},
                 ]}
-            if command.startswith('Get-DkimSigningConfig '):
+            if command.startswith(',@(Get-DkimSigningConfig '):
                 return {'value': [{'Domain': 'Contoso.com', 'Enabled': True}]}
             return {'value': []}
 

@@ -38,7 +38,9 @@
         "sharepoint",
         "sharepoint_access",
         "onedrive_posture",
-        "teams"
+        "teams",
+        "exchange_policy",
+        "dns_posture"
       ],
       "exclude": [],
       "plane": "full"

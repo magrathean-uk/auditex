@@ -17,6 +17,32 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
+# These default workload enrichments may be unavailable without blocking the core audit.
+# Their actual failed/partial rows and the run's partial coverage remain unchanged.
+NON_FATAL_COLLECTORS = frozenset({"exchange_policy", "dns_posture"})
+
+
+def collector_gap_reason(collector: str, error_class: Any, error: Any = None) -> str | None:
+    """Controlled customer text; never echo credentials or command output into a reason."""
+    if collector in NON_FATAL_COLLECTORS and error_class == "collection_limit":
+        return _COLLECTOR_FAILURE_REASON_TEXT["collection_limit"]
+    if collector == "exchange_policy":
+        if error_class == "ipps_session_not_opened":
+            return SECTION_GAP_REASON_TEXT[REASON_IPPS_SESSION_NOT_OPENED]
+        if error_class == "license_required":
+            return _COLLECTOR_FAILURE_REASON_TEXT["license_required"]
+        if error_class in {"command_not_found", "module_not_found", "toolchain_unavailable"}:
+            return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
+        return _COLLECTOR_FAILURE_REASON_TEXT["exchange_policy_failed"]
+    if collector == "dns_posture":
+        if error_class == "dns_resolver_error":
+            return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
+        if error_class == "public_lookup_error":
+            return _COLLECTOR_FAILURE_REASON_TEXT[error_class]
+        return _COLLECTOR_FAILURE_REASON_TEXT["dns_posture_failed"]
+    return None
+
+
 # Error class of the coverage row for a list cut at the operator's row limit.
 TRUNCATION_ERROR_CLASS = "collection_limit"
 
@@ -25,11 +51,44 @@ TRUNCATION_ERROR_CLASS = "collection_limit"
 # section say so themselves). Such a gap is still named: in the manifest, ``collection_gaps`` and the gates.
 SECTION_SCOPED = "section_scoped"
 
+REASON_IPPS_SESSION_NOT_OPENED = "ipps_session_not_opened"
+IPPS_SKIP_TEXT = "Not assessed: alert policies need a Security & Compliance session, which Auditex does not open"
+
 REASON_TEAMS_TOKEN_UNAVAILABLE = "teams_token_unavailable"
 REASON_TEAMS_POWERSHELL_NOT_SUPPORTED = "teams_powershell_not_supported"
 SECTION_GAP_REASON_TEXT = {
+    REASON_IPPS_SESSION_NOT_OPENED: IPPS_SKIP_TEXT,
     REASON_TEAMS_TOKEN_UNAVAILABLE: "not collected: certificate token for the Teams admin API not available",
     REASON_TEAMS_POWERSHELL_NOT_SUPPORTED: "not collected: Teams PowerShell sessions are not supported",
+}
+
+_COLLECTOR_FAILURE_REASON_TEXT = {
+    "collection_limit": (
+        "Not assessed: the policy input is incomplete because collection stopped at an operator or safety limit; "
+        "see coverage for the affected list and limit."
+    ),
+    "license_required": "Not assessed: the Exchange policy read requires a licence that is unavailable to this tenant.",
+    **dict.fromkeys(
+        ("command_not_found", "module_not_found", "toolchain_unavailable"),
+        "Not assessed: Exchange Online PowerShell is unavailable (pwsh, ExchangeOnlineManagement "
+        "or the required cmdlet is missing). Install the tooling and rerun the selected collector.",
+    ),
+    "exchange_policy_failed": (
+        "Not assessed: the Exchange Online policy read or session failed. Check Exchange.ManageAsApp "
+        "admin consent and Global Reader on the service principal for app-only access. "
+        "Interactive, delegated and access-token authentication cannot open an Exchange Online policy session; "
+        "use app authentication or deselect exchange_policy."
+    ),
+    "dns_resolver_error": (
+        "Not assessed: the public Cloudflare DNS-over-HTTPS resolver could not answer or was unreachable; "
+        "DNS records are unknown, not absent. Check resolver connectivity and rerun dns_posture."
+    ),
+    "public_lookup_error": "Not assessed: the verified domain's MTA-STS or public OpenID discovery HTTPS read failed.",
+    "dns_posture_failed": (
+        "Not assessed: DNS posture could not be collected. Check the same-run Exchange accepted-domain read "
+        "or Graph verified Email domains, access to Graph verified domains for posture checks, "
+        "and public DNS/HTTPS connectivity, then rerun dns_posture."
+    ),
 }
 
 # Why a list stopped before its last row. These strings are part of the output contract.
@@ -308,7 +367,7 @@ _SEGMENT_NOT_FOUND = "resource not found for the segment"
 def refusal_gap_records(
     coverage_rows: Iterable[Any], collector_payloads: Mapping[str, Any] | None = None
 ) -> list[dict[str, Any]]:
-    """One record per ``REFUSAL_GAP_OPERATIONS`` read that failed or was refused, with the error class and the reason.
+    """One record per refused/failed named read, including the non-fatal Exchange/DNS workload reads.
 
     A read that was cut short is listed by :func:`list_truncations` already and is left out here, as is any read that was
     marked section-scoped (:func:`section_gap_records` names it). A raw section that carries an ``error`` and has no
@@ -326,11 +385,13 @@ def refusal_gap_records(
             "reason": REASON_ENDPOINT_UNAVAILABLE if unavailable else REASON_READ_FAILED,
             "status": status,
             **({"error_classes": classes} if classes else {}),
+            **({"customer_reason": collector_gap_reason(collector, error_class, error)} if collector in NON_FATAL_COLLECTORS else {}),
         }
 
     for row in latest_coverage(coverage_rows):
         collector, operation = str(row.get("collector") or ""), str(row.get("name") or "")
-        if operation not in REFUSAL_GAP_OPERATIONS.get(collector, ()) or row.get("status") not in {"failed", "partial"}:
+        named_read = collector in NON_FATAL_COLLECTORS or operation in REFUSAL_GAP_OPERATIONS.get(collector, ())
+        if not named_read or row.get("status") not in {"failed", "partial"}:
             continue
         if row.get("collection_truncated") is True or row.get(SECTION_SCOPED) is True:
             continue

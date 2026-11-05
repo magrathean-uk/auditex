@@ -71,12 +71,12 @@ def test_defender_commands_are_read_only_and_have_explicit_field_selections():
         )
         for forbidden in ("*", "-ResultSize Unlimited", "Set-", "New-", "Remove-", "TargetedUsersToProtect"):
             assert forbidden not in command
-        if name in NEW_OPERATIONS:
+        if name in (*NEW_OPERATIONS, "malwareFilterPolicy"):
             assert command.startswith(",@(") and command.endswith(")")
         else:
             assert not command.startswith(",@(")
     assert commands["adminAuditLogConfig"] == "Get-AdminAuditLogConfig | Select-Object Identity,UnifiedAuditLogIngestionEnabled"
-    assert commands["malwareFilterPolicy"] == "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"
+    assert commands["malwareFilterPolicy"] == ",@(Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes)"
     for name in ("antiPhishRules", "hostedContentFilterRules"):
         assert "Priority" not in commands[name]
 
@@ -86,13 +86,17 @@ def test_defender_collector_collects_every_new_operation_without_changing_sessio
     assert result.status == "ok"
     assert set(NEW_OPERATIONS) <= result.payload.keys()
     assert all(result.payload[name]["value"] == [] for name in NEW_OPERATIONS)
-    assert all(row["status"] == "ok" for row in result.coverage)
+    assert all(row["status"] == "ok" for row in result.coverage if row["name"] != "protectionAlerts")
+    alert = next(row for row in result.coverage if row["name"] == "protectionAlerts")
+    assert alert["status"] == "skipped" and alert["reason"] == "ipps_session_not_opened"
     names = list(result.payload)
     assert names.index("acceptedDomains") < min(names.index(name) for name in NEW_OPERATIONS)
     assert names.index("eopProtectionPolicyRules") + 1 == names.index("atpProtectionPolicyRules")
-    sessions = {name: session for (name, _), (_, session) in zip(ExchangePolicyCollector.command_collectors, adapter.calls)}
+    calls = dict(adapter.calls)
+    sessions = {name: calls[command] for name, command in ExchangePolicyCollector.command_collectors
+                if name != "protectionAlerts"}
+    assert dict(ExchangePolicyCollector.command_collectors)["protectionAlerts"] not in calls
     assert all(sessions[name] == {"kind": "none"} for name in NEW_OPERATIONS)
-    assert sessions["protectionAlerts"] == {"kind": "security_compliance"}
 
 
 @pytest.mark.parametrize("operation", RULE_OPERATIONS)
@@ -243,7 +247,7 @@ def test_defender_scope_config_matches_the_shipped_commands():
         (entry,) = [row for row in definition["command_collectors"] if row["name"] == name]
         assert entry["commands"] == [commands[name]]
         assert definition["query_plan"].count(name) == 1
-        if name in NEW_OPERATIONS:
+        if name in (*NEW_OPERATIONS, "malwareFilterPolicy"):
             assert entry["category"] == "policy"
     index = definition["query_plan"].index("dkimSigningConfig") + 1
     assert tuple(definition["query_plan"][index:]) == NEW_OPERATIONS

@@ -754,19 +754,19 @@ def test_onedrive_posture_collector_distinguishes_personal_and_team_sites() -> N
 
 def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> None:
     transport_command = (
-        "Get-TransportRule | Select-Object "
-        "Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject"
+        ",@(Get-TransportRule | Select-Object "
+        "Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)"
     )
     adapter = _FakeAdapter(
         {
             transport_command: {"value": [{"Name": "Block Forwarding", "RedirectMessageTo": ["external@example.invalid"]}]},
-            "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Inbound 1"}]},
-            "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Outbound 1"}]},
-            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain": {"value": [{"Name": "example.invalid"}]},
-            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled": {
+            ",@(Get-InboundConnector | Select-Object Name,Enabled,ConnectorType)": {"value": [{"Name": "Inbound 1"}]},
+            ",@(Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType)": {"value": [{"Name": "Outbound 1"}]},
+            ",@(Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain)": {"value": [{"Name": "example.invalid"}]},
+            ",@(Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled)": {
                 "value": [{"Name": "Default"}]
             },
-            "Get-SharingPolicy | Select-Object Name,Domains": {"value": [{"Name": "Partners", "Domains": []}]},
+            ",@(Get-SharingPolicy | Select-Object Name,Domains)": {"value": [{"Name": "Partners", "Domains": []}]},
             MAILBOX_FORWARDING_COMMAND: {"value": [{"DisplayName": "Alice Example"}]},
             "Get-AdminAuditLogConfig | Select-Object Identity,UnifiedAuditLogIngestionEnabled": {
                 "value": [{"UnifiedAuditLogIngestionEnabled": True}]
@@ -775,10 +775,10 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count": {
                 "value": [{"Count": 0}]
             },
-            "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule": {
+            ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)": {
                 "value": [{"Name": "Elevation of Exchange admin privilege", "Disabled": False}]
             },
-            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes": {
+            ",@(Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes)": {
                 "value": [{"Identity": "Default", "Name": "Default", "IsDefault": True, "EnableFileFilter": True, "ZapEnabled": True}]
             },
             "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled": {
@@ -787,7 +787,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count": {
                 "value": [{"Count": 0}]
             },
-            "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status": {
+            ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)": {
                 "value": [{"Domain": "example.invalid", "Enabled": True, "Status": "Valid"}]
             },
             ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},

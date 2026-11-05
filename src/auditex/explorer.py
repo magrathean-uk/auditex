@@ -344,14 +344,20 @@ def _collector_rows(run_dir: Path, manifest: dict[str, Any], data_handling: dict
         elif (not ledger.get("item_count") and section_gaps.get(name)
               and all(gap.get("status") == "skipped" for gap in section_gaps[name])):
             status = "not_verified"
-            reason = "; ".join(dict.fromkeys(
-                SECTION_GAP_REASON_TEXT.get(gap.get("reason"), _text(gap.get("reason")))
-                for gap in section_gaps[name]
-            ))
+            reason = ""
+            if not _text(ledger.get("coverage_status")).startswith("complete"):
+                reason = _text(ledger.get("message")) or _collector_reason(name, ledger, capability.get(name, {}))
         elif _text(ledger.get("coverage_status")).startswith("complete"):
             status, reason = "verified", "Replayed from the offline sample" if offline else "Collected"
         else:
             status, reason = "not_verified", _collector_reason(name, ledger, capability.get(name, {}))
+        if name in selected:
+            # Keep the collected status, while naming sections deliberately left unread.
+            limitations = [
+                SECTION_GAP_REASON_TEXT.get(gap.get("reason"), _text(gap.get("reason")))
+                for gap in section_gaps.get(name, []) if gap.get("status") == "skipped"
+            ]
+            reason = "; ".join(dict.fromkeys(filter(None, [reason, *limitations])))
         rows.append(
             {
                 "collector": name,

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .profiles import get_profile
+from .collection_gaps import collector_gap_reason
 from .resources import resolve_resource_path
 
 
@@ -44,6 +45,10 @@ def build_diagnostics(
         preflight_blocked = row["status"] == "skipped" and row.get("error_class") == "preflight_blocked"
         if row["status"] in {"ok", "skipped"} and not preflight_blocked:
             continue
+        escalation_permissions = [
+            permission for permission in profile.app_escalation_permissions
+            if permission != "Exchange.ManageAsApp" or collector_name == "exchange_policy"
+        ]
         hints = permission_hints.get(collector_name, {})
         recommended_scopes = hints.get("graph_scopes", [])
         minimum_roles = hints.get("minimum_role_hints", [])
@@ -68,7 +73,7 @@ def build_diagnostics(
                         "notes": notes_detail,
                         "auditor_profile": auditor_profile,
                         "profile_role_hints": list(profile.delegated_role_hints),
-                        "optional_app_escalation_permissions": list(profile.app_escalation_permissions),
+                        "optional_app_escalation_permissions": list(escalation_permissions),
                     },
                 }
             )
@@ -76,7 +81,7 @@ def build_diagnostics(
 
         for item in issue_rows:
             status = item.get("status")
-            if status == "ok":
+            if status == "ok" or (status == "skipped" and item.get("section_scoped")):
                 continue
             failure: dict[str, Any] = {
                 "collector": collector_name,
@@ -92,6 +97,7 @@ def build_diagnostics(
                 failure["commands_required"] = optional_commands or [str(item.get("command"))] if item.get("command") else []
                 failure["recommendations"] = {
                     "required_tools": sorted(set(command_tools)),
+                    "optional_app_escalation_permissions": list(escalation_permissions),
                     "notes": notes_detail,
                     "auditor_profile": auditor_profile,
                     "profile_role_hints": list(profile.delegated_role_hints),
@@ -103,10 +109,14 @@ def build_diagnostics(
                     "notes": notes_detail,
                     "auditor_profile": auditor_profile,
                     "profile_role_hints": list(profile.delegated_role_hints),
-                    "optional_app_escalation_permissions": list(profile.app_escalation_permissions),
+                    "optional_app_escalation_permissions": list(escalation_permissions),
                 }
             else:
                 failure["recommendations"] = {"notes": notes_detail, "auditor_profile": auditor_profile}
             failures.append(failure)
 
+    for failure in failures:
+        reason = collector_gap_reason(str(failure.get("collector")), failure.get("error_class"), failure.get("error"))
+        if reason:
+            failure["customer_reason"] = reason
     return failures

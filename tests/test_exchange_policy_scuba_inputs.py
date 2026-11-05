@@ -16,12 +16,12 @@ from azure_tenant_audit.normalize import build_normalized_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {
-    "acceptedDomains": "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain",
-    "transportRules": "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject",
-    "remoteDomains": "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",
+    "acceptedDomains": ",@(Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain)",
+    "transportRules": ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)",
+    "remoteDomains": ",@(Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled)",
     "organizationAuditConfig": "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled",
     "transportConfig": "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled",
-    "sharingPolicy": "Get-SharingPolicy | Select-Object Name,Domains",
+    "sharingPolicy": ",@(Get-SharingPolicy | Select-Object Name,Domains)",
 }
 SECTIONS = {
     "transport_config": ("transportConfig", {"Name": "Transport", "SmtpClientAuthenticationDisabled": True}),
@@ -89,7 +89,7 @@ def test_all_commands_pass_read_guard():
 def test_accepted_domain_flag_survives_collection_without_changing_projection(monkeypatch, tmp_path):
     adapter = FakeAdapter()
     command = COMMANDS['acceptedDomains']
-    selected = command.split(' | Select-Object ')[1].split(',')
+    selected = command.removesuffix(')').split(' | Select-Object ')[1].split(',')
     constructed_row = {'Name': 'Mail', 'DomainName': 'mail.example.invalid',
                        'DomainType': 'Authoritative', 'Default': True, 'IsCoexistenceDomain': False}
     adapter.responses[command] = {'value': [{key: constructed_row[key] for key in selected}]}
@@ -128,7 +128,7 @@ def test_sharing_policy_failure_is_isolated(monkeypatch):
     for name in complete.payload:
         if name != "sharingPolicy":
             assert failed.payload[name] == complete.payload[name]
-            assert coverage[name]["status"] == "ok"
+            assert coverage[name]["status"] == ("skipped" if name == "protectionAlerts" else "ok")
 
 
 def test_collector_output_reaches_rule_and_model_views(monkeypatch, tmp_path):

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, TypedDict
 
 from .collectors.base import CollectorResult
+from .collection_gaps import NON_FATAL_COLLECTORS, collector_gap_reason
 
 AuditLogger = Callable[[str, str, dict[str, Any] | None], None]
 ChunkWriter = Callable[[str, str, int, list[dict[str, Any]], dict[str, Any] | None], str | None]
@@ -196,7 +197,9 @@ class CollectorRunner:
         try:
             result = collector.run(legacy_context)
         except Exception as exc:  # noqa: BLE001
-            error = str(exc)
+            from .secret_hygiene import redact_output
+
+            error = redact_output(exc)
             self._log(
                 legacy_context,
                 "collector.failed",
@@ -211,20 +214,37 @@ class CollectorRunner:
                 "error": error,
                 "coverage_rows": 0,
             }
+            coverage = []
+            payload = {}
+            if collector_name in NON_FATAL_COLLECTORS:
+                reason = collector_gap_reason(collector_name, "unknown")
+                row["message"] = reason
+                row["error_class"] = "unknown"
+                row["coverage_rows"] = 1
+                payload = {"error": error, "error_class": "unknown"}
+                coverage = [{
+                    "collector": collector_name, "type": "derived", "name": "collector",
+                    "status": "failed", "item_count": 0, "error_class": "unknown", "error": error,
+                    "customer_reason": reason,
+                }]
+                if options.write_coverage:
+                    self._write_coverage(coverage)
+                if options.write_raw:
+                    self._write_raw(collector_name, payload)
             if options.write_checkpoint:
                 self._write_checkpoint(collector_name, row)
             return CollectorRunOutput(
                 result=CollectorResult(
                     name=collector_name,
                     status="failed",
-                    payload={},
+                    payload=payload,
                     item_count=0,
-                    message="collector crashed",
+                    message=row["message"],
                     error=error,
-                    coverage=[],
+                    coverage=coverage,
                 ),
                 result_row=row,
-                coverage_rows=[],
+                coverage_rows=coverage,
                 crashed=True,
             )
 
@@ -267,6 +287,12 @@ class CollectorRunner:
             "error": result.error,
             "coverage_rows": len(coverage_rows),
         }
+        if result.name in NON_FATAL_COLLECTORS and result.status != "ok":
+            reasons = list(dict.fromkeys(
+                collector_gap_reason(result.name, item.get("error_class"), item.get("error"))
+                for item in coverage_rows if item.get("status") != "ok"
+            ))
+            row["message"] = " ".join(reason for reason in reasons if reason) or collector_gap_reason(result.name, "unknown")
         return row
 
     def _log(

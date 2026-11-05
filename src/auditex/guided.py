@@ -540,6 +540,10 @@ def run_guided(args: argparse.Namespace) -> int:
         argv.extend(["--collectors", args.collectors])
     if include_exchange:
         argv.append("--include-exchange")
+    elif flow == "gr-audit":
+        argv.extend(["--exclude", "exchange,exchange_policy"])
+    else:
+        argv.extend(["--exclude", "exchange"])
     if args.probe_first:
         argv.append("--probe-first")
     else:

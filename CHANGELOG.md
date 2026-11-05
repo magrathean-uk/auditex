@@ -11,6 +11,27 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`; in-memory projection integration remains a separate product change.
 
 - Skip the Teams reads and say so when no Teams certificate token is available, instead of failing the run; record teams_token_unavailable as a collector error class; with a token, messaging and app setup are skipped as teams_powershell_not_supported.
+
+- App-mode `auto`/`global-reader` defaults and the `full` preset include read-only
+  Exchange policy sessions and public DNS posture through Cloudflare DoH. Profile
+  defaults (including `exchange-reader` and `app-readonly-full`) and presets omit
+  both for delegated, interactive and access-token modes, even with `--include-exchange`;
+  that flag retains the Microsoft 365 CLI `exchange` collector. Only explicit
+  `--collectors` overrides this boundary. Guided `app-audit` keeps both defaults. Use the
+  existing `--exclude exchange_policy`, `--exclude dns_posture` or both to deselect.
+  Disclose the resolver, domain scope and Exchange permission/reader-role blast radius.
+- Preserve legitimately empty Exchange policy lists as successful reads; keep real
+  command failures partial. Resolve generated setup commands and requirements per
+  authentication mode, including app disclosures in the default delegated guide.
+  Name skipped sections in explorer rows even when other policy rows were collected.
+- Record the unopened IPPS alert-policy session as a named by-design section skip:
+  healthy Exchange collection and the run stay `ok`, with a passing coverage gate
+  and visible limitations. Real Exchange/DNS failures leave policies not assessed
+  and the run `partial`, with collection exit 0 when they are the only failures;
+  coverage gates still block partial runs unless `--allow-partial` is supplied.
+- Include Exchange/DNS in app-mode probe surfaces and avoid a duplicate full pass
+  for these collectors during `--probe-first`; redact collector crash diagnostics.
+
 - Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.
 - Use complete same-run Exchange accepted domains for SPF, DKIM and DMARC TXT records, excluding coexistence domains and preserving first-seen spelling; fall back to Graph-verified mail domains when evidence is unusable. HTTPS reads remain limited to Graph-verified domains.
 
