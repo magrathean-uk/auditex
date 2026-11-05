@@ -861,7 +861,7 @@ def test_only_rows_that_state_a_verdict_count(miner):
 
 
 def _outcome_cases(miner, rows, sections, *, masks=None, every=1000, applicability=None, methods=None, gates=None, policy="MS.DEMO.1.1v1",
-                   fields=None, fields_added=None):
+                   fields=None, fields_added=None, commit="abcdef123456", opa_version="1.20.2"):
     """One case per variant of one policy; `rows` are (observed input, ReportDetails, RequirementMet)."""
     inputs = [row[0] for row in rows]
     evaluations = []
@@ -869,7 +869,7 @@ def _outcome_cases(miner, rows, sections, *, masks=None, every=1000, applicabili
         variant = {"name": "base" if index == 0 else f"demo_test:variant_{index}", "input": value, "sha256": f"{index:064x}"}
         evaluations.append((variant, [_outcome(details, met, policy)]))
     cases, stats = miner.build_cases("demo", evaluations, {policy: sections}, {policy: "Expiry SHALL be 30 days or less."},
-                                     inputs[0], commit="abcdef123456", opa_version="1.20.2", config_name="DemoConfig.rego",
+                                     inputs[0], commit=commit, opa_version=opa_version, config_name="DemoConfig.rego",
                                      not_collected_every=every, masks=masks, applicability=applicability, methods=methods, gates=gates,
                                      fields=fields, fields_added=fields_added)
     validate_cases(cases)
@@ -941,6 +941,52 @@ def test_oracle_not_applicable_disagrees_with_open_shipped_gate(miner):
     rows = [({"SPO_tenant": [{"SharingCapability": 2, "Expiry": 30}]}, GATE, True)]
     with pytest.raises(ValueError, match="disagrees with shipped pre-check: MS.SHAREPOINT.3.1v1; open gate"):
         _outcome_cases(miner, rows, ["SPO_tenant"], policy="MS.SHAREPOINT.3.1v1")
+
+
+@pytest.mark.parametrize("policy,observed,reason", [
+    ("MS.SHAREPOINT.1.3v1", {"SPO_tenant": [{"SharingCapability": 3}]}, "P6/D52"),
+    ("MS.AAD.9.1v1", {"scuba_config": {"M365Environment": "gcchigh"},
+                        "conditional_access_policies": [], "service_plans": []}, "P6/Q23/M4"),
+    ("MS.AAD.9.1v1", {"scuba_config": {"M365Environment": "dod"},
+                        "conditional_access_policies": [], "service_plans": []}, "P6/Q23/M4"),
+])
+@pytest.mark.parametrize("met", [True, False])
+@pytest.mark.parametrize("commit", [PINNED_COMMIT, PINNED_COMMIT[:12]], ids=["full_pin", "cli_pin"])
+def test_only_recognised_pinned_gate_divergences_are_recorded(miner, policy, observed, reason, met, commit):
+    rows = [(observed, "Requirement met" if met else "Requirement not met", met)]
+    # A duplicate is still checked, then deduplicated; the counter counts emitted cases.
+    cases, stats = _outcome_cases(miner, rows * 2, list(observed), policy=policy, commit=commit)
+    case, = cases
+    assert case["provenance"]["oracle_outcome"] == "not_applicable"
+    assert case["provenance"]["review_status"] == "unreviewed"
+    assert f"gate_divergent=true; gate_divergence_reason={reason}" in case["provenance"]["source"]
+    assert f"rego_requirement_met={json.dumps(met)}" in case["provenance"]["source"]
+    assert case["expected"]["claims"][0]["status"] == "inferred"
+    assert case["expected"]["limitations"] == ["policy_not_applicable"]
+    assert stats["gate_divergent"] == stats["not_applicable"] == 1
+    assert stats["duplicate_view"] == 1
+    for pin in ({"commit": "a" * 40}, {"commit": PINNED_COMMIT[:8]}, {"commit": PINNED_COMMIT[:12] + "0"},
+                {"commit": commit, "opa_version": "1.20.3"}):
+        with pytest.raises(ValueError, match="disagrees with shipped pre-check"):
+            _outcome_cases(miner, rows, list(observed), policy=policy, **pin)
+
+
+@pytest.mark.parametrize("policy,observed", [
+    ("MS.SHAREPOINT.1.3v1", {"SPO_tenant": [{"SharingCapability": 0}]}),
+    ("MS.SHAREPOINT.3.1v1", {"SPO_tenant": [{"SharingCapability": 0}]}),
+])
+def test_unrecognised_closed_gate_disagreement_still_aborts_with_pinned_tools(miner, policy, observed):
+    with pytest.raises(ValueError, match="disagrees with shipped pre-check"):
+        _outcome_cases(miner, [(observed, "Requirement met", True)], list(observed),
+                       policy=policy, commit=PINNED_COMMIT)
+
+
+def test_aad_gcc_remains_applicable_and_is_not_marked_divergent(miner):
+    observed = {"scuba_config": {"M365Environment": "gcc"}, "conditional_access_policies": [], "service_plans": []}
+    cases, stats = _outcome_cases(miner, [(observed, "Requirement not met", False)], list(observed),
+                                policy="MS.AAD.9.1v1", commit=PINNED_COMMIT)
+    assert cases[0]["provenance"]["oracle_outcome"] == "not_met"
+    assert "gate_divergent" not in cases[0]["provenance"]["source"] and not stats["gate_divergent"]
 
 
 @pytest.mark.parametrize("observed,details,met,outcome,status", [
@@ -2303,6 +2349,16 @@ def test_sharepoint_end_to_end_named_enums_preserve_ids_and_only_add_names(miner
     named = {row["id"]: row for row in _rows(named_dir / "cases-sharepoint.jsonl")}
     plain = {row["id"]: row for row in _rows(plain_dir / "cases-sharepoint.jsonl")}
     assert named.keys() == plain.keys() and len(named) == 464
+    divergent = [row for row in named.values() if "; gate_divergent=true;" in row["provenance"]["source"]]
+    assert divergent
+    for row in divergent:
+        user = _user(row)
+        assert user['policy_id'] == 'MS.SHAREPOINT.1.3v1'
+        assert next(e['observed'] for e in user['evidence'] if e['section'] == 'SPO_tenant')[0]['SharingCapability'] == 3
+        assert row['provenance']['oracle_outcome'] == 'not_applicable'
+        assert 'gate_divergence_reason=P6/D52:' in row['provenance']['source']
+    summary = json.loads((named_dir / 'summary.json').read_text())
+    assert summary['products']['Sharepoint']['stats']['gate_divergent'] == len(divergent)
     changed = 0
     for case_id, row in named.items():
         old = plain[case_id]
@@ -2651,6 +2707,16 @@ def test_aad_single_purpose_run_gives_every_item_met_cases_that_meet_the_text_wi
     assert sp["id_salt"] == "conv3-sp" and sp["items"] == SP_ITEMS and sp["dropped_contaminated_met_cases"] > 0 and sp["variants"] >= 9 * 15
     rows = _rows(out / "cases-aad.jsonl")
     validate_cases(rows)
+    divergent = [row for row in rows if "; gate_divergent=true;" in row['provenance']['source']]
+    assert divergent
+    for row in divergent:
+        user = _user(row)
+        assert user['policy_id'] == 'MS.AAD.9.1v1'
+        config = next(e['observed'] for e in user['evidence'] if e['section'] == 'scuba_config')
+        assert config['M365Environment'] in {'gcchigh', 'dod'}
+        assert row['provenance']['oracle_outcome'] == 'not_applicable'
+        assert 'gate_divergence_reason=P6/Q23/M4:' in row['provenance']['source']
+    assert summary['products']['AAD']['stats']['gate_divergent'] == len(divergent)
     meta = miner.product_meta(SCUBA, "AAD")
     met_by_item: Counter = Counter()
     for row in rows:
@@ -2705,26 +2771,49 @@ AAD_COMBINED_SHA256 = "2e3a24aefa4fb952388a1d4ee92400e07bc1511333a0b39edb351e531
 def aad_combined_run(miner, tmp_path_factory):
     _pinned_tools()
     out = tmp_path_factory.mktemp("oracle") / "mined"
-    assert miner.main(["--scuba", str(SCUBA), "--opa", str(OPA), "--output-dir", str(out), "--products", "AAD", "--ca-bases", "combined"]) == 0
-    return out
+    # Mine current combined cases normally. Replay the same OPA evaluations through v4's
+    # gate lookup to preserve the historical checksum without another OPA batch or a moving pin.
+    current_rule, build = miner.policy_rule, miner.build_cases
+    legacy_rows = []
+    def current_and_legacy(*args, **kwargs):
+        current = build(*args, **kwargs)
+        legacy_args, legacy_kwargs = copy.deepcopy((args, kwargs))
+        with pytest.MonkeyPatch.context() as legacy:
+            legacy.setattr(miner, 'policy_rule', lambda pid: None if pid == 'MS.AAD.9.1v1' else current_rule(pid))
+            rows, _ = build(*legacy_args, **legacy_kwargs)
+            legacy_rows.extend(rows)
+        return current
+    with pytest.MonkeyPatch.context() as capture:
+        capture.setattr(miner, 'build_cases', current_and_legacy)
+        assert miner.main(["--scuba", str(SCUBA), "--opa", str(OPA), "--output-dir", str(out), "--products", "AAD", "--ca-bases", "combined"]) == 0
+    return out, legacy_rows
 
 
 @needs_oracle
 def test_the_combined_ca_bases_reproduce_the_earlier_aad_cases_with_no_single_purpose_id(miner, aad_combined_run, aad_single_purpose_run):
-    out = aad_combined_run
+    out, legacy_rows = aad_combined_run
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert summary["ca_bases"] == "combined" and "single_purpose_ca" not in summary["products"]["AAD"]
     rows = _rows(out / "cases-aad.jsonl")
     validate_cases(rows)
+    divergent = [row for row in rows if '; gate_divergent=true;' in row['provenance']['source']]
+    assert divergent
+    assert summary['products']['AAD']['stats']['gate_divergent'] == len(divergent)
+    for row in divergent:
+        assert _user(row)['policy_id'] == 'MS.AAD.9.1v1'
+        assert row['provenance']['oracle_outcome'] == 'not_applicable'
+        assert 'gate_divergence_reason=P6/Q23/M4:' in row['provenance']['source']
     for row in rows:
         assert "variant=single_purpose:" not in row["provenance"]["source"] and "single_purpose:" not in row["provenance"]["template"]
     # the conv3-sp ids are exactly the ids of the single-purpose rows of the default run (the salt is hashed into the id, so it is not a substring)
     sp_ids = {row["id"] for row in _rows(aad_single_purpose_run / "cases-aad.jsonl") if "variant=single_purpose:" in row["provenance"]["source"]}
     assert sp_ids and not sp_ids & {row["id"] for row in rows}
     assert len(rows) == len({row["id"] for row in rows}) == AAD_COMBINED_CASES
-    # The rendering convention is now recorded on every product; AAD prompt bytes
-    # and all other fields still reproduce v4 exactly after removing that new key.
-    legacy = copy.deepcopy(rows)
+    # The same evaluations under v4's gate table must still reproduce every frozen byte
+    # after removing the newly recorded rendering convention, including gap-mask scheduling.
+    validate_cases(legacy_rows)
+    assert len(legacy_rows) == AAD_COMBINED_CASES
+    legacy = copy.deepcopy(legacy_rows)
     for row in legacy:
         assert row["provenance"].pop("prompt_convention") == "named-enums-v1"
     raw = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in legacy).encode("utf-8")

@@ -70,6 +70,14 @@ The Python replay of the same patches is the fallback when OPA cannot evaluate a
 
 Output layout (a new directory; an existing one is refused): cases.jsonl, cases-<product>.jsonl, summary.json,
 variants-<product>/variant-NNNN.json and, after an evaluation failure, first-eval-error-<product>.txt.
+
+Recognised applicability divergences from pinned ScubaGear 2446ad72 / OPA 1.20.2:
+the v3.9 P6 gate closes SharePoint 1.3 at SharingCapability=3 (D52), and AAD 9.1
+in gcchigh/dod (Q23/M4). These cases use the shipped not-applicable label, remain
+unreviewed, and record gate_divergent=true plus the reason in provenance.source;
+summary stats count them as gate_divergent. The original Rego verdict stays in
+that source record. Every other applicability disagreement still aborts mining.
+This uses the existing provenance format; it does not change the case contract.
 """
 from __future__ import annotations
 
@@ -1199,6 +1207,24 @@ def missing_sections(details: str, view_sections: list[str]) -> list[str]:
     return [s for s in view_sections if s in named] or list(view_sections)
 
 
+def recognised_gate_divergence(pid: str, precheck: dict, *, commit: str, opa_version: str) -> str | None:
+    """Allow only the two approved P6 changes against the pinned oracle, never a general override."""
+    # tool_versions/run_products uses the 12-character revision in case provenance;
+    # direct callers may supply the full revision. Accept exactly those two pins.
+    if commit not in {"2446ad723b7f", "2446ad723b7f55031cc02c8aca244d731d468cba"} or opa_version != "1.20.2":
+        return None
+    if precheck["class"] != "closed_gate":
+        return None
+    if (pid == "MS.SHAREPOINT.1.3v1" and precheck["section"] == ["SPO_tenant"]
+            and precheck["field"] == "SharingCapability" and type(precheck["value"]) is int
+            and precheck["value"] == 3):
+        return "P6/D52: SharingCapability=3 closes the SharePoint 1.3 applicability gate"
+    if (pid == "MS.AAD.9.1v1" and precheck["section"] == ["scuba_config"]
+            and precheck["field"] == "M365Environment" and precheck["value"] in ("gcchigh", "dod")):
+        return "P6/Q23/M4: AAD 9.1 is not applicable in gcchigh or dod (gcc remains applicable)"
+    return None
+
+
 def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections: dict[str, list[str]], texts: dict[str, str],
                 base_input: dict, *, commit: str, opa_version: str, config_name: str, not_collected_every: int,
                 template: bool = True, variants_failed: int = 0, methods: dict[str, str] | None = None,
@@ -1278,12 +1304,15 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
             # Check the evidence actually shown, after removed sections have
             # become NOT_COLLECTED. A usable closed gate takes priority.
             precheck = precheck_policy(pid, shown, view_sections) if rule else None
+            gate_divergence = None
             if (precheck and precheck["class"] == "closed_gate" and engine_outcome == "evaluated"
                     and all(section in variant["input"] for section in view_sections)
                     and not unavailable_input_sections(shown, view_sections)):
-                raise ValueError(f"Oracle applicability disagrees with shipped pre-check: {pid}; "
-                                 f"closed gate {precheck['field']}={precheck['value']!r}, "
-                                 f"evaluated RequirementMet={result['RequirementMet']!r}")
+                gate_divergence = recognised_gate_divergence(pid, precheck, commit=commit, opa_version=opa_version)
+                if gate_divergence is None:
+                    raise ValueError(f"Oracle applicability disagrees with shipped pre-check: {pid}; "
+                                     f"closed gate {precheck['field']}={precheck['value']!r}, "
+                                     f"evaluated RequirementMet={result['RequirementMet']!r}")
             if not precheck and rule and rule["complete"] and engine_outcome == "not_applicable":
                 raise ValueError(f"Oracle applicability disagrees with shipped pre-check: {pid}; "
                                  "open gate, oracle not_applicable")
@@ -1377,6 +1406,12 @@ def build_cases(name: str, evaluations: list[tuple[dict, list[dict]]], sections:
                              {"role": "assistant", "content": canonical(response)}],
                 "expected": {**response, "allowed_evidence_ids": [e["id"] for e in all_evidence]},
             }
+            if gate_divergence is not None:
+                case["provenance"]["source"] += (
+                    f"; gate_divergent=true; gate_divergence_reason={gate_divergence}"
+                    f"; rego_requirement_met={json.dumps(result['RequirementMet'])}"
+                )
+                stats["gate_divergent"] += 1
             if template:
                 case["provenance"]["template"] = template_key(name, pid, mutation)
                 case["provenance"]["distinct_prompt_sha256"] = distinct_prompt_sha256(case)

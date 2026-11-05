@@ -257,6 +257,7 @@ def test_default_redaction_is_stable_per_run_and_changes_between_runs(complete_b
 
 @pytest.mark.parametrize('no_redaction', [False, True])
 def test_endpoint_prompts_respect_redaction_and_all_dependencies(complete_bundle, monkeypatch, no_redaction):
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     calls = []
     def reply(self, method, path, payload):
         case = json.loads(payload['messages'][1]['content'])
@@ -365,6 +366,7 @@ def test_runtime_shapes_and_enum_domains_match_complete_pack_goldens():
 
 
 def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     from auditex.demo import DEMO_AS_OF, DEMO_SAMPLE
     from azure_tenant_audit.cli import run_offline
     assert run_offline(ROOT / DEMO_SAMPLE, tmp_path, 'p2', 'demo', plane='full', as_of=DEMO_AS_OF) == 0

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import nullcontext
 from hashlib import sha256
 import ast
 import importlib.util
@@ -1803,123 +1804,70 @@ def test_export_environment_is_retained_only_when_recognised(tmp_path, environme
             assert view == NOT_COLLECTED
 
 
-# Baseline: git archive 9ca7ddb extracted into $TMPDIR/base (no worktree); a subprocess using this repo's
-# .venv, cwd=base and PYTHONPATH=base/src:base/tests ran _dry and the precheck loop below on both
-# mocktenant exports x gcc/gcchigh/dod x both redaction modes, with default value rules. All 1,224 prompt
-# hashes matched b41cb97. Only TEAMS 2.2/2.3/4.1 prechecks differed (36 rows): retaining recognised
-# environments lets the v3.9.1/D19 commercial-only gate fire. Pin branch signatures, baseline prompts,
-# and baseline prechecks with exactly those three approved differences restored to their frozen values.
-# The baseline precheck digest is identical for all 12 combinations; no Git history is needed at test time.
-_GOV_BASELINE_PRECHECK_SHA256 = '7aa8ac03d3f56591ab516d483ee3bfd306afc0bf4c06aaebd16923a4d2d580f7'
-_GOV_BASELINE_TEAMS_PRECHECKS = {
-    'MS.TEAMS.2.2v2': {
-        'cell': 'section_not_collected',
-        'class': 'value_rule',
-        'field': None,
-        'reason_code': 'required_evidence_section_not_collected',
-        'reason_text': 'Data unavailable: required evidence section(s) not collected: federation_configuration, scuba_config.',
-        'rule_id': 'MS.TEAMS.2.2v2.two_flag',
-        'section': ['federation_configuration', 'scuba_config'],
-        'value': None,
-    },
-    'MS.TEAMS.2.3v2': {
-        'cell': 'section_not_collected',
-        'class': 'value_rule',
-        'field': None,
-        'reason_code': 'required_evidence_section_not_collected',
-        'reason_text': 'Data unavailable: required evidence section(s) not collected: federation_configuration, scuba_config.',
-        'rule_id': 'MS.TEAMS.2.3v2.any_flag',
-        'section': ['federation_configuration', 'scuba_config'],
-        'value': None,
-    },
-    'MS.TEAMS.4.1v1': {
-        'cell': 'section_not_collected',
-        'class': 'value_rule',
-        'field': None,
-        'reason_code': 'required_evidence_section_not_collected',
-        'reason_text': 'Data unavailable: required evidence section(s) not collected: client_configuration, scuba_config.',
-        'rule_id': 'MS.TEAMS.4.1v1.any_flag',
-        'section': ['client_configuration', 'scuba_config'],
-        'value': None,
-    },
-}
-
-
-@pytest.mark.parametrize('source,environment,redact,expected,baseline_prompts', [
-    (PROVIDER, 'gcc', True,
-     'f394622ec20f9067cf351a3fe5f91d7a8d0367995cddcc5e4bcaa621b85ce4e7',
-     'd1ea70f2f5ca79675e91a0cd41e2c8c41007d22f0355f6731ac97062220f9b7d'),
-    (PROVIDER, 'gcc', False,
-     '2abf6fff8d7af516e759f16856d5279d522c8c6447a3f51dd65afed1564037bf',
-     'ae3070c7e0c538b94e5057bd3aaea20ff39b7ebf36becf31fc044144304cba77'),
-    (PROVIDER, 'gcchigh', True,
-     '57ed8e9b49ce5dee42bfdea451b86280eb42eb61c6ffe817d8893832233be8eb',
-     'f92fec3faa8bf726143db750386e50a0664a7d9a57a8bd6e918efe840a89c7dc'),
-    (PROVIDER, 'gcchigh', False,
-     'fc2c180c77f29485b80c663604c2c9497fa6b97dcfe30192b078ce86cd2a2cb4',
-     'fd497f34c018aa937c2c078bd24fda506c019bba9c4061dcd36f08a844dbd787'),
-    (PROVIDER, 'dod', True,
-     '227f76c23a8e36cb6a06d701e9f4266a4105b6c301e1cb94aeeb32faf5114dfd',
-     '78367ab0d73f86b59bc8cd12c44083bf9d69bde8a71d7a4c680eda07d2a99d2c'),
-    (PROVIDER, 'dod', False,
-     '0b7c916fa2ab2c23c1c6ce7ba89cac154e13663a08a7e3be9b7d5dbd1bbcb9ce',
-     '21d9eea35f314897dd964f8457194811198c77ca734197a8981cfeeebd86b07d'),
-    (REAL, 'gcc', True,
-     'eeccbb1ed3ab9a0856ddcf7a62d5fe5ea99be123a58c2d384e8ea6c8055658cf',
-     '116edb64cbb541724b4a4442836cb9bb2b1f5a29e8c39b3f9066866c096d9361'),
-    (REAL, 'gcc', False,
-     '7d11f91c431b8e2c04a45e805c1f74dea22d86a7794303f5a4f3f3ca5499dec6',
-     '49ef57d0809b24c400da57d11871a111271ddbce6908173cbfd2ca13456d0319'),
-    (REAL, 'gcchigh', True,
-     'c0df002977983a45dd7bd0f038ab2cad0b2794e643c4b878464fd963046e83a8',
-     '0013ac93b9edf258cd76b05552bad870f6aac88a40ea022ae38134acc47dd1aa'),
-    (REAL, 'gcchigh', False,
-     'bad32f754ea57ad4ff4ed7c2a41f37190889f1f861f3f342a345045ac5c6a54a',
-     'c94f9c544e37e496d8e67a587683e1e9fae1e81ed6f85e1b276c1e566672fa47'),
-    (REAL, 'dod', True,
-     '34d9f726ad292ca482a0150d970c2d52dd12523601ae80a855b1245c21a1a84e',
-     '7fe4f720af0681bb326c77149c72e53a41a21ac6e3e9c09410b4892595190418'),
-    (REAL, 'dod', False,
-     '86267952339f3cc91bc493da75f031df7ad32c77cda78e9989dc492090fe2a68',
-     'a422ac244557c031e4345cbba618011734eb1d5a4548abfb8fcda34e333546bb'),
-])
+# Retaining recognised rule-view environments lets the commercial-only Teams gates fire.
+# Compare with the same export under the previous environment branch; unrelated rule additions
+# must not invalidate this regression, and model prompts must remain byte-identical.
+@pytest.mark.parametrize('source', [PROVIDER, REAL], ids=['provider', 'realformat'])
+@pytest.mark.parametrize('environment', ['gcc', 'gcchigh', 'dod'])
+@pytest.mark.parametrize('redact', [True, False])
 def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behaviour(
-        tmp_path, monkeypatch, source, environment, redact, expected, baseline_prompts):
+        tmp_path, monkeypatch, source, environment, redact):
+    from auditex import scubagear_export
     from auditex.model_precheck import precheck_case
-    from auditex.model_serving import ModelClient, ModelEndpointError, build_case, canonical
+    from auditex.model_serving import ModelClient, ModelEndpointError, build_case
     from azure_tenant_audit.value_rules.catalogue import row_for
 
     monkeypatch.delenv('AUDITEX_DISABLE_VALUE_RULES', raising=False)
     raw = json.loads(source.read_text())
     raw['scuba_config']['M365Environment'] = environment
     export = _save(tmp_path, raw)
-    projection, _ = project_export(load_export(export), policy_catalogue()['policies'], redact=redact)
-    prompts = _dry(tmp_path / 'dry', export, no_redaction=not redact)[2]
-    assert len(prompts) == 102
-    signatures, prechecks = {}, {}
-    for prompt in prompts:
-        pid = prompt['policy_id']
-        row = row_for(pid)
-        rule_input = {s: deepcopy(rule_policy_section(projection, pid, s)) for s in row['sections']} if row else None
-        precheck = precheck_case(build_case(pid, projection, 'unused'), absent_fields=True, empty_lists=True,
-                                 value_rules=True, rule_projection=rule_input)
-        prechecks[pid] = precheck['rule_precheck'] if precheck else None
-        signatures[pid] = {'prompt_sha256': prompt['prompt_sha256'], 'precheck': prechecks[pid]}
-    assert sha256(canonical(signatures).encode()).hexdigest() == expected
-    prompt_hashes = {pid: row['prompt_sha256'] for pid, row in signatures.items()}
-    assert sha256(canonical(prompt_hashes).encode()).hexdigest() == baseline_prompts
-    for pid, baseline in _GOV_BASELINE_TEAMS_PRECHECKS.items():
-        assert prechecks[pid] != baseline
+
+    def signatures(label):
+        projection, _ = project_export(load_export(export), policy_catalogue()['policies'], redact=redact)
+        prompts = _dry(tmp_path / label, export, no_redaction=not redact)[2]
+        assert len(prompts) == 102
+        prechecks = {}
+        for prompt in prompts:
+            pid = prompt['policy_id']
+            row = row_for(pid)
+            rule_input = {s: deepcopy(rule_policy_section(projection, pid, s)) for s in row['sections']} if row else None
+            precheck = precheck_case(build_case(pid, projection, 'unused'), absent_fields=True, empty_lists=True,
+                                     value_rules=True, rule_projection=rule_input)
+            prechecks[pid] = precheck['rule_precheck'] if precheck else None
+        return projection, {p['policy_id']: p['prompt_sha256'] for p in prompts}, prechecks
+
+    projection, prompts, prechecks = signatures('current')
+    config_view = scubagear_export._config_view
+
+    def without_environment_retention(raw, catalogue, max_items, max_chars, *, rule_view=False):
+        # Only rule_view's recognised-environment set differs here. Replaying this same export
+        # through the old branch gives a baseline independent of unrelated rules added on main.
+        return config_view(raw, catalogue, max_items, max_chars, rule_view=False)
+
+    with monkeypatch.context() as baseline_patch:
+        baseline_patch.setattr(scubagear_export, '_config_view', without_environment_retention)
+        baseline_projection, baseline_prompts, baseline_prechecks = signatures('baseline')
+    assert prompts == baseline_prompts
+    changed = {pid for pid in prechecks if prechecks[pid] != baseline_prechecks[pid]}
+    teams = {'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1'}
+    assert changed == teams | {'MS.AAD.9.1v1'}
+    for pid in changed:
         assert prechecks[pid]['class'] == 'value_rule'
+        assert rule_policy_section(baseline_projection, pid, 'scuba_config') == NOT_COLLECTED
+        assert baseline_prechecks[pid]['cell'] == 'section_not_collected'
+    closed = teams | ({'MS.AAD.9.1v1'} if environment in {'gcchigh', 'dod'} else set())
+    for pid in closed:
+        # A closed gate wins even though other rule dependencies may be unavailable.
         assert prechecks[pid]['cell'] == 'closed_gate'
         assert prechecks[pid]['reason_code'] == 'policy_not_applicable_environment'
-    baseline_prechecks = {**prechecks, **_GOV_BASELINE_TEAMS_PRECHECKS}
-    assert sha256(canonical(baseline_prechecks).encode()).hexdigest() == _GOV_BASELINE_PRECHECK_SHA256
-    for pid in ('MS.AAD.9.1v1', 'MS.TEAMS.2.2v2', 'MS.TEAMS.2.3v2', 'MS.TEAMS.4.1v1'):
+    for pid in changed:
         assert policy_section(projection, pid, 'scuba_config') == NOT_COLLECTED
         assert rule_policy_section(projection, pid, 'scuba_config')['M365Environment'] == environment
-    assert prechecks['MS.AAD.9.1v1']['class'] == 'absent_section'
-    assert prechecks['MS.AAD.9.1v1']['section'] == ['scuba_config']
+    if environment == 'gcc':
+        # GCC leaves AAD 9.1 applicable; the fixtures have no P2 service plan.
+        assert prechecks['MS.AAD.9.1v1']['cell'] == 'licence_not_detected'
+        assert prechecks['MS.AAD.9.1v1']['reason_code'] == 'data_unavailable_no_licence'
+        assert prechecks['MS.AAD.9.1v1']['section'] == ['service_plans']
 
     calls = []
     original_assess = ModelClient.assess
@@ -2014,26 +1962,43 @@ def test_unaffected_export_prompt_hashes_match_pre_rule_view_fixture(tmp_path, s
 
 
 @pytest.mark.parametrize("clear", [False, True])
-def test_non_dry_run_loopback_stub_and_comparisons(tmp_path, clear):
+@pytest.mark.parametrize("transport", ["loopback", "in_process"])
+def test_non_dry_run_loopback_stub_and_comparisons(tmp_path, monkeypatch, clear, transport):
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     spec = importlib.util.spec_from_file_location("existing_model_tests", ROOT / "tests/test_model_serving.py")
     existing = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(existing)
     selected = ["MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1", "MS.AAD.7.4v1", "MS.AAD.1.1v1"]
+    projection, _ = project_export(load_export(PROVIDER), policy_catalogue()['policies'])
     answer = {"claims": [
         {"id": "requirement_met", "status": "unknown", "value": None, "evidence_ids": ["e0"]},
         {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
         "limitations": ["required_evidence_section_not_collected"],
         "recommendations": ["collect_missing_evidence_section"]}
     answers = []
-    for value in (True, False, True):
+    for pid, value in zip(selected, (True, False, True, True, False)):
+        case = existing.build_case(pid, projection, 'unused')
         confirmed = deepcopy(answer)
-        confirmed["claims"][0].update(status="confirmed", value=value, evidence_ids=["e0", "e1"])
+        confirmed["claims"][0].update(status="confirmed", value=value,
+                                      evidence_ids=[item['id'] for item in case['evidence']])
+        confirmed["claims"][1]["value"] = case['evidence'][0]['observed']['criticality']
         confirmed["limitations"] = []
         confirmed["recommendations"] = [] if value else ["review_policy_against_baseline_text"]
         answers.append(confirmed)
-    answers.extend(deepcopy(answer) for _ in range(7))
     actions = [(200, existing.envelope(item), 0) for item in answers]
-    with existing.stub_server(actions) as (endpoint, calls):
+    if transport == 'in_process':
+        # Exercise the same assertions even on hosts that forbid binding a loopback socket.
+        calls = []
+        def reply(self, method, path, payload):
+            calls.append({'method': method, 'path': path, 'body': payload})
+            status, body, delay = actions.pop(0)
+            assert status == 200 and delay == 0
+            return body
+        monkeypatch.setattr(existing.ModelClient, '_request', reply)
+        server = nullcontext((ModelConfig().endpoint, calls))
+    else:
+        server = existing.stub_server(actions)
+    with server as (endpoint, calls):
         result = assess_scubagear_export(PROVIDER, tmp_path / "stub", ModelConfig(endpoint=endpoint,
             model_name="test-model"), results_path=RESULTS, policies=selected, no_redaction=clear)
     validate_assessment(result)
@@ -2042,35 +2007,53 @@ def test_non_dry_run_loopback_stub_and_comparisons(tmp_path, clear):
     comparisons = {row["policy_id"]: row["comparison"] for row in result["policies"]}
     assert [comparisons[pid]["baseline_status"] for pid in selected] == [
         "pass", "fail", "fail", "not_assessed", "not_assessed"]
+    # With value rules disabled, all five collected policies exercise the model route.
     assert [comparisons[pid]["result"] for pid in selected[:3]] == ["agree", "agree", "disagree"]
     assert any(call["method"] == "POST" for call in calls)
     posts = sum(call["method"] == "POST" for call in calls)
-    assert posts + len(actions) == 10
+    assert posts == len(selected) and actions == []
+    assert [json.loads(call['body']['messages'][1]['content'])['policy_id']
+            for call in calls if call['method'] == 'POST'] == selected
     assert all(row["validation_status"] == "valid" and row["attempts"] == 1
                for row in result["policies"] if row["reason"] != "rule_precheck")
     assert result["totals"]["invalid"] == 0
+    assert result["totals"]["answered"] == len(selected) and result["totals"]["rule_answered"] == 0
 
 
 def test_model_comparison_agreement_and_disagreement_without_socket(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     from auditex.model_serving import ModelClient
     spec = importlib.util.spec_from_file_location("existing_model_tests", ROOT / "tests/test_model_serving.py")
     existing = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(existing)
+    # Pin the model route explicitly; these user policies have collected fixture evidence.
+    selected = ["MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"]
+    projection, _ = project_export(load_export(PROVIDER), policy_catalogue()['policies'])
     responses = []
-    for value in (True, False, True):
+    for pid, value in zip(selected, (True, False, True)):
+        case = existing.build_case(pid, projection, 'unused')
         answer = {"claims": [
-            {"id": "requirement_met", "status": "confirmed", "value": value, "evidence_ids": ["e0", "e1"]},
-            {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
+            {"id": "requirement_met", "status": "confirmed", "value": value,
+             "evidence_ids": [item['id'] for item in case['evidence']]},
+            {"id": "policy_criticality", "status": "confirmed",
+             "value": case['evidence'][0]['observed']['criticality'], "evidence_ids": ["e0"]}],
             "limitations": [], "recommendations": [] if value else ["review_policy_against_baseline_text"]}
         responses.append(existing.envelope(answer))
     calls = iter(responses)
-    monkeypatch.setattr(ModelClient, "_request", lambda *_args, **_kwargs: next(calls))
-    selected = ["MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"]
+    requested = []
+    def reply(self, method, path, payload):
+        requested.append(json.loads(payload['messages'][1]['content'])['policy_id'])
+        return next(calls)
+    monkeypatch.setattr(ModelClient, "_request", reply)
     result = assess_scubagear_export(PROVIDER, tmp_path / "comparisons", ModelConfig(model_name="test-model"),
                                      results_path=RESULTS, policies=selected)
     validate_assessment(result)
     assert [row["comparison"]["result"] for row in result["policies"]] == ["agree", "agree", "disagree"]
     assert result["totals"]["invalid"] == 0
+    assert result["totals"]["answered"] == 3 and result["totals"]["rule_answered"] == 0
+    assert all(row['attempts'] == 1 and row['reason'] is None for row in result['policies'])
+    assert list(calls) == []
+    assert requested == selected
 
 
 def _env_path(name: str) -> Path | None:
