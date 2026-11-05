@@ -157,6 +157,18 @@ settings-catalog templates (not listed by `deviceCompliancePolicies`), the editi
 `osVersion`) and enrolment in the Windows 10 Extended Security Updates programme. Each is reported as unknown or
 not assessed, never as a pass.
 
+## Teams Policy Reads
+
+These are read-only `Get-*` cmdlets; policy settings only, no messages, chats, channel posts or files.
+
+| Collector | Command | Fields read | Role |
+| --- | --- | --- | --- |
+| `teams_policy` | `Get-CsTenantFederationConfiguration` | `Identity`, `AllowFederatedUsers`, `AllowTeamsConsumer`, `AllowTeamsConsumerInbound`, `AllowPublicUsers`, `AllowedDomains`, `BlockedDomains` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
+| `teams_policy` | `Get-CsTeamsMeetingPolicy` | `Identity`, `AllowCloudRecording`, `AllowIPVideo`, `ScreenSharingMode`, `AllowExternalParticipantGiveRequestControl`, `AllowAnonymousUsersToStartMeeting`, `AutoAdmittedUsers`, `AllowPSTNUsersToBypassLobby` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
+| `teams_policy` | `Get-CsTeamsAppPermissionPolicy` | `Identity`, `DefaultCatalogAppsType`, `GlobalCatalogAppsType`, `PrivateCatalogAppsType` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
+| `teams_policy` | `Get-CsTeamsMeetingBroadcastPolicy` | `Identity`, `BroadcastRecordingMode` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
+| `teams_policy` | `Get-CsTeamsClientConfiguration` | `Identity`, `AllowEmailIntoChannel` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
+
 ## Customer Use
 
 For enterprise review, create and verify a customer pack, inspect it for confidential data, and use the approved evidence channel. Keep raw evidence local unless separately authorized for disclosure. Review these artifacts first:
