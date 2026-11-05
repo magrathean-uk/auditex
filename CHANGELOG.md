@@ -14,6 +14,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.
 - Use complete same-run Exchange accepted domains for SPF, DKIM and DMARC TXT records, excluding coexistence domains and preserving first-seen spelling; fall back to Graph-verified mail domains when evidence is unusable. HTTPS reads remain limited to Graph-verified domains.
 
+- Add the report-output redaction boundary (`azure_tenant_audit/output_redaction.py`, documented in `docs/reference/security-privacy.md`): rendered reports and exports, report payload files, customer-pack generated files, notifications and `report-pack.json` now pass one shared function. Shareable outputs mask e-mail local parts, pseudonymise privileged-user names, immutable ids and GUIDs with the run salt and drop run paths; `report-pack.json` is redacted for secrets only because its ids are evidence references. Private run files, the explorer page and the customer pack's verbatim source artifacts are unchanged. Decisions left to product are one constant, `PENDING_PRODUCT_POLICY`.
+
 - Explain unassessed Power BI / Power Platform policies when optional collection was not enabled; preserve generic reasons for unknown selection and existing failures for selected collectors.
 
 - Add value-rule contract A1 within assessment schema `2026-11-05`: distinguish collected but unusable evidence from missing collection, preserve legacy assessments and pack parity, and accept the exact 68 reason/citation contract exceptions for subsequent rule stages.

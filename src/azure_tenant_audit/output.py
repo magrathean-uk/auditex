@@ -15,6 +15,7 @@ from .assurance import build_assurance_summary, build_coverage_gap_summary, buil
 from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
 from .findings import apply_coverage_gaps_to_report_pack
+from .output_redaction import PROFILE_REPORT_PACK, redact_output
 from .tenant_identity import IDENTITY_FIELDS
 from .private_io import write_private_bytes, write_private_text
 from .sensitive_users import (
@@ -630,6 +631,13 @@ class AuditWriter:
         return path
 
     def write_report_pack(self, payload: dict[str, Any]) -> Path:
+        # Output redaction boundary, report-pack profile: no secret reaches the pack (idempotent, so the
+        # finalisation steps that read the pack back and rewrite it are unaffected). E-mails, GUIDs, names and
+        # paths stay exact here: finding ids and proof-table rows embed the keys of the records they cite and the
+        # validator resolves them (masking one gives ``unresolved_report_proof_table_ref``), and the run salt is
+        # the digest of the final manifest, which does not exist yet. Those classes are redacted where the pack's
+        # content is rendered, exported, sent or handed over.
+        payload = redact_output(payload, profile=PROFILE_REPORT_PACK)
         path = self.reports_dir / "report-pack.json"
         self._write_json_atomic(path, payload)
         self._record_artifact(path)

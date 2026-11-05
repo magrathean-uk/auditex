@@ -14,6 +14,7 @@ from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, context_for_run, redact_output
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
@@ -556,7 +557,30 @@ def _build_report_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit_report_payload(*, content: str, format_name: str, output_path: str | None) -> None:
+def _redact_report_content(content: str, format_name: str, run_dir: str | None) -> str:
+    """The shareable redaction for a report payload that is about to be printed or written.
+
+    JSON is redacted as structure (so key-based rules apply) and re-serialised the way the callers serialise it;
+    anything else (Markdown) is redacted as text.
+    """
+    context = context_for_run(run_dir) if run_dir else None
+    if format_name == "json":
+        try:
+            parsed = json.loads(content)
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            return json.dumps(redact_output(parsed, profile=PROFILE_SHAREABLE, context=context), indent=2) + "\n"
+    return redact_output(content, profile=PROFILE_SHAREABLE, context=context, markup=True)
+
+
+def _emit_report_payload(
+    *, content: str, format_name: str, output_path: str | None, run_dir: str | None = None, redact: bool = True
+) -> None:
+    # Every report payload leaves through the output redaction boundary; only the setup guide (the operator's own
+    # parameters, no tenant evidence) opts out with ``redact=False``.
+    if redact:
+        content = _redact_report_content(content, format_name, run_dir)
     if not output_path:
         print(content, end="")
         return
@@ -571,7 +595,7 @@ def _emit_setup_guide(payload: dict[str, object], *, format_name: str, output_pa
         content = render_setup_guide_markdown(payload)
     else:
         content = json.dumps(payload, indent=2) + "\n"
-    _emit_report_payload(content=content, format_name=format_name, output_path=output_path)
+    _emit_report_payload(content=content, format_name=format_name, output_path=output_path, redact=False)
 
 
 def _build_export_parser() -> argparse.ArgumentParser:
@@ -1026,7 +1050,7 @@ def main(argv: list[str] | None = None) -> int:
                 content = render_api_call_inventory_markdown(inventory)
             else:
                 content = json.dumps(inventory, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output, run_dir=args.run_dir)
             return 0
         if args.report_command == "permissions":
             payload = permissions_ledger(args.run_dir)
@@ -1036,7 +1060,7 @@ def main(argv: list[str] | None = None) -> int:
                 content = render_permissions_ledger_markdown(payload)
             else:
                 content = json.dumps(payload, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output, run_dir=args.run_dir)
             return 0
         if args.report_command == "proof-table":
             payload = proof_table(args.run_dir)
@@ -1046,7 +1070,7 @@ def main(argv: list[str] | None = None) -> int:
                 content = render_proof_table_markdown(payload)
             else:
                 content = json.dumps(payload, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output, run_dir=args.run_dir)
             return 0
         if args.report_command == "handoff":
             payload = enterprise_handoff(args.run_dir)
@@ -1056,7 +1080,7 @@ def main(argv: list[str] | None = None) -> int:
                 content = render_enterprise_handoff_markdown(payload)
             else:
                 content = json.dumps(payload, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(content=content, format_name=args.format, output_path=args.output, run_dir=args.run_dir)
             return 0
         if args.report_command == "customer-pack":
             from .reporting import BundleIntegrityError, PackOutputError

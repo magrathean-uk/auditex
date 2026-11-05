@@ -251,6 +251,78 @@ Notification preview is local by default. `auditex notify send --execute`
 sends the chosen notification to an external sink. Review the recipient and
 payload separately from pack verification before using `--execute`.
 
+## Output redaction boundary
+
+Run directories hold tenant evidence and are private working files: 0600 files in 0700 directories, for the
+operator, not redacted, because the operator and the rules need the real values. Everything that can leave the
+operator's machine passes one function, `redact_output` in `azure_tenant_audit/output_redaction.py`, at the
+last step before the bytes are written, printed or sent. `WRITER_INVENTORY` in `auditex/output_writers.py` lists every writer
+and `tests/test_output_redaction.py` checks the list against the source, so a new writer cannot skip the
+function silently.
+
+### Inventory
+
+| Output | Writer | Audience | Handling | Can leave the machine |
+| --- | --- | --- | --- | --- |
+| Run bundle: `raw/`, `normalized/`, `findings/`, `blockers/`, `index/evidence.sqlite`, `audit-log.jsonl`, `coverage.json`, `summary.json`, `summary.md`, manifests, `validation.json`, `bundle-hashes.json` | `AuditWriter` (`output.py`), `evidence_db.py`, `run_offline` | Operator | Private working files. Not redacted. Diagnostics inside them are masked by the command-output boundary above; user-authored text is minimised at collection | Only by operator action (copying, a customer pack) |
+| `reports/report-pack.json`, `reports/action-plan.json` | `AuditWriter.write_report_pack` | Operator; copied verbatim into customer packs | `report_pack` profile: secrets only. E-mails, GUIDs and names stay exact because finding ids, proof-table rows and evidence references embed the keys of the records they cite and the validator resolves them (an e-mail masked here gives `unresolved_report_proof_table_ref`) | Yes, inside a customer pack (see the verbatim-copy decision below) |
+| Reports: HTML, Markdown, JSON, CSV, SARIF, OSCAL; exports (`auditex export run`, built-in exporters call `render_report`) | `render_report`, `preview_report` (`reporting.py`) | Customer, reviewers, CI tools | `shareable` profile on the sections before rendering, then on the rendered text (not on JSON, SARIF or OSCAL text) | Yes |
+| Report preview returned to the CLI and the MCP tool `auditex_report_preview` | `preview_report` | Local client, AI client | `shareable`, including the citations (re-derived after masking) | Yes |
+| `report api-calls`, `permissions`, `proof-table`, `handoff` payloads, to a file or stdout | `_emit_report_payload` (`cli.py`) | Customer, reviewers | `shareable` (JSON as structure, Markdown as text) | Yes |
+| Setup guide (`setup-guide`) | `_emit_setup_guide` (`cli.py`) | Operator | Not redacted: it renders the operator's own parameters (for example `--subject`) and commands, and holds no tenant evidence | Yes, but carries no evidence |
+| Customer pack: `handoff`, `report.md`, `api-calls`, `permissions`, `proof-table`, `README.md`, `checksums.sha256`, `pack-manifest.json` and the copy of `run-manifest.json` | `write_enterprise_handoff_pack`, `_write_text_artifact`, `_copy_source_artifact` | The tenant owner and whoever they pass it to | `customer_pack` profile, with the run salt; the manifest digests are those of the redacted files | Yes |
+| Customer pack `source-artifacts/` other than `run-manifest.json` | `_copy_source_artifact` | As above | Verbatim, integrity-bound copies (`verify-pack` ties them to `bundle-hashes.json`). Not redacted. Decision pending product | Yes |
+| Notifications: Slack, Teams, SMTP, Jira, GitHub | `send_notification` (`notify.py`) | Third-party services | `shareable` before any sink; the webhook walker (`_redact_value`) stays as a second layer | Yes |
+| Explorer page | `write_explorer` (`explorer.py`) | Operator's browser | Private working view; it exists to inspect real values. Not redacted. Decision pending product if it is to be shared | Only by operator action |
+| Model assessment files, prompts, adapter sidecar | `assess_run`, `assess_scubagear_export` (`model_serving.py`) | Operator; the model endpoint (loopback unless the operator says otherwise) | The model view is redacted by the projection (input side); the files are private. The explainer's text passes `redact_output(..., profile="explainer")`, wired by the explainer job, not by these writers | Prompts only to the configured endpoint |
+| Logs: `audit-log.jsonl`, command samples, doctor and auth errors | Adapters, `secret_hygiene.redact_output` | Operator, support | Diagnostics boundary above: credentials, e-mail local parts, dashed GUIDs; clipped to 500 characters | Only by operator action |
+| Operator terminal output of read-only commands (`summarize`, `blockers`, `diff`) | `cli.py` | Operator | Not redacted | No (the operator's terminal) |
+
+### What each profile redacts
+
+| Class | `report_pack` | `shareable`, `customer_pack`, `explainer` |
+| --- | --- | --- |
+| Secrets: Bearer values, JWTs, `key=value` and JSON-keyed credentials (`secret_hygiene.redact_text`), and the value of exact credential keys (`client_secret`, `password`, `access_token`, `refresh_token`, `api_key` and the like) | Yes | Yes |
+| E-mail local parts, masked `***@domain` exactly as the model projection masks them | No | Yes |
+| Privileged-user display names and `onPremisesImmutableId`, pseudonymised as the projection does (`User <16 hex>`, `Id <16 hex>`; `sha256(salt NUL value)`, the salt being the SHA-256 of the canonical `run-manifest.json`), so a name matches across the model view and every output of one run | No | Yes |
+| Dashed GUIDs (tenant, object, application and policy ids): replaced by a valid GUID `00000000-0000-4000-8000-<12 hex>` derived from the run salt, so references inside one output stay consistent and OSCAL still validates | No | Yes (pending product, below) |
+| The operator's run paths: run-relative, or `<run-dir>` | No | Yes |
+
+Deliberately not redacted, in every profile: policy ids, finding ids and rule ids, reason codes, verdicts and
+statuses, section names, setting names and enum values, role names, numbers and booleans, and the public
+baseline text. These public values are allow-listed exactly: the addresses `reports@dmarc.cyber.dhs.gov`,
+`cyberliaison@cisa.dhs.gov`, `reports@example.com` and `username@somedomain.com` (`PUBLIC_ADDRESSES`); the
+all-zero GUID, Microsoft first-party resource application ids and the Microsoft role template ids the product
+ships (`PUBLIC_GUIDS`, kept equal to the GUID literals under `src/` by a test); and values labelled
+`Trace ID:` or `Correlation ID:`, which stay usable for support as in the diagnostics boundary. A key is changed
+only when its text holds an identifier. Redaction is deterministic, idempotent, structure-preserving and leaves
+numbers, booleans, `None` and bytes alone. An unknown profile name raises rather than publishing.
+Privileged-user names are found from `normalized/effective_admin_set.json`, from any record that carries an
+immutable id, and from records with `principal_type: user` that hold roles; they are replaced in free text of
+the same output too (whole-word, at least four characters).
+
+### Decisions pending product
+
+These classes are not settled by the documents. Each default is conservative but usable and is a field of the
+single constant `PENDING_PRODUCT_POLICY`; changing the field changes every writer.
+
+| Class | Default | Why | Flip |
+| --- | --- | --- | --- |
+| GUIDs | Redacted (pseudonymised) | Tenant and object ids identify the tenant; consistent pseudonyms keep cross-references readable | `redact_guids=False` |
+| Domain names | Kept | DNS, mail-flow and accepted-domain findings are unreadable without them; the e-mail mask keeps the domain by contract | `redact_domains=True` replaces every domain seen in an e-mail address (and `RedactionContext.domains`) with `domain-<12 hex>.invalid` |
+| Group display names | Kept | The group is what an administrator acts on | `redact_group_names=True` pseudonymises records whose `principal_type` is `group` (`Group <16 hex>`) |
+| Free text (`owner`, `justification`, `comment`, `comments`, `notes` values) | Kept | Accountability fields of waivers; `reason` is not in the list because it carries reason codes | `redact_free_text=True` |
+| Role names | Kept, no flip | Built-in names are public Microsoft vocabulary, custom names are tenant text, and the output alone cannot tell them apart | Needs a product definition first |
+| Customer-pack source artifacts (`source-artifacts/*` apart from `run-manifest.json`) | Verbatim | `verify-pack` checks them against `bundle-hashes.json`; a redacted copy needs a `transformed` row like the manifest has, and a recipient who is the tenant owner may need the real values | Product to decide whether the pack carries redacted derivatives |
+| `report-pack.json` in the run bundle | Secrets only | Its ids are references; see the inventory | Redact at hand-over only (the current design) |
+| Explorer page | Not redacted | Operator working view | Add a shareable variant |
+
+Limits worth knowing: after masking, two users of one domain are indistinguishable in a shared report (the
+projection's mask has the same property); a pseudonymised GUID cannot be looked up in the portal, so the operator
+reads the private run directory for that; names shorter than four characters are not replaced in free text;
+the notification fingerprint that de-duplicates Jira and GitHub tickets is now computed over the redacted payload,
+so tickets created before this change are not matched once.
+
 ## Credentials and local files
 
 Never commit or ship Azure app authentication values, Google service-account

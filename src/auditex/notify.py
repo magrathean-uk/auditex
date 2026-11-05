@@ -14,6 +14,8 @@ import requests
 
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 
+from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, context_for_run, redact_output
+
 from .run_bundle import RunBundle
 
 
@@ -629,6 +631,9 @@ def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
 def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[str, Any]:
     payload = _build_payload(run_dir)
     citations, evidence_missing = _notification_proof(run_dir, payload)
+    # Every sink leaves the machine: the payload passes the shared output redaction (with the run's salt and path
+    # spellings) after the proof is built from the real paths and before any sink or dry-run result sees it.
+    payload = redact_output(payload, profile=PROFILE_SHAREABLE, context=context_for_run(run_dir))
     base = {
         "sink": sink,
         "payload": payload,

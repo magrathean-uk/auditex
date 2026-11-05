@@ -51,6 +51,9 @@ _OUTPUT_GUID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])",
     re.IGNORECASE,
 )
+# Public names for the shared output-redaction module (``output_redaction``).
+OUTPUT_EMAIL_RE = _OUTPUT_EMAIL_RE
+OUTPUT_GUID_RE = _OUTPUT_GUID_RE
 # Decode only representations needed for identifier matching; never execute a
 # general escape decoder on arbitrary command output. One pass, no recursion.
 _OUTPUT_ENCODING_RE = re.compile(r"%40|%7b|%7d|%2d|\\u0040|&#64;|＠", re.IGNORECASE)

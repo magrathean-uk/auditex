@@ -37,6 +37,7 @@ from auditex.reporting import (
 )
 from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundle_hashes
 from azure_tenant_audit.cli import run_offline
+from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, context_for_run, redact_output
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.evidence_db import load_run_index_summary
 from azure_tenant_audit.rule_parameters import effective_rule_parameters, rule_parameter_gap
@@ -754,10 +755,12 @@ def test_a_pack_from_a_run_written_with_an_absolute_out_carries_no_local_path(tm
     assert copied["run_dir"] == "halcyon-abs"
     assert copied["waiver_path"] == "<local-path>/waivers.json"
     assert copied["command_line"] == ["azure-tenant-audit", "--offline", "--out", "<local-path>/outputs", "--tenant-name", "halcyon"]
-    # Everything else in the run manifest is as the run wrote it.
-    assert {key: value for key, value in copied.items() if key not in {"run_dir", "waiver_path", "command_line"}} == {
-        key: value for key, value in manifest.items() if key not in {"run_dir", "waiver_path", "command_line"}
-    }
+    # Everything else in the run manifest is as the run wrote it, after the customer-pack output redaction (the tenant
+    # GUIDs in ``tenant_identity`` are pseudonymised with the run's salt; the old assertion expected them verbatim).
+    others = {key: value for key, value in manifest.items() if key not in {"run_dir", "waiver_path", "command_line"}}
+    assert {key: value for key, value in copied.items() if key not in {"run_dir", "waiver_path", "command_line"}} == (
+        redact_output(others, profile=PROFILE_CUSTOMER_PACK, context=context_for_run(run))
+    )
 
 
 def test_the_pack_copy_of_the_run_manifest_is_tied_to_the_run_file_the_manifest_lists(bundle: Path, tmp_path: Path) -> None:
