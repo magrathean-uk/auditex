@@ -10,9 +10,10 @@ RULE_SCOPE = (
 )
 
 
-def _listing(cmdlet: str, props: tuple[str, ...]) -> str:
-    # Keep an empty listing as an array rather than an empty command output. Unverified offline.
-    return f",@({cmdlet} | Select-Object {','.join(props)})"
+def _listing(cmdlet: str, props: tuple[str, ...], *, allow_empty: bool = True) -> str:
+    command = f"{cmdlet} | Select-Object {','.join(props)}"
+    # Default-bearing policies and singleton settings must return an answer.
+    return f",@({command})" if allow_empty else command
 
 
 DEFENDER_COMMANDS: list[tuple[str, str]] = [
@@ -21,7 +22,7 @@ DEFENDER_COMMANDS: list[tuple[str, str]] = [
     ("atpBuiltInProtectionRules", _listing("Get-ATPBuiltInProtectionRule", (
         "Identity", "ExceptIfSentTo", "ExceptIfSentToMemberOf", "ExceptIfRecipientDomainIs",
     ))),
-    ("atpPolicyForO365", _listing("Get-AtpPolicyForO365", ("Identity", "EnableATPForSPOTeamsODB"))),
+    ("atpPolicyForO365", _listing("Get-AtpPolicyForO365", ("Identity", "EnableATPForSPOTeamsODB"), allow_empty=False)),
     ("malwareFilterRules", _listing("Get-MalwareFilterRule", (
         "Identity", "State", "Priority", "MalwareFilterPolicy", *RULE_SCOPE,
     ))),
@@ -34,12 +35,12 @@ DEFENDER_COMMANDS: list[tuple[str, str]] = [
         "EnableOrganizationDomainsProtection", "TargetedDomainProtectionAction", "EnableTargetedDomainsProtection",
         "TargetedDomainsToProtect", "EnableFirstContactSafetyTips", "EnableSimilarUsersSafetyTips",
         "EnableSimilarDomainsSafetyTips", "EnableUnusualCharactersSafetyTips", "EnableViaTag", "EnableUnauthenticatedSender",
-    ))),
+    ), allow_empty=False)),
     ("antiPhishRules", _listing("Get-AntiPhishRule", ("Identity", "State", "AntiPhishPolicy", *RULE_SCOPE))),
     ("hostedContentFilterPolicies", _listing("Get-HostedContentFilterPolicy", (
         "Identity", "IsDefault", "RecommendedPolicyType", "SpamAction", "HighConfidenceSpamAction",
         "PhishSpamAction", "HighConfidencePhishAction", "AllowedSenderDomains",
-    ))),
+    ), allow_empty=False)),
     ("hostedContentFilterRules", _listing("Get-HostedContentFilterRule", (
         "Identity", "State", "HostedContentFilterPolicy", *RULE_SCOPE,
     ))),
@@ -48,7 +49,7 @@ DEFENDER_COMMANDS: list[tuple[str, str]] = [
         "EnableForInternalSenders", "ScanUrls", "DeliverMessageAfterScan", "TrackClicks",
     ))),
     ("safeLinksRules", _listing("Get-SafeLinksRule", ("Identity", "State", "Priority", "SafeLinksPolicy", *RULE_SCOPE))),
-    ("hostedConnectionFilterPolicy", _listing("Get-HostedConnectionFilterPolicy", ("Name", "IPAllowList", "EnableSafeList"))),
+    ("hostedConnectionFilterPolicy", _listing("Get-HostedConnectionFilterPolicy", ("Name", "IPAllowList", "EnableSafeList"), allow_empty=False)),
 ]
 
 _RULE_OPERATIONS = frozenset({

@@ -727,21 +727,21 @@
           "name": "acceptedDomains",
           "category": "policy",
           "commands": [
-            ",@(Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain)"
+            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain"
           ]
         },
         {
           "name": "remoteDomains",
           "category": "policy",
           "commands": [
-            ",@(Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled)"
+            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled"
           ]
         },
         {
           "name": "sharingPolicy",
           "category": "policy",
           "commands": [
-            ",@(Get-SharingPolicy | Select-Object Name,Domains)"
+            "Get-SharingPolicy | Select-Object Name,Domains"
           ]
         },
         {
@@ -783,7 +783,7 @@
           "name": "malwareFilterPolicy",
           "category": "policy",
           "commands": [
-            ",@(Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes)"
+            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"
           ]
         },
         {
@@ -804,7 +804,7 @@
           "name": "dkimSigningConfig",
           "category": "policy",
           "commands": [
-            ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)"
+            "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"
           ]
         },
         {
@@ -832,7 +832,7 @@
           "name": "atpPolicyForO365",
           "category": "policy",
           "commands": [
-            ",@(Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB)"
+            "Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB"
           ]
         },
         {
@@ -860,7 +860,7 @@
           "name": "antiPhishPolicies",
           "category": "policy",
           "commands": [
-            ",@(Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender)"
+            "Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender"
           ]
         },
         {
@@ -874,7 +874,7 @@
           "name": "hostedContentFilterPolicies",
           "category": "policy",
           "commands": [
-            ",@(Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains)"
+            "Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains"
           ]
         },
         {
@@ -902,7 +902,7 @@
           "name": "hostedConnectionFilterPolicy",
           "category": "policy",
           "commands": [
-            ",@(Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList)"
+            "Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList"
           ]
         }
       ]

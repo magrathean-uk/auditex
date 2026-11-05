@@ -796,7 +796,9 @@ def test_guided_no_exchange_excludes_policy_even_from_explicit_list(monkeypatch,
 
 @pytest.mark.parametrize('flow,include_exchange', [('app-audit', False), ('gr-audit', True), ('gr-audit', False)])
 @pytest.mark.parametrize('non_interactive', [False, True])
-def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchange, non_interactive):
+@pytest.mark.parametrize('selection', [[], ['--auditor-profile', 'app-readonly-full'],
+                                      ['--collectors', 'identity,exchange']])
+def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchange, non_interactive, selection):
     from pathlib import Path
     from azure_tenant_audit import cli as tenant_cli
     from azure_tenant_audit.config import CollectorConfig
@@ -821,12 +823,19 @@ def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchang
         argv += ['--include-exchange']
     if non_interactive:
         argv += ['--non-interactive']
+    argv += selection
     assert guided.run_guided(build_guided_parser().parse_args(argv)) == 0
     args = tenant_cli.build_parser().parse_args(seen[0])
     plan = build_live_run_plan(args, output_dir=tmp_path,
         collector_config=CollectorConfig.from_path(Path('configs/collector-definitions.json')), permission_hints={})
     if flow == 'app-audit':
-        assert {'exchange_policy', 'dns_posture'} <= set(plan.selected_collectors)
+        assert not args.exclude
+        if '--collectors' in selection:
+            assert plan.selected_collectors == ['identity', 'exchange']
+        else:
+            assert {'exchange_policy', 'dns_posture'} <= set(plan.selected_collectors)
+            if '--auditor-profile' in selection:
+                assert 'exchange' in plan.selected_collectors
     else:
         assert {'exchange_policy', 'dns_posture'}.isdisjoint(plan.selected_collectors)
         assert ('exchange' in plan.selected_collectors) == (include_exchange or not non_interactive)

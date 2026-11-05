@@ -8,6 +8,18 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 ## [Unreleased]
 
 - Let SS 2.1 decide from verified SensitiveUsers operator input in its private in-memory rule view, including offline bundle replay; retain existing not-assessed outcomes for missing or unusable input. Addresses never enter model views or assessment outputs. Current collection still excludes `TargetedUsersToProtect`, so proving met from target membership needs a separate collector/privacy change. SS 2.3 still needs PartnerDomains; the ScubaGear export path is unchanged.
+- Retain exit-0 JSON evidence with stderr warnings in the shared PowerShell adapter.
+  Every adapter command uses `$ErrorActionPreference = 'Stop'`, including
+  Microsoft365DSC and lab-only response actions; empty stdout with stderr remains
+  `command_error`. Only legitimately empty Exchange lists are array-wrapped;
+  default-bearing configuration requires an answer and empty accepted-domain
+  evidence falls back to Graph for DNS. Proxy-function error propagation remains
+  unverified without PowerShell.
+- Preserve explicitly named and profile-selected Microsoft 365 CLI `exchange`
+  collection in guided app flows. Keep Windows 365 in generated probes, disclose
+  explicit app-only names omitted from delegated setup commands, and print session
+  and resolver notices before standalone probe reads. Clarify the permission
+  catalogue's `ipps_session_not_opened` skip.
 
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
 - Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`. SS 2.1 private rule-view integration is described above.

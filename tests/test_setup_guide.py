@@ -131,7 +131,7 @@ def test_optional_setup_commands_preserve_resolved_selection(selection) -> None:
     run = tenant_cli.build_parser().parse_args(shlex.split(commands["app_run"])[2:])
 
     assert probe.mode == "app"
-    assert probe.surface.split(",") == payload["selected_collectors"]
+    assert probe.surface.split(",") == [*payload["selected_collectors"], "windows365"]
     assert run.collectors.split(",") == payload["selected_collectors"]
     assert run.collector_preset == selection.get("collector_preset")
     assert run.plane == "inventory"
@@ -150,7 +150,8 @@ def test_setup_commands_without_power_collectors_preserve_requested_scope(select
     run = tenant_cli.build_parser().parse_args(shlex.split(payload["commands"]["app_run"])[2:])
     assert run.auditor_profile == probe.auditor_profile == "global-reader"
     assert run.plane == "full" and probe.mode == "app"
-    assert probe.surface.split(",") == run.collectors.split(",") == payload["authentication_plans"]["app"]["selected_collectors"]
+    assert run.collectors.split(",") == payload["authentication_plans"]["app"]["selected_collectors"]
+    assert probe.surface.split(",") == [*run.collectors.split(","), "windows365"]
     assert {"power_platform", "power_bi"}.isdisjoint(payload["selected_collectors"])
 
 
@@ -212,7 +213,7 @@ def test_setup_guide_deselection_survives_generated_run_commands(tmp_path, exclu
     assert set(exclude.split(",")).isdisjoint(guide["selected_collectors"])
     for key in ("app_probe", "delegated_probe"):
         args = auditex_cli._build_probe_parser().parse_args(shlex.split(guide["commands"][key])[2:])
-        assert args.surface.split(",") == guide["authentication_plans"][key.split("_")[0]]["selected_collectors"]
+        assert args.surface.split(",") == [*guide["authentication_plans"][key.split("_")[0]]["selected_collectors"], "windows365"]
     for key in ("app_run", "delegated_run"):
         args = tenant_cli.build_parser().parse_args(shlex.split(guide["commands"][key])[2:])
         plan = build_live_run_plan(args, output_dir=tmp_path,
@@ -235,3 +236,20 @@ def test_setup_explicit_app_only_scope_does_not_emit_empty_delegated_commands():
 def test_exchange_tooling_follows_explicit_selection_in_other_profiles():
     guide = build_setup_guide(provider='m365', mode='app', auditor_profile='security-reader', collectors='exchange_policy')
     assert {'pwsh', 'ExchangeOnlineManagement'} <= set(guide['authentication_plans']['app']['tool_requirements'])
+
+
+@pytest.mark.parametrize('collectors', ['identity,exchange_policy', 'identity,dns_posture',
+                                        'identity,exchange_policy,dns_posture', 'exchange_policy'])
+@pytest.mark.parametrize('mode', ['app', 'delegated'])
+def test_setup_discloses_explicit_names_filtered_from_delegated_commands(collectors, mode):
+    guide = build_setup_guide(provider='m365', mode=mode, collectors=collectors)
+    steps = guide['authentication_plans']['delegated']['setup_steps']
+    assert sum('app-mode only' in step for step in steps) == 1
+    assert any('including explicitly selected names' in step for step in steps)
+    if 'identity' in collectors:
+        for key in ('app_probe', 'delegated_probe'):
+            args = auditex_cli._build_probe_parser().parse_args(shlex.split(guide['commands'][key])[2:])
+            assert args.surface.split(',')[-1] == 'windows365'
+        args = tenant_cli.build_parser().parse_args(shlex.split(guide['commands']['delegated_run'])[2:])
+        assert args.collectors == 'identity'
+    assert 'app-mode only' in render_setup_guide_markdown(guide)

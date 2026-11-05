@@ -54,9 +54,14 @@ Add the usual tenant/auth/output arguments. These flags also work on
 `--collector-preset config-only` omits both. Exclusions apply after profile, preset or explicit selection.
 In the guided `gr-audit` flow, answering No to Exchange excludes both Exchange collectors.
 Answering Yes selects the Microsoft 365 CLI `exchange` collector in delegated mode.
-Guided `app-audit` keeps both default policy collectors. Generated setup plans resolve
+Guided `app-audit` keeps both default policy collectors and honours an explicitly
+named or profile-selected Microsoft 365 CLI `exchange` collector. Outside a
+`gr-audit` No answer, guided flows add no Exchange exclusion. Generated setup plans resolve
 app and delegated selections separately; each command has its own permissions, tooling
 and collection notices, including app requirements in the default delegated guide.
+If an explicit Exchange policy or DNS posture name is removed from a generated
+delegated command, its setup steps explain the app-mode-only restriction.
+Generated app and delegated probes also retain the probe-only `windows365` surface.
 
 Real Exchange/DNS failures leave dependent policies **not assessed**, with a clear
 reason. DNS lookup failures mean unknown records, never absent records. If these
@@ -66,6 +71,8 @@ failures retain their non-zero exit behaviour. Missing tooling, consent and real
 Exchange session failures retain the tooling or app-consent remediation.
 
 App-mode `auditex probe live --surface all` includes Exchange policy and DNS posture.
+The standalone probe prints the Exchange session and Cloudflare resolver notices
+before its reads; use `--surface` to limit probe surfaces.
 `--probe-first` defers these two collectors to the collection phase, so it does not
 repeat their PowerShell sessions or public lookups. A standalone app probe performs
 the reads and a subsequent run repeats them. Added runtime depends on tenant size,

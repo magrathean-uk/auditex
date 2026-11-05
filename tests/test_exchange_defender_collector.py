@@ -71,12 +71,13 @@ def test_defender_commands_are_read_only_and_have_explicit_field_selections():
         )
         for forbidden in ("*", "-ResultSize Unlimited", "Set-", "New-", "Remove-", "TargetedUsersToProtect"):
             assert forbidden not in command
-        if name in (*NEW_OPERATIONS, "malwareFilterPolicy"):
+        if name not in {"malwareFilterPolicy", "adminAuditLogConfig", "atpPolicyForO365",
+                        "antiPhishPolicies", "hostedContentFilterPolicies", "hostedConnectionFilterPolicy"}:
             assert command.startswith(",@(") and command.endswith(")")
         else:
             assert not command.startswith(",@(")
     assert commands["adminAuditLogConfig"] == "Get-AdminAuditLogConfig | Select-Object Identity,UnifiedAuditLogIngestionEnabled"
-    assert commands["malwareFilterPolicy"] == ",@(Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes)"
+    assert commands["malwareFilterPolicy"] == "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"
     for name in ("antiPhishRules", "hostedContentFilterRules"):
         assert "Priority" not in commands[name]
 
@@ -259,7 +260,7 @@ def test_defender_permissions_add_only_the_new_optional_commands():
     assert shipped["graph_scopes"] == []
     assert shipped["minimum_role_hints"] == ["Exchange Reader", "Exchange Administrator", "Global Reader"]
     assert shipped["command_tools"] == ["pwsh", "powershell_graph"]
-    cmdlets = [command[3:].split()[0] for _, command in defender.DEFENDER_COMMANDS]
+    cmdlets = [command.removeprefix(",@(").split()[0] for _, command in defender.DEFENDER_COMMANDS]
     assert len(cmdlets) == 14
     assert set(cmdlets) <= set(shipped["optional_commands"])
     assert len(shipped["optional_commands"]) == len(set(shipped["optional_commands"]))

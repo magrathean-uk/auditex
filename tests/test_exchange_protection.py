@@ -63,11 +63,11 @@ def test_the_three_commands_are_read_only_get_cmdlets_that_pass_the_shared_guard
         classification = classify_command("powershell_graph", commands[name])
         assert classification.read_only, (name, classification.reason)
         assert check_command("powershell_graph", commands[name])[0].startswith("Get-")
-    assert commands["malwareFilterPolicy"].startswith(",@(Get-MalwareFilterPolicy |")
+    assert commands["malwareFilterPolicy"].startswith("Get-MalwareFilterPolicy |")
     assert commands["transportConfig"].startswith("Get-TransportConfig |")
     # An aggregate: no mailbox is named and the answer is never empty (an empty output reads as a failed command).
     assert commands["casMailboxSmtpAuth"].startswith("Get-CASMailbox ") and commands["casMailboxSmtpAuth"].endswith("Measure-Object | Select-Object Count")
-    assert commands["dkimSigningConfig"].startswith(",@(Get-DkimSigningConfig |")
+    assert commands["dkimSigningConfig"].startswith("Get-DkimSigningConfig |")
     # A write cmdlet the remediation text names is refused by the same guard.
     assert not classify_command("powershell_graph", "Set-TransportConfig -SmtpClientAuthenticationDisabled $true").read_only
     assert not classify_command("powershell_graph", "Get-DkimSigningConfig | Set-DkimSigningConfig -Enabled $true").read_only

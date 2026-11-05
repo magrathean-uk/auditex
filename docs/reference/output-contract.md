@@ -1353,8 +1353,25 @@ Real Exchange/DNS failures remain partial, with collection exit 0 when these are
 the only failures; partial runs still block coverage gates by default.
 
 Explicitly array-wrapped Exchange policy list reads serialise zero rows as `[]`.
-An empty list is a successful read; non-zero exits and command errors remain
-failures. Scalar configuration and aggregate count reads still require an answer.
+Only lists that can legitimately be empty use this wrapper: transport rules,
+inbound/outbound connectors, forwarding mailboxes, Defender assignment/preset
+rules and optional Safe Attachments/Safe Links policies. The unused protection-alert
+command remains wrapped but is never invoked. Accepted/remote domains, default
+sharing and malware policies, DKIM signing configuration, default anti-phish,
+hosted content/connection filter policies and the ATP organisation setting stay
+unwrapped; missing output is a failure, as it is for scalar and count reads.
+An empty accepted-domain envelope is unusable and DNS falls back to Graph-verified
+domains with the Email service. A non-empty accepted-domain list containing only
+coexistence domains still legitimately produces an empty DNS record universe.
+
+Every command through the shared PowerShell adapter starts with
+`$ErrorActionPreference = 'Stop'`, including Microsoft365DSC and lab-only response
+actions. PowerShell errors should therefore terminate with a non-zero exit;
+non-zero exits and recognised authentication/command failures remain failures.
+Exit-0 JSON evidence is retained when stderr contains a warning. The empty-output
+success branch requires both an explicitly array-wrapped read and empty stderr;
+empty stdout with stderr is `command_error`. Error-preference propagation into
+Exchange module proxy functions has not been verified with PowerShell.
 
 ## Explainer (planned output)
 

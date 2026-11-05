@@ -762,11 +762,11 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             transport_command: {"value": [{"Name": "Block Forwarding", "RedirectMessageTo": ["external@example.invalid"]}]},
             ",@(Get-InboundConnector | Select-Object Name,Enabled,ConnectorType)": {"value": [{"Name": "Inbound 1"}]},
             ",@(Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType)": {"value": [{"Name": "Outbound 1"}]},
-            ",@(Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain)": {"value": [{"Name": "example.invalid"}]},
-            ",@(Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled)": {
+            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain": {"value": [{"Name": "example.invalid"}]},
+            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled": {
                 "value": [{"Name": "Default"}]
             },
-            ",@(Get-SharingPolicy | Select-Object Name,Domains)": {"value": [{"Name": "Partners", "Domains": []}]},
+            "Get-SharingPolicy | Select-Object Name,Domains": {"value": [{"Name": "Partners", "Domains": []}]},
             MAILBOX_FORWARDING_COMMAND: {"value": [{"DisplayName": "Alice Example"}]},
             "Get-AdminAuditLogConfig | Select-Object Identity,UnifiedAuditLogIngestionEnabled": {
                 "value": [{"UnifiedAuditLogIngestionEnabled": True}]
@@ -778,7 +778,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)": {
                 "value": [{"Name": "Elevation of Exchange admin privilege", "Disabled": False}]
             },
-            ",@(Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes)": {
+            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes": {
                 "value": [{"Identity": "Default", "Name": "Default", "IsDefault": True, "EnableFileFilter": True, "ZapEnabled": True}]
             },
             "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled": {
@@ -787,23 +787,23 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count": {
                 "value": [{"Count": 0}]
             },
-            ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)": {
+            "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status": {
                 "value": [{"Domain": "example.invalid", "Enabled": True, "Status": "Valid"}]
             },
             ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
             ",@(Get-ATPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
             ",@(Get-ATPBuiltInProtectionRule | Select-Object Identity,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
-            ",@(Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB)": {"value": []},
+            "Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB": {"value": []},
             ",@(Get-MalwareFilterRule | Select-Object Identity,State,Priority,MalwareFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
             ",@(Get-SafeAttachmentPolicy | Select-Object Identity,Action)": {"value": []},
             ",@(Get-SafeAttachmentRule | Select-Object Identity,State,Priority,SafeAttachmentPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
-            ",@(Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender)": {"value": []},
+            "Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender": {"value": []},
             ",@(Get-AntiPhishRule | Select-Object Identity,State,AntiPhishPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
-            ",@(Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains)": {"value": []},
+            "Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains": {"value": []},
             ",@(Get-HostedContentFilterRule | Select-Object Identity,State,HostedContentFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
             ",@(Get-SafeLinksPolicy | Select-Object Identity,EnableSafeLinksForEmail,EnableSafeLinksForTeams,EnableSafeLinksForOffice,EnableForInternalSenders,ScanUrls,DeliverMessageAfterScan,TrackClicks)": {"value": []},
             ",@(Get-SafeLinksRule | Select-Object Identity,State,Priority,SafeLinksPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
-            ",@(Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList)": {"value": []},
+            "Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList": {"value": []},
         }
     )
     monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _name: adapter)
