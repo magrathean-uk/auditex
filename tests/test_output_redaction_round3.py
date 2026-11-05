@@ -201,14 +201,14 @@ def test_f03_a_filename_with_a_name_an_address_and_a_credential_is_never_echoed(
 
 def test_the_message_names_the_file_by_run_relative_path_and_reason_class_with_no_content(tmp_path: Path) -> None:
     run = _run(tmp_path, [PRIV])
-    (run / "normalized" / "broken.json").write_text('{"client_secret": "privatecanary", ', encoding="utf-8")
+    (run / "normalized" / "users.json").write_text('{"client_secret": "privatecanary", ', encoding="utf-8")
     context = context_for_run(run)
     with pytest.raises(ContextIncompleteError) as caught:
         redact_output(NARRATIVE, context=context, profile=PROFILE_CUSTOMER_PACK)
     error = caught.value
-    assert "normalized/broken.json" in str(error) and "malformed JSON" in str(error)
+    assert "normalized/users.json" in str(error) and "malformed JSON" in str(error)
     assert "privatecanary" not in f"{error}{error!r}{error.args}{error.files}" and str(run) not in str(error)
-    assert error.files == (("normalized/broken.json", "malformed JSON"),)
+    assert error.files == (("normalized/users.json", "malformed JSON"),)
     assert error.omitted == 0
 
 
@@ -219,7 +219,7 @@ def test_the_message_names_the_file_by_run_relative_path_and_reason_class_with_n
 )
 def test_every_reason_class_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, expected: str) -> None:
     run = _run(tmp_path, [PRIV])
-    target = run / "normalized" / "odd.json"
+    target = run / "normalized" / "devices.json"
     if kind == "malformed":
         target.write_text("{no", encoding="utf-8")
     elif kind == "dangling":
@@ -242,10 +242,10 @@ def test_every_reason_class_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyP
     finally:
         target.chmod(0o600) if kind == "unreadable" else None
     assert context.incomplete
-    assert any(reason.endswith(f": {expected}") and "normalized/odd.json" in reason for reason in context.incomplete_reasons), context.incomplete_reasons
+    assert any(reason.endswith(f": {expected}") and "normalized/devices.json" in reason for reason in context.incomplete_reasons), context.incomplete_reasons
     with pytest.raises(ContextIncompleteError) as caught:
         redact_output("x", context=context)
-    assert ("normalized/odd.json", expected) in caught.value.files and str(run) not in str(caught.value)
+    assert ("normalized/devices.json", expected) in caught.value.files and str(run) not in str(caught.value)
 
 
 def test_several_files_are_listed_sorted_with_a_capped_list_and_a_count_of_the_rest(tmp_path: Path) -> None:
@@ -257,8 +257,9 @@ def test_several_files_are_listed_sorted_with_a_capped_list_and_a_count_of_the_r
         redact_output("x", context=context)
     error = caught.value
     listed = [label for label, _ in error.files]
-    assert listed == sorted(listed) and len(listed) == orx._MAX_LISTED_FILES == 10
-    assert listed[0] == "normalized/bad_01.json" and error.omitted == 3
+    # An unrecognised file name is opaque: the label is its position (the files sorted by name), never the name.
+    assert listed == [f"normalized/<redacted-segment-2>#{n}" for n in range(1, 11)] and len(listed) == orx._MAX_LISTED_FILES == 10
+    assert "bad_" not in str(error) and error.omitted == 3
     assert "and 3 more" in str(error) and "13 file" in str(error)
     again = context_for_run(run)
     with pytest.raises(ContextIncompleteError) as caught_again:
@@ -327,11 +328,11 @@ def _report_run(tmp_path: Path) -> Path:
 
 def test_f04_preview_report_with_a_fifo_in_normalized_refuses_instead_of_blocking(tmp_path: Path) -> None:
     run = _report_run(tmp_path)
-    os.mkfifo(run / "normalized" / "pipe.json")
+    os.mkfifo(run / "normalized" / "devices.json")
     with deadline(4):
         with pytest.raises(ContextIncompleteError) as caught:
             reporting.preview_report(run_dir=str(run), format_name="json", include_sections=["summary"])
-    assert "normalized/pipe.json" in str(caught.value) and "non-regular" in str(caught.value) and str(run) not in str(caught.value)
+    assert "normalized/devices.json" in str(caught.value) and "non-regular" in str(caught.value) and str(run) not in str(caught.value)
     with deadline(4):
         sections = reporting._load_normalized_sections(run)  # the loader itself never opens a FIFO
     assert sections == {}
@@ -420,9 +421,9 @@ def test_f06_an_embedded_record_above_the_bound_makes_the_context_incomplete(tmp
     monkeypatch.setattr(orx, "_MAX_EMBEDDED_JSON_CHARS", 500)
     embedded = json.dumps({"records": [PRIV], "pad": "x" * 2000})
     run = _run(tmp_path)
-    (run / "normalized" / "wrap.json").write_text(json.dumps({"payload": embedded}), encoding="utf-8")
+    (run / "normalized" / "snapshot.json").write_text(json.dumps({"payload": embedded}), encoding="utf-8")
     context = context_for_run(run)
-    assert context.incomplete and any(reason.endswith(": limit") and "normalized/wrap.json" in reason for reason in context.incomplete_reasons)
+    assert context.incomplete and any(reason.endswith(": limit") and "normalized/snapshot.json" in reason for reason in context.incomplete_reasons)
     for profile in (PROFILE_SHAREABLE, PROFILE_CUSTOMER_PACK, PROFILE_EXPLAINER):
         with pytest.raises(ContextIncompleteError):
             redact_output(NARRATIVE, context=context, profile=profile)
@@ -551,22 +552,27 @@ def test_f10_a_dangling_symlink_or_a_file_in_place_of_the_normalized_root_is_inc
 # -- F13, F14, F11: the finding-id exemption ---------------------------------------------------------------------------------------
 
 
-def _scanned_namespaces() -> set[str]:
+_CREDENTIAL_TRIGGER_RE = re.compile(r"(?:access_?token|refresh_?token|id_?token|client_?secret|secret|password|authorization|api_?key)", re.I)
+
+
+def _scanned_credential_bearing_definitions() -> set[str]:
+    """Every ``namespace:name`` the finding producers write as an id (``"id": f"identity:name:{x}"``) whose name carries
+    a word the inline secret pattern reads as a credential."""
     root = Path(orx.__file__).resolve().parents[1]
-    pattern = re.compile(r"[\"'](?:id|finding_id|rule_id|check_id)[\"']\s*[:=]\s*f?[\"']([a-z][a-z0-9_]*):")
+    pattern = re.compile(r"[\"'](?:id|finding_id|rule_id|check_id)[\"']\s*[:=]\s*f?[\"']([a-z][a-z0-9_]*:[a-z][a-z0-9_]*)")
     found: set[str] = set()
     for path in root.rglob("*.py"):
         if path.name == "output_redaction.py":
             continue
-        found.update(pattern.findall(path.read_text(encoding="utf-8")))
+        found.update(m for m in pattern.findall(path.read_text(encoding="utf-8")) if _CREDENTIAL_TRIGGER_RE.search(m.split(":", 1)[1]))
     return found
 
 
-def test_f11_the_namespace_list_covers_every_namespace_the_finding_producers_emit() -> None:
-    scanned = _scanned_namespaces()
-    assert len(scanned) >= 25
-    assert scanned <= set(orx._ID_NAMESPACES), sorted(scanned - set(orx._ID_NAMESPACES))
-    assert not set(orx._ID_NAMESPACES) & orx._CREDENTIAL_NAMESPACES
+def test_f11_the_definition_list_covers_every_credential_bearing_id_the_finding_producers_emit() -> None:
+    scanned = _scanned_credential_bearing_definitions()
+    assert "identity:global_admin_stale_password" in scanned
+    assert scanned <= set(orx._ID_DEFINITIONS), sorted(scanned - set(orx._ID_DEFINITIONS))
+    assert all(":" in d and not _CREDENTIAL_TRIGGER_RE.fullmatch(d.split(":", 1)[0]) for d in orx._ID_DEFINITIONS)
 
 
 REAL_IDS = [

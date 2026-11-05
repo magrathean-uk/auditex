@@ -98,7 +98,7 @@ class ContextIncompleteError(RedactionError):
     """The run's identities could not all be discovered (see ``RedactionContext.incomplete``): fail closed.
 
     The message and the attributes name each unusable file by a *safe label* (its run-relative path with every
-    segment that is not a plain section name replaced by ``<redacted-segment-N>``) and a reason class
+    segment that is not a recognised public section label, ``_PUBLIC_SECTION_LABELS``, replaced by ``<redacted-segment-N>``) and a reason class
     (``unreadable``, ``malformed JSON``, ``oversize``, ``non-regular``, ``dangling link``, ``limit``, ``outside run``,
     ``changed during scan``). Never file content, an operating-system message or the absolute run path.
 
@@ -375,35 +375,24 @@ def _structural(text: str) -> bool:
 
 # Finding ids are ``<namespace>:<snake_case_words>[:<guid-or-digest>]`` (``identity:global_admin_stale_password:<guid>``).
 # A credential word inside such an id (``..._password:<guid>``) is part of the name, not an assignment, so the inline
-# secret pattern must not read it as ``password: <value>``. The exemption is deliberately narrow and exact:
+# secret pattern must not read it as ``password: <value>``. The exemption is exact and closed:
 #
-# * the namespace is one of ``_ID_NAMESPACES`` (the namespaces the finding producers under ``src/`` emit; a test scans
-#   the producers and fails when one is missing), never a credential word;
-# * the words carry at least one underscore, lower case only;
-# * the optional suffix is a dashed GUID, a lower-case hex digest of 16 to 64 digits or a decimal number;
+# * the ``namespace:name`` pair is one of ``_ID_DEFINITIONS``, the finding definitions the producers under ``src/``
+#   emit whose name carries a credential word (a test scans the producers and fails when one is missing); an arbitrary
+#   snake_case name under a known namespace (``identity:db_password:654321``) is NOT exempt, because a numeric or hex
+#   password has the same shape as a finding suffix;
+# * the optional suffix is a dashed GUID, a lower-case hex digest of 16 to 64 digits or a decimal id of 16 to 24 digits;
 # * the token is not preceded by a word, ``:``, ``.`` or ``-`` and is not followed by a word character, ``:`` or ``=``,
-#   so ``identity:db_password:hunter2``, ``identity:db_password=x``, ``config:db_password:x`` and
-#   ``identity:global_admin_stale_password:<guid>:hunter`` are all still read as credentials and redacted.
+#   so ``identity:global_admin_stale_password:<guid>:hunter`` and ``config:identity:global_admin_stale_password:x`` are
+#   still read as credentials and redacted.
 #
 # Everything is one regular expression run in one left-to-right pass (the id alternative is tried first at every
 # position, the inline secret pattern second): linear in the text, no recursion, no second scan.
-_ID_NAMESPACES = (
-    "admin_set_unknown", "app", "app_consent", "app_credentials", "attack_path", "category", "conditional_access",
-    "conditional_access_policy", "conditional_access_relationship", "consent_policy", "coverage_gap",
-    "cross_tenant_access", "detection_coverage", "dns_posture", "exchange", "exchange_policy", "exchange_remote_domain",
-    "exchange_transport", "exposure", "external_identity", "google_admin_resilience", "google_policies", "identity",
-    "identity_governance", "intune", "intune_depth", "mailbox_forwarding", "onedrive_posture", "reports_usage",
-    "response", "secure_score", "security_directory_audit", "security_signin", "service_health", "sharepoint",
-    "sharepoint_permission", "sharepoint_site_posture", "sharepoint_tenant", "teams_policy",
-)
-_CREDENTIAL_NAMESPACES = frozenset(
-    {"access", "refresh", "id", "client", "secret", "password", "authorization", "api", "token", "key", "bearer"}
-)
+_ID_DEFINITIONS = frozenset({"identity:global_admin_stale_password"})
 _ID_GUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 _ID_TOKEN = (
-    r"(?-i:(?<![\w:.-])(?:" + "|".join(sorted(_ID_NAMESPACES, key=len, reverse=True)) + r")"
-    r":[a-z][a-z0-9]*(?:_[a-z0-9]+)+"
-    rf"(?::(?:{_ID_GUID}|[0-9a-f]{{16,64}}|[0-9]{{1,20}}))?(?![\w:=]))"
+    r"(?-i:(?<![\w:.-])(?:" + "|".join(re.escape(d) for d in sorted(_ID_DEFINITIONS, key=len, reverse=True)) + r")"
+    rf"(?::(?:{_ID_GUID}|[0-9a-f]{{16,64}}|[0-9]{{16,24}}))?(?![\w:=]))"
 )
 _INLINE_OR_ID_RE = re.compile(rf"(?P<idtoken>{_ID_TOKEN})|{INLINE_SECRET_RE.pattern}", INLINE_SECRET_RE.flags)
 
@@ -423,7 +412,11 @@ def _redact_inline_secrets(value: str) -> str:
 
 # Credentials carried by a URL: the password of ``scheme://user:password@host`` and the value of a credential-looking
 # query or fragment parameter (OAuth tokens and codes, shared-access-signature fields, API keys). The URL syntax stays.
-_URL_USERINFO_RE = re.compile(r"(?P<head>\b[A-Za-z][A-Za-z0-9+.-]{1,15}://[^\s/@:?#\"'<>]*:)(?P<password>[^\s/@?#\"'<>]+)(?=@)")
+# The scheme is one to 32 characters (``x://u:pw@host`` is a URL); a scheme-relative ``//user:pw@host`` is one too.
+_URL_USERINFO_RE = re.compile(
+    r"(?P<head>(?:(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}:|(?<![\w:/.+-]))//[^\s/@:?#\"'<>]*:)"
+    r"(?P<password>[^\s/@?#\"'<>]+)(?=@)"
+)
 _URL_PARAMETERS = (
     "access_token", "refresh_token", "id_token", "token", "sig", "signature", "code", "password", "passwd", "pwd",
     "secret", "client_secret", "key", "api_key", "apikey", "sv", "se", "sp", "sr", "spr", "st", "skoid", "sktid",
@@ -436,12 +429,14 @@ _URL_PARAMETER_RE = re.compile(
 
 def _redact_url_credentials(value: str) -> str:
     """URL userinfo passwords and credential parameters of ``value`` replaced by ``SECRET_PLACEHOLDER``."""
-    if "=" not in value and "://" not in value:
+    if "=" not in value and "//" not in value:
         return value
     value = _URL_USERINFO_RE.sub(lambda m: m["head"] + SECRET_PLACEHOLDER, value)
     return _URL_PARAMETER_RE.sub(lambda m: m["lead"] + m["name"] + m["eq"] + SECRET_PLACEHOLDER, value)
 
 
+# An immutable id shorter than this is pseudonymised under its own key but not searched for in free text.
+_MIN_NARRATIVE_ID = 4
 _IMMUTABLE_PREFIX = "Id "
 _USER_PREFIX = "User "
 _HEX16 = r"[0-9a-f]{16}"
@@ -497,6 +492,9 @@ class RedactionContext:
     incomplete_reasons: tuple[str, ...] = ()
     incomplete_files: tuple[tuple[str, str], ...] = ()
     incomplete_omitted: int = 0
+    # The state of the run's ``normalized/`` files as discovery read them (see ``snapshot_run``); empty for a context
+    # that was not built from one run directory.
+    snapshot: tuple[tuple[str, tuple[int, int, int, int, int]], ...] = ()
 
 
 def pseudonym(salt: str, text: str) -> str:
@@ -625,7 +623,9 @@ def _maybe_json(text: str) -> Any:
     """The parsed value of a string that is a JSON object or array, else ``None``. Numbers are ``_Num``; the
     non-standard ``NaN`` and ``Infinity`` make the text not JSON. Raises ``_EmbeddedLimitError`` for a string longer
     than ``_MAX_EMBEDDED_JSON_CHARS`` that starts like JSON."""
-    if len(text) > _MAX_EMBEDDED_JSON_CHARS and _JSON_START_RE.match(text):
+    if not _JSON_START_RE.match(text):
+        return None  # not JSON-looking: the one test discovery and redaction share (``str.strip`` and ``\\s`` agree)
+    if len(text) > _MAX_EMBEDDED_JSON_CHARS:
         raise _EmbeddedLimitError
     stripped = text.strip()
     if len(stripped) < 2 or stripped[0] not in "{[" or stripped[-1] not in "}]":
@@ -654,7 +654,7 @@ def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
                     found.domains.add(match["domain"].lower())
                 for match in _ENCODED_EMAIL_RE.finditer(item):
                     found.domains.add(match["domain"].lower())
-            if names and item[:1] in ("{", "[", " ", "\n", "\t"):
+            if names:  # ``_maybe_json`` is the one recogniser, the same one redaction uses
                 try:
                     parsed = _maybe_json(item)
                 except _EmbeddedLimitError:
@@ -710,19 +710,39 @@ REASON_LIMIT = "limit"
 REASON_OUTSIDE = "outside run"
 REASON_CHANGED = "changed during scan"
 
-_SAFE_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}(?:\.json)?$")
-_CREDENTIAL_WORD_RE = re.compile(r"password|passwd|secret|token|apikey|api_key|authorization|bearer|credential", re.IGNORECASE)
-_LONG_DIGITS_RE = re.compile(r"[0-9]{6,}")
+# The only path segments a refusal ever shows: the run's ``normalized`` directory and the ``normalized/<section>.json``
+# names the product itself writes. A file name is untrusted text (``alice_smith.json``, ``acme_corp.json``), so spelling
+# is never the test: a segment that is not on this list is opaque. A test scans ``src/`` and fails when a section
+# literal the producers write is missing; a section the list does not know shows as ``<redacted-segment-N>``.
+_PUBLIC_SECTION_LABELS = frozenset(
+    {
+        "normalized", "app_owner_edges", "application_consents", "application_credential_objects", "auth_context",
+        "auth_methods", "bounded_samples", "break_glass_assessment", "capabilities", "capability_matrix",
+        "collection_gaps", "compliance_policy_objects", "conditional_access_graph", "consent_policy_objects",
+        "coverage_ledger", "cross_tenant_access_objects", "defender_av_objects", "detection_signal_objects",
+        "device_posture", "devices", "directory_relationship_objects", "domain_hybrid_objects", "effective_admin_set",
+        "exchange_policy_objects", "google_alias_errors", "google_calendar_acl_errors", "google_domains",
+        "google_drive_files", "google_gmail_settings", "google_group_member_errors", "google_group_setting_errors",
+        "google_group_settings", "google_mailbox_settings", "google_oauth_grant_errors", "google_oauth_tokens",
+        "google_two_step_policies", "governance_objects", "identity_control_verdicts", "identity_users",
+        "intune_policy_assignment_objects", "mailbox_forwarding", "normalization_coverage", "onedrive_posture_objects",
+        "privileged_roles", "public_footprint_objects", "response", "role_assignments", "security_score_control_profiles",
+        "security_scores", "sharepoint_tenant_settings", "snapshot", "teams_policy_objects", "update_management_objects",
+        "users",
+    }
+)
 
 
 def _safe_label(parts: Iterable[str]) -> str:
-    """A run-relative path that is safe to show: a segment is kept only when it is a short lower-case snake_case
-    section name (``normalized``, ``identity_users.json``) with no credential word and no long digit run; every
-    other segment (a name, an address, a GUID, a credential or anything else a file can be called) becomes
-    ``<redacted-segment-N>``, N being its 1-based position in the path. The run directory is never part of it."""
+    """A run-relative path that is safe to show: a segment is kept only when it is a recognised public label
+    (``_PUBLIC_SECTION_LABELS``: ``normalized`` or the name of a section the product writes, with the ``.json`` suffix);
+    every other segment (a name, an address, a GUID, a credential or anything else a file can be called, however
+    harmless it looks) becomes ``<redacted-segment-N>``, N being its 1-based position in the path. The run directory
+    is never part of it."""
     shown = []
     for index, part in enumerate(parts, start=1):
-        keep = bool(_SAFE_SEGMENT_RE.match(part)) and not _CREDENTIAL_WORD_RE.search(part) and not _LONG_DIGITS_RE.search(part)
+        stem = part[: -len(".json")] if part.endswith(".json") else part
+        keep = stem in _PUBLIC_SECTION_LABELS and (stem != "normalized" or part == stem)
         shown.append(part if keep else f"<redacted-segment-{index}>")
     return "/".join(shown) or "<run>"
 
@@ -768,9 +788,21 @@ def _open_dir_at(parent_fd: int, name: str, expected: os.stat_result | None = No
     return descriptor
 
 
-def _read_file_at(parent_fd: int, name: str, expected: os.stat_result) -> bytes:
-    """The bytes of regular file ``name`` below ``parent_fd``: never following a link, never blocking, identity and
-    type re-checked on the descriptor, at most ``_MAX_FILE_BYTES``."""
+def _fingerprint(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    """What identifies the state of one file: device, inode, size and the two change times (a write moves ``ctime``
+    even when it restores ``mtime``)."""
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int = _MAX_FILE_BYTES) -> bytes:
+    """The bytes of regular file ``name`` below ``parent_fd``: never following a link, never blocking, identity, type
+    and state re-checked on the descriptor, at most ``cap`` bytes (never more than ``_MAX_FILE_BYTES``).
+
+    The state of the file (``_fingerprint``) must equal the listed one (``expected``) when it is opened and again after
+    the last byte is read, and the bytes read must equal the size: a file that grew, shrank or was rewritten while
+    it was read is ``changed during scan``, never partial content. ``cap`` is what the caller can still afford of
+    the aggregate budget (reading past it is a ``limit``), charged against what was really read, not what was listed.
+    """
     try:
         descriptor = os.open(name, _FILE_MODE, dir_fd=parent_fd)
     except FileNotFoundError as exc:
@@ -787,16 +819,23 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result) -> bytes:
             raise _Unsafe(REASON_CHANGED)
         if info.st_size > _MAX_FILE_BYTES:
             raise _Unsafe(REASON_OVERSIZE)
+        if _fingerprint(info) != _fingerprint(expected):
+            raise _Unsafe(REASON_CHANGED)  # grown, shrunk or rewritten between the listing and the open
+        limit = min(cap, _MAX_FILE_BYTES)
         chunks: list[bytes] = []
         total = 0
         while True:
-            chunk = os.read(descriptor, min(1 << 20, _MAX_FILE_BYTES + 1 - total))
+            chunk = os.read(descriptor, min(1 << 20, limit + 1 - total))
             if not chunk:
-                return b"".join(chunks)
+                break
             total += len(chunk)
-            if total > _MAX_FILE_BYTES:
-                raise _Unsafe(REASON_OVERSIZE)
+            if total > limit:
+                raise _Unsafe(REASON_OVERSIZE if limit >= _MAX_FILE_BYTES else REASON_LIMIT)
             chunks.append(chunk)
+        after = os.fstat(descriptor)
+        if total != info.st_size or _fingerprint(after) != _fingerprint(info):
+            raise _Unsafe(REASON_CHANGED)
+        return b"".join(chunks)
     except OSError as exc:
         raise _Unsafe(REASON_UNREADABLE) from exc
     finally:
@@ -818,11 +857,14 @@ def _open_chain(root_fd: int, parts: tuple[str, ...]) -> tuple[int, str]:
         raise
 
 
-def _link_reader(run_real: str, dir_fd: int, parts: tuple[str, ...], name: str) -> tuple[Callable[[], bytes], int] | None:
+def _link_reader(
+    run_real: str, dir_fd: int, parts: tuple[str, ...], name: str
+) -> tuple[Callable[[int], bytes], os.stat_result] | None:
     """A symlink below ``normalized/``: a ``.json`` link to a regular file inside the run is read through its
     resolved path (every ancestor opened without following links); a link to a directory is not followed.
 
-    Returns ``(reader, size)``, ``None`` for a link that is not a ``.json`` file, or raises ``_Unsafe``.
+    Returns ``(reader(cap), listed stat of the target)``, ``None`` for a link that is not a ``.json`` file, or raises
+    ``_Unsafe``.
     """
     is_json = name.lower().endswith(".json")
     try:
@@ -846,25 +888,27 @@ def _link_reader(run_real: str, dir_fd: int, parts: tuple[str, ...], name: str) 
         raise _Unsafe(REASON_NON_REGULAR)
     relative = tuple(Path(target).relative_to(run_real).parts)
 
-    def reader() -> bytes:
+    def reader(cap: int = _MAX_FILE_BYTES) -> bytes:
         root_fd = os.open(run_real, _DIR_MODE)
         try:
             parent_fd, leaf = _open_chain(root_fd, relative)
         finally:
             os.close(root_fd)
         try:
-            return _read_file_at(parent_fd, leaf, target_info)
+            return _read_file_at(parent_fd, leaf, target_info, cap)
         finally:
             os.close(parent_fd)
 
-    return reader, target_info.st_size
+    return reader, target_info
 
 
 class _Scan:
-    def __init__(self, run_real: str) -> None:
+    def __init__(self, run_real: str, *, read: bool = True) -> None:
         self.run_real = run_real
+        self.read = read  # False: only list and fingerprint (``snapshot_run``)
         self.found = _Found()
         self.problems: list[tuple[tuple[str, ...], str]] = []
+        self.fingerprints: list[tuple[str, tuple[int, int, int, int, int]]] = []
         self.files = 0
         self.budget = _MAX_SCAN_BYTES
 
@@ -883,23 +927,27 @@ class _Scan:
         if local.limit_hits:
             self.problem(parts, REASON_LIMIT)
 
-    def take(self, parts: tuple[str, ...], reader: Callable[[], bytes], size: int) -> None:
+    def take(self, parts: tuple[str, ...], reader: Callable[[int], bytes], info: os.stat_result) -> None:
         if self.files >= _MAX_SCAN_FILES:
             self.problem(parts, REASON_LIMIT)
             return
         self.files += 1
+        size = info.st_size
+        self.fingerprints.append(("/".join(parts), _fingerprint(info)))
         if size > _MAX_FILE_BYTES:
             self.problem(parts, REASON_OVERSIZE)
             return
         if size > self.budget:
             self.problem(parts, REASON_LIMIT)
             return
-        self.budget -= size
+        if not self.read:
+            return
         try:
-            data = reader()
+            data = reader(self.budget)
         except _Unsafe as exc:
             self.problem(parts, exc.reason)
             return
+        self.budget -= len(data)  # what was really read, not what was listed
         self.collect(parts, data)
 
     def symlink(self, dir_fd: int, parts: tuple[str, ...], name: str) -> None:
@@ -960,7 +1008,7 @@ class _Scan:
                 elif not stat.S_ISREG(mode):
                     self.problem(here, REASON_NON_REGULAR)  # FIFO, socket, device: never opened
                 else:
-                    self.take(here, lambda d=frame.descriptor, n=name, i=info: _read_file_at(d, n, i), info.st_size)
+                    self.take(here, lambda cap, d=frame.descriptor, n=name, i=info: _read_file_at(d, n, i, cap), info)
         finally:
             for frame in frames:
                 os.close(frame.descriptor)
@@ -999,7 +1047,7 @@ def read_run_json(run_dir: str | Path, relative: str, fallback: Any = None) -> A
                 resolved = _link_reader(run_real, parent_fd, parts[:-1], leaf)
                 if resolved is None:
                     return fallback
-                data = resolved[0]()
+                data = resolved[0](_MAX_FILE_BYTES)
             elif stat.S_ISREG(entry.st_mode):
                 data = _read_file_at(parent_fd, leaf, entry)
             else:
@@ -1013,7 +1061,7 @@ def read_run_json(run_dir: str | Path, relative: str, fallback: Any = None) -> A
         os.close(run_fd)
 
 
-def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
+def read_normalized_sections(run_dir: str | Path, *, strict: bool = False) -> dict[str, Any]:
     """The top-level ``normalized/<section>.json`` records of a run, parsed, for a report.
 
     The same guarded reader as identity discovery: only a bounded regular file (or a link to one inside the run) is
@@ -1021,8 +1069,19 @@ def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
     symlinked directory. A file that cannot be used is left out here; ``context_for_run`` names it and the
     redaction profiles that pseudonymise identities then refuse, so nothing is published without it. Empty
     sections are not returned. Never raises for a missing or unreadable ``normalized/``.
+
+    ``strict=True`` is for a reader that has no redaction step after it (a diff): a file that cannot be used (not a
+    regular file, unreadable, malformed, oversize, over the aggregate budget, a link that leaves the run) raises
+    ``ContextIncompleteError`` (a ``ValueError``) naming it by a safe label, instead of being left out. It still never
+    blocks on a FIFO.
     """
     sections: dict[str, Any] = {}
+    unusable: list[tuple[str, str]] = []
+
+    def refuse(name: str, reason: str) -> None:
+        if strict:
+            unusable.append((_safe_label(("normalized", name)), reason))
+
     run_real = os.path.realpath(run_dir)
     try:
         run_fd = os.open(run_real, _DIR_MODE)
@@ -1047,17 +1106,26 @@ def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
                         resolved = _link_reader(run_real, root_fd, ("normalized",), name)
                         if resolved is None:
                             continue
-                        reader, size = resolved
+                        reader, entry = resolved
                     elif stat.S_ISREG(entry.st_mode):
-                        size = entry.st_size
-                        reader = lambda d=root_fd, n=name, i=entry: _read_file_at(d, n, i)  # noqa: E731
+                        reader = lambda cap, d=root_fd, n=name, i=entry: _read_file_at(d, n, i, cap)  # noqa: E731
                     else:
+                        refuse(name, REASON_NON_REGULAR)
                         continue
-                    if size > budget:
+                    if entry.st_size > budget:
+                        refuse(name, REASON_LIMIT)
                         continue
-                    budget -= size
-                    payload = json.loads(reader().decode("utf-8"))
-                except (OSError, _Unsafe, ValueError, RecursionError):
+                    data = reader(budget)
+                    budget -= len(data)  # charged for the bytes really read
+                    payload = json.loads(data.decode("utf-8"))
+                except _Unsafe as exc:
+                    refuse(name, exc.reason)
+                    continue
+                except (ValueError, RecursionError):
+                    refuse(name, REASON_MALFORMED)
+                    continue
+                except OSError:
+                    refuse(name, REASON_UNREADABLE)
                     continue
                 if payload not in ({}, [], None):
                     sections[name[: -len(".json")]] = payload
@@ -1065,10 +1133,24 @@ def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
             os.close(root_fd)
     finally:
         os.close(run_fd)
+    if unusable:
+        raise ContextIncompleteError(sorted(set(unusable)))
     return sections
 
 
-def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str], frozenset[str], list[tuple[str, str]]]:
+Snapshot = tuple[tuple[str, tuple[int, int, int, int, int]], ...]
+
+
+@dataclass(frozen=True)
+class _Discovery:
+    names: frozenset[str] = frozenset()
+    ids: frozenset[str] = frozenset()
+    vocabulary: frozenset[str] = frozenset()
+    problems: tuple[tuple[str, str], ...] = ()
+    snapshot: Snapshot = ()
+
+
+def _scan_run_identities(run_path: Path, *, read: bool = True) -> _Discovery:
     """Privileged-user names, immutable ids, role vocabulary and the files discovery could not use.
 
     Every ``normalized/**/*.json`` is read (bounded), not just the sections a report selects, so an output that
@@ -1078,16 +1160,18 @@ def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str]
 
     Every directory is opened below a descriptor of the run directory without following links, every file is
     checked on its descriptor (regular, same identity as listed, size) and nothing is cached: a file replaced,
-    swapped, made unreadable or edited between two calls is seen by the next one.
+    swapped, made unreadable or edited between two calls is seen by the next one. A file that changes while it is
+    read is a ``changed during scan`` problem, and the fingerprints of every file listed are returned as the
+    ``snapshot`` the caller can compare later (``read=False`` lists and fingerprints without reading).
     """
     run_real = os.path.realpath(run_path)
     try:
         run_fd = os.open(run_real, _DIR_MODE)
     except FileNotFoundError:
-        return frozenset(), frozenset(), frozenset(), []
+        return _Discovery()
     except OSError:
-        return frozenset(), frozenset(), frozenset(), [("<run>", REASON_UNREADABLE)]
-    scan = _Scan(run_real)
+        return _Discovery(problems=(("<run>", REASON_UNREADABLE),))
+    scan = _Scan(run_real, read=read)
     try:
         try:
             info = os.stat("normalized", dir_fd=run_fd, follow_symlinks=False)
@@ -1121,7 +1205,24 @@ def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str]
         label = _safe_label(parts)
         labelled.append((f"{label}#{index}" if "<redacted-segment-" in label else label, reason))
     found = scan.found
-    return frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary), labelled
+    return _Discovery(
+        frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary), tuple(labelled), tuple(sorted(scan.fingerprints))
+    )
+
+
+def snapshot_run(run_dir: str | Path) -> Snapshot:
+    """The state of every ``normalized/**/*.json`` file of a run (relative path, device, inode, size, ``mtime`` and
+    ``ctime``), listed without reading any file. Two equal snapshots taken around a read mean the files read were not
+    touched in between; compare with ``RedactionContext.snapshot`` (``assert_snapshot_stable``)."""
+    return _scan_run_identities(Path(run_dir), read=False).snapshot
+
+
+def assert_snapshot_stable(run_dir: str | Path, expected: Snapshot, *, label: str = "<run>") -> None:
+    """Raise ``ContextIncompleteError`` unless the run's ``normalized/`` files are exactly as ``expected`` (an earlier
+    ``snapshot_run`` or ``RedactionContext.snapshot``): a file added, removed, replaced, grown or rewritten since then
+    means what was read and what was discovered may not be the same bytes, so nothing is published."""
+    if snapshot_run(run_dir) != expected:
+        raise ContextIncompleteError(((label, REASON_CHANGED),))
 
 
 def _problem_fields(problems: list[tuple[str, str]], prefix: str = "") -> tuple[tuple[tuple[str, str], ...], int]:
@@ -1137,10 +1238,12 @@ def context_for_run(run_dir: str | Path, **overrides: Any) -> RedactionContext:
     """The context for outputs derived from one run: its salt, its path spellings, its administrators' names and
     immutable ids (from every ``normalized/`` record, whichever sections the output selects) and role vocabulary."""
     run_path = Path(run_dir)
-    names, ids, vocabulary, problems = _scan_run_identities(run_path)
-    files, omitted = _problem_fields(problems)
+    discovery = _scan_run_identities(run_path)
+    names, ids, vocabulary = discovery.names, discovery.ids, discovery.vocabulary
+    files, omitted = _problem_fields(list(discovery.problems))
     values: dict[str, Any] = {
-        "incomplete": bool(problems),
+        "incomplete": bool(discovery.problems),
+        "snapshot": discovery.snapshot,
         "incomplete_reasons": _reason_strings(files, omitted),
         "incomplete_files": files,
         "incomplete_omitted": omitted,
@@ -1168,8 +1271,10 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
     omitted = 0
     incomplete = False
     salt = ""
+    snapshot: list[tuple[str, tuple[int, int, int, int, int]]] = []
     for index, run_dir in enumerate(run_dirs):
         context = context_for_run(run_dir)
+        snapshot.extend((f"{index}/{path}", state) for path, state in context.snapshot)
         incomplete = incomplete or context.incomplete
         files.extend((f"run {index + 1}: {label}", reason) for label, reason in context.incomplete_files)
         omitted += context.incomplete_omitted
@@ -1192,7 +1297,21 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         incomplete_reasons=_reason_strings(kept, omitted),
         incomplete_files=kept,
         incomplete_omitted=omitted,
+        snapshot=tuple(snapshot),
     )
+
+
+def assert_runs_stable(run_dirs: Iterable[str | Path], context: RedactionContext) -> None:
+    """``assert_snapshot_stable`` for the runs of a ``context_for_runs`` context (or the one run of ``context_for_run``)."""
+    dirs = list(run_dirs)
+    if len(dirs) == 1 and not any(path[:2] == "0/" for path, _ in context.snapshot):
+        assert_snapshot_stable(dirs[0], context.snapshot)
+        return
+    now: list[tuple[str, tuple[int, int, int, int, int]]] = []
+    for index, run_dir in enumerate(dirs):
+        now.extend((f"{index}/{path}", state) for path, state in snapshot_run(run_dir))
+    if tuple(now) != context.snapshot:
+        raise ContextIncompleteError((("<run>", REASON_CHANGED),))
 
 
 # -- redaction --------------------------------------------------------------------------------------------------------
@@ -1302,12 +1421,17 @@ class _Redactor:
             if self.names else None
         )
         # Immutable ids are protected by value, whatever their shape and case (``planted_immutable_id`` is as much an id
-        # as a base64 one); the pseudonym is that of the id as discovered, so every spelling gets the same one.
-        self.id_canonical = {i.lower(): i for i in sorted(ids, reverse=True) if len(i) >= 6 and not _PSEUDONYM_RE.match(i)}
+        # as a base64 one); the pseudonym is that of the id as discovered, so every spelling gets the same one. The only
+        # boundary is a word character (so ``key=ID``, ``/users/ID/`` and ``a-ID`` are all caught); the only floor is
+        # ``_MIN_NARRATIVE_ID`` characters for free text, because a shorter value would rewrite ordinary words and
+        # numbers (a structured ``immutable_id`` is pseudonymised whatever its length).
+        self.id_canonical = {
+            i.lower(): i for i in sorted(ids, reverse=True) if len(i) >= _MIN_NARRATIVE_ID and not _PSEUDONYM_RE.match(i)
+        }
         self.ids = sorted(self.id_canonical.values(), key=len, reverse=True)
         self.id_re = (
             re.compile(
-                _PSEUDONYM_KEEP + r"|(?<![\w+/=-])(?P<hit>" + "|".join(re.escape(i) for i in self.ids) + r")(?![\w+/=-])",
+                _PSEUDONYM_KEEP + r"|(?<!\w)(?P<hit>" + "|".join(re.escape(i) for i in self.ids) + r")(?!\w)",
                 re.IGNORECASE,
             )
             if self.ids else None
@@ -1596,6 +1720,9 @@ def redact_payload(
 ) -> Any:
     """The complete payload a tool or command returns, redacted with the context of the runs it was built from
     and with its citation summary re-derived. For return values that can leave the machine (MCP tools, notifications)."""
-    context = context_for_runs(run_dirs, paths)
+    dirs = list(run_dirs)
+    context = context_for_runs(dirs, paths)
     redacted = redact_output(value, profile=profile, context=context, markup=markup)
+    if dirs and (profile if isinstance(profile, RedactionProfile) else PROFILES[profile]).identities:
+        assert_runs_stable(dirs, context)  # the files discovery read are the files there still are
     return settle_citations(transform(redacted) if transform else redacted)

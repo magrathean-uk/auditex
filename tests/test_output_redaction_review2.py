@@ -140,7 +140,7 @@ def test_s3_per_file_errors_keep_found_identities_and_mark_the_context_incomplet
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     run = _run(tmp_path, [PRIV])
-    target = run / "normalized" / "broken.json"
+    target = run / "normalized" / "users.json"
     if kind == "dangling":
         target.symlink_to(run / "normalized" / "missing-target.json")
     elif kind == "malformed":
@@ -158,11 +158,11 @@ def test_s3_per_file_errors_keep_found_identities_and_mark_the_context_incomplet
 @pytest.mark.parametrize("profile", [PROFILE_SHAREABLE, PROFILE_EXPLAINER, PROFILE_CUSTOMER_PACK])
 def test_s3_an_incomplete_context_refuses_the_profiles_that_pseudonymise_identities(tmp_path: Path, profile: str) -> None:
     run = _run(tmp_path, [PRIV])
-    (run / "normalized" / "broken.json").write_text("[", encoding="utf-8")
+    (run / "normalized" / "users.json").write_text("[", encoding="utf-8")
     context = context_for_run(run)
     with pytest.raises(ContextIncompleteError) as caught:
         redact_output(NARRATIVE, context=context, profile=profile)
-    assert isinstance(caught.value, RedactionError) and "broken.json" in str(caught.value)
+    assert isinstance(caught.value, RedactionError) and "users.json" in str(caught.value)
     # The report-pack profile keeps identifiers by decision and is not refused.
     assert redact_output("x", context=context, profile=PROFILE_REPORT_PACK) == "x"
     # The decision is the caller's: a context repaired by the caller is accepted.

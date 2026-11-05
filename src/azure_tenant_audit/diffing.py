@@ -1,26 +1,23 @@
 from __future__ import annotations
 
 from collections import Counter
-import json
 from pathlib import Path
 from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
+from .output_redaction import read_normalized_sections, read_run_json
 from .waivers import accepted_risk_summary, is_accepted_status
 
 
-def _load_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, ValueError):
-        return {}
+def _load_json(run_dir: Path, relative: str) -> dict[str, Any]:
+    """A JSON object below the run, through the guarded reader of the redaction boundary (never blocks on a FIFO or
+    device, never follows a link out of the run, bounded); anything unusable is ``{}``."""
+    payload = read_run_json(run_dir, relative, {})
     return payload if isinstance(payload, dict) else {}
 
 
 def _load_findings(run_dir: Path) -> list[dict[str, Any]]:
-    pack = _load_json(run_dir / "reports" / "report-pack.json")
+    pack = _load_json(run_dir, "reports/report-pack.json")
     rows = pack.get("findings") if isinstance(pack, dict) else []
     if not isinstance(rows, list):
         rows = []
@@ -215,10 +212,9 @@ def _filter_changed_rows(
     return changed, suppressed
 
 
-def _load_records(path: Path) -> tuple[str, list[dict[str, Any]]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    kind = str(payload.get("kind") or path.stem)
-    records = payload.get("records", [])
+def _load_records(section: str, payload: Any) -> tuple[str, list[dict[str, Any]]]:
+    kind = str(payload.get("kind") or section) if isinstance(payload, dict) else section
+    records = payload.get("records", []) if isinstance(payload, dict) else []
     if not isinstance(records, list):
         records = []
     return kind, [item for item in records if isinstance(item, dict)]
@@ -229,24 +225,23 @@ def _record_key(record: dict[str, Any], kind: str) -> str:
 
 
 def _records_for_run(run_dir: Path) -> tuple[dict[str, str], dict[str, list[dict[str, Any]]]]:
-    normalized_dir = run_dir / "normalized"
-    if not normalized_dir.exists():
-        return {}, {}
-
+    # The guarded reader of the redaction boundary, strict: a FIFO, a device, a link out of the run, an oversize or
+    # malformed file is refused by name class, never opened blocking and never left out silently (a diff has no
+    # redaction step after it that could notice the gap).
     files: dict[str, str] = {}
     records_by_kind: dict[str, list[dict[str, Any]]] = {}
-    for path in sorted(normalized_dir.glob("*.json")):
-        kind, records = _load_records(path)
+    for section, payload in read_normalized_sections(run_dir, strict=True).items():
+        kind, records = _load_records(section, payload)
         if not records:
             continue
-        files[kind] = path.name
+        files[kind] = f"{section}.json"
         records_by_kind[kind] = records
     return files, records_by_kind
 
 
 def _run_metadata(run_dir: Path) -> dict[str, Any]:
-    manifest = _load_json(run_dir / "run-manifest.json")
-    snapshot = _load_json(run_dir / "normalized" / "snapshot.json")
+    manifest = _load_json(run_dir, "run-manifest.json")
+    snapshot = _load_json(run_dir, "normalized/snapshot.json")
     snapshot_meta = snapshot if isinstance(snapshot, dict) else {}
     platform = manifest.get("platform") or snapshot_meta.get("platform") or "m365"
     return {
