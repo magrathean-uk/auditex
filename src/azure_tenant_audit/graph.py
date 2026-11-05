@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import logging
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -237,6 +238,8 @@ class GraphClient:
     _next_request_not_before: float = field(default=0.0, init=False)
     _permission_failures: dict[str, int] = field(default_factory=dict, init=False)
     _token_claims: Optional[dict[str, Any]] = field(default=None, init=False, repr=False)
+    # Process memory only: scope -> (token, refresh deadline on the monotonic clock).
+    _certificate_tokens: dict[str, tuple[str, float]] = field(default_factory=dict, init=False, repr=False)
 
     def _emit(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
         if self.audit_event is None:
@@ -316,6 +319,9 @@ class GraphClient:
         return f"{self.auth.authority.rstrip('/')}/{tenant_id}"
 
     def ensure_token(self) -> str:
+        if self.auth.certificate is not None and self.auth.auth_mode == "app" and not self.auth.access_token:
+            # Certificate tokens must pass the expiry check even when _token is set.
+            return self._app_token()
         if self._token:
             return self._token
         if self.auth.access_token:
@@ -367,7 +373,7 @@ class GraphClient:
         self._emit("graph.token.succeeded", "Resource token acquired", {"scope": scope, "status": response.status_code})
         return token
 
-    def _certificate_result(self, scope: str) -> str | CertificateAuthError:
+    def _certificate_result(self, scope: str) -> tuple[str, float] | CertificateAuthError:
         """Contain all sensitive locals and upstream tracebacks inside this frame."""
         response = None
         try:
@@ -400,18 +406,28 @@ class GraphClient:
             )
             if not 200 <= response.status_code < 300:
                 return CertificateAuthError()
-            token = response.json().get("access_token")
+            payload = response.json()
+            token = payload.get("access_token")
             if not isinstance(token, str) or not token:
+                return CertificateAuthError()
+            lifetime = payload.get("expires_in")
+            if (isinstance(lifetime, bool) or not isinstance(lifetime, (int, float))
+                    or not math.isfinite(lifetime) or lifetime <= 0):
                 return CertificateAuthError()
             if scope == "48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default":
                 claims = auth_context.b64url_json(token.split(".")[1])
+                expiry = claims.get("exp")
+                now = time.time()
                 if (claims.get("aud") != scope.removesuffix("/.default")
                         or claims.get("azpacr", claims.get("appidacr")) != "2"
                         or claims.get("scp")
-                        or not isinstance(claims.get("exp"), (int, float))
-                        or claims["exp"] <= time.time()):
+                        or isinstance(expiry, bool)
+                        or not isinstance(expiry, (int, float))
+                        or not math.isfinite(expiry)
+                        or expiry <= now):
                     return CertificateAuthError()
-            return token
+                lifetime = min(lifetime, expiry - now)
+            return token, lifetime
         except Exception:
             # Never render response bodies, transport messages, callbacks or
             # library errors: they can all contain passwords or assertions.
@@ -424,14 +440,33 @@ class GraphClient:
                     pass
 
     def _certificate_app_token(self, scope: str) -> str:
+        cached = self._certificate_tokens.get(scope)
+        if cached is not None and time.monotonic() < cached[1]:
+            return cached[0]
+        self._certificate_tokens.pop(scope, None)
+        if scope == self.auth.graph_scope:
+            self._token = None
+            self._token_claims = None
+        started = time.monotonic()
         # Events contain no credential payload and no upstream diagnostics.
         self._emit("graph.token.requested", "Requesting certificate app token", {"mode": "certificate"})
         result = self._certificate_result(scope)
         if isinstance(result, CertificateAuthError):
+            self._invalidate_certificate_tokens()
             self._emit("graph.token.failed", "Certificate authentication failed", {"error_code": result.error_code})
             raise result
+        token, lifetime = result
+        # Count transport time against validity; refresh 60 seconds before expiry.
+        self._certificate_tokens[scope] = (token, started + lifetime - 60.0)
+        if scope == self.auth.graph_scope:
+            self._token = token
         self._emit("graph.token.succeeded", "Certificate app token acquired", {"mode": "certificate"})
-        return result
+        return token
+
+    def _invalidate_certificate_tokens(self) -> None:
+        self._certificate_tokens.clear()
+        self._token = None
+        self._token_claims = None
 
     def _app_token(self) -> str:
         if self.auth.certificate is not None:
@@ -617,6 +652,8 @@ class GraphClient:
             )
             if response.status_code in _REDIRECT_STATUSES:
                 response = self._follow_redirects(response, method, url, headers)
+            if response.status_code == 401 and self.auth.certificate is not None:
+                self._invalidate_certificate_tokens()
             if response.status_code == 403 and permission_stop_after:
                 self._permission_failures[family] = self._permission_failures.get(family, 0) + 1
             elif response.status_code < 400:

@@ -93,13 +93,14 @@ def _client(credential, post, **kwargs):
 
 
 class Response:
-    def __init__(self, status=200, token=None):
+    def __init__(self, status=200, token=None, expires_in=600):
         self.status_code = status
         self.token = token or _access_token()
+        self.expires_in = expires_in
         self.closed = False
 
     def json(self):
-        return {"access_token": self.token}
+        return {"access_token": self.token, "expires_in": self.expires_in}
 
     def close(self):
         self.closed = True
@@ -147,18 +148,81 @@ def test_pfx_success_and_teams_reader_contract(monkeypatch, material, password_s
     assert [event[0] for event in events] == ["graph.token.requested", "graph.token.succeeded"]
 
 
-def test_assertions_are_unique_and_graph_uses_same_certificate(monkeypatch, material):
+def test_certificate_cache_reuses_graph_and_resource_tokens(monkeypatch, material, caplog):
     credential = _pfx(monkeypatch, material)
+    assertions, scopes = [], []
+    def post(url, *, data, **kwargs):
+        assertions.append(data["client_assertion"])
+        scopes.append(data["scope"])
+        return Response(token="test-only-opaque-graph-token") if data["scope"] != TEAMS_SCOPE else Response()
+    client, events = _client(credential, post, throttle_mode="fast")
+    client.session.request = lambda *a, **k: SimpleNamespace(status_code=200, text="{}", json=lambda: {})
+    caplog.set_level(logging.DEBUG)
+    assert client.get_json("/users") == {}
+    assert client.get_json("/groups") == {}
+    assert client.app_token_for(client.auth.graph_scope) == "test-only-opaque-graph-token"
+    token = client.app_token_for(TEAMS_SCOPE)
+    assert client.app_token_for(TEAMS_SCOPE) == token
+    assert scopes == [client.auth.graph_scope, TEAMS_SCOPE]
+    assert client._token == "test-only-opaque-graph-token"
+    assert _decode(assertions[0].split(".")[1])["jti"] != _decode(assertions[1].split(".")[1])["jti"]
+    rendered = repr(client) + repr(events) + caplog.text
+    assert "test-only-opaque-graph-token" not in rendered and token not in rendered
+    assert "_certificate_tokens" not in repr(client)
+    assert all(assertion not in rendered for assertion in assertions)
+
+
+@pytest.mark.parametrize("scope", ["https://graph.microsoft.com/.default", TEAMS_SCOPE])
+@pytest.mark.parametrize("elapsed", [540, 601])
+def test_certificate_cache_refreshes_before_or_after_expiry(monkeypatch, material, scope, elapsed):
+    clock = [1000.0]
+    monkeypatch.setattr("azure_tenant_audit.graph.time.monotonic", lambda: clock[0])
     assertions = []
     def post(url, *, data, **kwargs):
         assertions.append(data["client_assertion"])
-        assert data["scope"] == "https://graph.microsoft.com/.default"
-        return Response(token="test-only-opaque-graph-token")
-    client, _ = _client(credential, post)
-    assert client.ensure_token() == "test-only-opaque-graph-token"
-    client.app_token_for(client.auth.graph_scope)
+        return Response(token=_access_token(test_only_generation=len(assertions)))
+    client, _ = _client(_pfx(monkeypatch, material), post)
+    acquire = client.ensure_token if scope == client.auth.graph_scope else lambda: client.app_token_for(scope)
+    first = acquire()
+    clock[0] += 539
+    assert acquire() == first
+    clock[0] = 1000.0 + elapsed
+    assert acquire() != first
+    assert len(assertions) == 2
     assert _decode(assertions[0].split(".")[1])["jti"] != _decode(assertions[1].split(".")[1])["jti"]
-    assert "test-only-opaque-graph-token" not in repr(client)
+
+
+def test_certificate_cache_invalidated_on_401(monkeypatch, material):
+    requests_seen = []
+    def post(*args, **kwargs):
+        requests_seen.append(kwargs["data"]["scope"])
+        return Response()
+    client, _ = _client(_pfx(monkeypatch, material), post, throttle_mode="fast")
+    client.app_token_for(TEAMS_SCOPE)
+    client.session.request = lambda *a, **k: SimpleNamespace(status_code=401, text="{}")
+    assert client._request("GET", "https://graph.microsoft.com/v1.0/users").status_code == 401
+    assert not client._certificate_tokens and client._token is None and client._token_claims is None
+    client.ensure_token()
+    client.app_token_for(TEAMS_SCOPE)
+    assert requests_seen == [TEAMS_SCOPE, client.auth.graph_scope, client.auth.graph_scope, TEAMS_SCOPE]
+
+
+def test_failed_cache_fill_discards_tokens_and_rechecks_teams_claims(monkeypatch, material):
+    requests_seen = []
+    clock = [1000.0]
+    monkeypatch.setattr("azure_tenant_audit.graph.time.monotonic", lambda: clock[0])
+    def post(*args, **kwargs):
+        requests_seen.append(kwargs["data"]["scope"])
+        return Response(token=_access_token(azpacr="1") if len(requests_seen) == 3 else _access_token())
+    client, _ = _client(_pfx(monkeypatch, material), post)
+    client.app_token_for(TEAMS_SCOPE)
+    clock[0] += 540
+    client.ensure_token()
+    with pytest.raises(CertificateAuthError):
+        client.app_token_for(TEAMS_SCOPE)
+    assert not client._certificate_tokens and client._token is None and client._token_claims is None
+    client.app_token_for(TEAMS_SCOPE)
+    assert requests_seen == [TEAMS_SCOPE, client.auth.graph_scope, TEAMS_SCOPE, TEAMS_SCOPE]
 
 
 @pytest.mark.parametrize("case", ["password", "missing_key", "missing_file", "missing_env", "provider_failure"])
@@ -202,22 +266,37 @@ def test_mock_endpoint_rejects_invalid_assertion(monkeypatch, material, rejectio
         signature = material[0].sign(message, padding.PKCS1v15(), hashes.SHA256())
         return message.decode() + "." + base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
     monkeypatch.setattr("azure_tenant_audit.graph.client_assertion", invalid)
+    captured = []
     def post(url, *, data, **kwargs):
-        claims = _decode(data["client_assertion"].split(".")[1])
-        assert claims["exp"] < time.time() or claims["aud"] != url
+        captured.append((url, _decode(data["client_assertion"].split(".")[1])))
         return Response(status=400)
     client, _ = _client(credential, post)
     with pytest.raises(CertificateAuthError):
         client.app_token_for(TEAMS_SCOPE)
+    assert len(captured) == 1
+    url, claims = captured[0]
+    if rejection == "expired":
+        assert claims["exp"] < time.time()
+    else:
+        assert claims["aud"] != url
 
 
 @pytest.mark.parametrize("overrides", [
     {"aud": "wrong"}, {"exp": 1}, {"azpacr": "1"}, {"azpacr": "2", "scp": "test-only-scope"},
+    *({"exp": value} for value in [float("nan"), float("inf"), float("-inf"), True, False, "9999999999", None]),
 ])
 def test_rejects_invalid_returned_teams_token(monkeypatch, material, overrides):
     client, _ = _client(_pfx(monkeypatch, material), lambda *a, **k: Response(token=_access_token(**overrides)))
     with pytest.raises(CertificateAuthError):
         client.app_token_for(TEAMS_SCOPE)
+
+
+@pytest.mark.parametrize("lifetime", [float("nan"), float("inf"), True, "600", 0, -1, None])
+def test_rejects_invalid_certificate_cache_lifetime(monkeypatch, material, lifetime):
+    client, _ = _client(_pfx(monkeypatch, material), lambda *a, **k: Response(expires_in=lifetime))
+    with pytest.raises(CertificateAuthError):
+        client.ensure_token()
+    assert not client._certificate_tokens and client._token is None
 
 
 def test_keychain_signs_without_export(monkeypatch, material):
@@ -380,6 +459,62 @@ def test_certificate_cli_selects_without_reading_secret_env(monkeypatch, tmp_pat
     assert captured[0].certificate_pfx == "test-only-memory.pfx"
 
 
+def test_certificate_cache_never_enters_persisted_run_state(monkeypatch, tmp_path, caplog):
+    from azure_tenant_audit import cli, output
+    from azure_tenant_audit.collectors.base import CollectorResult
+
+    token = _access_token(aud="https://graph.microsoft.com", test_only_cache_marker="test-only-private-cache")
+    assertion = "test-only-in-memory-assertion"
+    monkeypatch.setattr("azure_tenant_audit.graph.client_assertion", lambda *a: assertion)
+    clients, fills = [], []
+    def make_client(auth, **kwargs):
+        client = GraphClient(auth, **kwargs)
+        def post(*a, **k):
+            fills.append(k["data"]["scope"])
+            return Response(token=token)
+        client.session.post = post
+        clients.append(client)
+        return client
+
+    class Collector:
+        name = "identity"
+
+        def run(self, context):
+            # token_claims() has already filled the real client's Graph cache.
+            clients[0].ensure_token()
+            return CollectorResult(self.name, "ok", {"users": {"value": []}}, 0)
+
+    def assert_safe(text):
+        assert token not in text and assertion not in text
+        assert "test-only-private-cache" not in text and "_certificate_tokens" not in text
+
+    # Check before these persistence boundaries as well as checking the saved artefacts.
+    real_log = output.AuditLogger.log
+    real_write = output.AuditWriter._write_text_atomic
+    def safe_log(self, event, message, details=None):
+        assert_safe(json.dumps([event, message, details], default=str))
+        return real_log(self, event, message, details)
+    def safe_write(self, path, content):
+        assert_safe(content)
+        return real_write(self, path, content)
+    monkeypatch.setattr(output.AuditLogger, "log", safe_log)
+    monkeypatch.setattr(output.AuditWriter, "_write_text_atomic", safe_write)
+    monkeypatch.setattr(cli, "GraphClient", make_client)
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": Collector()})
+    caplog.set_level(logging.DEBUG)
+    assert cli.main(["--tenant-name", "test-only", "--tenant-id", "test-only-tenant",
+                     "--client-id", "test-only-app", "--certificate-keychain-sha256", "00" * 32,
+                     "--collectors", "identity", "--throttle-mode", "fast", "--out", str(tmp_path)]) == 0
+    assert fills == [clients[0].auth.graph_scope]
+    assert clients[0]._certificate_tokens
+    assert_safe(repr(clients[0]) + caplog.text)
+    persisted = [path for path in tmp_path.rglob("*") if path.is_file()]
+    assert any(path.name == "run-manifest.json" for path in persisted)
+    assert any(path.name == "auth_context.json" for path in persisted)
+    for path in persisted:
+        assert_safe(path.read_bytes().decode("utf-8", errors="replace"))
+
+
 @pytest.mark.parametrize("args", [
     ["--certificate-pfx", "test-only-memory.pfx", "--client-secret", "test-only-secret"],
     ["--certificate-password-env", "TEST_ONLY_PASSWORD"],
@@ -390,3 +525,16 @@ def test_certificate_cli_rejects_ambiguous_credentials(args):
     with pytest.raises(SystemExit) as caught:
         main(args)
     assert caught.value.code == 2
+
+
+@pytest.mark.parametrize("flag", ["--certificate-pf", "--certificate-password-en", "--certificate-keychain-sha25"])
+@pytest.mark.parametrize("joined", [False, True])
+def test_certificate_cli_rejects_abbreviations_before_run(monkeypatch, flag, joined):
+    from azure_tenant_audit import cli
+    called = []
+    monkeypatch.setattr(cli, "run_live", lambda *a, **k: called.append(True))
+    args = [flag + "=test-only-selector"] if joined else [flag, "test-only-selector"]
+    with pytest.raises(SystemExit) as caught:
+        cli.main(args)
+    assert caught.value.code == 2
+    assert not called
