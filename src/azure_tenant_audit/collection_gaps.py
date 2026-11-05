@@ -25,6 +25,13 @@ TRUNCATION_ERROR_CLASS = "collection_limit"
 # section say so themselves). Such a gap is still named: in the manifest, ``collection_gaps`` and the gates.
 SECTION_SCOPED = "section_scoped"
 
+REASON_TEAMS_TOKEN_UNAVAILABLE = "teams_token_unavailable"
+REASON_TEAMS_POWERSHELL_NOT_SUPPORTED = "teams_powershell_not_supported"
+SECTION_GAP_REASON_TEXT = {
+    REASON_TEAMS_TOKEN_UNAVAILABLE: "not collected: certificate token for the Teams admin API not available",
+    REASON_TEAMS_POWERSHELL_NOT_SUPPORTED: "not collected: Teams PowerShell sessions are not supported",
+}
+
 # Why a list stopped before its last row. These strings are part of the output contract.
 REASON_OPERATOR_LIMIT = "operator_limit"
 REASON_PAGINATION_FAILED = "pagination_failed"
@@ -234,13 +241,14 @@ def _section_name(name: str) -> str:
 
 
 def section_gap_records(coverage_rows: Iterable[Any]) -> list[dict[str, Any]]:
-    """One record per section whose section-scoped read did not finish: cut by a bound or refused.
+    """One record per section whose section-scoped read did not finish: cut, refused or skipped.
 
     ``section_scoped`` coverage rows (the Defender state, the Intune policy assignments, the beta update profiles) keep
     the collector ``ok``. Their gap is real all the same, so it is listed here for the manifest's ``coverage_gaps``, the
     normalized ``collection_gaps``, the handoff limitations and the gates. The aggregate row of a read and its derived
     ``<section>Fanout`` row are one section gap: ``status`` is ``failed`` when the read itself (a row that is not derived)
-    failed, else ``partial``; ``reason`` is the truncation reason, or ``read_failed`` when nothing was cut.
+    failed, ``skipped`` when all its rows were skipped, else ``partial``. ``reason`` is the truncation or explicit skip
+    reason, or ``read_failed`` when neither is recorded.
     """
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in latest_coverage(coverage_rows):
@@ -252,12 +260,14 @@ def section_gap_records(coverage_rows: Iterable[Any]) -> list[dict[str, Any]]:
             groups.setdefault((collector, section), []).append(row)
     records: list[dict[str, Any]] = []
     for (collector, section), rows in sorted(groups.items()):
-        reasons = [str(row["truncation_reason"]) for row in rows if row.get("truncation_reason")]
+        reasons = [str(row.get("truncation_reason") or row["reason"]) for row in rows
+                   if row.get("truncation_reason") or row.get("reason")]
         classes = sorted({str(row["error_class"]) for row in rows if row.get("error_class") and row.get("error_class") != TRUNCATION_ERROR_CLASS})
         record: dict[str, Any] = {
             "collector": collector,
             "section": section,
-            "status": "failed" if any(row.get("type") != "derived" and row.get("status") == "failed" for row in rows) else "partial",
+            "status": ("skipped" if all(row.get("status") == "skipped" for row in rows) else
+                       "failed" if any(row.get("type") != "derived" and row.get("status") == "failed" for row in rows) else "partial"),
             "reason": reasons[0] if reasons else REASON_READ_FAILED,
             "rows_collected": max(_row_count(row) for row in rows),
         }
@@ -271,7 +281,15 @@ def section_gap_records(coverage_rows: Iterable[Any]) -> list[dict[str, Any]]:
 
 
 def section_gap_summary(records: Iterable[Mapping[str, Any]]) -> str:
-    return ", ".join(f"{item['collector']}.{item['section']} ({item['status']}, {item['reason']})" for item in records)
+    """Name every operation, sharing repeated status and reason text per collector."""
+    groups: dict[tuple[str, str, str], list[str]] = {}
+    for item in records:
+        key = (item["collector"], item["status"], item["reason"])
+        groups.setdefault(key, []).append(f"{item['collector']}.{item['section']}")
+    return ", ".join(
+        f"{', '.join(operations)} ({status}, {SECTION_GAP_REASON_TEXT.get(reason, reason)})"
+        for (_collector, status, reason), operations in groups.items()
+    )
 
 
 # Operations whose refused or failed read is named in ``collection_gaps`` although no list was cut. Unlike a section-scoped

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.private_io import write_private_text
+from azure_tenant_audit.collection_gaps import SECTION_GAP_REASON_TEXT
 from azure_tenant_audit.resources import load_json_resource, resolve_resource_path
 
 FORMAT_VERSION = 2
@@ -330,12 +331,23 @@ def _collector_rows(run_dir: Path, manifest: dict[str, Any], data_handling: dict
     coverage = {_text(row.get("collector")): row for row in _records(_read_json(run_dir / "normalized" / "coverage_ledger.json", {}))}
     capability = {_text(row.get("collector")): row for row in _records(_read_json(run_dir / "normalized" / "capability_matrix.json", {}))}
     offline = _text(manifest.get("mode")) == "offline"
+    section_gaps: dict[str, list[dict[str, Any]]] = {}
+    for gap in manifest.get("coverage_gaps") or []:
+        for section in gap.get("section_gaps") or []:
+            section_gaps.setdefault(_text(section.get("collector")), []).append(section)
     rows = []
     for name in universe:
         definition = definitions.get(name) if isinstance(definitions.get(name), dict) else {}
         ledger = coverage.get(name, {})
         if name not in selected:
             status, reason = "not_selected", f'Not in preset "{preset}"' if preset else "Not selected for this run"
+        elif (not ledger.get("item_count") and section_gaps.get(name)
+              and all(gap.get("status") == "skipped" for gap in section_gaps[name])):
+            status = "not_verified"
+            reason = "; ".join(dict.fromkeys(
+                SECTION_GAP_REASON_TEXT.get(gap.get("reason"), _text(gap.get("reason")))
+                for gap in section_gaps[name]
+            ))
         elif _text(ledger.get("coverage_status")).startswith("complete"):
             status, reason = "verified", "Replayed from the offline sample" if offline else "Collected"
         else:

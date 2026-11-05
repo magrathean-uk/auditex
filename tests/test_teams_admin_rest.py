@@ -313,39 +313,34 @@ def command_reader(monkeypatch):
     return commands
 
 
-def test_collector_certificate_reads_five_and_keeps_two_commands(monkeypatch):
+def test_collector_certificate_reads_five_and_skips_two_commands(monkeypatch):
     commands = command_reader(monkeypatch)
     session = connect(monkeypatch, [Response() for _ in range(5)])
     client = Client()
     result = TeamsPolicyCollector().run({"client": client})
-    assert len(session.calls) == 5 and len(commands.calls) == 2
+    assert len(session.calls) == 5 and commands.calls == []
     assert client.scopes == [rest.TEAMS_ADMIN_SCOPE]
     assert tuple(result.payload) == TEAMS_OPERATIONS and len(result.coverage) == 7
-    assert result.status == "partial" and result.item_count == 5
+    assert result.status == "ok" and result.item_count == 5
+    skipped = [row for row in result.coverage if row["status"] == "skipped"]
+    assert {row["name"] for row in skipped} == {"messagingPolicies", "appSetupPolicies"}
+    assert all(row["reason"] == row["error_class"] == "teams_powershell_not_supported" for row in skipped)
+    assert all(row["section_scoped"] for row in skipped)
     for operation in rest.TEAMS_READ_PATHS:
         assert result.payload[operation]["value"] == [policy_row(operation)]
         assert result.payload[operation]["command"] == f"GET {rest.TEAMS_READ_PATHS[operation]}"
     assert TOKEN not in json.dumps([result.payload, result.coverage, commands.calls])
 
 
-def test_no_token_matches_main_except_reason(monkeypatch):
+@pytest.mark.parametrize("resource_token", [None, "unusable", token(appidacr="1"), token(aud="other-resource")])
+def test_no_token_skips_every_read(monkeypatch, resource_token):
     commands = command_reader(monkeypatch)
     session = connect(monkeypatch, [])
-    # Reproduce main's unmodified seven-command reader and coverage contract.
-    expected_payload, expected_coverage = {}, []
-    for name, command in TeamsPolicyCollector.command_collectors:
-        response = commands.run(command, log_event=None, session={"kind": "microsoft_teams"})
-        response.setdefault("command", command)
-        expected_payload[name] = response
-        expected_coverage.append({"collector": "teams_policy", "type": "command", "name": name,
-            "command": command, "status": "failed", "item_count": 0, "duration_ms": 0.0,
-            "error_class": "session_not_connected", "error": "session_not_connected"})
-    commands.calls.clear()
-    result = TeamsPolicyCollector().run({"client": Client(None)})
-    assert result.payload == expected_payload and result.status == "partial" and result.item_count == 0
-    coverage = deepcopy(result.coverage)
-    assert all(row.pop("reason") == "teams_token_unavailable" for row in coverage)
-    assert coverage == expected_coverage and session.calls == [] and len(commands.calls) == 7
+    result = TeamsPolicyCollector().run({"client": Client(resource_token)})
+    assert result.status == "ok" and result.item_count == 0
+    assert len(result.coverage) == 7
+    assert all(row["reason"] == "teams_token_unavailable" and row["status"] == "skipped" for row in result.coverage)
+    assert session.calls == [] and commands.calls == []
 
 
 @pytest.mark.parametrize("environment", ["gcchigh", "dod", "unknown"])
@@ -354,10 +349,12 @@ def test_collector_unsupported_environment(monkeypatch, environment):
     session = connect(monkeypatch, [])
     client = Client()
     result = TeamsPolicyCollector().run({"client": client, "environment": environment})
-    assert session.calls == [] and client.scopes == [] and len(commands.calls) == 2
+    assert session.calls == [] and client.scopes == [] and commands.calls == []
     for operation in rest.TEAMS_READ_PATHS:
         assert result.payload[operation]["error_class"] == "unsupported_environment"
-    assert all(row["status"] == "failed" for row in result.coverage)
+    assert result.status == "partial"
+    assert all(row["status"] == ("failed" if row["name"] in rest.TEAMS_READ_PATHS else "skipped")
+               for row in result.coverage)
 
 
 @pytest.mark.parametrize("endpoint", ["https://graph.microsoft.us/v1.0", "http://graph.microsoft.com/v1.0", ""])
@@ -367,7 +364,7 @@ def test_no_environment_defaults_only_for_commercial_graph(monkeypatch, endpoint
     client = Client()
     client.graph_endpoint = endpoint
     result = TeamsPolicyCollector().run({"client": client})
-    assert session.calls == [] and client.scopes == [] and len(commands.calls) == 2
+    assert session.calls == [] and client.scopes == [] and commands.calls == []
     assert all(result.payload[operation]["error_class"] == "unsupported_environment"
                for operation in rest.TEAMS_READ_PATHS)
 
@@ -379,18 +376,21 @@ def test_environment_from_manifest(monkeypatch):
     assert len(session.calls) == 5 and result.item_count == 5
 
 
-def test_collector_does_not_attempt_secret_token(monkeypatch):
-    command_reader(monkeypatch)
+@pytest.mark.parametrize("auth", [SimpleNamespace(client_secret="constructed-secret", auth_mode="app"),
+                                  SimpleNamespace(auth_mode="delegated")])
+def test_collector_does_not_attempt_non_certificate_auth(monkeypatch, auth):
+    commands = command_reader(monkeypatch)
     session = connect(monkeypatch, [])
     client = Client()
-    client.auth = SimpleNamespace(client_secret="constructed-secret", auth_mode="app")
+    client.auth = auth
     result = TeamsPolicyCollector().run({"client": client})
-    assert client.scopes == [] and session.calls == []
+    assert client.scopes == [] and session.calls == [] and commands.calls == []
+    assert result.status == "ok"
     assert all(row["reason"] == "teams_token_unavailable" for row in result.coverage)
 
 
 def test_token_exception_never_reaches_logs_or_bundle(monkeypatch):
-    command_reader(monkeypatch)
+    commands = command_reader(monkeypatch)
     connect(monkeypatch, [])
     client = Client()
     def fail(_scope):
@@ -398,6 +398,7 @@ def test_token_exception_never_reaches_logs_or_bundle(monkeypatch):
     client.app_token_for = fail
     events = []
     result = TeamsPolicyCollector().run({"client": client, "audit_logger": lambda *a: events.append(a)})
+    assert result.status == "ok" and commands.calls == []
     assert TOKEN not in json.dumps([result.payload, result.coverage, events])
 
 
@@ -406,7 +407,8 @@ def test_capability_gate_has_no_unused_graph_scope():
     hints = json.loads(Path("configs/collector-permissions.json").read_text())["collector_permissions"]
     rows = build_capability_matrix_rows(auth_context={"token_claims": {}}, selected_collectors=["teams_policy"],
         auditor_profile="app-readonly-full", collector_config=config, permission_hints=hints)
-    assert rows[0]["status"] != "blocked_by_scope"
+    assert rows[0]["status"] == "supported_effective_role"
+    assert rows[0]["reason"] == "command_toolchain_required"
     assert rows[0]["required_permissions"] == [] and hints["teams_policy"]["graph_scopes"] == []
 
 

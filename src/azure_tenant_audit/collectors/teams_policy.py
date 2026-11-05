@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ..adapters import get_adapter
+from ..collection_gaps import (
+    REASON_TEAMS_POWERSHELL_NOT_SUPPORTED, REASON_TEAMS_TOKEN_UNAVAILABLE,
+    SECTION_GAP_REASON_TEXT, SECTION_SCOPED,
+)
 from .base import Collector, CollectorResult
 
 
@@ -61,7 +65,6 @@ class TeamsPolicyCollector(Collector):
         from ..graph import GRAPH_ROOT, GraphClient
 
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
-        adapter = get_adapter("powershell_graph")
         client = context.get("client")
         manifest = context.get("manifest") or {}
         environment = context.get("environment") or context.get("m365_environment") or manifest.get("environment")
@@ -93,12 +96,29 @@ class TeamsPolicyCollector(Collector):
 
         for name, command in self.command_collectors:
             rest_read = name in TEAMS_READ_PATHS and bool(token)
+            skipped = False
             if name in TEAMS_READ_PATHS and environment and environment not in TEAMS_ADMIN_BASE:
                 response = {"error": "unsupported_environment", "error_class": "unsupported_environment"}
+            elif not token:
+                # No adapter connects a Teams PowerShell session. An unavailable
+                # certificate token is a named coverage gap, not a failed read.
+                skipped = True
+                response = {"value": [], "status": "skipped",
+                            "reason": REASON_TEAMS_TOKEN_UNAVAILABLE,
+                            SECTION_SCOPED: True,
+                            "error_class": "teams_token_unavailable",
+                            "error": SECTION_GAP_REASON_TEXT[REASON_TEAMS_TOKEN_UNAVAILABLE]}
             elif name in TEAMS_READ_PATHS and token:
                 response = rest.get(name, token, environment, log_event=log_event)
             else:
-                response = adapter.run(command, log_event=log_event, session={"kind": "microsoft_teams"})
+                # No Teams session path exists. Never launch an unauthenticated
+                # PowerShell command for operations outside the REST allowlist.
+                skipped = True
+                response = {"value": [], "status": "skipped",
+                            "reason": REASON_TEAMS_POWERSHELL_NOT_SUPPORTED,
+                            SECTION_SCOPED: True,
+                            "error_class": "teams_powershell_not_supported",
+                            "error": SECTION_GAP_REASON_TEXT[REASON_TEAMS_POWERSHELL_NOT_SUPPORTED]}
             response.setdefault("command", command)
             payload[name] = response
             values = response.get("value")
@@ -113,22 +133,23 @@ class TeamsPolicyCollector(Collector):
                         "endpoint": TEAMS_ADMIN_BASE[environment] + TEAMS_READ_PATHS[name],
                     } if rest_read else {"type": "command", "command": command}),
                     "name": name,
-                    "status": "failed" if response.get("error") else "ok",
+                    "status": "skipped" if skipped else "failed" if response.get("error") else "ok",
                     "item_count": item_count,
                     "duration_ms": response.get("duration_ms", 0.0),
                     "error_class": response.get("error_class"),
                     "error": response.get("error"),
                 }
             )
-            if not token and response.get("error_class") == "session_not_connected":
-                coverage[-1]["reason"] = "teams_token_unavailable"
+            if skipped:
+                coverage[-1].update(reason=response["reason"], **{SECTION_SCOPED: True})
 
-        partial = any(item.get("status") != "ok" for item in coverage)
+        partial = any(item.get("status") not in {"ok", "skipped"} for item in coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",
             payload=payload,
             item_count=total,
-            message="Teams policy collector partially completed" if partial else "",
+            message=("Teams policy collector partially completed" if partial else
+                     SECTION_GAP_REASON_TEXT[REASON_TEAMS_TOKEN_UNAVAILABLE] if not token else ""),
             coverage=coverage,
         )

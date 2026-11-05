@@ -8,6 +8,7 @@ from azure_tenant_audit.collectors.teams_policy import TEAMS_OPERATIONS, TeamsPo
 from azure_tenant_audit.config import CollectorConfig
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
+from test_teams_admin_rest import Client
 
 
 REQUIRED = {
@@ -46,6 +47,11 @@ class _FakeAdapter:
         self.calls.append((command, session))
         commands = dict(TeamsPolicyCollector.command_collectors)
         if self.failed_operation and command == commands[self.failed_operation]:
+            return {"error": "Policy read failed", "error_class": "permission", "value": []}
+        return {"value": [{"Identity": "Global"}], "duration_ms": 1.0}
+
+    def get(self, name, token, environment, **kwargs):
+        if name == self.failed_operation:
             return {"error": "Policy read failed", "error_class": "permission", "value": []}
         return {"value": [{"Identity": "Global"}], "duration_ms": 1.0}
 
@@ -155,21 +161,22 @@ def test_failed_operation_marks_only_its_own_row(monkeypatch) -> None:
     adapter = _FakeAdapter(failed_operation="broadcastPolicies")
     monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", lambda _name: adapter)
 
-    result = TeamsPolicyCollector().run({"audit_logger": None})
+    result = TeamsPolicyCollector().run({"client": Client(), "audit_logger": None})
 
     assert result.status == "partial"
     assert len(result.coverage) == 7
     assert {row["name"]: row["status"] for row in result.coverage} == {
-        name: "failed" if name == "broadcastPolicies" else "ok" for name in TEAMS_OPERATIONS
+        name: "failed" if name == "broadcastPolicies" else
+        "skipped" if name in {"messagingPolicies", "appSetupPolicies"} else "ok" for name in TEAMS_OPERATIONS
     }
-    assert result.item_count == 6
+    assert result.item_count == 4
     assert result.payload["broadcastPolicies"]["error"] == "Policy read failed"
     for name in TEAMS_OPERATIONS:
-        if name != "broadcastPolicies":
+        if name not in {"broadcastPolicies", "messagingPolicies", "appSetupPolicies"}:
             assert result.payload[name]["value"] == [{"Identity": "Global"}]
 
 
-def test_all_seven_operations_collected(monkeypatch) -> None:
+def test_no_token_skips_all_seven_operations_without_loading_an_adapter(monkeypatch) -> None:
     expected = (
         "tenantFederationConfiguration",
         "messagingPolicies",
@@ -179,8 +186,9 @@ def test_all_seven_operations_collected(monkeypatch) -> None:
         "broadcastPolicies",
         "clientConfiguration",
     )
-    adapter = _FakeAdapter()
-    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", lambda _name: adapter)
+    def forbidden_adapter(name):
+        raise AssertionError(f"No adapter may be loaded without a Teams token: {name}")
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", forbidden_adapter)
 
     result = TeamsPolicyCollector().run({"audit_logger": None})
 
@@ -188,11 +196,38 @@ def test_all_seven_operations_collected(monkeypatch) -> None:
     assert tuple(result.payload) == expected
     assert tuple(row["name"] for row in result.coverage) == expected
     assert result.status == "ok"
-    assert result.item_count == 7
-    assert all(row["status"] == "ok" and row["item_count"] == 1 for row in result.coverage)
-    assert adapter.calls == [
-        (command, {"kind": "microsoft_teams"}) for _, command in TeamsPolicyCollector.command_collectors
-    ]
+    assert result.item_count == 0 and result.error is None
+    assert all(row["status"] == "skipped" and row["item_count"] == 0 for row in result.coverage)
+    assert all(row["reason"] == "teams_token_unavailable" and row["section_scoped"] for row in result.coverage)
     for name, command in TeamsPolicyCollector.command_collectors:
-        assert result.payload[name]["value"] == [{"Identity": "Global"}]
+        assert result.payload[name]["value"] == []
+        assert result.payload[name]["status"] == "skipped"
         assert result.payload[name]["command"] == command
+
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme", run_id="skipped-teams", collector_payloads={"teams_policy": result.payload},
+        coverage_rows=result.coverage,
+    )
+    assert not snapshot.get("teams_policy_objects", {}).get("records")
+    assert not [row for row in build_findings([], normalized_snapshot=snapshot) if row.get("collector") == "teams_policy"]
+    gaps = snapshot["collection_gaps"]["records"]
+    assert len(gaps) == 7
+    assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in gaps)
+
+
+def test_operation_outside_rest_allowlist_never_loads_powershell(monkeypatch) -> None:
+    adapter = _FakeAdapter()
+
+    def rest_only(name):
+        assert name == "teams_admin_rest"
+        return adapter
+
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", rest_only)
+    collector = TeamsPolicyCollector()
+    collector.command_collectors = [*collector.command_collectors, ("futurePolicy", "Get-CsFuturePolicy")]
+    result = collector.run({"client": Client()})
+
+    assert result.status == "ok" and adapter.calls == []
+    assert result.payload["futurePolicy"]["status"] == "skipped"
+    assert result.payload["futurePolicy"]["reason"] == "teams_powershell_not_supported"
+    assert result.coverage[-1]["reason"] == "teams_powershell_not_supported"

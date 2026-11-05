@@ -639,6 +639,28 @@ def test_consistent_command_words_and_text_stay_read_only() -> None:
     assert inventory["safety"]["observed_write_calls"] == []
 
 
+def test_skipped_teams_reads_do_not_claim_transport_attempts(monkeypatch, tmp_path):
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+
+    def forbidden_adapter(name):
+        raise AssertionError(f"Unexpected Teams adapter: {name}")
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", forbidden_adapter)
+    writer = AuditWriter(tmp_path, tenant_name="constructed", run_name="teams-skip")
+    writer.log_event("collector.started", "Constructed Teams collector started", {"collector": "teams_policy"})
+    result = TeamsPolicyCollector().run({"audit_logger": writer.log_event})
+    declared = build_api_call_inventory(
+        platform="m365", selected_collectors=["teams_policy"], capability_rows=[],
+        coverage_rows=result.coverage, data_handling={"read_only": True},
+    )
+    path = writer.write_json_artifact("api-inventory.json", declared)
+    inventory = json.loads(path.read_text())
+    assert inventory["counts"]["observed_commands"] == 0
+    assert inventory["counts"]["observed_teams_admin_rest_requests"] == 0
+    assert len(inventory["observed_calls"]) == 7
+    assert all(row["status"] == "skipped" for row in inventory["observed_calls"])
+    assert inventory["safety"]["read_only"] and inventory["safety"]["no_content_reads"]
+
+
 def test_every_shipped_powershell_command_logged_by_the_adapter_is_read_only_in_the_ledger(monkeypatch) -> None:
     """The logged text is quoted by the redaction; the cross-check must still accept what the adapters really log."""
     import subprocess

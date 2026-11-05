@@ -821,23 +821,14 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
     assert result.payload["mailboxForwarding"]["value"][0]["DisplayName"] == "Alice Example"
 
 
-def test_teams_policy_collector_collects_command_sections(monkeypatch) -> None:
-    adapter = _FakeAdapter(
-        {
-            "Get-CsTenantFederationConfiguration | Select-Object Identity,AllowFederatedUsers,AllowTeamsConsumer,AllowTeamsConsumerInbound,AllowPublicUsers,AllowedDomains,BlockedDomains": {"value": [{"AllowFederatedUsers": True}]},
-            "Get-CsTeamsMessagingPolicy | Select-Object Identity,AllowOwnerDeleteMessage,AllowUserDeleteMessage,AllowUserEditMessage": {"value": [{"Identity": "Global"}]},
-            "Get-CsTeamsMeetingPolicy | Select-Object Identity,AllowCloudRecording,AllowIPVideo,ScreenSharingMode,AllowExternalParticipantGiveRequestControl,AllowAnonymousUsersToStartMeeting,AutoAdmittedUsers,AllowPSTNUsersToBypassLobby": {"value": [{"Identity": "Global"}]},
-            "Get-CsTeamsAppPermissionPolicy | Select-Object Identity,DefaultCatalogAppsType,GlobalCatalogAppsType,PrivateCatalogAppsType": {"value": [{"Identity": "Global"}]},
-            "Get-CsTeamsAppSetupPolicy | Select-Object Identity,AllowSideLoading": {"value": [{"Identity": "Global"}]},
-            "Get-CsTeamsMeetingBroadcastPolicy | Select-Object Identity,BroadcastRecordingMode": {"value": [{"Identity": "Global"}]},
-            "Get-CsTeamsClientConfiguration | Select-Object Identity,AllowEmailIntoChannel": {"value": [{"Identity": "Global"}]},
-        }
-    )
-    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", lambda _name: adapter)
+def test_teams_policy_collector_skips_command_sections_without_a_token(monkeypatch) -> None:
+    def forbidden_adapter(name):
+        raise AssertionError(f"Unexpected adapter: {name}")
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", forbidden_adapter)
 
     collector = TeamsPolicyCollector()
     result = collector.run({"audit_logger": None})
 
     assert result.status == "ok"
-    assert result.payload["tenantFederationConfiguration"]["value"][0]["AllowFederatedUsers"] is True
-    assert result.payload["meetingPolicies"]["value"][0]["Identity"] == "Global"
+    assert len(result.coverage) == 7 and result.item_count == 0
+    assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in result.coverage)

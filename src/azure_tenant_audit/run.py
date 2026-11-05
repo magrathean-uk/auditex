@@ -355,7 +355,12 @@ def run_preflight_probe(
                 )
             coverage = result.coverage or []
             has_ok = any(item.get("status") == "ok" for item in coverage)
-            decision = "run" if include_blocked or result.item_count > 0 or has_ok else "skip"
+            # An intentional capability skip is not a blocked read. Run the
+            # collector to persist its skipped rows and customer-facing gaps.
+            non_failing_skip = result.status == "ok" and coverage and all(
+                item.get("status") == "skipped" for item in coverage
+            )
+            decision = "run" if include_blocked or result.item_count > 0 or has_ok or non_failing_skip else "skip"
             reason = "supported" if decision == "run" else "known_blocked"
             row: dict[str, Any] = {
                 "collector": name,

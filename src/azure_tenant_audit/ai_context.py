@@ -134,6 +134,12 @@ def build_ai_context(
                 for collector, payload in collector_status.items()
                 if payload.get("coverage_status") in {"partial_success", "blocked_permission", "failed_runtime", "not_run"}
             }
+            | {
+                str(section["collector"])
+                for gap in run_metadata.get("coverage_gaps") or []
+                for section in gap.get("section_gaps") or []
+                if section.get("status") == "skipped" and section.get("collector")
+            }
         ),
     }
 

@@ -298,7 +298,7 @@ def finalize_bundle_contract(
 
     ai_context = build_ai_context(
         run_dir=writer.run_dir,
-        run_metadata=run_metadata,
+        run_metadata={**run_metadata, "coverage_gaps": computed_coverage_gaps},
         normalized_snapshot=normalized_snapshot,
         capability_rows=capability_rows,
         coverage_ledger=coverage_ledger,

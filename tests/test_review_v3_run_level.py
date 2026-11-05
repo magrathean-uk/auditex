@@ -20,6 +20,103 @@ from azure_tenant_audit.graph import GraphError
 from graph_fakes import COMPLIANCE_POLICY, RING, FakeGraph, devices, intune_lists, load, rule_statuses, run_collectors
 
 
+@pytest.mark.parametrize("probe_first", [False, True])
+def test_no_teams_token_leaves_run_ok_and_customer_limitations_visible(monkeypatch, tmp_path, probe_first):
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.collectors.base import CollectorResult
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+
+    class AllOkCollector:
+        name = "licensing"
+
+        def run(self, context):
+            return CollectorResult(name=self.name, status="ok", item_count=0, payload={"skus": {"value": []}},
+                                   coverage=[{"collector": self.name, "name": "skus", "type": "graph",
+                                              "endpoint": "/subscribedSkus", "status": "ok", "item_count": 0}])
+
+    def forbidden_adapter(name):
+        raise AssertionError(f"Unexpected Teams adapter: {name}")
+
+    monkeypatch.setattr(cli, "REGISTRY", {"teams_policy": TeamsPolicyCollector(), "licensing": AllOkCollector()})
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", forbidden_adapter)
+    # The other collector supplies a successful coverage row even for an empty list.
+    extra = ("--probe-first",) if probe_first else ()
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, FakeGraph(), "teams_policy,licensing", *extra)
+
+    assert rc == 0
+    manifest = load(run_dir, "run-manifest.json")
+    assert manifest["overall_status"] == "ok"
+    assert load(run_dir, "validation.json")["valid"] is True
+    teams_rows = [row for row in load(run_dir, "coverage.json") if row["collector"] == "teams_policy"]
+    assert len(teams_rows) == 7 and all(row["status"] == "skipped" for row in teams_rows)
+    ledger = {row["collector"]: row for row in load(run_dir, "normalized/coverage_ledger.json")["records"]}
+    assert ledger["teams_policy"]["actual_status"] == "ok"
+    assert ledger["teams_policy"]["coverage_status"] != "not_applicable"
+    assert len(_section_gaps(run_dir)) == 7
+    customer_text = "not collected: certificate token for the Teams admin API not available"
+    from auditex.explorer import _collector_rows
+
+    explorer_rows = {row["collector"]: row for row in _collector_rows(run_dir, manifest, {})}
+    assert explorer_rows["teams_policy"]["status"] == "not_verified"
+    assert explorer_rows["teams_policy"]["reason"] == customer_text
+    assert explorer_rows["licensing"]["status"] == "verified"
+    assert load(run_dir, "ai_context.json")["known_limitations"] == ["teams_policy"]
+    pack = load(run_dir, "reports/report-pack.json")
+    assert customer_text in str(pack["summary"]["coverage_gaps"])
+    assert pack["summary"]["coverage_gaps"][0]["message"].count(customer_text) == 1
+    summary_gaps = (run_dir / "summary.md").read_text().split("## Coverage Gaps", 1)[1]
+    assert summary_gaps.count(customer_text) == 1
+    handoff = enterprise_handoff(run_dir)
+    assert handoff["handoff_status"] == "ready_with_limitations"
+    assert customer_text in str(handoff["limitations"])
+    teams_statuses = rule_statuses(run_dir)["teams.external_federation_open"]
+    assert {status for status, _reason in teams_statuses} == {"not_assessed"}
+    assert not [row for row in (load(run_dir, "findings/findings.json") or []) if row.get("collector") == "teams_policy"]
+
+
+@pytest.mark.parametrize("probe_first", [False, True])
+def test_teams_token_runs_five_rest_reads_and_skips_commands_without_partial_run(monkeypatch, tmp_path, probe_first):
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.adapters import teams_admin_rest as rest
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+    from test_teams_admin_rest import Response, TOKEN, command_reader, connect
+
+    class CertificateGraph(FakeGraph):
+        graph_endpoint = "https://graph.microsoft.com/v1.0"
+
+        def app_token_for(self, scope):
+            assert scope == rest.TEAMS_ADMIN_SCOPE
+            return TOKEN
+
+    monkeypatch.setattr(cli, "REGISTRY", {"teams_policy": TeamsPolicyCollector()})
+    commands = command_reader(monkeypatch)
+    # probe-first also performs five reads in the capability preflight.
+    session = connect(monkeypatch, [Response() for _ in range(10 if probe_first else 5)])
+    extra = ("--probe-first",) if probe_first else ()
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, CertificateGraph(), "teams_policy", *extra)
+
+    assert rc == 0 and commands.calls == []
+    assert len(session.calls) == (10 if probe_first else 5)
+    manifest = load(run_dir, "run-manifest.json")
+    assert manifest["overall_status"] == "ok"
+    assert load(run_dir, "validation.json")["valid"] is True
+    rows = load(run_dir, "coverage.json")
+    assert len(rows) == 7
+    assert sum(row["status"] == "ok" for row in rows) == 5
+    skipped = {row["name"]: row for row in rows if row["status"] == "skipped"}
+    assert set(skipped) == {"messagingPolicies", "appSetupPolicies"}
+    assert all(row["reason"] == "teams_powershell_not_supported" for row in skipped.values())
+    assert len(_section_gaps(run_dir)) == 2
+    assert "Teams PowerShell sessions are not supported" in str(enterprise_handoff(run_dir)["limitations"])
+    assert load(run_dir, "ai_context.json")["known_limitations"] == ["teams_policy"]
+
+    from auditex.explorer import _collector_rows
+
+    explorer_rows = {row["collector"]: row for row in _collector_rows(run_dir, manifest, {})}
+    assert explorer_rows["teams_policy"]["status"] == "verified"
+    assert explorer_rows["teams_policy"]["reason"] == "Collected"
+
+
 def _section_gaps(run_dir: Path) -> dict[tuple[str, str], dict[str, Any]]:
     manifest = load(run_dir, "run-manifest.json")
     return {

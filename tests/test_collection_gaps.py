@@ -40,6 +40,47 @@ GROUPS = "/groups"
 APPLICATIONS = "/applications"
 
 
+def test_skipped_teams_sections_name_the_certificate_gap_without_claiming_a_failed_read():
+    from azure_tenant_audit.assurance import build_coverage_gap_summary, build_surface_coverage_map
+    from azure_tenant_audit.collection_gaps import section_gap_records
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+
+    result = TeamsPolicyCollector().run({})
+    collectors = [{"name": result.name, "status": result.status}]
+    sections = section_gap_records(result.coverage)
+    assert len(sections) == 7
+    assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in sections)
+    assert list_truncations(result.coverage) == []
+    surfaces = build_surface_coverage_map(collector_rows=collectors, coverage_rows=result.coverage)
+    gaps = build_coverage_gap_summary(surface_coverage=surfaces, collector_rows=collectors, coverage_rows=result.coverage)
+    assert gaps[0]["scope"] == "section" and len(gaps[0]["section_gaps"]) == 7
+    assert "not collected: certificate token for the Teams admin API not available" in gaps[0]["message"]
+    assert build_diagnostics(collectors, result.coverage, {}, "app-readonly-full") == []
+
+
+def test_section_gap_summary_groups_operations_by_collector_status_and_reason():
+    from azure_tenant_audit.collection_gaps import section_gap_summary
+
+    summary = section_gap_summary([
+        {"collector": "teams_policy", "section": section, "status": status, "reason": reason}
+        for section, status, reason in [
+            ("messagingPolicies", "skipped", "teams_powershell_not_supported"),
+            ("meetingPolicies", "skipped", "teams_token_unavailable"),
+            ("appSetupPolicies", "skipped", "teams_powershell_not_supported"),
+            ("clientConfiguration", "failed", "read_failed"),
+        ]
+    ] + [{"collector": "other", "section": "settings", "status": "skipped",
+          "reason": "teams_powershell_not_supported"}])
+
+    assert summary == (
+        "teams_policy.messagingPolicies, teams_policy.appSetupPolicies "
+        "(skipped, not collected: Teams PowerShell sessions are not supported), "
+        "teams_policy.meetingPolicies (skipped, not collected: certificate token for the Teams admin API not available), "
+        "teams_policy.clientConfiguration (failed, read_failed), "
+        "other.settings (skipped, not collected: Teams PowerShell sessions are not supported)"
+    )
+
+
 def _rows(prefix: str, count: int) -> list[dict[str, Any]]:
     return [{"id": f"{prefix}-{index}"} for index in range(count)]
 

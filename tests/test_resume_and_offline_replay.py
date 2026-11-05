@@ -237,6 +237,48 @@ def _rule_statuses(run_dir: Path) -> dict[str, set[str]]:
     return statuses
 
 
+@pytest.mark.parametrize("mode", ["no_token", "certificate_token", "legacy_failed"])
+def test_teams_replay_preserves_new_skips_and_older_failures(tmp_path, monkeypatch, mode):
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+
+    context = {}
+    if mode == "certificate_token":
+        from test_teams_admin_rest import Client, Response, command_reader, connect
+
+        context["client"] = Client()
+        commands = command_reader(monkeypatch)
+        session = connect(monkeypatch, [Response() for _ in range(5)])
+    result = TeamsPolicyCollector().run(context)
+    if mode == "certificate_token":
+        assert result.status == "ok" and len(session.calls) == 5 and commands.calls == []
+    payload = result.payload
+    legacy_failed = mode == "legacy_failed"
+    if legacy_failed:
+        payload = {name: {"error": "session_not_connected", "error_class": "session_not_connected",
+                          "command": command} for name, command in TeamsPolicyCollector.command_collectors}
+    sample = tmp_path / "teams.json"
+    sample.write_text(json.dumps({"teams_policy": payload}))
+
+    rc, run_dir = _replay(tmp_path, sample, "teams")
+
+    assert rc == (1 if legacy_failed else 0)
+    assert _manifest(run_dir)["overall_status"] == ("partial" if legacy_failed else "ok")
+    assert json.loads((run_dir / "validation.json").read_text())["valid"] is True
+    coverage = json.loads((run_dir / "coverage.json").read_text())
+    assert len(coverage) == (2 if mode == "certificate_token" else 7)
+    assert all(row["status"] == ("failed" if legacy_failed else "skipped") for row in coverage)
+    assert _rule_statuses(run_dir)["teams.external_federation_open"] == (
+        {"pass"} if mode == "certificate_token" else {"not_assessed"}
+    )
+    if not legacy_failed:
+        expected_reason = "teams_powershell_not_supported" if mode == "certificate_token" else "teams_token_unavailable"
+        assert all(row["reason"] == expected_reason and row["section_scoped"] is True for row in coverage)
+        if mode == "certificate_token":
+            assert {row["name"] for row in coverage} == {"messagingPolicies", "appSetupPolicies"}
+        else:
+            assert "certificate token for the Teams admin API not available" in str(_manifest(run_dir)["coverage_gaps"])
+
+
 def test_a_clean_sample_still_replays_complete(tmp_path: Path) -> None:
     rc, run_dir = _replay(tmp_path, _admin_set_sample(tmp_path), "clean")
 

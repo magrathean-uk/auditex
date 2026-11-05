@@ -29,7 +29,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .collection_gaps import REASON_OPERATOR_LIMIT, REASON_UNKNOWN, TRUNCATION_ERROR_CLASS, section_was_cut
+from .collection_gaps import (
+    REASON_OPERATOR_LIMIT, REASON_UNKNOWN, SECTION_GAP_REASON_TEXT,
+    SECTION_SCOPED, TRUNCATION_ERROR_CLASS, section_was_cut,
+)
 from .resources import resolve_resource_path
 
 OFFLINE_ROW_TYPE = "offline_sample"
@@ -146,6 +149,18 @@ def replay_coverage_rows(collector: str, payload: Mapping[str, Any]) -> list[dic
         error_class = section.get("error_class")
         failed = bool(error or error_class)
         cut = section_was_cut(section)
+        # Preserve explicit Teams capability skips. Older failed Teams rows
+        # have no skipped status and retain their original failure semantics.
+        if (collector == "teams_policy" and section.get("status") == "skipped"
+                and section.get("reason") in SECTION_GAP_REASON_TEXT and not cut):
+            rows.append({
+                "collector": collector, "type": OFFLINE_ROW_TYPE, "name": str(name),
+                "status": "skipped", "item_count": 0, SECTION_SCOPED: True,
+                "reason": section["reason"],
+                "error_class": error_class, "error": error,
+                "message": "Replayed from an offline sample that recorded this read as skipped.",
+            })
+            continue
         if not failed and not cut:
             continue
         limit = _positive_int(section.get("result_limit"))
@@ -174,5 +189,5 @@ def replay_coverage_rows(collector: str, payload: Mapping[str, Any]) -> list[dic
 
 
 def replay_collector_status(coverage_rows: list[dict[str, Any]]) -> str:
-    """``ok`` for a collector whose sections carry no marker, else ``partial``."""
-    return "partial" if coverage_rows else "ok"
+    """``ok`` for clean reads or explicit non-failing skips, else ``partial``."""
+    return "partial" if any(row.get("status") != "skipped" for row in coverage_rows) else "ok"

@@ -47,6 +47,25 @@ def fixture_rows():
             for section, (_, vector_id) in PARENTS.items()}
 
 
+def test_skipped_teams_reads_project_as_not_collected(monkeypatch, tmp_path):
+    commands = command_reader(monkeypatch)
+    result = TeamsPolicyCollector().run({"client": Client(None)})
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw/teams_policy.json").write_text(json.dumps(result.payload))
+    (tmp_path / "run-manifest.json").write_text(json.dumps({
+        "run_id": "constructed-teams-skip", "platform": "m365",
+        "tenant_id": "11111111-1111-4111-8111-111111111111",
+        "graph_endpoint": "https://graph.microsoft.com/v1.0",
+    }))
+    (tmp_path / "collector-coverage.json").write_text(json.dumps({"coverage": result.coverage}))
+    projection = project_run(tmp_path, redact=False)
+    assert commands.calls == [] and result.status == "ok"
+    assert all(projection.rule_sections[section] == NOT_COLLECTED for section in PARENTS)
+    assert all(projection.report["sections"][section]["detail"]["error_class"] == "teams_token_unavailable"
+               for section in PARENTS)
+    assert projection.rule_sections["tenant_app_settings"] == NOT_COLLECTED
+
+
 def collect_bundle(monkeypatch, tmp_path, failed_operation=None, malformed_operation=None):
     rows = fixture_rows()
     by_operation = {operation: rows[section] for section, (operation, _) in PARENTS.items()}
@@ -68,14 +87,14 @@ def collect_bundle(monkeypatch, tmp_path, failed_operation=None, malformed_opera
     }))
     (tmp_path / "collector-coverage.json").write_text(json.dumps({"coverage": result.coverage}))
     (tmp_path / "audit-log.jsonl").write_text("\n".join(json.dumps(event) for event in events))
-    assert len(session.calls) == 5 and len(commands.calls) == 2
+    assert len(session.calls) == 5 and commands.calls == []
     assert all(TOKEN.encode() not in path.read_bytes() for path in tmp_path.rglob("*") if path.is_file())
     return result, project_run(tmp_path, redact=False), rows
 
 
 def test_collector_bundle_projects_all_five_sections(monkeypatch, tmp_path):
     result, projection, rows = collect_bundle(monkeypatch, tmp_path)
-    assert result.status == "partial"  # The two unverified command paths stay coverage gaps.
+    assert result.status == "ok"  # The two unsupported command paths are explicit section gaps.
     for section, (operation, _) in PARENTS.items():
         assert result.payload[operation]["status"] == "ok"
         expected = [{key: value for key, value in row.items() if key in FIELDS[section]} for row in rows[section]]

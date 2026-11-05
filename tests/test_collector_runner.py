@@ -68,6 +68,27 @@ class _CrashingCollector:
         raise RuntimeError("boom")
 
 
+def test_runner_preserves_teams_skips_as_non_failing_coverage(monkeypatch):
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+    from azure_tenant_audit.diagnostics import build_diagnostics
+    from azure_tenant_audit.probe import _capability_row_from_coverage
+
+    def forbidden_adapter(name):
+        raise AssertionError(f"Unexpected Teams adapter: {name}")
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", forbidden_adapter)
+    writer = _FakeWriter()
+    output = CollectorRunner(writer).run(TeamsPolicyCollector(), CollectorRunContext(client=None, top=None))
+    assert not output.crashed and output.result_row["status"] == "ok"
+    assert len(writer.coverage[0]) == 7
+    assert all(row["status"] == "skipped" for row in writer.coverage[0])
+    assert writer.checkpoints[0][1]["status"] == "ok"
+    assert build_diagnostics([output.result_row], output.coverage_rows, {}, "app-readonly-full") == []
+    # Probes still advertise unavailable capability, with the accurate reason,
+    # rather than claiming support or creating a runtime failure diagnostic.
+    probe_rows = [_capability_row_from_coverage("teams_policy", "app", row) for row in output.coverage_rows]
+    assert all(row["status"] == "partial" and "certificate token" in row["message"] for row in probe_rows)
+
+
 def test_runner_calls_legacy_collector_and_writes_result_surfaces() -> None:
     writer = _FakeWriter()
     runner = CollectorRunner(writer)
