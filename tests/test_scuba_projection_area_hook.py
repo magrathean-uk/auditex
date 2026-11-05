@@ -41,11 +41,19 @@ def test_empty_area_modules_leave_projection_unchanged(complete_bundle, tmp_path
     monkeypatch.setattr(scuba_projection, "AREA_ADAPTER_MODULES", ())
     after = scuba_projection.project_run(complete_bundle, redact=redact)
 
-    assert after == before
-    assert after.report == before.report
-    assert after.views == before.views
-    assert after.rule_sections == before.rule_sections
-    assert after.rule_views == before.rule_views
+    # sharing_policy is the one section that deliberately differs from the pre-hook code: it used to be withheld
+    # unconditionally in project_run and is now projected by the Exchange adapter module (not registered here).
+    def comparable(projection):
+        report = {**projection.report, "sections": {k: v for k, v in projection.report["sections"].items() if k != "sharing_policy"}}
+        return (
+            {k: v for k, v in dict(projection).items() if k != "sharing_policy"},
+            report,
+            projection.views,
+            {k: v for k, v in projection.rule_sections.items() if k != "sharing_policy"},
+            projection.rule_views,
+        )
+
+    assert comparable(after) == comparable(before)
     if not redact:
         for section, value in EXPECTED.items():
             assert after[section] == value
@@ -171,7 +179,7 @@ def test_adapter_must_be_callable(complete_bundle, monkeypatch):
         scuba_projection.project_run(complete_bundle)
 
 
-@pytest.mark.parametrize("section", ["sharing_policy", "scuba_config", "tenant_id"])
+@pytest.mark.parametrize("section", ["scuba_config", "tenant_id"])
 def test_reserved_adapter_key_is_rejected(complete_bundle, monkeypatch, section):
     module = ModuleType("test_area_reserved")
     module.ADAPTERS = {section: lambda bundle: pytest.fail("Reserved adapter was called")}

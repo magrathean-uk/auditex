@@ -1321,6 +1321,7 @@ def rule_policy_section(projection: Projection, policy_id: str, section: str) ->
 # rule-only sections do not. scubagear_export.py does not call project_run, so these adapters never apply there.
 AREA_ADAPTER_MODULES: tuple[str, ...] = (
     # One module per line (keeps merges of the area branches small): "auditex.scuba_adapters_<area>",
+    "auditex.scuba_adapters_exchange",
 )
 
 PS_SECTIONS = {
@@ -1482,7 +1483,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
     import importlib
 
     valid_sections = set(sections)
-    reserved_sections = {"sharing_policy", "scuba_config", "tenant_id"}
+    reserved_sections = {"scuba_config", "tenant_id"}
     registered_sections = adapters.keys() | PS_SECTIONS.keys() | {"dmarc_records", "spf_records", "dkim_records"}
     for name in AREA_ADAPTER_MODULES:
         mod = importlib.import_module(name)
@@ -1510,8 +1511,6 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 raise manifest_error
             if manifest.get("platform", "m365") != "m365":
                 raise Unavailable("not_applicable_to_platform")
-            if section == "sharing_policy":
-                raise Unavailable()
             if section == "scuba_config":
                 if not manifest:
                     raise Unavailable("missing_artifact")  # no run manifest, no run to synthesise a configuration for
