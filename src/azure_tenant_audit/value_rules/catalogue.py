@@ -37,6 +37,12 @@ def catalogue() -> dict[str, Any]:
             raise ValueError("Invalid value-rule policy")
         if len(set(row["sections"])) != len(row["sections"]):
             raise ValueError("Duplicate value-rule section")
+        # stage 4: optional reads never enter required-section checks or citation inventories.
+        optional = row.get("optional_sections", [])
+        if (not isinstance(optional, list)
+                or any(not isinstance(name, str) or not name for name in optional)
+                or len(set(optional)) != len(optional) or set(optional) & set(row["sections"])):
+            raise ValueError("Invalid optional value-rule sections")
         if data["rule_failure"]["cell"] in row["cells"]:
             raise ValueError("Value-rule failure is not a policy cell")
         for cell, entry in row["cells"].items():
@@ -49,8 +55,13 @@ def catalogue() -> dict[str, Any]:
                     any(not isinstance(text, str) or len(text) > 400 for text in texts)
                     or texts != sorted(set(texts))):
                 raise ValueError("Incomplete value-rule cell")
-            if (not isinstance(entry.get("cited"), list) or not entry["cited"]
-                    or entry["cited"] != [name for name in row["sections"] if name in entry["cited"]]):
+            # stage 4: explicit citation variants include SS 7.x's reference cell order.
+            variants = entry.get("cited_variants", [entry.get("cited")])
+            if (not isinstance(variants, list) or not variants or entry.get("cited") not in variants
+                    or any(not isinstance(cited, list) or not cited or len(set(cited)) != len(cited)
+                           or any(name not in row["sections"] for name in cited) for cited in variants)
+                    or ("cited_variants" not in entry
+                        and entry["cited"] != [name for name in row["sections"] if name in entry["cited"]])):
                 raise ValueError("Invalid value-rule cell citation")
     return data
 

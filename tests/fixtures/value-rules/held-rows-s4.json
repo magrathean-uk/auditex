@@ -1,0 +1,634 @@
+{
+  "MS.SECURITYSUITE.6.1v1": {
+    "cells": {
+      "custom_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "custom_policy_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients delivers detected spam or phishing to the inbox."
+        ],
+        "verdict": "met"
+      },
+      "custom_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_custom_policy_noncompliant",
+        "reason_texts": [
+          "Requirement not met: an anti-spam policy that applies to recipients has a spam or phishing action outside MoveToJmf, Quarantine, Redirect and Delete."
+        ],
+        "verdict": "not_met"
+      },
+      "custom_order_dependent": {
+        "cited": [
+          "hosted_content_filter_rules"
+        ],
+        "reason_code": "data_unavailable_custom_policy_priority",
+        "reason_texts": [
+          "Data unavailable: which custom anti-spam policy applies first depends on the rule Priority, which the export does not carry; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "custom_policy_without_rule": {
+        "cited": [
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules"
+        ],
+        "reason_code": "data_unavailable_custom_policy_without_rule",
+        "reason_texts": [
+          "Data unavailable: a custom anti-spam policy that does not carry the required settings exists but no anti-spam rule is exported (the rule list is empty, which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "custom_topology_unusable": {
+        "cited": [
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules"
+        ],
+        "reason_code": "data_unusable_custom_topology",
+        "reason_texts": [
+          "Data unusable: a custom anti-spam rule does not point at exactly one custom policy; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "default_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "default_policy_applies_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients delivers detected spam or phishing to the inbox."
+        ],
+        "verdict": "met"
+      },
+      "default_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_default_policy_noncompliant",
+        "reason_texts": [
+          "Requirement not met: an anti-spam policy that applies to recipients has a spam or phishing action outside MoveToJmf, Quarantine, Redirect and Delete."
+        ],
+        "verdict": "not_met"
+      },
+      "default_policy_ambiguous": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_default_policy_ambiguous",
+        "reason_texts": [
+          "Data unusable: more than one hosted content filter policy is marked Default; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "list_element_unusable": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "cited_variants": [
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_list_element",
+        "reason_texts": [
+          "Data unusable: hosted_content_filter_policies holds an element that is not an object; the policy was not assessed.",
+          "Data unusable: hosted_content_filter_rules holds an element that is not an object; the policy was not assessed.",
+          "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "no_default_policy": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unavailable_default_policy_absent",
+        "reason_texts": [
+          "Data unavailable: no Default hosted content filter policy is exported (every tenant has exactly one); the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_duplicated": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_policy_duplicated",
+        "reason_texts": [
+          "Data unusable: two hosted content filter policies share one Identity; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_leaf_unusable": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_spam_actions",
+        "reason_texts": [
+          "Data unusable: a spam or phishing action of an applied anti-spam policy is absent, null or not a recognised action; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_unusable": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_policy_record",
+        "reason_texts": [
+          "Data unusable: a hosted content filter policy has no readable Identity, IsDefault flag or RecommendedPolicyType; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "preset_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_preset_noncompliant",
+        "reason_texts": [
+          "Requirement not met: an anti-spam policy that applies to recipients has a spam or phishing action outside MoveToJmf, Quarantine, Redirect and Delete."
+        ],
+        "verdict": "not_met"
+      },
+      "preset_topology_unusable": {
+        "cited": [
+          "hosted_content_filter_policies",
+          "protection_policy_rules"
+        ],
+        "reason_code": "data_unusable_preset_topology",
+        "reason_texts": [
+          "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "rule_scope_unusable": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_rules"
+        ],
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "hosted_content_filter_rules"
+          ],
+          [
+            "accepted_domains",
+            "protection_policy_rules"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_rule_scope",
+        "reason_texts": [
+          "Data unusable: an enabled rule has a recipient scope that cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "rule_state_unusable": {
+        "cited": [
+          "hosted_content_filter_rules"
+        ],
+        "cited_variants": [
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_rule_state",
+        "reason_texts": [
+          "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "section_not_a_list": {
+        "cited": [
+          "accepted_domains"
+        ],
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_section_not_a_list",
+        "reason_texts": [
+          "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+          "Data unusable: hosted_content_filter_policies is not a list of objects; the policy was not assessed.",
+          "Data unusable: hosted_content_filter_rules is not a list of objects; the policy was not assessed.",
+          "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "section_not_collected": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "required_evidence_section_not_collected",
+        "reason_texts": [
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, hosted_content_filter_policies.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, hosted_content_filter_rules.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+          "Data unavailable: required evidence section(s) not collected: hosted_content_filter_policies.",
+          "Data unavailable: required evidence section(s) not collected: hosted_content_filter_rules.",
+          "Data unavailable: required evidence section(s) not collected: protection_policy_rules."
+        ],
+        "verdict": "not_assessed"
+      },
+      "standard_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "standard_preset_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients delivers detected spam or phishing to the inbox."
+        ],
+        "verdict": "met"
+      },
+      "strict_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "strict_preset_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients delivers detected spam or phishing to the inbox."
+        ],
+        "verdict": "met"
+      }
+    },
+    "kind": "spam_cascade",
+    "params": {
+      "bad": "an anti-spam policy that applies to recipients has a spam or phishing action outside MoveToJmf, Quarantine, Redirect and Delete",
+      "good": "no anti-spam policy that applies to recipients delivers detected spam or phishing to the inbox",
+      "leaf": "actions",
+      "leaf_code": "data_unusable_spam_actions",
+      "leaf_text": "a spam or phishing action of an applied anti-spam policy is absent, null or not a recognised action"
+    },
+    "rule_id": "MS.SECURITYSUITE.6.1v1.spam_cascade",
+    "sections": [
+      "accepted_domains",
+      "hosted_content_filter_policies",
+      "hosted_content_filter_rules",
+      "protection_policy_rules"
+    ]
+  },
+  "MS.SECURITYSUITE.6.2v1": {
+    "cells": {
+      "custom_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "custom_policy_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients lists allowed sender domains."
+        ],
+        "verdict": "met"
+      },
+      "custom_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_custom_policy_noncompliant",
+        "reason_texts": [
+          "Requirement not met: an anti-spam policy that applies to recipients lists allowed sender domains."
+        ],
+        "verdict": "not_met"
+      },
+      "custom_order_dependent": {
+        "cited": [
+          "hosted_content_filter_rules"
+        ],
+        "reason_code": "data_unavailable_custom_policy_priority",
+        "reason_texts": [
+          "Data unavailable: which custom anti-spam policy applies first depends on the rule Priority, which the export does not carry; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "custom_policy_without_rule": {
+        "cited": [
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules"
+        ],
+        "reason_code": "data_unavailable_custom_policy_without_rule",
+        "reason_texts": [
+          "Data unavailable: a custom anti-spam policy that does not carry the required settings exists but no anti-spam rule is exported (the rule list is empty, which can also mean a failed command), so whether it applies to anyone is unknown; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "custom_topology_unusable": {
+        "cited": [
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules"
+        ],
+        "reason_code": "data_unusable_custom_topology",
+        "reason_texts": [
+          "Data unusable: a custom anti-spam rule does not point at exactly one custom policy; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "default_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "default_policy_applies_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients lists allowed sender domains."
+        ],
+        "verdict": "met"
+      },
+      "default_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_default_policy_noncompliant",
+        "reason_texts": [
+          "Requirement not met: an anti-spam policy that applies to recipients lists allowed sender domains."
+        ],
+        "verdict": "not_met"
+      },
+      "default_policy_ambiguous": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_default_policy_ambiguous",
+        "reason_texts": [
+          "Data unusable: more than one hosted content filter policy is marked Default; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "list_element_unusable": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "cited_variants": [
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_list_element",
+        "reason_texts": [
+          "Data unusable: hosted_content_filter_policies holds an element that is not an object; the policy was not assessed.",
+          "Data unusable: hosted_content_filter_rules holds an element that is not an object; the policy was not assessed.",
+          "Data unusable: protection_policy_rules holds an element that is not an object; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "no_default_policy": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unavailable_default_policy_absent",
+        "reason_texts": [
+          "Data unavailable: no Default hosted content filter policy is exported (every tenant has exactly one); the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_duplicated": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_policy_duplicated",
+        "reason_texts": [
+          "Data unusable: two hosted content filter policies share one Identity; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_leaf_unusable": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_allowed_sender_domains",
+        "reason_texts": [
+          "Data unusable: AllowedSenderDomains of an applied anti-spam policy is absent, null or not a list of strings; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "policy_unusable": {
+        "cited": [
+          "hosted_content_filter_policies"
+        ],
+        "reason_code": "data_unusable_policy_record",
+        "reason_texts": [
+          "Data unusable: a hosted content filter policy has no readable Identity, IsDefault flag or RecommendedPolicyType; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "preset_noncompliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "applied_preset_noncompliant",
+        "reason_texts": [
+          "Requirement not met: an anti-spam policy that applies to recipients lists allowed sender domains."
+        ],
+        "verdict": "not_met"
+      },
+      "preset_topology_unusable": {
+        "cited": [
+          "hosted_content_filter_policies",
+          "protection_policy_rules"
+        ],
+        "reason_code": "data_unusable_preset_topology",
+        "reason_texts": [
+          "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "rule_scope_unusable": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_rules"
+        ],
+        "cited_variants": [
+          [
+            "accepted_domains",
+            "hosted_content_filter_rules"
+          ],
+          [
+            "accepted_domains",
+            "protection_policy_rules"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_rule_scope",
+        "reason_texts": [
+          "Data unusable: an enabled rule has a recipient scope that cannot be read (absent or untyped field, or unknown accepted domains); the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "rule_state_unusable": {
+        "cited": [
+          "hosted_content_filter_rules"
+        ],
+        "cited_variants": [
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_rule_state",
+        "reason_texts": [
+          "Data unusable: a rule's State is not exactly Enabled or Disabled; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "section_not_a_list": {
+        "cited": [
+          "accepted_domains"
+        ],
+        "cited_variants": [
+          [
+            "accepted_domains"
+          ],
+          [
+            "hosted_content_filter_policies"
+          ],
+          [
+            "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
+          ]
+        ],
+        "reason_code": "data_unusable_section_not_a_list",
+        "reason_texts": [
+          "Data unusable: accepted_domains is not a list of objects; the policy was not assessed.",
+          "Data unusable: hosted_content_filter_policies is not a list of objects; the policy was not assessed.",
+          "Data unusable: hosted_content_filter_rules is not a list of objects; the policy was not assessed.",
+          "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed."
+        ],
+        "verdict": "not_assessed"
+      },
+      "section_not_collected": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "required_evidence_section_not_collected",
+        "reason_texts": [
+          "Data unavailable: required evidence section(s) not collected: accepted_domains, hosted_content_filter_policies.",
+          "Data unavailable: required evidence section(s) not collected: accepted_domains.",
+          "Data unavailable: required evidence section(s) not collected: hosted_content_filter_policies, protection_policy_rules.",
+          "Data unavailable: required evidence section(s) not collected: hosted_content_filter_policies.",
+          "Data unavailable: required evidence section(s) not collected: hosted_content_filter_rules.",
+          "Data unavailable: required evidence section(s) not collected: protection_policy_rules."
+        ],
+        "verdict": "not_assessed"
+      },
+      "standard_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "standard_preset_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients lists allowed sender domains."
+        ],
+        "verdict": "met"
+      },
+      "strict_covers_compliant": {
+        "cited": [
+          "accepted_domains",
+          "hosted_content_filter_policies",
+          "hosted_content_filter_rules",
+          "protection_policy_rules"
+        ],
+        "reason_code": "strict_preset_covers_all_recipients_compliant",
+        "reason_texts": [
+          "Requirement met: no anti-spam policy that applies to recipients lists allowed sender domains."
+        ],
+        "verdict": "met"
+      }
+    },
+    "kind": "spam_cascade",
+    "params": {
+      "bad": "an anti-spam policy that applies to recipients lists allowed sender domains",
+      "good": "no anti-spam policy that applies to recipients lists allowed sender domains",
+      "leaf": "domains",
+      "leaf_code": "data_unusable_allowed_sender_domains",
+      "leaf_text": "AllowedSenderDomains of an applied anti-spam policy is absent, null or not a list of strings"
+    },
+    "rule_id": "MS.SECURITYSUITE.6.2v1.spam_cascade",
+    "sections": [
+      "accepted_domains",
+      "hosted_content_filter_policies",
+      "hosted_content_filter_rules",
+      "protection_policy_rules"
+    ]
+  }
+}

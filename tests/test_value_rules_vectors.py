@@ -31,7 +31,11 @@ STAGE3_POLICIES = frozenset({
     "MS.EXO.2.2v3", "MS.EXO.5.1v1", "MS.EXO.6.1v1", "MS.EXO.6.2v1", "MS.EXO.7.1v1", "MS.EXO.13.1v1",
     "MS.SECURITYSUITE.1.4v1", "MS.SECURITYSUITE.4.1v1", "MS.SECURITYSUITE.5.1v1",
     "MS.SECURITYSUITE.8.1v1", "MS.SECURITYSUITE.8.2v1"})
-STAGE_POLICIES = STAGE1_POLICIES | STAGE3_POLICIES
+# stage 4: live DNS and Safe Links rows; SS 6.x rows remain held until P4.
+STAGE4_POLICIES = frozenset({"MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS.EXO.4.3v1",
+                             "MS.EXO.4.4v1", "MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1",
+                             "MS.SECURITYSUITE.7.3v1"})
+STAGE_POLICIES = STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES
 GATE_POLICIES = frozenset(policy for policy, row in catalogue()["policies"].items()
                           if row["params"].get("environment_gate"))
 PBI_COMMON = {"section_not_collected", "licence_false", "licence_flag_unusable", "access_denied",

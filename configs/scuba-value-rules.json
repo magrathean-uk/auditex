@@ -282,6 +282,857 @@
         "spf_records"
       ]
     },
+    "MS.EXO.3.1v1": {
+      "cells": {
+        "all_compliant": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "all_domains_compliant",
+          "reason_texts": [
+            "Requirement met: DKIM is enabled for every domain."
+          ],
+          "verdict": "met"
+        },
+        "domain_noncompliant.dkim_not_enabled": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: DKIM signing is not enabled for at least one domain."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.key_not_published": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DKIM key is not published for at least one domain."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.no_dkim_record_entry": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: at least one domain has no DKIM record entry."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.no_signing_config": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: at least one domain has no DKIM signing configuration."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_unusable.dkim_rdata_empty": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "data_unavailable_dns_answer_empty",
+          "reason_texts": [
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.dkim_rdata_unusable": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (dkim_rdata_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.enabled_flag_unusable": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (enabled_flag_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.spf_domain_absent": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (spf_domain_absent); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "dkim_config"
+          ],
+          "cited_variants": [
+            [
+              "dkim_config"
+            ],
+            [
+              "dkim_records"
+            ],
+            [
+              "spf_records"
+            ]
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: dkim_config holds no objects; the policy was not assessed.",
+            "Data unavailable: dkim_records holds no objects; the policy was not assessed.",
+            "Data unavailable: spf_records holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dkim_config"
+          ],
+          "cited_variants": [
+            [
+              "dkim_config"
+            ],
+            [
+              "dkim_records"
+            ],
+            [
+              "spf_records"
+            ]
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dkim_config is not a list of objects; the policy was not assessed.",
+            "Data unusable: dkim_records is not a list of objects; the policy was not assessed.",
+            "Data unusable: spf_records is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dkim_config",
+            "dkim_records",
+            "spf_records"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dkim_config, dkim_records.",
+            "Data unavailable: required evidence section(s) not collected: dkim_config.",
+            "Data unavailable: required evidence section(s) not collected: dkim_records, spf_records.",
+            "Data unavailable: required evidence section(s) not collected: dkim_records.",
+            "Data unavailable: required evidence section(s) not collected: spf_records."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "parser",
+      "params": {
+        "need": "dkim_enabled",
+        "what": "DKIM is enabled for every domain"
+      },
+      "rule_id": "MS.EXO.3.1v1.parser",
+      "sections": [
+        "dkim_config",
+        "dkim_records",
+        "spf_records"
+      ]
+    },
+    "MS.EXO.4.1v1": {
+      "cells": {
+        "all_compliant": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "all_domains_compliant",
+          "reason_texts": [
+            "Requirement met: a DMARC policy is published for every domain."
+          ],
+          "verdict": "met"
+        },
+        "domain_noncompliant.no_record": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: at least one domain has no DMARC record."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.p_absent": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain has no policy (p) tag."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.p_invalid": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain has a policy (p) tag that is not none, quarantine or reject."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_unlabelled": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a record in dmarc_records shows a failing domain but names no domain; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.multiple_records": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (multiple_records); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.other_strings_present": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (other_strings_present); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_empty": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_dns_answer_empty",
+          "reason_texts": [
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_unusable": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (rdata_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.record_syntax": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (record_syntax); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.tag_duplicated": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (tag_duplicated); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: dmarc_records holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dmarc_records is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dmarc_records."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "parser",
+      "params": {
+        "need": "dmarc_published",
+        "section": "dmarc_records",
+        "what": "a DMARC policy is published"
+      },
+      "rule_id": "MS.EXO.4.1v1.parser",
+      "sections": [
+        "dmarc_records"
+      ]
+    },
+    "MS.EXO.4.2v1": {
+      "cells": {
+        "all_compliant": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "all_domains_compliant",
+          "reason_texts": [
+            "Requirement met: the DMARC policy is p=reject for every domain."
+          ],
+          "verdict": "met"
+        },
+        "domain_noncompliant.no_record": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: at least one domain has no DMARC record."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.p_absent": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain has no policy (p) tag."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.p_invalid": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain has a policy (p) tag that is not none, quarantine or reject."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.p_not_reject": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC policy of at least one domain is not reject."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_unlabelled": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a record in dmarc_records shows a failing domain but names no domain; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.multiple_records": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (multiple_records); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.other_strings_present": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (other_strings_present); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_empty": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_dns_answer_empty",
+          "reason_texts": [
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_unusable": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (rdata_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.record_syntax": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (record_syntax); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.tag_duplicated": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (tag_duplicated); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: dmarc_records holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dmarc_records is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dmarc_records."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "parser",
+      "params": {
+        "need": "dmarc_reject",
+        "section": "dmarc_records",
+        "what": "the DMARC policy is p=reject"
+      },
+      "rule_id": "MS.EXO.4.2v1.parser",
+      "sections": [
+        "dmarc_records"
+      ]
+    },
+    "MS.EXO.4.3v1": {
+      "cells": {
+        "all_compliant": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "all_domains_compliant",
+          "reason_texts": [
+            "Requirement met: the DMARC aggregate report address includes the CISA address for every domain."
+          ],
+          "verdict": "met"
+        },
+        "domain_noncompliant.dhs_address_absent": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC aggregate report address (rua) of at least one domain does not include the CISA address."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.no_record": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: at least one domain has no DMARC record."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.rua_absent": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain has no aggregate report address (rua)."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_unlabelled": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a record in dmarc_records shows a failing domain but names no domain; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.multiple_records": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (multiple_records); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.other_strings_present": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (other_strings_present); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_empty": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_dns_answer_empty",
+          "reason_texts": [
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_unusable": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (rdata_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.record_syntax": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (record_syntax); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.tag_duplicated": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (tag_duplicated); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.uri_unusable": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (uri_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: dmarc_records holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dmarc_records is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dmarc_records."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "parser",
+      "params": {
+        "need": "dmarc_dhs_rua",
+        "section": "dmarc_records",
+        "what": "the DMARC aggregate report address includes the CISA address"
+      },
+      "rule_id": "MS.EXO.4.3v1.parser",
+      "sections": [
+        "dmarc_records"
+      ]
+    },
+    "MS.EXO.4.4v1": {
+      "cells": {
+        "all_compliant": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "all_domains_compliant",
+          "reason_texts": [
+            "Requirement met: the DMARC record names agency contacts for aggregate and failure reports for every domain."
+          ],
+          "verdict": "met"
+        },
+        "domain_noncompliant.agency_contact_missing": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain names no agency contact other than the CISA address in its aggregate reports, its failure reports or both."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.contacts_missing": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain does not name the required report contacts."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.no_record": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: at least one domain has no DMARC record."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.rua_absent": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain has no aggregate report address (rua)."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_noncompliant.ruf_absent": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "domain_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the DMARC record of at least one domain has no failure report address (ruf)."
+          ],
+          "verdict": "not_met"
+        },
+        "domain_unlabelled": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: a record in dmarc_records shows a failing domain but names no domain; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.multiple_records": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (multiple_records); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.other_strings_present": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (other_strings_present); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_empty": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_dns_answer_empty",
+          "reason_texts": [
+            "Data unavailable: a DNS answer (rdata) is empty and the export does not say whether the lookup succeeded or failed; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.rdata_unusable": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (rdata_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.record_syntax": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (record_syntax); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.tag_duplicated": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (tag_duplicated); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "domain_unusable.uri_unusable": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_dns_record",
+          "reason_texts": [
+            "Data unusable: a DNS record could not be read exactly (uri_unusable); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: dmarc_records holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dmarc_records is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dmarc_records"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dmarc_records."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "parser",
+      "params": {
+        "need": "dmarc_agency_contacts",
+        "section": "dmarc_records",
+        "what": "the DMARC record names agency contacts for aggregate and failure reports"
+      },
+      "rule_id": "MS.EXO.4.4v1.parser",
+      "sections": [
+        "dmarc_records"
+      ]
+    },
     "MS.EXO.5.1v1": {
       "cells": {
         "all_clear": {
@@ -2245,6 +3096,702 @@
       "rule_id": "MS.SECURITYSUITE.5.1v1.any_true_is_met",
       "sections": [
         "admin_audit_log_config"
+      ]
+    },
+    "MS.SECURITYSUITE.7.1v1": {
+      "cells": {
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_rules_configured": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "no_rules_configured",
+          "reason_texts": [
+            "Requirement not met: no preset security policy rule and no Safe Links rule exists, so no Standard, Strict or custom Safe Links policy applies (URL comparison with a block-list)."
+          ],
+          "verdict": "not_met"
+        },
+        "partial_rule_noncompliant": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "partial_scope_policy_flag_off",
+          "reason_texts": [
+            "Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable URL comparison with a block-list, so those recipients get a non-compliant policy."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_duplicated": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unusable_applied_policy_duplicated",
+          "reason_texts": [
+            "Data unusable: the applied Safe Links policy appears more than once; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_flag_off": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "applied_policy_flag_off",
+          "reason_texts": [
+            "Requirement not met: the applied Safe Links policy does not enable URL comparison with a block-list."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_flag_unusable": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: the applied Safe Links policy lacks a boolean value for a flag the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_flags_ok": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "applied_policy_flags_on",
+          "reason_texts": [
+            "Requirement met: the applied Safe Links policy enables URL comparison with a block-list."
+          ],
+          "verdict": "met"
+        },
+        "policy_not_in_export": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unavailable_applied_policy_not_exported",
+          "reason_texts": [
+            "Data unavailable: the applied Safe Links policy is not in safe_links_policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_covers": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "preset_covers_all_recipients",
+          "reason_texts": [
+            "Requirement met: an enabled Standard or Strict preset security policy applies to all recipients, in both its Exchange Online Protection and its Defender for Office 365 rule (URL comparison with a block-list)."
+          ],
+          "verdict": "met"
+        },
+        "preset_rule_unusable": {
+          "cited": [
+            "protection_policy_rules",
+            "atp_policy_rules"
+          ],
+          "cited_variants": [
+            [
+              "protection_policy_rules",
+              "atp_policy_rules"
+            ]
+          ],
+          "reason_code": "data_unusable_preset_rule",
+          "reason_texts": [
+            "Data unusable: a protection policy rule that may be a preset (Exchange Online Protection or Defender for Office 365 part) has an unreadable identity, state or recipient scope; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_priority_tie": {
+          "cited": [
+            "safe_links_rules"
+          ],
+          "reason_code": "data_unusable_rule_priority_tie",
+          "reason_texts": [
+            "Data unusable: two covering Safe Links rules share the lowest Priority; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_unusable": {
+          "cited": [
+            "safe_links_rules"
+          ],
+          "reason_code": "data_unusable_safe_links_rule",
+          "reason_texts": [
+            "Data unusable: a covering Safe Links rule has no numeric Priority or no policy name; the policy was not assessed.",
+            "Data unusable: an enabled Safe Links rule has an unreadable recipient scope; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "atp_policy_rules"
+          ],
+          "cited_variants": [
+            [
+              "atp_policy_rules"
+            ],
+            [
+              "protection_policy_rules"
+            ],
+            [
+              "safe_links_policies"
+            ],
+            [
+              "safe_links_rules"
+            ]
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: atp_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_links_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_links_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules, safe_links_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_links_policies, safe_links_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_links_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: safe_links_rules."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "safelinks_resolution",
+      "optional_sections": [
+        "accepted_domains"
+      ],
+      "params": {
+        "flags": [
+          "EnableSafeLinksForEmail",
+          "EnableSafeLinksForTeams",
+          "EnableSafeLinksForOffice",
+          "EnableForInternalSenders"
+        ],
+        "what": "URL comparison with a block-list"
+      },
+      "rule_id": "MS.SECURITYSUITE.7.1v1.safelinks_resolution",
+      "sections": [
+        "atp_policy_rules",
+        "defender_license",
+        "protection_policy_rules",
+        "safe_links_policies",
+        "safe_links_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.7.2v1": {
+      "cells": {
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_rules_configured": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "no_rules_configured",
+          "reason_texts": [
+            "Requirement not met: no preset security policy rule and no Safe Links rule exists, so no Standard, Strict or custom Safe Links policy applies (direct download link scanning)."
+          ],
+          "verdict": "not_met"
+        },
+        "partial_rule_noncompliant": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "partial_scope_policy_flag_off",
+          "reason_texts": [
+            "Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable direct download link scanning, so those recipients get a non-compliant policy."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_duplicated": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unusable_applied_policy_duplicated",
+          "reason_texts": [
+            "Data unusable: the applied Safe Links policy appears more than once; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_flag_off": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "applied_policy_flag_off",
+          "reason_texts": [
+            "Requirement not met: the applied Safe Links policy does not enable direct download link scanning."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_flag_unusable": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: the applied Safe Links policy lacks a boolean value for a flag the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_flags_ok": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "applied_policy_flags_on",
+          "reason_texts": [
+            "Requirement met: the applied Safe Links policy enables direct download link scanning."
+          ],
+          "verdict": "met"
+        },
+        "policy_not_in_export": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unavailable_applied_policy_not_exported",
+          "reason_texts": [
+            "Data unavailable: the applied Safe Links policy is not in safe_links_policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_covers": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "preset_covers_all_recipients",
+          "reason_texts": [
+            "Requirement met: an enabled Standard or Strict preset security policy applies to all recipients, in both its Exchange Online Protection and its Defender for Office 365 rule (direct download link scanning)."
+          ],
+          "verdict": "met"
+        },
+        "preset_rule_unusable": {
+          "cited": [
+            "protection_policy_rules",
+            "atp_policy_rules"
+          ],
+          "cited_variants": [
+            [
+              "protection_policy_rules",
+              "atp_policy_rules"
+            ]
+          ],
+          "reason_code": "data_unusable_preset_rule",
+          "reason_texts": [
+            "Data unusable: a protection policy rule that may be a preset (Exchange Online Protection or Defender for Office 365 part) has an unreadable identity, state or recipient scope; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_priority_tie": {
+          "cited": [
+            "safe_links_rules"
+          ],
+          "reason_code": "data_unusable_rule_priority_tie",
+          "reason_texts": [
+            "Data unusable: two covering Safe Links rules share the lowest Priority; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_unusable": {
+          "cited": [
+            "safe_links_rules"
+          ],
+          "reason_code": "data_unusable_safe_links_rule",
+          "reason_texts": [
+            "Data unusable: a covering Safe Links rule has no numeric Priority or no policy name; the policy was not assessed.",
+            "Data unusable: an enabled Safe Links rule has an unreadable recipient scope; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "atp_policy_rules"
+          ],
+          "cited_variants": [
+            [
+              "atp_policy_rules"
+            ],
+            [
+              "protection_policy_rules"
+            ],
+            [
+              "safe_links_policies"
+            ],
+            [
+              "safe_links_rules"
+            ]
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: atp_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_links_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_links_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules, safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules, safe_links_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_links_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: safe_links_rules."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "safelinks_resolution",
+      "optional_sections": [
+        "accepted_domains"
+      ],
+      "params": {
+        "flags": [
+          "ScanUrls",
+          "DeliverMessageAfterScan"
+        ],
+        "what": "direct download link scanning"
+      },
+      "rule_id": "MS.SECURITYSUITE.7.2v1.safelinks_resolution",
+      "sections": [
+        "atp_policy_rules",
+        "defender_license",
+        "protection_policy_rules",
+        "safe_links_policies",
+        "safe_links_rules"
+      ]
+    },
+    "MS.SECURITYSUITE.7.3v1": {
+      "cells": {
+        "licence_false": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_no_licence",
+          "reason_texts": [
+            "Data unavailable: licence not detected: no Defender for Office 365 licence was found (a false read can also mean missing permissions or a failed command), so the anti-phishing settings could not be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "licence_flag_unusable": {
+          "cited": [
+            "defender_license"
+          ],
+          "reason_code": "data_unavailable_licence_flag_unusable",
+          "reason_texts": [
+            "Data unavailable: defender_license is not a boolean, so it is unknown whether the Defender settings could be read; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_rules_configured": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "no_rules_configured",
+          "reason_texts": [
+            "Requirement not met: no preset security policy rule and no Safe Links rule exists, so no Standard, Strict or custom Safe Links policy applies (user click tracking)."
+          ],
+          "verdict": "not_met"
+        },
+        "partial_rule_noncompliant": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "partial_scope_policy_flag_off",
+          "reason_texts": [
+            "Requirement not met: an enabled Safe Links rule applies to some recipients only and its policy does not enable user click tracking, so those recipients get a non-compliant policy."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_duplicated": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unusable_applied_policy_duplicated",
+          "reason_texts": [
+            "Data unusable: the applied Safe Links policy appears more than once; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_flag_off": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "applied_policy_flag_off",
+          "reason_texts": [
+            "Requirement not met: the applied Safe Links policy does not enable user click tracking."
+          ],
+          "verdict": "not_met"
+        },
+        "policy_flag_unusable": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: the applied Safe Links policy lacks a boolean value for a flag the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "policy_flags_ok": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "applied_policy_flags_on",
+          "reason_texts": [
+            "Requirement met: the applied Safe Links policy enables user click tracking."
+          ],
+          "verdict": "met"
+        },
+        "policy_not_in_export": {
+          "cited": [
+            "safe_links_policies"
+          ],
+          "reason_code": "data_unavailable_applied_policy_not_exported",
+          "reason_texts": [
+            "Data unavailable: the applied Safe Links policy is not in safe_links_policies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "preset_covers": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "preset_covers_all_recipients",
+          "reason_texts": [
+            "Requirement met: an enabled Standard or Strict preset security policy applies to all recipients, in both its Exchange Online Protection and its Defender for Office 365 rule (user click tracking)."
+          ],
+          "verdict": "met"
+        },
+        "preset_rule_unusable": {
+          "cited": [
+            "protection_policy_rules",
+            "atp_policy_rules"
+          ],
+          "cited_variants": [
+            [
+              "protection_policy_rules",
+              "atp_policy_rules"
+            ]
+          ],
+          "reason_code": "data_unusable_preset_rule",
+          "reason_texts": [
+            "Data unusable: a protection policy rule that may be a preset (Exchange Online Protection or Defender for Office 365 part) has an unreadable identity, state or recipient scope; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_priority_tie": {
+          "cited": [
+            "safe_links_rules"
+          ],
+          "reason_code": "data_unusable_rule_priority_tie",
+          "reason_texts": [
+            "Data unusable: two covering Safe Links rules share the lowest Priority; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "rule_unusable": {
+          "cited": [
+            "safe_links_rules"
+          ],
+          "reason_code": "data_unusable_safe_links_rule",
+          "reason_texts": [
+            "Data unusable: a covering Safe Links rule has no numeric Priority or no policy name; the policy was not assessed.",
+            "Data unusable: an enabled Safe Links rule has an unreadable recipient scope; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "atp_policy_rules"
+          ],
+          "cited_variants": [
+            [
+              "atp_policy_rules"
+            ],
+            [
+              "protection_policy_rules"
+            ],
+            [
+              "safe_links_policies"
+            ],
+            [
+              "safe_links_rules"
+            ]
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: atp_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: protection_policy_rules is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_links_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: safe_links_rules is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "atp_policy_rules",
+            "defender_license",
+            "protection_policy_rules",
+            "safe_links_policies",
+            "safe_links_rules"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules, safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license, safe_links_rules.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules, defender_license.",
+            "Data unavailable: required evidence section(s) not collected: atp_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: defender_license.",
+            "Data unavailable: required evidence section(s) not collected: protection_policy_rules.",
+            "Data unavailable: required evidence section(s) not collected: safe_links_policies.",
+            "Data unavailable: required evidence section(s) not collected: safe_links_rules."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "safelinks_resolution",
+      "optional_sections": [
+        "accepted_domains"
+      ],
+      "params": {
+        "flags": [
+          "TrackClicks"
+        ],
+        "what": "user click tracking"
+      },
+      "rule_id": "MS.SECURITYSUITE.7.3v1.safelinks_resolution",
+      "sections": [
+        "atp_policy_rules",
+        "defender_license",
+        "protection_policy_rules",
+        "safe_links_policies",
+        "safe_links_rules"
       ]
     },
     "MS.SECURITYSUITE.8.1v1": {

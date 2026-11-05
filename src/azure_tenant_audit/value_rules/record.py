@@ -43,7 +43,8 @@ def checked(record: dict[str, Any]) -> dict[str, Any]:
     if record["cell"] == "section_not_collected":
         if not cited or cited != [name for name in row["sections"] if name in cited]:
             raise ValueError("Value-rule answer cites the wrong section")
-    elif (cited or row["sections"]) != entry["cited"]:
+    # stage 4: parser and Defender cells have explicit, closed citation variants.
+    elif (cited or row["sections"]) not in entry.get("cited_variants", [entry["cited"]]):
         raise ValueError("Value-rule answer cites the wrong section")
     return record
 

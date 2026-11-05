@@ -330,7 +330,9 @@ def validate_assessment(payload: Any) -> None:
                         or detail["field"] is not None or detail["value"] is not None):
                     raise ValueError("Unsupported value-rule cell or reason")
                 allowed_sections = value_row["sections"]
-                if detail["section"] != [s for s in allowed_sections if s in detail["section"]]:
+                # stage 4: SS 7.x preserves its explicit reference cell citation order.
+                if (detail["section"] != [s for s in allowed_sections if s in detail["section"]]
+                        and detail["section"] not in cell.get("cited_variants", [])):
                     raise ValueError("Invalid value-rule section order")
             else:
                 allowed_sections = sections
@@ -344,7 +346,8 @@ def validate_assessment(payload: Any) -> None:
                                      + ", ".join(detail["section"]) + ".")
                     if detail["reason_text"] != expected_text:
                         raise ValueError("Value-rule missing-section reason differs from citation")
-                elif detail["section"] != cell["cited"]:
+                # stage 4: DNS and Defender unusable cells have closed citation variants.
+                elif detail["section"] not in cell.get("cited_variants", [cell["cited"]]):
                     raise ValueError("Value-rule decision cites the wrong section")
             elif detail["rule_id"] == "required_sections_present":
                 if detail["class"] != "absent_section" or detail["field"] is not None or detail["value"] is not None:

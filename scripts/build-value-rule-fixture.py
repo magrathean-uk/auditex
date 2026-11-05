@@ -95,12 +95,15 @@ def build(source: Path, target: Path) -> dict:
             "by_verdict": dict(sorted(by_verdict.items())), "by_source": dict(sorted(by_source.items()))}
 
 
-def build_v3(source: Path, target: Path) -> dict:
+def build_v3(source: Path, target: Path, *, policies: set[str] | None = None) -> dict:
     root = Path(__file__).resolve().parents[1]
     catalogue = json.loads((root / "configs/scuba-policy-sections.json").read_text())["policies"]
     rules = json.loads((root / "configs/scuba-value-rules.json").read_text())
     selected = {policy for policy, row in rules["policies"].items()
                 if not row["kind"].startswith("powerbi.") and policy != "MS.AAD.3.4v1"}
+    # stage 4: a stage fixture can include held policies without enabling their config rows.
+    if policies is not None:
+        selected = policies
     source_hash = sha256()
     rows = []
     by_policy, by_cell, by_verdict, by_source = Counter(), Counter(), Counter(), Counter()

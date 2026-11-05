@@ -378,6 +378,10 @@ def _assess_policies(projection: dict[str, Any], client: ModelClient | None, sel
                 if row:
                     rule_projection = {section: deepcopy(projection.rule_sections.get(section, NOT_COLLECTED))
                                        for section in row["sections"] if section != "scuba_config"}
+                    # stage 4: optional evidence informs the rule without becoming required or cited.
+                    rule_projection.update({section: deepcopy(projection.rule_sections[section])
+                                            for section in row.get("optional_sections", [])
+                                            if section in projection.rule_sections})
                     if "scuba_config" in row["sections"]:
                         rule_projection["scuba_config"] = deepcopy(rule_policy_section(projection, policy_id, "scuba_config"))
             record = precheck_case(case, absent_fields=True, empty_lists=True, value_rules=value_rules_enabled,
