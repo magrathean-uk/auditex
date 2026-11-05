@@ -166,7 +166,7 @@ def test_spo_rejects_invalid_enum_or_scalar_types(complete_bundle, field, value)
 def test_sharing_policy_is_disabled_without_faithful_pack_evidence(complete_bundle):
     p = project_run(complete_bundle)
     assert p['sharing_policy'] == NOT_COLLECTED
-    assert p.report['sections']['sharing_policy']['reason'] == 'incomplete_shape'
+    assert p.report['sections']['sharing_policy']['reason'] == 'missing_artifact'
 
 
 @pytest.mark.parametrize('case', ['conflict', 'non_uuid', 'recorded_conflict'])

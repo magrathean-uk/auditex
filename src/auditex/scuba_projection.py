@@ -1510,8 +1510,6 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
                 raise manifest_error
             if manifest.get("platform", "m365") != "m365":
                 raise Unavailable("not_applicable_to_platform")
-            if section == "sharing_policy":
-                raise Unavailable()
             if section == "scuba_config":
                 if not manifest:
                     raise Unavailable("missing_artifact")  # no run manifest, no run to synthesise a configuration for
