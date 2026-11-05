@@ -1,4 +1,5 @@
 """Offline Teams rule-view contracts, including the unchanged model shape gate."""
+from collections import Counter
 from copy import deepcopy
 import inspect
 import json
@@ -334,3 +335,60 @@ def test_fixture_hygiene_and_provenance():
         actual = {row["vector_id"].split(":", 1)[0] for row in FIXTURE["vectors"]
                   if section in row["sections"]}
         assert actual == set(kinds)
+
+
+def test_fixture_allowed_origins():
+    vectors = FIXTURE["vectors"]
+    ids = [row["vector_id"] for row in vectors]
+    assert len(set(ids)) == len(ids)
+    counts = Counter(vector_id.split(":", 1)[0] for vector_id in ids)
+    assert counts == FIXTURE["_meta"]["origin_counts"] == {
+        "constructed": 459, "pack-train": 6, "pack-validation": 6,
+    }
+    allowed = {
+        "constructed": {"source_file": "constructed by build_vectors.py", "split": None},
+        "pack-train": {"source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl", "split": "train"},
+        "pack-validation": {"source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl", "split": "validation"},
+        "packlic-train": {"source_file": "20261030-oracle-pack-v10/.../approved-cases.jsonl", "split": "train"},
+    }
+    assert set(FIXTURE["_meta"]["origins"]) == set(counts)
+    for kind, origin in FIXTURE["_meta"]["origins"].items():
+        assert origin == allowed[kind]
+    assert FIXTURE["_meta"]["provenance"] == (
+        "constructed rows and pack train and validation rows from v3.9.1; "
+        "held-out test and pilot rows excluded"
+    )
+    assert not any(":v38_" in vector_id for vector_id in ids)
+    replacement = next(row for row in vectors
+                       if row["vector_id"] == "pack-train:scuba-teams-ms-teams-5-1v2-a133783860")
+    assert replacement["policy"] == "MS.TEAMS.5.1v2"
+    assert replacement["rule_reason_code"] == "required_evidence_section_not_collected"
+    assert replacement["rule_verdict"] == "not_assessed"
+    assert replacement["sections"]["app_policies"] == NOT_COLLECTED
+
+
+def test_fixture_local_constructions_use_allowed_parents():
+    by_id = {row["vector_id"]: row for row in FIXTURE["vectors"]}
+    constructions = FIXTURE["_meta"]["local_constructions"]
+    assert len(constructions) == 18
+    local_ids = {item["vector_id"] for item in constructions}
+    assert len(local_ids) == 18
+    assert {vector_id for vector_id in by_id if ":fixture_" in vector_id} == local_ids
+    assert Counter(by_id[vector_id]["policy"] for vector_id in local_ids) == {
+        "MS.TEAMS.1.6v1": 3, "MS.TEAMS.1.3v1": 3, "MS.TEAMS.1.4v1": 3,
+        "MS.TEAMS.1.7v2": 3, "MS.TEAMS.5.1v2": 2, "MS.TEAMS.5.2v2": 2, "MS.TEAMS.5.3v2": 2,
+    }
+    for item in constructions:
+        parent_id = item["parent_vector_id"]
+        assert parent_id.startswith("constructed:")
+        assert parent_id not in local_ids
+        parent = by_id[parent_id]
+        cell = "setting_duplicated" if item["section"] == "tenant_app_settings" else "global_duplicated"
+        suffix = "org_duplicated_identical" if cell == "setting_duplicated" else "global_duplicated_identical"
+        assert parent_id == f"constructed:{parent['policy']}:{suffix}"
+        assert parent["rule_reason_code"] == f"data_unusable_{cell}"
+        assert parent["rule_verdict"] == "not_assessed"
+        expected = deepcopy(parent)
+        expected["vector_id"] = item["vector_id"]
+        expected["sections"][item["section"]][0]["UnrelatedField"] = f"fixture-variant-{item['variant']}"
+        assert by_id[item["vector_id"]] == expected
