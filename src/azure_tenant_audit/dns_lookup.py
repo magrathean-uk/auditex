@@ -189,10 +189,11 @@ def scuba_dkim_record(domain: str, resolver: DnsResolver) -> dict[str, Any] | No
         name = f"{selector}._domainkey.{domain}"
         answer = _record_ask(resolver, name)
         # SG-P:297-303: traditional DNS keeps TXT strings, not CNAME targets.
-        # Untyped injected resolvers retain the historical DoH-fallback behaviour.
+        # With no TXT, DoH fallback retains CNAME data and stops the selector walk.
         if answer.record_types:
             records = [r for r, kind in zip(answer.records, answer.record_types) if kind != 5]
-            answer = DnsAnswer(records, answer.outcome if records else "empty")
+            if records:
+                answer = DnsAnswer(records, answer.outcome)
         log.append(_dns_log(name, answer))
         if answer.records:
             break

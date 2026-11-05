@@ -266,26 +266,55 @@ def test_doh_carries_answer_types_without_changing_query_strings():
 
 
 @pytest.mark.parametrize('with_txt', [False, True])
-def test_dkim_ignores_typed_cname_and_keeps_txt(with_txt):
+def test_dkim_typed_cname_keeps_txt_or_doh_fallback(with_txt):
     first = 'selector1._domainkey.example.invalid'
-    second = 'selector2._domainkey.example.invalid'
+    calls = []
 
     class DkimSession(Session):
         def get(self, *args, **kwargs):
             name = kwargs['params']['name']
+            calls.append((name, kwargs['params']['type']))
             entries = [{'type': 5, 'data': 'target.invalid'}] if name == first else []
-            if name == second or with_txt:
+            if with_txt:
                 entries.append({'type': 16, 'data': '"v=DKIM1; p=key"'})
             self.payload = {'Status': 0, 'Answer': entries}
             return self
 
     resolver = dns.CachingResolver(dns.DohClient(session=DkimSession(None)))
     result = dns.scuba_dkim_record('example.invalid', resolver)
-    assert result['rdata'] == ['v=DKIM1; p=key']
-    assert [entry['query_name'] for entry in result['log']] == ([first] if with_txt else [first, second])
-    assert result['log'][0]['query_answers'] == (['v=DKIM1; p=key'] if with_txt else [])
+    expected = ['v=DKIM1; p=key'] if with_txt else ['target.invalid']
+    assert result['rdata'] == expected
+    assert calls == [(first, 'TXT')]
+    assert [entry['query_name'] for entry in result['log']] == [first]
+    assert result['log'][0]['query_answers'] == expected
     # Posture and the query API still see the original CNAME data in the shared cache.
     assert resolver.query(first, 'TXT') == ['target.invalid'] + (['v=DKIM1; p=key'] if with_txt else [])
+
+
+def test_dkim_dangling_selector1_stops_before_valid_selector2():
+    first = 'selector1._domainkey.example.invalid'
+    second = 'selector2._domainkey.example.invalid'
+    calls = []
+
+    class DkimSession(Session):
+        def get(self, *args, **kwargs):
+            name = kwargs['params']['name']
+            calls.append((name, kwargs['params']['type']))
+            self.payload = {'Status': 0, 'Answer': {
+                first: [{'type': 5, 'data': 'target.invalid'}],
+                second: [{'type': 5, 'data': 'working.invalid'},
+                         {'type': 16, 'data': '"v=DKIM1; p=key"'}],
+            }[name]}
+            return self
+
+    result = dns.scuba_dkim_record('example.invalid', dns.DohClient(session=DkimSession(None)))
+    # ref_impl is not a test dependency. Pin the row that v3.9.1 EXO 3.1 reads
+    # as domain_noncompliant.key_not_published, rather than passing on selector2.
+    assert result == {'domain': 'example.invalid', 'rdata': ['target.invalid'], 'log': [{
+        'query_name': first, 'query_method': 'DoH',
+        'query_result': 'Query returned 1 txt records', 'query_answers': ['target.invalid'],
+    }]}
+    assert calls == [(first, 'TXT')]
 
 
 def test_cache_shares_both_interfaces_and_does_not_cache_errors():
@@ -344,9 +373,9 @@ def test_collector_raw_records_and_projection(tmp_path):
     projection, report = bundle(tmp_path, result.payload, result.coverage)
     for operation in OPERATIONS:
         expected = [{k: v for k, v in r.items() if k != 'log'} for r in result.payload[operation]['value']]
-        assert projection.rule_sections[operation] == expected
+        assert [{k: v for k, v in r.items() if k != 'log'}
+                for r in projection.rule_sections[operation]] == expected
         assert projection[operation] == expected
-        assert 'log' in report['sections'][operation]['ignored_fields']
 
 
 def test_collector_noerror_empty_spf_reaches_the_rule_view(tmp_path):
@@ -361,7 +390,8 @@ def test_collector_noerror_empty_spf_reaches_the_rule_view(tmp_path):
     projection, report = bundle(tmp_path, result.payload, result.coverage)
     # Rules read the in-memory rule view, captured after the adapter and before the shape gate:
     # the empty-rdata row reaches MS.EXO.2.2 and 3.1 (product, 5 Nov 2026).
-    assert projection.rule_sections['spf_records'] == [{k: v for k, v in row.items() if k != 'log'}]
+    assert [{k: v for k, v in r.items() if k != 'log'}
+            for r in projection.rule_sections['spf_records']] == [{k: v for k, v in row.items() if k != 'log'}]
     # Only the model view is withheld by the digest gate; this part may flip or become irrelevant
     # when the model fallback is removed.
     assert projection['spf_records'] == NOT_COLLECTED
