@@ -1326,19 +1326,15 @@ def test_scope_raw_branch_keeps_restrictions(tmp_path):
     assert "user1@" not in json.dumps(summary)
 
 
-def test_projected_scope_marks_met_row_and_bad_raw_scope_is_not_evaluated(tmp_path):
-    from azure_tenant_audit.scuba_scope import apply_post_check
+def test_projected_scope_summary_and_bad_raw_scope_is_not_evaluated(tmp_path):
     from auditex.scubagear_export import scope_from_export
     raw = json.loads(PROVIDER.read_text())
     raw["conditional_access_policies"][0]["GrantControls"]["BuiltInControls"] = ["mfa"]
     projection, extras = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()["policies"])
     scope = scope_from_export(projection, extras["raw_ca"], redact=True, max_items=40)
     assert scope.summary["source"] == "projection" and scope.summary["count"] == 1
-    row = {"policy_id": "MS.AAD.3.2v2", "validation_status": "valid", "reason": None,
-           "claims": [{"id": "requirement_met", "status": "confirmed", "value": True}],
-           "limitations": [], "recommendations": []}
-    apply_post_check(row, scope.entries)
-    assert row["post_check"]["kind"] == "scope_narrowed"
+    assert scope.summary["policies"] == [{"name": raw["conditional_access_policies"][0]["DisplayName"],
+                                           "conditions": ["conditions.clientAppTypes"]}]
     raw["conditional_access_policies"][0]["DisplayName"] = []
     projection, extras = project_export(load_export(_save(tmp_path, raw, "bad-scope.json")),
                                         policy_catalogue()["policies"])

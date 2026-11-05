@@ -1,6 +1,6 @@
 """Read-only Conditional Access scope evidence for the model assessment post-check.
 
-The verdict rules live in ``azure_tenant_audit.scuba_scope``. This module only supplies the policies:
+The scope summary lives in ``azure_tenant_audit.scuba_scope``. This module only supplies the policies:
 the projected section when there is one, else the bundle's own raw payload, so that the envelope can say
 which policies are scope-narrowed even when the projection withheld the section (a location, platform
 or device condition withholds it). The raw read goes through the projection's bundle reader, with its

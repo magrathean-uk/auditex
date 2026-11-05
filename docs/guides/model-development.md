@@ -738,8 +738,8 @@ passes in ScubaGear although Entra would not apply the control tenant-wide; the 
 `ca_condition` with the axis in the template, so a stricter reading can drop them by template.
 
 Current `auditex model assess` retains the deterministic scope envelope (`configs/scuba-scope-blind.json`)
-for local review without calling a model. Rule rows are excluded from `scope_narrowed` marking, so its
-current total is zero. Historical model assessments may carry that row marker when an enabled scoped
+for local review without calling a model. Row-level scope marking has been removed;
+`totals.scope_narrowed` remains zero. Historical model assessments may carry that row marker when an enabled scoped
 policy could have decided a met answer and no compliant unscoped policy could decide it too. Those
 historical fields remain readable. See "Scope post-check" in the output contract.
 

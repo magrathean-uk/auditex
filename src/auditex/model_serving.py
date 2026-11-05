@@ -23,7 +23,6 @@ from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_na
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.resources import open_text_resource
-from azure_tenant_audit.scuba_scope import apply_post_check
 
 from .model_eval import _invalid_constant, _pairs, validate_model_response
 from .model_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256
@@ -373,8 +372,7 @@ def _uncovered_record(case: dict[str, Any]) -> dict[str, Any]:
 
 def _assess_policies(projection: dict[str, Any], selected: list[str],
                      catalogue: dict[str, Any], generated_at: str, *, dry_run: bool,
-                     baseline: dict[str, str], scope: Any,
-                     max_items: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                     baseline: dict[str, str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     records, prompts = [], []
     for policy_id in selected:
         try:
@@ -410,16 +408,15 @@ def _assess_policies(projection: dict[str, Any], selected: list[str],
                                     rule_projection=rule_projection) if row else None)
             if record is None:
                 record = _uncovered_record(case)
-        if scope is not None and scope.entries:
-            apply_post_check(record, scope.entries, max_items=max_items)
         record["comparison"] = _comparison(policy_id, record, baseline)
         records.append(record)
     return records, prompts
 
 
 def _totals(records: list[dict[str, Any]]) -> dict[str, int]:
+    # Keep the historical total in current output; row-level scope metadata is no longer produced.
     totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0,
-              "scope_narrowed": sum("post_check" in record for record in records)}
+              "scope_narrowed": 0}
     for record in records:
         totals["rule_answered"] += record["reason"] == "rule_precheck"
         state = record["validation_status"]
@@ -464,14 +461,13 @@ def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, polici
                              scan_max_bytes=projection_scan_max_bytes, scan_max_chunks=projection_scan_max_chunks)
     baseline = {} if dry_run else _baseline_statuses(root / "reports" / "report-pack.json")
     # Read-only and verdict-independent: which enabled Conditional Access policies carry a scope condition the
-    # pinned Rego ignores. A met row is marked after its verdict is known; nothing here reaches a prompt.
+    # pinned Rego ignores. The envelope carries this caveat; nothing here reaches a prompt.
     scope = None if dry_run else collect_scope_evidence(
         root, projection, redact=True, max_items=projection_max_items,
         scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
         scan_max_chunks=projection_scan_max_chunks)
     records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
-                                        dry_run=dry_run, baseline=baseline, scope=scope,
-                                        max_items=projection_max_items)
+                                        dry_run=dry_run, baseline=baseline)
     if dry_run:
         write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
         return {"path": str(target), "dry_run": True, "prompts": sum("messages" in row for row in prompts),
@@ -549,8 +545,7 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
     scope = None if dry_run else scope_from_export(projection, extras["raw_ca"],
                                                    redact=True, max_items=projection_max_items)
     records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
-                                        dry_run=dry_run, baseline=baseline, scope=scope,
-                                        max_items=projection_max_items)
+                                        dry_run=dry_run, baseline=baseline)
     sidecar = build_sidecar(loaded, projection, extras, catalogue["policies"], selected, baseline,
                             reasons, unmappable, verdict_source, verdict_state, verdict_map, generated_at, scope)
     filename = "model_assessment_prompts.jsonl" if dry_run else "model_assessment.json"

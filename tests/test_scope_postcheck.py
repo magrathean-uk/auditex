@@ -1,26 +1,26 @@
-"""Scope post-check: a met verdict the pinned Rego reads blind to Conditional Access scoping is marked, never changed.
-
-Synthetic evidence only; no tenant, network or model calls (the endpoint is stubbed).
-"""
+"""Live scope envelopes and historical row validation, using synthetic evidence only."""
 from __future__ import annotations
 
 from copy import deepcopy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import re
+from unittest.mock import patch
 
 import jsonschema
 import pytest
 
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, canonical, policy_catalogue
+from auditex.model_serving import ModelClient, ModelConfig, assess_run, policy_catalogue
 from azure_tenant_audit.model_assessment import validate_assessment
 from azure_tenant_audit.scuba_scope import (
-    LIMITATION_ID, ScopeEntry, post_check, requirement_met, scope_catalogue, scope_entries, scope_summary,
+    scope_catalogue, scope_entries, scope_summary,
 )
-from test_model_serving import envelope, fake_projection
+from test_model_serving import fake_projection
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
+LIMITATION_ID = "scope_narrowed"  # Historical row vocabulary; never written by assessment.
 CA = "conditional_access_policies"
 LOCATION = "7c1e4b52-3a90-4d68-8f21-b5d0a6e93c14"
 NAMED = {"IncludeLocations": [LOCATION], "ExcludeLocations": []}
@@ -88,144 +88,42 @@ def camel(value):
     return value
 
 
-def answer_for(verdict, case):
-    ids = [item["id"] for item in case["evidence"]]
-    criticality = {"id": "policy_criticality", "status": "confirmed", "evidence_ids": ["e0"],
-                   "value": case["evidence"][0]["observed"]["criticality"]}
-    requirement = {"id": "requirement_met", "status": "confirmed", "value": True, "evidence_ids": ids}
-    limitations, recommendations = [], []
-    if verdict == "inferred_met":
-        requirement["status"] = "inferred"
-    elif verdict == "not_met":
-        requirement["value"] = False
-        recommendations = ["review_policy_against_baseline_text"]
-    elif verdict == "not_applicable":
-        requirement["status"] = "inferred"
-        limitations = ["policy_not_applicable"]
-    elif verdict == "unknown":
-        requirement.update(status="unknown", value=None, evidence_ids=ids[:2])
-        limitations, recommendations = ["required_evidence_section_not_collected"], ["collect_missing_evidence_section"]
-    return {"claims": [requirement, criticality], "limitations": limitations, "recommendations": recommendations}
-
-
-def assess(tmp_path, monkeypatch, policy_id, policies, verdict="met", **kwargs):
-    """A direct historical client fixture for ``policy_id`` over a faked projection whose Conditional Access section is ``policies``."""
-    (tmp_path / "run-manifest.json").write_text(
-        '{"run_id":"run","rule_parameters":{"break_glass_accounts":[]}}')
-    # project_run synthesises the policy's scuba_config view from this manifest.
-    # Leave that view in place: fake_projection replaces ordinary evidence and
-    # clears per-policy views for any section it replaces.
-    values = {section: {} for section in policy_catalogue()["policies"][policy_id]["sections"]
-              if section != "scuba_config"}
-    values[CA] = policies
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **options: fake_projection(root, values))
-    prompts = []
-
-    def reply(self, method, path, payload):
-        prompts.append(canonical(payload))
-        return envelope(answer_for(verdict, json.loads(payload["messages"][1]["content"])))
-
-    monkeypatch.setattr(ModelClient, "_request", reply)
-    result = assess_run(tmp_path, policies=[policy_id], **kwargs)
-    from auditex.model_serving import build_case, _comparison, _totals
-    from azure_tenant_audit.scuba_scope import apply_post_check
-    from auditex.scope_postcheck import collect_scope_evidence
-    projection = fake_projection(tmp_path, values)
-    client = ModelClient(ModelConfig(model_name="stub"))
-    case = build_case(policy_id, projection, "synthetic")
-    # Historical post-check fixtures use collected synthetic config, independently of today's projection gate.
-    for item in case["evidence"][1:]:
-        if item["section"] == "scuba_config":
-            item["observed"] = {}
-    record = client.assess(case)
-    scope = collect_scope_evidence(tmp_path, projection, redact=True,
-                                  max_items=kwargs.get("projection_max_items", 40),
-                                  scan_max_rows=250000, scan_max_bytes=268435456, scan_max_chunks=10000)
-    apply_post_check(record, scope.entries, max_items=kwargs.get("projection_max_items", 40))
-    record["comparison"] = _comparison(policy_id, record, {})
-    result.update(policies=[record], totals=_totals([record]), endpoint_host="127.0.0.1", model_name="stub")
-    validate_assessment(result)
-    jsonschema.validate(result, SCHEMA)
-    return result, result["policies"][0], prompts
+# --- which conditions narrow -------------------------------------------------------------------------------
 
 
 @pytest.fixture
 def marked(tmp_path, monkeypatch):
-    result, row, _ = assess(tmp_path, monkeypatch, "MS.AAD.3.2v2", [policy("Office only", builtin=["mfa"], Locations=NAMED)])
-    assert "post_check" in row
+    """Hand-built historical model row; no removed client route or row marker is involved."""
+    (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
+    policy_id = "MS.AAD.3.2v2"
+    values = {CA: [policy("Office only", builtin=["mfa"], Locations=NAMED)]}
+    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, values))
+    result = assess_run(tmp_path, policies=[policy_id])
+    result.update(endpoint_host="127.0.0.1", model_name="historical-model")
+    result["policies"] = [{
+        "policy_id": policy_id, "validation_status": "valid", "reason": None,
+        "claims": [
+            {"id": "requirement_met", "status": "confirmed", "value": True, "evidence_ids": ["e0", "e1", "e2"]},
+            {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
+        "limitations": [LIMITATION_ID], "recommendations": [], "attempts": 1, "latency_ms": 0.1,
+        "prompt_sha256": "0" * 64, "response_sha256": "1" * 64, "thinking_disabled": True,
+        "thinking_stripped": False, "finish_reason": None,
+        "comparison": {"baseline_match": "none", "baseline_status": None, "model_status": "pass", "result": "not_assessed"},
+        "post_check": {"kind": "scope_narrowed", "policies": ["Office only"],
+                       "conditions": ["conditions.locations"], "count": 1}}]
+    result["totals"] = {"answered": 1, "unknown": 0, "invalid": 0, "skipped": 0,
+                        "rule_answered": 0, "scope_narrowed": 1}
+    validate_assessment(result)
     return result
 
 
-# --- verdict-level behaviour -------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("verdict", ["met", "inferred_met"])
-def test_met_row_with_location_scoped_enabled_policy_is_marked_and_the_verdict_is_kept(tmp_path, monkeypatch, verdict):
-    (tmp_path / "plain").mkdir()
-    plain = assess(tmp_path / "plain", monkeypatch, "MS.AAD.3.2v2", [policy(builtin=["mfa"])], verdict)[1]
-    result, row, prompts = assess(tmp_path, monkeypatch, "MS.AAD.3.2v2",
-                                  [policy("Office only", builtin=["mfa"], Locations=NAMED)], verdict)
-    assert row["post_check"] == {"kind": "scope_narrowed", "policies": ["Office only"],
-                                 "conditions": ["conditions.locations"], "count": 1}
-    assert row["limitations"] == [LIMITATION_ID]
-    # The oracle's verdict, comparison and recommendations are exactly those of the unscoped run.
-    for key in ("claims", "recommendations", "comparison", "validation_status", "reason", "attempts"):
-        assert row[key] == plain[key]
-    assert row["claims"][0]["value"] is True and row["claims"][0]["status"] == ("confirmed" if verdict == "met" else "inferred")
-    assert result["totals"] == {"answered": 1, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0,
-                                "scope_narrowed": 1}
-    assert result["scope_post_check"] == {
-        "status": "evaluated", "source": "projection", "reason": None, "count": 1,
-        "policies": [{"name": "Office only", "conditions": ["conditions.locations"]}]}
-    # Nothing of the post-check reaches the prompt: the case, its limitation vocabulary and the training shape are unchanged.
-    assert LIMITATION_ID not in "".join(prompts)
-    assert "limitation_ids" in prompts[0] and "scope_narrowed" not in policy_catalogue()["limitation_ids"]
-
-
-@pytest.mark.parametrize("state", ["disabled", "enabledForReportingButNotEnforced"])
-def test_report_only_or_disabled_scoped_policy_does_not_trigger(tmp_path, monkeypatch, state):
-    result, row, _ = assess(tmp_path, monkeypatch, "MS.AAD.3.2v2",
-                            [policy("Office only", state=state, builtin=["mfa"], Locations=NAMED)])
-    assert "post_check" not in row and row["limitations"] == []
-    assert result["totals"]["scope_narrowed"] == 0
-    assert result["scope_post_check"]["count"] == 0 and result["scope_post_check"]["policies"] == []
-
-
-def test_unscoped_met_row_is_untouched(tmp_path, monkeypatch):
-    policies = [policy(builtin=["mfa"], Locations={"IncludeLocations": ["All"], "ExcludeLocations": []},
-                       Platforms={"IncludePlatforms": ["all"], "ExcludePlatforms": []}, Devices=None,
-                       ClientApplications=None, Operator=None)]
-    result, row, _ = assess(tmp_path, monkeypatch, "MS.AAD.3.2v2", policies)
-    assert "post_check" not in row and row["limitations"] == [] and row["claims"][0]["value"] is True
-    assert result["totals"]["scope_narrowed"] == 0 and result["scope_post_check"]["policies"] == []
-
-
-@pytest.mark.parametrize("verdict", ["not_met", "unknown", "not_applicable"])
-def test_other_verdicts_are_untouched_even_with_a_scoped_policy(tmp_path, monkeypatch, verdict):
-    result, row, _ = assess(tmp_path, monkeypatch, "MS.AAD.3.2v2",
-                            [policy("Office only", builtin=["mfa"], Locations=NAMED)], verdict)
-    assert "post_check" not in row and LIMITATION_ID not in row["limitations"]
-    assert result["totals"]["scope_narrowed"] == 0
-    # The envelope list is verdict-independent: the scoped policy is still named.
-    assert result["scope_post_check"]["policies"] == [{"name": "Office only", "conditions": ["conditions.locations"]}]
-
-
-def test_requirement_met_excludes_rule_rows_and_not_applicable_answers():
-    row = {"validation_status": "valid", "reason": None, "limitations": [],
-           "claims": [{"id": "requirement_met", "status": "confirmed", "value": True}]}
-    assert requirement_met(row)
-    assert not requirement_met({**row, "reason": "rule_precheck"})
-    assert not requirement_met({**row, "limitations": ["policy_not_applicable"]})
-    assert not requirement_met({**row, "validation_status": "invalid"})
-    assert not requirement_met({**row, "claims": [{"id": "requirement_met", "status": "unknown", "value": None}]})
-
-
-# --- which conditions narrow -------------------------------------------------------------------------------
-
-
-def narrowed(policy_id, *policies, **options):
-    found = post_check(policy_id, scope_entries(policies), **options)
-    return None if found is None else found["conditions"]
+def envelope_conditions(policy_id, *policies, **options):
+    """Exercise the live envelope for one table entry, isolating its candidate checks."""
+    table = scope_catalogue()
+    table["policies"] = {policy_id: table["policies"][policy_id]}
+    with patch("azure_tenant_audit.scuba_scope.scope_catalogue", return_value=table):
+        found = scope_summary(scope_entries(policies), **options)
+    return sorted({condition for item in found["policies"] for condition in item["conditions"]}) or None
 
 
 @pytest.mark.parametrize("condition,conditions", [
@@ -242,7 +140,7 @@ def narrowed(policy_id, *policies, **options):
 ])
 def test_each_scope_condition_narrows(condition, conditions):
     paths = scope_catalogue()["paths"]
-    assert narrowed("MS.AAD.3.2v2", policy(builtin=["mfa"], **conditions)) == [paths[condition]]
+    assert envelope_conditions("MS.AAD.3.2v2", policy(builtin=["mfa"], **conditions)) == [paths[condition]]
 
 
 @pytest.mark.parametrize("conditions", [
@@ -253,52 +151,27 @@ def test_each_scope_condition_narrows(condition, conditions):
     {"ClientAppTypes": ["all"]},
 ])
 def test_unscoped_forms_do_not_narrow(conditions):
-    assert narrowed("MS.AAD.3.2v2", policy(builtin=["mfa"], **conditions)) is None
+    assert envelope_conditions("MS.AAD.3.2v2", policy(builtin=["mfa"], **conditions)) is None
 
 
 def test_graph_spelling_and_projection_spelling_are_read_alike():
     scoped = policy("Office only", builtin=["mfa"], Locations=NAMED, Platforms={"IncludePlatforms": ["iOS"]})
-    assert narrowed("MS.AAD.3.2v2", scoped) == narrowed("MS.AAD.3.2v2", camel(scoped)) == [
+    assert envelope_conditions("MS.AAD.3.2v2", scoped) == envelope_conditions("MS.AAD.3.2v2", camel(scoped)) == [
         "conditions.locations", "conditions.platforms"]
 
 
 @pytest.mark.parametrize("policy_id", sorted(BASES))
-def test_plain_compliant_policy_is_not_marked_but_each_ignored_scope_is(policy_id):
-    assert narrowed(policy_id, base(policy_id)) is None
-    assert narrowed(policy_id, base(policy_id, Locations=NAMED)) == ["conditions.locations"]
-    assert narrowed(policy_id, base(policy_id, Platforms={"IncludePlatforms": ["iOS"]})) == ["conditions.platforms"]
-    assert narrowed(policy_id, base(policy_id, Devices={"DeviceFilter": {"Mode": "include", "Rule": "x"}})) == ["conditions.devices"]
+def test_envelope_lists_each_ignored_scope_of_a_compliant_policy(policy_id):
+    assert envelope_conditions(policy_id, base(policy_id)) is None
+    assert envelope_conditions(policy_id, base(policy_id, Locations=NAMED)) == ["conditions.locations"]
+    assert envelope_conditions(policy_id, base(policy_id, Platforms={"IncludePlatforms": ["iOS"]})) == ["conditions.platforms"]
+    assert envelope_conditions(policy_id, base(policy_id, Devices={"DeviceFilter": {"Mode": "include", "Rule": "x"}})) == ["conditions.devices"]
     # A condition the Rego reads is already part of its verdict and is not flagged (the policy still carries what it reads).
     agents = BASES[policy_id].get("ClientApplications", {})
     for group, spec in (("client_applications", {"ClientApplications": {**agents, "IncludeServicePrincipals": ["All"]}}),
                         ("client_app_types", {"ClientAppTypes": ["browser", "other", "exchangeActiveSync", "all"]})):
         expected = None if group not in CARD_IGNORED[policy_id] else [scope_catalogue()["paths"][group]]
-        assert narrowed(policy_id, base(policy_id, **spec)) == expected
-
-
-# --- the grant operator ------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("policy_id", sorted(BASES))
-def test_or_operator_marks_only_the_policies_where_the_rego_ignores_it(policy_id):
-    accepted = {"strength": STRENGTH} if "strength" in BASES[policy_id] else {}
-    # An OR grant that also offers a control the item does not accept: a user can pass without the required one.
-    weakened = base(policy_id, operator="OR", builtin=[*BASES[policy_id].get("builtin", []), "passwordChange"], **accepted)
-    expected = ["grantControls.operator"] if policy_id in OPERATOR_IGNORED else None
-    assert narrowed(policy_id, weakened) == expected
-    # AND demands every control, so it is stricter than the Rego asks, not weaker.
-    assert narrowed(policy_id, {**weakened, "GrantControls": {**weakened["GrantControls"], "Operator": "AND"}}) is None
-
-
-@pytest.mark.parametrize("policy_id", sorted(OPERATOR_IGNORED))
-def test_or_without_an_alternative_control_is_not_a_narrowing(policy_id):
-    # Graph returns OR for an ordinary single-control policy; the baseline form of MS.AAD.3.8v1 is itself OR of two.
-    assert narrowed(policy_id, base(policy_id, operator="OR")) is None
-
-
-def test_or_with_mfa_and_a_weaker_control_marks_ms_aad_3_2v2_but_mfa_or_strength_does_not():
-    assert narrowed("MS.AAD.3.2v2", policy(builtin=["mfa", "compliantApplication"], operator="OR")) == ["grantControls.operator"]
-    assert narrowed("MS.AAD.3.2v2", policy(builtin=["mfa"], strength=STRENGTH, operator="OR")) is None
+        assert envelope_conditions(policy_id, base(policy_id, **spec)) == expected
 
 
 def test_scoped_policy_that_could_not_decide_the_item_is_ignored():
@@ -307,27 +180,23 @@ def test_scoped_policy_that_could_not_decide_the_item_is_ignored():
     agent_block = policy("Block risky agents", builtin=["block"], AgentIdRiskLevels="high",
                          ClientApplications={"IncludeAgentIdServicePrincipals": ["All"]})
     mfa_untrusted = policy("MFA outside the office", builtin=["mfa"], Locations=NAMED)
-    assert narrowed("MS.AAD.3.2v2", geo_block) is None            # block does not give MFA
-    assert narrowed("MS.AAD.2.1v1", geo_block, legacy_block, agent_block) is None   # none carries a high user risk level
-    assert narrowed("MS.AAD.3.1v1", mfa_untrusted) is None        # no authentication strength
-    assert narrowed("MS.AAD.3.7v1", mfa_untrusted) is None        # no device control
-    assert narrowed("MS.AAD.1.1v1", geo_block) is None            # not about legacy client types
-    assert narrowed("MS.AAD.1.1v1", legacy_block) == ["conditions.locations"]
+    assert envelope_conditions("MS.AAD.3.2v2", geo_block) is None            # block does not give MFA
+    assert envelope_conditions("MS.AAD.2.1v1", geo_block, legacy_block, agent_block) is None   # none carries a high user risk level
+    assert envelope_conditions("MS.AAD.3.1v1", mfa_untrusted) is None        # no authentication strength
+    assert envelope_conditions("MS.AAD.3.7v1", mfa_untrusted) is None        # no device control
+    assert envelope_conditions("MS.AAD.1.1v1", geo_block) is None            # not about legacy client types
+    assert envelope_conditions("MS.AAD.1.1v1", legacy_block) == ["conditions.locations"]
 
 
-def test_post_check_names_are_distinct_sorted_and_bounded():
+def test_envelope_names_are_distinct_sorted_and_bounded():
     entries = scope_entries([policy(name, builtin=["mfa"], Locations=NAMED) for name in ("B", "A", "A", "C")])
-    assert post_check("MS.AAD.3.2v2", entries) == {"kind": "scope_narrowed", "policies": ["A", "B", "C"],
-                                                   "conditions": ["conditions.locations"], "count": 4}
-    assert post_check("MS.AAD.3.2v2", entries, max_items=2)["policies"] == ["A", "B"]
     assert scope_summary(entries, max_items=2) == {"count": 4, "policies": [
         {"name": "A", "conditions": ["conditions.locations"]}, {"name": "B", "conditions": ["conditions.locations"]}]}
     long = scope_entries([policy("x" * 500, builtin=["mfa"], Locations=NAMED), policy(None, builtin=["mfa"], Locations=NAMED)])
     assert sorted(entry.name for entry in long) == ["(unnamed policy)", "x" * 200]
 
 
-def test_unknown_policy_and_non_candidate_inputs_never_raise():
-    assert post_check("MS.AAD.3.3v2", [ScopeEntry("x", frozenset({"locations"}), frozenset())]) is None
+def test_non_candidate_inputs_never_raise():
     assert scope_entries([None, "text", 3, {}, {"state": "enabled"}, {"state": "enabled", "conditions": "text"}]) == []
 
 
@@ -381,22 +250,22 @@ def breakers(policy_id):
 
 @pytest.mark.parametrize("policy_id", sorted(BASES))
 def test_a_policy_missing_one_check_the_rego_makes_is_not_a_candidate(policy_id):
-    assert narrowed(policy_id, scoped(policy_id)) == ["conditions.locations"]
+    assert envelope_conditions(policy_id, scoped(policy_id)) == ["conditions.locations"]
     for label, override in breakers(policy_id).items():
-        assert narrowed(policy_id, scoped(policy_id, **override)) is None, label
+        assert envelope_conditions(policy_id, scoped(policy_id, **override)) is None, label
 
 
-def test_the_reviewed_probes_no_longer_mark_a_row():
+def test_envelope_omits_policies_that_cannot_decide_an_item():
     # A role-scoped MFA policy on the browser only does not decide MS.AAD.3.2v2 (it does not include all users).
     role_mfa = policy("Admins on the browser", builtin=["mfa"], ClientAppTypes=["browser"],
                       Users=users(IncludeUsers=[], IncludeRoles=[ROLE]))
-    assert narrowed("MS.AAD.3.2v2", role_mfa) is None and scope_summary(scope_entries([role_mfa]))["count"] == 0
+    assert envelope_conditions("MS.AAD.3.2v2", role_mfa) is None and scope_summary(scope_entries([role_mfa]))["count"] == 0
     # A guest policy with a weak authentication strength decides neither MS.AAD.3.1v1 nor MS.AAD.3.6v1.
     guests = policy("Guests", strength=WEAKER, Users=users(IncludeUsers=["GuestsOrExternalUsers"]), Locations=NAMED)
-    assert narrowed("MS.AAD.3.1v1", guests) is None and narrowed("MS.AAD.3.6v1", guests) is None
+    assert envelope_conditions("MS.AAD.3.1v1", guests) is None and envelope_conditions("MS.AAD.3.6v1", guests) is None
     # A policy that blocks only the "other" legacy client type does not decide MS.AAD.1.1v1.
     other_only = policy("Block other clients", builtin=["block"], ClientAppTypes=["other"], Locations=NAMED)
-    assert narrowed("MS.AAD.1.1v1", other_only) is None
+    assert envelope_conditions("MS.AAD.1.1v1", other_only) is None
 
 
 @pytest.mark.parametrize("policy_id", sorted(BASES))
@@ -405,17 +274,17 @@ def test_checks_the_rego_does_not_make_never_drop_the_deciding_policy(policy_id)
     apps = {**BASES[policy_id].get("Applications", {"IncludeApplications": ["All"]}), "ExcludeApplications": [APP]}
     excluding = {"Users": users(ExcludeUsers=[USER], ExcludeGroups=[ROLE], ExcludeGuestsOrExternalUsers={"GuestOrExternalUserTypes": "internalGuest"}),
                  "Applications": apps}
-    assert narrowed(policy_id, scoped(policy_id, **excluding)) == ["conditions.locations"]
+    assert envelope_conditions(policy_id, scoped(policy_id, **excluding)) == ["conditions.locations"]
 
 
 def test_fields_a_policys_rego_skips_do_not_gate_it():
     # MS.AAD.3.6v1 is role based (l612 skips includeUsers); MS.AAD.3.8v1 skips the applications (l773);
     # MS.AAD.9.1v1 reads neither the users nor the excluded roles (l1948-1962) and never reads excluded agents.
-    assert narrowed("MS.AAD.3.6v1", scoped("MS.AAD.3.6v1", Users=users(IncludeUsers=[], IncludeRoles=[ROLE]))) == ["conditions.locations"]
-    assert narrowed("MS.AAD.3.8v1", scoped("MS.AAD.3.8v1", Applications={"IncludeApplications": [APP], "IncludeUserActions": [REGISTER]})) == [
+    assert envelope_conditions("MS.AAD.3.6v1", scoped("MS.AAD.3.6v1", Users=users(IncludeUsers=[], IncludeRoles=[ROLE]))) == ["conditions.locations"]
+    assert envelope_conditions("MS.AAD.3.8v1", scoped("MS.AAD.3.8v1", Applications={"IncludeApplications": [APP], "IncludeUserActions": [REGISTER]})) == [
         "conditions.locations"]
     agents = {"IncludeAgentIdServicePrincipals": ["All"], "ExcludeAgentIdServicePrincipals": ["agent-1"]}
-    assert narrowed("MS.AAD.9.1v1", scoped("MS.AAD.9.1v1", Users=users(IncludeUsers=[USER], ExcludeRoles=[ROLE]),
+    assert envelope_conditions("MS.AAD.9.1v1", scoped("MS.AAD.9.1v1", Users=users(IncludeUsers=[USER], ExcludeRoles=[ROLE]),
                                            ClientApplications=agents)) == ["conditions.locations"]
 
 
@@ -439,45 +308,6 @@ def test_retained_entries_keep_no_identifier_and_only_candidates_are_retained():
     assert entry.name == "Kept" and entry.groups == frozenset()
     assert not any(USER in token or ROLE in token or APP in token for token in entry.tokens)
     assert {"conditions.users.excludeUsers#1", "conditions.users.excludeGroups#1", "conditions.applications.includeApplications=All"} <= entry.tokens
-
-
-# --- a compliant unscoped candidate decides the item everywhere: the scoped one is left to the envelope ------
-
-
-@pytest.mark.parametrize("policy_id", sorted(BASES))
-def test_a_compliant_unscoped_candidate_leaves_the_row_unmarked(policy_id):
-    unscoped = base(policy_id, "Everywhere")
-    assert narrowed(policy_id, scoped(policy_id), unscoped) is None
-    assert narrowed(policy_id, unscoped, scoped(policy_id)) is None
-    # The scoped policy is still named by the envelope list, whatever the verdicts.
-    assert scope_summary(scope_entries([scoped(policy_id), unscoped])) == {
-        "count": 1, "policies": [{"name": "Office only", "conditions": ["conditions.locations"]}]}
-
-
-@pytest.mark.parametrize("policy_id", sorted(BASES))
-def test_an_unscoped_candidate_the_rego_could_refuse_does_not_suppress_the_mark(policy_id):
-    # An exclusion needs an allow-list entry in the ScubaGear config, which is not in the evidence: err towards flagging.
-    for excluded in (users(ExcludeUsers=[USER]), users(ExcludeGroups=[ROLE]),
-                     users(ExcludeGuestsOrExternalUsers={"GuestOrExternalUserTypes": "internalGuest"})):
-        assert narrowed(policy_id, scoped(policy_id), base(policy_id, "Excluding", Users=excluded)) == ["conditions.locations"]
-    apps = {**BASES[policy_id].get("Applications", {"IncludeApplications": ["All"]}), "ExcludeApplications": [APP]}
-    assert narrowed(policy_id, scoped(policy_id), base(policy_id, "Excluding", Applications=apps)) == ["conditions.locations"]
-
-
-def test_an_unscoped_policy_that_could_not_decide_the_item_does_not_suppress_the_mark():
-    narrowed_mfa = policy("Office only", builtin=["mfa"], Locations=NAMED)
-    # All users, every application, but a phishing-resistant-only strength: the Rego does not count it as general MFA.
-    resistant_only = policy("Phishing-resistant for everyone", strength=STRENGTH)
-    admins_only = policy("Admins", builtin=["mfa"], Users=users(IncludeUsers=[], IncludeRoles=[ROLE]))
-    assert narrowed("MS.AAD.3.2v2", narrowed_mfa, resistant_only, admins_only) == ["conditions.locations"]
-
-
-def test_a_met_row_with_a_scoped_and_an_unscoped_candidate_is_not_marked_but_the_envelope_names_the_scope(tmp_path, monkeypatch):
-    result, row, _ = assess(tmp_path, monkeypatch, "MS.AAD.3.2v2", [
-        policy("Office only", builtin=["mfa"], Locations=NAMED), policy("Everywhere", builtin=["mfa"])])
-    assert "post_check" not in row and row["limitations"] == [] and row["claims"][0]["value"] is True
-    assert result["totals"]["scope_narrowed"] == 0
-    assert result["scope_post_check"]["policies"] == [{"name": "Office only", "conditions": ["conditions.locations"]}]
 
 
 # --- the envelope record lists a condition only for an item that ignores it ----------------------------------
@@ -643,12 +473,45 @@ def test_dry_run_reads_no_scope_evidence(tmp_path, monkeypatch):
     assert assess_run(tmp_path, ModelConfig(), dry_run=True, policies=["MS.AAD.3.2v2"])["dry_run"] is True
 
 
-def test_envelope_and_row_lists_are_bounded_by_the_projection_item_budget(tmp_path, monkeypatch):
-    scoped = [policy(f"Office {name}", builtin=["mfa"], Locations=NAMED) for name in "CBA"]
-    result, row, _ = assess(tmp_path, monkeypatch, "MS.AAD.3.2v2", scoped, projection_max_items=2)
-    assert row["post_check"]["policies"] == ["Office A", "Office B"] and row["post_check"]["count"] == 3
+@pytest.mark.parametrize("state", ["disabled", "enabledForReportingButNotEnforced"])
+def test_envelope_omits_disabled_and_report_only_policies(state):
+    assert summary(policy("Office only", state=state, builtin=["mfa"], Locations=NAMED)) == {"count": 0, "policies": []}
+
+
+def test_envelope_list_is_bounded_by_the_projection_item_budget(tmp_path, monkeypatch):
+    write_raw(tmp_path, [policy(f"Office {name}", builtin=["mfa"], Locations=NAMED) for name in "CBA"])
+    result = assess_raw(tmp_path, monkeypatch, projection_max_items=2)
     assert [item["name"] for item in result["scope_post_check"]["policies"]] == ["Office A", "Office B"]
     assert result["scope_post_check"]["count"] == 3
+
+
+@pytest.mark.parametrize("projected", [False, True], ids=["raw-unassessed", "projected-met"])
+def test_ca_rule_row_is_untouched_and_envelope_names_the_scope(tmp_path, monkeypatch, projected):
+    # State every field read by the value rule, independently of the Rego candidate summary.
+    conditions = {"Applications": {"IncludeApplications": ["All"], "ExcludeApplications": [],
+                                    "IncludeUserActions": []},
+                  "UserRiskLevels": [], "SignInRiskLevels": [], "AuthenticationFlows": {"TransferMethods": None}}
+    policies = [policy("Office only", builtin=["mfa"], operator="AND", Locations=NAMED, **conditions),
+                policy("Everywhere", builtin=["mfa"], operator="AND", **conditions)]
+    write_raw(tmp_path, policies, manifest={"run_id": "run", "platform": "m365",
+                                            "rule_parameters": {"break_glass_accounts": []}})
+    if projected:
+        monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw:
+            fake_projection(root, {CA: policies}))
+    result = assess_raw(tmp_path, monkeypatch)
+    expected = deepcopy(result["policies"][0])
+    no_scope = SimpleNamespace(summary={"status": "not_evaluated", "source": None,
+                                        "reason": "missing_artifact", "count": 0, "policies": []})
+    monkeypatch.setattr("auditex.model_serving.collect_scope_evidence", lambda *a, **kw: no_scope)
+    without_scope = assess_run(tmp_path, policies=["MS.AAD.3.2v2"])
+    assert without_scope["policies"][0] == expected
+    assert expected["reason"] == "rule_precheck"
+    if projected:
+        assert expected["rule_precheck"]["cell"] == "met_policy_clean"
+        assert next(c for c in expected["claims"] if c["id"] == "requirement_met")["value"] is True
+    assert "post_check" not in expected and LIMITATION_ID not in expected["limitations"]
+    assert result["totals"]["scope_narrowed"] == 0
+    assert result["scope_post_check"]["policies"] == [{"name": "Office only", "conditions": ["conditions.locations"]}]
 
 
 # --- schema and validators ---------------------------------------------------------------------------------
@@ -680,6 +543,9 @@ MUTATIONS = {
     "count_below_listed": (lambda r: r["policies"][0]["post_check"].update(policies=["A", "B"], count=1), False),
     "unsorted_policies": (lambda r: r["policies"][0]["post_check"].update(policies=["B", "A"], count=2), False),
     "name_too_long": (lambda r: r["policies"][0]["post_check"].update(policies=["x" * 201]), False),
+    "false_requirement": (lambda r: r["policies"][0]["claims"][0].update(value=False), False),
+    "unknown_requirement": (lambda r: r["policies"][0]["claims"][0].update(status="unknown", value=None), False),
+    "rule_row": (lambda r: r["policies"][0].update(reason="rule_precheck"), False),
     "not_applicable_answer": (lambda r: r["policies"][0]["limitations"].insert(0, "policy_not_applicable"), False),
     "policy_not_in_table": (lambda r: reassign(r["policies"][0], "MS.AAD.3.3v2", ["conditions.locations"]), False),
     "operator_where_rego_reads_it": (lambda r: reassign(r["policies"][0], "MS.AAD.3.7v1", ["grantControls.operator"]), False),
@@ -701,11 +567,21 @@ MUTATIONS = {
 }
 
 
-def test_schema_and_validators_accept_the_marked_result(marked):
+@pytest.mark.parametrize("version", ["2026-10-29", "2026-11-05"])
+@pytest.mark.parametrize("claim_status", ["confirmed", "inferred"])
+@pytest.mark.parametrize("condition", ["conditions.locations", "grantControls.operator"])
+def test_schema_and_validators_accept_the_marked_result(marked, version, claim_status, condition):
+    marked["schema_version"] = version
+    marked["policies"][0]["post_check"]["conditions"] = [condition]
+    marked["policies"][0]["claims"][0]["status"] = claim_status
+    marked["policies"][0]["comparison"]["model_status"] = "pass" if claim_status == "confirmed" else None
     validate_assessment(marked)
     jsonschema.Draft202012Validator.check_schema(SCHEMA)
-    jsonschema.validate(marked, SCHEMA)
-    assert marked["schema_version"] == "2026-11-05" and marked["projection"]["schema_version"] == "2026-10-29"
+    schema_path = ("schemas/model_assessment-2026-10-29.schema.json" if version == "2026-10-29"
+                   else "schemas/model_assessment.schema.json")
+    schema = json.loads((ROOT / schema_path).read_text())
+    jsonschema.validate(marked, schema)
+    assert marked["projection"]["schema_version"] == "2026-10-29"
 
 
 @pytest.mark.parametrize("name", sorted(MUTATIONS))

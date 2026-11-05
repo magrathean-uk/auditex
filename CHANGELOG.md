@@ -7,6 +7,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
+
 - Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.
 - Use complete same-run Exchange accepted domains for SPF, DKIM and DMARC TXT records, excluding coexistence domains and preserving first-seen spelling; fall back to Graph-verified mail domains when evidence is unusable. HTTPS reads remain limited to Graph-verified domains.
 

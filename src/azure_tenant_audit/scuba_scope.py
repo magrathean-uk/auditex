@@ -1,17 +1,8 @@
-"""Deterministic scope post-check for verdicts the pinned ScubaGear Rego reads blind.
+"""Bounded Conditional Access scope evidence for the assessment envelope.
 
-The Rego ignores the location, platform, device-filter, client-application and (for most
-policies) client-application-type conditions of a Conditional Access policy, and the grant
-operator of several, so a policy applied to one office still gives a clean verdict. After a
-verdict of met this module marks the row ``scope_narrowed`` when an enabled policy that could
-have decided it carries such a condition and no compliant unscoped policy decides it as well.
-It never changes the verdict, never reads message bodies or file content, and keeps of each
-enabled policy only its display name, a few enumeration values, counts and which scope
-conditions it carries. The per-policy table is ``configs/scuba-scope-blind.json``; the serving
-layer, the validator and the tests share it. A policy "could have decided" an item only when it
-carries every check the Rego makes of a deciding policy (users, applications, role exclusions,
-client types, risk levels, the exact grant), so the policy that really decided can never be left
-out; the table's ``source`` text cites the Rego line of each.
+The summary lists enabled candidate policies carrying conditions the pinned ScubaGear
+Rego ignores, independently of assessment verdicts. It never marks assessment rows.
+The shared table also describes historical row metadata accepted by the validator.
 """
 from __future__ import annotations
 
@@ -22,11 +13,6 @@ from typing import Any
 
 from .resources import open_text_resource
 
-POST_CHECK_KIND = "scope_narrowed"
-# The one limitation id the post-check adds. It is an assessment-contract extension on the row, like the
-# named ``required_evidence_section_not_collected:<section>`` limitations: the catalogue's closed
-# ``limitation_ids`` (part of every prompt) and the pack vocabulary are untouched.
-LIMITATION_ID = "scope_narrowed"
 SECTION = "conditional_access_policies"
 # A display name, a tracked enumeration value and a retained policy are all bounded: the scan bounds of the
 # projection limit what is read, these limit what is kept and written.
@@ -35,12 +21,11 @@ MAX_VALUES = 64
 MAX_ENTRIES = 1000
 UNNAMED = "(unnamed policy)"
 _OPERATOR = "operator"
-_OPERATOR_OR = "grantControls.operator=OR"
 _AGENTS_INCLUDED = "includeagentidserviceprincipals"
 
 
 class ScopeOversize(ValueError):
-    """More candidate policies than the post-check retains; the check is not evaluated."""
+    """More candidate policies than the scope summary retains; the check is not evaluated."""
 
 
 @dataclass(frozen=True)
@@ -55,30 +40,13 @@ class ScopeEntry:
     groups: frozenset[str]
     tokens: frozenset[str]
 
-    @property
-    def operator_or(self) -> bool:
-        return _OPERATOR_OR in self.tokens
-
 
 def scope_catalogue() -> dict[str, Any]:
     return json.loads(open_text_resource("configs/scuba-scope-blind.json"))
 
 
-def scope_rule(policy_id: str) -> dict[str, Any] | None:
-    return scope_catalogue()["policies"].get(policy_id)
-
-
 def condition_paths() -> dict[str, str]:
     return scope_catalogue()["paths"]
-
-
-def allowed_conditions(rule: dict[str, Any]) -> set[str]:
-    """The condition paths a row of this policy may carry, given the policy's table entry."""
-    paths = condition_paths()
-    allowed = {paths[group] for group in rule["ignored"]}
-    if rule["operator"]:
-        allowed.add(paths[_OPERATOR])
-    return allowed
 
 
 def _get(mapping: Any, name: str) -> Any:
@@ -201,7 +169,7 @@ def _candidate(rule: dict[str, Any], tokens: frozenset[str]) -> bool:
 
 
 def scope_entries(policies: Iterable[Any], *, mask: Callable[[str], str] | None = None) -> list[ScopeEntry]:
-    """Retain what the post-check needs of each enabled policy that could have decided a tabled item.
+    """Retain what the scope summary needs of each enabled policy that could have decided a tabled item.
 
     Report-only and disabled policies never decide. ``mask`` rewrites a display name (before it is cut to
     ``NAME_LIMIT``, so a cut cannot leave part of what the mask would have hidden).
@@ -225,61 +193,6 @@ def scope_entries(policies: Iterable[Any], *, mask: Callable[[str], str] | None 
     return entries
 
 
-def requirement_met(row: dict[str, Any]) -> bool:
-    """A model row whose requirement is confirmed or inferred met; a not-applicable answer is not a clean pass."""
-    claim = next((c for c in row.get("claims", []) if c.get("id") == "requirement_met"), None)
-    return (row.get("validation_status") == "valid" and row.get("reason") != "rule_precheck"
-            and isinstance(claim, dict) and claim.get("status") in {"confirmed", "inferred"}
-            and claim.get("value") is True and "policy_not_applicable" not in row.get("limitations", []))
-
-
-def _found(rule: dict[str, Any], entry: ScopeEntry, catalogue: dict[str, Any]) -> set[str]:
-    """The condition paths through which this candidate is scoped for this item, in the Rego's blind spots."""
-    paths = catalogue["paths"]
-    found = {paths[group] for group in entry.groups & set(rule["ignored"])}
-    if rule["operator"] and entry.operator_or:
-        # An OR grant that offers a control the item does not accept lets a user pass without the required one.
-        accepted, controls = {*rule["grants"], *rule["alongside"]}, set(catalogue["controls"])
-        if any(token.partition("=")[0] in controls and token not in accepted for token in entry.tokens):
-            found.add(paths[_OPERATOR])
-    return found
-
-
-def _without_exclusions(entry: ScopeEntry, catalogue: dict[str, Any]) -> bool:
-    """A candidate with no exclusion the ScubaGear config would have to allow-list: nothing for the Rego to refuse."""
-    return all(f"{path}#0" in entry.tokens for path in catalogue["exclusions"])
-
-
-def post_check(policy_id: str, entries: Iterable[ScopeEntry], *, max_items: int = 40) -> dict[str, Any] | None:
-    """The row-level record when a policy that could have decided ``policy_id`` is scope-narrowed, else None.
-
-    Nothing is recorded when a compliant policy with no scope condition could have decided the item as well:
-    the control is then applied everywhere, and the scoped policy is left to the envelope record.
-    """
-    catalogue = scope_catalogue()
-    rule = catalogue["policies"].get(policy_id)
-    if rule is None:
-        return None
-    names: set[str] = set()
-    conditions: set[str] = set()
-    count = 0
-    for entry in entries:
-        if not _candidate(rule, entry.tokens):
-            continue
-        found = _found(rule, entry, catalogue)
-        if not found:
-            if _without_exclusions(entry, catalogue):
-                return None
-            continue
-        count += 1
-        names.add(entry.name)
-        conditions |= found
-    if not count:
-        return None
-    return {"kind": POST_CHECK_KIND, "policies": sorted(names)[:max_items], "conditions": sorted(conditions),
-            "count": count}
-
-
 def scope_summary(entries: Iterable[ScopeEntry], *, max_items: int = 40) -> dict[str, Any]:
     """Every enabled policy scoped on a condition that a tabled item it could decide ignores (the envelope list).
 
@@ -298,14 +211,3 @@ def scope_summary(entries: Iterable[ScopeEntry], *, max_items: int = 40) -> dict
             by_name.setdefault(entry.name, set()).update(found)
     return {"count": count, "policies": [{"name": name, "conditions": sorted(found)}
                                          for name, found in sorted(by_name.items())][:max_items]}
-
-
-def apply_post_check(row: dict[str, Any], entries: Iterable[ScopeEntry], *, max_items: int = 40) -> None:
-    """Mark a met row ``scope_narrowed``; the claims, comparison and recommendations stay as the verdict gave them."""
-    if not requirement_met(row):
-        return
-    found = post_check(row["policy_id"], entries, max_items=max_items)
-    if found is not None:
-        row["post_check"] = found
-        if LIMITATION_ID not in row["limitations"]:
-            row["limitations"].append(LIMITATION_ID)

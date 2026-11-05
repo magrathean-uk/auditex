@@ -24,8 +24,8 @@ uses `section_not_collected`; collected but unusable evidence uses `evidence_unu
 reason. Optional Power BI or Power Platform collection not enabled retains
 `optional_collection_not_enabled`. A rule fault reports `rule_evaluation_failed` with
 `report_product_fault`. Teams 2.2v2, 2.3v2 and 4.1v1 record a closed applicability gate as class
-`value_rule`, cell `closed_gate`. The scope envelope is still collected for review; current rule rows are not marked and
-`totals.scope_narrowed` stays zero. Historical model-row marking remains readable.
+`value_rule`, cell `closed_gate`. The scope envelope is still collected for review. Row-level scope marking has been removed;
+`totals.scope_narrowed` stays zero. Historical model-row metadata remains readable.
 See the [output contract](../reference/output-contract.md) for exact fields and policy coverage.
 
 ## Run and read the result

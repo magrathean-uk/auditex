@@ -14,9 +14,11 @@ from typing import Any
 from .resources import open_text_resource
 from .scuba_precheck import field_name, policy_rule, precheck_response, rule_catalogue
 from .scuba_scope import (
-    LIMITATION_ID as SCOPE_LIMITATION, NAME_LIMIT as SCOPE_NAME_LIMIT, SECTION as SCOPE_SECTION,
-    allowed_conditions, condition_paths, requirement_met, scope_rule,
+    NAME_LIMIT as SCOPE_NAME_LIMIT, SECTION as SCOPE_SECTION, condition_paths, scope_catalogue,
 )
+
+# Historical row metadata remains valid; current assessments only write the scope envelope.
+SCOPE_LIMITATION = "scope_narrowed"
 
 MODEL_ASSESSMENT_PATH = "model_assessment.json"
 MODEL_ASSESSMENT_SCHEMA = "schemas/model_assessment.schema.json"
@@ -148,12 +150,24 @@ def _validate_scope_record(summary: dict[str, Any], section_projected: bool) -> 
         raise ValueError("Invalid scope post-check record")
 
 
+def _legacy_requirement_met(row: dict[str, Any]) -> bool:
+    """The recorded model-row contract, retained solely for historical validation."""
+    claim = next((c for c in row.get("claims", []) if c.get("id") == "requirement_met"), None)
+    return (row.get("validation_status") == "valid" and row.get("reason") != "rule_precheck"
+            and isinstance(claim, dict) and claim.get("status") in {"confirmed", "inferred"}
+            and claim.get("value") is True and "policy_not_applicable" not in row.get("limitations", []))
+
+
 def _validate_post_check(row: dict[str, Any], summary: Any) -> None:
-    """A row's scope_narrowed mark: a met verdict of a tabled policy, conditions the Rego is known to ignore."""
-    post, rule = row["post_check"], scope_rule(row["policy_id"])
-    if (rule is None or not requirement_met(row) or not isinstance(summary, dict) or summary["status"] != "evaluated"
+    """A historical row's scope_narrowed mark: a met verdict of a tabled policy, conditions the Rego is known to ignore."""
+    post, rule = row["post_check"], scope_catalogue()["policies"].get(row["policy_id"])
+    paths = condition_paths()
+    allowed = {paths[group] for group in rule["ignored"]} if rule else set()
+    if rule and rule["operator"]:
+        allowed.add(paths["operator"])
+    if (rule is None or not _legacy_requirement_met(row) or not isinstance(summary, dict) or summary["status"] != "evaluated"
             or not _sorted_unique(post["policies"]) or not _sorted_unique(post["conditions"])
-            or not set(post["conditions"]) <= allowed_conditions(rule) or len(post["policies"]) > post["count"]
+            or not set(post["conditions"]) <= allowed or len(post["policies"]) > post["count"]
             or any(len(name) > SCOPE_NAME_LIMIT for name in post["policies"])):
         raise ValueError("Invalid scope post-check")
 
