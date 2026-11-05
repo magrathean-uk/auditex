@@ -80,7 +80,8 @@
         3
       ],
       "closed_values": [
-        0
+        0,
+        3
       ],
       "source": "docs/guides/model-development.md (doc-sourced; no test-v7 rows)",
       "complete": true
@@ -172,6 +173,27 @@
       ],
       "source": "oracle-pack-v7 training prompts; policy applicability",
       "complete": false
+    },
+    {
+      "rule_id": "MS.AAD.9.1v1.environment_closed",
+      "policy_id": "MS.AAD.9.1v1",
+      "section": "scuba_config",
+      "path": [
+        "M365Environment"
+      ],
+      "value_type": "string",
+      "allowed_values": [
+        "commercial",
+        "gcc",
+        "gcchigh",
+        "dod"
+      ],
+      "closed_values": [
+        "gcchigh",
+        "dod"
+      ],
+      "source": "value-rules-spec-v39 P6; main Q23 (GCC High and DOD only)",
+      "complete": true
     }
   ],
   "field_rules": [

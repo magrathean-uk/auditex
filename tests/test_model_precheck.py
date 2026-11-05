@@ -21,7 +21,7 @@ SP = "MS.SHAREPOINT.3.1v1"
 
 
 @pytest.mark.parametrize("pid,closed", [(SP, {0, 1, 3}), ("MS.SHAREPOINT.3.2v1", {0, 1, 3}),
-                                      ("MS.SHAREPOINT.3.3v2", {0}), ("MS.SHAREPOINT.1.3v1", {0})])
+                                      ("MS.SHAREPOINT.3.3v2", {0}), ("MS.SHAREPOINT.1.3v1", {0, 3})])
 @pytest.mark.parametrize("value", [0, 1, 2, 3, 0.0, 3.0])
 @pytest.mark.parametrize("wrapped", [False, True])
 def test_every_sharepoint_gate_value(pid, closed, value, wrapped):
@@ -274,7 +274,6 @@ def test_powerbi_missing_policy_setting_is_unknown(settings):
 
 @pytest.mark.parametrize("pid,projection", [
     # Unregistered tuples: no v10 evidence that absence is always unknown.
-    ("MS.AAD.9.1v1", {"conditional_access_policies": [{"State": "enabled"}], "scuba_config": {}, "service_plans": []}),
     ("MS.EXO.7.1v1", {"transport_rule": [{"Mode": "Enforce"}]}),
     # The present-but-null field is a collected default.
     (SP, {"SPO_tenant": [{"SharingCapability": 2, "RequireAnonymousLinksExpireInDays": None}]}),
@@ -304,15 +303,19 @@ def test_gate_and_section_absence_take_precedence_over_absent_field(projection, 
     assert precheck_case(build_case(PBI, pbi, "unused"), absent_fields=True)["rule_precheck"]["class"] == "absent_section"
 
 
-FROZEN_V10 = Path(os.environ.get("AUDITEX_TEST_PRECHECK_PACK", "/Volumes/4TB/dev/auditex-data/development-kit/"
-                                 "20261030-oracle-pack-v10/training-pack-oracle-v10-ministral3-8b"))
+def _frozen_v10_file(name):
+    pack = os.environ.get("AUDITEX_TEST_PRECHECK_PACK")
+    if not pack:
+        pytest.skip("AUDITEX_TEST_PRECHECK_PACK unset; opt in to frozen v10 pack tests")
+    path = Path(pack) / name
+    if not path.is_file():
+        pytest.skip(f"frozen v10 pack file not present: {path}")
+    return path
 
 
 @pytest.mark.parametrize("name", ["test.jsonl", "approved-cases.jsonl"])
 def test_absent_field_rows_are_unknown_in_every_frozen_v10_row(name):
-    path = FROZEN_V10 / name
-    if not path.is_file():
-        pytest.skip(f"frozen v10 pack not present ({path}); set AUDITEX_TEST_PRECHECK_PACK")
+    path = _frozen_v10_file(name)
     fired = 0
     for line in path.read_text().splitlines():
         row = json.loads(line)
@@ -326,7 +329,10 @@ def test_absent_field_rows_are_unknown_in_every_frozen_v10_row(name):
         assert row["expected"]["claims"][0]["status"] == "unknown", row["id"]
         assert {key: record[key] for key in ("claims", "limitations", "recommendations")} == {
             key: row["expected"][key] for key in ("claims", "limitations", "recommendations")}, row["id"]
-    assert fired == (5 if name == "test.jsonl" else 69)
+    # P6 closes SP 1.3 at SharingCapability=3 before checking fields. Approved
+    # rows ending 49ff76adfe and 9bf1a53d64 lack SharingDomainRestrictionMode:
+    # both move absent_field -> closed_gate (69 -> 67); test.jsonl stays at 5.
+    assert fired == (5 if name == "test.jsonl" else 67)
 
 
 def test_evaluator_scores_absent_field_only_on_request(tmp_path):
@@ -354,6 +360,8 @@ def test_evaluator_scores_absent_field_only_on_request(tmp_path):
 
 
 def run_assessment(tmp_path, monkeypatch, projection, **kwargs):
+    # stage 6: these legacy precheck-contract tests keep the value-rule route off explicitly.
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
     from test_model_serving import fake_projection
     monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, projection))
@@ -594,23 +602,83 @@ def test_empty_conditional_access_list_is_not_met_only_when_enabled(pid):
     ("MS.AAD.1.1v1", {"conditional_access_policies": [{}], "scuba_config": {}}),
     ("MS.AAD.1.1v1", {"conditional_access_policies": None, "scuba_config": {}}),
     ("MS.AAD.1.1v1", {"conditional_access_policies": {}, "scuba_config": {}}),
-    # MS.AAD.9.1v1 is a Not-Implemented skip in GCC High and DoD, and an unusable scuba_config cannot rule that out.
-    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": {"M365Environment": "gcchigh"}, "service_plans": []}),
-    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": {"M365Environment": "dod"}, "service_plans": []}),
-    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": None, "service_plans": []}),
-    ("MS.AAD.9.1v1", {"conditional_access_policies": [], "scuba_config": [], "service_plans": []}),
 ])
 def test_unregistered_non_empty_or_possibly_not_applicable_lists_are_left_to_the_model(pid, projection):
     assert precheck_case(build_case(pid, projection, "unused"), absent_fields=True, empty_lists=True) is None
 
 
-@pytest.mark.parametrize("environment", ["commercial", "gcc", None, "GCCHIGH", 0])
+@pytest.mark.parametrize("environment", ["commercial", "gcc"])
 def test_ai_agents_rule_applies_outside_the_excluded_environments(environment):
     projection = empty_ca("MS.AAD.9.1v1", scuba_config={"M365Environment": environment})
     record = precheck_case(build_case("MS.AAD.9.1v1", projection, "unused"), empty_lists=True)
     assert record["rule_precheck"]["class"] == "empty_required_list"
-    del projection["scuba_config"]["M365Environment"]  # undefined in Rego: the not-applicable branch cannot fire
-    assert precheck_case(build_case("MS.AAD.9.1v1", projection, "unused"), empty_lists=True) is not None
+    del projection["scuba_config"]["M365Environment"]
+    assert precheck_case(build_case("MS.AAD.9.1v1", projection, "unused"), empty_lists=True)["rule_precheck"]["class"] == "absent_section"
+
+
+# stage 6: P6 closes the two government environments and fails closed on an unreadable gate.
+@pytest.mark.parametrize("config,expected", [
+    ({"M365Environment": "gcchigh"}, "closed_gate"), ({"M365Environment": "dod"}, "closed_gate"),
+    (None, "absent_section"), ([], "absent_section"), ({}, "absent_section"),
+    ({"M365Environment": None}, "absent_section"), ({"M365Environment": "GCCHIGH"}, "absent_section"),
+    ({"M365Environment": 0}, "absent_section"),
+])
+def test_ai_agents_applicability_gate_precedes_empty_lists(config, expected):
+    projection = empty_ca("MS.AAD.9.1v1", scuba_config=config)
+    record = precheck_case(build_case("MS.AAD.9.1v1", projection, "unused"), empty_lists=True)
+    assert record["rule_precheck"]["class"] == expected
+
+
+@pytest.mark.parametrize("restriction_mode", [None, 0])
+def test_p6_sp13_slider3_reclassifies_field_and_model_rows(monkeypatch, restriction_mode):
+    """Synthetic witnesses for both SP transitions in the frozen-pack reconciliation."""
+    pid = "MS.SHAREPOINT.1.3v1"
+    spo = {"SharingCapability": 3}
+    if restriction_mode is not None:
+        spo["SharingDomainRestrictionMode"] = restriction_mode
+    case = build_case(pid, {"SPO_tenant": [spo]}, "unused")
+    legacy = deepcopy(rule_catalogue())
+    next(r for r in legacy["rules"] if r["policy_id"] == pid)["closed_values"] = [0]
+    with monkeypatch.context() as before_p6:
+        before_p6.setattr("azure_tenant_audit.scuba_precheck.rule_catalogue", lambda: legacy)
+        before = precheck_case(case, absent_fields=True, empty_lists=True)
+    if restriction_mode is None:
+        assert before["rule_precheck"]["class"] == "absent_field"
+        assert before["rule_precheck"]["field"] == "SharingDomainRestrictionMode"
+    else:
+        assert before is None  # A collected field used to leave the row to the model.
+    after = precheck_case(case, absent_fields=True, empty_lists=True)
+    assert after["rule_precheck"]["class"] == "closed_gate"
+    assert after["limitations"] == ["policy_not_applicable"]
+
+
+@pytest.mark.parametrize("environment,ca,missing_plans,before_class,after_class", [
+    (None, [], False, "empty_required_list", "absent_section"),
+    (None, [{"State": "enabled"}], False, None, "absent_section"),
+    ("gcchigh", [{"State": "enabled"}], False, None, "closed_gate"),
+    ("dod", [{"State": "enabled"}], False, None, "closed_gate"),
+    ("gcchigh", [], True, "absent_section", "closed_gate"),
+    ("dod", [], True, "absent_section", "closed_gate"),
+])
+def test_p6_aad91_reclassifies_unreadable_and_closed_environments(
+        monkeypatch, environment, ca, missing_plans, before_class, after_class):
+    """Synthetic witnesses for every AAD transition, including the empty-list loss."""
+    pid = "MS.AAD.9.1v1"
+    projection = empty_ca(pid, scuba_config={"M365Environment": environment},
+                          conditional_access_policies=ca)
+    if missing_plans:
+        del projection["service_plans"]
+    case = build_case(pid, projection, "unused")
+    legacy = deepcopy(rule_catalogue())
+    legacy["rules"] = [r for r in legacy["rules"] if r["policy_id"] != pid]
+    with monkeypatch.context() as before_p6:
+        before_p6.setattr("azure_tenant_audit.scuba_precheck.rule_catalogue", lambda: legacy)
+        before = precheck_case(case, absent_fields=True, empty_lists=True)
+    assert (before["rule_precheck"]["class"] if before else None) == before_class
+    after = precheck_case(case, absent_fields=True, empty_lists=True)
+    assert after["rule_precheck"]["class"] == after_class
+    assert after["rule_precheck"]["field"] == "M365Environment"
+    assert after["claims"][0]["status"] == ("unknown" if after_class == "absent_section" else "inferred")
 
 
 @pytest.mark.parametrize("projection,expected", [
@@ -648,9 +716,7 @@ def test_gate_and_absent_field_take_precedence_over_empty_list(monkeypatch):
 
 @pytest.mark.parametrize("name", ["test.jsonl", "approved-cases.jsonl"])
 def test_empty_list_rows_are_not_met_in_every_frozen_v10_row(name):
-    path = FROZEN_V10 / name
-    if not path.is_file():
-        pytest.skip(f"frozen v10 pack not present ({path}); set AUDITEX_TEST_PRECHECK_PACK")
+    path = _frozen_v10_file(name)
     fired = 0
     for line in path.read_text().splitlines():
         row = json.loads(line)
@@ -664,7 +730,11 @@ def test_empty_list_rows_are_not_met_in_every_frozen_v10_row(name):
         assert (row["expected"]["claims"][0]["status"], row["expected"]["claims"][0]["value"]) == ("confirmed", False), row["id"]
         assert {key: record[key] for key in ("claims", "limitations", "recommendations")} == {
             key: row["expected"][key] for key in ("claims", "limitations", "recommendations")}, row["id"]
-    assert fired == (1 if name == "test.jsonl" else 7)
+    # P6 requires a usable AAD 9.1 M365Environment before evaluating the CA list.
+    # Row scuba-aad-ms-aad-9-1v1-a4f3ce848e occurs in both files with a null
+    # environment and CA=[]: empty_required_list -> absent_section, so 1 -> 0
+    # in test.jsonl and 7 -> 6 in approved-cases.jsonl. Other list rows stay put.
+    assert fired == (0 if name == "test.jsonl" else 6)
 
 
 def test_evaluator_scores_empty_list_only_on_request(tmp_path):

@@ -105,6 +105,477 @@
         "authentication_method"
       ]
     },
+    "MS.AAD.5.1v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in authorization_policies shows that non-admin users can register applications."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: non-admin users can register applications (found in authorization_policies)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_bad_unlabelled": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: an object in authorization_policies shows that non-admin users can register applications but carries no name or identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "flag_unusable": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in authorization_policies lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: authorization_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: authorization_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: authorization_policies."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "authz",
+      "params": {
+        "leaf": "create_apps",
+        "section": "authorization_policies",
+        "what": "non-admin users can register applications"
+      },
+      "rule_id": "MS.AAD.5.1v1.authz",
+      "sections": [
+        "authorization_policies"
+      ]
+    },
+    "MS.AAD.7.1v1": {
+      "cells": {
+        "count_ambiguous": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: the number of privileged users cannot be fixed (a user without a readable role list, or users sharing a DisplayName); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "ga_count_in_range": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "ga_count_in_range",
+          "reason_texts": [
+            "Requirement met: two to eight users hold the Global Administrator role."
+          ],
+          "verdict": "met"
+        },
+        "ga_count_out_of_range": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "ga_count_out_of_range",
+          "reason_texts": [
+            "Requirement not met: fewer than two or more than eight users hold the Global Administrator role."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_users holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_users."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_users is not a map or list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_users",
+      "params": {
+        "leaf": "ga_count",
+        "what": "the number of Global Administrators is outside 2 to 8"
+      },
+      "rule_id": "MS.AAD.7.1v1.priv_users",
+      "sections": [
+        "privileged_users"
+      ]
+    },
+    "MS.AAD.7.2v1": {
+      "cells": {
+        "count_ambiguous": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: the number of privileged users cannot be fixed (a user without a readable role list, or users sharing a DisplayName); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "least_privilege_failed": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "least_privilege_failed",
+          "reason_texts": [
+            "Requirement not met: Global Administrators outnumber the privileged users without that role."
+          ],
+          "verdict": "not_met"
+        },
+        "least_privilege_ok": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "least_privilege_ok",
+          "reason_texts": [
+            "Requirement met: Global Administrators do not outnumber the privileged users without that role."
+          ],
+          "verdict": "met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_users holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_users."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_users is not a map or list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_users",
+      "params": {
+        "leaf": "least_privilege",
+        "what": "privileged users hold Global Administrator more than finer-grained roles"
+      },
+      "rule_id": "MS.AAD.7.2v1.priv_users",
+      "sections": [
+        "privileged_users"
+      ]
+    },
+    "MS.AAD.7.3v1": {
+      "cells": {
+        "all_cloud_only": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "all_cloud_only",
+          "reason_texts": [
+            "Requirement met: no privileged user has an on-premises identity."
+          ],
+          "verdict": "met"
+        },
+        "federated_admin_found": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "federated_admin_found",
+          "reason_texts": [
+            "Requirement not met: a privileged user has an on-premises identity (OnPremisesImmutableId is set)."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: privileged_users holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: privileged_users."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_shape_unusable": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: privileged_users is not a map or list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "user_record_unusable": {
+          "cited": [
+            "privileged_users"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: a privileged user has no OnPremisesImmutableId value or no DisplayName beside one; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "priv_users",
+      "params": {
+        "leaf": "cloud_only",
+        "what": "a privileged user has an on-premises identity"
+      },
+      "rule_id": "MS.AAD.7.3v1.priv_users",
+      "sections": [
+        "privileged_users"
+      ]
+    },
+    "MS.AAD.8.1v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in authorization_policies shows that guest users have the same access as members."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: guest users have the same access as members (found in authorization_policies)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_bad_unlabelled": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: an object in authorization_policies shows that guest users have the same access as members but carries no name or identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "flag_unusable": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in authorization_policies lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: authorization_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: authorization_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: authorization_policies."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "authz",
+      "params": {
+        "leaf": "guest_role",
+        "section": "authorization_policies",
+        "what": "guest users have the same access as members"
+      },
+      "rule_id": "MS.AAD.8.1v1.authz",
+      "sections": [
+        "authorization_policies"
+      ]
+    },
+    "MS.AAD.8.2v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in authorization_policies shows that guest invitations are open beyond administrators and Guest Inviters."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: guest invitations are open beyond administrators and Guest Inviters (found in authorization_policies)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_bad_unlabelled": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_label_absent",
+          "reason_texts": [
+            "Data unusable: an object in authorization_policies shows that guest invitations are open beyond administrators and Guest Inviters but carries no name or identity; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "flag_unusable": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in authorization_policies lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: authorization_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: authorization_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "authorization_policies"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: authorization_policies."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "authz",
+      "params": {
+        "leaf": "invite_from",
+        "section": "authorization_policies",
+        "what": "guest invitations are open beyond administrators and Guest Inviters"
+      },
+      "rule_id": "MS.AAD.8.2v1.authz",
+      "sections": [
+        "authorization_policies"
+      ]
+    },
     "MS.EXO.13.1v1": {
       "cells": {
         "all_clear": {
@@ -4683,6 +5154,974 @@
       "rule_id": "MS.SECURITYSUITE.8.2v1.any_flag",
       "sections": [
         "conn_filter"
+      ]
+    },
+    "MS.SHAREPOINT.1.1v1": {
+      "cells": {
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: SharingCapability is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: SharingCapability in SPO_tenant is null or not a number; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: SharingCapability holds a compliant setting."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: SharePoint external sharing is wider than Existing guests or Only people in your organization."
+          ],
+          "verdict": "not_met"
+        },
+        "value_outside_set": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: SharingCapability in SPO_tenant holds a value outside the known settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "sp_scalar",
+      "params": {
+        "bad": [
+          1,
+          2
+        ],
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "field": "SharingCapability",
+        "good": [
+          0,
+          3
+        ],
+        "what": "SharePoint external sharing is wider than Existing guests or Only people in your organization"
+      },
+      "rule_id": "MS.SHAREPOINT.1.1v1.sp_scalar",
+      "sections": [
+        "SPO_tenant"
+      ]
+    },
+    "MS.SHAREPOINT.1.2v1": {
+      "cells": {
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: ODBSharingCapability is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: ODBSharingCapability in SPO_tenant is null or not a number; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: ODBSharingCapability holds a compliant setting."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: OneDrive external sharing is wider than Existing guests or Only people in your organization."
+          ],
+          "verdict": "not_met"
+        },
+        "value_outside_set": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: ODBSharingCapability in SPO_tenant holds a value outside the known settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "sp_scalar",
+      "params": {
+        "bad": [
+          1,
+          2
+        ],
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "field": "ODBSharingCapability",
+        "good": [
+          0,
+          3
+        ],
+        "what": "OneDrive external sharing is wider than Existing guests or Only people in your organization"
+      },
+      "rule_id": "MS.SHAREPOINT.1.2v1.sp_scalar",
+      "sections": [
+        "SPO_tenant"
+      ]
+    },
+    "MS.SHAREPOINT.1.3v1": {
+      "cells": {
+        "closed_gate": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "policy_not_applicable_sharing_slider",
+          "reason_texts": [
+            "Not applicable: the policy applies only when the external sharing slider is not set to Only people in your organization or Existing guests; the slider is set to Existing guests.",
+            "Not applicable: the policy applies only when the external sharing slider is not set to Only people in your organization or Existing guests; the slider is set to Only people in your organization."
+          ],
+          "verdict": "not_applicable"
+        },
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: SharingDomainRestrictionMode is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: SharingDomainRestrictionMode in SPO_tenant is null or not a number; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "slider_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_sharing_capability",
+          "reason_texts": [
+            "Data unusable: SharingCapability in SPO_tenant is absent, null or outside the known settings, so it is unknown whether the policy applies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: external sharing is restricted to approved domains."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: external sharing is not restricted to approved domains."
+          ],
+          "verdict": "not_met"
+        },
+        "value_outside_set": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: SharingDomainRestrictionMode in SPO_tenant holds a value outside the known settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "sp_gated",
+      "params": {
+        "fields": [
+          "SharingDomainRestrictionMode"
+        ],
+        "what": "external sharing is not restricted to approved domains"
+      },
+      "rule_id": "MS.SHAREPOINT.1.3v1.sp_gated",
+      "sections": [
+        "SPO_tenant"
+      ]
+    },
+    "MS.SHAREPOINT.2.1v1": {
+      "cells": {
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: DefaultSharingLinkType is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: DefaultSharingLinkType in SPO_tenant is null or not a number; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: DefaultSharingLinkType holds a compliant setting."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the default sharing link type is not Specific people."
+          ],
+          "verdict": "not_met"
+        },
+        "value_outside_set": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: DefaultSharingLinkType in SPO_tenant holds a value outside the known settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "sp_scalar",
+      "params": {
+        "bad": [
+          0,
+          2,
+          3
+        ],
+        "enum": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "field": "DefaultSharingLinkType",
+        "good": [
+          1
+        ],
+        "what": "the default sharing link type is not Specific people"
+      },
+      "rule_id": "MS.SHAREPOINT.2.1v1.sp_scalar",
+      "sections": [
+        "SPO_tenant"
+      ]
+    },
+    "MS.SHAREPOINT.2.2v1": {
+      "cells": {
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: DefaultLinkPermission is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: DefaultLinkPermission in SPO_tenant is null or not a number; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: DefaultLinkPermission holds a compliant setting."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: the default sharing link permission is not View."
+          ],
+          "verdict": "not_met"
+        },
+        "value_outside_set": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: DefaultLinkPermission in SPO_tenant holds a value outside the known settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "sp_scalar",
+      "params": {
+        "bad": [
+          0,
+          2
+        ],
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "field": "DefaultLinkPermission",
+        "good": [
+          1
+        ],
+        "what": "the default sharing link permission is not View"
+      },
+      "rule_id": "MS.SHAREPOINT.2.2v1.sp_scalar",
+      "sections": [
+        "SPO_tenant"
+      ]
+    },
+    "MS.SHAREPOINT.3.1v1": {
+      "cells": {
+        "closed_gate": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "policy_not_applicable_sharing_slider",
+          "reason_texts": [
+            "Not applicable: the policy applies only when the external sharing slider is set to Anyone; the slider is set to Existing guests.",
+            "Not applicable: the policy applies only when the external sharing slider is set to Anyone; the slider is set to New and existing guests.",
+            "Not applicable: the policy applies only when the external sharing slider is set to Anyone; the slider is set to Only people in your organization."
+          ],
+          "verdict": "not_applicable"
+        },
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: RequireAnonymousLinksExpireInDays is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: RequireAnonymousLinksExpireInDays in SPO_tenant is null or not a number; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "slider_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_sharing_capability",
+          "reason_texts": [
+            "Data unusable: SharingCapability in SPO_tenant is absent, null or outside the known settings, so it is unknown whether the policy applies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: Anyone links expire within 30 days."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: Anyone links do not expire within 30 days."
+          ],
+          "verdict": "not_met"
+        }
+      },
+      "kind": "sp_gated",
+      "params": {
+        "fields": [
+          "RequireAnonymousLinksExpireInDays"
+        ],
+        "what": "Anyone links do not expire within 30 days"
+      },
+      "rule_id": "MS.SHAREPOINT.3.1v1.sp_gated",
+      "sections": [
+        "SPO_tenant"
+      ]
+    },
+    "MS.SHAREPOINT.3.2v1": {
+      "cells": {
+        "closed_gate": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "policy_not_applicable_sharing_slider",
+          "reason_texts": [
+            "Not applicable: the policy applies only when the external sharing slider is set to Anyone; the slider is set to Existing guests.",
+            "Not applicable: the policy applies only when the external sharing slider is set to Anyone; the slider is set to New and existing guests.",
+            "Not applicable: the policy applies only when the external sharing slider is set to Anyone; the slider is set to Only people in your organization."
+          ],
+          "verdict": "not_applicable"
+        },
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: FileAnonymousLinkType is absent from SPO_tenant; the policy was not assessed.",
+            "Data unusable: FolderAnonymousLinkType is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: FileAnonymousLinkType in SPO_tenant is null or not a number; the policy was not assessed.",
+            "Data unusable: FolderAnonymousLinkType in SPO_tenant is null or not a number; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "slider_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_sharing_capability",
+          "reason_texts": [
+            "Data unusable: SharingCapability in SPO_tenant is absent, null or outside the known settings, so it is unknown whether the policy applies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: Anyone links are limited to view permission."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: Anyone links allow more than view permission."
+          ],
+          "verdict": "not_met"
+        },
+        "value_outside_set": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: FileAnonymousLinkType in SPO_tenant holds a value outside the known settings; the policy was not assessed.",
+            "Data unusable: FolderAnonymousLinkType in SPO_tenant holds a value outside the known settings; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "sp_gated",
+      "params": {
+        "fields": [
+          "FileAnonymousLinkType",
+          "FolderAnonymousLinkType"
+        ],
+        "what": "Anyone links allow more than view permission"
+      },
+      "rule_id": "MS.SHAREPOINT.3.2v1.sp_gated",
+      "sections": [
+        "SPO_tenant"
+      ]
+    },
+    "MS.SHAREPOINT.3.3v2": {
+      "cells": {
+        "closed_gate": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "policy_not_applicable_sharing_slider",
+          "reason_texts": [
+            "Not applicable: the policy applies only when the external sharing slider is not set to Only people in your organization; the slider is set to Only people in your organization."
+          ],
+          "verdict": "not_applicable"
+        },
+        "field_absent": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_field_absent",
+          "reason_texts": [
+            "Data unusable: EmailAttestationReAuthDays is absent from SPO_tenant; the policy was not assessed.",
+            "Data unusable: EmailAttestationRequired is absent from SPO_tenant; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "field_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: EmailAttestationReAuthDays in SPO_tenant is null or not a number; the policy was not assessed.",
+            "Data unusable: EmailAttestationRequired in SPO_tenant is null or not a boolean; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: SPO_tenant."
+          ],
+          "verdict": "not_assessed"
+        },
+        "slider_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_sharing_capability",
+          "reason_texts": [
+            "Data unusable: SharingCapability in SPO_tenant is absent, null or outside the known settings, so it is unknown whether the policy applies; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_empty": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: SPO_tenant is empty; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_not_singleton": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_singleton",
+          "reason_texts": [
+            "Data unusable: SPO_tenant holds more than one object; the tenant settings are a single object, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "spo_shape_unusable": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: SPO_tenant is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "value_compliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_compliant",
+          "reason_texts": [
+            "Requirement met: verification-code reauthentication is on and at most 30 days."
+          ],
+          "verdict": "met"
+        },
+        "value_noncompliant": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "setting_noncompliant",
+          "reason_texts": [
+            "Requirement not met: verification-code reauthentication is off or longer than 30 days."
+          ],
+          "verdict": "not_met"
+        },
+        "value_outside_set": {
+          "cited": [
+            "SPO_tenant"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: EmailAttestationReAuthDays in SPO_tenant is below one day; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "sp_gated",
+      "params": {
+        "fields": [
+          "EmailAttestationRequired",
+          "EmailAttestationReAuthDays"
+        ],
+        "what": "verification-code reauthentication is off or longer than 30 days"
+      },
+      "rule_id": "MS.SHAREPOINT.3.3v2.sp_gated",
+      "sections": [
+        "SPO_tenant"
       ]
     },
     "MS.TEAMS.1.1v1": {

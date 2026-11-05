@@ -23,13 +23,13 @@ def miner():
     return module
 
 
-def test_gate_sweep_covers_all_eight_rules_and_every_base_without_mutation(miner):
+def test_gate_sweep_covers_all_rules_and_every_base_without_mutation(miner):
     rules = rule_catalogue()["rules"]
     sections = {rule["policy_id"]: [rule["section"]] for rule in rules}
     harvested = [{"name": "base", "input": {}}, {"name": "sibling", "input": {"unrelated": [1, 2]}}]
     before = copy.deepcopy(harvested)
     variants = miner.v8_value_variants("gates", harvested, sections)
-    assert len(rules) == 8
+    assert len(rules) == 9
     assert len(variants) == 2 * sum(len(rule["allowed_values"]) for rule in rules)
     for rule in rules:
         for base in harvested:
@@ -43,7 +43,10 @@ def test_gate_sweep_covers_all_eight_rules_and_every_base_without_mutation(miner
 
 
 def test_gate_edit_handles_singleton_and_selector_and_removes_stale_enum_name(miner):
-    sharepoint, authenticator = rule_catalogue()["rules"][0], rule_catalogue()["rules"][-1]
+    # stage 6: the additional AAD gate makes positional catalogue picks unsafe.
+    rules = {rule["rule_id"]: rule for rule in rule_catalogue()["rules"]}
+    sharepoint = rules["MS.SHAREPOINT.3.1v1.sharing_closed"]
+    authenticator = rules["MS.AAD.3.3v2.authenticator_disabled"]
     tenant = {"SPO_tenant": [{"SharingCapability": 2, "SharingCapability_name": "stale", "Other": 7}]}
     edited = miner._v8_gate_edit(tenant, sharepoint, 0)
     assert edited["SPO_tenant"] == [{"SharingCapability": 0, "Other": 7}]

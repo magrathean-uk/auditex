@@ -38,7 +38,13 @@ STAGE4_POLICIES = frozenset({"MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS
 # stage 8: include the eight Power Platform policies in the exact registration gate.
 STAGE8_POLICIES = frozenset(f"MS.POWERPLATFORM.{number}v1" for number in
                             ("1.1", "1.2", "2.1", "2.2", "2.3", "3.1", "5.1", "6.1"))
-STAGE_POLICIES = STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE8_POLICIES
+# stage 6: include the new kinds in the exact registry and optional full-source checks.
+STAGE6_POLICIES = frozenset({
+    "MS.SHAREPOINT.1.1v1", "MS.SHAREPOINT.1.2v1", "MS.SHAREPOINT.1.3v1",
+    "MS.SHAREPOINT.2.1v1", "MS.SHAREPOINT.2.2v1", "MS.SHAREPOINT.3.1v1",
+    "MS.SHAREPOINT.3.2v1", "MS.SHAREPOINT.3.3v2", "MS.AAD.5.1v1", "MS.AAD.7.1v1",
+    "MS.AAD.7.2v1", "MS.AAD.7.3v1", "MS.AAD.8.1v1", "MS.AAD.8.2v1"})
+STAGE_POLICIES = STAGE1_POLICIES | STAGE3_POLICIES | STAGE4_POLICIES | STAGE6_POLICIES | STAGE8_POLICIES
 GATE_POLICIES = frozenset(policy for policy, row in catalogue()["policies"].items()
                           if row["params"].get("environment_gate"))
 PBI_COMMON = {"section_not_collected", "licence_false", "licence_flag_unusable", "access_denied",

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import socket
 
@@ -859,9 +860,6 @@ def test_demo_original_sharepoint_settings_and_generated_twin():
         assert 'fileAnonymousLinkType' not in settings and 'folderAnonymousLinkType' not in settings
 
 
-FROZEN_PACK = Path('/Volumes/4TB/dev/auditex-data/development-kit/20261026-oracle-pack-v7/training-pack-oracle-v7')
-
-
 def _frozen_pack_goldens(pack):
     """Reconstruct complete shape witnesses directly from the two read-only JSONL files.
 
@@ -876,9 +874,13 @@ def _frozen_pack_goldens(pack):
 
 
 def test_complete_shape_goldens_reproduce_both_frozen_packs():
-    if not all((FROZEN_PACK / name).is_file() for name in ('train.jsonl', 'test.jsonl')):
-        pytest.skip('Read-only frozen v7 train/test packs are not mounted')
-    assert _frozen_pack_goldens(FROZEN_PACK) == PACK_SHAPES
+    pack = os.environ.get('AUDITEX_TEST_PROJECTION_PACK')
+    if not pack:
+        pytest.skip('AUDITEX_TEST_PROJECTION_PACK unset; opt in to frozen v7 shape tests')
+    pack = Path(pack)
+    if not all((pack / name).is_file() for name in ('train.jsonl', 'test.jsonl')):
+        pytest.skip('Frozen v7 train/test pack files not present at AUDITEX_TEST_PROJECTION_PACK')
+    assert _frozen_pack_goldens(pack) == PACK_SHAPES
 
 
 @pytest.mark.parametrize('path,metadata', [

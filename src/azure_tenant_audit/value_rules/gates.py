@@ -25,5 +25,11 @@ def closed_gate(policy_id: str, sections: dict[str, Any]) -> dict | None:
         return _rec(policy_id, "not_applicable", "policy_not_applicable_environment",
                     f"Not applicable: the policy does not apply to {_names(rule['closed_values'])} environments.",
                     "closed_gate")
-    # The SharePoint slider and Authenticator gates are rendered when their kinds ship (stages 6 and 9).
+    # stage 6: render the config-decided SharePoint slider gate using closed names only.
+    if rule["section"] == "SPO_tenant" and rule["path"] == ["SharingCapability"]:
+        from .sharepoint import SLIDER_NAMES, SP_GATE_APPLIES
+        return _rec(policy_id, "not_applicable", "policy_not_applicable_sharing_slider",
+                    f"Not applicable: the policy applies only when {SP_GATE_APPLIES[policy_id]}; "
+                    f"the slider is set to {SLIDER_NAMES[gate['value']]}.", "closed_gate")
+    # The Authenticator gate is rendered when its kind ships (stage 9).
     raise ValueError("Closed gate has no value-rule rendering")
