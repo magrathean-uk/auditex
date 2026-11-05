@@ -762,7 +762,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             transport_command: {"value": [{"Name": "Block Forwarding", "RedirectMessageTo": ["external@example.invalid"]}]},
             "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Inbound 1"}]},
             "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Outbound 1"}]},
-            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default": {"value": [{"Name": "example.invalid"}]},
+            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain": {"value": [{"Name": "example.invalid"}]},
             "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled": {
                 "value": [{"Name": "Default"}]
             },
