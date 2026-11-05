@@ -19,11 +19,87 @@ from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
 from azure_tenant_audit.value_rules.catalogue import row_for
+from azure_tenant_audit.value_rules.record import evidence_kind
 from test_value_rules_oracle import _outcome_v3, pinned  # noqa: F401 - shared pytest fixture
 from test_value_rules_vectors import _rows, _strip_names, STAGE9_POLICIES
 
 FIXTURE = Path(__file__).parent / "fixtures/value-rules/vectors-s9.jsonl.xz"
 MANIFEST = FIXTURE.with_name("manifest-s9.json")
+A2_OVERRIDES = FIXTURE.with_name("label-overrides-a2-s9.jsonl")
+
+
+def _apply_a2_overrides(vectors, overrides):
+    """Copy gold and change only exact, precondition-checked A2 claim citations."""
+    by_id = {v["vector_id"]: v for v in vectors}
+    effective = {vid: deepcopy(v.get("gold_response")) for vid, v in by_id.items()}
+    seen = set()
+    for entry in overrides:
+        vid = entry["vector_id"]
+        if vid in seen or vid not in by_id:
+            raise ValueError("Duplicate or unknown A2 override")
+        seen.add(vid)
+        vector = by_id[vid]
+        if (entry["policy"] != "MS.AAD.3.3v2" or vector["policy"] != entry["policy"]
+                or vector["source_kind"] not in {"constructed", "pack-train", "pack-validation"}
+                or entry["claim_id"] != "requirement_met"
+                or entry["evidence_section_order"] != ["authentication_method"]
+                or entry["new_cited"] != ["e0", "e1"]
+                or vector.get("disagreement") is not None or effective[vid] is None):
+            raise ValueError("A2 override precondition mismatch")
+        claims = [c for c in effective[vid]["claims"] if c["id"] == "requirement_met"]
+        if len(claims) != 1 or claims[0]["evidence_ids"] != entry["old_cited"]:
+            raise ValueError("A2 override old ids mismatch")
+        claims[0]["evidence_ids"] = deepcopy(entry["new_cited"])
+    return effective
+
+
+@pytest.fixture(scope="module")
+def a2_overrides():
+    return [json.loads(line) for line in A2_OVERRIDES.read_text().splitlines()]
+
+
+def test_a2_overlay_manifest_is_exact_and_excludes_held_out(rows, a2_overrides):
+    assert sha256(A2_OVERRIDES.read_bytes()).hexdigest() == "5ec93e854ed2d93449e015e93d920c0db23e14616cc4c6c6db54dad97d3cdd6f"
+    assert len(a2_overrides) == 128
+    ids = {entry["vector_id"] for entry in a2_overrides}
+    assert len(ids) == 128
+    assert Counter(vid.split(":")[0] for vid in ids) == {"pack-train": 125, "pack-validation": 3}
+    affected = set()
+    for vector in rows:
+        if (vector["policy"] == "MS.AAD.3.3v2" and vector.get("gold_response") is not None
+                and vector.get("disagreement") is None):
+            claim = next(c for c in vector["gold_response"]["claims"] if c["id"] == "requirement_met")
+            if any(e not in {"e0", "e1"} for e in claim["evidence_ids"]):
+                affected.add(vector["vector_id"])
+    assert ids == affected  # Every stale label and no unrelated label.
+    before = deepcopy(rows)
+    effective = _apply_a2_overrides(rows, a2_overrides)
+    assert rows == before
+    for vector in rows:
+        vid = vector["vector_id"]
+        restored = deepcopy(effective[vid])
+        if vid in ids:
+            old = next(c for c in vector["gold_response"]["claims"] if c["id"] == "requirement_met")
+            next(c for c in restored["claims"] if c["id"] == "requirement_met")["evidence_ids"] = old["evidence_ids"]
+        assert restored == vector.get("gold_response")
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "unknown", "policy", "claim", "order", "old", "new"])
+def test_a2_overrides_reject_bad_manifest_entries(rows, a2_overrides, mutation):
+    entries = [deepcopy(a2_overrides[0])]
+    if mutation == "duplicate":
+        entries *= 2
+    else:
+        key, value = {"unknown": ("vector_id", "unknown"), "policy": ("policy", "MS.AAD.3.5v2"),
+                      "claim": ("claim_id", "policy_criticality"),
+                      "order": ("evidence_section_order", ["scuba_config"]),
+                      "old": ("old_cited", ["e0", "e1"]),
+                      "new": ("new_cited", ["e0"])}[mutation]
+        entries[0][key] = value
+    before = deepcopy(rows)
+    with pytest.raises(ValueError, match="A2 override"):
+        _apply_a2_overrides(rows, entries)
+    assert rows == before
 
 
 @pytest.fixture(scope="module")
@@ -101,27 +177,30 @@ def test_builder_reuses_shared_split_filter(tmp_path, rows):
 
 
 @pytest.mark.parametrize("policy", sorted(STAGE9_POLICIES))
-def test_agreeing_pack_response_parity(policy, rows):
+def test_agreeing_pack_response_parity(policy, rows, a2_overrides):
     agreeing = [v for v in rows if v["policy"] == policy and v["source_kind"].startswith("pack-")
                 and v.get("gold_response") is not None and v.get("disagreement") is None]
-    mismatches = []
+    effective = _apply_a2_overrides(rows, a2_overrides)
+    s2_only = set()
     for vector in agreeing:
-        record = assess(policy, vector["sections"])
-        response = as_pack_response(record, vector["criticality"], list(vector["sections"]), legacy=True)
-        if response != vector["gold_response"]:
-            mismatches.append((vector["vector_id"], response, vector["gold_response"]))
+        sections = vector["sections"]
+        if policy == "MS.AAD.3.3v2":
+            # A2 uses the current read set without mutating frozen source sections.
+            sections = {"authentication_method": deepcopy(sections["authentication_method"])}
+        record = assess(policy, sections)
+        assert record == assess(policy, vector["sections"])
+        gold = effective[vector["vector_id"]]
+        response = as_pack_response(record, vector["criticality"], list(sections),
+                                    legacy=policy != "MS.AAD.3.3v2")
+        if response != gold:
+            # A2 retains S2 only for an exact legacy-vocabulary match on unusable evidence.
+            assert policy == "MS.AAD.3.3v2" and record["verdict"] == "not_assessed", vector["vector_id"]
+            assert evidence_kind(record["reason_code"]) is not None
+            assert as_pack_response(record, vector["criticality"], list(sections), legacy=True) == gold, vector["vector_id"]
+            s2_only.add(vector["vector_id"])
     if policy == "MS.AAD.3.3v2":
-        # The pack label predates D94's read-set change; preserve its original evidence ids.
-        assert len(mismatches) == 1
-        vector_id, actual, gold = mismatches[0]
-        assert vector_id == "pack-validation:scuba-aad-ms-aad-3-3v2-0430461ff5"
-        assert actual["claims"][0]["evidence_ids"] == ["e0", "e1"]
-        assert gold["claims"][0]["evidence_ids"] == ["e0", "e1", "e3"]
-        adjusted = deepcopy(gold)
-        adjusted["claims"][0]["evidence_ids"] = actual["claims"][0]["evidence_ids"]
-        assert actual == adjusted
-        pytest.xfail("needs spec erratum: one agreeing 3.3v2 pack label cites a removed input")
-    assert not mismatches
+        assert s2_only == {"pack-train:scuba-aad-ms-aad-3-3v2-3fb3d8c6fb",
+                           "pack-train:scuba-aad-ms-aad-3-3v2-e66d9b7294"}
 
 
 def test_optional_full_stage9_vectors():

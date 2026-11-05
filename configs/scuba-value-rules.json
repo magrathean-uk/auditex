@@ -289,6 +289,9 @@
             "atp_policy_rules"
           ],
           [
+            "built_in_protection_rules"
+          ],
+          [
             "safe_attachment_policies"
           ],
           [
@@ -714,6 +717,9 @@
           ],
           [
             "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
           ]
         ]
       },
@@ -770,6 +776,9 @@
           ],
           [
             "hosted_content_filter_rules"
+          ],
+          [
+            "protection_policy_rules"
           ]
         ]
       },

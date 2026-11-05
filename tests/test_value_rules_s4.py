@@ -27,11 +27,13 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/value-rules"
 FIXTURE = FIXTURES / "vectors-s4.jsonl.xz"
 HELD = json.loads((FIXTURES / "held-rows-s4.json").read_text())
-# The prepared anti-spam fixture predates A1 and included an uncatalogued fourth
-# rule_scope_unusable citation. Exercise its rows against the final shared contract.
+# A2 confirms the prepared fixture's fourth rule_scope_unusable citation.
+# Keep held rows and shared contracts identical, rather than masking a conflict.
 for _policy, _row in HELD.items():
     for _cell, _extension in catalogue()["cell_contracts"].get(_policy, {}).items():
         if _cell in _row["cells"]:
+            for _key in _extension.keys() & _row["cells"][_cell].keys():
+                assert _row["cells"][_cell][_key] == _extension[_key]
             _row["cells"][_cell].update(_extension)
 LIVE = {"MS.EXO.3.1v1", "MS.EXO.4.1v1", "MS.EXO.4.2v1", "MS.EXO.4.3v1", "MS.EXO.4.4v1",
         "MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"}
@@ -224,7 +226,7 @@ def test_full_external_counts_include_pilot_and_flagged_rows(external_vectors):
 
 
 @pytest.mark.parametrize("policy", sorted(HELD))
-def test_unreadable_preset_scope_outside_final_contract_is_rejected(policy, vectors, monkeypatch):
+def test_a2_unreadable_preset_scope_is_accepted_and_wrong_citation_rejected(policy, vectors, monkeypatch):
     row = next(row for row in vectors[policy] if row["rule_cell"] == "strict_covers_compliant")
     sections = deepcopy(row["sections"])
     strict = next(rule for rule in sections["protection_policy_rules"] if PRESET_RE[0].search(rule["Identity"]))
@@ -232,17 +234,17 @@ def test_unreadable_preset_scope_outside_final_contract_is_rejected(policy, vect
     record = _evaluate(policy, sections)
     assert record["cell"] == "rule_scope_unusable"
     assert record["cited_sections"] == ["protection_policy_rules"]
-    # This pre-existing held predicate output is absent from A1's exact list.
-    # Contract work must reject it; changing the held predicate belongs to its stage.
-    assert record["cited_sections"] not in HELD[policy]["cells"][record["cell"]]["cited_variants"]
+    # A2 adds this preset-only list to A1's closed domain; the predicate is unchanged.
+    assert record["cited_sections"] in HELD[policy]["cells"][record["cell"]]["cited_variants"]
     import azure_tenant_audit.value_rules.catalogue as loader
     data = deepcopy(catalogue())
     data["policies"].update(HELD)
     monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
     loader.catalogue.cache_clear()
     try:
+        assert checked(record) == record
         with pytest.raises(ValueError, match="wrong section"):
-            checked(record)
+            checked({**record, "cited_sections": ["accepted_domains"]})
     finally:
         loader.catalogue.cache_clear()
 

@@ -1,4 +1,4 @@
-"""A1 shared contract: exact variants, additive assessments and unchanged offline answers."""
+"""A1/A2 shared contract: exact variants, additive assessments and unchanged offline answers."""
 from collections import Counter
 from copy import deepcopy
 from hashlib import sha256
@@ -75,11 +75,14 @@ def assessment_for(template, record, *, legacy=False):
 
 
 def test_a1_exception_set_is_pinned_and_does_not_register_policies():
-    # Derived independently from the final A1 catalogue: 64 varying lists + 3 fixed order exceptions.
+    # A2 citation-domains.json supplies 64 source-derived domains (190 variants).
+    # The immutable catalogue supplies the three fixed SS7 order exceptions.
     serial = {p + ":" + c: variants for (p, c), variants in VARIANTS.items()}
     assert len(VARIANTS) == 67
     assert sum(len(v) > 1 for v in VARIANTS.values()) == 64
-    assert sha256(canonical(serial).encode()).hexdigest() == "e129cc16d8370e0fa929d0d06aec25ebfeb33e3fbe9662fd54fc9e7cac6ac583"
+    assert sum(len(v) for v in VARIANTS.values() if len(v) > 1) == 190
+    assert sum(map(len, VARIANTS.values())) == 193
+    assert sha256(canonical(serial).encode()).hexdigest() == "00fd8197ded5350556d989e70be23d6c53c30ff536833ae426f0a15d85f192b7"
     # stage 5 added 11 policies (held SS 1.1 still unregistered), stage 9 the eight AAD pilot rules (A1 exception
     # contract preserved) and stage 7 sixteen AAD role and Conditional Access registrations.
     assert len(SOURCE["policies"]) == 64 + 11 + 8 + 16
@@ -88,6 +91,57 @@ def test_a1_exception_set_is_pinned_and_does_not_register_policies():
     assert TWO_CODES == {
         "data_unusable_sub_domain_root_case": "Data unusable: a managed sub-domain matches a managed verified root domain only when letter case is ignored, so the export does not establish that it is under that root and its password policy is unknown; the policy was not assessed.",
         "data_unusable_sub_domain_without_root": "Data unusable: a managed sub-domain has no managed verified root domain in the export, so its password policy is unknown; the policy was not assessed."}
+
+
+A2_FIXTURE = ROOT / "tests/fixtures/value-rules/vectors-a2-constructed.jsonl"
+A2_VECTORS = [json.loads(line) for line in A2_FIXTURE.read_text().splitlines()]
+
+
+def test_a2_constructed_fixture_identity_and_held_contracts():
+    assert sha256(A2_FIXTURE.read_bytes()).hexdigest() == "0351259550c0a87d27d65cfac8f98b8547334cbd1d94321af244ad06b622ac0b"
+    assert len(A2_VECTORS) == 3
+    held = json.loads((A2_FIXTURE.parent / "held-rows-s4.json").read_text())
+    for policy, row in held.items():
+        assert policy not in SOURCE["policies"]
+        assert row["cells"]["rule_scope_unusable"]["cited_variants"] == VARIANTS[policy, "rule_scope_unusable"]
+
+
+@pytest.mark.parametrize("vector", A2_VECTORS, ids=lambda v: v["vector_id"])
+def test_a2_constructed_exact_record_response_and_wrong_citations(vector, monkeypatch, assessment):
+    policy = vector["policy"]
+    assert vector["origin"] == "a2-constructed" and vector["source_kind"] == "constructed"
+    assert vector["gold_verdict"] is None and vector["gold_source"] is None
+    data = deepcopy(SOURCE)
+    # Test-only registration lets the held rows pass through the real dispatch checker.
+    data["policies"].update(json.loads((A2_FIXTURE.parent / "held-rows-s4.json").read_text()))
+    monkeypatch.setattr(loader, "open_text_resource", lambda _: json.dumps(data))
+    loader.catalogue.cache_clear()
+    before = deepcopy(vector)
+    try:
+        record = assess(policy, vector["sections"])
+        assert record == {"policy_id": policy, "detail": {}, **{
+            key: vector["rule_" + key] for key in
+            ("verdict", "cell", "reason_code", "reason_text", "cited_sections")}}
+        assert vector == before
+        checked(record)
+        row = loader.row_for(policy)
+        response = as_pack_response(record, "Shall", row["sections"])
+        cited = vector["rule_cited_sections"]
+        assert response == {
+            "claims": [
+                {"id": "requirement_met", "status": "unknown", "value": None,
+                 "evidence_ids": ["e0", *[f"e{row['sections'].index(s) + 1}" for s in cited]]},
+                {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
+            "limitations": ["evidence_unusable"], "recommendations": ["recollect_unusable_evidence"]}
+        result = assessment_for(assessment, record)
+        assert result["policies"][0]["limitations"] == [
+            "evidence_unusable", *[f"evidence_unusable:{s}:unusable" for s in cited]]
+        validate_assessment(result)
+        with pytest.raises(ValueError, match="wrong section"):
+            checked({**record, "cited_sections": ["accepted_domains"]})
+    finally:
+        loader.catalogue.cache_clear()
+    assert all(p not in SOURCE["policies"] for p in ("MS.SECURITYSUITE.6.1v1", "MS.SECURITYSUITE.6.2v1"))
 
 
 @pytest.mark.parametrize("number", [1, 2, 3])
