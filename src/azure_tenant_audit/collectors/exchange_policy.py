@@ -45,6 +45,25 @@ Mail protection commands (Cyber Essentials malware protection and secure configu
 * ``Get-DkimSigningConfig`` -> ``Domain``, ``Enabled`` and ``Status`` per domain: whether Exchange Online
   signs outbound mail with DKIM, which the DNS lookup in ``dns_posture`` cannot show.
   https://learn.microsoft.com/en-us/powershell/module/exchange/get-dkimsigningconfig
+
+Defender for Office 365 / EOP reads use the same Exchange Online session. Policy settings
+are kept; recipient and recipient-group scope lists become same-length placeholders.
+No mailbox enumeration or message/file content reads are added:
+
+* ``Get-EOPProtectionPolicyRule`` -> preset policy state and scope.
+* ``Get-ATPProtectionPolicyRule`` -> Defender preset policy state and scope.
+* ``Get-ATPBuiltInProtectionRule`` -> built-in protection exclusions.
+* ``Get-AtpPolicyForO365`` -> SharePoint, Teams and OneDrive ATP policy setting.
+* ``Get-MalwareFilterRule`` -> anti-malware policy assignment, priority, state and scope.
+* ``Get-SafeAttachmentPolicy`` -> attachment protection action.
+* ``Get-SafeAttachmentRule`` -> attachment policy assignment, priority, state and scope.
+* ``Get-AntiPhishPolicy`` -> protection flags, actions and domains; targeted users are not selected.
+* ``Get-AntiPhishRule`` -> anti-phish policy assignment, state and scope.
+* ``Get-HostedContentFilterPolicy`` -> spam/phish actions and allowed sender domains.
+* ``Get-HostedContentFilterRule`` -> content filter policy assignment, state and scope.
+* ``Get-SafeLinksPolicy`` -> URL scanning, delivery and click tracking settings.
+* ``Get-SafeLinksRule`` -> Safe Links policy assignment, priority, state and scope.
+* ``Get-HostedConnectionFilterPolicy`` -> IP allow list and safe list setting.
 """
 from __future__ import annotations
 
@@ -53,6 +72,7 @@ from typing import Any, Callable, Optional
 from ..adapters import get_adapter
 from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from .base import Collector, CollectorResult
+from .exchange_defender_commands import DEFENDER_COMMANDS, minimise_recipients, reclassify_licence_refusals
 
 
 EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
@@ -111,14 +131,14 @@ class ExchangePolicyCollector(Collector):
             "mailboxForwarding",
             MAILBOX_FORWARDING_COMMAND,
         ),
-        ("adminAuditLogConfig", "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled"),
+        ("adminAuditLogConfig", "Get-AdminAuditLogConfig | Select-Object Identity,UnifiedAuditLogIngestionEnabled"),
         ("organizationAuditConfig", "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled"),
         (
             "mailboxAuditBypass",
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count",
         ),
         ("protectionAlerts", "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"),
-        ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled"),
+        ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"),
         ("transportConfig", "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled"),
         # An aggregate, so the answer is never empty (an empty output is read as a failed command) and no mailbox is named.
         (
@@ -126,6 +146,7 @@ class ExchangePolicyCollector(Collector):
             "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count",
         ),
         ("dkimSigningConfig", "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"),
+        *DEFENDER_COMMANDS,
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
@@ -141,7 +162,12 @@ class ExchangePolicyCollector(Collector):
             session = {"kind": "security_compliance"} if name == "protectionAlerts" else exchange_session
             response = adapter.run(command, log_event=log_event, session=session)
             response.setdefault("command", command)
+            minimise_recipients(name, response)
             payload[name] = response
+
+        reclassify_licence_refusals(payload)
+        for name, command in self.command_collectors:
+            response = payload[name]
             values = response.get("value")
             cut = (
                 name == "mailboxForwarding"

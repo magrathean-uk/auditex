@@ -744,16 +744,16 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
     )
     adapter = _FakeAdapter(
         {
-            transport_command: {"value": [{"Name": "Block Forwarding", "RedirectMessageTo": ["external@example.net"]}]},
+            transport_command: {"value": [{"Name": "Block Forwarding", "RedirectMessageTo": ["external@example.invalid"]}]},
             "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Inbound 1"}]},
             "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType": {"value": [{"Name": "Outbound 1"}]},
-            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default": {"value": [{"Name": "contoso.com"}]},
+            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default": {"value": [{"Name": "example.invalid"}]},
             "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled": {
                 "value": [{"Name": "Default"}]
             },
             "Get-SharingPolicy | Select-Object Name,Domains": {"value": [{"Name": "Partners", "Domains": []}]},
             MAILBOX_FORWARDING_COMMAND: {"value": [{"DisplayName": "Alice Example"}]},
-            "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled": {
+            "Get-AdminAuditLogConfig | Select-Object Identity,UnifiedAuditLogIngestionEnabled": {
                 "value": [{"UnifiedAuditLogIngestionEnabled": True}]
             },
             "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled": {"value": [{"AuditDisabled": False}]},
@@ -763,7 +763,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
             "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule": {
                 "value": [{"Name": "Elevation of Exchange admin privilege", "Disabled": False}]
             },
-            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled": {
+            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes": {
                 "value": [{"Identity": "Default", "Name": "Default", "IsDefault": True, "EnableFileFilter": True, "ZapEnabled": True}]
             },
             "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled": {
@@ -773,8 +773,22 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
                 "value": [{"Count": 0}]
             },
             "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status": {
-                "value": [{"Domain": "contoso.com", "Enabled": True, "Status": "Valid"}]
+                "value": [{"Domain": "example.invalid", "Enabled": True, "Status": "Valid"}]
             },
+            ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-ATPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-ATPBuiltInProtectionRule | Select-Object Identity,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB)": {"value": []},
+            ",@(Get-MalwareFilterRule | Select-Object Identity,State,Priority,MalwareFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-SafeAttachmentPolicy | Select-Object Identity,Action)": {"value": []},
+            ",@(Get-SafeAttachmentRule | Select-Object Identity,State,Priority,SafeAttachmentPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender)": {"value": []},
+            ",@(Get-AntiPhishRule | Select-Object Identity,State,AntiPhishPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains)": {"value": []},
+            ",@(Get-HostedContentFilterRule | Select-Object Identity,State,HostedContentFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-SafeLinksPolicy | Select-Object Identity,EnableSafeLinksForEmail,EnableSafeLinksForTeams,EnableSafeLinksForOffice,EnableForInternalSenders,ScanUrls,DeliverMessageAfterScan,TrackClicks)": {"value": []},
+            ",@(Get-SafeLinksRule | Select-Object Identity,State,Priority,SafeLinksPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)": {"value": []},
+            ",@(Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList)": {"value": []},
         }
     )
     monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _name: adapter)
@@ -785,7 +799,7 @@ def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> Non
     assert result.status == "ok"
     assert result.payload["malwareFilterPolicy"]["value"][0]["ZapEnabled"] is True
     assert result.payload["transportConfig"]["value"] == [{"SmtpClientAuthenticationDisabled": True}]
-    assert result.payload["dkimSigningConfig"]["value"][0]["Domain"] == "contoso.com"
+    assert result.payload["dkimSigningConfig"]["value"][0]["Domain"] == "example.invalid"
     assert result.payload["adminAuditLogConfig"]["value"][0]["UnifiedAuditLogIngestionEnabled"] is True
     assert result.payload["mailboxAuditBypass"]["value"] == [{"Count": 0}]
     assert result.payload["transportRules"]["value"][0]["Name"] == "Block Forwarding"

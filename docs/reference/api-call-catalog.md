@@ -119,7 +119,7 @@ These reads feed `report_pack["detection_coverage"]` and `report_pack["public_fo
 
 | Collector | Call | Purpose | Reference |
 | --- | --- | --- | --- |
-| `exchange_policy` | `Get-AdminAuditLogConfig` (Exchange Online PowerShell) | `UnifiedAuditLogIngestionEnabled` | <https://learn.microsoft.com/en-us/purview/audit-log-enable-disable> |
+| `exchange_policy` | `Get-AdminAuditLogConfig` (Exchange Online PowerShell) | `Identity`, `UnifiedAuditLogIngestionEnabled` | <https://learn.microsoft.com/en-us/purview/audit-log-enable-disable> |
 | `exchange_policy` | `Get-OrganizationConfig` | `Identity`, `Name`, `AuditDisabled` (mailbox auditing on by default) | <https://learn.microsoft.com/en-us/purview/audit-mailboxes> |
 | `exchange_policy` | `Get-MailboxAuditBypassAssociation` | Count of accounts with `AuditBypassEnabled`; names are not kept | <https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-mailboxauditbypassassociation> |
 | `exchange_policy` | `Get-ProtectionAlert` (Security & Compliance PowerShell only) | Alert policy name, state, severity, category | <https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert> |
@@ -149,14 +149,30 @@ cmdlets use, with the Global Reader role.
 | `intune` | `GET /deviceManagement/managedDevices/{id}/windowsProtectionState` | Defender antivirus, real-time protection and signature state per Windows device | `DeviceManagementManagedDevices.Read.All` |
 | `intune_depth` | `GET /deviceManagement/deviceConfigurations/{id}/assignments` (update rings only) | Whether each update ring is assigned | `DeviceManagementConfiguration.Read.All` |
 | `intune_depth` | `GET /beta/deviceManagement/windowsQualityUpdateProfiles`, `windowsFeatureUpdateProfiles` and their `/{id}/assignments` | Update profiles and their assignments | `DeviceManagementConfiguration.Read.All` |
-| `exchange_policy` | `Get-MalwareFilterPolicy` | `IsDefault`, `EnableFileFilter`, `ZapEnabled` of each anti-malware policy | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-MalwareFilterPolicy` | `Identity`, `Name`, `IsDefault`, `EnableFileFilter`, `ZapEnabled`, `FileTypes` of each anti-malware policy | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-TransportConfig` | `Name`, `SmtpClientAuthenticationDisabled` | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-CASMailbox -ResultSize Unlimited \| Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } \| Measure-Object \| Select-Object Count` | Count of mailboxes that switch SMTP AUTH back on (no address is kept) | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-DkimSigningConfig` | `Domain`, `Enabled`, `Status` per domain | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-TransportRule` | `Name`, `State`, `Priority`, `Mode`, `RedirectMessageTo`, `BlindCopyTo`, `CopyTo`, `ApplyHtmlDisclaimerText`, `FromScope`, `PrependSubject` | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-SharingPolicy` | `Name`, `Domains` (partner domain names and sharing actions) | Exchange Online; readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet |
+| `exchange_policy` | `Get-EOPProtectionPolicyRule` | `Identity`, `State`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-ATPProtectionPolicyRule` | `Identity`, `State`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-ATPBuiltInProtectionRule` | `Identity`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-AtpPolicyForO365` | `Identity`, `EnableATPForSPOTeamsODB` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-MalwareFilterRule` | `Identity`, `State`, `Priority`, `MalwareFilterPolicy`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-SafeAttachmentPolicy` | `Identity`, `Action` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-SafeAttachmentRule` | `Identity`, `State`, `Priority`, `SafeAttachmentPolicy`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-AntiPhishPolicy` | `Identity`, `Name`, `IsDefault`, `Enabled`, `EnableTargetedUserProtection`, `TargetedUserProtectionAction`, `EnableOrganizationDomainsProtection`, `TargetedDomainProtectionAction`, `EnableTargetedDomainsProtection`, `TargetedDomainsToProtect`, `EnableFirstContactSafetyTips`, `EnableSimilarUsersSafetyTips`, `EnableSimilarDomainsSafetyTips`, `EnableUnusualCharactersSafetyTips`, `EnableViaTag`, `EnableUnauthenticatedSender` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-AntiPhishRule` | `Identity`, `State`, `AntiPhishPolicy`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-HostedContentFilterPolicy` | `Identity`, `IsDefault`, `RecommendedPolicyType`, `SpamAction`, `HighConfidenceSpamAction`, `PhishSpamAction`, `HighConfidencePhishAction`, `AllowedSenderDomains` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-HostedContentFilterRule` | `Identity`, `State`, `HostedContentFilterPolicy`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-SafeLinksPolicy` | `Identity`, `EnableSafeLinksForEmail`, `EnableSafeLinksForTeams`, `EnableSafeLinksForOffice`, `EnableForInternalSenders`, `ScanUrls`, `DeliverMessageAfterScan`, `TrackClicks` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-SafeLinksRule` | `Identity`, `State`, `Priority`, `SafeLinksPolicy`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-HostedConnectionFilterPolicy` | `Name`, `IPAllowList`, `EnableSafeList` | Exchange Online, Global Reader |
 
 Transport-rule `FromScope` and `PrependSubject` are configuration (the latter a subject-prefix setting), without reading mail. The `Select-Object` field lists stay explicit; full transport-rule objects can contain addresses and keywords in conditions and exceptions. Sharing-policy reads collect no message content and use the existing Exchange grants.
+
+These Exchange Online reads use `Exchange.ManageAsApp` plus Global Reader only in app mode; no new Graph scope or role is needed. Rule recipient and recipient-group scope lists are stored as same-length `"recipient"` placeholders. Non-empty recipient strings become `"recipient"` and non-empty dictionaries become `["recipient"]`; nulls and empty values stay unchanged, and domain scopes are retained. Rule error payloads retain `stderr` and replace `stdout` with its length in `stdout_bytes`. The adapter's audit-log `stdout_sample` is recorded before payload minimisation with e-mail/UPN local parts and dashed GUIDs masked by the shared diagnostic boundary.
 
 What could not be collected read-only: the Intune reports API for Defender state (a POST export job), the Windows
 Defender settings of a Windows compliance policy (not returned by Graph v1.0), compliance policies built from

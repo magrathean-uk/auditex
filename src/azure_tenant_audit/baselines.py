@@ -195,6 +195,8 @@ _SIGNIN_ACTIVITY_RULES = frozenset(
 # ``identity`` for everything but the sign-in rules, ``identity_governance`` (PIM schedules, which the
 # effective administrator set already reads as "no PIM") for the rules that tolerate it.
 _LICENCE_GATED_SECTIONS = {
+    # Marker for the projection; this entry has no effect on rule evaluation today.
+    "exchange_policy": frozenset({"atpProtectionPolicyRules", "atpPolicyForO365"}),
     "identity": frozenset({"userSignInActivity"}),
     # The PIM role policy reads are licence-gated the same way (Microsoft Entra ID P2 or Governance). The rules fan-out row
     # derives from the rule reads and carries their ``license_required`` when every failed read was refused for a licence.

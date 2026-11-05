@@ -53,6 +53,18 @@ only for a loopback endpoint, sends them unmasked to that endpoint.
 The approvers' names and ids of an approval rule are not stored. Nothing else of these reads
 leaves the machine, and the reads are GET-only.
 
+Defender for Office 365 / EOP rule scope lists (`SentTo`, `SentToMemberOf`,
+`ExceptIfSentTo`, `ExceptIfSentToMemberOf`) are stored as same-length lists of
+`"recipient"` placeholders in the collector payload. Non-empty strings become
+`"recipient"`, non-empty dictionaries become `["recipient"]`, and nulls and empty
+values stay unchanged. Domain scopes are retained for comparison with accepted
+domains. For rule errors, payload `stdout` is replaced with its length in
+`stdout_bytes`; `stderr` is retained.
+`TargetedUsersToProtect` is not collected. The adapter records the audit log's
+`stdout_sample` before this payload minimisation; the shared diagnostic boundary
+masks e-mail/UPN local parts and dashed GUIDs and clips the sample to 500 characters,
+as described below. Treat that log as confidential tenant evidence too.
+
 `data-handling.json` describes a run's declared plane, scope risk, read-only
 status, content-read status, and write actions; it is a declaration.
 `api-inventory.json` records declared collectors, the collectors' own call

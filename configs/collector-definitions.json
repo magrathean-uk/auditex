@@ -681,7 +681,21 @@
         "malwareFilterPolicy",
         "transportConfig",
         "casMailboxSmtpAuth",
-        "dkimSigningConfig"
+        "dkimSigningConfig",
+        "eopProtectionPolicyRules",
+        "atpProtectionPolicyRules",
+        "atpBuiltInProtectionRules",
+        "atpPolicyForO365",
+        "malwareFilterRules",
+        "safeAttachmentPolicies",
+        "safeAttachmentRules",
+        "antiPhishPolicies",
+        "antiPhishRules",
+        "hostedContentFilterPolicies",
+        "hostedContentFilterRules",
+        "safeLinksPolicies",
+        "safeLinksRules",
+        "hostedConnectionFilterPolicy"
       ],
       "command_collectors": [
         {
@@ -737,7 +751,7 @@
           "name": "adminAuditLogConfig",
           "category": "detection",
           "commands": [
-            "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled"
+            "Get-AdminAuditLogConfig | Select-Object Identity,UnifiedAuditLogIngestionEnabled"
           ]
         },
         {
@@ -765,7 +779,7 @@
           "name": "malwareFilterPolicy",
           "category": "policy",
           "commands": [
-            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled"
+            "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"
           ]
         },
         {
@@ -787,6 +801,104 @@
           "category": "policy",
           "commands": [
             "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"
+          ]
+        },
+        {
+          "name": "eopProtectionPolicyRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-EOPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "atpProtectionPolicyRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-ATPProtectionPolicyRule | Select-Object Identity,State,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "atpBuiltInProtectionRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-ATPBuiltInProtectionRule | Select-Object Identity,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "atpPolicyForO365",
+          "category": "policy",
+          "commands": [
+            ",@(Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB)"
+          ]
+        },
+        {
+          "name": "malwareFilterRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-MalwareFilterRule | Select-Object Identity,State,Priority,MalwareFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "safeAttachmentPolicies",
+          "category": "policy",
+          "commands": [
+            ",@(Get-SafeAttachmentPolicy | Select-Object Identity,Action)"
+          ]
+        },
+        {
+          "name": "safeAttachmentRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-SafeAttachmentRule | Select-Object Identity,State,Priority,SafeAttachmentPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "antiPhishPolicies",
+          "category": "policy",
+          "commands": [
+            ",@(Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender)"
+          ]
+        },
+        {
+          "name": "antiPhishRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-AntiPhishRule | Select-Object Identity,State,AntiPhishPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "hostedContentFilterPolicies",
+          "category": "policy",
+          "commands": [
+            ",@(Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains)"
+          ]
+        },
+        {
+          "name": "hostedContentFilterRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-HostedContentFilterRule | Select-Object Identity,State,HostedContentFilterPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "safeLinksPolicies",
+          "category": "policy",
+          "commands": [
+            ",@(Get-SafeLinksPolicy | Select-Object Identity,EnableSafeLinksForEmail,EnableSafeLinksForTeams,EnableSafeLinksForOffice,EnableForInternalSenders,ScanUrls,DeliverMessageAfterScan,TrackClicks)"
+          ]
+        },
+        {
+          "name": "safeLinksRules",
+          "category": "policy",
+          "commands": [
+            ",@(Get-SafeLinksRule | Select-Object Identity,State,Priority,SafeLinksPolicy,SentTo,SentToMemberOf,RecipientDomainIs,ExceptIfSentTo,ExceptIfSentToMemberOf,ExceptIfRecipientDomainIs)"
+          ]
+        },
+        {
+          "name": "hostedConnectionFilterPolicy",
+          "category": "policy",
+          "commands": [
+            ",@(Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList)"
           ]
         }
       ]
