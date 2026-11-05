@@ -1,12 +1,25 @@
 """Exchange Online policy posture via read-only Exchange PowerShell Get-* cmdlets.
 
+Policy configuration commands use explicit ``Select-Object`` lists:
+
+* ``Get-TransportRule`` -> name, state, priority, mode, redirect/copy targets, disclaimer
+  configuration, ``FromScope`` and ``PrependSubject``. ``FromScope`` and ``PrependSubject``
+  are rule configuration (the latter a subject-prefix setting), not mail. Never select full
+  transport-rule objects: conditions and exceptions can hold addresses and keywords.
+* ``Get-SharingPolicy`` -> ``Name`` and ``Domains`` (partner domain names and sharing actions),
+  without message content.
+* ``Get-RemoteDomain`` -> name, domain name, outbound trust, auto-reply and auto-forward settings.
+* ``Get-AcceptedDomain`` -> name, domain name, domain type and default-domain flag.
+* ``Get-InboundConnector`` and ``Get-OutboundConnector`` -> name, enabled state and connector type.
+
 Detection-coverage commands (all read-only ``Get-*`` cmdlets):
 
 * ``Get-AdminAuditLogConfig`` -> ``UnifiedAuditLogIngestionEnabled`` (must run in Exchange
   Online PowerShell; the Security & Compliance value is always False).
   https://learn.microsoft.com/en-us/purview/audit-log-enable-disable
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-adminauditlogconfig
-* ``Get-OrganizationConfig`` -> ``AuditDisabled`` (False = mailbox auditing on by default).
+* ``Get-OrganizationConfig`` -> ``Identity``, ``Name`` and ``AuditDisabled``
+  (False = mailbox auditing on by default).
   https://learn.microsoft.com/en-us/purview/audit-mailboxes
 * ``Get-MailboxAuditBypassAssociation`` -> count of accounts with ``AuditBypassEnabled`` only;
   no account names are kept.
@@ -22,7 +35,7 @@ Mail protection commands (Cyber Essentials malware protection and secure configu
   ``ZapEnabled`` (zero-hour auto purge of malware). The default policy applies to every recipient that no
   other policy covers; the policy settings are read, not the recipients.
   https://learn.microsoft.com/en-us/powershell/module/exchange/get-malwarefilterpolicy
-* ``Get-TransportConfig`` -> ``SmtpClientAuthenticationDisabled``: whether authenticated SMTP submission
+* ``Get-TransportConfig`` -> ``Name`` and ``SmtpClientAuthenticationDisabled``: whether authenticated SMTP submission
   (a basic-authentication protocol) is switched off for the whole tenant.
   https://learn.microsoft.com/en-us/powershell/module/exchange/get-transportconfig
 * ``Get-CASMailbox`` -> a count of the mailboxes whose own ``SmtpClientAuthenticationDisabled`` is false. The tenant
@@ -82,7 +95,7 @@ class ExchangePolicyCollector(Collector):
     command_collectors = [
         (
             "transportRules",
-            "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText",
+            "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject",
         ),
         ("inboundConnectors", "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType"),
         ("outboundConnectors", "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType"),
@@ -91,6 +104,7 @@ class ExchangePolicyCollector(Collector):
             "remoteDomains",
             "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",
         ),
+        ("sharingPolicy", "Get-SharingPolicy | Select-Object Name,Domains"),
         # The server filters to mailboxes that forward, so the answer does not depend on how many mailboxes the tenant has.
         # One row past FORWARDING_MAILBOX_LIMIT is asked for: seeing it proves the list continued (a gap, never a clean read).
         (
@@ -98,14 +112,14 @@ class ExchangePolicyCollector(Collector):
             MAILBOX_FORWARDING_COMMAND,
         ),
         ("adminAuditLogConfig", "Get-AdminAuditLogConfig | Select-Object UnifiedAuditLogIngestionEnabled"),
-        ("organizationAuditConfig", "Get-OrganizationConfig | Select-Object AuditDisabled"),
+        ("organizationAuditConfig", "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled"),
         (
             "mailboxAuditBypass",
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count",
         ),
         ("protectionAlerts", "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"),
         ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled"),
-        ("transportConfig", "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled"),
+        ("transportConfig", "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled"),
         # An aggregate, so the answer is never empty (an empty output is read as a failed command) and no mailbox is named.
         (
             "casMailboxSmtpAuth",

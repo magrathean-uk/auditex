@@ -147,7 +147,10 @@
       "query_plan": [
         "domains",
         "domainPosture",
-        "publicFootprint"
+        "publicFootprint",
+        "spf_records",
+        "dkim_records",
+        "dmarc_records"
       ]
     },
     "cross_tenant_access": {
@@ -647,6 +650,7 @@
         "outboundConnectors",
         "acceptedDomains",
         "remoteDomains",
+        "sharingPolicy",
         "mailboxForwarding",
         "adminAuditLogConfig",
         "organizationAuditConfig",
@@ -662,7 +666,7 @@
           "name": "transportRules",
           "category": "policy",
           "commands": [
-            "Get-TransportRule | Select-Object Name,State,Priority,Mode"
+            "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject"
           ]
         },
         {
@@ -690,7 +694,14 @@
           "name": "remoteDomains",
           "category": "policy",
           "commands": [
-            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled"
+            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled"
+          ]
+        },
+        {
+          "name": "sharingPolicy",
+          "category": "policy",
+          "commands": [
+            "Get-SharingPolicy | Select-Object Name,Domains"
           ]
         },
         {
@@ -711,7 +722,7 @@
           "name": "organizationAuditConfig",
           "category": "detection",
           "commands": [
-            "Get-OrganizationConfig | Select-Object AuditDisabled"
+            "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled"
           ]
         },
         {
@@ -739,7 +750,7 @@
           "name": "transportConfig",
           "category": "policy",
           "commands": [
-            "Get-TransportConfig | Select-Object SmtpClientAuthenticationDisabled"
+            "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled"
           ]
         },
         {

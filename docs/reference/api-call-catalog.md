@@ -120,11 +120,14 @@ These reads feed `report_pack["detection_coverage"]` and `report_pack["public_fo
 | Collector | Call | Purpose | Reference |
 | --- | --- | --- | --- |
 | `exchange_policy` | `Get-AdminAuditLogConfig` (Exchange Online PowerShell) | `UnifiedAuditLogIngestionEnabled` | <https://learn.microsoft.com/en-us/purview/audit-log-enable-disable> |
-| `exchange_policy` | `Get-OrganizationConfig` | `AuditDisabled` (mailbox auditing on by default) | <https://learn.microsoft.com/en-us/purview/audit-mailboxes> |
+| `exchange_policy` | `Get-OrganizationConfig` | `Identity`, `Name`, `AuditDisabled` (mailbox auditing on by default) | <https://learn.microsoft.com/en-us/purview/audit-mailboxes> |
 | `exchange_policy` | `Get-MailboxAuditBypassAssociation` | Count of accounts with `AuditBypassEnabled`; names are not kept | <https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-mailboxauditbypassassociation> |
 | `exchange_policy` | `Get-ProtectionAlert` (Security & Compliance PowerShell only) | Alert policy name, state, severity, category | <https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert> |
 | `identity_protection` (opt-in) | `GET /identityProtection/riskyUsers` (one page, `$select=id,riskLevel,riskState`) | Whether Identity Protection risk detection exists; counts only | <https://learn.microsoft.com/en-us/graph/api/riskyuser-list?view=graph-rest-1.0> |
 | `conditional_access`, `security`, `defender`, `sentinel_xdr` | existing reads | Risk-based policies, sign-in and directory audit availability, alerts API reachability | see collector definitions |
+| `dns_posture` | DoH `TXT <domain>` | Complete SPF TXT answers, public DNS without sign-in | Public DNS |
+| `dns_posture` | DoH `TXT _dmarc.<domain>` and up to seven parent labels | Complete DMARC TXT answers, public DNS without sign-in | Public DNS |
+| `dns_posture` | DoH `TXT selector1._domainkey.<domain>`, `selector2._domainkey.<domain>`, `selector1-<domain with dots as dashes>._domainkey.<domain>`, `selector2-<domain with dots as dashes>._domainkey.<domain>` | Complete DKIM TXT answers, public DNS without sign-in | Public DNS |
 | `dns_posture` | DoH `TXT _smtp._tls.<domain>` | TLS-RPT record (RFC 8460) | <https://datatracker.ietf.org/doc/html/rfc8460> |
 | `dns_posture` | `GET https://mta-sts.<domain>/.well-known/mta-sts.txt` | MTA-STS policy mode, only when `_mta-sts` TXT exists; no redirects, 64 KiB cap | <https://learn.microsoft.com/en-us/exchange/security-and-compliance/enhance-mail-flow-using-strict-transport-security> |
 | `dns_posture` | `GET https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration` | Public tenant ID, region scope, cloud instance | <https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc> |
@@ -147,9 +150,13 @@ cmdlets use, with the Global Reader role.
 | `intune_depth` | `GET /deviceManagement/deviceConfigurations/{id}/assignments` (update rings only) | Whether each update ring is assigned | `DeviceManagementConfiguration.Read.All` |
 | `intune_depth` | `GET /beta/deviceManagement/windowsQualityUpdateProfiles`, `windowsFeatureUpdateProfiles` and their `/{id}/assignments` | Update profiles and their assignments | `DeviceManagementConfiguration.Read.All` |
 | `exchange_policy` | `Get-MalwareFilterPolicy` | `IsDefault`, `EnableFileFilter`, `ZapEnabled` of each anti-malware policy | Exchange Online, Global Reader |
-| `exchange_policy` | `Get-TransportConfig` | `SmtpClientAuthenticationDisabled` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-TransportConfig` | `Name`, `SmtpClientAuthenticationDisabled` | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-CASMailbox -ResultSize Unlimited \| Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } \| Measure-Object \| Select-Object Count` | Count of mailboxes that switch SMTP AUTH back on (no address is kept) | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-DkimSigningConfig` | `Domain`, `Enabled`, `Status` per domain | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-TransportRule` | `Name`, `State`, `Priority`, `Mode`, `RedirectMessageTo`, `BlindCopyTo`, `CopyTo`, `ApplyHtmlDisclaimerText`, `FromScope`, `PrependSubject` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-SharingPolicy` | `Name`, `Domains` (partner domain names and sharing actions) | Exchange Online; readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet |
+
+Transport-rule `FromScope` and `PrependSubject` are configuration (the latter a subject-prefix setting), without reading mail. The `Select-Object` field lists stay explicit; full transport-rule objects can contain addresses and keywords in conditions and exceptions. Sharing-policy reads collect no message content and use the existing Exchange grants.
 
 What could not be collected read-only: the Intune reports API for Defender state (a POST export job), the Windows
 Defender settings of a Windows compliance policy (not returned by Graph v1.0), compliance policies built from
