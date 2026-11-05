@@ -1,0 +1,62 @@
+{
+  "raw": {
+    "power_platform": {
+      "environmentCreation": [{"disableEnvironmentCreationByNonAdminUsers": true}],
+      "tenantIsolation": [{"properties": {"isDisabled": false}}],
+      "dlpPolicyScopes": [],
+      "environments": [{"name": "test", "is_default": false}]
+    },
+    "power_bi": {
+      "tenantSettings": [{"settingName": "PublishToWeb", "enabled": false}],
+      "accessState": [{"denied": false, "http_status": 200}]
+    },
+    "licensing": {
+      "subscribedSkus": [{"servicePlans": [{"servicePlanId": "11111111-1111-4111-8111-111111111111", "servicePlanName": "POWER_BI_STANDARD", "provisioningStatus": "Success"}]}]
+    }
+  },
+  "failure_modes": [
+    {"status": "failed", "error_class": "insufficient_permissions", "reason": "collector_error"},
+    {"status": "failed", "error_class": "service_not_available", "reason": "collector_error"},
+    {"status": "failed", "error_class": "client_error", "reason": "collector_error"},
+    {"status": "skipped", "error_class": "service_not_available", "reason": "collector_error"},
+    {"status": "skipped", "reason": "incomplete_shape"},
+    {"collection_truncated": true, "reason": "incomplete_shape"},
+    {"missing_operation": true, "reason": "missing_artifact"}
+  ],
+  "cases": [
+    {"id": "never-configured", "section": "tenant_isolation", "rows": [{"never_configured": true}], "reason": "tenant_isolation_unconfirmed"},
+    {"id": "missing-default", "section": "environment_list", "rows": [{"name": "test"}], "expected": [{"EnvironmentName": "test", "IsDefault": null}]},
+    {"id": "missing-name", "section": "environment_list", "rows": [{"is_default": "false"}], "expected": [{"EnvironmentName": null, "IsDefault": "false"}]},
+    {"id": "creation-string", "section": "environment_creation", "rows": [{"disableEnvironmentCreationByNonAdminUsers": "false"}], "expected": [{"disableEnvironmentCreationByNonAdminUsers": "false"}]},
+    {"id": "creation-null", "section": "environment_creation", "rows": [{"powerPlatform": null}], "expected": [{"powerPlatform": null}]},
+    {"id": "creation-empty", "section": "environment_creation", "rows": [], "reason": "incomplete_shape"},
+    {"id": "creation-non-object", "section": "environment_creation", "rows": [false], "reason": "incomplete_shape"},
+    {"id": "creation-unrecognised", "section": "environment_creation", "rows": [{"unknown": true}], "reason": "incomplete_shape"},
+    {"id": "isolation-string", "section": "tenant_isolation", "rows": [{"properties": {"isDisabled": "false"}}], "expected": [{"properties": {"isDisabled": "false"}}]},
+    {"id": "isolation-null", "section": "tenant_isolation", "rows": [{"properties": {"isDisabled": null}}], "expected": [{"properties": {"isDisabled": null}}]},
+    {"id": "dlp-unusable", "section": "dlp_policies", "rows": [{"environmentType": null, "environments": [null, "bad", {}]}], "expected": [{"value": [{"environmentType": null, "environments": [null, "bad", {}]}]}]},
+    {"id": "denied-401", "section": "powerbi_access_denied_reason", "rows": [{"denied": true, "http_status": 401}], "expected": "Power BI Admin API denied access (HTTP 401)"},
+    {"id": "denied-403", "section": "powerbi_access_denied_reason", "rows": [{"denied": true, "http_status": 403}], "expected": "Power BI Admin API denied access (HTTP 403)"},
+    {"id": "not-denied", "section": "powerbi_access_denied_reason", "rows": [{"denied": false, "http_status": null}], "expected": ""},
+    {"id": "not-denied-500", "section": "powerbi_access_denied_reason", "rows": [{"denied": false, "http_status": 500}], "expected": ""},
+    {"id": "denied-empty", "section": "powerbi_access_denied_reason", "rows": [], "reason": "incomplete_shape"},
+    {"id": "denied-invalid", "section": "powerbi_access_denied_reason", "rows": [{"denied": "false", "http_status": 403}], "reason": "incomplete_shape"},
+    {"id": "denied-wrong-status", "section": "powerbi_access_denied_reason", "rows": [{"denied": true, "http_status": 500}], "reason": "incomplete_shape"},
+    {"id": "settings-string", "section": "powerbi_tenant_settings", "rows": [{"settingName": "PublishToWeb", "enabled": "false", "enabledSecurityGroups": "bad"}], "expected": [{"settingName": "PublishToWeb", "enabled": "false", "enabledSecurityGroups": "bad"}]},
+    {"id": "settings-duplicated", "section": "powerbi_tenant_settings", "rows": [{"settingName": "PublishToWeb", "enabled": true}, {"settingName": "PublishToWeb", "enabled": false}], "expected": [{"settingName": "PublishToWeb", "enabled": true}, {"settingName": "PublishToWeb", "enabled": false}]}
+  ],
+  "plans": [
+    {"name": "POWER_BI_STANDARD", "status": "Success", "expected": true},
+    {"name": "BI_AZURE_P2", "status": "Success", "expected": true},
+    {"name": "BI_AZURE_P_2", "status": "Success", "expected": true},
+    {"name": "PBI_PREMIUM_PER_USER", "status": "Success", "expected": true},
+    {"name": "FABRIC_FREE", "status": "Success", "expected": true},
+    {"name": "AAD_PREMIUM_P2", "status": "Success", "expected": false},
+    {"name": "POWER_BI_STANDARD", "status": "Disabled", "expected": false},
+    {"name": "power_bi_standard", "status": "Success", "expected": true},
+    {"name": "bi_azure_p2", "status": "Success", "expected": true},
+    {"name": "pbi_premium_per_user", "status": "Success", "expected": true},
+    {"name": "fabric_free", "status": "Success", "expected": true},
+    {"name": "prefixPOWER_BI_STANDARDsuffix", "status": "Success", "expected": true}
+  ]
+}
