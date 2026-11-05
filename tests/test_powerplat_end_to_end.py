@@ -10,6 +10,7 @@ import json
 
 import pytest
 
+from auditex.model_serving import ModelConfig, assess_run
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.collectors import power_platform as pp
 from azure_tenant_audit.collectors.power_bi import PowerBICollector, TENANT_SETTINGS
@@ -40,6 +41,9 @@ BI_POLICIES = [
 ]
 PP_POLICIES = [f"MS.POWERPLATFORM.{number}v1" for number in
                ("1.1", "1.2", "2.1", "2.2", "3.1", "5.1", "6.1")]
+OPTIONAL_POLICIES = [*(row[0] for row in BI_POLICIES), *PP_POLICIES, "MS.POWERPLATFORM.2.3v1"]
+OPTIONAL_REASON = "optional_collection_not_enabled"
+OPTIONAL_TEXT = "Not assessed: the optional Power BI / Power Platform collection was not enabled for this run."
 FLAGS = {
     "MS.POWERPLATFORM.1.1v1": "disableEnvironmentCreationByNonAdminUsers",
     "MS.POWERPLATFORM.1.2v1": "disableTrialEnvironmentCreationByNonAdminUsers",
@@ -75,6 +79,7 @@ def forbid_network(monkeypatch):
     monkeypatch.setattr("requests.sessions.Session.request", blocked)
     monkeypatch.setattr("socket.socket.connect", blocked)
     monkeypatch.setattr("socket.create_connection", blocked)
+    monkeypatch.setattr("auditex.model_serving.ModelClient.assess", blocked)
     yield
     # Collectors catch transport errors, so also fail outside their exception handlers.
     assert not attempts, "a collector attempted real network access"
@@ -148,7 +153,8 @@ class FakePowerBI:
 
 @pytest.fixture
 def collect_run(tmp_path, request):
-    def run(*, pp_changes=None, settings=None, bi_error=None, licence="present", tokens=True):
+    def run(*, pp_changes=None, settings=None, bi_error=None, licence="present", tokens=True,
+            manifest_metadata=None):
         platform = FakePowerPlatform()
         platform.responses.update(pp_changes or {})
         bi = FakePowerBI(settings if settings is not None else [
@@ -159,7 +165,9 @@ def collect_run(tmp_path, request):
             "client": FakeGraph(), "power_platform_client": platform if tokens else None,
         })
         bi_result = PowerBICollector().run({"power_bi_client": bi if tokens else None})
-        write(tmp_path, "run-manifest.json", {"run_id": "constructed-powerplat-run", "platform": "m365"})
+        write(tmp_path, "run-manifest.json", {
+            "run_id": "constructed-powerplat-run", "platform": "m365", **(manifest_metadata or {}),
+        })
         write(tmp_path, "fixture-meta.json", {
             **FIXTURE_META, "vector_id": f"constructed:powerplat-e2e:{request.node.name}",
         })
@@ -327,9 +335,27 @@ def test_no_admin_token_withholds_every_optional_section(collect_run):
                                "not_assessed", "section_not_collected")
 
 
-def test_without_opt_in_all_15_policies_are_not_assessed(tmp_path):
+def assess_optional_run(root):
+    # Use the same customer assessment entry point as test_optional_collection_reason.py.
+    result = assess_run(root, ModelConfig(model_name="constructed-powerplat-e2e"), policies=OPTIONAL_POLICIES)
+    assert len(result["policies"]) == 16
+    assert {row["policy_id"] for row in result["policies"]} == set(OPTIONAL_POLICIES)
+    return result
+
+
+@pytest.mark.parametrize("metadata,optional_reason", [
+    pytest.param({"selected_collectors": ["identity", "licensing"]}, True, id="not-enabled"),
+    pytest.param({}, False, id="selection-absent"),
+    pytest.param({"selected_collectors": []}, False, id="selection-empty"),
+    pytest.param({"selected_collectors": None}, False, id="selection-null"),
+    pytest.param({"selected_collectors": "identity"}, False, id="selection-string"),
+    pytest.param({"selected_collectors": {"identity": True}}, False, id="selection-object"),
+])
+def test_without_optional_collection_all_16_policies_are_not_assessed(tmp_path, metadata, optional_reason):
     # Constructed run with only supporting collectors; no optional collector ran.
-    write(tmp_path, "run-manifest.json", {"run_id": "constructed-no-opt-in", "platform": "m365"})
+    write(tmp_path, "run-manifest.json", {
+        "run_id": "constructed-no-opt-in", "platform": "m365", **metadata,
+    })
     write(tmp_path, "fixture-meta.json", {**FIXTURE_META, "vector_id": "constructed:powerplat-e2e:no-opt-in"})
     operation(tmp_path, "identity", "organization", [{"id": TENANT}])
     operation(tmp_path, "licensing", "subscribedSkus", [{"servicePlans": [{
@@ -342,8 +368,54 @@ def test_without_opt_in_all_15_policies_are_not_assessed(tmp_path):
     projection = project_run(tmp_path, redact=False)
     for section in ("environment_creation", "tenant_isolation", "dlp_policies", "environment_list",
                     "powerbi_tenant_settings", "powerbi_access_denied_reason"):
-        assert projection.rule_sections[section] == NOT_COLLECTED
-    for policy_id in [*(row[0] for row in BI_POLICIES), *PP_POLICIES]:
+        assert projection[section] == NOT_COLLECTED
+        assert projection.report["sections"][section]["reason"] == (
+            OPTIONAL_REASON if optional_reason else "missing_artifact"
+        )
+    for policy_id in OPTIONAL_POLICIES:
         result = assess(policy_id, projection.rule_sections)
         assert result["verdict"] == "not_assessed"
-        assert result["cell"] == "section_not_collected"
+        if not optional_reason:
+            assert result["cell"] == "section_not_collected"
+    result = assess_optional_run(tmp_path)
+    for row in result["policies"]:
+        assert row["claims"][0]["status"] == "unknown"
+        detail = row["rule_precheck"]
+        if optional_reason:
+            assert detail["class"] == "absent_section"
+            assert detail["reason_code"] == OPTIONAL_REASON
+            assert detail["reason_text"] == OPTIONAL_TEXT
+            assert row["limitations"] == [OPTIONAL_REASON]
+            assert row["recommendations"] == []
+        else:
+            assert detail["cell"] == "section_not_collected"
+            assert detail["reason_code"] == "required_evidence_section_not_collected"
+            assert OPTIONAL_REASON not in row["limitations"]
+            assert detail["reason_text"] != OPTIONAL_TEXT
+
+
+def test_selected_optional_collectors_keep_read_failure_reasons(collect_run, tmp_path):
+    projection, pp_result, bi_result = collect_run(
+        manifest_metadata={"selected_collectors": ["identity", "licensing", "power_bi", "power_platform"]},
+        bi_error=PowerBIError("constructed denial", status=403),
+        pp_changes={path: PowerPlatformError("constructed denial", status=403) for path in (
+            pp.ENVIRONMENTS, pp.DLP_POLICIES, pp.DLP_SCOPES, pp.TENANT_SETTINGS, ISOLATION,
+        )},
+    )
+    assert pp_result.status == bi_result.status == "partial"
+    assert all(row["status"] == "failed" for row in pp_result.coverage)
+    assert bi_result.payload["tenantSettings"]["status"] == "failed"
+    result = assess_optional_run(tmp_path)
+    for section in ("environment_creation", "tenant_isolation", "dlp_policies", "environment_list",
+                    "powerbi_tenant_settings"):
+        detail = result["projection"]["sections"][section]
+        assert detail["reason"] == "collector_error"
+        assert detail["detail"]["error_class"] == "insufficient_permissions"
+    assert projection.rule_sections["powerbi_access_denied_reason"] == "Power BI Admin API denied access (HTTP 403)"
+    for row in result["policies"]:
+        assert row["claims"][0]["status"] == "unknown"
+        detail = row["rule_precheck"]
+        assert detail["cell"] == "section_not_collected"
+        assert detail["reason_code"] == "required_evidence_section_not_collected"
+        assert OPTIONAL_REASON not in row["limitations"]
+        assert detail["reason_text"] != OPTIONAL_TEXT
