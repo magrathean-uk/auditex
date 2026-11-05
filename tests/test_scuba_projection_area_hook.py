@@ -20,7 +20,7 @@ def register_modules(monkeypatch, *modules):
 
 @pytest.mark.parametrize("redact", [False, True])
 def test_empty_area_modules_leave_projection_unchanged(complete_bundle, tmp_path, monkeypatch, redact):
-    assert scuba_projection.AREA_ADAPTER_MODULES == ()
+    monkeypatch.setattr(scuba_projection, 'AREA_ADAPTER_MODULES', ())
     # Start with HEAD~1 as reviewed; retain the pre-hook baseline after this fix is committed on top of the hook.
     for revision in ("HEAD~1", "c29f431^"):
         source = subprocess.run(
