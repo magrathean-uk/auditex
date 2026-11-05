@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from azure_tenant_audit.api_inventory import (
     build_api_call_inventory,
     endpoint_template,
@@ -266,7 +268,7 @@ def test_google_runs_are_marked_as_not_instrumented() -> None:
     inventory = with_observed_ledger(_inventory(platform="google_workspace"), [])
 
     assert inventory["observed_ledger"]["basis"] == "not_instrumented"
-    assert inventory["observed_ledger"]["instrumentation"] == {"graph": False, "commands": False, "google_api": False}
+    assert inventory["observed_ledger"]["instrumentation"] == {"graph": False, "teams_admin_rest": False, "commands": False, "google_api": False}
     assert inventory["safety"]["observation_basis"] == "coverage_ledger_only"
 
 
@@ -312,6 +314,174 @@ def test_writer_derives_the_ledger_from_its_own_audit_log(tmp_path: Path) -> Non
     assert written["safety"]["write_actions"] is False
     assert [row["endpoint"] for row in written["observed_ledger"]["graph"]["endpoints"]] == ["/users"]
     assert "observed_ledger" not in declared  # the caller's dict is not mutated
+
+
+@pytest.mark.parametrize("statuses", [(200, 200, 200, 200, 200), (200, 403, 404, 500, 200)])
+def test_teams_rest_run_writes_five_gets_and_statuses_without_token(monkeypatch, tmp_path: Path, statuses) -> None:
+    from auditex.reporting import (
+        _render_pack_readme,
+        enterprise_handoff,
+        render_api_call_inventory_markdown,
+        render_enterprise_handoff_markdown,
+    )
+    from azure_tenant_audit.adapters.teams_admin_rest import TEAMS_READ_PATHS
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+    from test_teams_admin_rest import TOKEN, Client, Response, command_reader, connect
+
+    # All service rows and the certificate token are constructed, with no pack data.
+    command_reader(monkeypatch)
+    session = connect(monkeypatch, [Response(status) for status in statuses])
+    writer = AuditWriter(tmp_path, tenant_name="constructed", run_name="teams-rest")
+    result = TeamsPolicyCollector().run({"client": Client(), "audit_logger": writer.log_event})
+    declared = build_api_call_inventory(
+        platform="m365", selected_collectors=["teams_policy"], capability_rows=[],
+        coverage_rows=result.coverage, data_handling={"read_only": True},
+    )
+    inventory_path = writer.write_json_artifact("api-inventory.json", declared)
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    ledger = inventory["observed_ledger"]["teams_admin_rest"]
+    expected = {url: status for (url, _), status in zip(session.calls, statuses)}
+    assert len(expected) == len(ledger["endpoints"]) == ledger["request_attempts"] == 5
+    assert ledger["methods_seen"] == inventory["safety"]["observed_methods"] == ["GET"]
+    assert inventory["counts"]["observed_teams_admin_rest_requests"] == 5
+    assert inventory["counts"]["observed_teams_admin_rest_endpoints"] == 5
+    assert inventory["counts"]["observed_graph_requests"] == 0
+    assert inventory["observed_ledger"]["outside_declared"]["count"] == 0
+    assert inventory["safety"]["read_only"] is True
+    assert inventory["safety"]["no_content_reads"] is True
+    assert inventory["safety"]["write_actions"] is False
+    assert {row["path"] for row in ledger["endpoints"]} == set(TEAMS_READ_PATHS.values())
+    for row in ledger["endpoints"]:
+        assert row["method"] == "GET" and row["count"] == 1
+        assert row["host"] == "api.interfaces.records.teams.microsoft.com"
+        assert row["endpoint"] == f"https://{row['host']}{row['path']}"
+        assert row["statuses"] == {str(expected[row["endpoint"]]): 1}
+    rest_calls = [call for call in inventory["observed_calls"] if call["name"] in TEAMS_READ_PATHS]
+    assert len(rest_calls) == 5
+    for call in rest_calls:
+        assert call["method"] == "GET" and "command" not in call
+        assert call["endpoint"] in expected
+        assert call["status"] == ("ok" if expected[call["endpoint"]] == 200 else "failed")
+    command_calls = [call for call in inventory["observed_calls"] if call["name"] not in TEAMS_READ_PATHS]
+    assert len(command_calls) == 2
+    assert all(call["method"] == "COMMAND" and call["command"].startswith("Get-") for call in command_calls)
+    markdown = render_api_call_inventory_markdown(inventory)
+    assert "Observed Teams REST requests: 5" in markdown
+    for row in ledger["endpoints"]:
+        assert f"| GET | {row['host']} | {row['path']} | 1 | {expected[row['endpoint']]}: 1 |" in markdown
+    handoff = enterprise_handoff(writer.run_dir)
+    assert handoff["counts"]["observed_teams_admin_rest_requests"] == 5
+    assert handoff["selected_collectors"] == ["teams_policy"]
+    handoff_path = writer.write_json_artifact("handoff.json", handoff)
+    assert json.loads(handoff_path.read_text())["counts"]["observed_teams_admin_rest_requests"] == 5
+    for text in (render_enterprise_handoff_markdown(handoff), _render_pack_readme({"source": handoff})):
+        assert "- Observed Teams REST requests: 5" in text
+        assert TOKEN not in text
+    assert TOKEN not in markdown
+    assert TOKEN not in json.dumps([result.payload, result.coverage])
+    for path in writer.run_dir.rglob("*"):
+        if path.is_file():
+            assert TOKEN.encode() not in path.read_bytes(), path.name
+
+
+def test_teams_ledger_counts_retries_and_transport_failures() -> None:
+    path = "/Skype.Policy/configurations/TeamsMeetingPolicy"
+    events = [
+        _event("teams_admin_rest.request", method="GET", host="api.interfaces.records.teams.microsoft.com", path=path, status_code=status)
+        for status in (429, 200, None)
+    ]
+    inventory = with_observed_ledger(_inventory(calls=[]), events)
+    teams = inventory["observed_ledger"]["teams_admin_rest"]
+    assert teams["request_attempts"] == 3
+    assert teams["endpoints"][0]["count"] == 3
+    assert teams["endpoints"][0]["statuses"] == {"200": 1, "429": 1, "transport_error": 1}
+
+
+def test_teams_outside_declared_compares_the_real_host_and_path() -> None:
+    path = "/Skype.Policy/configurations/TeamsMeetingPolicy"
+    host = "api.interfaces.records.teams.microsoft.com"
+    declared = _inventory(calls=[{
+        "collector": "teams_policy", "name": "meetingPolicies", "type": "teams_admin_rest",
+        "method": "GET", "endpoint": f"https://{host}{path}",
+    }])
+    events = [
+        _event("teams_admin_rest.request", method="GET", host=host, path=path, status_code=200),
+        _event("teams_admin_rest.request", method="GET", host="other.invalid", path=path, status_code=403),
+        _event("teams_admin_rest.request", method="GET", host=host, path="/unlisted", status_code=404),
+    ]
+    outside = with_observed_ledger(declared, events)["observed_ledger"]["outside_declared"]
+    assert outside["count"] == 2
+    assert outside["teams_admin_rest"] == [
+        {"method": "GET", "endpoint": f"https://{host}/unlisted"},
+        {"method": "GET", "endpoint": f"https://other.invalid{path}"},
+    ]
+
+
+@pytest.mark.parametrize("method", ["POST", "patch", None])
+def test_teams_non_get_or_missing_method_cannot_claim_a_read(method) -> None:
+    host, path = "api.interfaces.records.teams.microsoft.com", "/Skype.Policy/configurations/TeamsMeetingPolicy"
+    inventory = with_observed_ledger(_inventory(calls=[]), [
+        _event("teams_admin_rest.request", method="GET", host=host, path=path, status_code=200),
+        _event("teams_admin_rest.request", host=host, path=path, status_code=200,
+               **({"method": method} if method else {})),
+    ])
+    observed_method = method.upper() if method else "UNVERIFIED"
+    teams = inventory["observed_ledger"]["teams_admin_rest"]
+    assert teams["methods_seen"] == sorted(["GET", observed_method])
+    assert {row["method"] for row in teams["endpoints"]} == {"GET", observed_method}
+    assert len(teams["endpoints"]) == teams["request_attempts"] == 2
+    assert teams["write_calls"] == [{"method": observed_method, "endpoint": f"https://{host}{path}"}]
+    assert inventory["safety"]["observed_write_calls"] == teams["write_calls"]
+    assert inventory["safety"]["observed_methods"] == teams["methods_seen"]
+    assert inventory["safety"]["read_only"] is False
+    assert inventory["safety"]["write_actions"] is True
+
+
+@pytest.mark.parametrize("selected,count,shown", [(False, 0, False), (True, 0, True), (False, 1, True)])
+def test_teams_summary_line_is_conditional_across_markdown_surfaces(tmp_path: Path, selected, count, shown) -> None:
+    from auditex.reporting import (
+        _render_pack_readme,
+        enterprise_handoff,
+        render_api_call_inventory_markdown,
+        render_enterprise_handoff_markdown,
+        preview_report,
+        write_enterprise_handoff_pack,
+    )
+
+    writer, finalize_kwargs = _prepare_bundle_for_finalize(tmp_path)
+    # Constructed transport events need a transport run's manifest, rather than
+    # the helper's offline-replay label. No real client or tenant is contacted.
+    for metadata in (finalize_kwargs["bundle_metadata"], finalize_kwargs["run_metadata"]):
+        metadata["mode"] = "live"
+    writer.log_event("run.started", "Constructed run", {"mode": "live"})
+    for _ in range(count):
+        writer.log_event("teams_admin_rest.request", "Constructed GET", {
+            "method": "GET", "host": "teams.invalid", "path": "/constructed", "status_code": 200,
+        })
+    inventory = build_api_call_inventory(
+        platform="m365", selected_collectors=["teams_policy"] if selected else ["identity"],
+        capability_rows=[], coverage_rows=[], data_handling={"read_only": True},
+    )
+    path = writer.write_json_artifact("api-inventory.json", inventory)
+    inventory = json.loads(path.read_text())
+    finalize_kwargs["bundle_metadata"]["api_inventory_path"] = "api-inventory.json"
+    finalize_bundle_contract(**finalize_kwargs)
+    handoff = enterprise_handoff(writer.run_dir)
+    assert handoff["counts"]["observed_teams_admin_rest_requests"] == count
+    pack = tmp_path / "pack"
+    write_enterprise_handoff_pack(writer.run_dir, pack)
+    assert json.loads((pack / "handoff.json").read_text())["counts"]["observed_teams_admin_rest_requests"] == count
+    for text in (
+        render_api_call_inventory_markdown(inventory),
+        render_enterprise_handoff_markdown(handoff),
+        _render_pack_readme({"source": handoff}),
+        preview_report(run_dir=str(writer.run_dir), format_name="md")["content"],
+        (pack / "README.md").read_text(),
+        (pack / "handoff.md").read_text(),
+    ):
+        assert ("Observed Teams REST requests:" in text) is shown
+        if shown:
+            assert f"Observed Teams REST requests: {count}" in text
 
 
 def test_writer_marks_a_run_whose_log_shows_a_write_as_not_read_only(tmp_path: Path) -> None:

@@ -474,6 +474,8 @@ def _outside_declared_warning(bundle: RunBundle, label: str) -> str | None:
         return None
     named = [
         *(f"{row.get('method')} {row.get('endpoint')}" for row in outside.get("graph") or [] if isinstance(row, Mapping)),
+        *(f"teams_admin_rest: {row.get('method')} {row.get('endpoint')}"
+          for row in outside.get("teams_admin_rest") or [] if isinstance(row, Mapping)),
         *(f"{row.get('adapter')}: {row.get('command')}" for row in outside.get("commands") or [] if isinstance(row, Mapping)),
     ]
     shown = ", ".join(named[:3])

@@ -64,6 +64,13 @@ def test_command_list_matches_config() -> None:
     assert definition.query_plan == list(TEAMS_OPERATIONS)
 
 
+def test_required_permissions_match_config_and_app_recommendation() -> None:
+    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
+    assert TeamsPolicyCollector.required_permissions == config.collectors["teams_policy"].required_permissions == []
+    permissions = json.loads(Path("configs/collector-permissions.json").read_text(encoding="utf-8"))
+    assert "TeamSettings.Read.All" not in permissions["global_app_recommendation"]
+
+
 def test_rule_fields_are_selected() -> None:
     commands = dict(TeamsPolicyCollector.command_collectors)
     for name, required in REQUIRED.items():

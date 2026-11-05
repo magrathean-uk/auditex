@@ -9,28 +9,32 @@ Auditex writes `api-inventory.json` into every finalized bundle. This artifact i
 - `declared_collectors`: planned collector coverage, status, required permissions, observed permissions, and missing permissions.
 - `observed_calls`: the declared call rows: endpoint-level calls the collectors recorded in their coverage rows (and, for command rows, the command text). This is the expected set, not proof of what was sent.
 - `observed_ledger`: what was sent, read back from the run's own `audit-log.jsonl` (see below).
-- `counts`: declared collector count, declared call count, mutating call count, content-read call count, beta call count (`beta_calls`), and from the observed ledger `observed_graph_requests`, `observed_graph_endpoints`, `observed_commands`, `refused_calls` and `observed_outside_declared`.
+- `counts`: declared collector count, declared call count, mutating call count, content-read call count, beta call count (`beta_calls`), and from the observed ledger `observed_graph_requests`, `observed_graph_endpoints`, `observed_teams_admin_rest_requests`, `observed_teams_admin_rest_endpoints`, `observed_commands`, `refused_calls` and `observed_outside_declared`.
 - `safety`: read-only status, no-content-read status, write-capable scopes, any mutating/content-read exceptions, and from the observed ledger `observation_basis`, `observed_methods`, `observed_write_calls`, `observed_content_read_calls`, `refused_calls` and `observed_outside_declared`.
 
 ## Observed ledger
 
-`AuditWriter` builds `observed_ledger` from the `graph.request.*`, `graph.token.*` and `command.*` events in `audit-log.jsonl` every time it writes `api-inventory.json`, so a caller cannot write the ledger from declarations alone. The declared rows above stay as the expected set the observed calls are compared with.
+`AuditWriter` builds `observed_ledger` from the `graph.request.*`, `graph.token.*`, `teams_admin_rest.request` and `command.*` events in `audit-log.jsonl` every time it writes `api-inventory.json`, so a caller cannot write the ledger from declarations alone. The declared rows above stay as the expected set the observed calls are compared with.
 
 ```
 observed_ledger
-  source, basis ("transport_audit_log" or "not_instrumented"), instrumentation
+  source, basis ("transport_audit_log" or "not_instrumented"), instrumentation (graph, teams_admin_rest, commands, google_api)
   graph
     request_attempts, methods_seen (HTTP methods on the wire, e.g. GET and POST),
     data_methods_seen (after unpacking $batch: GET only in a read-only run),
     batch_requests, batch_inner_requests, unverified_batch_requests,
     endpoints[]  method, endpoint (ids templated as {id}), api_version, count, statuses
     write_calls[], content_read_calls[], refused[], refused_count
+  teams_admin_rest
+    request_attempts, methods_seen
+    endpoints[]  method, host, path, endpoint, count, statuses
+    write_calls[]  method, endpoint (non-GET, or UNVERIFIED for a missing method)
   commands
     executed[]   adapter, command (the command words), family, read_only, count, statuses
     write_calls[], refused[], refused_count
   log            readable, malformed_lines
   auth           token_requests, token_succeeded, token_failed
-  outside_declared  graph[], commands[], count
+  outside_declared  graph[], teams_admin_rest[], commands[], count
 ```
 
 How `safety` is derived: `read_only` is false when any non-`GET` data call was observed, any executed command is not a read, any call was refused (`refused_calls`), or the log cannot be fully read: a `$batch` request whose inner calls, inner methods or call count were not all recorded (`unverified_batch_requests`), a malformed line (`malformed_log_lines`, counted and never silently skipped) or a log that could not be opened. `observed_log_complete` says whether everything in the log could be read and verified. `no_content_reads` is false when an observed endpoint reads content (messages, attachments, `/content`, `/$value`, calendar events, OneNote, `/search/query`) or a `$select` asks for `body`, `bodyPreview`, `uniqueBody` or `content`. Microsoft service-health posts (`/admin/serviceAnnouncement/messages`) are not user content. A refused call is counted in `refused_calls` and makes `read_only` false, because the run tried something that is not a read; it is not a write (`write_actions` stays as observed), because nothing reached the tenant. A call outside the declared set is listed in `outside_declared` for review and does not by itself change `read_only`.
@@ -191,15 +195,15 @@ not assessed, never as a pass.
 
 ## Teams Policy Reads
 
-These are read-only `Get-*` cmdlets; policy settings only, no messages, chats, channel posts or files.
+In app-only runs a certificate-authenticated Teams admin API token and Global Reader on the service principal enable the five GET paths below, in commercial and GCC only. No new Graph scope is required. The current CLI only acquires client-secret resource tokens, so without a certificate-capable client these reads stay on the existing command path with `teams_token_unavailable` on `session_not_connected` rows. GCC High and DoD are `unsupported_environment`. Messaging and app setup keep their command path; org-wide `tenant_app_settings` stay uncollected (TEAMS 5.1-5.3 not assessed). Client-secret acceptance and these REST reads are not verified live. Policy settings only, no messages, chats, channel posts or files.
 
 | Collector | Command | Fields read | Role |
 | --- | --- | --- | --- |
-| `teams_policy` | `Get-CsTenantFederationConfiguration` | `Identity`, `AllowFederatedUsers`, `AllowTeamsConsumer`, `AllowTeamsConsumerInbound`, `AllowPublicUsers`, `AllowedDomains`, `BlockedDomains` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
-| `teams_policy` | `Get-CsTeamsMeetingPolicy` | `Identity`, `AllowCloudRecording`, `AllowIPVideo`, `ScreenSharingMode`, `AllowExternalParticipantGiveRequestControl`, `AllowAnonymousUsersToStartMeeting`, `AutoAdmittedUsers`, `AllowPSTNUsersToBypassLobby` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
-| `teams_policy` | `Get-CsTeamsAppPermissionPolicy` | `Identity`, `DefaultCatalogAppsType`, `GlobalCatalogAppsType`, `PrivateCatalogAppsType` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
-| `teams_policy` | `Get-CsTeamsMeetingBroadcastPolicy` | `Identity`, `BroadcastRecordingMode` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
-| `teams_policy` | `Get-CsTeamsClientConfiguration` | `Identity`, `AllowEmailIntoChannel` | Global Reader or Teams Administrator (see configs/collector-permissions.json); the Teams read path itself is not yet documented here |
+| `teams_policy` | `Get-CsTenantFederationConfiguration` | `Identity`, `AllowFederatedUsers`, `AllowTeamsConsumer`, `AllowTeamsConsumerInbound`, `AllowPublicUsers`, `AllowedDomains`, `BlockedDomains` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TenantFederationSettings` |
+| `teams_policy` | `Get-CsTeamsMeetingPolicy` | `Identity`, `AllowCloudRecording`, `AllowIPVideo` (PowerShell path only), `ScreenSharingMode` (PowerShell path only), `AllowExternalParticipantGiveRequestControl`, `AllowAnonymousUsersToStartMeeting`, `AutoAdmittedUsers`, `AllowPSTNUsersToBypassLobby` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsMeetingPolicy` |
+| `teams_policy` | `Get-CsTeamsAppPermissionPolicy` | `Identity`, `DefaultCatalogAppsType`, `GlobalCatalogAppsType`, `PrivateCatalogAppsType` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsAppPermissionPolicy` |
+| `teams_policy` | `Get-CsTeamsMeetingBroadcastPolicy` | `Identity`, `BroadcastRecordingMode` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsMeetingBroadcastPolicy` |
+| `teams_policy` | `Get-CsTeamsClientConfiguration` | `Identity`, `AllowEmailIntoChannel` | Global Reader on the service principal; certificate auth; `GET /Skype.Policy/configurations/TeamsClientConfiguration` |
 
 ## Customer Use
 

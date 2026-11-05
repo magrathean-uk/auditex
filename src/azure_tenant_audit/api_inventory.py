@@ -223,7 +223,7 @@ def _collector_plan(
 # --------------------------------------------------------------------------------------------
 # Observed ledger: facts read back from the run's own audit log, not declarations.
 #
-# GraphClient._request and the command adapters write graph.request.* and command.* events for
+# GraphClient._request, Teams REST and command adapters write transport events for
 # every call they make (and for every call they refuse). The ledger below is built from those
 # events, so "read-only" and "no content read" are statements about what was sent, and the
 # declared ledger (the collectors' coverage rows) is only the expected set to compare against.
@@ -467,7 +467,7 @@ def observe_audit_events(
     platform: str = "m365",
     declared_calls: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Summarise graph.request.* and command.* audit events into the observed ledger.
+    """Summarise Graph, Teams REST and command audit events into the observed ledger.
 
     Only transport and command events are counted, so the result does not change when later
     events (completion, validation) are appended to the same log.
@@ -482,6 +482,8 @@ def observe_audit_events(
     graph_writes: list[dict[str, Any]] = []
     graph_content: dict[tuple[str, str], dict[str, Any]] = {}
     graph_refused: list[dict[str, Any]] = []
+    teams: dict[tuple[str, str, str], dict[str, Any]] = {}
+    teams_writes: list[dict[str, Any]] = []
     # Redirect hops the client followed (host and path only; the query of a download URL is a credential).
     graph_redirects: dict[tuple[str, str, str], dict[str, Any]] = {}
     redirects_refused = 0
@@ -578,6 +580,22 @@ def observe_audit_events(
             hop["count"] += 1
         elif name == "graph.request.redirect_refused":
             redirects_refused += 1
+        elif name == "teams_admin_rest.request":
+            # This event is emitted once per attempted request, including retries and
+            # transport failures. It deliberately carries no headers or token.
+            method = _text(details.get("method")).upper() or "UNVERIFIED"
+            host = _text(details.get("host"))
+            path = _text(details.get("path"))
+            entry = teams.setdefault(
+                (method, host, path),
+                {"method": method, "host": host, "path": path, "endpoint": f"https://{host}{path}",
+                 "count": 0, "statuses": Counter()},
+            )
+            entry["count"] += 1
+            status = details.get("status_code")
+            entry["statuses"][str(status) if status is not None else "transport_error"] += 1
+            if method != "GET":
+                teams_writes.append({"method": method, "endpoint": entry["endpoint"]})
         elif name in {"graph.token.requested", "graph.token.interactive"}:
             auth["token_requests"] += 1
         elif name == "graph.token.succeeded":
@@ -639,6 +657,15 @@ def observe_audit_events(
             for row in _sorted_entries(graph)
             if row["endpoint"] not in declared_templates
         ]
+    declared_teams = {
+        (_text(call.get("method")).upper(), _text(call.get("endpoint")))
+        for call in declared if call.get("collector") == "teams_policy" and call.get("method") != "COMMAND"
+    }
+    outside_teams = [
+        {"method": row["method"], "endpoint": row["endpoint"]}
+        for row in _sorted_entries(teams)
+        if (row["method"], row["endpoint"]) not in declared_teams
+    ]
     declared_families = _declared_command_families(declared)
     if declared_families:
         outside_commands = [
@@ -655,7 +682,7 @@ def observe_audit_events(
         "source": LEDGER_SOURCE,
         "basis": basis,
         **({"replay": {"source_file": replayed_from, "tenant_contact": False}} if replayed else {}),
-        "instrumentation": {"graph": instrumented, "commands": instrumented, "google_api": False},
+        "instrumentation": {"graph": instrumented, "teams_admin_rest": instrumented, "commands": instrumented, "google_api": False},
         "log": {"readable": log_readable, "malformed_lines": malformed_lines, **({"empty": True} if silent_log else {})},
         "graph": {
             "request_attempts": attempts,
@@ -672,6 +699,12 @@ def observe_audit_events(
             "redirects": [graph_redirects[key] for key in sorted(graph_redirects)][:_MAX_LISTED],
             "redirects_refused": redirects_refused,
         },
+        "teams_admin_rest": {
+            "request_attempts": sum(row["count"] for row in teams.values()),
+            "methods_seen": sorted({row["method"] for row in teams.values()}),
+            "endpoints": _sorted_entries(teams),
+            "write_calls": teams_writes,
+        },
         "commands": {
             "executed": _sorted_entries(commands),
             "write_calls": [command_writes[key] for key in sorted(command_writes)],
@@ -681,8 +714,9 @@ def observe_audit_events(
         "auth": {key: auth[key] for key in sorted(auth)},
         "outside_declared": {
             "graph": outside_graph[:_MAX_LISTED],
+            "teams_admin_rest": outside_teams[:_MAX_LISTED],
             "commands": outside_commands[:_MAX_LISTED],
-            "count": len(outside_graph) + len(outside_commands),
+            "count": len(outside_graph) + len(outside_teams) + len(outside_commands),
         },
     }
 
@@ -690,8 +724,9 @@ def observe_audit_events(
 def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str, Any]:
     """Fold the observed ledger into an inventory's safety flags and counts; the flags can only get stricter."""
     graph = ledger["graph"]
+    teams = ledger["teams_admin_rest"]
     commands = ledger["commands"]
-    write_calls = [*graph["write_calls"], *commands["write_calls"]]
+    write_calls = [*graph["write_calls"], *teams["write_calls"], *commands["write_calls"]]
     content_calls = list(graph["content_read_calls"])
     safety = dict(inventory.get("safety") or {})
     counts = dict(inventory.get("counts") or {})
@@ -701,7 +736,7 @@ def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str
     replay = ledger.get("replay")
     if isinstance(replay, Mapping):
         safety["replay_source"] = replay.get("source_file")
-    safety["observed_methods"] = list(graph["data_methods_seen"])
+    safety["observed_methods"] = sorted(set(graph["data_methods_seen"]) | set(teams["methods_seen"]))
     safety["observed_write_calls"] = write_calls
     safety["observed_content_read_calls"] = content_calls
     safety["refused_calls"] = int(graph["refused_count"]) + int(commands["refused_count"])
@@ -725,6 +760,8 @@ def _apply_ledger(inventory: dict[str, Any], ledger: dict[str, Any]) -> dict[str
     safety["content_reads"] = bool(safety.get("content_reads")) or bool(content_calls)
     counts["observed_graph_requests"] = graph["request_attempts"]
     counts["observed_graph_endpoints"] = len(graph["endpoints"])
+    counts["observed_teams_admin_rest_requests"] = teams["request_attempts"]
+    counts["observed_teams_admin_rest_endpoints"] = len(teams["endpoints"])
     counts["observed_commands"] = sum(int(row["count"]) for row in commands["executed"])
     counts["refused_calls"] = safety["refused_calls"]
     counts["observed_outside_declared"] = safety["observed_outside_declared"]

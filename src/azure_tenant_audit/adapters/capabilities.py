@@ -3,6 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 ADAPTER_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
+    "teams_admin_rest": {
+        "supported_auth_modes": ["app"],
+        "required_tools": [],
+        "supported_profiles": ["app-readonly-full", "auto"],
+        "supported_actions": ["teams_policy"],
+        "write_risk": "get_only_allowlist",
+        "expected_commands": ["GET /Skype.Policy/configurations/*"],
+    },
     "m365_cli": {
         "supported_auth_modes": ["delegated", "saved_context"],
         "required_tools": ["m365"],

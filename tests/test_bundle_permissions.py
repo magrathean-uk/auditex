@@ -126,6 +126,6 @@ def test_google_offline_bundle_is_private_and_marked_not_instrumented(tmp_path: 
     assert inventory["safety"]["observation_basis"] == "offline_replay"
     assert inventory["safety"]["replay_source"] == "google_workspace_sample.json"
     assert inventory["observed_ledger"]["basis"] == "offline_replay"
-    assert inventory["observed_ledger"]["instrumentation"] == {"graph": False, "commands": False, "google_api": False}
+    assert inventory["observed_ledger"]["instrumentation"] == {"graph": False, "teams_admin_rest": False, "commands": False, "google_api": False}
     validation = json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))
     assert validation["valid"] is True, validation["issues"]

@@ -747,7 +747,9 @@ def _validate_api_inventory(run_dir: Path, manifest: Mapping[str, Any], issues: 
             _issue(
                 "observed_call_outside_declared",
                 path=str(relative),
-                details={"count": outside_count, "graph": (outside.get("graph") or [])[:5], "commands": (outside.get("commands") or [])[:5]},
+                details={"count": outside_count, "graph": (outside.get("graph") or [])[:5],
+                         "commands": (outside.get("commands") or [])[:5],
+                         "teams_admin_rest": (outside.get("teams_admin_rest") or [])[:5]},
                 severity="warning",
             )
         )

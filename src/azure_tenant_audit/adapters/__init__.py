@@ -4,12 +4,14 @@ from .base import Adapter
 from .m365_cli import M365CLIAdapter
 from .m365dsc import M365DSCAdapter
 from .powershell_graph import PowerShellGraphAdapter
+from .teams_admin_rest import TeamsAdminRestAdapter
 from .capabilities import capability_for_adapter
 
 ADAPTERS: dict[str, Adapter] = {
     "m365_cli": M365CLIAdapter(),
     "m365dsc": M365DSCAdapter(),
     "powershell_graph": PowerShellGraphAdapter(),
+    "teams_admin_rest": TeamsAdminRestAdapter(),
 }
 
 

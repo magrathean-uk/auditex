@@ -310,9 +310,7 @@
     "teams_policy": {
       "enabled": true,
       "description": "Teams federation, messaging, meeting, and app policy posture",
-      "required_permissions": [
-        "TeamSettings.Read.All"
-      ],
+      "required_permissions": [],
       "query_plan": [
         "tenantFederationConfiguration",
         "messagingPolicies",

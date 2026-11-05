@@ -20,9 +20,7 @@ TEAMS_OPERATIONS: tuple[str, ...] = (
 class TeamsPolicyCollector(Collector):
     name = "teams_policy"
     description = "Teams federation, messaging, meeting, and app policy posture."
-    required_permissions = [
-        "TeamSettings.Read.All",
-    ]
+    required_permissions = []
     command_collectors = [
         (
             "tenantFederationConfiguration",
@@ -55,14 +53,52 @@ class TeamsPolicyCollector(Collector):
     ]
 
     def run(self, context: dict[str, Any]) -> CollectorResult:
+        from urllib.parse import urlsplit
+
+        from ..adapters.teams_admin_rest import (
+            TEAMS_ADMIN_BASE, TEAMS_ADMIN_SCOPE, TEAMS_READ_PATHS, certificate_token,
+        )
+        from ..graph import GRAPH_ROOT, GraphClient
+
         log_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = context.get("audit_logger")
         adapter = get_adapter("powershell_graph")
+        client = context.get("client")
+        manifest = context.get("manifest") or {}
+        environment = context.get("environment") or context.get("m365_environment") or manifest.get("environment")
+        endpoint = (context.get("graph_endpoint") or manifest.get("graph_endpoint")
+                    or getattr(client, "graph_endpoint", None)
+                    or (GRAPH_ROOT if isinstance(client, GraphClient) else ""))
+        if not environment and endpoint:
+            parsed_endpoint = urlsplit(endpoint)
+            environment = ("commercial" if parsed_endpoint.scheme == "https"
+                           and parsed_endpoint.netloc == "graph.microsoft.com" else "unknown")
+        if not environment and hasattr(client, "app_token_for"):
+            environment = "unknown"
+        auth = getattr(client, "auth", None)
+        token = None
+        # The current GraphClient only mints secret-auth tokens. Do not try that
+        # unapproved credential path; a certificate-capable client can supply one.
+        if not getattr(auth, "client_secret", None) and getattr(auth, "auth_mode", "app") == "app":
+            if environment in TEAMS_ADMIN_BASE and hasattr(client, "app_token_for"):
+                try:
+                    token = client.app_token_for(TEAMS_ADMIN_SCOPE)
+                except Exception:  # Token errors may contain credentials; keep diagnostics out of the bundle.
+                    token = None
+        if not certificate_token(token):
+            token = None
+        rest = get_adapter("teams_admin_rest") if token else None
         payload: dict[str, Any] = {}
         coverage: list[dict[str, Any]] = []
         total = 0
 
         for name, command in self.command_collectors:
-            response = adapter.run(command, log_event=log_event, session={"kind": "microsoft_teams"})
+            rest_read = name in TEAMS_READ_PATHS and bool(token)
+            if name in TEAMS_READ_PATHS and environment and environment not in TEAMS_ADMIN_BASE:
+                response = {"error": "unsupported_environment", "error_class": "unsupported_environment"}
+            elif name in TEAMS_READ_PATHS and token:
+                response = rest.get(name, token, environment, log_event=log_event)
+            else:
+                response = adapter.run(command, log_event=log_event, session={"kind": "microsoft_teams"})
             response.setdefault("command", command)
             payload[name] = response
             values = response.get("value")
@@ -71,9 +107,12 @@ class TeamsPolicyCollector(Collector):
             coverage.append(
                 {
                     "collector": self.name,
-                    "type": "command",
+                    **({
+                        "type": "teams_admin_rest",
+                        "method": "GET",
+                        "endpoint": TEAMS_ADMIN_BASE[environment] + TEAMS_READ_PATHS[name],
+                    } if rest_read else {"type": "command", "command": command}),
                     "name": name,
-                    "command": command,
                     "status": "failed" if response.get("error") else "ok",
                     "item_count": item_count,
                     "duration_ms": response.get("duration_ms", 0.0),
@@ -81,6 +120,8 @@ class TeamsPolicyCollector(Collector):
                     "error": response.get("error"),
                 }
             )
+            if not token and response.get("error_class") == "session_not_connected":
+                coverage[-1]["reason"] = "teams_token_unavailable"
 
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(

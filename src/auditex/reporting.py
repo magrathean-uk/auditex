@@ -1131,6 +1131,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
     return {
         "run_dir": str(run_path),
         "handoff_status": status,
+        "selected_collectors": [row.get("collector") for row in _dict_rows(api.get("declared_collectors"))],
         "status_reasons": status_reasons,
         "citations": citations,
         "citation_summary": build_citation_summary(citations),
@@ -1179,6 +1180,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
             "api_calls": int(_mapping(api.get("counts")).get("observed_calls") or len(_dict_rows(api.get("observed_calls")))),
             "declared_calls": int(_mapping(api.get("counts")).get("observed_calls") or len(_dict_rows(api.get("observed_calls")))),
             "observed_graph_requests": _mapping(api.get("counts")).get("observed_graph_requests"),
+            "observed_teams_admin_rest_requests": _mapping(api.get("counts")).get("observed_teams_admin_rest_requests"),
             "observed_commands": _mapping(api.get("counts")).get("observed_commands"),
             "observed_outside_declared": _mapping(api.get("counts")).get("observed_outside_declared"),
         },
@@ -1203,6 +1205,13 @@ def _status_counts_text(statuses: Any) -> str:
     return ", ".join(f"{key}: {statuses[key]}" for key in sorted(statuses, key=str))
 
 
+def _teams_rest_summary_lines(counts: Mapping[str, Any], selected_collectors: Iterable[str]) -> list[str]:
+    count = counts.get("observed_teams_admin_rest_requests") or 0
+    if count or "teams_policy" in selected_collectors:
+        return [f"- Observed Teams REST requests: {_markdown_cell(count)}"]
+    return []
+
+
 def _ledger_summary_lines(inventory: Mapping[str, Any]) -> list[str]:
     """The headline figures of the transport-observed ledger, or a plain statement that there is none."""
     ledger = _mapping(inventory.get("observed_ledger"))
@@ -1216,6 +1225,7 @@ def _ledger_summary_lines(inventory: Mapping[str, Any]) -> list[str]:
         return ["- Observed calls: none (this provider's calls are not instrumented; the call list is declared, not observed)"]
     return [
         f"- Observed Graph requests: {_markdown_cell(counts.get('observed_graph_requests'))}",
+        *_teams_rest_summary_lines(counts, (row.get("collector") for row in _dict_rows(inventory.get("declared_collectors")))),
         f"- Observed commands: {_markdown_cell(counts.get('observed_commands'))}",
         f"- Observed calls outside the declared set: {_markdown_cell(counts.get('observed_outside_declared'))}",
         f"- Refused calls: {_markdown_cell(counts.get('refused_calls'))}",
@@ -1241,6 +1251,7 @@ def _observed_ledger_markdown(inventory: Mapping[str, Any], *, level: str = "##"
         return lines
     log = _mapping(ledger.get("log"))
     graph = _mapping(ledger.get("graph"))
+    teams = _mapping(ledger.get("teams_admin_rest"))
     commands = _mapping(ledger.get("commands"))
     outside = _mapping(ledger.get("outside_declared"))
     basis = str(ledger.get("basis") or "")
@@ -1284,6 +1295,19 @@ def _observed_ledger_markdown(inventory: Mapping[str, Any], *, level: str = "##"
             )
     else:
         lines.append("|  |  |  | No Graph requests in the audit log. |  |")
+    teams_rows = _dict_rows(teams.get("endpoints"))
+    if teams_rows:
+        lines.extend(["", f"{level}# Teams REST requests", "", "| Method | Host | Path | Count | Statuses |", "| --- | --- | --- | --- | --- |"])
+        for row in teams_rows:
+            lines.append(
+                "| " + " | ".join([
+                    _markdown_cell(row.get("method")),
+                    _markdown_cell(row.get("host")),
+                    _markdown_cell(row.get("path")),
+                    _markdown_cell(row.get("count")),
+                    _markdown_cell(_status_counts_text(row.get("statuses"))),
+                ]) + " |"
+            )
     lines.extend(["", f"{level}# Commands", "", "| Adapter | Command | Count | Statuses | Read-only |", "| --- | --- | --- | --- | --- |"])
     command_rows = _dict_rows(commands.get("executed"))
     if command_rows:
@@ -1309,6 +1333,7 @@ def _observed_ledger_markdown(inventory: Mapping[str, Any], *, level: str = "##"
     ]
     outside_rows = [
         *({"kind": "graph", "call": f"{row.get('method')} {row.get('endpoint')}"} for row in _dict_rows(outside.get("graph"))),
+        *({"kind": "teams_admin_rest", "call": f"{row.get('method')} {row.get('endpoint')}"} for row in _dict_rows(outside.get("teams_admin_rest"))),
         *({"kind": "command", "call": f"{row.get('adapter')} {row.get('command')}"} for row in _dict_rows(outside.get("commands"))),
     ]
     if refused:
@@ -1400,7 +1425,9 @@ def render_permissions_ledger_markdown(payload: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _handoff_call_lines(counts: Mapping[str, Any], safety: Mapping[str, Any]) -> list[str]:
+def _handoff_call_lines(
+    counts: Mapping[str, Any], safety: Mapping[str, Any], selected_collectors: Iterable[str] = (),
+) -> list[str]:
     declared = counts.get("declared_calls", counts.get("api_calls"))
     lines = [f"- Declared calls: {_markdown_cell(declared)} (collector coverage rows, not a record of what was sent)"]
     if _observation_basis(safety) == _REPLAY_BASIS:
@@ -1409,6 +1436,7 @@ def _handoff_call_lines(counts: Mapping[str, Any], safety: Mapping[str, Any]) ->
         lines.extend(
             [
                 f"- Observed Graph requests: {_markdown_cell(counts.get('observed_graph_requests'))}",
+                *_teams_rest_summary_lines(counts, selected_collectors),
                 f"- Observed commands: {_markdown_cell(counts.get('observed_commands'))}",
                 f"- Observed calls outside the declared set: {_markdown_cell(counts.get('observed_outside_declared'))}",
             ]
@@ -1446,7 +1474,7 @@ def render_enterprise_handoff_markdown(payload: Mapping[str, Any]) -> str:
         f"- Live readiness: {_markdown_cell(quality.get('live_readiness')) or 'not recorded'}",
         f"- Findings: {_markdown_cell(counts.get('findings'))}",
         f"- Proof rows: {_markdown_cell(counts.get('proof_rows'))}",
-        *_handoff_call_lines(counts, safety),
+        *_handoff_call_lines(counts, safety, payload.get("selected_collectors") or []),
         f"- Accepted risks: {_markdown_cell(accepted_risks.get('count'))}",
         f"- Stale accepted risks: {_markdown_cell(accepted_risks.get('stale_count'))}",
         "",
@@ -1733,7 +1761,7 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         *_safety_lines(safety),
         f"- Audit quality: {_markdown_cell(quality.get('audit_plan_status'))}",
         f"- Findings: {_markdown_cell(counts.get('findings'))}",
-        *_handoff_call_lines(counts, safety),
+        *_handoff_call_lines(counts, safety, source.get("selected_collectors") or []),
         f"- Reviewer prove-this rows: {_markdown_cell(_mapping(reviewer_summary.get('counts')).get('prove_this'))}",
         "",
         "## Start Here",
@@ -1933,6 +1961,7 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
             "safety": handoff_payload.get("safety"),
             "quality": handoff_payload.get("quality"),
             "counts": handoff_payload.get("counts"),
+            "selected_collectors": handoff_payload.get("selected_collectors"),
             "reviewer_summary": handoff_payload.get("reviewer_summary"),
             "accepted_risks": handoff_payload.get("accepted_risks"),
             "permissions": {

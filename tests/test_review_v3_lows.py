@@ -409,3 +409,29 @@ def test_a_call_outside_the_declared_set_is_a_gate_and_a_validation_warning(tmp_
     issue = next(item for item in report["issues"] if item["code"] == "observed_call_outside_declared")
     assert issue["severity"] == "warning" and issue["details"]["count"] == 2
     assert report["valid"] is True
+
+
+@pytest.mark.parametrize("count", [1, 7])
+def test_teams_only_outside_declaration_names_gate_and_contract_details(tmp_path: Path, count: int) -> None:
+    run_dir = offline_run(tmp_path)
+    inventory_path = run_dir / "api-inventory.json"
+    inventory = read_json(inventory_path)
+    rows = [{"method": "GET", "endpoint":
+             f"https://api.interfaces.records.teams.microsoft.com/Skype.Policy/configurations/Undeclared{index}"}
+            for index in range(count)]
+    inventory["observed_ledger"]["outside_declared"] = {
+        "graph": [], "commands": [], "teams_admin_rest": rows, "count": count,
+    }
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+    rehash(run_dir)
+    result = gate_findings(run_dir=str(run_dir), fail_on="critical")
+    assert result["status"] == "pass"
+    warning = next(item for item in result["warnings"] if "outside the declared set" in item)
+    assert f"{count} call(s)" in warning
+    assert "teams_admin_rest: GET https://api.interfaces.records.teams.microsoft.com/Skype.Policy/configurations/Undeclared0" in warning
+    if count > 3:
+        assert "and 4 more" in warning and "Undeclared3" not in warning
+    report = build_validation_report(run_dir=run_dir, read_only=True)
+    issue = next(item for item in report["issues"] if item["code"] == "observed_call_outside_declared")
+    assert issue["severity"] == "warning" and report["valid"] is True
+    assert issue["details"]["teams_admin_rest"] == rows[:5]
