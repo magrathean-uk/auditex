@@ -16,6 +16,7 @@ from azure_tenant_audit.normalize import build_normalized_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {
+    "acceptedDomains": "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain",
     "transportRules": "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject",
     "remoteDomains": "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",
     "organizationAuditConfig": "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled",
@@ -83,6 +84,26 @@ def test_all_commands_pass_read_guard():
         words = check_command("powershell_graph", command)
         assert words[0].startswith("Get-")
         assert all(word.startswith("Get-") or word in {"Select-Object", "Where-Object", "Measure-Object"} for word in words)
+
+
+def test_accepted_domain_flag_survives_collection_without_changing_projection(monkeypatch, tmp_path):
+    adapter = FakeAdapter()
+    command = COMMANDS['acceptedDomains']
+    selected = command.split(' | Select-Object ')[1].split(',')
+    constructed_row = {'Name': 'Mail', 'DomainName': 'mail.example.invalid',
+                       'DomainType': 'Authoritative', 'Default': True, 'IsCoexistenceDomain': False}
+    adapter.responses[command] = {'value': [{key: constructed_row[key] for key in selected}]}
+    monkeypatch.setattr('azure_tenant_audit.collectors.exchange_policy.get_adapter', lambda _name: adapter)
+    result = ExchangePolicyCollector().run({})
+    assert result.payload['acceptedDomains']['value'] == [constructed_row]
+    assert next(c for c in result.coverage if c['name'] == 'acceptedDomains')['status'] == 'ok'
+    manifest(tmp_path)
+    write(tmp_path, 'raw/exchange_policy.json', result.payload)
+    projection = project_run(tmp_path, redact=False)
+    expected = [{'Name': 'Mail', 'DomainName': 'mail.example.invalid'}]
+    assert projection['accepted_domains'] == projection.rule_sections['accepted_domains'] == expected
+    assert projection.report['sections']['accepted_domains']['ignored_fields'] == [
+        'Default', 'DomainType', 'IsCoexistenceDomain']
 
 
 def test_sharing_policy_payload_and_coverage(monkeypatch):

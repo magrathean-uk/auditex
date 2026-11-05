@@ -1,0 +1,22 @@
+{
+  "meta": "constructed rows only; held-out test and pilot rows excluded",
+  "source_kind": "constructed",
+  "vectors": [
+    {
+      "vector_id": "constructed.exchange-4.accepted-universe",
+      "graph_domains": [
+        {"id": "login.example.invalid", "isVerified": true, "supportedServices": ["Email"]},
+        {"id": "mail.example.invalid", "isVerified": true, "supportedServices": []},
+        {"id": "tenant.mail.onmicrosoft.com", "isVerified": true},
+        {"id": "pending.example.invalid", "isVerified": false}
+      ],
+      "accepted_domains": [
+        {"DomainName": " MAIL.EXAMPLE.INVALID ", "IsCoexistenceDomain": false},
+        {"DomainName": "mail.example.invalid", "IsCoexistenceDomain": false},
+        {"DomainName": "exchange-only.example.invalid", "IsCoexistenceDomain": false},
+        {"DomainName": "tenant.mail.onmicrosoft.com", "IsCoexistenceDomain": true},
+        {"DomainName": "coexist.example.invalid", "IsCoexistenceDomain": true}
+      ]
+    }
+  ]
+}

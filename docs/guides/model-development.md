@@ -162,8 +162,10 @@ reading policy's outcome). The cloud comes from the `dns_posture` OpenID discove
 Government licence SKUs, else it is taken as `commercial`.
 
 **DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** The opt-in `dns_posture` collector now saves
-`spf_records`, `dkim_records` and `dmarc_records` for verified domains with the Email service
-(a domain without `supportedServices` is kept), including resolver logs. Posture checks still cover
+`spf_records`, `dkim_records` and `dmarc_records` for tenant Exchange accepted domains
+(coexistence excluded) when complete same-run `acceptedDomains` evidence is available;
+otherwise it uses Graph-verified domains with the Email service (a missing or non-list
+`supportedServices` field is kept). Records include resolver logs. Posture checks still cover
 all verified domains. Failed or truncated reads withhold the dependent sections. The private rule
 view keeps resolver logs; the model view drops them before its shape and budget checks.
 `dns_posture` remains outside default collector sets; its public lookups and OpenID discovery

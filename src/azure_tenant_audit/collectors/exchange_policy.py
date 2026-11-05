@@ -9,7 +9,7 @@ Policy configuration commands use explicit ``Select-Object`` lists:
 * ``Get-SharingPolicy`` -> ``Name`` and ``Domains`` (partner domain names and sharing actions),
   without message content.
 * ``Get-RemoteDomain`` -> name, domain name, outbound trust, auto-reply and auto-forward settings.
-* ``Get-AcceptedDomain`` -> name, domain name, domain type and default-domain flag.
+* ``Get-AcceptedDomain`` -> name, domain name, domain type, default-domain flag and ``IsCoexistenceDomain``.
 * ``Get-InboundConnector`` and ``Get-OutboundConnector`` -> name, enabled state and connector type.
 
 Detection-coverage commands (all read-only ``Get-*`` cmdlets):
@@ -119,7 +119,7 @@ class ExchangePolicyCollector(Collector):
         ),
         ("inboundConnectors", "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType"),
         ("outboundConnectors", "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType"),
-        ("acceptedDomains", "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default"),
+        ("acceptedDomains", "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain"),
         (
             "remoteDomains",
             "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",

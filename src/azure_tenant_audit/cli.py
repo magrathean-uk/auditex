@@ -718,7 +718,7 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
             },
         )
 
-    for name in selected:
+    for name in run_core.collector_execution_order(selected):
         collector = REGISTRY.get(name)
         if collector is None:
             LOG.warning("Unknown collector requested: %s", name)
@@ -769,6 +769,11 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
                 collector_checkpoint_state=collector_checkpoint_state.get(name, {}),
                 operation_checkpoint_state=operation_checkpoint_state.get(name, {}),
                 hooks=writer_adapter.hooks(),
+                # Only completed evidence from this run (including a validated resume),
+                # never another tenant read or an arbitrary raw artefact from disk.
+                extra={
+                    "exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains"),
+                } if name == "dns_posture" else {},
             ),
             name=name,
         )

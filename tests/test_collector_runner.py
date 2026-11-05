@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from azure_tenant_audit.collector_runner import CollectorRunContext, CollectorRunHooks, CollectorRunner
 from azure_tenant_audit.collectors.base import CollectorResult
+from azure_tenant_audit.run import collector_execution_order
 
 
 class _FakeWriter:
@@ -170,3 +173,53 @@ def test_context_exposes_checkpoint_and_adapter_hooks_to_existing_collectors() -
         ("checkpoint", "purview", "auditLogJobs", "ok", 3, "done", {"command": "Get-Job"}),
         ("chunk", "identity", "users", 1, [{"id": "1"}], {"endpoint": "/users"}),
     ]
+
+
+@pytest.mark.parametrize('selected,expected', [
+    (['dns_posture', 'identity', 'exchange_policy', 'security'],
+     ['identity', 'exchange_policy', 'dns_posture', 'security']),
+    (['exchange_policy', 'identity', 'dns_posture'], ['exchange_policy', 'identity', 'dns_posture']),
+    (['dns_posture', 'identity'], ['dns_posture', 'identity']),
+    (['exchange_policy'], ['exchange_policy']),
+    ([], []),
+])
+def test_dns_execution_dependency_never_adds_collectors_or_mutates_selection(selected, expected):
+    original = list(selected)
+    assert collector_execution_order(selected) == expected
+    assert selected == original
+
+
+def test_selected_exchange_result_is_reused_by_dns_in_the_same_run():
+    from azure_tenant_audit.collectors.dns_posture import DnsPostureCollector
+
+    class Exchange:
+        name = 'exchange_policy'
+
+        def run(self, context):
+            # Another operation may fail while acceptedDomains remains usable.
+            return CollectorResult(name=self.name, status='partial', payload={
+                'acceptedDomains': {'value': [{'DomainName': 'accepted.invalid', 'IsCoexistenceDomain': False}]},
+                'transportConfig': {'error': 'constructed refusal'},
+            }, item_count=1)
+
+    class Graph:
+        def get_all(self, path, params):
+            assert path == '/domains'
+            return [{'id': 'graph-only.invalid', 'isVerified': True}]
+
+    class Resolver:
+        def query(self, name, record_type):
+            return []
+
+    collectors = {'exchange_policy': Exchange(), 'dns_posture': DnsPostureCollector()}
+    runner = CollectorRunner(_FakeWriter())
+    payloads = {}
+    for name in collector_execution_order(['dns_posture', 'exchange_policy']):
+        output = runner.run(collectors[name], CollectorRunContext(
+            client=Graph(), top=None, extra={
+                'exchange_accepted_domains': payloads.get('exchange_policy', {}).get('acceptedDomains'),
+                'dns_resolver': Resolver(), 'public_lookups': False,
+            }))
+        payloads[name] = output.result.payload
+    assert [r['domain'] for r in payloads['dns_posture']['spf_records']['value']] == ['accepted.invalid']
+    assert [r['domain'] for r in payloads['dns_posture']['domainPosture']['value']] == ['graph-only.invalid']

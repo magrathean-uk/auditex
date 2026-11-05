@@ -727,7 +727,7 @@
           "name": "acceptedDomains",
           "category": "policy",
           "commands": [
-            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default"
+            "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain"
           ]
         },
         {

@@ -178,10 +178,15 @@ read-only role and scopes granted to the auditor.
 ## External lookups
 
 Live Microsoft 365 runs with the `dns_posture` collector make unauthenticated,
-read-only requests about the audited tenant's own verified domains:
+read-only requests about the audited tenant's domains:
 
 - DNS-over-HTTPS queries (default resolver `cloudflare-dns.com`) for SPF,
-  DMARC, DKIM, MTA-STS, TLS-RPT, and BIMI records.
+  DMARC and DKIM TXT records cover the tenant's Exchange accepted domains,
+  excluding coexistence domains, when complete same-run `acceptedDomains`
+  evidence is available. Otherwise they cover Graph-verified domains with the
+  Email service (a missing or non-list `supportedServices` field is kept).
+  The separate posture checks, including MTA-STS, TLS-RPT and BIMI, cover
+  Graph-verified domains only.
 - An HTTPS GET of `https://mta-sts.<domain>/.well-known/mta-sts.txt`, only when
   the `_mta-sts` TXT record exists. Redirects are not followed.
 - An HTTPS GET of the public Entra OpenID discovery document,
@@ -191,9 +196,11 @@ read-only requests about the audited tenant's own verified domains:
 
 These requests reveal the audited domain names to the DNS resolver, the
 domain's web host, and Microsoft. No usernames, mailboxes, or accounts are
-probed, and no user enumeration endpoint is called. Unverified domains and
-domains outside the tenant are never looked up. Offline runs make no external
-lookups; embedded callers can pass `public_lookups: False` in the collector
+probed, and no user enumeration endpoint is called. The HTTPS reads (MTA-STS
+and OpenID discovery) stay limited to Graph-verified tenant domains. The TXT
+record universe can also include tenant Exchange accepted domains absent from
+that verified list. Offline runs make no external lookups; embedded callers
+can pass `public_lookups: False` in the collector
 context to skip the HTTPS reads.
 
 The opt-in `identity_protection` collector stores only aggregate risky-user

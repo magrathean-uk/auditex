@@ -691,7 +691,14 @@ def test_every_ediscovery_command_row_names_the_variants_it_may_run() -> None:
         assert rows[entry["name"]]["command"] in entry["commands"]
 
 
-def test_checkpoint_resume_rows_keep_their_command_variants() -> None:
+def test_checkpoint_resume_rows_keep_their_command_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Adapter:
+        def run(self, command: str, log_event: Any = None) -> dict[str, Any]:
+            return {"error": "constructed refusal", "error_class": "command_not_found", "command": command}
+
+    # Inventory commands are not checkpointed. Keep those fallback reads offline too.
+    monkeypatch.setattr("azure_tenant_audit.collectors.ediscovery.get_adapter", lambda _name: _Adapter())
+
     class _Client:
         def get_all(self, *_a: Any, **_k: Any) -> list[Any]:
             return []

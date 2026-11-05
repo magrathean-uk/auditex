@@ -391,7 +391,8 @@ def test_collector_raw_records_and_projection(tmp_path):
         row = next(c for c in result.coverage if c['name'] == operation)
         assert row == {'collector': 'dns_posture', 'type': 'dns', 'name': operation,
                        'endpoint': f'doh://records/{kind}', 'status': 'ok', 'item_count': 1,
-                       'duration_ms': row['duration_ms'], 'error_class': None, 'error': None}
+                       'duration_ms': row['duration_ms'], 'error_class': None, 'error': None,
+                       'domain_universe': 'graph_email_service'}
     counts = Counter(resolver.calls)
     assert counts[('example.invalid', 'TXT')] == 1
     assert counts[('_dmarc.example.invalid', 'TXT')] == 1
@@ -489,6 +490,94 @@ def test_collector_graph_failure():
         assert result.payload[operation] == {'value': [], 'status': 'failed',
                                             'error_class': 'insufficient_permissions', 'error': 'forbidden'}
         assert next(c for c in result.coverage if c['name'] == operation)['status'] == 'failed'
+
+
+def test_accepted_domains_define_records_but_not_verified_domain_posture():
+    fixture = json.loads((Path(__file__).parent / 'fixtures/collect-exchange/dns-accepted-domains.json').read_text())
+    assert fixture['source_kind'] == 'constructed'
+    vector = fixture['vectors'][0]
+    assert vector['vector_id'] == 'constructed.exchange-4.accepted-universe'
+    resolver = Resolver()
+    result = run(resolver, client=Graph(vector['graph_domains']),
+                 exchange_accepted_domains={'value': vector['accepted_domains']})
+    assert result.status == 'ok'
+    for operation in OPERATIONS:
+        assert [r['domain'] for r in result.payload[operation]['value']] == [
+            'MAIL.EXAMPLE.INVALID', 'exchange-only.example.invalid']
+        assert next(c for c in result.coverage if c['name'] == operation)['domain_universe'] == 'accepted_domains'
+    assert [r['domain'] for r in result.payload['domainPosture']['value']] == [
+        'login.example.invalid', 'mail.example.invalid', 'tenant.mail.onmicrosoft.com']
+    # Posture still queries the Graph-only domain, but the record-only selectors do not.
+    assert ('login.example.invalid', 'TXT') in resolver.calls
+    assert ('selector1-login-example-invalid._domainkey.login.example.invalid', 'TXT') not in resolver.calls
+    assert not any('coexist.example.invalid' in name for name, _ in resolver.calls)
+    assert Counter(resolver.calls)[('exchange-only.example.invalid', 'TXT')] == 1
+
+
+@pytest.mark.parametrize('envelope', [
+    None, {}, {'value': None}, {'value': 'not rows'},
+    {'value': [], 'error': 'refused'}, {'value': [], 'error_class': 'command_error'},
+    {'value': [], 'status': 'failed'}, {'value': [], 'status': 'partial'},
+    {'value': [], 'collection_truncated': True},
+    {'value': [{'DomainName': 'incomplete.invalid'}]},
+    {'value': [{'DomainName': 'incomplete.invalid', 'IsCoexistenceDomain': 'false'}]},
+    {'value': [{'DomainName': ' ', 'IsCoexistenceDomain': False}]},
+    {'value': [{'DomainName': 123, 'IsCoexistenceDomain': False}]},
+    {'value': [None]},
+    {'value': [{'DomainName': 'do-not-use.invalid', 'IsCoexistenceDomain': False}, None]},
+])
+def test_unusable_accepted_domains_preserve_graph_fallback_exactly(envelope):
+    entries = [
+        {'id': 'Email.invalid', 'isVerified': True, 'supportedServices': ['eMaIl']},
+        {'id': 'no-mail.invalid', 'isVerified': True, 'supportedServices': []},
+        {'id': 'missing.invalid', 'isVerified': True},
+        {'id': 'non-list.invalid', 'isVerified': True, 'supportedServices': None},
+        {'id': 'pending.invalid', 'isVerified': False, 'supportedServices': ['Email']},
+    ]
+    baseline = run(Resolver(), client=Graph(entries))
+    result = run(Resolver(), client=Graph(entries), exchange_accepted_domains=envelope)
+    assert result.payload == baseline.payload
+    for operation in OPERATIONS:
+        assert next(c for c in result.coverage if c['name'] == operation)['domain_universe'] == 'graph_email_service'
+
+
+@pytest.mark.parametrize('rows', [[], [{'DomainName': 'coexist.invalid', 'IsCoexistenceDomain': True}]])
+def test_complete_empty_accepted_universe_does_not_fall_back(rows):
+    result = run(Resolver(), exchange_accepted_domains={'value': rows, 'status': 'ok'})
+    for operation in OPERATIONS:
+        assert result.payload[operation] == {'status': 'ok', 'value': []}
+        assert next(c for c in result.coverage if c['name'] == operation)['domain_universe'] == 'accepted_domains'
+    assert len(result.payload['domainPosture']['value']) == 1
+
+
+def test_accepted_universe_preserves_graph_failure_safeguard():
+    result = run(Resolver(), client=Graph(GraphError('forbidden', status=403, request='/domains')),
+                 exchange_accepted_domains={'value': [{'DomainName': 'accepted.invalid', 'IsCoexistenceDomain': False}]})
+    assert result.status == 'partial'
+    for operation in OPERATIONS:
+        assert result.payload[operation]['status'] == 'failed'
+        assert result.payload[operation]['error_class'] == 'insufficient_permissions'
+        assert result.payload[operation]['value'] == []
+
+
+def test_accepted_universe_preserves_limit_and_failure_isolation(monkeypatch):
+    monkeypatch.setattr(collector, 'MAX_RECORD_DOMAINS', 2)
+    resolver = Resolver({'b.invalid': dns.DohError('failed')})
+    result = run(resolver, domains=(), exchange_accepted_domains={'value': [
+        {'DomainName': name, 'IsCoexistenceDomain': False} for name in ('a.invalid', 'b.invalid', 'c.invalid')
+    ]})
+    assert result.status == 'partial'
+    assert result.payload['spf_records']['status'] == 'failed'
+    assert [r['domain'] for r in result.payload['spf_records']['value']] == ['a.invalid']
+    assert ('c.invalid', 'TXT') not in resolver.calls
+    for operation in OPERATIONS:
+        assert result.payload[operation]['collection_truncated'] is True
+        assert result.payload[operation]['result_limit'] == 2
+        row = next(c for c in result.coverage if c['name'] == operation)
+        assert row['domain_universe'] == 'accepted_domains'
+        assert row['status'] == ('failed' if operation == 'spf_records' else 'partial')
+        if operation != 'spf_records':
+            assert [r['domain'] for r in result.payload[operation]['value']] == ['a.invalid', 'b.invalid']
 
 
 def test_collector_coexistence_unverified_and_blank():
@@ -646,3 +735,54 @@ def test_peak_queries_with_existing_posture():
     # 13 record questions + 6 preserved fallback selectors + 3 other posture TXT names.
     assert len(resolver.calls) == 22
     assert max(Counter(resolver.calls).values()) == 1
+
+
+@pytest.mark.parametrize('wrapped', [
+    {'Domain': 'Contoso.com', 'IncludeSubDomains': False},
+    {'Address': 'Contoso.com'},
+    {'SmtpDomain': 'Contoso.com'},
+])
+def test_accepted_domain_wrappers_preserve_first_seen_spelling(wrapped):
+    result = run(Resolver(), domains=(), exchange_accepted_domains={'value': [
+        {'DomainName': wrapped, 'IsCoexistenceDomain': False},
+        {'DomainName': 'contoso.COM', 'IsCoexistenceDomain': False},
+    ]})
+    for operation in OPERATIONS:
+        assert [row['domain'] for row in result.payload[operation]['value']] == ['Contoso.com']
+        assert next(c for c in result.coverage if c['name'] == operation)['domain_universe'] == 'accepted_domains'
+
+
+def test_unreadable_domain_wrapper_rejects_whole_accepted_envelope():
+    result = run(Resolver(), domains=('fallback.invalid',), exchange_accepted_domains={'value': [
+        {'DomainName': 'do-not-use.invalid', 'IsCoexistenceDomain': False},
+        {'DomainName': {'Domain': None}, 'IsCoexistenceDomain': False},
+    ]})
+    for operation in OPERATIONS:
+        assert [row['domain'] for row in result.payload[operation]['value']] == ['fallback.invalid']
+        assert next(c for c in result.coverage if c['name'] == operation)['domain_universe'] == 'graph_email_service'
+
+
+def test_exchange_domain_spelling_matches_dkim_config(monkeypatch, tmp_path):
+    from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
+
+    class Adapter:
+        def run(self, command, **kwargs):
+            if command.startswith('Get-AcceptedDomain '):
+                return {'value': [
+                    {'DomainName': 'Contoso.com', 'IsCoexistenceDomain': False},
+                    {'DomainName': 'contoso.COM', 'IsCoexistenceDomain': False},
+                ]}
+            if command.startswith('Get-DkimSigningConfig '):
+                return {'value': [{'Domain': 'Contoso.com', 'Enabled': True}]}
+            return {'value': []}
+
+    monkeypatch.setattr('azure_tenant_audit.collectors.exchange_policy.get_adapter', lambda _: Adapter())
+    exchange = ExchangePolicyCollector().run({})
+    result = run(Resolver(), domains=(), exchange_accepted_domains=exchange.payload['acceptedDomains'])
+    write(tmp_path, 'raw/exchange_policy.json', exchange.payload)
+    projection, _ = bundle(tmp_path, result.payload, exchange.coverage + result.coverage)
+    assert projection['dkim_config'][0]['Domain'] == 'Contoso.com'
+    for operation in OPERATIONS:
+        assert [row['domain'] for row in result.payload[operation]['value']] == ['Contoso.com']
+        # The product's DKIM rule joins these exact strings.
+        assert projection.rule_sections[operation][0]['domain'] == projection.rule_sections['dkim_config'][0]['Domain']

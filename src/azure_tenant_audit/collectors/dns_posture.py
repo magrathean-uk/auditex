@@ -24,6 +24,7 @@ from ..dns_lookup import (
     scuba_spf_record,
     unknown_posture,
 )
+from ..exchange_protection import domain_text
 from ..exposure_lookup import (
     HttpsFetcher,
     RequestsHttpsFetcher,
@@ -200,7 +201,8 @@ class DnsPostureCollector(Collector):
 
         record_coverage: list[dict[str, Any]] = []
         records = self._scuba_records(
-            verified_domains, resolver, record_coverage, domains_status, domains_error_class, domains_error
+            verified_domains, resolver, record_coverage, domains_status, domains_error_class, domains_error,
+            accepted_domains=context.get("exchange_accepted_domains"),
         )
         payload["domains"] = {"value": domains_payload}
         payload["domainPosture"] = {"value": assessments}
@@ -231,21 +233,27 @@ class DnsPostureCollector(Collector):
         domains_status: str,
         domains_error_class: str | None,
         domains_error: str | None,
+        *,
+        accepted_domains: Any = None,
     ) -> dict[str, Any]:
-        """Save bounded ScubaGear-shaped records for verified mail domains.
+        """Save bounded records for accepted domains, or the Graph mail-domain fallback.
 
         Deliberately fail closed on resolver errors, unlike ScubaGear's error-to-empty
         record behaviour: stop that operation, retain its prior rows, and try the others.
         """
-        # ScubaGear iterates Get-AcceptedDomain; Email support is the closest
-        # Graph-only approximation. Coexistence domain handling is a cross-collector follow-up.
-        domains = [
-            str(entry.get("id") or "").strip() for entry in verified_domains
-            if not isinstance(entry.get("supportedServices"), list)
-            or any(isinstance(service, str) and service.casefold() == "email"
-                   for service in entry["supportedServices"])
-        ]
-        domains = [domain for domain in domains if domain]
+        domains = self._accepted_record_domains(accepted_domains)
+        universe = "accepted_domains"
+        if domains is None:
+            universe = "graph_email_service"
+            # Preserve the original Graph-only filter, including absent/malformed
+            # supportedServices, domain spelling and ordering.
+            domains = [
+                str(entry.get("id") or "").strip() for entry in verified_domains
+                if not isinstance(entry.get("supportedServices"), list)
+                or any(isinstance(service, str) and service.casefold() == "email"
+                       for service in entry["supportedServices"])
+            ]
+            domains = [domain for domain in domains if domain]
         cut = len(domains) > MAX_RECORD_DOMAINS
         payload = {}
         for operation, kind, lookup in (
@@ -274,6 +282,7 @@ class DnsPostureCollector(Collector):
                 "item_count": len(rows),
                 "duration_ms": round((time.perf_counter() - start) * 1000, 2),
                 "error_class": error_class, "error": error,
+                "domain_universe": universe,
             }
             if status == "failed":
                 envelope.update(error_class=error_class, error=error)
@@ -292,6 +301,35 @@ class DnsPostureCollector(Collector):
             payload[operation] = envelope
             coverage.append(row)
         return payload
+
+    @staticmethod
+    def _accepted_record_domains(envelope: Any) -> list[str] | None:
+        """Use only complete, usable same-run evidence; None requests the Graph fallback.
+
+        The adapter's successful command envelopes need not carry a status. Older
+        envelopes without the coexistence flag cannot safely exclude that domain.
+        Reject an unusable list as a whole rather than silently dropping its rows.
+        """
+        if (
+            not isinstance(envelope, dict)
+            or envelope.get("status") not in (None, "ok")
+            or envelope.get("error")
+            or envelope.get("error_class")
+            or envelope.get("collection_truncated")
+            or not isinstance(envelope.get("value"), list)
+        ):
+            return None
+        domains: dict[str, str] = {}
+        for row in envelope["value"]:
+            if not isinstance(row, dict) or not isinstance(row.get("IsCoexistenceDomain"), bool):
+                return None
+            name = domain_text(row.get("DomainName"))
+            if name is None:
+                return None
+            if not row["IsCoexistenceDomain"]:
+                # Preserve Exchange's spelling for the case-sensitive DKIM config join.
+                domains.setdefault(name.casefold(), name)
+        return list(domains.values())
 
     def _public_footprint(
         self,

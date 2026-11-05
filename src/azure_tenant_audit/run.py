@@ -28,6 +28,16 @@ class LiveRunPlan:
     profile: AuditProfile
 
 
+def collector_execution_order(selected: list[str]) -> list[str]:
+    """Delay DNS until selected Exchange evidence is available; never add a collector."""
+    ordered = list(selected)
+    if "dns_posture" in ordered and "exchange_policy" in ordered:
+        if ordered.index("dns_posture") < ordered.index("exchange_policy"):
+            ordered.remove("dns_posture")
+            ordered.insert(ordered.index("exchange_policy") + 1, "dns_posture")
+    return ordered
+
+
 def build_live_run_plan(
     args: Any,
     *,

@@ -300,3 +300,34 @@ def test_probe_live_app_mode_writes_token_claims(tmp_path: Path, monkeypatch) ->
     assert safety["scope_risk"] == "write_capable_scope_present"
     assert safety["write_capable_scopes"] == ["Application.ReadWrite.All"]
     assert safety["read_only"] is True and safety["write_actions"] is False
+
+
+def test_probe_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch) -> None:
+    envelope = {"value": [{"DomainName": "Contoso.com", "IsCoexistenceDomain": False}]}
+    calls = []
+    contexts = {}
+
+    class _Collector:
+        def __init__(self, name):
+            self.name = name
+
+        def run(self, context):
+            calls.append(self.name)
+            contexts[self.name] = dict(context)
+            payload = {"acceptedDomains": envelope} if self.name == "exchange_policy" else {}
+            return CollectorResult(name=self.name, status="ok", item_count=1, message="ok", payload=payload)
+
+    monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
+    monkeypatch.setattr("azure_tenant_audit.probe._capture_signed_in_context", lambda *_, **__: {})
+    monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
+    monkeypatch.setattr("azure_tenant_audit.probe.REGISTRY", {
+        name: _Collector(name) for name in ("dns_posture", "exchange_policy", "identity")
+    })
+    assert run_live_probe(ProbeConfig(
+        tenant_name="fixture", tenant_id="tenant-id", output_dir=tmp_path,
+        surface="dns_posture,exchange_policy,identity", run_name="handoff", access_token="constructed-token",
+    )) == 0
+    assert calls == ["exchange_policy", "dns_posture", "identity"]
+    assert contexts["dns_posture"]["exchange_accepted_domains"] == envelope
+    assert "exchange_accepted_domains" not in contexts["exchange_policy"]
+    assert "exchange_accepted_domains" not in contexts["identity"]

@@ -693,7 +693,7 @@ def run_live_probe(cfg: ProbeConfig) -> int:
                     )
 
         if client is not None:
-            for surface in requested_surfaces:
+            for surface in run_core.collector_execution_order(requested_surfaces):
                 if surface == "windows365":
                     result_row, windows_coverage, payload = _run_windows365_probe(cfg, client=client, writer=writer)
                     collector_payloads["windows365"] = payload
@@ -734,6 +734,9 @@ def run_live_probe(cfg: ProbeConfig) -> int:
                             since=cfg.since,
                             until=cfg.until,
                             hooks=writer_adapter.hooks(),
+                            extra={
+                                "exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains"),
+                            } if surface == "dns_posture" else {},
                         ),
                         name=surface,
                         options=CollectorRunOptions(write_checkpoint=False),

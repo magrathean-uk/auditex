@@ -1106,3 +1106,63 @@ def test_scrub_command_line_redacts_tokens() -> None:
         "--client-secret=***redacted***",
         "--collectors=identity",
     ]
+
+
+@pytest.mark.parametrize("resume", [False, True], ids=["fresh", "resume"])
+@pytest.mark.parametrize("include_other", [False, True], ids=["pair", "context-isolation"])
+def test_run_live_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch, resume, include_other) -> None:
+    envelope = {"value": [{"DomainName": "Contoso.com", "IsCoexistenceDomain": False}]}
+    calls = []
+    contexts = {}
+
+    class _Collector:
+        def __init__(self, name):
+            self.name = name
+
+        def run(self, context):
+            calls.append(self.name)
+            contexts[self.name] = dict(context)
+            payload = {"acceptedDomains": envelope} if self.name == "exchange_policy" else {}
+            return CollectorResult(name=self.name, status="ok", item_count=1, message="ok", payload=payload)
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_json(self, *args, **kwargs):
+            return {}
+
+        def get_all(self, *args, **kwargs):
+            return []
+
+    monkeypatch.setattr(cli, "GraphClient", _Client)
+    monkeypatch.setattr(cli, "REGISTRY", {
+        name: _Collector(name) for name in ("dns_posture", "exchange_policy", "identity")
+    })
+    # An explicit token and fake client keep this orchestration test entirely offline.
+    argv = ["--tenant-name", "fixture", "--tenant-id", "tenant-id", "--access-token", "constructed-token",
+            "--collectors", "dns_posture,exchange_policy" + (",identity" if include_other else ""),
+            "--out", str(tmp_path), "--run-name", "handoff"]
+    if resume:
+        run_dir = tmp_path / "fixture-handoff"
+        (run_dir / "raw").mkdir(parents=True)
+        (run_dir / "checkpoints").mkdir()
+        (run_dir / "raw/exchange_policy.json").write_text(json.dumps({"acceptedDomains": envelope}))
+        (run_dir / "summary.json").write_text(json.dumps({"collectors": [
+            {"name": "exchange_policy", "status": "ok", "item_count": 1, "message": "ok"}
+        ]}))
+        (run_dir / "checkpoints/checkpoint-state.json").write_text(json.dumps({
+            "run_id": "handoff", "collectors": {"exchange_policy": {
+                "status": "ok", "item_count": 1, "message": "ok",
+            }},
+        }))
+        argv += ["--resume-from", str(run_dir)]
+
+    assert cli.run_live(cli.build_parser().parse_args(argv)) == 0
+    assert calls == ([] if resume else ["exchange_policy"]) + ["dns_posture"] + (["identity"] if include_other else [])
+    assert contexts["dns_posture"]["exchange_accepted_domains"] == envelope
+    if not resume:
+        assert "exchange_accepted_domains" not in contexts["exchange_policy"]
+    if include_other:
+        # This collector runs after Exchange, so an unconditional hand-off would leak the envelope here.
+        assert "exchange_accepted_domains" not in contexts["identity"]
