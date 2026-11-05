@@ -76,6 +76,12 @@ def operation(root, collector, name, rows, **metadata):
     write(root, f'raw/{collector}.json', payload)
 
 
+@pytest.fixture(autouse=True)
+def _no_area_adapter_modules(monkeypatch):
+    # This file pins the built-in adapters (shape gate, digests, demo totals); each area adapter module has its own tests.
+    monkeypatch.setattr('auditex.scuba_projection.AREA_ADAPTER_MODULES', ())
+
+
 @pytest.fixture
 def complete_bundle(tmp_path):
     write(tmp_path, 'run-manifest.json', {'run_id': 'synthetic-run', 'platform': 'm365',
