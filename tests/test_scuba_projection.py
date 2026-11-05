@@ -1142,7 +1142,9 @@ def test_chunk_row_depth_bound_is_exactly_64_containers(complete_bundle):
     assert projection.report['sections']['service_plans']['detail']['field'] == 'chunk_files'
 
 
-def test_normal_manifest_salt_and_output_are_unchanged(complete_bundle):
+def test_normal_manifest_salt_and_output_are_unchanged(complete_bundle, monkeypatch):
+    # Hermetic: the frozen output hash covers the built-in adapters only; area adapter modules have their own tests.
+    monkeypatch.setattr('auditex.scuba_projection.AREA_ADAPTER_MODULES', ())
     projection = project_run(complete_bundle)
     manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
     salt = sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
