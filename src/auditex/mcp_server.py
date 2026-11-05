@@ -699,7 +699,7 @@ def rules_inventory(
 
 
 def _build_mcp_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="auditex-mcp", description="Auditex MCP server.")
+    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex-mcp", description="Auditex MCP server.")
     parser.add_argument("--version", action="version", version=package_version_line("auditex-mcp"))
     return parser
 
