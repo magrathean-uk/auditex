@@ -122,7 +122,7 @@ def collect_sensitive_argv_values(
 
 
 def _sensitive_option(option: str, flags: set[str]) -> bool:
-    """Recognise exact flags and unique long-option prefixes, defensively.
+    """Recognise exact flags and any sensitive long-option prefix, defensively.
 
     Public parsers reject abbreviations. Retain this protection for synthetic
     command lines and any future parser that accidentally enables them again.
@@ -130,7 +130,7 @@ def _sensitive_option(option: str, flags: set[str]) -> bool:
     return option in flags or (
         option.startswith("--")
         and len(option) > 2
-        and sum(flag.startswith(option) for flag in flags) == 1
+        and sum(flag.startswith(option) for flag in flags) >= 1
     )
 
 

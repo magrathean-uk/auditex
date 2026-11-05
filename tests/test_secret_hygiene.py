@@ -39,11 +39,22 @@ def test_prefix_matching_preserves_exact_flags_and_unrelated_options() -> None:
     flags = {"--token", "--token-cache"}
     argv = ["--token", "constructed-token", "--token-c", "constructed-cache", "--tok", "ambiguous", "--", "positional"]
     assert redact_argv(argv, sensitive_flags=flags) == [
-        "--token", "***redacted***", "--token-c", "***redacted***", "--tok", "ambiguous", "--", "positional",
+        "--token", "***redacted***", "--token-c", "***redacted***", "--tok", "***redacted***", "--", "positional",
     ]
-    assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == {"constructed-token", "constructed-cache"}
+    assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == {"constructed-token", "constructed-cache", "ambiguous"}
     assert redact_argv(["--client-sec"]) == ["--client-sec", "***redacted***"]
     assert redact_argv(["--unrelated=constructed", "ordinary"]) == ["--unrelated=constructed", "ordinary"]
+
+
+@pytest.mark.parametrize("option", ["--c", "--a", "--s"])
+@pytest.mark.parametrize("inline", [False, True])
+def test_ambiguous_sensitive_prefixes_are_redacted(option: str, inline: bool) -> None:
+    canary = "constructed-canary-ambiguous-zz9"
+    argv = [f"{option}={canary}"] if inline else [option, canary]
+    expected = [f"{option}=***redacted***"] if inline else [option, "***redacted***"]
+    assert redact_argv(argv) == expected
+    assert collect_sensitive_argv_values(argv) == {canary}
+    assert canary not in redact_command_string(" ".join(argv))
 
 
 def test_argv_redaction_covers_token_and_inline_forms() -> None:
