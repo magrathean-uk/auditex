@@ -18,9 +18,11 @@ API::
 
 ``value`` may be a ``str``, a mapping, a list, tuple or set, or anything else (returned unchanged). The result
 has the same shape: mappings stay mappings, lists keep their order, numbers, booleans, ``None`` and bytes pass
-through. A key is rewritten only when the key text itself holds an identifier (an e-mail address or a GUID) and
-never by name substitution, so verdict fields, policy ids, reason codes and setting names stay; if rewriting
-makes two keys equal the later one gets a ``#n`` suffix and no value is lost.
+through. A key is rewritten only when the key text itself holds an identifier (an e-mail address or a GUID) or a
+credential assignment (``password=value``) and never by name substitution; values under structural keys (ids,
+setting names, reason codes, statuses, verdicts, sections) and values shaped like a policy id or a snake_case code
+are never name-substituted; if rewriting makes two keys equal the later one gets a ``#n`` suffix and no value is
+lost. Number literals in embedded JSON are written back exactly.
 
 What is and is not guaranteed (see the document for the full statement):
 
@@ -29,7 +31,9 @@ What is and is not guaranteed (see the document for the full statement):
   matched as names, ids or e-mail addresses again.
 * It raises ``RedactionDepthError`` (a ``ValueError``) for a value nested more than ``MAX_DEPTH`` levels,
   including a self-referencing one, instead of returning something partly redacted; an unknown profile name
-  raises ``KeyError``. It does not otherwise raise on odd input.
+  raises ``KeyError``; and, for a profile that pseudonymises identities, it raises ``ContextIncompleteError`` when
+  ``context.incomplete`` is set (``context_for_run`` could not read every record of the run: fail closed, redact
+  nothing, return nothing). It does not otherwise raise on odd input.
 * It protects the classes below in the representations below. It is a pattern and structure redactor, not a
   proof: free text can carry a name it was never told about (see "Limits" in the document).
 
@@ -57,6 +61,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,6 +90,10 @@ class RedactionError(ValueError):
 
 class RedactionDepthError(RedactionError):
     """The value is nested more than ``MAX_DEPTH`` levels (or refers to itself): fail closed."""
+
+
+class ContextIncompleteError(RedactionError):
+    """The run's identities could not all be discovered (see ``RedactionContext.incomplete``): fail closed."""
 
 
 @dataclass(frozen=True)
@@ -288,13 +297,16 @@ _SECRET_KEYS = frozenset(
     }
 )
 
-# Keys whose string values are controlled vocabulary or structure (statuses, verdicts, ids of rules): a
-# user's name is never substituted into them.
+# Keys whose values are controlled vocabulary or structure (ids of findings and policies, setting names, reason codes,
+# statuses, verdicts, sections, kinds, cells, roles): a user's name is never substituted into them, whatever the
+# user is called. Compared as ``_norm``. Identifiers (GUIDs, e-mail addresses, immutable ids) in them are still masked.
 _CONTROLLED_KEYS = frozenset(
     {
-        "status", "severity", "verdict", "reasoncode", "collector", "ruleid", "policyid", "priority", "kind",
-        "type", "format", "principaltype", "state", "outcome", "result", "category", "level", "role", "rolename",
-        "rolenames", "roledisplayname", "roledefinitionname",
+        "id", "ids", "findingid", "findingids", "policyid", "policyids", "ruleid", "ruleids", "checkid", "controlid",
+        "setting", "settings", "settingname", "settingnames", "reason", "reasons", "reasoncode", "reasoncodes", "code",
+        "errorcode", "errorclass", "status", "severity", "verdict", "section", "sections", "kind", "cell", "cellid",
+        "collector", "priority", "type", "format", "principaltype", "state", "outcome", "result", "category", "level",
+        "role", "rolename", "rolenames", "roledisplayname", "roledefinitionname",
     }
 )
 _ROLE_KEYS = frozenset({"role", "rolename", "rolenames", "roledisplayname", "roledefinitionname", "roles"})
@@ -304,9 +316,22 @@ _STATIC_VOCABULARY = frozenset(
     {
         "open", "closed", "pass", "fail", "warning", "critical", "high", "medium", "info", "error", "true", "false",
         "none", "null", "unknown", "enabled", "disabled", "status", "severity", "verdict", "owner", "accepted",
-        "resolved", "blocked", "partial", "complete", "manual",
+        "resolved", "blocked", "partial", "complete", "manual", "ok", "warn", "skipped", "low", "unavailable",
     }
 )
+# By shape: policy ids (``MS.EXO.4.1v1``), snake_case and UPPER_SNAKE codes (``not_collected``) are structure
+# wherever they appear; a user called one of them keeps it readable in free text (the structured name field is
+# still pseudonymised).
+_STRUCTURAL_SHAPES = (
+    re.compile(r"^[A-Za-z]{2,}(?:\.[A-Za-z0-9]+)+\.\d+v\d+$"),
+    re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$"),
+    re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$"),
+)
+
+
+def _structural(text: str) -> bool:
+    return any(shape.match(text) for shape in _STRUCTURAL_SHAPES)
+
 
 _IMMUTABLE_PREFIX = "Id "
 _USER_PREFIX = "User "
@@ -357,6 +382,8 @@ class RedactionContext:
     policy: PendingProductPolicy = field(default_factory=lambda: PENDING_PRODUCT_POLICY)
     protected_ids: frozenset[str] = frozenset()
     vocabulary: frozenset[str] = frozenset()
+    incomplete: bool = False
+    incomplete_reasons: tuple[str, ...] = ()
 
 
 def pseudonym(salt: str, text: str) -> str:
@@ -448,13 +475,31 @@ class _Found:
     keys: set[str] = field(default_factory=set)
 
 
+class _Num:
+    """A JSON number kept as the literal it was written as: never re-parsed, so it cannot round, overflow to
+    ``Infinity`` or lose its sign."""
+
+    __slots__ = ("raw",)
+
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"_Num({self.raw!r})"
+
+
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not JSON")
+
+
 def _maybe_json(text: str) -> Any:
-    """The parsed value of a string that is a JSON object or array, else ``None``."""
+    """The parsed value of a string that is a JSON object or array, else ``None``. Numbers are ``_Num``; the
+    non-standard ``NaN`` and ``Infinity`` make the text not JSON."""
     stripped = text.strip()
     if len(stripped) < 2 or stripped[0] not in "{[" or stripped[-1] not in "}]":
         return None
     try:
-        parsed = json.loads(stripped)
+        parsed = json.loads(stripped, parse_float=_Num, parse_int=_Num, parse_constant=_reject_constant)
     except RecursionError as exc:
         raise RedactionDepthError("embedded JSON is nested too deeply to redact") from exc
     except ValueError:
@@ -466,12 +511,16 @@ def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
     """Privileged-user display names, immutable ids, role vocabulary and key names found anywhere in ``value``
     (JSON embedded in a string included), so the same strings are replaced inside free text of the same output."""
     stack = [value]
-    seen: set[int] = set()
+    # Visited containers are kept alive here, not only their ids: a parsed embedded record that is freed would
+    # hand its id to the next one parsed, which would then be skipped as "seen" and its identities lost.
+    seen: dict[int, Any] = {}
     while stack:
         item = stack.pop()
         if isinstance(item, str):
             if domains:
                 for match in OUTPUT_EMAIL_RE.finditer(item):
+                    found.domains.add(match["domain"].lower())
+                for match in _ENCODED_EMAIL_RE.finditer(item):
                     found.domains.add(match["domain"].lower())
             if names and item[:1] in ("{", "[", " ", "\n", "\t") and len(item) < 4_000_000:
                 parsed = _maybe_json(item)
@@ -480,7 +529,7 @@ def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
         elif isinstance(item, Mapping):
             if id(item) in seen:
                 continue
-            seen.add(id(item))
+            seen[id(item)] = item
             if names:
                 privileged = _is_privileged_user(item)
                 for key, member in item.items():
@@ -501,45 +550,145 @@ def _collect(value: Any, found: _Found, *, names: bool, domains: bool) -> None:
         elif isinstance(item, (list, tuple)):
             if id(item) in seen:
                 continue
-            seen.add(id(item))
+            seen[id(item)] = item
             stack.extend(item)
 
 
 # -- contexts ---------------------------------------------------------------------------------------------------------
 
-_MAX_SCAN_FILES = 400
-_MAX_SCAN_BYTES = 96 * 1024 * 1024
-_SCAN_CACHE: dict[tuple[Any, ...], tuple[frozenset[str], frozenset[str], frozenset[str]]] = {}
+# Discovery limits. Hitting one is never silent: the context is flagged ``incomplete`` (see ``RedactionContext``).
+_MAX_SCAN_FILES = 5_000            # ``normalized/**/*.json`` files per run
+_MAX_FILE_BYTES = 32 * 1024 * 1024  # one file; a larger one is not read
+_MAX_SCAN_BYTES = 128 * 1024 * 1024  # all files of one run together
+_MAX_REASONS = 20
+_SCAN_CACHE: dict[tuple[Any, ...], tuple[frozenset[str], frozenset[str], frozenset[str], tuple[str, ...]]] = {}
 
 
-def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
-    """Privileged-user names, immutable ids and role vocabulary in the run's ``normalized/`` records.
+def _inside(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def _plan_scan(run_path: Path) -> tuple[list[tuple[str, str, int, int]], list[str]]:
+    """The ``normalized/**/*.json`` files to read and why anything cannot be read.
+
+    Nothing is opened here. A file is read only when it is a regular file; a symlink is followed only to a regular
+    file inside the run directory. Everything else (FIFO, device, socket, dangling or escaping link, symlinked
+    directory, unreadable directory) is recorded as a reason, never read and never waited for.
+    """
+    entries: list[tuple[str, str, int, int]] = []
+    reasons: list[str] = []
+    run_real = os.path.realpath(run_path)
+    root = os.path.join(run_path, "normalized")
+    try:
+        root_stat = os.stat(root)
+    except FileNotFoundError:
+        return entries, reasons
+    except OSError as exc:
+        return entries, [f"normalized: unreadable ({type(exc).__name__})"]
+    if not stat.S_ISDIR(root_stat.st_mode):
+        return entries, ["normalized: not a directory"]
+    if not _inside(os.path.realpath(root), run_real):
+        return entries, ["normalized: resolves outside the run directory"]
+
+    def relative(path: str) -> str:
+        return os.path.relpath(path, run_path)
+
+    def on_error(exc: OSError) -> None:
+        reasons.append(f"{relative(str(exc.filename or root))}: directory unreadable ({type(exc).__name__})")
+
+    for directory, dirnames, filenames in os.walk(root, topdown=True, onerror=on_error, followlinks=False):
+        dirnames.sort()
+        for name in dirnames:
+            if os.path.islink(os.path.join(directory, name)):
+                reasons.append(f"{relative(os.path.join(directory, name))}: symlinked directory not followed")
+        for name in sorted(filenames):
+            if not name.lower().endswith(".json"):
+                continue
+            full = os.path.join(directory, name)
+            rel = relative(full)
+            if len(entries) >= _MAX_SCAN_FILES:
+                reasons.append(f"{rel}: more than {_MAX_SCAN_FILES} files, limit reached; the rest are not read")
+                return entries, reasons
+            try:
+                info = os.lstat(full)
+                target = full
+                if stat.S_ISLNK(info.st_mode):
+                    target = os.path.realpath(full)
+                    info = os.stat(target)
+                    if not _inside(target, run_real):
+                        reasons.append(f"{rel}: symlink resolves outside the run directory")
+                        continue
+            except OSError as exc:
+                reasons.append(f"{rel}: unreadable or dangling ({type(exc).__name__})")
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                reasons.append(f"{rel}: not a regular file")
+                continue
+            if info.st_size > _MAX_FILE_BYTES:
+                reasons.append(f"{rel}: larger than {_MAX_FILE_BYTES} bytes, not read")
+                continue
+            entries.append((rel, target, info.st_mtime_ns, info.st_size))
+    return entries, reasons
+
+
+def _read_regular(path: str, limit: int) -> bytes | None:
+    """The bytes of a regular file of at most ``limit`` bytes, else ``None``. Opens without blocking and without
+    following a link, and re-checks the type on the descriptor."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return None
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(1 << 20, limit + 1 - total))
+            if not chunk:
+                return b"".join(chunks)
+            total += len(chunk)
+            if total > limit:
+                return None
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+
+
+def _scan_run_identities(run_path: Path) -> tuple[frozenset[str], frozenset[str], frozenset[str], tuple[str, ...]]:
+    """Privileged-user names, immutable ids, role vocabulary and the reasons discovery was incomplete.
 
     Every ``normalized/**/*.json`` is read (bounded), not just the sections a report selects, so an output that
-    shows only findings still knows who the administrators are. Cached per file signature.
+    shows only findings still knows who the administrators are. Discovery never gives up silently: a file that
+    cannot be read, or a limit that is hit, is a reason, the identities found elsewhere are kept, and the caller
+    gets the reasons (``RedactionContext.incomplete``). Cached per file signature.
     """
-    normalized = run_path / "normalized"
-    try:
-        files = sorted(normalized.rglob("*.json"))[:_MAX_SCAN_FILES]
-        signature = tuple((str(f), f.stat().st_mtime_ns, f.stat().st_size) for f in files)
-    except OSError:
-        return frozenset(), frozenset(), frozenset()
-    cache_key = (os.path.realpath(run_path), signature)
+    entries, reasons = _plan_scan(run_path)
+    signature = tuple((rel, target, mtime, size) for rel, target, mtime, size in entries)
+    cache_key = (os.path.realpath(run_path), signature, tuple(reasons))
     cached = _SCAN_CACHE.get(cache_key)
     if cached is not None:
         return cached
     found = _Found()
+    problems = list(reasons)
     budget = _MAX_SCAN_BYTES
-    for path, _mtime, size in signature:
+    for rel, target, _mtime, size in entries:
         if size > budget:
+            problems.append(f"{rel}: total size limit reached, not read")
             continue
         budget -= size
         try:
-            payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, ValueError, UnicodeError, RecursionError):
-            continue
-        _collect(payload, found, names=True, domains=False)
-    result = (frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary))
+            data = _read_regular(target, _MAX_FILE_BYTES)
+            if data is None:
+                problems.append(f"{rel}: not a regular file or larger than the limit, not read")
+                continue
+            payload = json.loads(data.decode("utf-8"))
+            _collect(payload, found, names=True, domains=False)
+        except OSError as exc:
+            problems.append(f"{rel}: unreadable ({type(exc).__name__})")
+        except (ValueError, RecursionError):  # malformed JSON, bad encoding, too deeply nested
+            problems.append(f"{rel}: not valid JSON or nested too deeply, not read")
+    if len(problems) > _MAX_REASONS:
+        problems = problems[:_MAX_REASONS] + [f"and {len(problems) - _MAX_REASONS} more"]
+    result = (frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary), tuple(problems))
     if len(_SCAN_CACHE) > 16:
         _SCAN_CACHE.clear()
     _SCAN_CACHE[cache_key] = result
@@ -550,8 +699,10 @@ def context_for_run(run_dir: str | Path, **overrides: Any) -> RedactionContext:
     """The context for outputs derived from one run: its salt, its path spellings, its administrators' names and
     immutable ids (from every ``normalized/`` record, whichever sections the output selects) and role vocabulary."""
     run_path = Path(run_dir)
-    names, ids, vocabulary = _scan_run_identities(run_path)
+    names, ids, vocabulary, problems = _scan_run_identities(run_path)
     values: dict[str, Any] = {
+        "incomplete": bool(problems),
+        "incomplete_reasons": problems,
         "salt": run_salt(run_path),
         "run_paths": run_path_roots(run_path),
         "protected_names": names,
@@ -572,9 +723,11 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
     names: set[str] = set()
     ids: set[str] = set()
     vocabulary: set[str] = set()
+    reasons: list[str] = []
     salt = ""
     for index, run_dir in enumerate(run_dirs):
         context = context_for_run(run_dir)
+        reasons.extend(f"run {index + 1}: {reason}" for reason in context.incomplete_reasons)
         salt = salt if index else context.salt
         roots.update(context.run_paths)
         names.update(context.protected_names)
@@ -588,6 +741,8 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         protected_names=frozenset(names),
         protected_ids=frozenset(ids),
         vocabulary=frozenset(vocabulary),
+        incomplete=bool(reasons),
+        incomplete_reasons=tuple(reasons),
     )
 
 
@@ -629,16 +784,42 @@ def _blank_text(value: Any) -> Any:
     return value
 
 
+def _dump(value: Any, ensure_ascii: bool, indent: int | None, separators: tuple[str, str], level: int = 0) -> str:
+    """``json.dumps`` for parsed embedded JSON, writing ``_Num`` literals back exactly as they were written."""
+    item_sep, key_sep = separators
+    if isinstance(value, _Num):
+        return value.raw
+    if isinstance(value, (Mapping, list, tuple)):
+        mapping = isinstance(value, Mapping)
+        if not value:
+            return "{}" if mapping else "[]"
+        opener, closer = ("{", "}") if mapping else ("[", "]")
+        if indent is None:
+            glue, lead, tail = item_sep, "", ""
+        else:
+            pad = "\n" + " " * (indent * (level + 1))
+            glue, lead, tail = item_sep + pad, pad, "\n" + " " * (indent * level)
+        if mapping:
+            parts = [
+                json.dumps(str(key), ensure_ascii=ensure_ascii) + key_sep + _dump(member, ensure_ascii, indent, separators, level + 1)
+                for key, member in value.items()
+            ]
+        else:
+            parts = [_dump(member, ensure_ascii, indent, separators, level + 1) for member in value]
+        return opener + lead + glue.join(parts) + tail + closer
+    return json.dumps(value, ensure_ascii=ensure_ascii, allow_nan=False)
+
+
 def _dump_like(original: str, parsed: Any, redacted: Any) -> str:
     """``redacted`` serialised the way ``original`` was, when one of the usual layouts reproduces it exactly."""
     for ensure_ascii in (True, False):
         for indent, separators in _JSON_SHAPES:
             try:
-                if json.dumps(parsed, ensure_ascii=ensure_ascii, indent=indent, separators=separators) == original:
-                    return json.dumps(redacted, ensure_ascii=ensure_ascii, indent=indent, separators=separators)
+                if _dump(parsed, ensure_ascii, indent, separators) == original:
+                    return _dump(redacted, ensure_ascii, indent, separators)
             except (ValueError, TypeError):
                 continue
-    return json.dumps(redacted, ensure_ascii=original.isascii())
+    return _dump(redacted, original.isascii(), None, (", ", ": "))
 
 
 class _Redactor:
@@ -649,6 +830,14 @@ class _Redactor:
         self.policy = context.policy
         self.roots = context.run_paths if profile.run_paths else ()
         self.depth = 0
+        if profile.identities and context.incomplete:
+            # Fail closed: the names and ids of this run were not all discovered, so free text may carry ones this
+            # redactor was never told about. The shareable profiles refuse rather than return a partial result.
+            shown = "; ".join(context.incomplete_reasons) or "reason not recorded"
+            raise ContextIncompleteError(
+                f"identity discovery for this run was incomplete ({shown}); nothing was redacted or returned. "
+                "Repair or remove the listed files and retry"
+            )
         found = _Found()
         names = set(context.protected_names) if profile.identities else set()
         ids = set(context.protected_ids) if profile.identities else set()
@@ -666,7 +855,7 @@ class _Redactor:
         self.names = sorted(
             (
                 n for n in names
-                if len(n) >= 4 and not _PSEUDONYM_RE.match(n) and n.lower() not in vocabulary and _norm(n) not in vocabulary_norms
+                if len(n) >= 4 and not _PSEUDONYM_RE.match(n) and n.lower() not in vocabulary and _norm(n) not in vocabulary_norms and not _structural(n)
             ),
             key=len, reverse=True,
         )
@@ -675,7 +864,7 @@ class _Redactor:
             re.compile(_PSEUDONYM_KEEP + r"|(?<!\w)(?P<hit>" + "|".join(re.escape(n) for n in self.names) + r")(?!\w)")
             if self.names else None
         )
-        self.ids = sorted((i for i in ids if len(i) >= 6), key=len, reverse=True)
+        self.ids = sorted((i for i in ids if len(i) >= 6 and not _structural(i)), key=len, reverse=True)
         self.id_re = (
             re.compile(_PSEUDONYM_KEEP + r"|(?<![\w+/=-])(?P<hit>" + "|".join(re.escape(i) for i in self.ids) + r")(?![\w+/=-])")
             if self.ids else None
@@ -686,15 +875,16 @@ class _Redactor:
         ) if want_domains else []
         self.domain_re = (
             re.compile(
-                r"(?<![\w-])(?:[\w-]+\.)*(?P<d>" + "|".join(re.escape(d) for d in self.domains) + r")(?![\w-])", re.IGNORECASE
+                r"(?:(?<![\w-])|(?<=%40)|(?<=\\u0040))(?:[\w-]+\.)*(?P<d>" + "|".join(re.escape(d) for d in self.domains) + r")(?![\w-])", re.IGNORECASE
             )
             if self.domains else None
         )
 
     # -- text ---------------------------------------------------------------------------------------------
     def text(self, value: str, *, names: bool = True, key: bool = False) -> str:
-        """``value`` as text. ``key`` is a mapping key: identifiers only, no name or id substitution, no embedded
-        JSON. ``names=False`` is a controlled-vocabulary value: no name or id substitution."""
+        """``value`` as text. ``key`` is a mapping key: identifiers and credential assignments only, no name or id
+        substitution, no embedded JSON. ``names=False`` is a controlled-vocabulary value (finding id, setting name,
+        reason code, status): no user name is substituted into it; identifiers in it are still masked."""
         if not value:
             return value
         profile = self.profile
@@ -705,14 +895,14 @@ class _Redactor:
         if self.roots:
             value = scrub_run_paths(value, self.roots)
         if profile.secrets:
-            value = self._secrets(value, minimal=key or self.markup)
+            value = self._secrets(value, minimal=self.markup)
         if profile.emails:
             value = OUTPUT_EMAIL_RE.sub(self._mask_email, value)
             value = _ENCODED_EMAIL_RE.sub(self._mask_encoded_email, value)
         if profile.guids and self.policy.redact_guids:
             value = _GUID_RE.sub(self._mask_guid, value)
-        if names and not key:
-            if self.name_re is not None:
+        if not key:
+            if names and self.name_re is not None:
                 value = self.name_re.sub(self._name, value)
             if self.id_re is not None:
                 value = self.id_re.sub(self._identifier, value)
@@ -722,8 +912,9 @@ class _Redactor:
 
     @staticmethod
     def _secrets(value: str, *, minimal: bool) -> str:
-        # ``minimal``: rendered JSON, HTML, CSV and Markdown, and keys. ``key=value`` secrets were redacted in the
-        # structure before rendering; the inline pattern cannot tell where a value ends in markup.
+        # ``minimal``: rendered JSON, HTML, CSV and Markdown. ``key=value`` secrets were redacted in the structure
+        # before rendering; the inline pattern cannot tell where a value ends in markup. Mapping keys use the full
+        # pattern (a key such as ``password=value`` carries its credential in the key text).
         value = JWT_RE.sub("***redacted-jwt***", BEARER_RE.sub("Bearer ***redacted***", value))
         if minimal:
             return value
@@ -874,19 +1065,45 @@ def redact_for_run(
     return redact_output(value, profile=profile, context=context_for_run(run_dir), markup=markup)
 
 
+def _settle(value: Any, depth: int) -> Any:
+    if depth > MAX_DEPTH + 1:
+        return value
+    if isinstance(value, list):
+        return [_settle(member, depth + 1) for member in value]
+    if not isinstance(value, Mapping):
+        return value
+    result = {key: _settle(member, depth + 1) for key, member in value.items()}
+    rows = result.get("citations")
+    if isinstance(rows, list) and all(isinstance(row, Mapping) for row in rows):
+        settled = dedupe_citations(rows)
+        result["citations"] = settled
+        if "citation_summary" in result:
+            result["citation_summary"] = build_citation_summary(settled)
+        if "citation_count" in result:
+            result["citation_count"] = len(settled)
+    # A summary copied beside the pack it describes (``report_pack_citation_summary``) follows the pack's own.
+    pack = result.get("report_pack")
+    if (
+        "report_pack_citation_summary" in result
+        and isinstance(pack, Mapping)
+        and isinstance(pack.get("citation_summary"), Mapping)
+    ):
+        result["report_pack_citation_summary"] = dict(pack["citation_summary"])
+    return result
+
+
 def settle_citations(payload: Any) -> Any:
-    """A redacted payload with its citation list de-duplicated and its ``citation_summary`` re-derived.
+    """A redacted payload with every citation list de-duplicated and every summary re-derived.
 
     Masking can make two citations identical, and a summary computed before masking would then disagree with the
-    list it sits beside (``verify-pack`` checks that). Other payloads are returned unchanged.
+    list it sits beside (``verify-pack`` checks that). This applies to the payload and to every nested container
+    that holds a ``citations`` list (a ``report_pack``, a notification section), to the ``citation_summary`` and
+    ``citation_count`` beside such a list, and to a ``report_pack_citation_summary`` copied from the nested pack's
+    summary. Values without citations are returned unchanged.
     """
-    if not isinstance(payload, Mapping) or not isinstance(payload.get("citations"), list):
+    if not isinstance(payload, (Mapping, list)):
         return payload
-    settled = dedupe_citations(payload["citations"])
-    result = {**payload, "citations": settled}
-    if "citation_summary" in payload:
-        result["citation_summary"] = build_citation_summary(settled)
-    return result
+    return _settle(payload, 0)
 
 
 def redact_payload(

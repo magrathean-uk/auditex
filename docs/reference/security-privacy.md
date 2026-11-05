@@ -268,7 +268,10 @@ returned. `auditex/output_writers.py` holds three machine-readable inventories a
   preservation (mappings keep their keys, apart from identifier keys, which are rewritten, never dropped; lists
   keep their order; embedded JSON is parsed, redacted and written back as valid JSON); a controlled failure
   (`RedactionDepthError`, a `ValueError`) for a value nested more than 100 levels or referring to itself, so a
-  deep value is refused, never returned half redacted; an unknown profile name raises `KeyError`.
+  deep value is refused, never returned half redacted; an unknown profile name raises `KeyError`; a refusal
+  (`ContextIncompleteError`, below) when the run's identities could not all be discovered; structural values
+  (finding and policy ids, setting names, reason codes, verdicts, sections) are never name-substituted; number
+  literals in embedded JSON are written back exactly.
 - **Not guaranteed:** that no identifier survives. This is a pattern and structure redactor. A privileged
   user's name that appears only in free text, with no structured record anywhere in the run's `normalized/`
   files, is not known to it; names under four characters are not replaced in free text; a name that is also
@@ -276,6 +279,18 @@ returned. `auditex/output_writers.py` holds three machine-readable inventories a
   structured `display_name` is still pseudonymised); e-mail addresses are matched in plain, `%40`, `@`,
   `&#64;` and full-width forms only (not double-encoded); domains, group names, role names and free-text fields
   are kept by default (decisions below).
+- **Incomplete discovery fails closed.** `context_for_run` reads every `normalized/**/*.json` of the run to learn
+  who the privileged users are. It reads regular files only, never opens a FIFO, device or socket (it checks the
+  type first and opens with `O_NONBLOCK`/`O_NOFOLLOW`), follows a symlink only to a regular file inside the run
+  directory, and reads at most 32 MiB per file, 128 MiB and 5,000 files per run. Anything it cannot read (a
+  dangling or escaping symlink, an unreadable or malformed file, a non-regular file, a symlinked directory, a limit
+  hit) is never ignored and never clears what other files yielded: the identities found are kept and the returned
+  `RedactionContext` has `incomplete=True` with `incomplete_reasons` (run-relative paths, no run directory). Then
+  `redact_output` with a profile that pseudonymises identities (`shareable`, `customer_pack`, `explainer`)
+  **raises `ContextIncompleteError`** (a `ValueError`): nothing is redacted, written, sent or returned, because
+  free text may name people the redactor was never told about. The operator fixes or removes the listed files, or
+  a caller that has reviewed the gap passes a context with `incomplete=False`. The `report_pack` profile keeps
+  identifiers by decision and is not refused. A context built from several runs is incomplete when any run is.
 - **Not covered at all:** customer-pack source artifacts other than `run-manifest.json` (below), the
   `report_pack` profile, anything in the operator-only rows, and writers, prints, sends and return values the
   structural test cannot see.
@@ -311,7 +326,10 @@ copy, `.write()`, `json.dump`, `print()` of a non-literal value, or send through
 (`auditex/output_writers.py`) classified `routed` or `private` with a reason; an unknown function fails the test,
 and so does an entry that matches nothing. A `routed` function is checked to call the redaction (or to be called
 only from a function that does). Every MCP tool must be in `MCP_TOOL_INVENTORY`, and every `routed` one must call
-`redact_payload`. A self-test checks that the scan recognises each shape it claims to.
+`redact_payload`. A self-test checks that the scan recognises each shape it claims to. A wildcard entry (`auditex.auth:*`) does not
+classify new functions by itself: each wildcard's matches are frozen, sorted, in `tests/sink_expansions.py`, and a
+new function that only a wildcard matches fails the test until its author reviews it and adds it there (private,
+with the wildcard's reason) or gives it its own explicit entry; a listed function that no longer exists also fails.
 
 Limits of that test, stated in `SCAN_LIMITS`: it reads source text by call name and receiver name, so it does not
 see a write through an alias or a stored callable, `os.write` on a raw descriptor, sqlite writes, subprocess
@@ -324,12 +342,12 @@ routed call the redaction. Nothing stronger is claimed.
 
 | Class | `report_pack` | `shareable`, `customer_pack`, `explainer` |
 | --- | --- | --- |
-| Secrets: Bearer values, JWTs, `key=value` and JSON-keyed credentials (`secret_hygiene.INLINE_SECRET_RE`, quoted values with escaped quotes included), and the whole value, of any type, under an exact credential key (`client_secret`, `password`, `access_token`, `refresh_token`, `api_key` and the like, spelled `snake_case`, `kebab-case` or `camelCase`) | Yes | Yes |
-| E-mail local parts, masked `***@domain` exactly as the model projection masks them, also when the at sign is written `%40`, `@`, `&#64;` or full-width | No | Yes |
+| Secrets: Bearer values, JWTs, `key=value` and JSON-keyed credentials (`secret_hygiene.INLINE_SECRET_RE`, quoted values with escaped quotes included), the same assignments written inside a mapping key (`password=value` as a key; colliding keys keep a `#n` suffix and every value), and the whole value, of any type, under an exact credential key (`client_secret`, `password`, `access_token`, `refresh_token`, `api_key` and the like, spelled `snake_case`, `kebab-case` or `camelCase`) | Yes | Yes |
+| E-mail local parts, masked `***@domain` exactly as the model projection masks them, also when the at sign is written `%40`, `\u0040`, `&#64;` or full-width | No | Yes |
 | Privileged-user display names (a record with an immutable id, M365 role holders, Google users flagged `is_admin`, `is_delegated_admin` or `is_privileged`) and `onPremisesImmutableId`, pseudonymised as the projection does (`User <16 hex>`, `Id <16 hex>`; `sha256(salt NUL value)`, the salt being the SHA-256 of the canonical `run-manifest.json`), so a name matches across the model view and every output of one run. The names and ids come from every `normalized/` record of the run, so an output that selects only some sections still protects them | No | Yes |
 | Dashed GUIDs (tenant, object, application and policy ids): replaced by a valid GUID `00000000-0000-4000-8000-<12 hex>` derived from the run salt, so references inside one output stay consistent and OSCAL still validates | No | Yes (pending product, below) |
 | The operator's run paths, every occurrence: run-relative when the text starts with the path, otherwise `<run-dir>` | No | Yes |
-| JSON embedded in a string | As the profile | Parsed, redacted as structure and written back in its own layout, so escapes and quotes stay valid |
+| JSON embedded in a string | As the profile | Parsed, redacted as structure and written back in its own layout, so escapes and quotes stay valid; number literals (`0.1000`, `1e400`, `-0`, long decimals) are written back exactly as written, and text with `NaN` or `Infinity` is not JSON and is handled as text |
 
 Deliberately not redacted, in every profile: policy ids, finding ids and rule ids, reason codes, verdicts and
 statuses, section names, setting names and enum values, role names, numbers and booleans, and the public
@@ -338,9 +356,17 @@ baseline text. These public values are allow-listed exactly: the addresses `repo
 all-zero GUID, Microsoft first-party resource application ids and the Microsoft role template ids the product
 ships (`PUBLIC_GUIDS`, kept equal to the GUID literals under `src/` by a test); and values labelled
 `Trace ID:` or `Correlation ID:`, which stay usable for support as in the diagnostics boundary. A mapping key is
-rewritten only when its text holds an identifier (an e-mail address or a GUID), never by name substitution;
-values under structural keys (`status`, `severity`, `verdict`, `reason_code`, role keys and the like) and names that
-equal report vocabulary are protected from name substitution. If two keys become equal the later one gets a `#n`
+rewritten only when its text holds an identifier (an e-mail address or a GUID) or a credential assignment, never
+by name substitution.
+
+**Structural protection (a privileged user's name never rewrites structure).** By path: a string under `id`,
+`finding_id`, `policy_id`, `rule_id`, `setting`, `setting_name`, `reason`, `reason_code`, `code`, `status`, `severity`,
+`verdict`, `section`, `kind`, `cell`, `cell_id`, `collector`, `type`, `category` or a role key (and under their lists)
+is never name-substituted; identifiers in it (GUIDs, addresses, immutable ids) are still masked. By shape: a
+policy id (`MS.EXO.4.1v1`), a snake_case or UPPER_SNAKE code (`not_collected`) and the enum words in
+`_STATIC_VOCABULARY` are never substituted anywhere in free text. A user whose name equals such a value is still
+pseudonymised in the structured `display_name` field, and a name of any other shape (`DmarcPolicy`) is still
+pseudonymised in free text; the price is that a person literally named like a code keeps that spelling in prose. If two keys become equal the later one gets a `#n`
 suffix; no value is lost. Redaction is deterministic and leaves numbers, booleans, `None` and bytes alone.
 
 ### The customer pack's verbatim files
@@ -370,6 +396,11 @@ single constant `PENDING_PRODUCT_POLICY`; changing the field changes every write
 | `report-pack.json` in the run bundle | Secrets only | Its ids are references; see the inventory | Redact at hand-over only (the current design) |
 | Explorer page | Not redacted | Operator working view | Add a shareable variant |
 | MCP auth tools | Not redacted | Operator's saved connection metadata | Decide whether tenant ids and names in them are shared with an AI client |
+
+Citation counts: after masking two citations can become identical. `settle_citations` therefore de-duplicates every
+`citations` list in a returned payload, nested ones included (a `report_pack`), re-derives the `citation_summary` and
+`citation_count` beside each, and refreshes a `report_pack_citation_summary` copy from the nested pack's summary, so
+every count equals a recomputation over the redacted citations.
 
 Limits worth knowing: after masking, two users of one domain are indistinguishable in a shared report (the
 projection's mask has the same property); a pseudonymised GUID cannot be looked up in the portal, so the operator

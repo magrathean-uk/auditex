@@ -25,7 +25,8 @@ from auditex.reporting import (
     verify_enterprise_handoff_pack,
     write_enterprise_handoff_pack,
 )
-from auditex.output_writers import MCP_TOOL_INVENTORY, SINK_INVENTORY, WRITER_INVENTORY, sink_entry
+from auditex.output_writers import MCP_TOOL_INVENTORY, SINK_INVENTORY, WRITER_INVENTORY, SinkEntry, sink_entry
+from sink_expansions import WILDCARD_EXPANSIONS
 from azure_tenant_audit import output_redaction as orx
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.output import AuditWriter
@@ -540,6 +541,57 @@ def test_every_sink_the_scan_finds_in_src_is_classified_and_every_entry_is_live(
     assert not stale, f"inventory entries that match no scanned function: {stale}"
     for entry in SINK_INVENTORY:
         assert entry.classification in {"routed", "private"} and entry.reason, entry
+
+
+def _is_wildcard(entry: SinkEntry) -> bool:
+    return any(char in entry.pattern for char in "*?[")
+
+
+def _unreviewed_wildcard_matches(
+    functions: "set[tuple[str, str]] | list[tuple[str, str]]",
+    inventory: "tuple[SinkEntry, ...]" = SINK_INVENTORY,
+    expansions: "dict[str, tuple[str, ...]]" = WILDCARD_EXPANSIONS,
+) -> list[str]:
+    """Scanned functions classified only by a wildcard that nobody has listed in the frozen expansion (S9)."""
+    unreviewed = []
+    for module, qualname in sorted(functions):
+        matching = [entry for entry in inventory if entry.matches(module, qualname)]
+        if not matching or any(not _is_wildcard(entry) for entry in matching):
+            continue  # unknown (reported by the classification test) or named explicitly
+        spec = f"{module}:{qualname}"
+        if not any(spec in expansions.get(entry.pattern, ()) for entry in matching):
+            unreviewed.append(spec)
+    return unreviewed
+
+
+def test_a_wildcard_never_classifies_a_new_sink_function_silently() -> None:
+    """S9: every function a wildcard pattern matches is listed in ``tests/sink_expansions.py``; the list is exact."""
+    hits = set(_scan_tree())
+    unreviewed = _unreviewed_wildcard_matches(hits)
+    assert not unreviewed, (
+        "these functions write, print or send and are matched only by a wildcard in SINK_INVENTORY that has not "
+        "reviewed them: read each one, then add it to WILDCARD_EXPANSIONS in tests/sink_expansions.py (it is private, "
+        "with the wildcard's reason) or give it its own explicit SinkEntry (routed or private, with a reason): "
+        f"{unreviewed}"
+    )
+    wildcards = {entry.pattern: entry for entry in SINK_INVENTORY if _is_wildcard(entry)}
+    assert set(WILDCARD_EXPANSIONS) == set(wildcards), (sorted(set(WILDCARD_EXPANSIONS) ^ set(wildcards)))
+    for pattern, listed in WILDCARD_EXPANSIONS.items():
+        assert list(listed) == sorted(listed), f"{pattern}: keep the expansion sorted"
+        current = sorted(f"{m}:{q}" for (m, q) in hits if wildcards[pattern].matches(m, q))
+        assert list(listed) == current, f"{pattern}: stale expansion (removed or renamed function): {sorted(set(listed) ^ set(current))}"
+
+
+def test_the_wildcard_check_catches_the_review_s9_example() -> None:
+    new = ("azure_tenant_audit.output", "new_customer_export")
+    source = "from pathlib import Path\ndef new_customer_export(p, payload):\n    p.write_text(payload)\n"
+    assert "write:write_text" in _scan_source(source)["new_customer_export"]
+    assert sink_entry(*new) is not None  # the broad wildcard does match it...
+    assert _unreviewed_wildcard_matches({new}) == ["azure_tenant_audit.output:new_customer_export"]  # ...but the check refuses
+    explicit = (*SINK_INVENTORY, SinkEntry("azure_tenant_audit.output:new_customer_export", "private", "reviewed: test only"))
+    assert _unreviewed_wildcard_matches({new}, explicit) == []
+    listed = {**WILDCARD_EXPANSIONS, "azure_tenant_audit.output:*": (*WILDCARD_EXPANSIONS["azure_tenant_audit.output:*"], "azure_tenant_audit.output:new_customer_export")}
+    assert _unreviewed_wildcard_matches({new}, expansions=listed) == []
 
 
 def test_every_routed_entry_reaches_the_redaction() -> None:
