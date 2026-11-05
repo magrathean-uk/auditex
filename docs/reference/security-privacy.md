@@ -104,10 +104,31 @@ opened.
 Not enforced by these layers: Google Workspace SDK calls are not routed through
 a method check and write no per-call audit events, so Google bundles say
 `observation_basis: "coverage_ledger_only"` and rely on read-only scopes and the
-collectors' use of list and get methods; the `dns_posture`, exposure and `power_platform`
-lookups use their own GET-only sessions rather than `GraphClient`, and the
+collectors' use of list and get methods; the `dns_posture`, exposure, `power_platform`
+and `power_bi` lookups use their own GET-only sessions rather than `GraphClient`, and the
 `probe` toolchain checks that start `pwsh` or `az` directly are outside the
 adapters.
+
+The optional Power BI / Power Platform collectors are extended scope, off by default
+and absent from `full` and all default presets. In commercial-cloud app mode they
+obtain their own tokens through `app_token_for` for
+`https://service.powerapps.com//.default` and
+`https://analysis.windows.net/powerbi/api/.default`. Delegated runs have no token
+path. The customer deliberately selects the `power-platform` preset after setting
+up the management-app registration and the Power BI security-group tenant setting;
+see the [one-time setup steps](../guides/admin-permission-guide.md#power-platform-and-power-bi-optional).
+Fabric Administrator and Power Platform Administrator are write-capable admin roles
+used read-only, with tenant-wide administrative blast radius in their services.
+Power Platform management-app registration includes write privileges; the blast
+radius is UNKNOWN beyond that statement. The Power BI service-principal setting
+permits tenant-wide read-only admin metadata access for the selected group.
+Auditex performs no registration, role assignment, tenant-setting change or other
+tenant write and adds no Graph application permission. `Tenant.Read.All` must not
+be granted. `listTenantSettings` is a read pinned to GET (`2023-06-01`);
+POST is only a possible later fallback if GET is refused, to be decided after a
+playground check, and is not enabled. Environment display names are discarded
+because developer and trial environments can be named after people; DLP policy
+display names remain because the rules read them. No bodies or file content are read.
 
 Command-output diagnostics mask credentials (including JSON-keyed secrets), e-mail
 and UPN local parts, and dashed GUIDs. This applies to `command.completed` samples,

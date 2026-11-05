@@ -94,7 +94,7 @@ def _assert_retention(value):
 def test_collector_returns_environments_and_dlp_policies():
     client = _FakeBapClient(
         environments=[{"name": "default", "properties": {
-            "displayName": "Default", "environmentSku": "Default", "isDefault": True,
+            "displayName": "drop@example.test", "environmentSku": "Default", "isDefault": True,
             "createdTime": "2024-01-01T00:00:00Z", "linkedEnvironmentMetadata": {"name": "drop@example.test"},
         }}],
         dlp_policies=[{"name": "policy-1", "displayName": "Tenant DLP", "environmentType": "AllEnvironments", "connectorGroups": [
@@ -111,7 +111,7 @@ def test_collector_returns_environments_and_dlp_policies():
     result = _run(client)
     assert result.status == "ok"
     assert result.payload["environments"]["value"] == [{
-        "id": "default", "name": "default", "display_name": "Default", "environment_sku": "Default",
+        "id": "default", "name": "default", "environment_sku": "Default",
         "is_default": True, "created_time": "2024-01-01T00:00:00Z",
     }]
     assert result.payload["dlpPolicies"]["value"] == [{

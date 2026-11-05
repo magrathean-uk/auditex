@@ -153,3 +153,31 @@ def test_rule_inventory_filters_by_platform_and_product_family() -> None:
     assert {row["platform"] for row in rows} == {"google_workspace"}
     assert {row["product_family"] for row in rows} == {"gmail"}
     assert "google.gmail_external_forwarding" in {row["name"] for row in rows}
+
+
+def test_power_platform_opt_in_selects_disabled_collectors_without_extending_defaults(tmp_path):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.profiles import get_profile
+    from azure_tenant_audit.run import build_live_run_plan
+
+    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
+    presets = load_collector_presets()
+    optional = {"power_platform", "power_bi"}
+    assert all(config.collectors[name].enabled is False for name in optional)
+    assert presets["power-platform"]["plane"] == "inventory"
+    for name, preset in presets.items():
+        if name != "power-platform":
+            assert optional.isdisjoint(preset["include"]), name
+    assert optional.isdisjoint(get_profile("global-reader").default_collectors)
+
+    def plan(extra):
+        args = cli.build_parser().parse_args(["--tenant-name", "constructed", *extra])
+        return build_live_run_plan(args, output_dir=tmp_path, collector_config=config,
+                                   permission_hints={}, collector_presets=presets)
+
+    selected = plan(["--collector-preset", "power-platform", "--plane", "inventory"])
+    assert selected.selected_collectors == ["identity", "licensing", "power_platform", "power_bi"]
+    assert selected.execution_plane == "inventory"
+    assert optional.isdisjoint(plan([]).selected_collectors)
+    assert optional.isdisjoint(plan(["--collector-preset", "full"]).selected_collectors)

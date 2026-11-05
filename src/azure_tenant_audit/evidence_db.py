@@ -129,7 +129,9 @@ def _insert_records(
             section_name,
             index,
             _record_key(record, section_name, index),
-            _scalar(record.get("display_name") or record.get("name")),
+            _scalar((record.get("name") or record.get("id"))
+                    if section_name == "power_platform_environment_objects"
+                    else (record.get("display_name") or record.get("name"))),
             _scalar(record.get("source_name")),
             _scalar(record.get("collector")),
             _scalar(record.get("severity")),
