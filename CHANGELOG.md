@@ -12,11 +12,10 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Add value-rule contract A1 within assessment schema `2026-11-05`: distinguish collected but unusable evidence from missing collection, preserve legacy assessments and pack parity, and accept the exact 68 reason/citation contract exceptions for subsequent rule stages.
 
 Model-development tooling (round 2 of the specialist-model programme) and an internal
-engine/product boundary rework. `CONTRACT_VERSION` stays `2026-10-22`; report, export and
-MCP tool contracts are unchanged; command-response diagnostics are masked as described below.
-Audit collection changes too: the `identity_governance` collector
-gains two GET-only reads (the PIM role policies, "Collection (1.2.2.dev5)" below) and the
-bundle gains the `privileged_roles` artefact, both additive.
+engine/product boundary rework, plus the deterministic value-rule route and collection changes below.
+`CONTRACT_VERSION` stays `2026-10-22`; report, export and MCP tool contracts are unchanged; command-response diagnostics are masked as described below.
+The `identity_governance` collector also gains two GET-only PIM role-policy reads and
+the bundle gains the `privileged_roles` artefact, both additive.
 
 ### Command-output privacy
 
@@ -35,7 +34,11 @@ bundle gains the `privileged_roles` artefact, both additive.
   window. Decode common address/GUID separators once and emit the decoded forms;
   retain URL hosts and paths, numeric npm versions, conventional Git SSH addresses,
   undashed hashes and labelled trace/correlation IDs. Graph request IDs retain the
-  ordinary dashed-GUID masking rule.
+  ordinary dashed-GUID masking rule. Credentials are masked before and after decoding,
+  including literal secrets containing encoded separators; query/filter-glued addresses
+  are masked separately. Accepted limits include unsupported or double-encoded separators,
+  overlong local parts, numeric/IP-literal domains, GUIDs followed by hex characters and
+  partial quoted or apostrophe local parts at a clipped scan edge; see the privacy model.
 
 ### Model projection correctness
 
@@ -71,31 +74,47 @@ bundle gains the `privileged_roles` artefact, both additive.
 
 ### Model assessment schema
 
-- **Model assessment schema version `2026-11-05` adds a `value_rule` class for deterministic rule answers.** The change is additive:
-  a `value_rule` row carries `cell`, `reason_code` and `reason_text`, where the text is constant and comes from the shipped
-  `configs/scuba-value-rules.json` inventory, and the validator checks all three against that inventory. Version `2026-10-29`
-  stays valid under its own preserved schema file. The inventory covers eight Power BI policies and `MS.AAD.3.4v1`. Serving
-  applies it by default, ahead of the registered missing-field and empty-list checks; because the model case's Power BI and
-  `authentication_method` evidence can still be withheld by the projection, those policies may answer not assessed until the
-  rules read evidence directly. The hidden `AUDITEX_DISABLE_VALUE_RULES` switch turns the rules off operationally, and the offline
-  `evaluate_precheck` scorer always leaves them off.
-- **25 more policies are answered by deterministic value rules (spec v3.9).** Teams 1.1 to 1.7, 2.1 to 2.3, 4.1 and 5.1 to
-  5.3, Exchange Online 2.2, 5.1, 6.1, 6.2, 7.1 and 13.1 and Defender (`MS.SECURITYSUITE`) 1.4, 4.1, 5.1, 8.1 and 8.2 join the
-  inventory (34 policies, 314 cells). Serving answers them from the rule view instead of the model. The Teams environment gate
-  (2.2, 2.3, 4.1) is now recorded as the rule's `closed_gate` cell (class `value_rule`) instead of the `closed_gate` class; the
-  claims, limitations and recommendations are unchanged. A not-commercial environment the gate does not close, an unlabelled
-  violating object, an unusable field value, an empty or non-list section and similar evidence now answer not assessed with a
-  catalogued reason where the pinned Rego reads met or not met (spec divergences D14 to D23, D103). MS.SECURITYSUITE.4.1v1
-  requires the seventh alert, "A potentially malicious URL click was detected", as the baseline does (D103). The Power BI and
-  `MS.AAD.3.4v1` texts are unchanged by the v3.9 text review.
+- **Deterministic value rules cover 99 SCuBA policies without a model call:** Entra ID 31, Exchange Online 12,
+  Power BI 8, Power Platform 8, Defender 18, SharePoint 8 and Teams 14. The `2026-11-05` assessment schema adds
+  class `value_rule` and inventory-validated cell, reason code and constant text; legacy `2026-10-29` is preserved.
+  Both run-bundle and internal ScubaGear export paths capture a private in-memory rule view after collection-health
+  withholding and before pruning, shape gates, model budgets and redaction; it is never persisted. Teams applicability
+  gates are recorded as `value_rule` / `closed_gate`. SS 1.1, 6.1 and 6.2 remain held pending the P4 projection review.
+  Rules are on by default, with hidden rollback switch `AUDITEX_DISABLE_VALUE_RULES`; offline `evaluate_precheck`
+  scoring leaves them off. The model still answers uncovered rows; an optional explainer remains planned.
 - **A value rule that fails on collected evidence has its own answer.** It was answered as "section not collected"; it now
   answers the catalogued `rule_evaluation_failed` reason ("Not assessed: Auditex could not evaluate this policy on the collected
   evidence. This is a product fault, not a tenant setting.") with no limitation and the new recommendation `report_product_fault`
   (report to `contact+auditex@magrathean.uk`). Both are additive within the unreleased `2026-11-05` schema. The log line still
   names only the rule id and the exception class, and `MemoryError` still propagates.
-- **Customer-facing wording now matches what runs today.** The model-assisted path is no longer called a second opinion; the README, docs and `auditex model` help say the rules answer the Power BI policies, `MS.AAD.3.4v1` and the rows caught by the gate, missing-evidence and empty-list checks, and the model answers the rows no rule covers, mark rules-only verdicts and the optional explainer role as planned and not built, and the output contract maps the customer term "not assessed" to the unchanged internal values.
 
 ### Collection (1.2.2.dev5)
+
+- **Exchange 1:** select transport and organisation config names, remote-domain trust and transport-rule scope,
+  and add `Get-SharingPolicy`. Normalised `transportConfig` keys now use `Name`; `organizationAuditConfig` keys use
+  `Identity`, changing record keys and dependent finding ids. Live organisation-identity serialisation is still unverified.
+- **Exchange 2:** save raw SPF, DKIM and DMARC answers and resolver logs for verified Email-service domains,
+  with bounded fan-out, a retry and explicit failure/truncation coverage. A CNAME-only DKIM answer is retained,
+  matching ScubaGear's DoH fallback; a dangling CNAME can read not met rather than absent or resolver failure.
+- **Exchange 3:** project remote domains, transport rules and the sharing policy on the run path, with failed reads
+  withheld and sharing partner domains retained as configuration metadata.
+- **Teams 1:** widen meeting-policy fields and add broadcast/client configuration reads without new permissions.
+  Federation records now carry `Identity`; the finding id becomes
+  `teams_policy:tenantFederationConfiguration:Global:external_federation_open`, a one-off comparison change.
+- **Teams 2:** project app-permission, client, broadcast and federation policy sections on the run path;
+  only the exact open allow-list marker is treated as unrestricted federation.
+- **Defender 1:** add 14 read-only Exchange Online `Get-*` commands for Defender for Office 365 and EOP policy
+  evidence, with no new Graph scope. Recipient lists are minimised; paired ATP `command_error` failures after
+  a healthy EOP read are reclassified as `license_required` with `licence_inferred: true`. Other failure classes stay gaps.
+- **Defender 2:** project 16 Exchange/Defender list sections and the licence flag on the run path. An inferred licence refusal
+  withholds the flag and dependent sections; it is not evidence of no licence.
+- **Power Platform 1:** add seven run-path section adapters for Power BI and Power Platform; failed, skipped
+  or truncated reads withhold evidence instead of becoming empty lists.
+- **Power Platform 2:** collect Power BI tenant settings and Power Platform environments, DLP scope, tenant
+  isolation and tenant settings through GET-only clients, with separate token audiences and coverage gaps on failure.
+- **Power Platform 3:** add the deliberate `power-platform` preset for both optional collectors; they stay disabled
+  in other presets. Document customer setup and write-capable administrative roles used read-only. Environment
+  records no longer retain `display_name` or use it as a label.
 
 - **PIM schedule start dates preserve explicit nulls.** The `privileged_roles` artefact now keeps
   `StartDateTime: null` when Graph returns `scheduleInfo.startDateTime: null`; an omitted source key

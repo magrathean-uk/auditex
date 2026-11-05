@@ -162,9 +162,10 @@ pack data is ignored for comparison; dry-run does not read the report pack.
 
 ### Rule pre-checks and offline product scoring
 
-Serving enables the 34 value rules in `configs/scuba-value-rules.json` by default
-(spec v3.9: Power BI 8 and AAD 3.4v1, then the 25 Teams, Exchange Online and Defender
-lookups of `value_rules/lookups.py` on the cross-kind helpers of `value_rules/helpers.py`).
+Serving enables the 99 value rules in `configs/scuba-value-rules.json` by default,
+covering Entra ID, Exchange Online, Power BI, Power Platform, Defender, SharePoint and Teams.
+The [output contract](../reference/output-contract.md) lists their exact policy ids and the three held policies.
+The rule engine follows spec v3.9.1 and addendum A1; the catalogue retains its original `spec_version: v3.9` label.
 Their cell inventory and reason codes are checked by the `2026-11-05` assessment
 validator against the shipped inventory. A value rule uses the shared closed gate
 first (rendered by `value_rules/gates.py` as the rule's `closed_gate` cell), then its
@@ -176,12 +177,12 @@ restores the prior serving route. The offline `evaluate_precheck` scorer always 
 value rules off, preserving historical scoring output. Serving rules read the in-memory
 rule view; tests and `precheck_case` without a rule view read the case evidence.
 
-The vector fixtures are `tests/fixtures/value-rules/vectors-v2.jsonl.xz` (the nine) and
-`vectors-v39.jsonl.xz` (the other rule policies, from the v3.9 kit's `vectors.jsonl`),
-both rebuilt byte-identically by `scripts/build-value-rule-fixture.py SOURCE OUTPUT` and
-pinned in `manifest.json`. `AUDITEX_TEST_VALUE_RULE_VECTORS=<kit vectors.jsonl>` replays
-a full source file; `AUDITEX_TEST_OPA` and `AUDITEX_TEST_SCUBAGEAR` enable the pinned
-Rego replay in `tests/test_value_rules_oracle.py`.
+The compressed fixtures under `tests/fixtures/value-rules/` cover v2, the v3.9 lookups and
+stages 4 to 9; each manifest pins hashes, policy and cell counts, and row origins.
+They contain constructed rows and pack train/validation rows with vector ids and origins,
+excluding held-out test, pilot and sealed freeze rows. See [provenance](../provenance/provenance.md).
+`AUDITEX_TEST_VALUE_RULE_VECTORS=<kit vectors.jsonl>` replays a full source file;
+`AUDITEX_TEST_OPA` and `AUDITEX_TEST_SCUBAGEAR` enable pinned offline Rego replay.
 
 Assessment pre-checks non-empty projections before inference. The shipped
 `configs/scuba-rule-precheck.json` is the shared authority for serving and oracle
@@ -205,12 +206,13 @@ unreadable gate inputs as unknown. Frozen packs are not rewritten.
 reading policy's outcome). The cloud comes from the `dns_posture` OpenID discovery when the run has it, else from US
 Government licence SKUs, else it is taken as `commercial`.
 
-**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** `spf_records`, `dkim_records` and `dmarc_records` need the complete
-TXT answers ScubaGear exports; the `dns_posture` collector keeps parsed posture only, so no run produces them yet, and
-`dns_posture` is not in any default collector set (it sends the tenant's domain names to the DNS-over-HTTPS resolver,
-the domains' MTA-STS hosts and Microsoft; `docs/reference/security-privacy.md`). The projection report names the
-cause: `dns_posture_not_run` when the run did not select the collector, `dns_records_not_saved` when it did. Running
-it (`--collectors ...,dns_posture`) still helps the model path today: its OpenID discovery decides `M365Environment`.
+**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** The opt-in `dns_posture` collector now saves
+`spf_records`, `dkim_records` and `dmarc_records` for verified domains with the Email service
+(a domain without `supportedServices` is kept), including resolver logs. Posture checks still cover
+all verified domains. Failed or truncated reads withhold the dependent sections. The private rule
+view keeps resolver logs; the model view drops them before its shape and budget checks.
+`dns_posture` remains outside default collector sets; its public lookups and OpenID discovery
+are described in the [privacy model](../reference/security-privacy.md).
 
 Sharing values mean `0` organisation only, `1` new/existing guests, `2` anyone,
 `3` existing guests. Real integers and integral floats are accepted; booleans,

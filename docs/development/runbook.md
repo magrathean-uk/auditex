@@ -106,6 +106,17 @@ There is no hosted CI; the repository is stored on Git and checks run locally. B
 
 The response plane is hidden by default and guarded separately. Do not enable it for an ordinary audit. Agent command templates under `agent/` include lab tools as well as audit commands; inspect the selected tool before execution.
 
+### Pending playground checks
+
+Offline and mock-tenant checks do not verify live provider serialisation. Before claiming live parity:
+
+- Confirm how `Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled` serialises `Identity`.
+  The `org_config` adapter withholds an unreadable identity; do not substitute an assumed name.
+- Confirm unlicensed-tenant errors for the two ATP licence reads. Paired generic command failures are
+  marked `licence_inferred`; the rule projection withholds them rather than asserting no licence.
+- Confirm Power Platform `listTenantSettings` accepts GET with `api-version=2023-06-01`.
+  POST and automatic fallback remain disabled.
+
 ### Entra Free directory fixtures
 
 `tenant-bootstrap/scripts/seed-free-directory.py` is a separate lab writer for

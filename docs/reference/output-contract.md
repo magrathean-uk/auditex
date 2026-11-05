@@ -146,10 +146,22 @@ model `fail`. Precedence is `closed_gate`, `absent_section`, `absent_field`, the
 the four verdict totals still sum to the policy count.
 
 Version `2026-11-05` adds the `value_rule` class and the shipped
-`configs/scuba-value-rules.json` inventory (value-rule spec v3.9). The current route covers 34
-policies: eight Power BI policies, AAD 3.4v1, fourteen Teams (1.1 to 1.7, 2.1 to 2.3, 4.1,
-5.1 to 5.3), six Exchange Online (2.2, 5.1, 6.1, 6.2, 7.1, 13.1) and five Defender
-(SECURITYSUITE 1.4, 4.1, 5.1, 8.1, 8.2) policies. Serving enables it by default. The hidden operational
+`configs/scuba-value-rules.json` inventory, extended through spec v3.9.1 and addendum A1.
+The route covers 99 policies (`len(policies)` in that inventory):
+
+| Area | Policies | Policy suffixes (`MS.<area>.`) |
+| --- | --- | --- |
+| Entra ID (AAD) | 31 | `1.1v1`, `2.1v1`, `2.3v1`, `3.1v1`, `3.2v2`, `3.3v2`, `3.4v1`, `3.5v2`, `3.6v1`, `3.7v1`, `3.8v1`, `3.9v1`, `5.1v1`, `5.2v1`, `5.3v1`, `5.5v1`, `5.6v1`, `5.7v1`, `6.1v1`, `7.1v1`, `7.2v1`, `7.3v1`, `7.4v1`, `7.5v1`, `7.6v1`, `7.7v1`, `7.8v1`, `7.9v1`, `8.1v1`, `8.2v1`, `9.1v1` |
+| Exchange Online | 12 | `1.1v2`, `13.1v1`, `2.2v3`, `3.1v1`, `4.1v1`, `4.2v1`, `4.3v1`, `4.4v1`, `5.1v1`, `6.1v1`, `6.2v1`, `7.1v1` |
+| Power BI | 8 | `1.1v1`, `2.1v1`, `3.1v1`, `4.1v1`, `4.2v1`, `5.1v1`, `6.1v1`, `7.1v1` |
+| Power Platform | 8 | `1.1v1`, `1.2v1`, `2.1v1`, `2.2v1`, `2.3v1`, `3.1v1`, `5.1v1`, `6.1v1` |
+| Defender (SECURITYSUITE) | 18 | `1.2v1`, `1.3v1`, `1.4v1`, `2.1v1`, `2.2v1`, `2.3v1`, `2.4v1`, `3.1v1`, `3.2v1`, `3.3v1`, `3.4v1`, `4.1v1`, `5.1v1`, `7.1v1`, `7.2v1`, `7.3v1`, `8.1v1`, `8.2v1` |
+| SharePoint | 8 | `1.1v1`, `1.2v1`, `1.3v1`, `2.1v1`, `2.2v1`, `3.1v1`, `3.2v1`, `3.3v2` |
+| Teams | 14 | `1.1v1`, `1.2v2`, `1.3v1`, `1.4v1`, `1.5v1`, `1.6v1`, `1.7v2`, `2.1v2`, `2.2v2`, `2.3v2`, `4.1v1`, `5.1v2`, `5.2v2`, `5.3v2` |
+
+MS.SECURITYSUITE.1.1v1, 6.1v1 and 6.2v1 remain held pending the P4 projection review;
+prepared rows are in `tests/fixtures/value-rules/held-rows-*.json`, outside the enabled inventory.
+Serving enables value rules by default. The hidden operational
 switch `AUDITEX_DISABLE_VALUE_RULES` turns it off: the value is stripped of whitespace and
 lower-cased, and any result that is not empty and not `0`, `false`, `no` or `off` restores the
 previous pre-check order (unset, empty, whitespace-only and those four values leave the rules on).
@@ -179,10 +191,11 @@ schema: collected but unusable evidence uses `evidence_unusable` plus
 catalogued reason; no evidence text is interpolated and these recommendation ids define
 no display wording. Offline pack parity (`as_pack_response(..., legacy=True)`) and previously
 written `2026-11-05` answers retain the earlier vocabulary and still validate.
-A1 also closes the exact citation variants for 64 cells, the two paired reason codes/texts
+A1 accepts exactly 68 contract cells through `cited_variants` and `cell_contracts`: the
+exact citation variants for 64 cells, the two paired reason codes/texts
 for AAD 6.1 `orphan_sub_domain`, and the specified citation order for the three SS 7.x
-`preset_rule_unusable` cells. Catalogue-level contracts support subsequent policy stages
-without registering those policies. Other codes, texts and citation lists are rejected.
+`preset_rule_unusable` cells. Catalogue-level contracts also cover held policies without registering them. Other
+codes, texts, citation lists and citation orders are rejected.
 A met or not-met answer confirms the
 requirement and cites every section in the model case; not-met recommends baseline
 review. The validator checks the inventory, sections, claims and text but cannot
@@ -223,7 +236,8 @@ recommendation `report_product_fault`, which means: report the fault to
 `contact+auditex@magrathean.uk`. The failure is logged with the rule id and the
 exception class name only; no exception text or evidence reaches the row or the log.
 
-Serving rules read an in-memory rule view of the projected evidence, taken after
+Serving rules read an in-memory rule view on both the run-bundle and internal
+ScubaGear export paths, taken after
 withholding and before pruning, the shape gate, the item budget and redaction
 (`docs/reference/security-privacy.md`); it is never written to an artefact. A
 section the run or export did not collect still answers not assessed (section not
@@ -445,13 +459,13 @@ Graph camelCase is converted recursively for the selected fields.
 | `dmarc_records` | Saved raw `dns_posture.dmarc_records` with `{domain, rdata[]}` containing complete TXT answers. Parsed posture alone is insufficient. |
 | `spf_records` | Saved raw `dns_posture.spf_records` in a complete observed pack shape, including its `compliant`/`message` fields where present. Only explicit `domain`, historic `doamin`, `rdata`, `compliant` and `message` fields are permitted; missing values or spelling variants are never synthesised. |
 | `dkim_records` | Saved raw `dns_posture.dkim_records` with `{domain, rdata[]}` containing complete TXT answers. |
-| DNS sections, missing | No collector writes `dns_posture.spf_records`, `dkim_records` or `dmarc_records` today: `dns_posture` keeps parsed posture (`domainPosture`) only. A run that did not select `dns_posture` reports the three as `dns_posture_not_run`; a run that did reports `dns_records_not_saved`. Either way MS.EXO.2.2v3, 3.1v1 and 4.1v1 to 4.4v1 are answered unknown by rule. |
+| DNS sections, missing | `dns_posture` now saves raw SPF, DKIM and DMARC answers with resolver logs. A run that did not select it still withholds those sections; failed or truncated reads also withhold them. Rules read the health-checked answers and logs before the model view's shape and budget checks. |
 | `dkim_config` | Exchange raw `exchange_policy.dkimSigningConfig`: `{Domain, Enabled}`. |
 | `accepted_domains` | Exchange raw `exchange_policy.acceptedDomains`: `{Name, DomainName}`. Graph verified domains are not a substitute for accepted-domain policy. |
-| `transport_config` | Exchange raw `exchange_policy.transportConfig`: `{Name, SmtpClientAuthenticationDisabled}`. The current command selects only the boolean, so its output alone is incomplete. |
-| `org_config` | Exchange raw `exchange_policy.organizationAuditConfig`: `{Identity, Name, AuditDisabled}`. The current command selects only `AuditDisabled`, which is insufficient. |
+| `transport_config` | Exchange raw `exchange_policy.transportConfig`: `{Name, SmtpClientAuthenticationDisabled}`. The command selects both fields. Normalised `transportConfig` records are keyed by `Name`; this changes record keys and finding ids compared with older runs. |
+| `org_config` | Exchange raw `exchange_policy.organizationAuditConfig`: `{Identity, Name, AuditDisabled}`. The command selects all three fields. Normalised `organizationAuditConfig` records are keyed by `Identity`. Live `Identity` serialisation remains unverified; an unreadable value withholds the section. |
 | `meeting_policies` | Teams raw `teams_policy.meetingPolicies`: records containing only the validated fields `Identity`, `AllowAnonymousUsersToStartMeeting`, `AllowCloudRecording`, `AllowExternalParticipantGiveRequestControl`, `AllowPSTNUsersToBypassLobby`, `AutoAdmittedUsers`. Summary policy objects cannot supply missing fields. |
-| `sharing_policy` | Disabled with `incomplete_shape`: neither frozen v7 pack contains a populated example. Saved sharing-policy summaries cannot authorise an unseen shape. |
+| `sharing_policy` | Raw `exchange_policy.sharingPolicy` with `Name` and string `Domains`, available to the rule view. The model shape gate still withholds shapes without a frozen pack witness. |
 
 PowerShell sections can also use existing `normalized/exchange_policy_objects.json`
 or `normalized/teams_policy_objects.json` records only when the matching `source_name`
@@ -478,18 +492,17 @@ excluded from raw shapes and applied only during prompt assembly. All shape
 variants require a real train/test witness; paths or types from separate variants
 are never combined to authorise a new object.
 
-The other 41 catalogue sections have no adapter in this package. Collection alone
-does not enable them: they require a future complete-shape adapter and tests. The
-corresponding complete provider evidence, rather than summary counts, would be:
+Area adapters now supply additional private rule evidence. Their registration does not
+relax the frozen model shape gate; collected sections can reach rules while remaining withheld from the model.
 
-| Surface | Sections awaiting adapters and saved evidence |
+| Surface | Run-path rule evidence and remaining gaps |
 | --- | --- |
-| Entra | `app_management_policies`, `default_app_management_policy`: application management policies/default policy; `authentication_method`: authentication method configuration; `directory_settings`: directory settings; `risky_delegated_permission_classifications`: permission classifications. |
-| Exchange | `admin_audit_log_config`: full admin audit log configuration; `remote_domains`: complete remote-domain settings; `transport_rule`: full transport rule records. |
-| Security Suite | `anti_malware_policies`, `anti_malware_rules`, `anti_phish_policies`, `anti_phish_rules`, `atp_policy_for_o365`, `atp_policy_rules`, `built_in_protection_rules`, `conn_filter`, `dlp_compliance_policies`, `dlp_compliance_rules`, `hosted_content_filter_policies`, `hosted_content_filter_rules`, `protection_alerts`, `protection_policy_rules`, `safe_attachment_policies`, `safe_attachment_rules`, `safe_links_policies`, `safe_links_rules`: complete Exchange/Security policy and rule exports; `defender_license`, `defender_dlp_license`: explicit, complete service-plan/licence evidence. |
-| Teams | `app_policies`, `broadcast_policies`, `client_configuration`, `federation_configuration`, `tenant_app_settings`: full Teams policy/configuration exports. |
-| Power Platform | `dlp_policies`, `domain_settings`, `environment_creation`, `environment_list`, `tenant_isolation`: full Power Platform tenant and environment administration exports. |
-| Power BI | `powerbi_access_denied_reason`, `powerbi_license_found`, `powerbi_tenant_settings`: explicit access/licence state and complete tenant settings exports. |
+| Entra | The additional authentication-method, application-management, directory-setting and delegated-permission-classification adapters are not merged. Rules remain enabled but missing evidence is not assessed. |
+| Exchange | `remote_domains`, `transport_rule` and `sharing_policy` now have adapters; `admin_audit_log_config` is supplied by the Defender adapter module. |
+| Security Suite | Sixteen Exchange/Defender list sections and `defender_license` have adapters. Explicit licence refusals are distinguished from inferred ones; inferred licence state withholds dependent evidence. DLP policy/rule, DLP licence and protection-alert adapters remain absent. |
+| Teams | `meeting_policies`, `app_policies`, `broadcast_policies`, `client_configuration` and `federation_configuration` have adapters. `tenant_app_settings` remains absent. |
+| Power Platform | `dlp_policies`, `environment_creation`, `environment_list` and `tenant_isolation` have adapters. Environment `display_name` is discarded; only machine identifiers and rule settings are retained. `domain_settings` remains absent on the run path. |
+| Power BI | `powerbi_access_denied_reason`, `powerbi_license_found` and `powerbi_tenant_settings` have adapters for explicit access/licence state and tenant settings. |
 
 By default rule rows make zero model calls. `--shadow-model-on-precheck` records the
 ordinary model-client result under `model_shadow`, including failures and attempt
@@ -977,6 +990,12 @@ Report and compare code can use this database as the durable lookup surface inst
 
 No list read drops its next-page link silently. `defender.secureScoreControlProfiles`, `defender.secureScores`, `licensing.subscribedSkus` and `identity.domains` were unpaged reads (the first returned 200 rows and a next link in a live run); they now go through the shared paging path without `$top` and are kept whole inline (the endpoint-spec flag `inline: true`), so an operator `--top` below the list length cuts them like any other list (below about 250 it makes `defender` partial). An unpaged response that still carries `@odata.nextLink` is a gap with `truncation_reason` `pagination_not_followed`, and the capability-gated list endpoints (`/security/incidents`, `/security/alerts_v2`, `/identityGovernance/appConsent/appConsentRequests`) follow the next link or record the same reason. A test fails the build when a collector reads a list with a direct `get_json`.
 
+**DKIM CNAME parity.** For raw SCuBA records, a CNAME-only answer is retained as `rdata`,
+matching the pinned ScubaGear DoH fallback. A selector CNAME whose target is NXDOMAIN can therefore
+stop the selector walk and read not met as a non-key answer, rather than being flattened to an absent
+TXT answer. When other answers remain, CNAME entries are dropped. This differs from a resolver that
+follows the target and returns only its NXDOMAIN result.
+
 A DNS resolver failure is unknown, never a missing record. The DNS-over-HTTPS client raises for SERVFAIL, REFUSED, FORMERR and NOTIMP; only NXDOMAIN and NOERROR without an answer mean the record is absent. A response with no `Status` (or one that is not a number) and a response with the truncation flag (`TC`) are not statements about the record either: they raise too, so a malformed answer cannot read "absent" and raise a false "missing" finding. A DKIM record with an empty `p=` is a revoked key (RFC 6376) and counts as an absent selector. An MTA-STS policy fetch that did not answer (unreachable, HTTP 429 or 5xx) fails the domain's row with error class `public_lookup_error` and makes the collector `partial`; a 404 or an invalid file is an answer and stays a finding. The domain's coverage row is `failed` with error class `dns_resolver_error`, so the `dns_posture` collector and the run are `partial`, a blocker names the error, and the rules read `not_assessed` with `collector_not_complete:dns_posture` (an offline bundle whose collector is complete but whose record carries `resolver_error` reads `resolver_error`). The record has every presence flag unknown (`present: null`; DKIM `selectors_unresolved`) and the normalized `dns_posture_objects` record omits `spf_present`, `dmarc_present`, `mta_sts_dns_present`, `tls_rpt_present` and `bimi_present` and lists `dkim_selectors_unresolved`. No SPF, DMARC, DKIM, MTA-STS, TLS-RPT or BIMI finding is raised for such a domain (Microsoft 365 and Google Workspace), and it no longer mutes `exchange.dkim_signing_disabled`.
 
 Mailbox forwarding is read server-side: `Get-EXOMailbox -ResultSize 501 -Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward -Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null'` returns the mailboxes that forward whatever the tenant size (it was the first 50 mailboxes of the tenant, recorded nowhere). The collector bound is 500 (`FORWARDING_MAILBOX_LIMIT`); one row more is requested so a longer list is detected, and then 500 are kept and the coverage row is `partial` with `truncation_reason` `fanout_limit`, `result_limit` 500 and `rows_collected` 500, so `exchange.mailbox_forwarding_configured` reads `not_assessed` unless a finding was raised. Normalized `mailboxForwarding` records carry `forwarding_address` (a forwarding contact) next to `forwarding_smtp_address`.
@@ -1010,6 +1029,11 @@ Shell), so on a Graph-only run those rules report `sharing_setting_not_read:<set
 
 `onedrive_posture_objects` records gain `sharing_capability_source`: `tenant` when the collector
 copied the tenant's single value onto the site, `site` when the site carried its own.
+
+The federation record now uses `Identity` (`Global`) as its key. Its finding id is
+`teams_policy:tenantFederationConfiguration:Global:external_federation_open`;
+comparisons against older runs can show the old id resolved and this id newly raised.
+
 `teams_policy_objects` records for `tenantFederationConfiguration` gain `allow_teams_consumer`,
 `allowed_domains_state` (`open`: no allow list; `allow_list`; `unknown`: not collected or an unrecognised
 shape), `allowed_domain_count` and `blocked_domain_count`.
@@ -1140,7 +1164,7 @@ for at most 100 Windows devices; a larger fleet leaves a `fanout_limit` entry in
 | `exchange.smtp_auth_enabled_tenant_wide` | `SmtpClientAuthenticationDisabled` is false for the tenant, or the tenant default is true and `casMailboxSmtpAuth` counts mailboxes that switch it back on for themselves (finding `exchange_policy:cas_mailbox:smtp_auth_enabled`, once per run, with the count and no address) | medium | `Get-TransportConfig` was not read or omitted the setting, or the per-mailbox count (`Get-CASMailbox`, an aggregate `Measure-Object \| Select-Object Count`, so the answer is never empty and no mailbox is named) was not read in full |
 | `exchange.dkim_signing_disabled` | DKIM signing is off for an authoritative accepted domain other than `*.onmicrosoft.com`. One finding per domain. `DomainType` and `DomainName` are read whether Exchange returns names, integers or objects | medium | `Get-DkimSigningConfig` or `Get-AcceptedDomain` was not read, there is no custom domain, a domain has no signing row, or `dns_posture.dkim_missing` already reports the disabled domain (`reported_by:dns_posture.dkim_missing`) |
 
-**Mail protection rules are judged on their own command rows.** The three Exchange rules do not wait for the whole `exchange_policy` collector: it runs a dozen commands and is `partial` whenever one is unavailable (`Get-ProtectionAlert` needs a Security & Compliance session that app-only runs never open). Each rule reads `not_assessed` unless its own command rows were read in full (`malwareFilterPolicy`, `transportConfig` with `casMailboxSmtpAuth`, `dkimSigningConfig` with `acceptedDomains`), and `auditex compare` reassesses a vanished finding on the same rows. CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` now need `exchange.dkim_signing_disabled` as well as `dns_posture.dkim_missing`: selectors published in DNS no longer make them `pass` on their own. Exchange Online returns enumerations as integers in some builds, so the adapter asks for names (`ConvertTo-Json -EnumsAsStrings` where PowerShell has it) and the normalizer reads either form.
+**Mail protection rules are judged on their own command rows.** The three Exchange rules do not wait for the whole `exchange_policy` collector: it runs multiple independent commands and is `partial` whenever one is unavailable (`Get-ProtectionAlert` needs a Security & Compliance session that app-only runs never open). Each rule reads `not_assessed` unless its own command rows were read in full (`malwareFilterPolicy`, `transportConfig` with `casMailboxSmtpAuth`, `dkimSigningConfig` with `acceptedDomains`), and `auditex compare` reassesses a vanished finding on the same rows. CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` now need `exchange.dkim_signing_disabled` as well as `dns_posture.dkim_missing`: selectors published in DNS no longer make them `pass` on their own. Exchange Online returns enumerations as integers in some builds, so the adapter asks for names (`ConvertTo-Json -EnumsAsStrings` where PowerShell has it) and the normalizer reads either form.
 
 **End-of-life table.** `configs/os-end-of-life.json` is read from disk and never from the network. It records
 `verified_on`, and for each Windows build (10 and 11, General Availability Channel) and each macOS, iOS, iPadOS and

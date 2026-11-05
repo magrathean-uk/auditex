@@ -273,9 +273,9 @@ assessed on delegated runs, even with the roles above, because Auditex has no
 delegated token path for either audience. Missing setup, denied reads and incomplete
 or truncated evidence also withhold the dependent sections rather than passing them.
 MS.POWERPLATFORM.2.3 is a separate constant not-assessed policy and is not enabled by
-this opt-in. Current projection and precheck output uses a generic missing-section
-reason when the opt-in is absent; it does not yet carry the explicit opt-in reason
-above into the policy result.
+this opt-in. Missing optional sections on a run with a known collector selection now carry
+`optional_collection_not_enabled`; unknown selection and selected-collector failures retain their
+existing reasons. The [output contract](../reference/output-contract.md) defines the exact conditions.
 
 Prerequisite reference: ScubaGear revision `2446ad723b7f55031cc02c8aca244d731d468cba`,
 `docs/prerequisites/noninteractive.md` (Power BI tenant setting and Power Platform

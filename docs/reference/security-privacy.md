@@ -25,17 +25,18 @@ metadata, OAuth grant metadata, sharing metadata, and audit-event metadata.
 Treat every bundle as confidential.
 Value-rule records carry policy, cell, code, section names and controlled reason
 text, not tenant evidence values. Serving rules read a separate in-memory view
-after source, ledger, collector-error, qualifier and scan checks, before the
-model view's shape, size and redaction gates. The rule view retains unredacted
+on both the run-bundle and internal ScubaGear export paths after source, ledger,
+collector-error, qualifier and scan checks, before pruning and the model view's
+shape, size and redaction gates. The rule view retains unredacted
 e-mail addresses and display names so rules can distinguish users; it is never
 serialised into prompts, assessment files, sidecars or logs. This includes
 Defender ATP preset-rule recipient and exclusion lists (`SentTo`,
 `SentToMemberOf`, `RecipientDomainIs` and their `ExceptIf*` counterparts),
 DNS resolver `log` entries and the Security Suite unsuccessful-command ledger.
-Only the gated
-model view reaches the model endpoint, redacted unless `--no-redaction` is used
-with a loopback endpoint. A policy whose `scuba_config`
-synthesis was not projected sees the not-collected marker in both views.
+Only the gated model view reaches the model endpoint, redacted unless `--no-redaction` is used
+with a loopback endpoint. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
+view receives the not-collected marker. The private rule view can retain recognised
+government environments while the model view remains withheld.
 Conditional Access policy display names in `scope_post_check` are retained as
 tenant configuration metadata, with e-mail local parts masked, as specified in
 the output contract. Administrators can put personal names in those labels;
@@ -143,8 +144,8 @@ shrinking earlier matches cannot expose a partial identifier at the scan edge.
 An unterminated delimiter-free window can therefore yield an empty sample.
 E-mail local parts, including quoted ones, are bounded to 64 characters for matching.
 Common encoded separators (`%40`, `\u0040`, `&#64;`, fullwidth `＠`, `%7B`/`%7D`,
-`%2D`) are decoded once for masking, after credential redaction, and those decoded
-forms are emitted, including in MCP responses. URL schemes, hosts and paths are
+`%2D`) are decoded once for masking; credentials are masked both before and after
+decoding, and the decoded forms are emitted, including in MCP responses. URL schemes, hosts and paths are
 retained around masked local parts; numeric npm versions, Git SSH addresses with
 user `git` and hosts starting with `git` or `ssh.`, undashed hashes and labelled
 `Trace ID:`/`Correlation ID:` values remain usable for support. Graph `request-id`
