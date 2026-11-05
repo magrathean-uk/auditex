@@ -144,17 +144,27 @@ def collect_sensitive_argv_values(
                 values.add(str(item))
             skip_next = False
             continue
-        if item in flags:
-            skip_next = True
-            continue
-        for flag in flags:
-            prefix = f"{flag}="
-            if item.startswith(prefix):
-                value = item[len(prefix) :]
+        option, separator, value = item.partition("=")
+        if _sensitive_option(option, flags):
+            if separator:
                 if value:
                     values.add(value)
-                break
+            else:
+                skip_next = True
     return values
+
+
+def _sensitive_option(option: str, flags: set[str]) -> bool:
+    """Recognise exact flags and unique long-option prefixes, defensively.
+
+    Public parsers reject abbreviations. Retain this protection for synthetic
+    command lines and any future parser that accidentally enables them again.
+    """
+    return option in flags or (
+        option.startswith("--")
+        and len(option) > 2
+        and sum(flag.startswith(option) for flag in flags) == 1
+    )
 
 
 def redact_text(value: str, sensitive_values: Iterable[str] | None = None) -> str:
@@ -222,17 +232,15 @@ def redact_argv(
             redacted.append("***redacted***")
             skip_next = False
             continue
-        if item in flags:
+        option, separator, _value = item.partition("=")
+        if _sensitive_option(option, flags):
+            if separator:
+                redacted.append(f"{option}=***redacted***")
+                continue
             redacted.append(str(item))
             skip_next = True
             continue
-        replacement = str(item)
-        for flag in flags:
-            prefix = f"{flag}="
-            if replacement.startswith(prefix):
-                replacement = f"{flag}=***redacted***"
-                break
-        redacted.append(redact_text(replacement))
+        redacted.append(redact_text(str(item)))
     if skip_next:
         redacted.append("***redacted***")
     return redacted

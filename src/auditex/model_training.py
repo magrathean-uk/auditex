@@ -601,7 +601,7 @@ def _validate_resume_input(output: Path, checkpoint: Path, input_record: dict[st
 
 def training_main(argv: list[str] | None = None) -> int:
     """Optional training entry point. Preparation and tests never invoke it."""
-    parser = argparse.ArgumentParser(description="Train one reviewed Auditex LoRA adapter using staged local weights")
+    parser = argparse.ArgumentParser(allow_abbrev=False, description="Train one reviewed Auditex LoRA adapter using staged local weights")
     parser.add_argument("--pack-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--resume-from-checkpoint")

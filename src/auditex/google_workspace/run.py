@@ -16,6 +16,7 @@ from azure_tenant_audit.offline_replay import absent_section_rows, replay_collec
 from azure_tenant_audit.output import AuditWriter
 from azure_tenant_audit.provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from azure_tenant_audit.resources import resolve_resource_path
+from azure_tenant_audit.secret_hygiene import redact_argv
 from azure_tenant_audit.run import build_coverage_ledger
 from azure_tenant_audit.utils import parse_csv_list
 from azure_tenant_audit.rule_parameters import google_rule_parameters
@@ -94,23 +95,7 @@ class GoogleRunConfig:
 
 
 def scrub_google_command_line(command_line: list[str]) -> list[str]:
-    scrubbed: list[str] = []
-    skip_next = False
-    for arg in command_line:
-        if skip_next:
-            scrubbed.append("***redacted***")
-            skip_next = False
-            continue
-        if arg in _SENSITIVE_COMMAND_FLAGS:
-            scrubbed.append(arg)
-            skip_next = True
-            continue
-        if any(arg.startswith(f"{flag}=") for flag in _SENSITIVE_COMMAND_FLAGS):
-            flag, _sep, _value = arg.partition("=")
-            scrubbed.append(f"{flag}=***redacted***")
-            continue
-        scrubbed.append(arg)
-    return scrubbed
+    return redact_argv(command_line, sensitive_flags=_SENSITIVE_COMMAND_FLAGS)
 
 
 def _selected_collectors(config: GoogleRunConfig) -> list[str]:

@@ -91,7 +91,7 @@ def _stale_sync_days(value: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Microsoft tenant audit collection.")
+    parser = argparse.ArgumentParser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
     parser.add_argument("--tenant-name", default="tenant", help="Label for the output folder.")
     parser.add_argument("--tenant-id", default=None, help="Entra tenant ID.")

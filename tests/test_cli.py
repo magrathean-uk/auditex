@@ -967,9 +967,11 @@ def test_run_live_exchange_can_be_explicitly_selected_without_include_flag(tmp_p
     assert manifest["mode"] == "app"
 
 
-def test_command_line_redaction_in_manifest_when_access_token_is_on_command_line(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("flag", ["--access-token", "--client-secret"])
+@pytest.mark.parametrize("inline", [False, True])
+def test_command_line_redaction_in_manifest_and_logs(tmp_path: Path, monkeypatch, flag: str, inline: bool) -> None:
     class _FakeClient:
-        def __init__(self, auth, audit_event=None):
+        def __init__(self, auth, **kwargs):
             self.auth = auth
 
     class _FakeCollector:
@@ -981,48 +983,36 @@ def test_command_line_redaction_in_manifest_when_access_token_is_on_command_line
                 status="ok",
                 item_count=1,
                 message="ok",
-                payload={"value": [{"id": "1"}]},
+                payload={"value": [{"id": "constructed-identity"}]},
             )
 
-    monkeypatch.setattr(cli, "GraphClient", lambda auth, **kwargs: _FakeClient(auth, **kwargs))
+    # Exercise main -> run_live -> real bundle finalisation, with auth and all
+    # tenant reads replaced by constructed adapters. No sign-in or API calls.
+    for name in ("AZURE_CLIENT_SECRET", "AZURE_ACCESS_TOKEN", "AZURE_TENANT_ID", "AZURE_CLIENT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(cli, "GraphClient", _FakeClient)
     monkeypatch.setattr(cli, "REGISTRY", {"identity": _FakeCollector()})
+    canary = "constructed-canary-argv-zz9"
+    credentials = [f"{flag}={canary}"] if inline else [flag, canary]
+    argv = [
+        "--tenant-name", "constructed", "--tenant-id", "constructed-tenant",
+        "--client-id", "constructed-app", *credentials, "--collectors", "identity",
+        "--out", str(tmp_path), "--run-name", "canary",
+    ]
+    assert cli.main(argv) == 0
 
-    secret = "super-secret-token"
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "python3",
-            "-m",
-            "azure_tenant_audit",
-            "--tenant-name",
-            "acme",
-            "--tenant-id",
-            "t-123",
-            "--access-token",
-            secret,
-            "--collectors",
-            "identity",
-            "--out",
-            str(tmp_path),
-        ],
-    )
-    args = cli.build_parser().parse_args(
-        [
-            "--tenant-name",
-            "acme",
-            "--tenant-id",
-            "t-123",
-            "--access-token",
-            secret,
-            "--collectors",
-            "identity",
-            "--out",
-            str(tmp_path),
-        ]
-    )
-    rc = cli.run_live(args)
-    assert rc == 0
+    output_dir = tmp_path / "constructed-canary"
+    manifest = json.loads((output_dir / "run-manifest.json").read_text(encoding="utf-8"))
+    command_line = manifest["command_line"]
+    assert command_line[:1] == ["azure-tenant-audit"]
+    if inline:
+        assert f"{flag}=***redacted***" in command_line
+    else:
+        assert command_line[command_line.index(flag) + 1] == "***redacted***"
+    assert (output_dir / "audit-log.jsonl").is_file()
+    for path in output_dir.rglob("*"):
+        if path.is_file():
+            assert canary.encode() not in path.read_bytes(), str(path.relative_to(output_dir))
 
 
 def test_azure_cli_run_captures_session_context(tmp_path: Path, monkeypatch) -> None:

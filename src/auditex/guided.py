@@ -298,7 +298,7 @@ def _ensure_m365_login(
 
 
 def build_guided_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="auditex guided-run", description="Interactive guided tenant audit.")
+    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex guided-run", description="Interactive guided tenant audit.")
     parser.add_argument("--flow", choices=flow_choices(), default="auto")
     parser.add_argument("--tenant-id", default=None)
     parser.add_argument("--tenant-name", default=None)
