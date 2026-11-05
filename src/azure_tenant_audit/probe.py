@@ -23,6 +23,7 @@ from .collection_gaps import sample_only
 from .collectors import REGISTRY
 from .collectors.base import run_graph_endpoints
 from .config import AuthConfig
+from .data_handling import collector_activity_notices
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
 from .findings import build_findings
 from .graph import GraphClient
@@ -504,6 +505,9 @@ def run_live_probe(cfg: ProbeConfig) -> int:
         raise ValueError(f"Audit profile '{cfg.auditor_profile}' does not support probe mode '{cfg.mode}'.")
 
     requested_surfaces = _resolve_requested_surfaces(cfg.surface, cfg.mode)
+    # The final shared notice describes run selection flags, not probe --surface.
+    for notice in collector_activity_notices(requested_surfaces, "live")[:-1]:
+        print(f"Collection notice: {notice}")
     capability_matrix: list[dict[str, Any]] = []
     result_rows: list[dict[str, Any]] = []
     coverage_rows: list[dict[str, Any]] = []

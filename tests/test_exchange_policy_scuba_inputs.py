@@ -16,12 +16,12 @@ from azure_tenant_audit.normalize import build_normalized_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = {
-    "acceptedDomains": ",@(Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain)",
+    "acceptedDomains": "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain",
     "transportRules": ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)",
-    "remoteDomains": ",@(Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled)",
+    "remoteDomains": "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",
     "organizationAuditConfig": "Get-OrganizationConfig | Select-Object Identity,Name,AuditDisabled",
     "transportConfig": "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled",
-    "sharingPolicy": ",@(Get-SharingPolicy | Select-Object Name,Domains)",
+    "sharingPolicy": "Get-SharingPolicy | Select-Object Name,Domains",
 }
 SECTIONS = {
     "transport_config": ("transportConfig", {"Name": "Transport", "SmtpClientAuthenticationDisabled": True}),

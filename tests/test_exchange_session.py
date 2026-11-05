@@ -116,28 +116,43 @@ def test_empty_failed_exchange_lists_stay_failures(monkeypatch, name, command, r
     assert 'value' not in result
 
 
-def test_all_exchange_collections_are_wrapped_but_scalars_are_not():
-    scalars = {'adminAuditLogConfig', 'organizationAuditConfig', 'mailboxAuditBypass',
-               'transportConfig', 'casMailboxSmtpAuth'}
+_REQUIRED_ANSWERS = {'adminAuditLogConfig', 'organizationAuditConfig', 'mailboxAuditBypass',
+                     'transportConfig', 'casMailboxSmtpAuth', 'acceptedDomains', 'remoteDomains',
+                     'sharingPolicy', 'malwareFilterPolicy', 'dkimSigningConfig', 'atpPolicyForO365',
+                     'antiPhishPolicies', 'hostedContentFilterPolicies', 'hostedConnectionFilterPolicy'}
+
+
+def test_only_legitimately_empty_exchange_collections_are_wrapped():
     for name, command in ExchangePolicyCollector.command_collectors:
-        assert command.startswith(',@(') == (name not in scalars)
+        assert command.startswith(',@(') == (name not in _REQUIRED_ANSWERS)
 
 
-def test_empty_scalar_is_still_an_error(monkeypatch):
+@pytest.mark.parametrize('name', sorted(_REQUIRED_ANSWERS))
+def test_empty_required_answer_is_still_an_error(monkeypatch, name):
     _capture_run(monkeypatch, stdout='')
-    command = dict(ExchangePolicyCollector.command_collectors)['transportConfig']
+    command = dict(ExchangePolicyCollector.command_collectors)[name]
     assert PowerShellGraphAdapter().run(command)['error_class'] == 'command_output_empty'
 
 
-def test_real_adapter_empty_lists_keep_exchange_collector_ok(monkeypatch):
-    scalar_commands = {command for _, command in ExchangePolicyCollector.command_collectors
-                       if not command.startswith(',@(')}
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_exit_zero_json_with_stderr_warning_preserves_exchange_evidence(monkeypatch, wrapped):
+    command = 'Get-InboundConnector | Select-Object Name'
+    if wrapped:
+        command = f',@({command})'
+    _capture_run(monkeypatch, stdout='[{"Name":"constructed"}]', stderr='constructed warning')
+    assert PowerShellGraphAdapter().run(command)['value'] == [{'Name': 'constructed'}]
+
+
+@pytest.mark.parametrize('list_stdout,stderr', [('', ''), ('[]', ''), ('[]', 'constructed warning')])
+def test_real_adapter_empty_lists_keep_exchange_collector_ok(monkeypatch, list_stdout, stderr):
+    required_commands = {command for _, command in ExchangePolicyCollector.command_collectors
+                         if not command.startswith(',@(')}
     calls = []
 
     def completed(argv, **kwargs):
         calls.append(argv[-1])
-        stdout = '{"Count":0}' if any(command in argv[-1] for command in scalar_commands) else ''
-        return SimpleNamespace(returncode=0, stdout=stdout, stderr='')
+        stdout = '{"Count":0}' if any(command in argv[-1] for command in required_commands) else list_stdout
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr=stderr)
 
     monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.shutil.which', lambda _: '/usr/bin/pwsh')
     monkeypatch.setattr(subprocess, 'run', completed)

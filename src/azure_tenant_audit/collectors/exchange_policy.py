@@ -25,7 +25,8 @@ Detection-coverage commands (all read-only ``Get-*`` cmdlets):
   no account names are kept.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-mailboxauditbypassassociation
 * ``Get-ProtectionAlert`` -> alert policy names, state, severity, category. Security & Compliance
-  PowerShell only (``Connect-IPPSSession``); without that session the row is a coverage gap.
+  PowerShell only (``Connect-IPPSSession``); Auditex never opens that session or invokes
+  the cmdlet, and records the ``ipps_session_not_opened`` section skip.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert
 
 Mail protection commands (Cyber Essentials malware protection and secure configuration; all read-only
@@ -122,12 +123,13 @@ class ExchangePolicyCollector(Collector):
         ),
         ("inboundConnectors", ",@(Get-InboundConnector | Select-Object Name,Enabled,ConnectorType)"),
         ("outboundConnectors", ",@(Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType)"),
-        ("acceptedDomains", ",@(Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain)"),
+        # These domain/default-policy reads always have an answer. Do not mask missing output as an empty list.
+        ("acceptedDomains", "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain"),
         (
             "remoteDomains",
-            ",@(Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled)",
+            "Get-RemoteDomain | Select-Object Name,DomainName,TrustedMailOutboundEnabled,AutoReplyEnabled,AutoForwardEnabled",
         ),
-        ("sharingPolicy", ",@(Get-SharingPolicy | Select-Object Name,Domains)"),
+        ("sharingPolicy", "Get-SharingPolicy | Select-Object Name,Domains"),
         # The server filters to mailboxes that forward, so the answer does not depend on how many mailboxes the tenant has.
         # One row past FORWARDING_MAILBOX_LIMIT is asked for: seeing it proves the list continued (a gap, never a clean read).
         (
@@ -141,14 +143,14 @@ class ExchangePolicyCollector(Collector):
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count",
         ),
         ("protectionAlerts", ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)"),
-        ("malwareFilterPolicy", ",@(Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes)"),
+        ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"),
         ("transportConfig", "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled"),
         # An aggregate, so the answer is never empty (an empty output is read as a failed command) and no mailbox is named.
         (
             "casMailboxSmtpAuth",
             "Get-CASMailbox -ResultSize Unlimited | Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } | Measure-Object | Select-Object Count",
         ),
-        ("dkimSigningConfig", ",@(Get-DkimSigningConfig | Select-Object Domain,Enabled,Status)"),
+        ("dkimSigningConfig", "Get-DkimSigningConfig | Select-Object Domain,Enabled,Status"),
         *DEFENDER_COMMANDS,
     ]
 

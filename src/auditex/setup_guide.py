@@ -268,6 +268,7 @@ def build_m365_setup_guide(
     config = CollectorConfig.from_path(config_path)
     profile = get_profile(auditor_profile)
     presets = load_collector_presets()
+    delegated_omissions: list[str] = []
 
     def selection(auth_mode: str) -> list[str]:
         names = select_collectors(
@@ -279,6 +280,8 @@ def build_m365_setup_guide(
             include_exchange=include_exchange, auth_mode=auth_mode,
         )
         # Generated delegated commands cannot open the app-only policy session.
+        if auth_mode != "app":
+            delegated_omissions.extend(name for name in names if name in {"exchange_policy", "dns_posture"})
         return names if auth_mode == "app" else [
             name for name in names if name not in {"exchange_policy", "dns_posture"}
         ]
@@ -367,10 +370,10 @@ def build_m365_setup_guide(
         "Keep command adapters read-only and review api-inventory.json after each run.",
     ]
 
-    if mode != "app" and not collectors and not collector_preset:
+    if delegated_omissions or (mode != "app" and not collectors and not collector_preset):
         delegated_steps.append(
-            "Exchange policy and DNS posture profile defaults are app-mode only. "
-            "Delegated/interactive/access-token runs omit both; DNS itself needs no Exchange session."
+            "Exchange policy and DNS posture are app-mode only in generated setup commands. "
+            "Delegated commands omit them, including explicitly selected names; DNS itself needs no Exchange session."
         )
     delegated_steps.extend(authentication_plans["delegated"]["collection_notices"])
     app_steps.extend(authentication_plans["app"]["collection_notices"])
@@ -386,11 +389,11 @@ def build_m365_setup_guide(
 
     app_csv = ",".join(selections["app"])
     delegated_csv = ",".join(selections["delegated"])
-    app_probe_selection = f" --surface {app_csv}"
+    app_probe_selection = f" --surface {','.join(_dedupe([*selections['app'], 'windows365']))}"
     preset_flag = f" --collector-preset {collector_preset}" if collector_preset else ""
     app_run_selection = f"{preset_flag} --collectors {app_csv}"
     delegated_run_selection = f"{preset_flag} --collectors {delegated_csv}"
-    delegated_probe_surface = delegated_csv
+    delegated_probe_surface = ",".join(_dedupe([*selections["delegated"], "windows365"]))
 
     return {
         "schema_version": "2026-05-22",

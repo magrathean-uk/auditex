@@ -192,7 +192,7 @@ class PowerShellGraphAdapter(Adapter):
                     )
 
             if (result.returncode != 0 or self._looks_like_not_found(combined)
-                    or self._looks_like_auth_required(combined) or stderr.strip()):
+                    or self._looks_like_auth_required(combined)):
                 module_missing = adapter_label == "m365dsc" and self._looks_like_module_missing(stderr)
                 if module_missing:
                     error_class = "module_not_found"
@@ -215,16 +215,17 @@ class PowerShellGraphAdapter(Adapter):
                     "stderr": redact_output(stderr),
                 }
 
-            if not stdout.strip() and script.startswith(",@(") and script.endswith(")"):
+            if not stdout.strip() and not stderr.strip() and script.startswith(",@(") and script.endswith(")"):
                 # Only explicitly declared collection reads may legitimately return no rows.
                 completed(None)
                 return {"value": [], "command": safe_command}
 
             if not stdout.strip():
-                completed("command_output_empty")
+                error_class = "command_error" if stderr.strip() else "command_output_empty"
+                completed(error_class)
                 return {
-                    "error": "command_output_empty",
-                    "error_class": "command_output_empty",
+                    "error": error_class,
+                    "error_class": error_class,
                     "command": safe_command,
                     "stdout": redact_output(stdout),
                     "stderr": redact_output(stderr),

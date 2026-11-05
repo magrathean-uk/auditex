@@ -309,6 +309,7 @@ class DnsPostureCollector(Collector):
         The adapter's successful command envelopes need not carry a status. Older
         envelopes without the coexistence flag cannot safely exclude that domain.
         Reject an unusable list as a whole rather than silently dropping its rows.
+        Every tenant has its initial accepted domain, so an empty list is unusable.
         """
         if (
             not isinstance(envelope, dict)
@@ -317,6 +318,7 @@ class DnsPostureCollector(Collector):
             or envelope.get("error_class")
             or envelope.get("collection_truncated")
             or not isinstance(envelope.get("value"), list)
+            or not envelope["value"]
         ):
             return None
         domains: dict[str, str] = {}
