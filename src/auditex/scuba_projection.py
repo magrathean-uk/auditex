@@ -1322,6 +1322,7 @@ def rule_policy_section(projection: Projection, policy_id: str, section: str) ->
 AREA_ADAPTER_MODULES: tuple[str, ...] = (
     # One module per line (keeps merges of the area branches small): "auditex.scuba_adapters_<area>",
     "auditex.scuba_adapters_exchange",
+    "auditex.scuba_adapters_teams",
 )
 
 PS_SECTIONS = {
