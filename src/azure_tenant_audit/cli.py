@@ -102,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     certificates.add_argument("--certificate-pfx", help="Customer-local PFX path; never copied into the bundle.")
     certificates.add_argument("--certificate-keychain-sha256", help="macOS identity certificate SHA-256 hex fingerprint.")
     parser.add_argument("--certificate-password-env", help="Name of the PFX password environment variable, never the password.")
+    parser.add_argument("--certificate-allow-unencrypted-pfx", action="store_true",
+                        help="Allow an unencrypted PFX private key (discouraged); requires --certificate-pfx.")
     parser.add_argument("--access-token", default=None, help="Optional preissued Graph access token.")
     parser.add_argument("--auth-context", default=None, help="Optional saved Auditex auth context name.")
     parser.add_argument(
@@ -592,7 +594,8 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         graph_scope=args.graph_scope,
         interactive_scopes=auth_scopes,
         throttle_mode=args.throttle_mode,
-        certificate=(PfxCertificate(args.certificate_pfx, password_env=args.certificate_password_env)
+        certificate=(PfxCertificate(args.certificate_pfx, password_env=args.certificate_password_env,
+                                    allow_unencrypted=args.certificate_allow_unencrypted_pfx)
                      if args.certificate_pfx else KeychainCertificate(args.certificate_keychain_sha256)
                      if args.certificate_keychain_sha256 else None),
     )
@@ -952,6 +955,8 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
     certificate_selected = bool(args.certificate_pfx or args.certificate_keychain_sha256)
     if args.certificate_password_env and not args.certificate_pfx:
         parser.error("--certificate-password-env requires --certificate-pfx")
+    if args.certificate_allow_unencrypted_pfx and not args.certificate_pfx:
+        parser.error("--certificate-allow-unencrypted-pfx requires --certificate-pfx")
     if certificate_selected and (args.client_secret or args.interactive or args.access_token
                                  or args.use_azure_cli_token or args.auth_context):
         parser.error("Certificate authentication requires app mode without another credential source.")

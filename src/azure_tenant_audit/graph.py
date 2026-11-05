@@ -20,6 +20,16 @@ from .versioning import package_user_agent
 
 
 LOG = logging.getLogger(__name__)
+_TEAMS_AUDIENCE = "48ac35b8-9aa8-4d74-927d-1f4a14a0b239"
+_TEAMS_SCOPE = _TEAMS_AUDIENCE + "/.default"
+
+
+def _is_teams_scope(scope: str) -> bool:
+    return scope.casefold().removesuffix("/.default") in {
+        _TEAMS_AUDIENCE, "https://api.interfaces.records.teams.microsoft.com",
+    }
+
+
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 # Beta is opt-in per endpoint: only surfaces without a v1.0 equivalent use it, and
 # every beta call is recorded with api_version="beta" in coverage and the API ledger.
@@ -333,12 +343,14 @@ class GraphClient:
 
     def app_token_for(self, scope: str) -> str | None:
         """Client-credentials token for another resource (e.g. Exchange Online), or None outside app mode."""
+        if _is_teams_scope(scope):
+            scope = _TEAMS_SCOPE
         if self.auth.certificate is not None:
             if self.auth.auth_mode != "app" or self.auth.access_token or not self.auth.client_id:
                 return None
             return self._certificate_app_token(scope)
         # Teams requires certificate credentials; never fall back to a secret.
-        if scope == "48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default":
+        if _is_teams_scope(scope):
             return None
         if self.auth.access_token or self.auth.auth_mode == "interactive" or not self.auth.client_secret or not self.auth.client_id:
             return None
@@ -414,11 +426,11 @@ class GraphClient:
             if (isinstance(lifetime, bool) or not isinstance(lifetime, (int, float))
                     or not math.isfinite(lifetime) or lifetime <= 0):
                 return CertificateAuthError()
-            if scope == "48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default":
+            if _is_teams_scope(scope):
                 claims = auth_context.b64url_json(token.split(".")[1])
                 expiry = claims.get("exp")
                 now = time.time()
-                if (claims.get("aud") != scope.removesuffix("/.default")
+                if (claims.get("aud") != _TEAMS_AUDIENCE
                         or claims.get("azpacr", claims.get("appidacr")) != "2"
                         or claims.get("scp")
                         or isinstance(expiry, bool)

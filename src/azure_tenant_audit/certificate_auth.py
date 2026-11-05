@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import stat
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,6 +21,9 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
+
+
+_MAX_PFX_BYTES = 64 * 1024
 
 
 class CertificateAuthError(RuntimeError):
@@ -35,6 +39,23 @@ class PfxCertificate:
     pfx_path: str | Path = field(repr=False)
     password_env: str | None = field(default=None, repr=False)
     password_provider: Callable[[], str | bytes | None] | None = field(default=None, repr=False)
+    allow_unencrypted: bool = False
+
+    def __post_init__(self) -> None:
+        if self.password_env:
+            # Consume once before collectors/children start. Never restore it:
+            # refreshes use only this process-local closure.
+            password = os.environ.pop(self.password_env, None)
+            if self.password_provider is not None:
+                return  # The conflicting sources still fail at the safe boundary.
+
+            def provider() -> str:
+                if password is None:
+                    raise CertificateAuthError()
+                return password
+
+            object.__setattr__(self, "password_provider", provider)
+            object.__setattr__(self, "password_env", None)
 
     def __repr__(self) -> str:
         return "PfxCertificate(<redacted>)"
@@ -72,18 +93,46 @@ def _check_certificate(cert: x509.Certificate) -> rsa.RSAPublicKey:
     return public
 
 
+def _read_pfx(path: str | Path) -> bytes:
+    # Non-blocking open also lets fstat refuse FIFOs without waiting for a writer.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077
+                or info.st_size > _MAX_PFX_BYTES):
+            raise CertificateAuthError()
+        raw = bytearray()
+        while len(raw) <= _MAX_PFX_BYTES:
+            chunk = os.read(descriptor, _MAX_PFX_BYTES + 1 - len(raw))
+            if not chunk:
+                break
+            raw.extend(chunk)
+        if len(raw) > _MAX_PFX_BYTES:
+            raise CertificateAuthError()
+        return bytes(raw)
+    finally:
+        os.close(descriptor)
+
+
 def _assertion(credential: CertificateCredential, client_id: str, audience: str) -> str:
     # This private frame never escapes the public error boundary below.
     if isinstance(credential, PfxCertificate):
         if credential.password_env and credential.password_provider:
             raise CertificateAuthError()
-        password = (credential.password_provider() if credential.password_provider
-                    else os.environ[credential.password_env] if credential.password_env else None)
+        password = credential.password_provider() if credential.password_provider else None
         if isinstance(password, str):
             password = password.encode("utf-8")
         if password is not None and not isinstance(password, bytes):
             raise CertificateAuthError()
-        key, cert, _ = pkcs12.load_key_and_certificates(Path(credential.pfx_path).read_bytes(), password)
+        raw = _read_pfx(credential.pfx_path)
+        if not credential.allow_unencrypted:
+            try:
+                pkcs12.load_key_and_certificates(raw, None)
+            except ValueError:
+                pass  # Encrypted PFX requires its supplied password below.
+            else:
+                raise CertificateAuthError()
+        key, cert, _ = pkcs12.load_key_and_certificates(raw, password)
         if not isinstance(key, rsa.RSAPrivateKey) or cert is None:
             raise CertificateAuthError()
         public = _check_certificate(cert)

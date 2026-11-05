@@ -5,10 +5,11 @@ import base64
 import http.client
 import json
 import logging
+import os
+import stat
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -71,17 +72,107 @@ def material():
     return key, cert
 
 
+def _memory_pfx(monkeypatch, raw, *, mode=stat.S_IFREG | 0o600, size=None):
+    # Stub descriptor APIs rather than ever writing private material to disk.
+    state = {"offset": 0, "opens": [], "reads": [], "closed": []}
+    def open_pfx(path, flags):
+        assert str(path) == "test-only-memory.pfx"
+        state["opens"].append(flags)
+        state["offset"] = 0
+        return 12345
+    def read_pfx(descriptor, count):
+        state["reads"].append(count)
+        start = state["offset"]
+        state["offset"] += count
+        return raw[start:start + count]
+    monkeypatch.setattr(certificate_auth, "os", SimpleNamespace(
+        environ=os.environ, O_RDONLY=os.O_RDONLY, O_NONBLOCK=os.O_NONBLOCK,
+        open=open_pfx, fstat=lambda fd: SimpleNamespace(st_mode=mode, st_size=len(raw) if size is None else size),
+        read=read_pfx, close=state["closed"].append,
+    ))
+    return state
+
+
 def _pfx(monkeypatch, material, *, key_present=True):
     key, cert = material
     raw = pkcs12.serialize_key_and_certificates(
         b"throwaway-test-only", key if key_present else None, cert, None,
         serialization.BestAvailableEncryption(PASSWORD),
     )
-    def read_bytes(path):
-        assert str(path) == "test-only-memory.pfx"
-        return raw
-    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    _memory_pfx(monkeypatch, raw)
     return PfxCertificate("test-only-memory.pfx", password_provider=lambda: PASSWORD)
+
+
+@pytest.mark.parametrize("mode", [
+    stat.S_IFREG | 0o644, stat.S_IFREG | 0o640, stat.S_IFREG | 0o604,
+    stat.S_IFREG | 0o610, stat.S_IFREG | 0o601,
+    stat.S_IFDIR | 0o700, stat.S_IFIFO | 0o600, stat.S_IFCHR | 0o600,
+    stat.S_IFSOCK | 0o600,
+])
+def test_pfx_refuses_permissions_and_non_regular_files_before_read(monkeypatch, mode):
+    state = _memory_pfx(monkeypatch, b"test-only-not-a-pfx", mode=mode)
+    with pytest.raises(CertificateAuthError):
+        client_assertion(PfxCertificate("test-only-memory.pfx"), "test-only-app", TOKEN_URL)
+    assert state["opens"] == [os.O_RDONLY | os.O_NONBLOCK]
+    assert not state["reads"]
+    assert state["closed"] == [12345]
+
+
+@pytest.mark.parametrize("grows_after_stat", [False, True])
+def test_pfx_refuses_over_64_kib_and_caps_read(monkeypatch, grows_after_stat):
+    state = _memory_pfx(monkeypatch, b"x" * (64 * 1024 + 1), size=0 if grows_after_stat else None)
+    with pytest.raises(CertificateAuthError):
+        client_assertion(PfxCertificate("test-only-memory.pfx"), "test-only-app", TOKEN_URL)
+    assert state["reads"] == ([64 * 1024 + 1] if grows_after_stat else [])
+    assert state["closed"] == [12345]
+
+
+def test_pfx_accepts_exactly_64_kib_and_handles_short_reads(monkeypatch):
+    raw = b"x" * (64 * 1024)
+    state = _memory_pfx(monkeypatch, raw)
+    real_read = certificate_auth.os.read
+    certificate_auth.os.read = lambda fd, count: real_read(fd, min(count, 4096))
+    assert certificate_auth._read_pfx("test-only-memory.pfx") == raw
+    assert len(state["reads"]) > 1 and state["closed"] == [12345]
+
+
+@pytest.mark.parametrize("password", [None, b"", PASSWORD])
+def test_unencrypted_pfx_requires_explicit_opt_in(monkeypatch, material, password):
+    key, cert = material
+    raw = pkcs12.serialize_key_and_certificates(
+        b"throwaway-test-only", key, cert, None, serialization.NoEncryption(),
+    )
+    _memory_pfx(monkeypatch, raw)
+    with pytest.raises(CertificateAuthError):
+        client_assertion(PfxCertificate("test-only-memory.pfx", password_provider=lambda: password),
+                         "test-only-app", TOKEN_URL)
+    # Only the discouraged opt-in permits the passwordless source.
+    assertion = client_assertion(PfxCertificate("test-only-memory.pfx", allow_unencrypted=True),
+                                 "test-only-app", TOKEN_URL)
+    _verify_assertion(assertion, key.public_key())
+
+
+def test_password_environment_consumed_once_and_absent_from_pwsh(monkeypatch, material):
+    from azure_tenant_audit.adapters import powershell_graph
+
+    _pfx(monkeypatch, material)
+    variable = "TEST_ONLY_PFX_PASSWORD"
+    monkeypatch.setenv(variable, PASSWORD.decode())
+    credential = PfxCertificate("test-only-memory.pfx", password_env=variable)
+    assert variable not in os.environ
+    client, _ = _client(credential, lambda *a, **k: Response())
+    assert client.app_token_for(TEAMS_SCOPE)
+    client._invalidate_certificate_tokens()
+    assert client.app_token_for(TEAMS_SCOPE)  # Refresh still uses the captured password.
+    children = []
+    def run_child(command, **kwargs):
+        children.append(kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout="[]", stderr="")
+    monkeypatch.setattr(powershell_graph.shutil, "which", lambda name: "/test-only/pwsh")
+    monkeypatch.setattr(powershell_graph.subprocess, "run", run_child)
+    powershell_graph.PowerShellGraphAdapter().run("Get-MgUser")
+    assert len(children) == 1
+    assert variable not in children[0] and PASSWORD.decode() not in children[0].values()
 
 
 def _client(credential, post, **kwargs):
@@ -231,9 +322,9 @@ def test_pfx_failures_are_typed_and_secret_free(monkeypatch, material, caplog, c
     if case == "password":
         credential = PfxCertificate("test-only-memory.pfx", password_provider=lambda: b"test-only-wrong-password")
     elif case == "missing_file":
-        def missing(path):
+        def missing(*args):
             raise OSError(PASSWORD.decode())
-        monkeypatch.setattr(Path, "read_bytes", missing)
+        monkeypatch.setattr(certificate_auth.os, "open", missing)
     elif case == "missing_env":
         monkeypatch.delenv("TEST_ONLY_MISSING_PASSWORD", raising=False)
         credential = PfxCertificate("test-only-memory.pfx", password_env="TEST_ONLY_MISSING_PASSWORD")
@@ -254,7 +345,7 @@ def test_pfx_failures_are_typed_and_secret_free(monkeypatch, material, caplog, c
 
 
 @pytest.mark.parametrize("rejection", ["expired", "audience"])
-def test_mock_endpoint_rejects_invalid_assertion(monkeypatch, material, rejection):
+def test_mock_endpoint_rejects_invalid_assertion(monkeypatch, material, caplog, rejection):
     credential = _pfx(monkeypatch, material)
     real_assertion = certificate_auth.client_assertion
     def invalid(*args):
@@ -268,13 +359,22 @@ def test_mock_endpoint_rejects_invalid_assertion(monkeypatch, material, rejectio
     monkeypatch.setattr("azure_tenant_audit.graph.client_assertion", invalid)
     captured = []
     def post(url, *, data, **kwargs):
-        captured.append((url, _decode(data["client_assertion"].split(".")[1])))
-        return Response(status=400)
-    client, _ = _client(credential, post)
-    with pytest.raises(CertificateAuthError):
+        assertion = data["client_assertion"]
+        captured.append((url, _decode(assertion.split(".")[1]), assertion))
+        response = Response(status=400)
+        body = {"error": "test-only-rejection", "error_description": PASSWORD.decode() + assertion}
+        response.text = json.dumps(body)
+        response.json = lambda: body
+        return response
+    client, events = _client(credential, post)
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(CertificateAuthError) as caught:
         client.app_token_for(TEAMS_SCOPE)
     assert len(captured) == 1
-    url, claims = captured[0]
+    url, claims, assertion = captured[0]
+    rendered = caplog.text + repr(events) + "".join(traceback.format_exception(caught.value))
+    assert PASSWORD.decode() not in rendered
+    assert assertion not in rendered
     if rejection == "expired":
         assert claims["exp"] < time.time()
     else:
@@ -285,10 +385,33 @@ def test_mock_endpoint_rejects_invalid_assertion(monkeypatch, material, rejectio
     {"aud": "wrong"}, {"exp": 1}, {"azpacr": "1"}, {"azpacr": "2", "scp": "test-only-scope"},
     *({"exp": value} for value in [float("nan"), float("inf"), float("-inf"), True, False, "9999999999", None]),
 ])
-def test_rejects_invalid_returned_teams_token(monkeypatch, material, overrides):
+@pytest.mark.parametrize("scope", [
+    TEAMS_SCOPE, TEAMS_SCOPE.upper(), TEAMS_SCOPE.removesuffix("/.default"),
+    TEAMS_SCOPE.removesuffix("/.default").upper(),
+    "https://api.interfaces.records.teams.microsoft.com/.default",
+    "HTTPS://API.INTERFACES.RECORDS.TEAMS.MICROSOFT.COM/.DEFAULT",
+])
+def test_rejects_invalid_returned_teams_token(monkeypatch, material, overrides, scope):
     client, _ = _client(_pfx(monkeypatch, material), lambda *a, **k: Response(token=_access_token(**overrides)))
     with pytest.raises(CertificateAuthError):
-        client.app_token_for(TEAMS_SCOPE)
+        client.app_token_for(scope)
+
+
+@pytest.mark.parametrize("scope", [
+    TEAMS_SCOPE.upper(), TEAMS_SCOPE.removesuffix("/.default"),
+    TEAMS_SCOPE.removesuffix("/.default").upper(),
+    "https://api.interfaces.records.teams.microsoft.com/.default",
+    "https://api.interfaces.records.teams.microsoft.com",
+])
+def test_teams_scope_variants_use_canonical_scope_and_cache(monkeypatch, material, scope):
+    seen = []
+    def post(*args, **kwargs):
+        seen.append(kwargs["data"]["scope"])
+        return Response()
+    client, _ = _client(_pfx(monkeypatch, material), post)
+    token = client.app_token_for(scope)
+    assert client.app_token_for(TEAMS_SCOPE) == token
+    assert seen == [TEAMS_SCOPE]
 
 
 @pytest.mark.parametrize("lifetime", [float("nan"), float("inf"), True, "600", 0, -1, None])
@@ -345,13 +468,20 @@ def test_keychain_certificate_or_signature_mismatch_is_rejected(monkeypatch, mat
         client_assertion(KeychainCertificate("00" * 32), "test-only-app", TOKEN_URL)
 
 
-def test_secret_path_preserved_and_teams_never_falls_back():
+@pytest.mark.parametrize("scope", [
+    TEAMS_SCOPE, TEAMS_SCOPE.upper(), TEAMS_SCOPE.removesuffix("/.default"),
+    TEAMS_SCOPE.removesuffix("/.default").upper(),
+    "https://api.interfaces.records.teams.microsoft.com/.default",
+    "HTTPS://API.INTERFACES.RECORDS.TEAMS.MICROSOFT.COM/.DEFAULT",
+    "https://api.interfaces.records.teams.microsoft.com",
+])
+def test_secret_path_preserved_and_teams_never_falls_back(scope):
     seen = []
     def post(url, *, data, timeout):
         seen.append(data)
         return Response(token="test-only-secret-auth-token")
     client, _ = _client(None, post, client_secret="test-only-client-secret")
-    assert client.app_token_for(TEAMS_SCOPE) is None
+    assert client.app_token_for(scope) is None
     assert not seen
     assert client.app_token_for("https://other.test/.default") == "test-only-secret-auth-token"
     assert seen[0] == {"client_id": "test-only-app", "client_secret": "test-only-client-secret",
@@ -446,17 +576,22 @@ def test_native_keychain_handle_cleanup_without_access(monkeypatch, material):
     assert "kSecUseAuthenticationUIFail" in constants
 
 
-def test_certificate_cli_selects_without_reading_secret_env(monkeypatch, tmp_path):
+@pytest.mark.parametrize("allow_unencrypted", [False, True])
+def test_certificate_cli_selects_without_reading_secret_env(monkeypatch, tmp_path, allow_unencrypted):
     from azure_tenant_audit import cli
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "test-only-environment-secret")
     # Intercept the live-run boundary, so neither tenant nor keychain is read.
     captured = []
     monkeypatch.setattr(cli, "run_live", lambda args, *a, **k: captured.append(args) or 0)
-    assert cli.main(["--tenant-id", "test-only-tenant", "--client-id", "test-only-app",
+    args = ["--tenant-id", "test-only-tenant", "--client-id", "test-only-app",
                      "--certificate-pfx", "test-only-memory.pfx", "--certificate-password-env", "TEST_ONLY_PASSWORD",
-                     "--out", str(tmp_path)]) == 0
+                     "--out", str(tmp_path)]
+    if allow_unencrypted:
+        args.append("--certificate-allow-unencrypted-pfx")
+    assert cli.main(args) == 0
     assert captured[0].client_secret is None
     assert captured[0].certificate_pfx == "test-only-memory.pfx"
+    assert captured[0].certificate_allow_unencrypted_pfx is allow_unencrypted
 
 
 def test_certificate_cache_never_enters_persisted_run_state(monkeypatch, tmp_path, caplog):
@@ -524,6 +659,7 @@ def test_certificate_cache_never_enters_persisted_run_state(monkeypatch, tmp_pat
 @pytest.mark.parametrize("args", [
     ["--certificate-pfx", "test-only-memory.pfx", "--client-secret", "test-only-secret"],
     ["--certificate-password-env", "TEST_ONLY_PASSWORD"],
+    ["--certificate-allow-unencrypted-pfx"],
     ["--certificate-pfx", "test-only-memory.pfx", "--interactive"],
 ])
 def test_certificate_cli_rejects_ambiguous_credentials(args):

@@ -222,6 +222,8 @@ payload separately from pack verification before using `--execute`.
 
 ## Credentials and local files
 
+Certificate app authentication reads a customer-managed PFX through a read-only descriptor, refusing non-regular files, group/other permission bits and files larger than 64 KiB. Encrypted PFX is the default requirement; the explicit `--certificate-allow-unencrypted-pfx` / `allow_unencrypted=True` opt-in is discouraged because it permits an unprotected private key. The named password environment variable is consumed once at credential construction and removed from `os.environ` before collectors spawn children; a process-local closure supplies refreshes. This does not erase the parent's environment or operating-system snapshots. PFX bytes, passwords, assertions and resource-token caches have no persistence path; the original PFX remains the customer's responsibility and Python does not promise memory zeroisation. The macOS bridge signs through an opaque keychain handle without exporting the private key. Follow the [keychain ACL and live validation guidance](../guides/setup-guide.md): choose Allow, never Always Allow for the generic Python interpreter. Endpoint error bodies and vendor diagnostic text are excluded from certificate errors and events.
+
 Never commit or ship Azure app authentication values, Google service-account
 files, OAuth client files, OAuth caches, bearer or refresh material, raw
 credential dumps, or customer signing keys. Keep them in `.secrets/` or another
