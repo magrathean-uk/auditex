@@ -175,8 +175,8 @@ class ProfilePolicy:
 
 _SHAREABLE_POLICY = ProfilePolicy()
 # The setting per profile. ``report_pack`` is the secrets-only working artifact (it keeps GUIDs, names and free text
-# so its references resolve); ``shareable`` is the operator's own report, MCP payloads and notifications; the customer
-# pack and the explainer are the two outputs that leave the operator's control. A flip is one edit here.
+# so its references resolve); ``shareable`` is the operator's own report and MCP payloads; the customer
+# pack, notifications (third-party services) and the explainer leave the operator's control. A flip is one edit here.
 PROFILE_POLICY: Mapping[str, ProfilePolicy] = MappingProxyType(
     {
         PROFILE_REPORT_PACK: ProfilePolicy(redact_guids=False),

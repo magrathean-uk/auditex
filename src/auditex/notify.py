@@ -14,9 +14,15 @@ import requests
 
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 
-from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, redact_payload
+from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, redact_payload
 
 from .run_bundle import RunBundle
+
+# Every notification leaves the machine for a third-party service (webhook, SMTP relay, Jira, GitHub), so it uses the
+# customer-pack redaction profile, which is stricter than ``shareable``: waiver free text (owner, justification,
+# comment, comments, notes) is redacted as well as GUIDs, secrets, URL passwords and credential query parameters
+# (decided by product, 5 Nov 2026). A test fails if a call here uses a weaker profile.
+NOTIFY_PROFILE = PROFILE_CUSTOMER_PACK
 
 
 # E4 redaction: any token-shaped string in an outbound webhook body gets
@@ -673,6 +679,6 @@ def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[
 
 
 def _redact_envelope(envelope: dict[str, Any], run_dir: str) -> dict[str, Any]:
-    """The shareable redaction over a whole notification result (payload, citations, service responses)."""
-    redacted = redact_payload(envelope, run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    """The customer-pack redaction over a whole notification result (payload, citations, service responses)."""
+    redacted = redact_payload(envelope, run_dirs=[run_dir], profile=NOTIFY_PROFILE)
     return dict(redacted)

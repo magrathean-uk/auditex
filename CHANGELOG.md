@@ -7,6 +7,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Notifications (webhook, SMTP, Jira, GitHub) now use the `customer_pack` redaction profile instead of `shareable`, because they leave the machine for third-party services: waiver free text (`owner`, `justification`, `comment`, `comments`, `notes`) is redacted at any depth and in any container, on top of GUIDs, secrets, URL passwords and credential query parameters. One constant (`NOTIFY_PROFILE` in `notify.py`) sets it for every sink; new tests plant free text through each sink type and fail if a notify redaction call uses a weaker profile.
+
 - Fix the redaction of finding ids that contain a credential word: `identity:global_admin_stale_password:<guid>` was written as `identity:global_admin_stale_password:***redacted***` by the report-pack profile (so `findings.json` and `report-pack.json` disagreed and the gate said `findings_inconsistent`). Id-shaped tokens (`<namespace>:<snake_case_words>[:<guid-or-suffix>]`) are now exempt from the inline secret pattern under every profile; real `password: value` assignments are redacted as before.
 
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.

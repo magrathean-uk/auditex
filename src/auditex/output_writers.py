@@ -46,7 +46,7 @@ WRITER_INVENTORY: tuple[WriterEntry, ...] = (
     WriterEntry("auditex.reporting", "write_enterprise_handoff_pack", "shareable", PROFILE_CUSTOMER_PACK, "customer pack manifest and payloads"),
     WriterEntry("auditex.cli", "_emit_report_payload", "shareable", PROFILE_SHAREABLE, "report api-calls, permissions, proof-table and handoff files and stdout"),
     WriterEntry("auditex.cli", "_emit_assessment", "private", None, "operator-supplied assessment re-emitted outside bundles; not run evidence"),
-    WriterEntry("auditex.notify", "send_notification", "shareable", PROFILE_SHAREABLE, "webhook, SMTP, Jira and GitHub sinks"),
+    WriterEntry("auditex.notify", "send_notification", "shareable", PROFILE_CUSTOMER_PACK, "webhook, SMTP, Jira and GitHub sinks"),
     WriterEntry("auditex.explorer", "write_explorer", "private", None, "operator's interactive run explorer (decision pending product)"),
     WriterEntry("auditex.model_serving", "assess_run", "private", None, "model assessment file; model view is redacted by the projection; explainer text is wired by the explainer job"),
     WriterEntry("auditex.model_serving", "assess_scubagear_export", "private", None, "model assessment file for an imported export; as assess_run"),

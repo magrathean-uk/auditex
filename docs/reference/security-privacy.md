@@ -328,7 +328,7 @@ returned. `auditex/output_writers.py` holds three machine-readable inventories a
 | Setup guide (`setup-guide`) | `_emit_setup_guide` (`cli.py`) | Operator | Not redacted: it renders the operator's own parameters (for example `--subject`) and commands, and holds no tenant evidence | Yes, but carries no evidence |
 | Customer pack: `handoff`, `report.md`, `api-calls`, `permissions`, `proof-table`, `README.md`, `checksums.sha256`, `pack-manifest.json` and the copy of `run-manifest.json` | `write_enterprise_handoff_pack`, `_write_text_artifact`, `_copy_source_artifact` | The tenant owner and whoever they pass it to | `customer_pack` profile, with the run salt; the manifest digests are those of the redacted files | Yes |
 | Customer pack `source-artifacts/` other than `run-manifest.json`: `summary.json`, `data-handling.json`, `api-inventory.json`, `audit-plan.json`, `live-readiness.json`, `reports/report-pack.json`, `validation.json`, `ai_context.json`, `bundle-hashes.json` | `_copy_source_artifact` | As above | **Verbatim, integrity-bound copies, not redacted** (`verify-pack` ties them to `bundle-hashes.json`) | Yes |
-| Notifications: Slack, Teams, SMTP, Jira, GitHub | `send_notification` (`notify.py`) | Third-party services | `shareable` over the whole envelope (payload, citations, service responses) before any sink and before the return; the run identity used for ticket de-duplication is computed first, from the real run directory, and carried as a one-way digest (`run_fingerprint`); the webhook walker (`_redact_value`) stays as a second layer | Yes |
+| Notifications: Slack, Teams, SMTP, Jira, GitHub | `send_notification` (`notify.py`) | Third-party services | `customer_pack` (stricter than `shareable`: waiver free text is redacted too) over the whole envelope (payload, citations, service responses) before any sink and before the return; the run identity used for ticket de-duplication is computed first, from the real run directory, and carried as a one-way digest (`run_fingerprint`); the webhook walker (`_redact_value`) stays as a second layer; one constant, `NOTIFY_PROFILE` in `notify.py`, sets the profile for every sink | Yes |
 | Explorer page | `write_explorer` (`explorer.py`) | Operator's browser | Private working view; it exists to inspect real values. Not redacted. Decision pending product if it is to be shared | Only by operator action |
 | Model assessment files, prompts, adapter sidecar | `assess_run`, `assess_scubagear_export` (`model_serving.py`) | Operator; the model endpoint (loopback unless the operator says otherwise) | The model view is redacted by the projection (input side); the files are private. The explainer's text passes `redact_output(..., profile="explainer", context=context_for_run(run))`, wired by the explainer job, not by these writers | Prompts only to the configured endpoint |
 | Logs: `audit-log.jsonl`, command samples, doctor and auth errors | Adapters, `secret_hygiene.redact_output` | Operator, support | Diagnostics boundary above: credentials, e-mail local parts, dashed GUIDs; clipped to 500 characters | Only by operator action |
@@ -364,10 +364,10 @@ The fixed rules (the class is redacted or kept by the profile itself) and the po
 mapping of profile name to `ProfilePolicy`; the product decisions below) together give this, per output class. The
 profiles map to outputs as follows: `report_pack` is `reports/report-pack.json` and `action-plan.json` in the run
 bundle; `shareable` is the local report in every format (`preview_report`, `render_report`, exporters), report
-payload files and stdout, MCP return values and notifications; `customer_pack` is every file the customer pack
-generates; `explainer` is the text of the deterministic explainer (it passes through `redact_output(..., profile="explainer")` where it is wired).
+payload files and stdout and MCP return values; `customer_pack` is every file the customer pack
+generates and every notification (webhook, SMTP, Jira, GitHub); `explainer` is the text of the deterministic explainer (it passes through `redact_output(..., profile="explainer")` where it is wired).
 
-| Class | `report_pack` | `shareable` (local report, exports, MCP, notifications) | `customer_pack` | `explainer` |
+| Class | `report_pack` | `shareable` (local report, exports, MCP) | `customer_pack` (customer pack, notifications) | `explainer` |
 | --- | --- | --- | --- | --- |
 | GUIDs (`redact_guids`) | Kept (references must resolve) | Redacted | Redacted | Redacted |
 | Domains (`redact_domains`) | Kept | Kept | Kept | Kept |
@@ -385,9 +385,10 @@ it carries reason codes) at any depth. Where the profile redacts them, every str
 the container (mapping, list, tuple, set), becomes `<redacted-text>` (empty strings stay empty; numbers and booleans
 stay), but the value is still walked by the ordinary rules: a mapping key inside it that holds an address or a
 credential assignment is masked, and a credential key (`password`, `client_secret` and the like) replaces its whole
-value with the secret placeholder, exactly as outside a free-text value. **Notifications use `shareable`, so a
-waiver's free text is kept in a webhook, e-mail, Jira or GitHub message; product decides whether notifications should
-use `customer_pack`** (one argument in `notify.py`).
+value with the secret placeholder, exactly as outside a free-text value. **Notifications use `customer_pack`** (product, 5 Nov 2026: they leave the machine for third-party services), so a
+waiver's free text never reaches a webhook, e-mail, Jira or GitHub message. `tests/test_notify_profile.py` plants free
+text at several depths and in container values and checks every sink type, and fails if any redaction call in
+`notify.py` uses a profile weaker than `customer_pack`.
 
 The detail of each class:
 
@@ -462,7 +463,7 @@ the branch was unmerged, so there is no compatibility alias). A flip is one fiel
 | Role names | Kept; **no setting exists** | Built-in names are public Microsoft vocabulary, custom names are tenant text, and the output alone cannot tell them apart | Needs a product definition first |
 | Customer-pack source artifacts (the nine above) | Verbatim | `verify-pack` checks them against `bundle-hashes.json`; a redacted copy needs a `transformed` row like the manifest has, and a recipient who is the tenant owner may need the real values | Product to decide whether the pack carries redacted derivatives |
 | `report-pack.json` in the run bundle | Secrets only | Its ids are references; see the inventory | Redact at hand-over only (the current design) |
-| Notifications | `shareable` (free text kept) | One profile per writer | Product to decide whether to use `customer_pack` |
+| Notifications | `customer_pack` (free text redacted) | They leave the machine for third-party services (product, 5 Nov 2026) | `NOTIFY_PROFILE` in `notify.py` |
 | Explorer page | Not redacted | Operator working view | Add a shareable variant |
 | MCP auth tools | Not redacted | Operator's saved connection metadata | Decide whether tenant ids and names in them are shared with an AI client |
 
@@ -502,7 +503,7 @@ Honest limits of the output redaction boundary; none of them is a claim that the
 - The boundary covers the shapes in the inventory. It does not cover third-party exporter plugins (which receive the
   raw run directory), a new sink reached through an alias, a stored callable, `os.write`, SQL, logging or subprocess
   side effects, terminal logs redirected by the operator, or the nine verbatim customer-pack source artifacts.
-- Notifications are `shareable`: free-text keys are kept in them (above).
+- Notifications are `customer_pack`: free-text keys are redacted in them (above).
 - Pseudonyms are stable per run and salt: anyone holding the run directory can recompute them, and two runs of one
   tenant share no pseudonyms only because the salt differs.
 
