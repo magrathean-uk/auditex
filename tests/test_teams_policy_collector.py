@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.collectors.teams_policy import TEAMS_OPERATIONS, TeamsPolicyCollector
 from azure_tenant_audit.config import CollectorConfig
+from azure_tenant_audit.findings import build_findings
+from azure_tenant_audit.normalize import build_normalized_snapshot
 
 
 REQUIRED = {
@@ -67,6 +70,72 @@ def test_rule_fields_are_selected() -> None:
         _, fields = commands[name].split(" | Select-Object ")
         selected = {field.strip() for field in fields.split(",")}
         assert selected.issuperset(required), name
+
+
+def test_every_declared_cmdlet_is_in_the_permission_notes() -> None:
+    path = Path(__file__).resolve().parent.parent / "configs" / "collector-permissions.json"
+    permissions = json.loads(path.read_text(encoding="utf-8"))["collector_permissions"]["teams_policy"]
+    for _, command in TeamsPolicyCollector.command_collectors:
+        cmdlet = command.split()[0]
+        assert cmdlet in permissions["optional_commands"], cmdlet
+
+
+def test_global_federation_identity_pins_normalised_and_finding_ids() -> None:
+    snapshot = build_normalized_snapshot(
+        tenant_name="acme",
+        run_id="run-1",
+        collector_payloads={
+            "teams_policy": {
+                "tenantFederationConfiguration": {
+                    "value": [{
+                        "Identity": "Global",
+                        "AllowFederatedUsers": True,
+                        "AllowTeamsConsumer": True,
+                        "AllowTeamsConsumerInbound": True,
+                        "AllowPublicUsers": True,
+                        "AllowedDomains": "AllowAllKnownDomains",
+                        "BlockedDomains": [],
+                    }],
+                },
+                "meetingPolicies": {
+                    "value": [{
+                        "Identity": "Global",
+                        "AllowCloudRecording": True,
+                        "AllowIPVideo": True,
+                        "ScreenSharingMode": "EntireScreen",
+                        "AllowExternalParticipantGiveRequestControl": False,
+                        "AllowAnonymousUsersToStartMeeting": False,
+                        "AutoAdmittedUsers": "EveryoneInCompany",
+                        "AllowPSTNUsersToBypassLobby": False,
+                    }],
+                },
+                "messagingPolicies": {
+                    "value": [{
+                        "Identity": "Global",
+                        "AllowOwnerDeleteMessage": False,
+                        "AllowUserDeleteMessage": True,
+                        "AllowUserEditMessage": True,
+                    }],
+                },
+            },
+        },
+    )
+
+    (federation,) = (
+        row for row in snapshot["teams_policy_objects"]["records"]
+        if row["source_name"] == "tenantFederationConfiguration"
+    )
+    # One-off drift for compare: old runs used tenantFederationConfiguration as the
+    # normalised id and teams_policy:tenantFederationConfiguration:external_federation_open
+    # as the finding id; the same finding appears resolved and new across this change.
+    assert federation["id"] == "tenantFederationConfiguration:Global"
+    assert federation["key"] == "teams_policy_object:tenantFederationConfiguration:Global"
+    (finding,) = (
+        row for row in build_findings([], normalized_snapshot=snapshot)
+        if row["rule_id"] == "teams.external_federation_open"
+    )
+    assert finding["id"] == "teams_policy:tenantFederationConfiguration:Global:external_federation_open"
+    assert finding["affected_objects"] == ["Global"]
 
 
 def test_only_get_commands() -> None:
