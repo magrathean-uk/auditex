@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import lzma
+import os
 from pathlib import Path
 
 import pytest
@@ -18,8 +19,8 @@ from azure_tenant_audit.model_evidence import NOT_COLLECTED
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/scuba-adapters-aad"
-PINNED = Path("/Users/bolyki/dev/opensource/auditex-references/ScubaGear")
-RISK_PATH = "PowerShell/ScubaGear/schemas/RiskyAppPermissions.json"
+SCUBA = Path(os.environ["AUDITEX_TEST_SCUBAGEAR"]) if os.environ.get("AUDITEX_TEST_SCUBAGEAR") else None
+RISK_PATH = "schemas/RiskyAppPermissions.json"
 TENANT = "11111111-1111-4111-8111-111111111111"
 
 # Pack-only fields deliberately omitted at every round trip, including nested
@@ -448,7 +449,9 @@ def test_unreadable_vendored_data_withholds(run, monkeypatch):
 
 
 def test_vendored_subset_equals_pinned_file():
-    path = PINNED / RISK_PATH
+    if SCUBA is None:
+        pytest.skip("set AUDITEX_TEST_SCUBAGEAR for pinned offline comparison")
+    path = SCUBA / RISK_PATH
     if not path.exists():
         pytest.skip("pinned local ScubaGear checkout absent")
     original = json.loads(path.read_text())

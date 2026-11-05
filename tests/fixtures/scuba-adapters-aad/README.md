@@ -4,7 +4,7 @@ Synthetic configuration data only; auditex-data-not-confidential. Rows derive fr
 
 Fixture meta: **constructed rows and pack train and validation rows from v3.9.1; held-out test and pilot rows excluded**. Every row records its vector_id, origin, source_kind, source_file and split.
 
-Source manifest: `/Volumes/4TB/dev/auditex-data/development-kit/20261027-ship-plan/tree/run/model/value-rules-v391/vectors-manifest.json`. This manifest does not list a hash for the final vectors.jsonl; both the manifest and the actual vector bytes are hashed below.
+Source manifest: `vectors-manifest.json` from the model stream's `value-rules-v391` directory (v3.9.1). This manifest does not list a hash for the final vectors.jsonl; both the manifest and the actual vector bytes are hashed below.
 
 ```json
 {
@@ -51,7 +51,7 @@ Source manifest: `/Volumes/4TB/dev/auditex-data/development-kit/20261027-ship-pl
   },
   "rows": 588,
   "selection": "constructed rows and pack train and validation rows from v3.9.1; held-out test and pilot rows excluded",
-  "source": "/Volumes/4TB/dev/auditex-data/development-kit/20261027-ship-plan/tree/run/model/value-rules-v391/vectors.jsonl",
+  "source": "the v3.9.1 vectors.jsonl from the model stream's value-rules-v391 directory",
   "source_sha256": "3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e"
 }
 ```
