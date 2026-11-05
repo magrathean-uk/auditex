@@ -253,7 +253,7 @@ def _serve_rule(policy, sections):
     projection.rule_views = {}
     records, prompts = _assess_policies(
         projection, [policy], policy_catalogue(), "2026-11-05T00:00:00Z",
-        dry_run=False, baseline={}, scope=None, max_items=100)
+        dry_run=False, baseline={})
     assert not prompts
     assert projection.rule_sections == sections
     return records[0]
