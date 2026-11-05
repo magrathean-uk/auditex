@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from ..secret_hygiene import redact_command_string, redact_output
+from ..secret_hygiene import ipps_password_env_allowed, redact_command_string, redact_output
 from .base import Adapter, AdapterMetadata
 from .read_guard import CommandRefused, VettedCommand, check_command, refusal_response
 
@@ -25,7 +25,19 @@ _IPPS_CHILD_PASSWORD = "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD"
 def _ipps_certificate_file_usable(value: str) -> bool:
     """Check metadata only; Python never reads or exports the PFX/private key."""
     try:
-        info = Path(value).lstat()
+        if os.path.realpath(value) != os.path.abspath(value):
+            return False
+        path = Path(os.path.abspath(value))
+        uid = os.getuid() if hasattr(os, "getuid") else None
+        for parent in path.parents:
+            parent_info = parent.lstat()
+            if not stat.S_ISDIR(parent_info.st_mode):
+                return False
+            if parent_info.st_mode & 0o022 and not (
+                parent_info.st_mode & stat.S_ISVTX and parent_info.st_uid in {0, uid}
+            ):
+                return False
+        info = path.lstat()
         return (stat.S_ISREG(info.st_mode) and not info.st_mode & 0o077
                 and 0 < info.st_size <= _IPPS_MAX_PFX_BYTES
                 and (not hasattr(os, "getuid") or info.st_uid == os.getuid()))
@@ -99,8 +111,9 @@ class PowerShellGraphAdapter(Adapter):
         )
 
     @staticmethod
-    def _session_prelude(session: Optional[dict[str, Any]], env: dict[str, str]) -> str:
-        """Connect step for a fresh pwsh process. Tokens travel in the environment, never on the command line."""
+    def _session_prelude(session: Optional[dict[str, Any]], env: dict[str, str]) -> tuple[str, str | None]:
+        """Connect step for a fresh pwsh process. IPPS passwords travel over stdin; tokens use the environment."""
+        child_input = None
         if session and session.get("kind") == "security_compliance":
             app_id = str(session.get("app_id") or "")
             thumbprint = str(session.get("certificate_thumbprint") or "")
@@ -110,32 +123,31 @@ class PowerShellGraphAdapter(Adapter):
             if (not session.get("enabled") or not re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", app_id)
                     or bool(thumbprint) == bool(certificate_file)
                     or not _ORGANIZATION_PATTERN.fullmatch(organization)):
-                return ""
+                return "", None
             if thumbprint:
                 if sys.platform != "win32" or password_env or not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint):
-                    return ""
+                    return "", None
                 env["AUDITEX_IPPS_CERTIFICATE_THUMBPRINT"] = thumbprint
                 certificate_argument = "-CertificateThumbprint $env:AUDITEX_IPPS_CERTIFICATE_THUMBPRINT "
                 load_certificate = ""
             else:
                 if (sys.platform not in {"darwin", "linux"}
-                        or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", password_env)
+                        or not ipps_password_env_allowed(password_env)
                         or not _ipps_certificate_file_usable(certificate_file)):
-                    return ""
+                    return "", None
                 provider = session.get("certificate_password_provider")
                 try:
                     password = provider() if callable(provider) else None
                 except Exception:  # Credential-provider diagnostics must never escape.
-                    return ""
-                if not isinstance(password, str) or not password or "\x00" in password:
-                    return ""
+                    return "", None
+                if not isinstance(password, str) or not password or any(c in password for c in "\x00\r\n"):
+                    return "", None
                 env["AUDITEX_IPPS_CERTIFICATE_FILE"] = certificate_file
-                env[_IPPS_CHILD_PASSWORD] = password
+                child_input = password + "\n"
                 # Let ExchangeOnlineManagement handle platform certificate loading.
                 # EphemeralKeySet is not portable to common macOS .NET runtimes.
                 load_certificate = (
-                    "$ippsPassword = ConvertTo-SecureString -String $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD "
-                    "-AsPlainText -Force; "
+                    "$ippsPassword = [System.Net.NetworkCredential]::new('', [Console]::In.ReadLine()).SecurePassword; "
                 )
                 certificate_argument = "-CertificateFilePath $env:AUDITEX_IPPS_CERTIFICATE_FILE -CertificatePassword $ippsPassword "
             env.update(AUDITEX_IPPS_APP_ID=app_id, AUDITEX_IPPS_ORGANIZATION=organization)
@@ -146,21 +158,20 @@ class PowerShellGraphAdapter(Adapter):
                 "try { " + load_certificate + "Connect-IPPSSession -AppId $env:AUDITEX_IPPS_APP_ID "
                 + certificate_argument +
                 "-Organization $env:AUDITEX_IPPS_ORGANIZATION -ShowBanner:$false -ErrorAction Stop | Out-Null } "
-                "catch { throw 'AUDITEX_IPPS_SESSION_NOT_CONNECTED' } "
-                "finally { $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD = $null }; "
-            )
+                "catch { throw 'AUDITEX_IPPS_SESSION_NOT_CONNECTED' }; "
+            ), child_input
         if not session or session.get("kind") != "exchange_online":
-            return ""
+            return "", None
         token = session.get("access_token")
         organization = str(session.get("organization") or "")
         if not token or not _ORGANIZATION_PATTERN.fullmatch(organization):
-            return ""
+            return "", None
         env["AUDITEX_EXO_ACCESS_TOKEN"] = str(token)
         return (
             "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
             f"Connect-ExchangeOnline -AccessToken $env:AUDITEX_EXO_ACCESS_TOKEN -Organization '{organization}' "
             "-ShowBanner:$false -SkipLoadingFormatData -ErrorAction Stop | Out-Null; "
-        )
+        ), None
 
     def run(
         self,
@@ -199,9 +210,13 @@ class PowerShellGraphAdapter(Adapter):
         env = dict(os.environ)
         # Even direct adapter users must not leak a configured PFX password to
         # unrelated PowerShell children. Collector sessions consume it earlier.
-        env.pop(os.environ.get("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", ""), None)
+        password_env = os.environ.get("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", "")
+        if ipps_password_env_allowed(password_env):
+            env.pop(password_env, None)
+        if session and ipps_password_env_allowed(str(session.get("certificate_password_env") or "")):
+            env.pop(session["certificate_password_env"], None)
         env.pop(_IPPS_CHILD_PASSWORD, None)
-        prelude = self._session_prelude(session, env)
+        prelude, child_input = self._session_prelude(session, env)
         if ipps and not prelude:
             error_class = "missing_app_credentials" if session.get("enabled") else "session_not_connected"
             return {"error": error_class, "error_class": error_class, "command": safe_command}
@@ -231,8 +246,13 @@ class PowerShellGraphAdapter(Adapter):
                 )
 
             start = time.time()
+            # Narrow the path race after providers/log callbacks, just before launch.
+            # pwsh still reopens the path: this is not inode pinning.
+            if ipps and session.get("certificate_file") and not _ipps_certificate_file_usable(session["certificate_file"]):
+                return {"error": "missing_app_credentials", "error_class": "missing_app_credentials", "command": safe_command}
             result = subprocess.run(
                 [exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prepared],
+                input=child_input,
                 text=True,
                 capture_output=True,
                 timeout=180 if prelude else 120,

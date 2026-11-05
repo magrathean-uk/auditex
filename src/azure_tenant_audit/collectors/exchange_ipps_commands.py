@@ -6,9 +6,9 @@ AdvancedRule is omitted: its free-form JSON can hold recipients and content matc
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
+from ..secret_hygiene import ipps_password_env_allowed
 from .exchange_defender_commands import _listing
 
 
@@ -35,7 +35,7 @@ def ipps_session() -> dict[str, Any]:
     # Consume once before any collector children, as in the certificate-auth branch.
     # A closure keeps the password out of session reprs and all other child environments.
     password_env = os.environ.get("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", "")
-    password = os.environ.pop(password_env, None) if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", password_env) else None
+    password = os.environ.pop(password_env, None) if ipps_password_env_allowed(password_env) else None
 
     def password_provider() -> str | None:
         return password

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from auditex.scuba_projection import NOT_COLLECTED, project_run
-from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
+from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter, _ipps_certificate_file_usable
 from azure_tenant_audit.adapters.read_guard import check_command
 from azure_tenant_audit.collectors.exchange_ipps_commands import DLP_EXCEPTION_FIELDS, DLP_LOCATION_FIELDS, IPPS_COMMANDS, ipps_session, minimise_ipps
 from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
@@ -123,6 +123,8 @@ def test_enabled_uses_existing_adapter_and_all_five_rules(monkeypatch, tmp_path)
             assert value not in " ".join(args)
         assert "-ClientSecret" not in args[-1] and "-AccessToken" not in args[-1]
         assert kw["env"]["AUDITEX_IPPS_CERTIFICATE_THUMBPRINT"] == "A" * 40
+        assert kw["input"] is None
+        assert "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in kw["env"]
     # Clearing all evidence and changing relevant settings produce negative judgements.
     negative = deepcopy(OUTPUT)
     negative["dlpComplianceRules"][0]["ContentContainsSensitiveInformation"] = []
@@ -328,6 +330,8 @@ def pfx_configuration(monkeypatch, *, platform="darwin", mode=stat.S_IFREG | 0o6
     original = Path.lstat
 
     def metadata(path, *args, **kwargs):
+        if str(path) == "/synthetic":
+            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=os.getuid())
         if str(path) == "/synthetic/customer.pfx":
             return SimpleNamespace(st_mode=mode, st_size=size, st_uid=os.getuid() if owner is None else owner)
         return original(path, *args, **kwargs)
@@ -353,12 +357,14 @@ def test_portable_certificate_is_child_only_and_uses_file_parameters(monkeypatch
             script = argv[-1]
             assert "-CertificateFilePath $env:AUDITEX_IPPS_CERTIFICATE_FILE -CertificatePassword $ippsPassword " in script
             assert "-CertificateThumbprint" not in script
-            assert "ConvertTo-SecureString -String $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD -AsPlainText -Force" in script
+            assert "[System.Net.NetworkCredential]::new('', [Console]::In.ReadLine()).SecurePassword" in script
+            assert "ConvertTo-SecureString" not in script
             assert "EphemeralKeySet" not in script
-            assert "finally { $env:AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD = $null }" in script
-            assert kwargs["env"]["AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD"] == "synthetic-password-only-in-memory"
+            assert kwargs["input"] == "synthetic-password-only-in-memory\n"
         else:
-            assert "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in kwargs["env"]
+            assert kwargs["input"] is None
+        assert "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in kwargs["env"]
+        assert "synthetic-password-only-in-memory" not in str(kwargs["env"])
 
 
 @pytest.mark.parametrize("mode,size,owner", [
@@ -403,9 +409,14 @@ def test_certificate_selection_fails_closed_without_sensitive_diagnostics(monkey
             raise ValueError("synthetic-password-only-in-memory")
         session["certificate_password_provider"] = failed_provider
     calls = process(monkeypatch)
-    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session)
+    events = []
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session, log_event=lambda *a: events.append(a))
     assert result["error_class"] == "missing_app_credentials" and not calls
     assert "synthetic-password-only-in-memory" not in str(result)
+    assert "/synthetic/customer.pfx" not in str(result)
+    assert (session.get("certificate_file") or "unconfigured") not in str(result)
+    assert "/synthetic/customer.pfx" not in str(events)
+    assert (session.get("certificate_file") or "unconfigured") not in str(events)
 
 
 @pytest.mark.parametrize("kind", ["none", "exchange_online", "security_compliance"])
@@ -419,8 +430,8 @@ def test_direct_adapter_children_do_not_inherit_password_source(monkeypatch, kin
     PowerShellGraphAdapter().run("Get-DlpCompliancePolicy", session=session)
     assert len(calls) == 1
     assert "SYNTHETIC_IPPS_PASSWORD" not in calls[0][1]["env"]
-    if kind != "security_compliance":
-        assert "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in calls[0][1]["env"]
+    assert "AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in calls[0][1]["env"]
+    assert calls[0][1]["input"] == ("synthetic-password-only-in-memory\n" if kind == "security_compliance" else None)
 
 
 @pytest.mark.parametrize("enabled_switch", ["true", "false"])
@@ -463,9 +474,10 @@ def test_prepared_session_is_reused_without_losing_consumed_password(monkeypatch
     monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.ipps_session", lambda: pytest.fail("session recaptured"))
     calls = process(monkeypatch)
     ExchangePolicyCollector().run({"ipps_session": session})
-    children = [kwargs["env"] for argv, kwargs in calls if "Connect-IPPSSession" in argv[-1]]
+    children = [kwargs for argv, kwargs in calls if "Connect-IPPSSession" in argv[-1]]
     assert len(children) == 3
-    assert all(env["AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD"] == "synthetic-password-only-in-memory" for env in children)
+    assert all(child["input"] == "synthetic-password-only-in-memory\n" for child in children)
+    assert all("AUDITEX_IPPS_CHILD_CERTIFICATE_PASSWORD" not in child["env"] for child in children)
 
 
 @pytest.mark.parametrize("failure", ["session", "parse", "timeout"])
@@ -519,3 +531,154 @@ def test_preflight_reuses_the_prepared_pfx_session(monkeypatch, tmp_path):
     assert runnable == ["exchange_policy"] and rows[0]["decision"] == "run"
     assert len([argv for argv, _ in calls if "Connect-IPPSSession" in argv[-1]]) == 3
     assert "synthetic-password-only-in-memory" not in json.dumps([events, artifacts])
+
+
+@pytest.fixture
+def private_pfx_test_root(monkeypatch, tmp_path):
+    root = tmp_path.resolve()
+    original = Path.lstat
+    ancestors = set(root.parents)
+
+    def metadata(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path in ancestors:
+            # The host's external mount is 0775. Isolate that infrastructure
+            # only; every file/directory under tmp_path uses real metadata.
+            return SimpleNamespace(st_mode=info.st_mode & ~0o022, st_uid=info.st_uid)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", metadata)
+    return root
+
+
+@pytest.mark.parametrize("case", ["regular", "leaf_symlink", "directory_symlink", "fifo", "public_file", "public_parent", "group_parent", "sticky_parent", "hardlink"])
+def test_pfx_real_filesystem_metadata_gate(monkeypatch, private_pfx_test_root, case):
+    monkeypatch.setattr("sys.platform", "darwin")
+    root = private_pfx_test_root  # macOS /var may itself be a symlink.
+    parent = root / "private"
+    parent.mkdir(mode=0o700)
+    path = parent / "metadata-only.pfx"
+    # A single dummy byte, not a certificate or any key material.
+    path.write_bytes(b"x")
+    path.chmod(0o600)
+    selected = path
+    if case == "leaf_symlink":
+        selected = parent / "leaf.pfx"
+        selected.symlink_to(path)
+    elif case == "directory_symlink":
+        link = root / "linked"
+        link.symlink_to(parent, target_is_directory=True)
+        selected = link / path.name
+    elif case == "fifo":
+        path.unlink()
+        os.mkfifo(path, 0o600)
+    elif case == "public_file":
+        path.chmod(0o644)
+    elif case == "public_parent":
+        parent.chmod(0o777)
+    elif case == "group_parent":
+        parent.chmod(0o770)
+    elif case == "sticky_parent":
+        parent.chmod(0o1777)
+    elif case == "hardlink":
+        os.link(path, parent / "other-link.pfx")
+    expected = case in {"regular", "sticky_parent", "hardlink"}
+    assert _ipps_certificate_file_usable(str(selected)) is expected
+    monkeypatch.setenv("AUDITEX_ENABLE_IPPS", "true")
+    monkeypatch.delenv("AUDITEX_IPPS_CERTIFICATE_THUMBPRINT")
+    monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_FILE", str(selected))
+    monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", "SYNTHETIC_IPPS_PASSWORD")
+    monkeypatch.setenv("SYNTHETIC_IPPS_PASSWORD", "synthetic-password-only-in-memory")
+    calls = process(monkeypatch)
+    events = []
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=ipps_session(), log_event=lambda *a: events.append(a))
+    assert bool(calls) is expected
+    if not expected:
+        assert result["error_class"] == "missing_app_credentials"
+    assert str(selected) not in str([result, events])
+
+
+def test_pfx_rechecked_after_callback_before_launch(monkeypatch, private_pfx_test_root):
+    pfx_configuration(monkeypatch)
+    path = private_pfx_test_root / "metadata-only.pfx"
+    path.write_bytes(b"x")
+    path.chmod(0o600)
+    monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_FILE", str(path))
+    events = []
+
+    def replace_after_validation(*event):
+        events.append(event)
+        if event[0] == "command.started":
+            path.chmod(0o644)
+
+    calls = process(monkeypatch)
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=ipps_session(), log_event=replace_after_validation)
+    assert result["error_class"] == "missing_app_credentials"
+    assert not calls
+    assert str(path) not in str([result, events])
+
+
+@pytest.mark.parametrize("name", ["PATH", "HOME", "USER", "SHELL", "TMPDIR", "AZURE_CLIENT_SECRET", "AZURE_OTHER", "M365_CLI_APP_ID", "AUDITEX_ENABLE_IPPS", "AUDITEX_IPPS_CERTIFICATE_FILE", "path", "azure_client_secret"])
+@pytest.mark.parametrize("switch", ["true", "false"])
+def test_reserved_password_variable_refused_without_consumption(monkeypatch, name, switch):
+    pfx_configuration(monkeypatch)
+    monkeypatch.setenv("AUDITEX_ENABLE_IPPS", switch)
+    before = os.environ.get(name)
+    monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", name)
+    session = ipps_session()
+    assert os.environ.get(name) == before
+    calls = process(monkeypatch)
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session)
+    assert result["error_class"] == ("missing_app_credentials" if switch == "true" else "session_not_connected")
+    assert not calls
+    # Also refuse a caller-supplied provider for a reserved name.
+    session.update(enabled=True, certificate_password_env=name, certificate_file="/synthetic/customer.pfx",
+                   app_id="11111111-1111-4111-8111-111111111111", organization="synthetic.onmicrosoft.com",
+                   certificate_password_provider=lambda: "synthetic-password-only-in-memory")
+    assert PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session)["error_class"] == "missing_app_credentials"
+    assert not calls
+
+
+@pytest.mark.parametrize("name", ["AUDITEX_IPPS_PFX_PASSWORD", "AUDITEX_IPPS_PFX_PASSWORD_CUSTOMER"])
+@pytest.mark.parametrize("switch", ["true", "false"])
+def test_dedicated_password_variable_consumed_even_when_off(monkeypatch, name, switch):
+    pfx_configuration(monkeypatch)
+    monkeypatch.setenv("AUDITEX_ENABLE_IPPS", switch)
+    monkeypatch.setenv("AUDITEX_IPPS_CERTIFICATE_PASSWORD_ENV", name)
+    monkeypatch.setenv(name, "synthetic-password-only-in-memory")
+    session = ipps_session()
+    assert name not in os.environ
+    calls = process(monkeypatch)
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session)
+    assert bool(calls) is (switch == "true")
+    if calls:
+        assert calls[0][1]["input"] == "synthetic-password-only-in-memory\n"
+        assert name not in calls[0][1]["env"]
+    else:
+        assert result["error_class"] == "session_not_connected"
+
+
+@pytest.mark.parametrize("password", ["synthetic\nsecond-line", "synthetic\rsecond-line", "synthetic\x00value"])
+def test_line_delimited_password_rejects_control_separators(monkeypatch, password):
+    pfx_configuration(monkeypatch)
+    monkeypatch.setenv("SYNTHETIC_IPPS_PASSWORD", password.replace("\x00", ""))
+    session = ipps_session()
+    session["certificate_password_provider"] = lambda: password
+    calls = process(monkeypatch)
+    result = PowerShellGraphAdapter().run(IPPS_COMMANDS[0][1], session=session)
+    assert result["error_class"] == "missing_app_credentials"
+    assert not calls
+
+
+@pytest.mark.parametrize("owner,mode", [(0, 0o1777), (os.getuid(), 0o1777), (os.getuid() + 1, 0o1777), (os.getuid(), 0o777), (os.getuid(), 0o770)])
+def test_writable_ancestor_requires_sticky_and_controlled_owner(monkeypatch, owner, mode):
+    pfx_configuration(monkeypatch)
+    original = Path.lstat
+
+    def metadata(path, *args, **kwargs):
+        if str(path) == "/synthetic":
+            return SimpleNamespace(st_mode=stat.S_IFDIR | mode, st_uid=owner)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", metadata)
+    assert _ipps_certificate_file_usable("/synthetic/customer.pfx") is (bool(mode & stat.S_ISVTX) and owner in {0, os.getuid()})

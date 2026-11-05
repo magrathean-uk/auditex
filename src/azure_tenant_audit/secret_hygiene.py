@@ -9,6 +9,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+def ipps_password_env_allowed(name: str) -> bool:
+    """Keep a password selector from consuming process or other auth settings."""
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return False
+    upper = name.upper()
+    if re.fullmatch(r"AUDITEX_IPPS_PFX_PASSWORD[A-Z0-9_]*", upper):
+        return True
+    return (upper not in {"PATH", "HOME", "USER", "SHELL", "TMPDIR"}
+            and not upper.startswith(("AZURE_", "M365_", "AUDITEX_")))
+
+
 SENSITIVE_ARG_FLAGS = frozenset(
     {
         "--access-token",
