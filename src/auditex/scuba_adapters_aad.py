@@ -322,6 +322,36 @@ ADAPTERS: dict[str, Callable[[Bundle], Any]] = {
     "risky_delegated_permission_classifications": _risky_classifications,
 }
 
+# These failures name settings the legacy SharePoint adapter requires or limits
+# to the model's enum domain. Parsing, health, coverage and scan failures do not
+# identify a retryable shape, even when their reason is also incomplete_shape.
+_SPO_RULE_SHAPE_FAILURES = {
+    ("missing_field", field) for field in (
+        *ENUM_NAME_KEYS, "RequireAnonymousLinksExpireInDays", "EmailAttestationRequired", "EmailAttestationReAuthDays")
+} | {
+    ("unseen_enum_value", field) for field in (
+        "DefaultLinkPermission", "DefaultSharingLinkType", "SharingDomainRestrictionMode")
+}
+
+
+def _retryable_rule_shape(section: str, report: dict[str, Any]) -> bool:
+    """Allow only identified model-shape refusals, never general failures.
+
+    CA's unsupported_conditions record is emitted only after the entire healthy
+    operation has been consumed and its populated restrictions identified.
+    An unexpected_field diagnostic alone does not establish that provenance.
+    """
+    if report.get("reason") != "incomplete_shape":
+        return False
+    detail = report.get("detail", {})
+    kind, field = detail.get("kind"), detail.get("field")
+    if section == "conditional_access_policies":
+        return kind == "unexpected_field" and field in report.get("unsupported_conditions", ())
+    if section == "SPO_tenant":
+        return (kind, field) in _SPO_RULE_SHAPE_FAILURES
+    return False
+
+
 RULE_VARIANTS: dict[str, Callable[[Bundle], Any]] = {
     "conditional_access_policies": _ca_rule,
     "SPO_tenant": _spo_rule,

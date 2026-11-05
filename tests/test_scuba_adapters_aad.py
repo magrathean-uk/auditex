@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from copy import deepcopy
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import lzma
@@ -488,6 +489,12 @@ def with_restriction(extra):
     return row
 
 
+def public_projection_bytes(result):
+    """Only public model evidence, policy views and diagnostics may persist."""
+    return {name: projection._json(value).encode("utf-8") for name, value in (
+        ("model.json", dict(result)), ("views.json", result.views), ("report.json", result.report))}
+
+
 @pytest.mark.parametrize("extra", RESTRICTIONS)
 def test_ca_variant_changes_only_rules(run, monkeypatch, extra):
     row = with_restriction(extra)
@@ -497,9 +504,67 @@ def test_ca_variant_changes_only_rules(run, monkeypatch, extra):
     without = projection.project_run(run)
     assert dict(with_variant) == dict(without)
     assert with_variant.report == without.report
+    assert public_projection_bytes(with_variant) == public_projection_bytes(without)
     assert with_variant.rule_sections["conditional_access_policies"] == expected_ca([aad._pascal(row)])
     assert without.rule_sections["conditional_access_policies"] == NOT_COLLECTED
     assert with_variant.report["sections"]["conditional_access_policies"]["unsupported_conditions"]
+
+
+@pytest.mark.parametrize("section", ["conditional_access_policies", "SPO_tenant"])
+def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(run, monkeypatch, section):
+    import auditex.model_serving as serving
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 5, 0, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(serving, "datetime", FixedDatetime)
+    monkeypatch.setattr(serving.ModelClient, "assess", lambda *a, **k: pytest.fail("unexpected model call"))
+    # Rule verdicts may legitimately change. Exercise the persisted model route
+    # for the affected families while varying only the private rule projection.
+    monkeypatch.setenv("AUDITEX_DISABLE_VALUE_RULES", "1")
+    canary = "PRIVATE CA display-name canary"
+    email = "private-ca-canary@example.invalid"
+    row = with_restriction(RESTRICTIONS[0])
+    row["displayName"] = canary
+    row["conditions"]["users"]["excludeUsers"] = [email]
+    operation(run, "conditional_access", "conditionalAccessPolicies", [row])
+    operation(run, "sharepoint_access", "sharePointSettings", [{**SPO, "DefaultSharingLinkType": 3}])
+    write(run, "normalized/sharepoint_tenant_settings.json", {"records": [{
+        "read_state": "collected", "sharing_capability": "externalUserAndGuestSharing",
+        "onedrive_sharing_capability": "existingExternalUserSharingOnly"}]})
+    enabled = projection.project_run(run)
+    assert canary in json.dumps(enabled.rule_sections["conditional_access_policies"])
+    assert email in json.dumps(enabled.rule_sections["conditional_access_policies"])
+    assert all(canary not in json.dumps(value) and email not in json.dumps(value)
+               for key, value in enabled.rule_sections.items() if key != "conditional_access_policies")
+
+    def outputs(result):
+        public = public_projection_bytes(result)
+        # Exercise the real prompt writer for both affected policy families.
+        serving.assess_run(run, serving.ModelConfig(model_name="stub"), dry_run=True,
+                           policies=["MS.AAD.1.1v1", "MS.SHAREPOINT.1.1v1"])
+        serving.assess_run(run, serving.ModelConfig(model_name="stub"),
+                           policies=["MS.AAD.1.1v1", "MS.SHAREPOINT.1.1v1"])
+        public.update({name: (run / name).read_bytes() for name in (
+            "model_assessment_prompts.jsonl", "model_assessment.json")})
+        return public
+
+    with_variant = outputs(enabled)
+    monkeypatch.setattr(aad, "RULE_VARIANTS", {})
+    disabled = projection.project_run(run)
+    assert disabled.rule_sections[section] == NOT_COLLECTED
+    assert enabled.rule_sections[section] != NOT_COLLECTED
+    without = outputs(disabled)
+    assert with_variant == without
+    for mode, files in (("enabled", with_variant), ("disabled", without)):
+        for name, content in files.items():
+            target = run / "serialisation" / mode / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            assert target.read_bytes() == (run / "serialisation" / "enabled" / name).read_bytes()
+            assert canary.encode() not in content and email.encode() not in content
 
 
 @pytest.mark.parametrize("state", ["enabled", "disabled", "enabledForReportingButNotEnforced"])
@@ -595,15 +660,25 @@ def test_sp_raw_requirement_exposes_legacy_normalised_synthesis_invariant_limit(
     assert projection.project_run(run).rule_sections["SPO_tenant"] == [SPO]
 
 
-@pytest.mark.parametrize("metadata", [{"status": "failed"}, {"read_state": "failed"}, {"collection_status": "failed"}, {"complete": False}, {"partial": True}, {"error_class": "permission_denied"}])
-def test_normalised_sp_health_failure_cannot_become_raw_rule_evidence(run, metadata):
+@pytest.mark.parametrize("metadata", [
+    {"status": "failed"}, {"read_state": "failed"}, {"collection_status": "failed"}, {"complete": False},
+    {"partial": True}, {"error_class": "permission_denied"}, {"resolver_error": True}, {"incomplete": True},
+    {"bounded_sample": True}, {"collection_truncated": True}, {"truncation_reason": "row_limit"},
+    {"@odata.nextLink": "https://example.invalid/next"},
+], ids=lambda metadata: next(iter(metadata)))
+def test_normalised_sp_health_failure_cannot_become_raw_rule_evidence(run, monkeypatch, metadata):
     operation(run, "sharepoint_access", "sharePointSettings", [SPO])
     write(run, "normalized/sharepoint_tenant_settings.json", {"records": [], **metadata})
-    assert projection.project_run(run).rule_sections["SPO_tenant"] == NOT_COLLECTED
+    monkeypatch.setitem(aad.RULE_VARIANTS, "SPO_tenant", lambda b: pytest.fail("health failure retried"))
+    result = projection.project_run(run)
+    assert result.rule_sections["SPO_tenant"] == NOT_COLLECTED
+    if "resolver_error" in metadata:
+        assert result.report["sections"]["SPO_tenant"]["detail"] == {"field": "resolver_error", "kind": "unseen_shape"}
 
 
 @pytest.mark.parametrize("section", ["conditional_access_policies", "SPO_tenant"])
-@pytest.mark.parametrize("reason", ["collector_error", "ledger", "qualifier_check", "oversize", "missing_artifact", "manifest_error", "platform"])
+@pytest.mark.parametrize("reason", ["collector_error", "ledger", "qualifier_check", "missing_artifact", "manifest_error", "platform",
+                                   "bounded_sample", "collection_truncated", "sample_truncated", "manifest_coverage_gaps"])
 def test_variant_never_bypasses_nonshape_failure(run, monkeypatch, section, reason):
     collector, name = ("conditional_access", "conditionalAccessPolicies") if section == "conditional_access_policies" else ("sharepoint_access", "sharePointSettings")
     operation(run, collector, name, [with_restriction(RESTRICTIONS[0]) if section == "conditional_access_policies" else SPO])
@@ -614,19 +689,83 @@ def test_variant_never_bypasses_nonshape_failure(run, monkeypatch, section, reas
         write(run, "run-manifest.json", {"platform": "google_workspace"})
     elif reason == "missing_artifact":
         (run / f"raw/{collector}.json").unlink()
-    elif reason in {"collector_error", "ledger"}:
-        write(run, "coverage.json" if reason == "collector_error" else "normalized/coverage_ledger.json", {"records": [{"collector": collector, "name": name, "status": "failed", "error_class": "permission_denied", "error": "synthetic failure"}]})
-    elif reason == "qualifier_check":
+    elif reason == "manifest_coverage_gaps":
+        write(run, "run-manifest.json", {"platform": "m365", "coverage_gaps": [f"{collector}.{name}"]})
+    elif reason == "collector_error":
+        write(run, "coverage.json", {"records": [{"collector": collector, "name": name, "status": "failed", "error_class": "permission_denied", "error": "synthetic failure"}]})
+    elif reason == "ledger":
+        write(run, "normalized/coverage_ledger.json", {"records": [{"collector": collector, "coverage_status": "partial",
+              "diagnostics": [{"item": name}]}]})
+    elif reason in {"qualifier_check", "bounded_sample", "collection_truncated", "sample_truncated"}:
         raw = json.loads((run / f"raw/{collector}.json").read_text())
-        raw[name]["partial"] = True
+        raw[name]["partial" if reason == "qualifier_check" else reason] = True
         write(run, f"raw/{collector}.json", raw)
-    kwargs = {"scan_max_bytes": 50} if reason == "oversize" else {}
-    enabled = projection.project_run(run, **kwargs)
+    monkeypatch.setitem(aad.RULE_VARIANTS, section, lambda b: pytest.fail("nonshape failure retried"))
+    enabled = projection.project_run(run)
     monkeypatch.setattr(aad, "RULE_VARIANTS", {})
-    disabled = projection.project_run(run, **kwargs)
+    disabled = projection.project_run(run)
     assert enabled.rule_sections[section] == NOT_COLLECTED
-    assert dict(enabled) == dict(disabled)
-    assert enabled.report == disabled.report
+    assert public_projection_bytes(enabled) == public_projection_bytes(disabled)
+    entry = enabled.report["sections"][section]
+    expected_reason = {"collector_error": "collector_error", "missing_artifact": "missing_artifact",
+                       "platform": "not_applicable_to_platform"}.get(reason, "incomplete_shape")
+    assert entry["reason"] == expected_reason
+    fields = {"ledger": "coverage_status", "qualifier_check": "partial", "bounded_sample": "bounded_sample",
+              "collection_truncated": "collection_truncated", "sample_truncated": "sample_truncated",
+              "manifest_coverage_gaps": "coverage_gaps"}
+    if reason in fields:
+        assert entry["detail"] == {"field": fields[reason], "kind": "unseen_shape"}
+
+
+@pytest.mark.parametrize("section", ["conditional_access_policies", "SPO_tenant"])
+@pytest.mark.parametrize("bound", ["scan_max_bytes", "scan_max_rows", "scan_max_chunks"])
+def test_variant_never_bypasses_source_scan_bounds(run, monkeypatch, section, bound):
+    collector, name = (("conditional_access", "conditionalAccessPolicies") if section == "conditional_access_policies"
+                       else ("sharepoint_access", "sharePointSettings"))
+    row = with_restriction(RESTRICTIONS[0]) if section == "conditional_access_policies" else SPO
+    write(run, "normalized/sharepoint_tenant_settings.json", {"records": [], "status": "ok"})
+    limit = 1024 if bound == "scan_max_bytes" else 1
+    if bound == "scan_max_chunks":
+        chunks = [f"chunks/{collector}/{index}.jsonl" for index in range(2)]
+        for path in chunks:
+            write(run, path, row)
+        operation(run, collector, name, [], chunk_files=chunks, chunk_count=2, item_count=2)
+    elif bound == "scan_max_bytes":
+        operation(run, collector, name, [row], **{"@odata.context": "x" * (limit * 2)})
+        assert (run / "run-manifest.json").stat().st_size < limit < (run / f"raw/{collector}.json").stat().st_size
+        assert (run / "normalized/sharepoint_tenant_settings.json").stat().st_size < limit
+    else:
+        operation(run, collector, name, [row, row])
+    monkeypatch.setitem(aad.RULE_VARIANTS, section, lambda b: pytest.fail("scan failure retried"))
+    enabled = projection.project_run(run, **{bound: limit})
+    monkeypatch.setattr(aad, "RULE_VARIANTS", {})
+    disabled = projection.project_run(run, **{bound: limit})
+    assert enabled.rule_sections[section] == NOT_COLLECTED
+    assert public_projection_bytes(enabled) == public_projection_bytes(disabled)
+    entry = enabled.report["sections"][section]
+    assert entry["reason"] == "oversize"
+    assert entry["detail"] == {"field": bound, "kind": "scan_bound"}
+    # The manifest parsed successfully: this failure belongs to section evidence.
+    assert enabled["tenant_id"] == TENANT
+    if bound == "scan_max_rows":
+        assert entry["scan"]["rows"] == limit
+
+
+@pytest.mark.parametrize("section", ["conditional_access_policies", "SPO_tenant"])
+@pytest.mark.parametrize("detail", [
+    {"field": "$", "kind": "unseen_shape"}, {"field": "future_health_marker", "kind": "unseen_shape"},
+    {"field": "SharingCapability", "kind": "invalid_type"}, {"field": "SharingCapability", "kind": "unseen_shape"},
+    {"field": "conditions.locations", "kind": "unexpected_field"},
+])
+def test_unidentified_incomplete_shape_never_retries(run, monkeypatch, section, detail):
+    def refused(b):
+        raise projection.Unavailable(field=detail["field"], kind=detail["kind"])
+
+    monkeypatch.setattr(projection, "_ca" if section == "conditional_access_policies" else "_spo", refused)
+    monkeypatch.setitem(aad.RULE_VARIANTS, section, lambda b: pytest.fail("unidentified shape retried"))
+    result = projection.project_run(run)
+    assert result.rule_sections[section] == NOT_COLLECTED
+    assert result.report["sections"][section]["detail"] == detail
 
 
 def test_sp_first_failed_read_does_not_fall_back(run):

@@ -1610,14 +1610,10 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             report[section]["ignored_fields"] = sorted(bundle.ignored_fields)
         if ("auditex.scuba_adapters_aad" in AREA_ADAPTER_MODULES
                 and manifest_error is None and manifest.get("platform", "m365") == "m365"
-                and report[section]["status"] == "not_collected"
-                and report[section]["reason"] == "incomplete_shape"
-                and report[section].get("detail", {}).get("field") not in {
-                    "status", "read_state", "collection_status", "complete", "partial", "incomplete",
-                    "collection_truncated", "bounded_sample", "truncation_reason", "odata.nextLink"}):
-            from auditex.scuba_adapters_aad import RULE_VARIANTS
+                and report[section]["status"] == "not_collected"):
+            from auditex.scuba_adapters_aad import RULE_VARIANTS, _retryable_rule_shape
 
-            variant = RULE_VARIANTS.get(section)
+            variant = RULE_VARIANTS.get(section) if _retryable_rule_shape(section, report[section]) else None
             if variant is not None:
                 bundle.reset()
                 result.rule_sections[section] = dict(NOT_COLLECTED)
