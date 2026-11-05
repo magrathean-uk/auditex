@@ -70,6 +70,57 @@ def test_output_mask_retains_credential_redaction() -> None:
     assert all(value not in masked for value in ("secret-canary", "bearer-canary", "known"))
 
 
+@pytest.mark.parametrize("secret", [
+    "Secr3t%2DValue", "ab%7Bcd%7D", "p%40ssword99", r"p\u0040ssword99", "p&#64;ssword99", "s＠cret",
+])
+@pytest.mark.parametrize("as_bytes", [False, True])
+def test_output_mask_redacts_literal_credentials_before_decoding(secret, as_bytes) -> None:
+    value = secret.encode() if as_bytes else secret
+    assert redact_output(value, {secret}) == "***redacted***"
+
+
+def test_output_mask_reuses_sensitive_iterator_after_decoding() -> None:
+    assert redact_output("Secr3t%2DValue", iter(["Secr3t-Value"])) == "***redacted***"
+
+
+@pytest.mark.parametrize("value", [0, False, 42, 1.5, [], [EMAIL], {"user": EMAIL}, bytearray(EMAIL.encode()), memoryview(EMAIL.encode())])
+def test_output_mask_coerces_unexpected_types(value) -> None:
+    assert redact_output(value) == redact_output(str(value))
+    _assert_private(redact_output(value))
+
+
+@pytest.mark.parametrize("limit", [-5000, -5, 0])
+@pytest.mark.parametrize("value", ["diagnostic text", DIAGNOSTIC, DIAGNOSTIC.encode(), "x" * 3000])
+def test_output_mask_nonpositive_limit_is_empty(value, limit) -> None:
+    assert redact_output(value, limit=limit) == ""
+
+
+@pytest.mark.parametrize("value", [42, 1.5, [EMAIL], {"user": EMAIL}])
+def test_toolchain_parser_nonstring_version_is_coerced_and_masked(value) -> None:
+    from auditex.auth_runtime import ToolchainRuntime, ToolchainRuntimeAdapters
+
+    runtime = ToolchainRuntime(ToolchainRuntimeAdapters(
+        run_json_command=lambda _: {"status": "supported", "stdout": json.dumps({"azure-cli": value})},
+    ))
+    version, error = runtime.command_version(["az", "version"], parser=lambda output: json.loads(output)["azure-cli"])
+    assert error is None
+    assert version == redact_output(str(value))
+    _assert_private(version)
+
+
+@pytest.mark.parametrize("value", [42, 1.5, [EMAIL], {"user": EMAIL}])
+def test_m365_cli_nonstring_exception_output_is_coerced_and_masked(monkeypatch, value) -> None:
+    def fake_run(cmd, **kwargs):
+        raise subprocess.CalledProcessError(1, cmd, output=value)
+
+    monkeypatch.setattr("shutil.which", lambda _: "/mock/m365")
+    monkeypatch.setattr("subprocess.run", fake_run)
+    response = M365CLIAdapter().run("m365 aad user list --output json")
+    assert response["error_class"] == "command_error"
+    assert response["output"] == redact_output(str(value))
+    _assert_private(json.dumps(response))
+
+
 @pytest.mark.parametrize("adapter,command", [
     (PowerShellGraphAdapter, "Get-Mailbox"),
     (M365CLIAdapter, "m365 aad user list --output json"),
@@ -272,29 +323,53 @@ def test_toolchain_parser_sees_original_output_before_diagnostics_are_masked() -
     _assert_private(runtime.command_version(["mock-tool"], parser=bad_parser)[1])
 
 
-@pytest.mark.parametrize("unit", ["a'", "To='", r"\u4e2d", "@", "a@", ".", "a17e23d45b6947ab8c0123456789abcd", "-eyJa"])
-@pytest.mark.parametrize("limit", [500, None])
-def test_output_mask_megabyte_adversarial_input_is_bounded(unit, limit) -> None:
+# The supplied review does not enumerate its full 57-case timing corpus.
+# Retain the eight existing units and cover query/filter starts, encodings, quotes,
+# credential pattern and long escaped local part in a reproducible 57-case corpus.
+@pytest.mark.parametrize("unit", [
+    "a'", "To='", r"\u4e2d", "@", "a@", ".", "a17e23d45b6947ab8c0123456789abcd", "-eyJa",
+    "a", f"Trace ID: {GUID} ", f"Correlation ID: {GUID} ", GUID + "f", "a+", "a|", "a?", "a&", "a%20", "a%27",
+    "a%3D", "a%40", r"a\u0040", "a&#64;", "a＠", "'", '"', r'\"', "\\", r"\u",
+    r"\u0061", r"\n", r"\t", r"\r", "%", "%2", "%27", "%20", "%3D", "%40",
+    "&#64;", "a'@", '"a"@', r'\"a\"@', r"\u0061" * 64 + "@x ",
+    "a@x&bob@y", "a@x?bob@y", "a@x|bob@y", "a@x+bob@y", "a@x'bob@y",
+    "a@x%20bob@y", "a@x%27bob@y", "a@x%3Dbob@y", "password=", "password='",
+    'password="', "Bearer ", "eyJa.", "eyJa.eyJa.",
+])
+def test_output_mask_megabyte_adversarial_input_is_bounded(unit, record_property) -> None:
     # Allow host-load variation with a fixed, generous 15-second budget per MB.
     # A separate child deadline bounds future regex regressions too.
-    script = """
-import sys, time
-from azure_tenant_audit.secret_hygiene import redact_output
-unit, limit = sys.argv[1:]
+    script = r"""
+import json, re, sys, time
+from auditex.command_runner import _redact_text
+from azure_tenant_audit import secret_hygiene
+unit = sys.argv[1]
 text = (unit * (1_048_576 // len(unit) + 1))[:1_048_576]
-started = time.monotonic()
-redact_output(text, limit=None if limit == 'None' else int(limit))
-elapsed = time.monotonic() - started
-print(elapsed)
-assert elapsed < 15.0, elapsed
+timings = {}
+def timed(name, operation):
+    started = time.monotonic()
+    operation()
+    timings[name] = time.monotonic() - started
+    assert timings[name] < 15.0, (name, timings[name])
+for name, pattern in vars(secret_hygiene).items():
+    if isinstance(pattern, re.Pattern):
+        timed(name, lambda: pattern.sub('', text))
+timed('trailing_token', lambda: re.split(r'''[\s,;:"'<>()\[\]{}]''', text))
+timed('full', lambda: secret_hygiene.redact_output(text, limit=None))
+timed('clipped', lambda: secret_hygiene.redact_output(text))
+# Force the real exemption pass even when this pattern has no operator value.
+operator = 'a' * 512
+timed('operator', lambda: _redact_text(text + '\n' + operator, set(), {operator}))
+print(json.dumps(timings))
 """
     result = subprocess.run(
-        [sys.executable, "-c", script, unit, str(limit)],
+        [sys.executable, "-c", script, unit],
         cwd=Path(__file__).resolve().parents[1],
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    record_property("adversarial_timings", result.stdout.strip())
 
 
 @pytest.mark.parametrize("encoded", [
@@ -334,7 +409,31 @@ def test_output_mask_only_scans_sample_and_safety_margin(monkeypatch) -> None:
     monkeypatch.setattr(secret_hygiene, "redact_text", observe)
     # The final unterminated run is dropped even when it fills the whole window.
     assert redact_output("x" * 1_048_576) == ""
-    assert lengths == [500 + 2048]
+    assert lengths == [500 + 2048, 500 + 2048]
+
+
+def test_output_mask_graph_or_filter_masks_both_addresses() -> None:
+    text = (
+        "Uri: https://graph.microsoft.com/v1.0/users?$filter="
+        "mail%20eq%20%27a%40contoso.com%27%20or%20mail%20eq%20%27bob%40contoso.com%27"
+    )
+    masked = redact_output(text)
+    assert "a@contoso.com" not in masked
+    assert "bob" not in masked
+    assert masked.count("***@contoso.com") == 2
+    assert masked.startswith("Uri: https://graph.microsoft.com/")
+
+
+@pytest.mark.parametrize("text", [
+    "?SenderAddress=a@x&b=c@y", "?SenderAddress=alice@x&RecipientAddress=bob@y",
+    "mailto:a@x?cc=bob@y", "a@x&bob@y", "a@x?bob@y", "a@x%20bob@y", "a@x%27bob@y",
+    "a@x|bob@y", "a@x+bob@y", "a@x'bob@y",
+])
+def test_output_mask_glued_addresses_masks_second_local_part(text) -> None:
+    masked = redact_output(text)
+    assert masked.count("***@") == 2
+    assert "a@x" not in masked and "alice" not in masked
+    assert all(local not in masked for local in ("b=c@", "bob"))
 
 
 @pytest.mark.parametrize("text,expected", [

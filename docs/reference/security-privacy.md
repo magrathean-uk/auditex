@@ -140,17 +140,22 @@ also covers a 64-character local part represented by JSON `\uXXXX` escapes and a
 253-character domain, or a percent-encoded GUID straddling the cut. If the input
 exceeds that window, its trailing non-delimiter run is dropped after masking so
 shrinking earlier matches cannot expose a partial identifier at the scan edge.
+An unterminated delimiter-free window can therefore yield an empty sample.
 E-mail local parts, including quoted ones, are bounded to 64 characters for matching.
 Common encoded separators (`%40`, `\u0040`, `&#64;`, fullwidth `＠`, `%7B`/`%7D`,
-`%2D`) are decoded once for masking, and those decoded forms are emitted, including
-in MCP responses. URL schemes, hosts and paths are retained around masked local
-parts; numeric npm versions, Git SSH addresses with user `git` and hosts starting
-with `git` or `ssh.`, undashed hashes and labelled `Trace ID:`/`Correlation ID:`
-values remain usable for support. Graph `request-id` and `client-request-id` labels
-remain visible; their values follow the ordinary dashed-GUID masking rule.
+`%2D`) are decoded once for masking, after credential redaction, and those decoded
+forms are emitted, including in MCP responses. URL schemes, hosts and paths are
+retained around masked local parts; numeric npm versions, Git SSH addresses with
+user `git` and hosts starting with `git` or `ssh.`, undashed hashes and labelled
+`Trace ID:`/`Correlation ID:` values remain usable for support. Graph `request-id`
+and `client-request-id` labels remain visible; their values follow the ordinary
+dashed-GUID masking rule.
 Known limitations include double-encoded or unsupported separator forms (`%2540`,
-double-escaped `\\u0040`, `&#x40;`, `\x40`, `%u0040`), GUIDs immediately followed
-by a hexadecimal character, and e-mail local parts longer than 64 characters.
+double-escaped `\\u0040`, `&#x40;`, `&#064;`, `&commat;`, `\x40`, `%u0040`), GUIDs
+immediately followed by a hexadecimal character, IP-literal or numeric e-mail
+domains, local parts or preceding glued local-part runs exceeding 64 characters,
+and partial local parts at the scan edge when a quote is treated as a delimiter
+(for example, `o'` from `o'brien` or `"john ` from `"john smith"`).
 
 Live MCP command-response streams are masked without clipping. Values explicitly
 supplied through `--tenant-name`, `--tenant-id`, `--out`, `--run-name`, `--target`,

@@ -33,9 +33,11 @@ _OUTPUT_EMAIL_RE = re.compile(
     # Keep familiar diagnostic field labels; otherwise mask an ambiguous '=' with
     # the local part, which may legitimately contain it.
     # Apostrophes inside a name are allowed, but surrounding single quotes stay intact.
-    # Every atom that can continue a local part also blocks a fresh start.
+    # Query/filter separators (? & | + ' and %20/%27) can start another address.
+    # Keep these fixed-width starts and the bounded local/domain scans: even a
+    # delimiter at every position must take only constant work per input byte.
     # Slash is a URL path separator, not part of a diagnostic local part.
-    r"(?:(?<![\w.!#$%&'*+=?^`{|}~\\-])|(?<=\\[nrtbf]))"
+    r"(?:(?<![\w.!#$%*=^`{}~\\-])|(?<=\\[nrtbf])|(?<=%2[07]))"
     r"(?P<field>(?i:SentTo|UserPrincipalName|UPN|EmailAddress|Email|Recipient|From|To)='?)?"
     r"(?P<quote>'?)"
     r'(?P<local>\\?"(?:\\u[0-9a-fA-F]{4}|[^"\\\r\n]){1,64}\\?"|'
@@ -166,7 +168,7 @@ def redact_text(value: str, sensitive_values: Iterable[str] | None = None) -> st
 
 
 def redact_output(
-    value: str | bytes | None,
+    value: Any,
     sensitive_values: Iterable[str] | None = None,
     *,
     limit: int | None = 500,
@@ -176,11 +178,15 @@ def redact_output(
     Domains, punctuation and error wording remain useful. ``limit=None`` is for full
     MCP command responses, which are not log samples and must not be clipped.
     """
-    text = value or ""
+    text = "" if value is None else value if isinstance(value, (str, bytes)) else str(value)
     clipped = limit is not None and len(text) > max(0, limit) + _OUTPUT_SAMPLE_MARGIN
     if limit is not None:
         text = text[:max(0, limit) + _OUTPUT_SAMPLE_MARGIN]
     text = text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
+    # Credentials take precedence over decoding, which can change a literal
+    # sensitive value. Reuse iterators for the post-decoding pass as well.
+    sensitive_values = tuple(sensitive_values) if sensitive_values is not None else None
+    text = redact_text(text, sensitive_values)
     text = _OUTPUT_ENCODING_RE.sub(lambda match: _OUTPUT_ENCODINGS[match[0].lower()], text)
     redacted = redact_text(text, sensitive_values)
 
@@ -200,7 +206,7 @@ def redact_output(
         trailing = re.split(r"[\s,;:\"'<>()\[\]{}]", redacted)[-1]
         if trailing:
             redacted = redacted[:-len(trailing)]
-    return redacted if limit is None else redacted[:limit]
+    return redacted if limit is None else redacted[:max(0, limit)]
 
 
 def redact_argv(
