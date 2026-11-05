@@ -43,8 +43,8 @@ checkout or executes report content.
 adapter weights file hashes, GGUF hash, base and distribution licence, llama.cpp revision, training pack and scores) and the inspected OpenAdmin and M365 Expert
 model artifacts, OpenAdmin public dataset and source pipeline, and proposed
 base checkpoints. Reference models, original data and sparse source copies
-are retained outside the distributable tree under
-`/Volumes/4TB/dev/auditex-data/` and the workspace's third-party area.
+are retained outside the distributable tree, in the development workspace's
+data and third-party areas.
 Per-file hashes and upstream revisions accompany the development kit.
 
 Auditex's corpus staging, structured evaluator, case curation and training-pack

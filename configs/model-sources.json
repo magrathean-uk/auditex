@@ -5,7 +5,7 @@
   "external_execution": true,
   "inference_executed": true,
   "training_executed": true,
-  "assembly_method": "One base, one LoRA adapter: Ministral 3 8B Instruct trained on the SCuBA oracle pack, merged into the BF16 base and quantised once for llama.cpp serving. Training, conversion and benchmarks ran on JUPITER; no tenant evidence was used. No cross-architecture weight merge. Listing this catalogue fetches and executes nothing.",
+  "assembly_method": "One base, one LoRA adapter: Ministral 3 8B Instruct trained on the SCuBA oracle pack, merged into the BF16 base and quantised once for llama.cpp serving. Training, conversion and benchmarks ran on a European HPC system; the training data is synthetic and no tenant evidence was used in training. No cross-architecture weight merge. Listing this catalogue fetches and executes nothing.",
   "sources": [
     {
       "id": "auditex-ministral3-8b-scuba-v10",
@@ -67,15 +67,15 @@
           "test": 435
         },
         "labels": "Synthetic cases built from ScubaGear Rego unit-test fixtures (commit 2446ad723b7f55031cc02c8aca244d731d468cba) and labelled by running the Rego with OPA; oracle output, not human review",
-        "dataset_card": "development-kit/20261030-oracle-pack-v10/DATASET-CARD.md",
-        "run": "round5-20261030T0250Z (JUPITER, 4 x GH200, 30 October 2026)",
-        "records": "development-kit/20261030-round5-v10/RESULTS-round5.md; development-kit/20261030-g4-8b/RESULTS-g4-8b.md"
+        "dataset_card": "Auditex oracle pack v10 dataset card (development record, not published)",
+        "run": "round5-20261030T0250Z (a European HPC system, four data-centre GPUs, 30 October 2026)",
+        "records": "Round 5 and 8B benchmark results records (development records, not published)"
       },
       "serving": {
         "runtime": "llama-server at the conversion revision",
         "server_flags": "-c 8192 -ngl 99 --seed 42 --parallel 1 --jinja --no-context-shift --alias auditex-ministral3-8b-scuba-v10",
         "benchmark_protocol": {
-          "manifest": "development-kit/20261030-g4-8b/results-20261030T0514Z/benchmark/manifest.json (protocol, response_format)",
+          "manifest": "Benchmark manifest of the 8B run (development record, not published): protocol, response_format",
           "request": {
             "cache_prompt": false,
             "chat_template_kwargs": {
@@ -106,7 +106,7 @@
             "type": "json_object"
           }
         },
-        "protocol_difference": "The scores were measured with benchmark_protocol; auditex model assess sends production_request. It leaves the other sampling fields at llama-server defaults (temperature 0 decodes greedily, so seed, top_k, top_p and min_p should not change the answer; inferred from llama.cpp behaviour, not measured), allows 1024 tokens instead of 512 (only an answer longer than 512 tokens, a benchmark failure, can differ) and asks for a JSON object (response_format), which the benchmark did not. A server that rejects response_format, chat_template_kwargs or cache_prompt is asked again without it, and model_assessment.json records what was sent (serving and per-row thinking_disabled). Production parity with the benchmark was checked only on the two P5 real-tenant bundles, not on the 435-row test set.",
+        "protocol_difference": "The scores were measured with benchmark_protocol; auditex model assess sends production_request. It leaves the other sampling fields at llama-server defaults (temperature 0 decodes greedily, so seed, top_k, top_p and min_p should not change the answer; inferred from llama.cpp behaviour, not measured), allows 1024 tokens instead of 512 (only an answer longer than 512 tokens, a benchmark failure, can differ) and asks for a JSON object (response_format), which the benchmark did not. A server that rejects response_format, chat_template_kwargs or cache_prompt is asked again without it, and model_assessment.json records what was sent (serving and per-row thinking_disabled). Production parity with the benchmark was checked only on two collection bundles of one real tenant, used for evaluation only (none of its data is in the training, validation or test rows), not on the 435-row test set.",
         "client": "auditex model assess (system prompt pinned by SYSTEM_PROMPT_SHA256, prompt convention named-enums-v1)",
         "guide": "docs/guides/ai-assessment.md"
       },
@@ -144,7 +144,7 @@
         "Real tenant without Conditional Access policies: two false 'met' before the empty_required_list rule class took those rows"
       ],
       "licence": "Base model: Apache-2.0 (verified on the mistralai/Ministral-3-8B-Instruct-2512-BF16 model card at the pinned revision f6fae9795746f63c9be8344932f01275f3c63734, 31 October 2026). The merged and quantised weights are distributed under Apache-2.0 as a modified work. Training labels derive from ScubaGear, CC0 1.0.",
-      "availability": "Public Hugging Face repository proposed, upload pending; revision is null until it is published. Internal copy: Civo s3://gmodels/auditex/jupiter-results/gguf-round5-8b-ckpt500/ (two parts and SHA256SUMS). Re-pick the base model in January 2027."
+      "availability": "Public Hugging Face repository proposed, upload pending; revision is null until it is published. Re-pick the base model in January 2027."
     },
     {
       "id": "openadmin-8b",

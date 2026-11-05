@@ -79,7 +79,7 @@ training system prompt.
 runtime buffers of a few hundred MB (not measured), so plan on roughly 7.5 to 8 GB of free GPU memory, or of unified
 memory on Apple silicon, on top of what the operating system and other applications hold. Whether a given laptop
 (for example a 16 GB Apple silicon machine) serves it comfortably has not been measured; check free memory before
-starting the server and treat laptop suitability as unverified. On a GH200 it generated about 197 tokens/s, about
+starting the server and treat laptop suitability as unverified. On one data-centre GPU it generated about 197 tokens/s, about
 0.55 s per policy; a laptop is slower (not measured). A VM works the same way; keep the server on
 loopback, or put it behind HTTPS and set `AUDITEX_MODEL_API_KEY` if Auditex runs elsewhere (a non-loopback
 endpoint prints a warning, because evidence leaves the machine).
@@ -105,7 +105,7 @@ or `cache_prompt` with an HTTP 400 naming the field is asked again without it, o
 records what was sent (`serving.cache_prompt`, `serving.response_format`, and `thinking_disabled` per row). This
 production request differs from the measured benchmark protocol (`max_tokens` 512, no `response_format`, explicit
 `seed` 42, `top_k` 1 and neutral penalties); `configs/model-sources.json` lists both (`serving.benchmark_protocol`,
-`serving.production_request`). Production parity was checked only on the two P5 real-tenant bundles. Personal values are
+`serving.production_request`). Production parity was checked only on two collection bundles of one real tenant, used for evaluation only (none of its data is in the training, validation or test rows). Personal values are
 redacted before they reach the prompt unless `--no-redaction` is given, which needs a loopback endpoint. The file
 is written into the run directory outside the bundle seal (mode 0600); a `model_assessment.json` already sealed in
 `bundle-hashes.json` is refused, so assess a fresh copy of such a run.
@@ -147,7 +147,7 @@ ScubaGear's Rego unit-test fixtures and labelled by running that Rego (oracle la
 The twin-free and per-policy figures were recomputed on 4 November 2026 on the 419/435 scoring, with all four rule
 classes (earlier figures: 280/298 and 88.6 % on the 417/435 scoring). The same test set also chose between candidate builds, so all figures
 are mildly optimistic. One policy, MS.AAD.9.1v1, is 171 of the 435 rows. Synthetic cases say nothing direct about
-real tenants, which are noisier and wider; on the one real tenant assessed so far, before the `empty_required_list`
+real tenants, which are noisier and wider; on the one real tenant used for evaluation only, before the `empty_required_list`
 class existed, the model answered "met" for two Conditional Access policies in a tenant that had none.
 
 Known weak classes, to read with care:
