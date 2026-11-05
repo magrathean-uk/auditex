@@ -806,7 +806,11 @@ and normalized comparisons therefore use all readable **collected** rows.
 Missing, malformed, duplicate or unsafe chunks and count mismatches produce
 `normalized/normalization_coverage.json` issues and `incomplete_evidence`
 blockers; the run finalizes as partial. Symlink escapes and paths outside the run
-are rejected. Successfully saved pages survive a later-page collection failure.
+are rejected. Successfully saved pages survive a later-page collection failure,
+except an `incomplete_evidence` safety stop: the standard chunk writer removes
+that endpoint's chunks and metadata sidecars from disk and the artifact manifest.
+Custom chunk callbacks must provide `discard(chunk_files)` to support this removal;
+without it, the section is withheld but its previously written files remain.
 
 `normalized/snapshot.json` and the AI-safe summary expose
 `normalization_complete`, `normalization_issue_count`,
@@ -961,7 +965,11 @@ recorded as a gap, which is the point.
 
 Reads are kept as far as they got: when a later page fails or is refused after rows were
 read, those rows stay in the evidence in both the chunked and the in-memory path, and the
-list is recorded with `pagination_failed` or `next_link_refused`.
+list is recorded with `pagination_failed` or `next_link_refused`. A repeated page
+URL instead stops with `incomplete_evidence` and withholds the entire section.
+Strict policy lists also withhold the section after 5,000 pages; ordinary lists
+have no default page-count ceiling. The strict validator reads one additional
+page to detect that ceiling, without publishing its rows.
 
 The optional `directory_relationships` collector emits
 `directory_relationship_objects` and `directory_relationship_coverage`.

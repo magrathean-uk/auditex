@@ -435,9 +435,7 @@ def _run_windows365_probe(
             endpoints,
             top=cfg.top,
             page_size=cfg.page_size,
-            chunk_writer=lambda collector_name, endpoint_name, page_number, records, metadata=None: str(
-                writer.write_chunk_records(collector_name, endpoint_name, page_number, records, metadata).relative_to(writer.run_dir)
-            ),
+            chunk_writer=AuditWriterCollectorAdapter(writer).hooks().chunk_writer,
             log_event=writer.log_event,
         )
     result_row = {

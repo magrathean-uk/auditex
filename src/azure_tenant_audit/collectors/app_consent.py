@@ -4,12 +4,115 @@ import time
 from typing import Any
 
 from ..chunk_reader import iter_endpoint_records
-from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_INPUT_LIMITED, section_was_cut
+from ..collection_gaps import REASON_FANOUT_LIMIT, REASON_INPUT_LIMITED, fanout_gap_row, section_total, section_was_cut
 from ..graph import GraphClient, GraphError
-from .base import Collector, CollectorResult, _classify_graph_error, run_graph_endpoints
+from .base import (
+    Collector, CollectorResult, _InvalidCollectionPage, _classify_graph_error,
+    _validated_collection, run_graph_endpoints,
+)
 
 _MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 _SERVICE_PRINCIPAL_FANOUT_LIMIT = 10
+
+# Resource identifiers from ScubaGear's RiskyAppPermissions.json, revision 2446ad72.
+RISKY_RESOURCE_APP_IDS = (
+    "00000003-0000-0000-c000-000000000000",
+    "00000002-0000-0ff1-ce00-000000000000",
+    "00000003-0000-0ff1-ce00-000000000000",
+    "c5393580-f805-4401-95e8-94b7a6ef2fc2",
+    "00000009-0000-0000-c000-000000000000",
+    "00000007-0000-0000-c000-000000000000",
+    "475226c6-020e-4fb2-8a90-7a972cbfc1d4",
+    "7df0a125-d3be-4c96-aa54-591f83ff541c",
+)
+
+
+def _classification_fanout(client: GraphClient) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    name = "delegatedPermissionClassifications"
+    start = time.perf_counter()
+    lookup_row = {
+        "collector": "app_consent", "type": "graph", "name": name,
+        "endpoint": "/servicePrincipals", "api_version": "v1.0",
+        "status": "ok", "item_count": 0, "error_class": None, "error": None,
+    }
+    inputs: dict[str, Any] = {}
+    try:
+        inputs["value"] = _validated_collection(client, "/servicePrincipals", {
+            "$filter": " or ".join(f"appId eq '{app_id}'" for app_id in RISKY_RESOURCE_APP_IDS),
+            "$select": "id,appId,displayName",
+        })
+        lookup_row["item_count"] = len(inputs["value"])
+    except Exception as exc:  # noqa: BLE001
+        error_class, error = (
+            ("incomplete_evidence", str(exc)) if isinstance(exc, _InvalidCollectionPage) else _classify_graph_error(exc)
+        )
+        lookup_row.update(status="failed", error_class=error_class, error=error)
+    lookup_row["duration_ms"] = round((time.perf_counter() - start) * 1000, 2)
+    coverage = [lookup_row]
+    resources = inputs.get("value")
+    invalid = not isinstance(resources, list)
+    resources = resources if isinstance(resources, list) else []
+    total = section_total(inputs, resources)
+    input_cut = section_was_cut(inputs)
+    invalid |= any(
+        not isinstance(resource, dict) or not isinstance(resource.get("id"), str) or not resource["id"]
+        or resource.get("appId") not in RISKY_RESOURCE_APP_IDS for resource in resources
+    )
+    ids = [resource.get("id") for resource in resources if isinstance(resource, dict) and isinstance(resource.get("id"), str)]
+    app_ids = [resource.get("appId") for resource in resources if isinstance(resource, dict) and isinstance(resource.get("appId"), str)]
+    invalid |= len(ids) != len(set(ids)) or len(app_ids) != len(set(app_ids))
+    incomplete = coverage[0]["status"] != "ok" or invalid or input_cut or total != len(resources)
+    rows: list[dict[str, Any]] = []
+    if not incomplete:
+        for resource in resources[:len(RISKY_RESOURCE_APP_IDS)]:
+            sp_id = resource["id"]
+            endpoint = f"/servicePrincipals/{sp_id}/delegatedPermissionClassifications"
+            start = time.perf_counter()
+            row = {
+                "collector": "app_consent", "type": "graph", "name": name,
+                "endpoint": endpoint, "api_version": "v1.0", "service_principal_id": sp_id,
+                "status": "ok", "item_count": 0, "error_class": None, "error": None,
+            }
+            try:
+                classifications = _validated_collection(client, endpoint, {"$select": "id,permissionId,permissionName,classification"})
+                rows.append({
+                    "servicePrincipalId": sp_id, "appId": resource["appId"], "displayName": resource.get("displayName"),
+                    "classifications": [
+                        {key: item[key] for key in ("id", "permissionId", "permissionName", "classification") if key in item}
+                        for item in classifications
+                    ],
+                })
+                row["item_count"] = len(classifications)
+            except Exception as exc:  # noqa: BLE001
+                error_class, error = (
+                    ("incomplete_evidence", str(exc)) if isinstance(exc, _InvalidCollectionPage) else _classify_graph_error(exc)
+                )
+                row.update(status="failed", error_class=error_class, error=error)
+            row["duration_ms"] = round((time.perf_counter() - start) * 1000, 2)
+            coverage.append(row)
+    capped = total > len(RISKY_RESOURCE_APP_IDS)
+    partial = incomplete or capped or any(row["status"] != "ok" for row in coverage)
+    summary = {
+        "collector": "app_consent", "type": "derived", "name": name,
+        "status": "partial" if partial else "ok", "item_count": 0,
+        "rows_collected": len(rows), "duration_ms": 0,
+        "error_class": "incomplete_evidence" if partial else None,
+        "error": "Delegated permission classifications are incomplete." if partial else None,
+        "input_complete": not incomplete, "fanout_limit": len(RISKY_RESOURCE_APP_IDS),
+        "fanout_total": total, "fanout_complete": not partial,
+    }
+    if capped:
+        summary.update(fanout_gap_row("app_consent", name, total=total, expanded=len(rows),
+                                      limit=len(RISKY_RESOURCE_APP_IDS), scope="Risky resource service principals"))
+    elif input_cut:
+        summary.update(collection_truncated=True, truncation_reason=REASON_INPUT_LIMITED)
+    coverage.append(summary)
+    section = {"status": summary["status"], "item_count": len(rows), "fanout": summary.copy()}
+    if rows or not partial:
+        section["value"] = rows
+    if partial:
+        section["error"] = summary["error"]
+    return section, coverage
 
 
 class AppConsentCollector(Collector):
@@ -259,6 +362,8 @@ class AppConsentCollector(Collector):
         })
         payload["servicePrincipalOwners"] = {"value": owner_rows, "fanout": fanout, "collection_truncated": limited}
         payload["servicePrincipalAppRoleAssignments"] = {"value": assignment_rows, "fanout": fanout, "collection_truncated": limited}
+        payload["delegatedPermissionClassifications"], classification_coverage = _classification_fanout(client)
+        coverage.extend(classification_coverage)
         total = sum(item.get("item_count", 0) for item in coverage)
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(

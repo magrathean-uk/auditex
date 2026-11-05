@@ -52,7 +52,7 @@ class IdentityCollector(Collector):
                 "endpoint": "/domains",
                 "apply_top": False,
                 "inline": True,
-                "params": {"$select": "id,authenticationType,isDefault,isVerified,isRoot"},
+                "params": {"$select": "id,authenticationType,isDefault,isVerified,isRoot,passwordValidityPeriodInDays"},
             },
             "users": {
                 "endpoint": "/users",

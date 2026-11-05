@@ -19,7 +19,7 @@ class _FakeClient:
     def get_all(self, path, params=None):  # noqa: ANN001
         if path == "/domains":
             # A list read: paged through the shared path, without $top.
-            assert params == {"$select": "id,authenticationType,isDefault,isVerified,isRoot"}
+            assert params == {"$select": "id,authenticationType,isDefault,isVerified,isRoot,passwordValidityPeriodInDays"}
             return [{"id": "domain-1"}, {"id": "domain-2"}]
         if path == "/users":
             assert params["$top"] == "500"

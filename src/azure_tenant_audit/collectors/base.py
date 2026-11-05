@@ -15,15 +15,56 @@ from ..collection_gaps import (
     truncation_message,
 )
 from ..perf_runtime import EndpointAccumulator, PageWindow
-from ..graph import GraphClient, GraphError, NEXT_LINK_REFUSED, graph_url
+from ..graph import GraphClient, GraphError, INCOMPLETE_EVIDENCE, NEXT_LINK_REFUSED, graph_url
 
 if TYPE_CHECKING:
     from ..collector_runner import CollectorRunContext
 
 
+class _InvalidCollectionPage(ValueError):
+    pass
+
+
+STRICT_MAX_PAGES = 5000
+
+
+def _validated_collection(client: GraphClient, endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate envelopes before flattening; never keep a prefix from a malformed list."""
+    rows: list[dict[str, Any]] = []
+    # Lightweight replay clients may expose only get_all. The real client must
+    # use iter_pages: iter_items/get_all silently accept a missing value key.
+    pages = client.iter_pages(endpoint, params=params) if hasattr(client, "iter_pages") else (
+        {"value": client.get_all(endpoint, params=params)},
+    )
+    try:
+        for page_number, page in enumerate(pages, 1):
+            if page_number > STRICT_MAX_PAGES:
+                raise _InvalidCollectionPage("Graph page-count limit reached; evidence withheld because the list is incomplete.")
+            values = page.get("value") if isinstance(page, dict) else None
+            if not isinstance(values, list) or any(not isinstance(item, dict) for item in values):
+                raise _InvalidCollectionPage("Invalid collection page; evidence withheld.")
+            next_link = page.get("@odata.nextLink")
+            # GraphClient treats null like an absent link: the list has ended.
+            # Leave URL safety checks to iter_pages so named refusals survive.
+            if next_link is not None and (not isinstance(next_link, str) or not next_link):
+                raise _InvalidCollectionPage("Invalid collection next link; evidence withheld.")
+            rows.extend(values)
+    except GraphError as exc:
+        # iter_pages rejects non-dict envelopes itself. Preserve HTTP failures
+        # and named client refusals, including unsafe next links.
+        if exc.status is None and exc.error_code is None and str(exc).startswith("Non-dict response from "):
+            raise _InvalidCollectionPage("Invalid collection page; evidence withheld.") from exc
+        raise
+    return rows
+
+
 def _classify_graph_error(exc: Exception) -> tuple[str, str]:
     message = str(exc)
+    if isinstance(exc, _InvalidCollectionPage):
+        return "incomplete_evidence", message
     if isinstance(exc, GraphError):
+        if exc.error_code == INCOMPLETE_EVIDENCE:
+            return "incomplete_evidence", message
         if exc.error_code == "PermissionStop":
             return "permission_stop", message
         if exc.error_code == NEXT_LINK_REFUSED:
@@ -211,6 +252,8 @@ def run_graph_endpoints(
     complete. A spec may carry ``sample_limit`` for a list that is a sample by design; hitting
     that bound is not a gap. ``max_rows`` is a safety ceiling; a remaining next link is an
     explicit ``pagination_not_followed`` gap. ``max_empty_pages`` stops empty-page loops.
+    ``validate_collection`` opts a new list into atomic envelope validation;
+    ``validate_object`` requires a non-empty object, optionally with ``required_key``.
     """
     payload: dict[str, Any] = {}
     coverage: list[dict[str, Any]] = []
@@ -264,7 +307,15 @@ def run_graph_endpoints(
         max_rows = spec.get("max_rows")
 
         try:
-            if page:
+            if page and spec.get("validate_collection"):
+                # Opt-in policy reads validate every original page before publishing any rows.
+                rows = _validated_collection(client, endpoint, query)
+                rows, collection_truncated = limit_rows(rows, collection_limit)
+                item_count = len(rows)
+                payload[key] = {"value": rows}
+                if collection_truncated:
+                    truncation_reason = REASON_OPERATOR_LIMIT
+            elif page:
                 if chunk_writer is not None and hasattr(client, "iter_pages") and not spec.get("inline"):
                     accumulator = EndpointAccumulator(sample_limit=20)
                     pages = _bounded_pages(
@@ -330,9 +381,16 @@ def run_graph_endpoints(
                     if endpoint.startswith("http")
                     else client.get_json(endpoint, params=query)
                 )
+                if spec.get("validate_object"):
+                    required_key = spec.get("required_key")
+                    if (not isinstance(page_result, dict) or not page_result
+                            or (required_key is not None and (
+                                not isinstance(page_result.get(required_key), str) or not page_result[required_key]
+                            ))):
+                        raise _InvalidCollectionPage("Invalid policy object; evidence withheld.")
                 values = page_result.get("value") if isinstance(page_result, dict) else page_result
                 payload[key] = page_result if isinstance(page_result, dict) else {"value": page_result}
-                if isinstance(values, list):
+                if isinstance(values, list) and not spec.get("validate_object"):
                     item_count = len(values)
                     payload[key] = {"value": values}
                     if isinstance(page_result, dict) and page_result.get("@odata.nextLink"):
@@ -344,9 +402,16 @@ def run_graph_endpoints(
         except Exception as exc:  # noqa: BLE001
             status = "failed"
             error_class, error = _classify_graph_error(exc)
-            # Successfully written pages remain evidence when a later page
-            # fails. Keep their manifest and bounded sample on partial runs.
-            if accumulator is not None:
+            # Ordinary later-page failures retain the prefix. Safety stops and
+            # strict validation failures withhold it, including stored chunks.
+            if spec.get("validate_collection") or error_class == "incomplete_evidence":
+                # A safety stop or strict validation failure withholds the entire section.
+                discard = getattr(chunk_writer, "discard", None)
+                if accumulator is not None and discard is not None:
+                    discard(accumulator.chunk_files)
+                item_count = 0
+                payload[key] = {}
+            elif accumulator is not None:
                 item_count = accumulator.item_count
                 payload[key] = accumulator.payload()
             elif streamed_rows:
@@ -438,6 +503,15 @@ def run_graph_endpoints(
                 },
             )
         coverage.append(coverage_row)
+        if spec.get("validate_collection") and status == "failed":
+            # Keep the named refusal/HTTP cause above, and expose the withheld
+            # section as an incomplete-evidence gap even when no rows were read.
+            coverage.append({
+                "collector": collector, "type": "derived", "name": key,
+                "status": "failed", "item_count": 0, "duration_ms": 0,
+                "error_class": "incomplete_evidence",
+                "error": "Policy collection is incomplete; section withheld.",
+            })
 
     return payload, coverage
 

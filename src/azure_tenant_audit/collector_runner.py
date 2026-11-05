@@ -110,6 +110,26 @@ class CollectorRunOutput:
     crashed: bool = False
 
 
+class _ChunkRecordWriter:
+    """Callable chunk hook with rollback for an endpoint whose evidence is withheld."""
+
+    def __init__(self, writer: Any) -> None:
+        self.writer = writer
+
+    def __call__(
+        self, collector: str, endpoint: str, page_number: int,
+        records: list[dict[str, Any]], metadata: dict[str, Any] | None = None,
+    ) -> str:
+        path = self.writer.write_chunk_records(collector, endpoint, page_number, records, metadata)
+        run_dir = getattr(self.writer, "run_dir", None)
+        return str(path.relative_to(run_dir)) if run_dir is not None and hasattr(path, "relative_to") else str(path)
+
+    def discard(self, chunk_files: list[str]) -> None:
+        discard = getattr(self.writer, "discard_chunk_records", None)
+        if discard is not None:
+            discard(chunk_files)
+
+
 class AuditWriterCollectorAdapter:
     def __init__(self, writer: Any) -> None:
         self.writer = writer
@@ -131,7 +151,7 @@ class AuditWriterCollectorAdapter:
             write_export_checkpoint=getattr(self.writer, "write_export_checkpoint", None),
             write_export_records=self._write_export_records if hasattr(self.writer, "write_export_records") else None,
             write_export_summary=self._write_export_summary if hasattr(self.writer, "write_export_summary") else None,
-            chunk_writer=self._write_chunk_records if hasattr(self.writer, "write_chunk_records") else None,
+            chunk_writer=_ChunkRecordWriter(self.writer) if hasattr(self.writer, "write_chunk_records") else None,
             audit_logger=self.log_event,
             run_dir=getattr(self.writer, "run_dir", None),
         )
@@ -154,16 +174,6 @@ class AuditWriterCollectorAdapter:
 
     def _write_export_summary(self, collector: str, operation: str, payload: dict[str, Any]) -> str:
         return self._relative(self.writer.write_export_summary(collector, operation, payload))
-
-    def _write_chunk_records(
-        self,
-        collector: str,
-        endpoint: str,
-        page_number: int,
-        records: list[dict[str, Any]],
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
-        return self._relative(self.writer.write_chunk_records(collector, endpoint, page_number, records, metadata))
 
 
 class CollectorRunner:

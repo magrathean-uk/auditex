@@ -90,6 +90,8 @@ class _AppConsentClient:
         self.batch_calls: list[list[str]] = []
 
     def get_all(self, path, params=None):  # noqa: ANN001, ARG002
+        if path == "/servicePrincipals" and "$filter" in (params or {}):
+            return []
         if path == "/servicePrincipals":
             return [
                 {
@@ -350,6 +352,8 @@ class _ConsentPolicyClient:
     def get_all(self, path, params=None):  # noqa: ANN001, ARG002
         responses = {
             "/policies/permissionGrantPolicies": [{"id": "grant-policy-1", "displayName": "Default user consent"}],
+            "/policies/appManagementPolicies": [],
+            "https://graph.microsoft.com/beta/settings": [],
         }
         if path not in responses:
             raise AssertionError(f"unexpected path: {path}")
@@ -359,6 +363,7 @@ class _ConsentPolicyClient:
         responses = {
             "/policies/adminConsentRequestPolicy": {"id": "admin-consent", "isEnabled": False},
             "/policies/authorizationPolicy": {"id": "authz", "defaultUserRolePermissions": {"permissionGrantPoliciesAssigned": ["grant-policy-1"]}},
+            "/policies/defaultAppManagementPolicy": {"id": "default-policy", "isEnabled": True},
         }
         if path in responses:
             return responses[path]
@@ -461,6 +466,8 @@ def test_app_consent_collector_collects_grants_owners_and_app_role_assignments()
     assert result.payload["oauth2PermissionGrants"]["value"][0]["id"] == "grant-1"
     assert result.payload["servicePrincipalOwners"]["value"][0]["owners"][0]["id"] == "owner-1"
     assert result.payload["servicePrincipalAppRoleAssignments"]["value"][0]["assignments"][0]["id"] == "assignment-1"
+    assert result.payload["delegatedPermissionClassifications"]["value"] == []
+    assert result.payload["delegatedPermissionClassifications"]["status"] == "ok"
     assert client.batch_calls == [["/servicePrincipals/sp-1/owners", "/servicePrincipals/sp-1/appRoleAssignedTo"]]
 
 
@@ -712,6 +719,14 @@ def test_consent_policy_collector_collects_admin_consent_and_grant_policies() ->
     assert result.status == "ok"
     assert result.payload["adminConsentRequestPolicy"]["isEnabled"] is False
     assert result.payload["permissionGrantPolicies"]["value"][0]["id"] == "grant-policy-1"
+    assert result.payload["directorySettings"]["value"] == []
+    assert result.payload["defaultAppManagementPolicy"]["id"] == "default-policy"
+    assert result.payload["defaultAppManagementPolicy"]["isEnabled"] is True
+    assert result.payload["appManagementPolicies"]["value"] == []
+    assert result.payload["appManagementPolicyAppliesTo"]["value"] == []
+    assert all(result.payload[name]["status"] == "ok" for name in (
+        "directorySettings", "defaultAppManagementPolicy", "appManagementPolicies", "appManagementPolicyAppliesTo",
+    ))
 
 
 def test_domains_hybrid_collector_collects_domains_and_sync_signals() -> None:

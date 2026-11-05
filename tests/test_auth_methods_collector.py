@@ -13,10 +13,13 @@ class _AuthMethodsClient:
         raise AssertionError(f"unexpected path: {path}")
 
     def get_all(self, path, params=None):  # noqa: ANN001
+        if path == "/policies/authenticationMethodsPolicy/authenticationMethodConfigurations":
+            assert params == {}
+            return [{"id": "MicrosoftAuthenticator", "state": "enabled"}]
         if path == "/reports/authenticationMethods/userRegistrationDetails":
             assert params["$top"] == "200"
             self.registration_params = dict(params)
-            return [{"id": "user-1", "userPrincipalName": "user1@contoso.com"}]
+            return [{"id": "user-1", "userPrincipalName": "user1@example.invalid"}]
         raise AssertionError(f"unexpected path: {path}")
 
 

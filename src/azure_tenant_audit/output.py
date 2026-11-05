@@ -451,6 +451,21 @@ class AuditWriter:
         self._record_artifact(target)
         return target
 
+    def discard_chunk_records(self, chunk_files: list[str]) -> None:
+        """Remove this endpoint's chunks and sidecars when its evidence is withheld."""
+        for relative in chunk_files:
+            path = Path(relative)
+            if (len(path.parts) != 3 or path.parts[0] != "chunks" or ".." in path.parts
+                    or path.suffix != ".jsonl"):
+                raise ValueError("Expected a chunk path beneath chunks/<collector>")
+            target = self.run_dir / path
+            if not target.parent.resolve().is_relative_to(self.chunks_dir.resolve()):
+                raise ValueError("Chunk path escapes the chunks directory")
+            for artifact in (target, target.with_suffix(".meta.json")):
+                artifact.unlink(missing_ok=True)
+                name = str(artifact.relative_to(self.run_dir))
+                self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != name]
+
     def write_export_records(
         self,
         collector: str,

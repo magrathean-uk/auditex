@@ -93,7 +93,8 @@
       ],
       "query_plan": [
         "authenticationMethodsPolicy",
-        "userRegistrationDetails"
+        "userRegistrationDetails",
+        "authenticationMethodConfigurations"
       ]
     },
     "reports_usage": {
@@ -126,7 +127,7 @@
     },
     "consent_policy": {
       "enabled": true,
-      "description": "Admin consent workflow, user consent, and permission grant policy posture.",
+      "description": "Admin consent workflow, user consent, permission grant and application management policy posture.",
       "required_permissions": [
         "Policy.Read.All",
         "Directory.Read.All",
@@ -135,7 +136,11 @@
       "query_plan": [
         "adminConsentRequestPolicy",
         "permissionGrantPolicies",
-        "authorizationPolicy"
+        "authorizationPolicy",
+        "directorySettings",
+        "defaultAppManagementPolicy",
+        "appManagementPolicies",
+        "appManagementPolicyAppliesTo"
       ]
     },
     "dns_posture": {
@@ -395,7 +400,8 @@
         "servicePrincipals",
         "oauth2PermissionGrants",
         "servicePrincipalOwners",
-        "servicePrincipalAppRoleAssignments"
+        "servicePrincipalAppRoleAssignments",
+        "delegatedPermissionClassifications"
       ]
     },
     "licensing": {

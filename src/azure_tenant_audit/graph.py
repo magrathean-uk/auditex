@@ -23,6 +23,8 @@ GRAPH_BETA_ROOT = "https://graph.microsoft.com/beta"
 GRAPH_API_ROOTS = {"v1.0": GRAPH_ROOT, "beta": GRAPH_BETA_ROOT}
 # Error code of a refused @odata.nextLink; the paging that stopped is recorded as a coverage gap.
 NEXT_LINK_REFUSED = "NextLinkRefused"
+# A paging safety stop cannot establish a complete collection.
+INCOMPLETE_EVIDENCE = "IncompleteEvidence"
 # Error code of a request the client refused because it is not a read (see read_only_violation).
 READ_ONLY_VIOLATION = "ReadOnlyViolation"
 # Error code of a redirect the client refused to follow (a host that is not Microsoft, a loop, a downgrade).
@@ -227,6 +229,8 @@ class GraphClient:
     session: requests.Session = field(default_factory=requests.Session)
     _token: Optional[str] = None
     audit_event: Optional[Callable[[str, str, Optional[dict[str, Any]]], None]] = None
+    # Explicit caller backstop only; ordinary inventories have no page-count ceiling.
+    max_pages: int | None = None
     _next_request_not_before: float = field(default=0.0, init=False)
     _permission_failures: dict[str, int] = field(default_factory=dict, init=False)
     _token_claims: Optional[dict[str, Any]] = field(default=None, init=False)
@@ -699,12 +703,27 @@ class GraphClient:
         )
 
     def iter_pages(self, path: str, params: Optional[Dict[str, Any]] = None) -> Iterator[Dict[str, Any]]:
+        if self.max_pages is not None and (
+            isinstance(self.max_pages, bool) or not isinstance(self.max_pages, int) or self.max_pages < 1
+        ):
+            raise ValueError("max_pages must be None or a positive integer")
         if path.startswith("http"):
             # An absolute first URL (a batch body's nextLink, a beta endpoint) gets the same host check as every later page.
             self._require_graph_url(path)
         page_url: Optional[str] = path if path.startswith("http") else f"{GRAPH_ROOT}{path}"
         current_params = params
+        visited: set[str] = set()
+        page_count = 0
         while page_url:
+            request_url = page_url
+            if current_params:
+                request_url += ("&" if "?" in request_url else "?") + urlencode(current_params, doseq=True)
+            if request_url in visited or (self.max_pages is not None and page_count >= self.max_pages):
+                reason = "Repeated Graph page link" if request_url in visited else "Graph page-count limit reached"
+                raise GraphError(f"{reason}; evidence withheld because the list is incomplete.",
+                                 error_code=INCOMPLETE_EVIDENCE)
+            visited.add(request_url)
+            page_count += 1
             payload = self.get_json(page_url, params=current_params, full_url=page_url.startswith("http"))
             if not isinstance(payload, dict):
                 raise GraphError(f"Non-dict response from {page_url}", request=page_url)

@@ -117,7 +117,7 @@
         "Authentication Policy Administrator",
         "Security Reader"
       ],
-      "notes": "Authentication method policy and registration reports can require report-reading access. The registration report is read with a fixed $select of metadata fields (userType and isAdmin included) and returns no authentication method values."
+      "notes": "Authentication method policy and registration reports can require report-reading access. The registration report is read with a fixed $select of metadata fields (userType and isAdmin included) and returns no authentication method values. Policy.Read.All also reads whole typed authentication method configurations from /policies/authenticationMethodsPolicy/authenticationMethodConfigurations (v1.0); no per-user method values are read."
     },
     "reports_usage": {
       "graph_scopes": [
@@ -152,7 +152,7 @@
         "Cloud Application Administrator",
         "Security Reader"
       ],
-      "notes": "Consent policy inventory covers admin consent workflow and permission grant policies."
+      "notes": "Consent policy inventory covers admin consent workflow and permission grant policies. Directory.Read.All reads beta /settings, retaining only EnableAdminConsentRequests values. Policy.Read.All reads default and custom application management policies and ids-only appliesTo targets (at most 100 policies and 50 targets per policy); failures and bounds are coverage gaps."
     },
     "cross_tenant_access": {
       "graph_scopes": [
@@ -324,7 +324,7 @@
         "Cloud Application Administrator",
         "Security Reader"
       ],
-      "notes": "Enterprise application consent depth depends on delegated grant and app role assignment visibility."
+      "notes": "Enterprise application consent depth depends on delegated grant and app role assignment visibility. Application.Read.All resolves the eight risky resource app IDs and reads all their delegated permission classifications (v1.0), without filtering by classification or risk; missing resource principals are legal, failed reads are coverage gaps."
     },
     "app_credentials": {
       "graph_scopes": [

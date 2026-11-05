@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from azure_tenant_audit.output import AuditWriter
 
 
@@ -73,3 +75,31 @@ def test_writer_supports_chunk_blocker_and_report_artifacts(tmp_path: Path) -> N
     assert "ai_safe/run_summary.json" in manifest["artifacts"]
     assert "reports/report-pack.json" in manifest["artifacts"]
     assert "reports/action-plan.json" in manifest["artifacts"]
+
+
+def test_discard_chunk_records_without_metadata_is_idempotent(tmp_path: Path) -> None:
+    writer = AuditWriter(tmp_path, tenant_name="constructed", run_name="discard")
+    path = writer.write_chunk_records("constructed", "users", 1, [{"id": "constructed-user"}])
+    relative = str(path.relative_to(writer.run_dir))
+    writer.discard_chunk_records([relative])
+    writer.discard_chunk_records([relative])
+    assert not path.exists() and relative not in writer.artifact_paths()
+
+
+@pytest.mark.parametrize("relative", ["raw/users.json", "chunks/../outside.jsonl", "/chunks/c/users.jsonl"])
+def test_discard_chunk_records_rejects_non_chunk_paths(tmp_path: Path, relative: str) -> None:
+    writer = AuditWriter(tmp_path, tenant_name="constructed", run_name="discard")
+    with pytest.raises(ValueError, match="chunk path"):
+        writer.discard_chunk_records([relative])
+
+
+def test_discard_chunk_records_rejects_symlinked_collector_directory(tmp_path: Path) -> None:
+    writer = AuditWriter(tmp_path, tenant_name="constructed", run_name="discard")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    path = outside / "users-00001.jsonl"
+    path.write_text('{"id": "constructed-user"}\n', encoding="utf-8")
+    (writer.chunks_dir / "constructed").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="escapes"):
+        writer.discard_chunk_records(["chunks/constructed/users-00001.jsonl"])
+    assert path.exists()

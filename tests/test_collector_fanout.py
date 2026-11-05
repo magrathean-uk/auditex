@@ -62,8 +62,17 @@ class _AppConsentClient:
         self.graph_index = graph_index
         self.relationship_calls: list[str] = []
 
+    def get_all(self, path: str, params: Any = None) -> list[dict[str, Any]]:
+        assert path == "/servicePrincipals"
+        assert "$filter" in params
+        assert params["$select"] == "id,appId,displayName"
+        return []
+
     def iter_pages(self, path: str, params: Any = None):
         assert path in {"/servicePrincipals", "/oauth2PermissionGrants"}
+        if path == "/servicePrincipals" and "$filter" in (params or {}):
+            yield {"value": self.get_all(path, params=params)}
+            return
         if path == "/oauth2PermissionGrants":
             return
         assert "accountEnabled" in params["$select"].split(",")
@@ -227,8 +236,11 @@ def test_fanout_coverage_is_not_recorded_as_an_api_call(tmp_path: Path) -> None:
     output, _writer = _run(tmp_path, AppConsentCollector(), _AppConsentClient(count=31, graph_index=30))
     recorder = ApiInventoryRecorder(platform="m365", capability_rows=[])
     recorder.record_many(output.coverage_rows)
-    assert len(recorder.observed_calls()) == 24
+    # Two inventory reads + 22 relationship reads + one resource-principal lookup.
+    # The lookup is a declared read under delegatedPermissionClassifications in collector-definitions.json.
+    assert len(recorder.observed_calls()) == 25
     assert all(call["endpoint"] for call in recorder.observed_calls())
+    assert all(call["status"] == "ok" for call in recorder.observed_calls())
 
 
 def test_consent_reports_unlocated_graph_when_inventory_is_collection_limited(tmp_path: Path) -> None:

@@ -492,6 +492,7 @@ _DIRECT_GET_JSON_ALLOWED = {
     "_capability_gated.py": "follows @odata.nextLink through iter_items, or records pagination_not_followed",
     "_endpoint_reads.py": "ObjectRead: one object per call",
     "app_credentials.py": "per-object owners ($select=id) and federated credentials of one application",
+    "consent_policy.py": "per-policy appliesTo, first page with $top=50; a next link sets appliesToTruncated and a coverage gap",
     "cross_tenant_access.py": "tenant-level policy objects; the partners list uses get_all",
     "dns_posture.py": "the /domains read falls back to get_json only when the client cannot page",
     "identity_protection.py": "a bounded riskyUsers sample (page size), summarised as counts",
@@ -507,6 +508,7 @@ _UNPAGED_OBJECT_ENDPOINTS = {
     "/policies/authenticationFlowsPolicy",
     "/policies/authenticationMethodsPolicy",
     "/policies/crossTenantAccessPolicy",
+    "/policies/defaultAppManagementPolicy",
     "/policies/identitySecurityDefaultsEnforcementPolicy",
 }
 
