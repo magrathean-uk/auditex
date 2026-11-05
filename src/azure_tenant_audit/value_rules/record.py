@@ -44,6 +44,7 @@ def checked(record: dict[str, Any]) -> dict[str, Any]:
         if not cited or cited != [name for name in row["sections"] if name in cited]:
             raise ValueError("Value-rule answer cites the wrong section")
     # stage 4: parser and Defender cells have explicit, closed citation variants.
+    # stage 8: PP 2.2 shape/empty cells can cite either of its two sections.
     elif (cited or row["sections"]) not in entry.get("cited_variants", [entry["cited"]]):
         raise ValueError("Value-rule answer cites the wrong section")
     return record

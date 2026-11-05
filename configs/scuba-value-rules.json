@@ -2731,6 +2731,661 @@
         "powerbi_tenant_settings"
       ]
     },
+    "MS.POWERPLATFORM.1.1v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in environment_creation shows that non-admin users can create production and sandbox environments."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: non-admin users can create production and sandbox environments (found in environment_creation)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_unusable": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in environment_creation lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: environment_creation holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: environment_creation is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: environment_creation."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_flag",
+      "params": {
+        "path": [
+          "disableEnvironmentCreationByNonAdminUsers"
+        ],
+        "section": "environment_creation",
+        "what": "non-admin users can create production and sandbox environments"
+      },
+      "rule_id": "MS.POWERPLATFORM.1.1v1.pp_flag",
+      "sections": [
+        "environment_creation"
+      ]
+    },
+    "MS.POWERPLATFORM.1.2v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in environment_creation shows that non-admin users can create trial environments."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: non-admin users can create trial environments (found in environment_creation)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_unusable": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in environment_creation lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: environment_creation holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: environment_creation is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: environment_creation."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_flag",
+      "params": {
+        "path": [
+          "disableTrialEnvironmentCreationByNonAdminUsers"
+        ],
+        "section": "environment_creation",
+        "what": "non-admin users can create trial environments"
+      },
+      "rule_id": "MS.POWERPLATFORM.1.2v1.pp_flag",
+      "sections": [
+        "environment_creation"
+      ]
+    },
+    "MS.POWERPLATFORM.2.1v1": {
+      "cells": {
+        "default_environment_covered": {
+          "cited": [
+            "dlp_policies",
+            "tenant_id"
+          ],
+          "reason_code": "default_environment_covered",
+          "reason_texts": [
+            "Requirement met: a DLP policy applies to the default environment."
+          ],
+          "verdict": "met"
+        },
+        "default_environment_not_covered": {
+          "cited": [
+            "dlp_policies",
+            "tenant_id"
+          ],
+          "reason_code": "default_environment_not_covered",
+          "reason_texts": [
+            "Requirement not met: no DLP policy applies to the default environment."
+          ],
+          "verdict": "not_met"
+        },
+        "dlp_structure_unusable": {
+          "cited": [
+            "dlp_policies"
+          ],
+          "reason_code": "data_unusable_dlp_structure",
+          "reason_texts": [
+            "Data unusable: a DLP policy wrapper or policy cannot be read exactly (no value list, no recognised environment type, no name, unreadable environments); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_dlp_policies": {
+          "cited": [
+            "dlp_policies",
+            "tenant_id"
+          ],
+          "reason_code": "no_dlp_policies",
+          "reason_texts": [
+            "Requirement not met: no DLP policy exists."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "dlp_policies"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: dlp_policies holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dlp_policies"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dlp_policies is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dlp_policies",
+            "tenant_id"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dlp_policies, tenant_id.",
+            "Data unavailable: required evidence section(s) not collected: dlp_policies.",
+            "Data unavailable: required evidence section(s) not collected: tenant_id."
+          ],
+          "verdict": "not_assessed"
+        },
+        "tenant_id_unusable": {
+          "cited": [
+            "tenant_id"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: tenant_id is not a non-empty string, so the default environment cannot be named; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_dlp",
+      "params": {
+        "variant": "default",
+        "what": "no DLP policy applies to the default environment"
+      },
+      "rule_id": "MS.POWERPLATFORM.2.1v1.pp_dlp",
+      "sections": [
+        "dlp_policies",
+        "tenant_id"
+      ]
+    },
+    "MS.POWERPLATFORM.2.2v1": {
+      "cells": {
+        "all_environments_covered": {
+          "cited": [
+            "dlp_policies",
+            "environment_list"
+          ],
+          "reason_code": "all_environments_covered",
+          "reason_texts": [
+            "Requirement met: every non-default environment has a DLP policy."
+          ],
+          "verdict": "met"
+        },
+        "all_environments_policy": {
+          "cited": [
+            "dlp_policies",
+            "environment_list"
+          ],
+          "reason_code": "all_environments_policy",
+          "reason_texts": [
+            "Requirement met: a DLP policy applies to all environments."
+          ],
+          "verdict": "met"
+        },
+        "dlp_structure_unusable": {
+          "cited": [
+            "dlp_policies"
+          ],
+          "reason_code": "data_unusable_dlp_structure",
+          "reason_texts": [
+            "Data unusable: a DLP policy wrapper or policy cannot be read exactly (no value list, no recognised environment type, no name, unreadable environments); the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "environment_list_unusable": {
+          "cited": [
+            "environment_list"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an environment lacks a name or a boolean IsDefault; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "environment_without_policy": {
+          "cited": [
+            "dlp_policies",
+            "environment_list"
+          ],
+          "reason_code": "environment_without_policy",
+          "reason_texts": [
+            "Requirement not met: a non-default environment has no DLP policy."
+          ],
+          "verdict": "not_met"
+        },
+        "no_nondefault_environments": {
+          "cited": [
+            "dlp_policies",
+            "environment_list"
+          ],
+          "reason_code": "no_nondefault_environments",
+          "reason_texts": [
+            "Requirement met: the tenant has no non-default environment."
+          ],
+          "verdict": "met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "dlp_policies"
+          ],
+          "cited_variants": [
+            [
+              "dlp_policies"
+            ],
+            [
+              "environment_list"
+            ]
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: dlp_policies holds no objects; the policy was not assessed.",
+            "Data unavailable: environment_list holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "dlp_policies"
+          ],
+          "cited_variants": [
+            [
+              "dlp_policies"
+            ],
+            [
+              "environment_list"
+            ]
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: dlp_policies is not a list of objects; the policy was not assessed.",
+            "Data unusable: environment_list is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dlp_policies",
+            "environment_list"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dlp_policies, environment_list.",
+            "Data unavailable: required evidence section(s) not collected: dlp_policies.",
+            "Data unavailable: required evidence section(s) not collected: environment_list."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_dlp",
+      "params": {
+        "variant": "coverage",
+        "what": "a non-default environment has no DLP policy"
+      },
+      "rule_id": "MS.POWERPLATFORM.2.2v1.pp_dlp",
+      "sections": [
+        "dlp_policies",
+        "environment_list"
+      ]
+    },
+    "MS.POWERPLATFORM.2.3v1": {
+      "cells": {
+        "no_baseline_text": {
+          "cited": [
+            "dlp_policies",
+            "tenant_id"
+          ],
+          "reason_code": "data_unavailable_no_baseline_text",
+          "reason_texts": [
+            "Data unavailable: the ScubaGear baselines hold no text for this policy, so the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "dlp_policies",
+            "tenant_id"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: dlp_policies, tenant_id.",
+            "Data unavailable: required evidence section(s) not collected: dlp_policies.",
+            "Data unavailable: required evidence section(s) not collected: tenant_id."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_constant",
+      "params": {
+        "what": "no baseline text"
+      },
+      "rule_id": "MS.POWERPLATFORM.2.3v1.pp_constant",
+      "sections": [
+        "dlp_policies",
+        "tenant_id"
+      ]
+    },
+    "MS.POWERPLATFORM.3.1v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "tenant_isolation"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in tenant_isolation shows that tenant isolation is not enabled."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "tenant_isolation"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: tenant isolation is not enabled (found in tenant_isolation)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_unusable": {
+          "cited": [
+            "tenant_isolation"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in tenant_isolation lacks a usable isDisabled value; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "never_configured": {
+          "cited": [
+            "tenant_isolation"
+          ],
+          "reason_code": "tenant_isolation_never_configured",
+          "reason_texts": [
+            "Requirement not met: the tenant isolation policy has never been configured."
+          ],
+          "verdict": "not_met"
+        },
+        "no_usable_items": {
+          "cited": [
+            "tenant_isolation"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: tenant_isolation holds no usable object; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "tenant_isolation"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: tenant_isolation is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "tenant_isolation"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: tenant_isolation."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_isolation",
+      "params": {
+        "section": "tenant_isolation",
+        "what": "tenant isolation is not enabled"
+      },
+      "rule_id": "MS.POWERPLATFORM.3.1v1.pp_isolation",
+      "sections": [
+        "tenant_isolation"
+      ]
+    },
+    "MS.POWERPLATFORM.5.1v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in environment_creation shows that non-admin users can create Power Pages sites."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: non-admin users can create Power Pages sites (found in environment_creation)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_unusable": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in environment_creation lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: environment_creation holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: environment_creation is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: environment_creation."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_flag",
+      "params": {
+        "path": [
+          "disablePortalsCreationByNonAdminUsers"
+        ],
+        "section": "environment_creation",
+        "what": "non-admin users can create Power Pages sites"
+      },
+      "rule_id": "MS.POWERPLATFORM.5.1v1.pp_flag",
+      "sections": [
+        "environment_creation"
+      ]
+    },
+    "MS.POWERPLATFORM.6.1v1": {
+      "cells": {
+        "all_clear": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "no_violation_found",
+          "reason_texts": [
+            "Requirement met: no object in environment_creation shows that Share with everyone is enabled."
+          ],
+          "verdict": "met"
+        },
+        "flag_bad": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "violation_found",
+          "reason_texts": [
+            "Requirement not met: Share with everyone is enabled (found in environment_creation)."
+          ],
+          "verdict": "not_met"
+        },
+        "flag_unusable": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_item_value",
+          "reason_texts": [
+            "Data unusable: an object in environment_creation lacks a usable value for the field the policy reads; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "no_usable_items": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unavailable_section_empty",
+          "reason_texts": [
+            "Data unavailable: environment_creation holds no objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_a_list": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "data_unusable_section_not_a_list",
+          "reason_texts": [
+            "Data unusable: environment_creation is not a list of objects; the policy was not assessed."
+          ],
+          "verdict": "not_assessed"
+        },
+        "section_not_collected": {
+          "cited": [
+            "environment_creation"
+          ],
+          "reason_code": "required_evidence_section_not_collected",
+          "reason_texts": [
+            "Data unavailable: required evidence section(s) not collected: environment_creation."
+          ],
+          "verdict": "not_assessed"
+        }
+      },
+      "kind": "pp_flag",
+      "params": {
+        "path": [
+          "powerPlatform",
+          "powerApps",
+          "disableShareWithEveryone"
+        ],
+        "section": "environment_creation",
+        "what": "Share with everyone is enabled"
+      },
+      "rule_id": "MS.POWERPLATFORM.6.1v1.pp_flag",
+      "sections": [
+        "environment_creation"
+      ]
+    },
     "MS.SECURITYSUITE.1.4v1": {
       "cells": {
         "flag_true": {

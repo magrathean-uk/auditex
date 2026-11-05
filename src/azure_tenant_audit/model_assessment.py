@@ -347,6 +347,7 @@ def validate_assessment(payload: Any) -> None:
                     if detail["reason_text"] != expected_text:
                         raise ValueError("Value-rule missing-section reason differs from citation")
                 # stage 4: DNS and Defender unusable cells have closed citation variants.
+                # stage 8: PP 2.2 shape/empty cells cite the section that could not be read.
                 elif detail["section"] not in cell.get("cited_variants", [cell["cited"]]):
                     raise ValueError("Value-rule decision cites the wrong section")
             elif detail["rule_id"] == "required_sections_present":
