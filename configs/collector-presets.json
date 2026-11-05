@@ -63,6 +63,17 @@
       ],
       "exclude": [],
       "plane": "full"
+    },
+    "power-platform": {
+      "description": "Opt-in extended Power Platform and Power BI admin metadata; requires customer-side setup and app authentication.",
+      "include": [
+        "identity",
+        "licensing",
+        "power_platform",
+        "power_bi"
+      ],
+      "exclude": [],
+      "plane": "inventory"
     }
   }
 }

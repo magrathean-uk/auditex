@@ -2767,7 +2767,7 @@ def build_normalized_snapshot(
             "power_platform_environment",
             "power_platform.environments",
             str(item.get("id") or item.get("name")),
-            display_name=item.get("display_name") or item.get("displayName"),
+            name=item.get("name"),
             environment_sku=item.get("environment_sku") or item.get("environmentSku"),
             created_time=item.get("created_time") or item.get("createdTime"),
         ) | {"is_default": item.get("is_default", item.get("isDefault"))}

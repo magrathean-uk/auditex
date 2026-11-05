@@ -188,3 +188,82 @@ If a permission name includes write capability but is required by a provider to 
 Exchange policy, audit, and forwarding checks run read-only `Get-*` cmdlets. In app mode Auditex requests an Exchange Online token for the audit app (`https://outlook.office365.com/.default`) and connects with `Connect-ExchangeOnline -AccessToken` against the tenant's initial `.onmicrosoft.com` domain; the token is passed to PowerShell through an environment variable, never on the command line. This needs the `Exchange.ManageAsApp` application permission on Office 365 Exchange Online plus a read role for the service principal, such as Global Reader ([Microsoft guidance](https://learn.microsoft.com/powershell/exchange/app-only-auth-powershell-v2)). Without them the checks are reported as `session_not_connected` or `command_not_authenticated` coverage gaps. `Get-ProtectionAlert` needs a Security & Compliance PowerShell session, which Auditex does not open, so alert policies stay a coverage gap in app mode; Security & Compliance DLP policy/rule and alert policy reads are not collected.
 
 The same Exchange session reads `Get-SharingPolicy` (`Name`, `Domains`), readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet. It uses the existing grants and reads partner-sharing configuration without message content. `Get-OrganizationConfig` includes `Identity`, `Name`, `AuditDisabled`; `Get-TransportConfig` includes `Name`, `SmtpClientAuthenticationDisabled`; `Get-TransportRule` includes `State`, `Mode`, `FromScope`, `PrependSubject` in its explicit configuration field list. The SPF, DKIM and DMARC TXT lookups above use public DNS without sign-in.
+
+## Power Platform and Power BI (optional)
+
+This is extended scope, off by default and available only in the commercial cloud.
+Select `--collector-preset power-platform --plane inventory --mode app` deliberately
+for an app-mode run or probe. The preset selects `identity`, `licensing`,
+`power_platform` and `power_bi`; it does not extend `full` or any existing preset.
+Both collector definitions remain `enabled: false`: presets and explicit collector
+selection use the configured names, rather than filtering on that flag. To add these
+reads to another selection, explicitly name all the desired collectors, including
+`identity`, `licensing`, `power_platform` and `power_bi`, with `--collectors`.
+
+The customer carries out the one-time setup below. Auditex never registers an app,
+changes a tenant setting, assigns a role or runs the setup commands. No additional
+Microsoft Graph application permission is introduced by these collectors; the
+supporting organisation and service-plan reads use the existing `Directory.Read.All`.
+
+1. **Power BI service-principal route first:** create a plain Entra security group
+   without role assignment and add the customer-owned audit app's service principal.
+   In Power BI Admin portal, open Tenant settings > Admin API settings; enable
+   **Service principals can access read-only admin APIs** for **Specific security
+   groups**, selecting that group. Do not grant any Power BI API permission, and
+   never grant `Tenant.Read.All`. The setting permits the group's service principals
+   to read tenant-wide admin metadata; keep group membership restricted to the audit
+   app. The alternative operator role is Fabric Administrator with a Power BI or
+   Fabric licence and at least one prior sign-in to the Power BI portal. It is a
+   write-capable admin role used read-only, with tenant-wide Power BI/Fabric
+   administrative blast radius. This operator route is a prerequisite reference,
+   not a working delegated token path in Auditex.
+2. **Power Platform management-app route first:** an authorised customer
+   administrator signs in interactively with the Power Apps administration module
+   (`Add-PowerAppsAccount -Endpoint prod -TenantID <tenant id>`) and performs the
+   one-time registration
+   `New-PowerAppManagementApp -ApplicationId <app id>` for the customer-owned audit
+   app. This registration is a customer-side write. The upstream prerequisite states
+   that its Power Platform permissions **include write privileges**; the management
+   app's blast radius is **UNKNOWN** beyond that statement. The alternative operator
+   role is Power Platform Administrator with a Power Apps for Office 365 licence.
+   It is a write-capable admin role used read-only; it can administer environments
+   and policy across the tenant. Auditex itself writes nothing. This operator route
+   likewise does not supply a delegated token path in Auditex.
+
+In app mode each collector obtains its own token through `app_token_for`, using
+`https://service.powerapps.com//.default` (the double slash is intentional) and
+`https://analysis.windows.net/powerbi/api/.default`. Do not supply a separate bearer
+token. Configure the app authentication locally using the existing app-mode process.
+See the selected collector notes in
+`auditex setup-guide m365 --collector-preset power-platform --plane inventory --mode app --format json`.
+The JSON guide includes these setup requirements only when the collectors are selected.
+
+Every request is GET only. Power Platform returns environment id/name, SKU, default
+status and creation time; environment display names are discarded because developer
+and trial environments can be named after people and no rule reads that field. DLP
+policy display names remain because the rules read them. Other reads retain DLP
+connector counts and environment scope, environment-creation and sharing flags, and
+the tenant-isolation disabled flag. Power BI retains tenant setting names, enabled
+values and security-group ids, plus a local access-denial observation. Neither
+collector reads message bodies or file content. The exact endpoints, API versions
+and retained fields are in the [API call catalogue](../reference/api-call-catalog.md#optional-power-platform-and-power-bi).
+
+`listTenantSettings` is a read, pinned to GET with `api-version=2023-06-01` and
+`TENANT_SETTINGS_METHOD = "GET"`. A POST is only a possible later fallback if GET is
+refused, to be decided after a playground check. No POST or automatic fallback is
+currently enabled; whether the live endpoint accepts GET remains unverified.
+
+Without the opt-in, optional Power BI / Power Platform collection was not enabled;
+these policies are not assessed: MS.POWERBI 1.1, 2.1, 3.1, 4.1, 4.2, 5.1, 6.1 and
+7.1; MS.POWERPLATFORM 1.1, 1.2, 2.1, 2.2, 3.1, 5.1 and 6.1. All 15 also stay not
+assessed on delegated runs, even with the roles above, because Auditex has no
+delegated token path for either audience. Missing setup, denied reads and incomplete
+or truncated evidence also withhold the dependent sections rather than passing them.
+MS.POWERPLATFORM.2.3 is a separate constant not-assessed policy and is not enabled by
+this opt-in. Current projection and precheck output uses a generic missing-section
+reason when the opt-in is absent; it does not yet carry the explicit opt-in reason
+above into the policy result.
+
+Prerequisite reference: ScubaGear revision `2446ad723b7f55031cc02c8aca244d731d468cba`,
+`docs/prerequisites/noninteractive.md` (Power BI tenant setting and Power Platform
+registration) and `interactive.md` (operator roles, licences and prior portal sign-in).

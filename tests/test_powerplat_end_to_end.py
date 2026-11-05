@@ -1,7 +1,6 @@
 """Constructed C1 evidence: real collectors -> project_run -> supported value rules.
 
-Power Platform rule kinds belong to product stage 8. Section assertions always
-run; verdict assertions become active when both catalogue and kind are present.
+Power Platform stage 8 rules are required: every policy checks its verdict and cell.
 No pack vectors, credentials or tenant evidence are used.
 """
 from __future__ import annotations
@@ -17,8 +16,7 @@ from azure_tenant_audit.collectors.power_bi import PowerBICollector, TENANT_SETT
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.power_bi import PowerBIError
 from azure_tenant_audit.power_platform import PowerPlatformError
-from azure_tenant_audit.value_rules import _registry, assess
-from azure_tenant_audit.value_rules.catalogue import row_for
+from azure_tenant_audit.value_rules import assess
 
 
 TENANT = "11111111-1111-4111-8111-111111111111"
@@ -186,15 +184,10 @@ def collect_run(tmp_path, request):
     return run
 
 
-def assess_pp_if_supported(policy_id, sections, verdict, cell, record_property):
-    row = row_for(policy_id)
-    # A catalogue row alone is insufficient: stage 8 can land its kinds separately.
-    supported = row is not None and row["kind"] in _registry()
-    record_property("power_platform_rule_supported", str(supported))
-    if supported:
-        result = assess(policy_id, sections)
-        assert result["verdict"] == verdict
-        assert result["cell"] == cell
+def assess_pp(policy_id, sections, verdict, cell):
+    result = assess(policy_id, sections)
+    assert result["verdict"] == verdict
+    assert result["cell"] == cell
 
 
 @pytest.mark.parametrize("policy_id,name,kind", BI_POLICIES)
@@ -252,7 +245,7 @@ def test_powerbi_missing_and_withheld_licence_are_distinct(collect_run, policy_i
 
 @pytest.mark.parametrize("policy_id", PP_POLICIES)
 @pytest.mark.parametrize("verdict", ["met", "not_met", "not_assessed"])
-def test_powerplatform_policy_matrix(collect_run, record_property, policy_id, verdict):
+def test_powerplatform_policy_matrix(collect_run, policy_id, verdict):
     changes = {}
     if policy_id in FLAGS:
         creation = deepcopy(CREATION)
@@ -288,11 +281,11 @@ def test_powerplatform_policy_matrix(collect_run, record_property, policy_id, ve
     projection, _, _ = collect_run(pp_changes=changes)
     for section, value in expected.items():
         assert projection.rule_sections[section] == value
-    assess_pp_if_supported(policy_id, projection.rule_sections, verdict, cell, record_property)
+    assess_pp(policy_id, projection.rule_sections, verdict, cell)
 
 
 @pytest.mark.parametrize("policy_id", ["MS.POWERPLATFORM.2.1v1", "MS.POWERPLATFORM.2.2v1"])
-def test_truncated_dlp_list_is_withheld_even_with_covering_first_page(collect_run, record_property, policy_id):
+def test_truncated_dlp_list_is_withheld_even_with_covering_first_page(collect_run, policy_id):
     first = FakePowerPlatform().responses[pp.DLP_SCOPES]
     next_link = "https://api.bap.microsoft.com/constructed-next?api-version=2016-11-01"
     first["nextLink"] = next_link
@@ -304,10 +297,10 @@ def test_truncated_dlp_list_is_withheld_even_with_covering_first_page(collect_ru
     row = next(row for row in result.coverage if row["name"] == "dlpPolicyScopes")
     assert row["collection_truncated"] is True
     assert projection.rule_sections["dlp_policies"] == NOT_COLLECTED
-    assess_pp_if_supported(policy_id, projection.rule_sections, "not_assessed", "section_not_collected", record_property)
+    assess_pp(policy_id, projection.rule_sections, "not_assessed", "section_not_collected")
 
 
-def test_absent_is_default_stays_unusable_instead_of_false(collect_run, record_property):
+def test_absent_is_default_stays_unusable_instead_of_false(collect_run):
     projection, result, _ = collect_run(pp_changes={pp.ENVIRONMENTS: {"value": [
         {"name": SANDBOX, "properties": {}},
     ]}})
@@ -315,11 +308,11 @@ def test_absent_is_default_stays_unusable_instead_of_false(collect_run, record_p
     assert projection.rule_sections["environment_list"] == [{"EnvironmentName": SANDBOX, "IsDefault": None}]
     # OnlyEnvironments avoids the rule's AllEnvironments shortcut, which needs no default flags.
     assert projection.rule_sections["dlp_policies"] == DLP
-    assess_pp_if_supported("MS.POWERPLATFORM.2.2v1", projection.rule_sections,
-                           "not_assessed", "environment_list_unusable", record_property)
+    assess_pp("MS.POWERPLATFORM.2.2v1", projection.rule_sections,
+                           "not_assessed", "environment_list_unusable")
 
 
-def test_no_admin_token_withholds_every_optional_section(collect_run, record_property):
+def test_no_admin_token_withholds_every_optional_section(collect_run):
     projection, pp_result, bi_result = collect_run(tokens=False)
     assert all(row["status"] == "skipped" for row in pp_result.coverage + bi_result.coverage)
     for section in ("environment_creation", "tenant_isolation", "dlp_policies", "environment_list",
@@ -330,5 +323,27 @@ def test_no_admin_token_withholds_every_optional_section(collect_run, record_pro
         assert result["verdict"] == "not_assessed"
         assert result["cell"] == "section_not_collected"
     for policy_id in PP_POLICIES:
-        assess_pp_if_supported(policy_id, projection.rule_sections,
-                               "not_assessed", "section_not_collected", record_property)
+        assess_pp(policy_id, projection.rule_sections,
+                               "not_assessed", "section_not_collected")
+
+
+def test_without_opt_in_all_15_policies_are_not_assessed(tmp_path):
+    # Constructed run with only supporting collectors; no optional collector ran.
+    write(tmp_path, "run-manifest.json", {"run_id": "constructed-no-opt-in", "platform": "m365"})
+    write(tmp_path, "fixture-meta.json", {**FIXTURE_META, "vector_id": "constructed:powerplat-e2e:no-opt-in"})
+    operation(tmp_path, "identity", "organization", [{"id": TENANT}])
+    operation(tmp_path, "licensing", "subscribedSkus", [{"servicePlans": [{
+        "servicePlanId": TENANT, "servicePlanName": "POWER_BI_STANDARD", "provisioningStatus": "Success",
+    }]}])
+    write(tmp_path, "coverage.json", [
+        {"collector": collector, "name": name, "status": "ok", "error_class": None}
+        for collector, name in (("identity", "organization"), ("licensing", "subscribedSkus"))
+    ])
+    projection = project_run(tmp_path, redact=False)
+    for section in ("environment_creation", "tenant_isolation", "dlp_policies", "environment_list",
+                    "powerbi_tenant_settings", "powerbi_access_denied_reason"):
+        assert projection.rule_sections[section] == NOT_COLLECTED
+    for policy_id in [*(row[0] for row in BI_POLICIES), *PP_POLICIES]:
+        result = assess(policy_id, projection.rule_sections)
+        assert result["verdict"] == "not_assessed"
+        assert result["cell"] == "section_not_collected"

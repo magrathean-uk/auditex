@@ -27,7 +27,8 @@ def test_power_platform_environments_flatten_to_section() -> None:
                         {
                             "id": "env-1",
                             "name": "default",
-                            "display_name": "Default",
+                            "display_name": "Constructed Person",
+                            "displayName": "Constructed Person",
                             "environment_sku": "Production",
                             "is_default": True,
                             "created_time": "2025-01-01T00:00:00Z",
@@ -41,7 +42,10 @@ def test_power_platform_environments_flatten_to_section() -> None:
     )
     section = snapshot.get("power_platform_environment_objects")
     assert section is not None
-    assert section["records"][0]["display_name"] == "Default"
+    assert "display_name" not in section["records"][0]
+    assert "displayName" not in section["records"][0]
+    assert section["records"][0]["name"] == "default"
+    assert section["records"][0]["id"] == "env-1"
     assert section["records"][0]["is_default"] is True
 
 
@@ -159,3 +163,22 @@ def test_gated_sections_absent_when_collector_payload_empty() -> None:
     assert snapshot.get("sentinel_xdr_incident_objects") is None
     assert snapshot.get("defender_cloud_apps_consent_objects") is None
     assert snapshot.get("copilot_admin_setting_objects") is None
+
+
+def test_environment_index_labels_fall_back_to_name_then_id(tmp_path):
+    import json
+    from contextlib import closing
+    from azure_tenant_audit.evidence_db import build_run_evidence_index, open_index_read_only
+
+    snapshot = _snapshot({"power_platform": {"environments": {"value": [
+        {"id": "constructed-env-1", "name": "constructed-environment", "displayName": "Constructed Person"},
+        {"id": "constructed-env-2", "display_name": "Constructed Person"},
+    ]}}})
+    section = snapshot["power_platform_environment_objects"]
+    target = tmp_path / "normalized" / "power_platform_environment_objects.json"
+    target.parent.mkdir()
+    target.write_text(json.dumps(section))
+    with closing(open_index_read_only(build_run_evidence_index(tmp_path))) as conn:
+        rows = conn.execute("SELECT display_name, record_json FROM normalized_records ORDER BY record_index").fetchall()
+    assert [row[0] for row in rows] == ["constructed-environment", "constructed-env-2"]
+    assert all("Constructed Person" not in row[1] for row in rows)

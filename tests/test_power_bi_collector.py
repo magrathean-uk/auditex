@@ -217,7 +217,7 @@ def test_app_token_resolution_and_collector_local_client_creation(monkeypatch, t
     assert power_bi_client_from({"client": graph, "power_bi_client": None}) is None
 
 
-def test_collectors_stay_disabled_and_absent_from_presets():
+def test_collectors_stay_disabled_and_absent_from_default_presets():
     definitions = json.loads(Path("configs/collector-definitions.json").read_text())["collectors"]
     for name in ("power_platform", "power_bi"):
         assert not definitions.get(name, {}).get("enabled", False)
@@ -228,4 +228,6 @@ def test_collectors_stay_disabled_and_absent_from_presets():
         if isinstance(value, list):
             return [text for child in value for text in strings(child)]
         return [value] if isinstance(value, str) else []
+    opt_in = presets["presets"].pop("power-platform")
+    assert {"power_platform", "power_bi"} <= set(opt_in["include"])
     assert not {"power_platform", "power_bi"} & set(strings(presets))

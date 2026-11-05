@@ -85,3 +85,27 @@ def test_m365_setup_guide_defender_cloud_apps_uses_consent_request_scope() -> No
 
     assert payload["selected_collectors"] == ["defender_cloud_apps"]
     assert payload["graph_permissions"] == ["ConsentRequest.Read.All"]
+
+
+def test_optional_power_platform_setup_notes_are_selected_only_on_opt_in():
+    optional = build_setup_guide(provider="m365", collector_preset="power-platform", mode="app", plane="inventory")
+    rows = {row["collector"]: row for row in optional["collector_permissions"]}
+    assert optional["selected_collectors"] == ["identity", "licensing", "power_platform", "power_bi"]
+    for name in ("power_platform", "power_bi"):
+        assert rows[name]["required_permissions"] == []
+        assert "off by default" in rows[name]["notes"]
+        assert "write-capable admin role used read-only" in rows[name]["notes"]
+        assert "no delegated token path" in rows[name]["notes"]
+    assert "New-PowerAppManagementApp -ApplicationId <app id>" in rows["power_platform"]["notes"]
+    assert "blast radius is UNKNOWN" in rows["power_platform"]["notes"]
+    assert "https://service.powerapps.com//.default" in rows["power_platform"]["notes"]
+    assert "TENANT_SETTINGS_METHOD remains pinned GET" in rows["power_platform"]["notes"]
+    assert "https://analysis.windows.net/powerbi/api/.default" in rows["power_bi"]["notes"]
+    assert "Service principals can access read-only admin APIs" in rows["power_bi"]["notes"]
+    assert "never grant Tenant.Read.All" in rows["power_bi"]["notes"]
+    baseline = build_setup_guide(provider="m365", collector_preset="full")
+    assert "New-PowerAppManagementApp" not in json.dumps(baseline)
+    assert "Service principals can access read-only admin APIs" not in json.dumps(baseline)
+    # The opt-in adds no Graph permission beyond identity and licensing.
+    supporting = build_setup_guide(provider="m365", collectors=["identity", "licensing"])
+    assert optional["graph_permissions"] == supporting["graph_permissions"]

@@ -54,6 +54,7 @@ _M365_SURFACES = {
     "ediscovery": ("data_protection",),
     "licensing": ("operations",),
     "power_platform": ("apps", "governance"),
+    "power_bi": ("apps", "governance"),
     "copilot_governance": ("governance",),
 }
 

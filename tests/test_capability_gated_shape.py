@@ -28,6 +28,7 @@ _CANONICAL_COVERAGE_KEYS = {
 
 _GATED_COLLECTORS = (
     "power_platform",
+    "power_bi",
     "sentinel_xdr",
     "defender_cloud_apps",
     "copilot_governance",

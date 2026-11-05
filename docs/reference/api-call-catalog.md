@@ -220,3 +220,28 @@ auditex report proof-table <run-dir> --format md
 Add `--output <path>` to persist individual review files outside the verified pack. Regenerate and reverify the pack when its contents need to change.
 
 The permission ledger joins `api-inventory.json` and `audit-plan.json` so reviewers can see required, observed, and missing scopes per collector. The `customer-pack` command also copies selected customer-safe source artifacts, including `data-handling.json`, `api-inventory.json`, `audit-plan.json`, `reports/report-pack.json`, `validation.json`, and `ai_context.json`, under `source-artifacts/` with hashes in `pack-manifest.json` and `checksums.sha256`. Run `verify-pack` before handoff.
+
+## Optional Power Platform and Power BI
+
+Commercial cloud only; deliberately select the `power-platform` preset. These
+collectors add no Graph permission and obtain their own app-mode tokens:
+`https://service.powerapps.com//.default` and
+`https://analysis.windows.net/powerbi/api/.default`. Delegated runs have no token
+path and leave all 15 supported policies not assessed. The
+[permission guide](../guides/admin-permission-guide.md#power-platform-and-power-bi-optional)
+describes the customer-side setup and write-capable administrative blast radius.
+
+| Collector | Call | Retained fields | Permission or role |
+| --- | --- | --- | --- |
+| `power_platform` | `GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2023-06-01` | `id`, `name`, `environment_sku` from `environmentSku`, `is_default` from `isDefault` verbatim, `created_time` from `createdTime`; environment `displayName` discarded | Customer's one-time `New-PowerAppManagementApp -ApplicationId <app id>` registration; operator alternative Power Platform Administrator with Power Apps licence (no delegated token path) |
+| `power_platform` | `GET https://api.bap.microsoft.com/providers/PowerPlatform.Governance/v2/policies?api-version=2020-10-01` | `id` from `name` or `id`, `display_name` from `displayName`, `environment_type` from `environmentType`; business, non-business and blocked connector counts only | Same Power Platform management-app registration |
+| `power_platform` | `GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/apiPolicies?api-version=2016-11-01` | `name`, `displayName`, derived `environmentType` and `environments: [{name}]` from `properties.definition.constraints.environmentFilter1`; absent and unusable values retained as such | Same Power Platform management-app registration |
+| `power_platform` | `GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/listTenantSettings?api-version=2023-06-01` | `tenantSettings`: `is_power_apps_enabled`, `is_power_automate_enabled`, `is_dataverse_enabled`; `environmentCreation`: present keys `disableEnvironmentCreationByNonAdminUsers`, `disableTrialEnvironmentCreationByNonAdminUsers`, `disablePortalsCreationByNonAdminUsers`, nested `powerPlatform.powerApps.disableShareWithEveryone`; no whole raw settings object | Same Power Platform management-app registration; one read produces two operations |
+| `power_platform` | `GET https://api.bap.microsoft.com/providers/PowerPlatform.Governance/v1/tenants/{TenantId}/tenantIsolationPolicy?api-version=2020-06-01` | `properties.isDisabled` verbatim, or `never_configured: true` for empty/null response; the unconfirmed null sentinel withholds rule evidence | Same Power Platform management-app registration; canonical tenant GUID from Graph organisation |
+| `power_bi` | `GET https://api.powerbi.com/v1/admin/tenantsettings` | `settingName`, `enabled`, `enabledSecurityGroups` restricted to `graphId` for object entries; local `accessState`: `denied`, `http_status`; titles, group names and other properties discarded | Specific security group containing the app allowed by **Service principals can access read-only admin APIs**; no Power BI API permission, never `Tenant.Read.All`; Fabric Administrator operator alternative requires a licence and prior portal sign-in (no delegated token path) |
+| `power_platform`, `identity` | `GET /organization` (Microsoft Graph) | Canonical organisation `id` for isolation and `tenant_id`; existing identity collection unchanged | Existing `Directory.Read.All` |
+| `licensing` | `GET /subscribedSkus` (Microsoft Graph) | Existing SKU/service-plan inventory; rule view uses successful `servicePlanName` values to derive `powerbi_license_found` | Existing `Directory.Read.All` |
+
+`listTenantSettings` is a read. `TENANT_SETTINGS_METHOD` remains pinned GET; POST
+is only a possible later fallback if GET is refused, to be decided after a playground
+check. There is no enabled POST fallback. No live GET acceptance has been verified.

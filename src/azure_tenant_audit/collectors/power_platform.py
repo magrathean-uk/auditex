@@ -133,7 +133,7 @@ class PowerPlatformCollector(Collector):
         properties = _object(env.get("properties"))
         return {
             "id": env.get("id") or env.get("name"), "name": env.get("name"),
-            "display_name": properties.get("displayName"), "environment_sku": properties.get("environmentSku"),
+            "environment_sku": properties.get("environmentSku"),
             "is_default": properties.get("isDefault"), "created_time": properties.get("createdTime"),
         }
 
