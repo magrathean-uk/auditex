@@ -2,7 +2,8 @@
 
 Uses cryptography already required by MSAL. Protocol reference (not fetched):
 https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
-RS256 support is inferred from the identity platform's established RSA flow.
+Uses PS256 with x5t#S256, the pairing emitted by MSAL 1.39.0.
+Native keychain and service acceptance remain unverified (round 7m gates).
 """
 from __future__ import annotations
 
@@ -24,6 +25,8 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 
 
 _MAX_PFX_BYTES = 64 * 1024
+# Explicit one-line fallback: change to "RS256"; never downgrade automatically.
+CLIENT_ASSERTION_ALGORITHM = "PS256"
 
 
 class CertificateAuthError(RuntimeError):
@@ -116,6 +119,13 @@ def _read_pfx(path: str | Path) -> bytes:
 
 def _assertion(credential: CertificateCredential, client_id: str, audience: str) -> str:
     # This private frame never escapes the public error boundary below.
+    algorithm = CLIENT_ASSERTION_ALGORITHM
+    if algorithm == "PS256":
+        signature_padding = padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32)
+    elif algorithm == "RS256":
+        signature_padding = padding.PKCS1v15()
+    else:
+        raise CertificateAuthError()
     if isinstance(credential, PfxCertificate):
         if credential.password_env and credential.password_provider:
             raise CertificateAuthError()
@@ -144,23 +154,24 @@ def _assertion(credential: CertificateCredential, client_id: str, audience: str)
     else:
         raise CertificateAuthError()
     now = int(time.time())
-    header = {"alg": "RS256", "typ": "JWT", "x5t#S256": _b64(thumbprint)}
+    header = {"alg": algorithm, "typ": "JWT", "x5t#S256": _b64(thumbprint)}
     claims = {"aud": audience, "iss": client_id, "sub": client_id,
               "jti": str(uuid.uuid4()), "nbf": now - 30, "iat": now, "exp": now + 300}
     message = ".".join(_b64(json.dumps(part, separators=(",", ":")).encode("utf-8"))
                        for part in (header, claims)).encode("ascii")
     if isinstance(credential, PfxCertificate):
-        signature = key.sign(message, padding.PKCS1v15(), hashes.SHA256())
+        signature = key.sign(message, signature_padding, hashes.SHA256())
     else:
-        from .keychain_signing import sign_rs256
+        from .keychain_signing import sign_ps256, sign_rs256
 
-        der, signature = sign_rs256(thumbprint, message)
+        signer = sign_ps256 if algorithm == "PS256" else sign_rs256
+        der, signature = signer(thumbprint, message)
         cert = x509.load_der_x509_certificate(der)
         public = _check_certificate(cert)
         if cert.fingerprint(hashes.SHA256()) != thumbprint:
             raise CertificateAuthError()
     # Also catches a mismatched key/certificate before any credential is sent.
-    public.verify(signature, message, padding.PKCS1v15(), hashes.SHA256())
+    public.verify(signature, message, signature_padding, hashes.SHA256())
     return message.decode("ascii") + "." + _b64(signature)
 
 

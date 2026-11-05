@@ -197,10 +197,13 @@ class Response:
         self.closed = True
 
 
-def _verify_assertion(assertion, public, audience=TOKEN_URL):
+def _verify_assertion(assertion, public, audience=TOKEN_URL, *, algorithm="PS256"):
+    signature_padding = (padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32)
+                         if algorithm == "PS256" else padding.PKCS1v15())
     header, payload, signature = assertion.split(".")
     public.verify(base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4)),
-                  (header + "." + payload).encode(), padding.PKCS1v15(), hashes.SHA256())
+                  (header + "." + payload).encode(), signature_padding, hashes.SHA256())
+    assert _decode(header)["alg"] == algorithm
     claims = _decode(payload)
     assert claims["aud"] == audience
     assert claims["iss"] == claims["sub"] == "test-only-app"
@@ -224,7 +227,7 @@ def test_pfx_success_and_teams_reader_contract(monkeypatch, material, password_s
         assert data["client_assertion_type"] == "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
         assert "client_secret" not in data
         header, _ = _verify_assertion(data["client_assertion"], material[0].public_key())
-        assert header == {"alg": "RS256", "typ": "JWT", "x5t#S256":
+        assert header == {"alg": "PS256", "typ": "JWT", "x5t#S256":
                           base64.urlsafe_b64encode(material[1].fingerprint(hashes.SHA256())).rstrip(b"=").decode()}
         return response
     client, events = _client(credential, post)
@@ -354,7 +357,7 @@ def test_mock_endpoint_rejects_invalid_assertion(monkeypatch, material, caplog, 
         claims = _decode(payload)
         claims.update({"exp": 1} if rejection == "expired" else {"aud": "https://wrong.test/token"})
         message = (header + "." + _encode(claims)).encode()
-        signature = material[0].sign(message, padding.PKCS1v15(), hashes.SHA256())
+        signature = material[0].sign(message, padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32), hashes.SHA256())
         return message.decode() + "." + base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
     monkeypatch.setattr("azure_tenant_audit.graph.client_assertion", invalid)
     captured = []
@@ -426,17 +429,61 @@ def test_keychain_signs_without_export(monkeypatch, material):
     key, cert = material
     def sign(thumbprint, message):
         assert thumbprint == cert.fingerprint(hashes.SHA256())
-        return cert.public_bytes(serialization.Encoding.DER), key.sign(message, padding.PKCS1v15(), hashes.SHA256())
-    monkeypatch.setattr(keychain_signing, "sign_rs256", sign)
+        return cert.public_bytes(serialization.Encoding.DER), key.sign(message, padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32), hashes.SHA256())
+    monkeypatch.setattr(keychain_signing, "sign_ps256", sign)
     credential = KeychainCertificate(cert.fingerprint(hashes.SHA256()).hex())
     assertion = client_assertion(credential, "test-only-app", TOKEN_URL)
     _verify_assertion(assertion, key.public_key())
 
 
+@pytest.mark.parametrize("source", ["pfx", "keychain"])
+def test_rs256_fallback_requires_explicit_selection(monkeypatch, material, source):
+    assert certificate_auth.CLIENT_ASSERTION_ALGORITHM == "PS256"
+    monkeypatch.setattr(certificate_auth, "CLIENT_ASSERTION_ALGORITHM", "RS256")
+    key, cert = material
+    if source == "pfx":
+        credential = _pfx(monkeypatch, material)
+    else:
+        def sign(thumbprint, message):
+            assert thumbprint == cert.fingerprint(hashes.SHA256())
+            return (cert.public_bytes(serialization.Encoding.DER),
+                    key.sign(message, padding.PKCS1v15(), hashes.SHA256()))
+        monkeypatch.setattr(keychain_signing, "sign_rs256", sign)
+        credential = KeychainCertificate(cert.fingerprint(hashes.SHA256()).hex())
+    assertion = client_assertion(credential, "test-only-app", TOKEN_URL)
+    header, _ = _verify_assertion(assertion, key.public_key(), algorithm="RS256")
+    assert header == {"alg": "RS256", "typ": "JWT", "x5t#S256":
+                      base64.urlsafe_b64encode(cert.fingerprint(hashes.SHA256())).rstrip(b"=").decode()}
+
+
+@pytest.mark.parametrize("bad_padding", [
+    padding.PKCS1v15(),
+    padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=20),
+    padding.PSS(mgf=padding.MGF1(hashes.SHA1()), salt_length=32),
+], ids=["pkcs1-v1.5", "wrong-salt-length", "wrong-mgf-hash"])
+def test_ps256_rejects_incorrect_keychain_signature_before_transmission(monkeypatch, material, bad_padding):
+    key, cert = material
+    def sign(thumbprint, message):
+        return cert.public_bytes(serialization.Encoding.DER), key.sign(message, bad_padding, hashes.SHA256())
+    monkeypatch.setattr(keychain_signing, "sign_ps256", sign)
+    credential = KeychainCertificate(cert.fingerprint(hashes.SHA256()).hex())
+    sent = []
+    client, _ = _client(credential, lambda *a, **k: sent.append(True) or Response())
+    with pytest.raises(CertificateAuthError):
+        client.app_token_for(TEAMS_SCOPE)
+    assert not sent
+
+
+def test_unknown_assertion_algorithm_fails_closed(monkeypatch):
+    monkeypatch.setattr(certificate_auth, "CLIENT_ASSERTION_ALGORITHM", "unsupported")
+    with pytest.raises(CertificateAuthError):
+        client_assertion(KeychainCertificate("00" * 32), "test-only-app", TOKEN_URL)
+
+
 def test_keychain_unavailable_is_safe(monkeypatch, material, caplog):
     def unavailable(*args):
         raise OSError(PASSWORD.decode())
-    monkeypatch.setattr(keychain_signing, "sign_rs256", unavailable)
+    monkeypatch.setattr(keychain_signing, "sign_ps256", unavailable)
     credential = KeychainCertificate(material[1].fingerprint(hashes.SHA256()).hex())
     with pytest.raises(CertificateAuthError) as caught:
         client_assertion(credential, "test-only-app", TOKEN_URL)
@@ -459,7 +506,7 @@ def test_expired_certificate_is_rejected_locally(monkeypatch, material):
 
 def test_keychain_certificate_or_signature_mismatch_is_rejected(monkeypatch, material):
     key, cert = material
-    monkeypatch.setattr(keychain_signing, "sign_rs256", lambda *args:
+    monkeypatch.setattr(keychain_signing, "sign_ps256", lambda *args:
                         (cert.public_bytes(serialization.Encoding.DER), b"test-only-invalid-signature"))
     credential = KeychainCertificate(cert.fingerprint(hashes.SHA256()).hex())
     with pytest.raises(CertificateAuthError):
@@ -538,11 +585,14 @@ def test_certificate_inputs_are_redacted():
     assert "test-only-not-a-key" not in redact_text(pem)
 
 
-def test_native_keychain_handle_cleanup_without_access(monkeypatch, material):
+@pytest.mark.parametrize("algorithm", ["PS256", "RS256"])
+def test_native_keychain_handle_cleanup_without_access(monkeypatch, material, algorithm):
     key, cert = material
     der = cert.public_bytes(serialization.Encoding.DER)
     message = b"test-only-signing-input"
-    signature = key.sign(message, padding.PKCS1v15(), hashes.SHA256())
+    signature_padding = (padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32)
+                         if algorithm == "PS256" else padding.PKCS1v15())
+    signature = key.sign(message, signature_padding, hashes.SHA256())
     released, values = [], {4: der, 7: signature}
     def copy(handle):
         def function(*args):
@@ -553,25 +603,56 @@ def test_native_keychain_handle_cleanup_without_access(monkeypatch, material):
     def constant(name):
         constants.setdefault(name, len(constants) + 100)
         return constants[name]
+    algorithm_name = ("kSecKeyAlgorithmRSASignatureMessagePSSSHA256" if algorithm == "PS256"
+                      else "kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA256")
+    calls = []
+    def supported(key_handle, operation, alg):
+        assert (key_handle, operation, alg) == (5, 0, constants[algorithm_name])
+        calls.append("supported")
+        return True
+    def create_signature(key_handle, alg, data, error):
+        assert (key_handle, alg, data) == (5, constants[algorithm_name], 6)
+        calls.append("signed")
+        return 7
+    def create_data(allocator, data, length):
+        assert data == message and length == len(message)
+        return 6
     cf = SimpleNamespace(
         CFDictionaryCreateMutable=lambda *a: 1, CFDictionarySetValue=lambda *a: None,
         CFArrayGetCount=lambda *a: 1, CFArrayGetValueAtIndex=lambda *a: 10,
-        CFDataCreate=lambda *a: 6, CFRelease=released.append,
+        CFDataCreate=create_data, CFRelease=released.append,
     )
     sec = SimpleNamespace(
         SecItemCopyMatching=copy(2), SecIdentityCopyCertificate=copy(3),
         SecCertificateCopyData=lambda *a: 4, SecIdentityCopyPrivateKey=copy(5),
-        SecKeyIsAlgorithmSupported=lambda key, operation, alg: operation == 0,
-        SecKeyCreateSignature=lambda *a: 7,
+        SecKeyIsAlgorithmSupported=supported,
+        SecKeyCreateSignature=create_signature,
     )
     monkeypatch.setattr(keychain_signing, "_Security", lambda: SimpleNamespace(
         cf=cf, sec=sec, constant=constant, data=values.__getitem__))
-    assert keychain_signing.sign_rs256(cert.fingerprint(hashes.SHA256()), message) == (der, signature)
+    signer = keychain_signing.sign_ps256 if algorithm == "PS256" else keychain_signing.sign_rs256
+    assert signer(cert.fingerprint(hashes.SHA256()), message) == (der, signature)
+    assert calls == ["supported", "signed"]
     assert released == [7, 6, 5, 4, 3, 2, 1]
     released.clear()
+    calls.clear()
+    def unsupported(*args):
+        supported(*args)
+        return False
+    sec.SecKeyIsAlgorithmSupported = unsupported
+    credential = KeychainCertificate(cert.fingerprint(hashes.SHA256()).hex())
+    monkeypatch.setattr(certificate_auth, "CLIENT_ASSERTION_ALGORITHM", algorithm)
+    sent = []
+    client, _ = _client(credential, lambda *a, **k: sent.append(True) or Response())
+    with pytest.raises(CertificateAuthError):
+        client.app_token_for(TEAMS_SCOPE)
+    assert calls == ["supported"] and not sent
+    assert released == [5, 4, 3, 2, 1]
+    released.clear()
+    sec.SecKeyIsAlgorithmSupported = supported
     sec.SecIdentityCopyPrivateKey = lambda *args: -1
     with pytest.raises(RuntimeError, match="Keychain operation failed"):
-        keychain_signing.sign_rs256(cert.fingerprint(hashes.SHA256()), message)
+        signer(cert.fingerprint(hashes.SHA256()), message)
     assert released == [4, 3, 2, 1]
     assert "kSecUseAuthenticationUIFail" in constants
 

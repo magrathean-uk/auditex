@@ -51,7 +51,16 @@ class _Security:
         return ct.string_at(self.cf.CFDataGetBytePtr(handle), self.cf.CFDataGetLength(handle))
 
 
+def sign_ps256(thumbprint: bytes, message: bytes) -> tuple[bytes, bytes]:
+    return _sign_sha256(thumbprint, message, "kSecKeyAlgorithmRSASignatureMessagePSSSHA256")
+
+
 def sign_rs256(thumbprint: bytes, message: bytes) -> tuple[bytes, bytes]:
+    """Only for the explicitly selected RS256 fallback, never an automatic retry."""
+    return _sign_sha256(thumbprint, message, "kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA256")
+
+
+def _sign_sha256(thumbprint: bytes, message: bytes, algorithm_name: str) -> tuple[bytes, bytes]:
     api = _Security()
     cf, sec = api.cf, api.sec
     owned = []
@@ -94,7 +103,7 @@ def sign_rs256(thumbprint: bytes, message: bytes) -> tuple[bytes, bytes]:
             if hashlib.sha256(der).digest() != thumbprint:
                 continue
             key = copied(sec.SecIdentityCopyPrivateKey, identity)
-            algorithm = api.constant("kSecKeyAlgorithmRSASignatureMessagePKCS1v15SHA256")
+            algorithm = api.constant(algorithm_name)
             if not sec.SecKeyIsAlgorithmSupported(key, 0, algorithm):  # kSecKeyOperationTypeSign (SecKey.h)
                 raise RuntimeError("Keychain RSA signing unavailable.")
             data = own(cf.CFDataCreate(None, message, len(message)))
