@@ -18,6 +18,7 @@ SENSITIVE_ARG_FLAGS = frozenset(
         "--password",
         "--command-override",
         "--adapter-override",
+        "--sensitive-users",
     }
 )
 

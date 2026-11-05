@@ -155,6 +155,31 @@ def test_demo_includes_before_after_step_for_demo_tenant(tmp_path: Path) -> None
     assert "Halcyon Freight Ltd" in output
 
 
+def test_demo_never_loads_sensitive_users_from_environment(tmp_path: Path, monkeypatch, capsys) -> None:
+    from azure_tenant_audit import sensitive_users
+
+    canary = "demo-operator-canary@example.invalid"
+    source = tmp_path / "operator.txt"
+    source.write_text(canary)
+    monkeypatch.setenv("AUDITEX_SENSITIVE_USERS_FILE", str(source))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("demo must not resolve operator inputs")
+
+    monkeypatch.setattr(sensitive_users, "load_sensitive_users", forbidden)
+    out_dir = tmp_path / "demo"
+    assert auditex_main(["demo", "--no-pause", "--no-html", "--out", str(out_dir)]) == 0
+    manifests = list((out_dir / "runs").glob("*/run-manifest.json"))
+    assert len(manifests) == 2
+    for path in manifests:
+        assert json.loads(path.read_text())["operator_inputs"]["sensitive_users"] == {"supplied": False}
+        assert not (path.parent / "operator-inputs/sensitive-users.txt").exists()
+    for path in out_dir.rglob("*"):
+        if path.is_file():
+            assert canary.encode() not in path.read_bytes()
+    assert canary not in capsys.readouterr().out
+
+
 def test_demo_shows_detection_baselines_and_graph_attack_path(tmp_path: Path) -> None:
     stream = io.StringIO()
 

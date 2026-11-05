@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 audit-output/
+operator-inputs/
 outputs/
 build/
 .secrets/

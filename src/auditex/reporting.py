@@ -1675,6 +1675,9 @@ def _copy_source_artifact(
     ``transformed: "pack_relative_paths"`` and ``source_sha256``, the digest of the run's own file (the one
     ``bundle-hashes.json`` lists), and ``sha256``, the digest of the copy.
     """
+    if Path(relative.replace("\\", "/")).as_posix().startswith("operator-inputs/"):
+        return {"source_path": relative, "purpose": purpose, "present": False,
+                "customer_safe": False, "skipped_reason": "redacted_operator_input"}
     source, reason = _plain_run_file(run_path, relative)
     row: dict[str, Any] = {
         "source_path": relative,

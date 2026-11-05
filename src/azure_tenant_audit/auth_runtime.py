@@ -10,7 +10,7 @@ from .graph import GraphClient
 from .secret_hygiene import redact_argv, redact_output, sanitize_token_claims
 
 
-SENSITIVE_CLI_ARGS = {"--client-secret", "--access-token"}
+SENSITIVE_CLI_ARGS = {"--client-secret", "--access-token", "--sensitive-users"}
 
 
 def scrub_command_line(command_line: list[str]) -> list[str]:

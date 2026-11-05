@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,11 @@ from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
 from .findings import apply_coverage_gaps_to_report_pack
 from .tenant_identity import IDENTITY_FIELDS
+from .private_io import write_private_bytes, write_private_text
+from .sensitive_users import (
+    BUNDLE_PATH as SENSITIVE_USERS_PATH, KEY_PATH as SENSITIVE_USERS_KEY_PATH,
+    SensitiveUsers, SensitiveUsersError, read_sensitive_users_key,
+)
 
 LOG = logging.getLogger("azure_tenant_audit.output")
 RUN_MANIFEST_SCHEMA_VERSION = "2026-04-21"
@@ -314,12 +320,52 @@ class AuditWriter:
         return {"collectors": collectors, "operations": operations}
 
     def _record_artifact(self, target: Path) -> None:
-        relative = str(target.relative_to(self.run_dir))
+        """Record paths only, including private artefacts; never read, hash or size them here."""
+        relative = target.relative_to(self.run_dir).as_posix()
         if relative not in self._manifest["artifacts"]:
             self._manifest["artifacts"].append(relative)
 
     def record_artifact(self, target: Path) -> None:
         self._record_artifact(target)
+
+    def write_sensitive_users(self, supplied: SensitiveUsers) -> None:
+        """The sole private copy, outside evidence and report inputs. Replace or clear on resume."""
+        target = self.run_dir / SENSITIVE_USERS_PATH
+        key_path = self.run_dir / SENSITIVE_USERS_KEY_PATH
+        private_paths = (SENSITIVE_USERS_PATH, SENSITIVE_USERS_KEY_PATH)
+        key = b""
+        try:
+            if target.parent.is_symlink():
+                raise OSError("linked operator-input directory")
+            if supplied.addresses:
+                self._mkdir_private(target.parent)
+                if key_path.exists() or key_path.is_symlink():
+                    key = read_sensitive_users_key(self.run_dir)
+                elif "hmac_sha256" in self._manifest.get("operator_inputs", {}).get("sensitive_users", {}):
+                    # Never silently invalidate the previous run's verification key.
+                    raise SensitiveUsersError("The private sensitive-users key is missing; unable to resume.")
+                else:
+                    key = secrets.token_bytes(32)
+                write_private_bytes(key_path, key)
+                self._record_artifact(key_path)
+                ignore = target.parent / ".gitignore"
+                write_private_text(ignore, "*\n")
+                self._record_artifact(ignore)
+                write_private_text(target, "\n".join(supplied.addresses) + "\n")
+                self._record_artifact(target)
+            else:
+                for relative in private_paths:
+                    (self.run_dir / relative).unlink(missing_ok=True)
+                    self.clear_result_file(relative)
+                (target.parent / ".gitignore").unlink(missing_ok=True)
+                self.clear_result_file("operator-inputs/.gitignore")
+        except OSError:
+            raise SensitiveUsersError("Unable to write the private sensitive-users bundle artefact.") from None
+        self._manifest["operator_inputs"] = {
+            **self._manifest.get("operator_inputs", {}), "sensitive_users": supplied.manifest(key),
+        }
+        redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
+        self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if supplied.addresses else [])
 
     def artifact_paths(self) -> list[str]:
         return list(self._manifest.get("artifacts", []))

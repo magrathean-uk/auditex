@@ -16,6 +16,24 @@
     "validation_path"
   ],
   "properties": {
+    "operator_inputs": {
+      "type": "object",
+      "properties": {
+        "sensitive_users": {
+          "type": "object",
+          "required": ["supplied"],
+          "properties": {
+            "supplied": { "type": "boolean" },
+            "count": { "type": "integer", "minimum": 1 },
+            "hmac_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          },
+          "additionalProperties": false,
+          "if": { "properties": { "supplied": { "const": true } }, "required": ["supplied"] },
+          "then": { "required": ["count", "hmac_sha256"] },
+          "else": { "properties": { "count": false, "hmac_sha256": false } }
+        }
+      }
+    },
     "schema_version": {
       "type": "string"
     },

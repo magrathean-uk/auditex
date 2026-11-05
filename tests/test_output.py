@@ -4,6 +4,9 @@ import json
 import re
 from pathlib import Path
 
+import jsonschema
+import pytest
+
 from azure_tenant_audit.output import AuditWriter
 
 
@@ -129,6 +132,50 @@ def test_run_manifest_schema_documents_assurance_coverage_fields() -> None:
 
     properties = schema["properties"]
     assert {"assurance", "surface_coverage", "coverage_gaps", "provider_scorecard", "data_handling_path", "api_inventory_path"}.issubset(properties)
+
+
+@pytest.mark.parametrize("metadata", [None, {"supplied": False},
+    {"supplied": True, "count": 1, "hmac_sha256": "a" * 64}])
+def test_run_manifest_schema_accepts_optional_sensitive_users(metadata) -> None:
+    schema = json.loads(Path("schemas/run_manifest.schema.json").read_text())
+    manifest = {"schema_version": "2026-04-21", "tenant_name": "constructed", "run_id": "constructed",
+                "overall_status": "ok", "mode": "offline", "auditor_profile": "global-reader",
+                "selected_collectors": [], "artifacts": [], "evidence_db_path": "index/evidence.sqlite",
+                "ai_context_path": "ai_context.json", "validation_path": "validation.json"}
+    if metadata is not None:
+        manifest["operator_inputs"] = {"sensitive_users": metadata}
+    jsonschema.Draft202012Validator(schema).validate(manifest)
+
+
+def test_run_manifest_schema_defines_sensitive_users_hmac_pattern() -> None:
+    schema = json.loads(Path("schemas/run_manifest.schema.json").read_text())
+    properties = schema["properties"]["operator_inputs"]["properties"]["sensitive_users"]["properties"]
+    assert properties["hmac_sha256"]["type"] == "string"
+    assert properties["hmac_sha256"]["pattern"] == "^[0-9a-f]{64}$"
+    assert properties["supplied"]["type"] == "boolean"
+    assert properties["count"] == {"type": "integer", "minimum": 1}
+    assert "sha256" not in properties
+
+
+@pytest.mark.parametrize("metadata", [
+    {}, {"supplied": "true"}, {"supplied": True},
+    {"supplied": True, "count": 0, "hmac_sha256": "a" * 64},
+    {"supplied": True, "count": -1, "hmac_sha256": "a" * 64},
+    {"supplied": True, "count": 1.5, "hmac_sha256": "a" * 64},
+    {"supplied": True, "count": True, "hmac_sha256": "a" * 64},
+    {"supplied": True, "count": 1, "hmac_sha256": "A" * 64},
+    {"supplied": True, "count": 1, "hmac_sha256": "g" * 64},
+    {"supplied": True, "count": 1, "hmac_sha256": "a" * 63},
+    {"supplied": True, "count": 1, "hmac_sha256": "a" * 65},
+    {"supplied": True, "count": 1, "hmac_sha256": 123},
+    {"supplied": True, "count": 1, "sha256": "a" * 64},
+    {"supplied": False, "count": 2, "hmac_sha256": "a" * 64},
+])
+def test_run_manifest_schema_rejects_malformed_sensitive_users(metadata) -> None:
+    schema = json.loads(Path("schemas/run_manifest.schema.json").read_text())
+    validator = jsonschema.Draft202012Validator(schema["properties"]["operator_inputs"])
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate({"sensitive_users": metadata})
 
 
 def test_writer_promotes_coverage_gaps_into_report_pack(tmp_path: Path) -> None:

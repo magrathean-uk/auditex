@@ -35,8 +35,10 @@ def _artifact_map(run_dir: Path) -> dict[str, list[str]]:
         if path.name.endswith(("-wal", "-shm")):
             continue
         relative = path.relative_to(run_dir)
+        if relative.as_posix().startswith("operator-inputs/"):
+            continue
         section = relative.parts[0] if len(relative.parts) > 1 else "root"
-        raw.setdefault(section, []).append(str(relative))
+        raw.setdefault(section, []).append(relative.as_posix())
     # Stable section order: dict-insertion-order leaks rglob's traversal sequence
     # which can differ between two finalize calls (audit-log grows, evidence DB
     # rebuilds), so sort the section keys to keep ai_context.json byte-stable.

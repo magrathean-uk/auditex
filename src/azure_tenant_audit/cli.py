@@ -31,6 +31,7 @@ from .graph import GraphClient
 from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
 from .offline_replay import absent_section_rows, planned_sections, replay_collector_status, replay_coverage_rows, replay_source
 from .output import AuditWriter
+from .sensitive_users import SensitiveUsers, SensitiveUsersError, load_sensitive_users
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
@@ -184,6 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Named audit profile for expected permission shape and escalation guidance.",
     )
     parser.add_argument("--offline", action="store_true", help="Use offline sample bundle.")
+    parser.add_argument("--sensitive-users", metavar="FILE", help="Local sensitive-user list (else AUDITEX_SENSITIVE_USERS_FILE); never uploaded or logged.")
     parser.add_argument("--sample", default="examples/sample_audit_bundle/sample_result.json", help="Sample bundle path when offline.")
     parser.add_argument(
         "--permission-hints",
@@ -209,8 +211,10 @@ def run_offline(
     break_glass_accounts: Sequence[str] | None = None,
     stale_sync_days: int | None = None,
     as_of: datetime | None = None,
+    sensitive_users: SensitiveUsers | None = None,
 ) -> int:
     """Replay an offline sample. ``as_of`` pins the instant that stale sync and operating-system end of life are judged at."""
+    sensitive_users = sensitive_users if sensitive_users is not None else SensitiveUsers()
     sample_path = resolve_resource_path(sample_path)
     if not sample_path.exists():
         LOG.error("Sample file not found: %s", sample_path)
@@ -226,6 +230,11 @@ def run_offline(
     )
 
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
+    try:
+        writer.write_sensitive_users(sensitive_users)
+    except SensitiveUsersError as exc:
+        LOG.error("%s", exc)
+        return 2
     writer.log_event(
         "run.started",
         "Offline run started",
@@ -445,7 +454,15 @@ def _resumed_row(name: str, state: dict[str, Any], coverage_rows: list[dict[str,
     }
 
 
-def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None) -> int:
+def run_live(
+    args: argparse.Namespace, event_listener: Callable[[dict[str, Any]], None] | None = None,
+    *, sensitive_users: SensitiveUsers | None = None,
+) -> int:
+    try:
+        sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(getattr(args, "sensitive_users", None))
+    except SensitiveUsersError as exc:
+        LOG.error("%s", exc)
+        return 2
     # Read the waiver file once, before any tenant call. A file that cannot be trusted must not
     # let the run finish with no waivers applied (or the wrong ones), and the rows loaded here
     # are the ones applied later, so a file edited mid-run cannot fail the run after collection.
@@ -496,6 +513,11 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
         event_listener=event_listener,
     )
     completed_state = writer.load_checkpoint_state() if resume_from else {}
+    try:
+        writer.write_sensitive_users(sensitive_users)
+    except SensitiveUsersError as exc:
+        LOG.error("%s", exc)
+        return 2
     collector_checkpoint_state = writer.load_collector_checkpoint_state() if resume_from else {}
     operation_checkpoint_state = writer.load_operation_checkpoint_state() if resume_from else {}
     # Collectors that finished are carried forward with the status they finished with; every other
@@ -942,7 +964,10 @@ def run_live(args: argparse.Namespace, event_listener: Callable[[dict[str, Any]]
     return 1 if overall_status == "partial" else 0
 
 
-def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]], None] | None = None) -> int:
+def main(
+    argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]], None] | None = None,
+    *, sensitive_users: SensitiveUsers | None = None,
+) -> int:
     parser = build_parser()
     parsed_argv = list(argv if argv is not None else sys.argv[1:])
     args = parser.parse_args(parsed_argv)
@@ -951,6 +976,11 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
 
     if args.env:
         load_env_file(Path(args.env))
+
+    try:
+        sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(args.sensitive_users)
+    except SensitiveUsersError as exc:
+        parser.error(str(exc))
 
     args.tenant_id = args.tenant_id or None
     args.client_id = args.client_id or None
@@ -993,8 +1023,9 @@ def main(argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]
             until=args.until,
             break_glass_accounts=offline_break_glass,
             stale_sync_days=args.stale_sync_days,
+            sensitive_users=sensitive_users,
         )
-    return run_live(args, event_listener=event_listener)
+    return run_live(args, event_listener=event_listener, sensitive_users=sensitive_users)
 
 
 if __name__ == "__main__":

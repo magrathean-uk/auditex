@@ -8,6 +8,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 ## [Unreleased]
 
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
+- Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`; in-memory projection integration remains a separate product change.
 
 - Skip the Teams reads and say so when no Teams certificate token is available, instead of failing the run; record teams_token_unavailable as a collector error class; with a token, messaging and app setup are skipped as teams_powershell_not_supported.
 - Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.

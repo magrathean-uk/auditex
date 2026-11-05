@@ -13,6 +13,44 @@ Use the generated plan as the admin request. It includes selected collectors, re
 
 ## Microsoft 365 Access Models
 
+### Local sensitive-user list
+
+For SS 2.1, an authorised operator can name the accounts whose anti-phishing
+protection should be assessed. Supply a local file to `auditex run`,
+`azure-tenant-audit` or `auditex guided-run` with `--sensitive-users FILE`, or
+set `AUDITEX_SENSITIVE_USERS_FILE`. The flag takes precedence. Offline replay
+accepts the same input. This needs no extra tenant permission.
+
+Use UTF-8 plain text with one e-mail address per line, or a JSON array of
+e-mail strings. `name;email` lines or array strings are accepted; the name is
+discarded. Addresses are trimmed, lower-cased, de-duplicated and sorted.
+The file must be non-empty, at most 256 KiB and at most 10,000 entries before
+de-duplication. Invalid entries reject the whole file before collection; errors
+identify the line without displaying personal data.
+
+Auditex opens this file once locally, read-only. The list is never uploaded or
+logged. It retains one confidential copy at
+`<run-dir>/operator-inputs/sensitive-users.txt` (0600, git-ignored and marked
+REDACTED). It is excluded from customer packs, reports,
+the evidence index and built-in exports. The manifest's
+`operator_inputs.sensitive_users` records only `supplied`, the unique `count`
+and `hmac_sha256` of the sorted normalised newline-joined list without a final
+newline: HMAC-SHA256 with a per-run 32-byte key held only in
+`operator-inputs/sensitive-users.key` (0600); do not share either file.
+Both files are excluded from those outputs and listed only by path and the
+`redacted_operator_input` exclusion reason in `bundle-hashes.json`, without
+hashes or byte lengths. Without input the manifest records `supplied: false`.
+Resuming retains the key when the list is supplied again and removes both files
+otherwise; support can call
+`azure_tenant_audit.sensitive_users.verify_sensitive_users(run_dir)` to check
+the private files against the manifest.
+
+SS 2.1 remains not assessed without this operator input. SS 2.3 also remains
+not assessed without its operator input, but the v3.9.1 specification calls
+that separate input `PartnerDomains`; this file does not supply it. Connecting
+the sensitive-user copy to the in-memory `scuba_config` rule view is a separate
+product integration; collection alone does not enable the assessment.
+
 ### Delegated Read Login
 
 Use this when an operator signs in with a tenant account.

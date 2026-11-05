@@ -209,6 +209,28 @@ check stores only a count of bypassed accounts.
 
 ## Evidence and customer packs
 
+`operator_inputs.sensitive_users.supplied` is a boolean; when true,
+`operator_inputs.sensitive_users.count` is the positive integer count of unique
+normalised addresses and `operator_inputs.sensitive_users.hmac_sha256` records
+HMAC-SHA256 of the sorted, normalised list joined by newlines without a final
+newline. Each run with a list
+generates 32 random bytes using `secrets.token_bytes(32)` and stores them as raw
+bytes only in `operator-inputs/sensitive-users.key` (0600, directory 0700).
+The list is stored only in `operator-inputs/sensitive-users.txt`, also 0600.
+The list and key are excluded from customer packs, exports, the evidence index,
+AI context, logs and run-copy helpers. `bundle-hashes.json` records only their
+paths and exclusion reason, never hashes or byte lengths. The key never leaves
+the private area or appears in the manifest.
+
+This lets the operator who holds the run directory prove which list was used;
+a holder of only a customer pack cannot test guesses without the key. The count
+and HMAC may be shared. This is a consistency check, not an authenticity
+guarantee against someone able to rewrite all three inputs. Support can call
+`azure_tenant_audit.sensitive_users.verify_sensitive_users(run_dir)`, which uses
+`hmac.compare_digest`. Resume retains one key while replacing the list, removes
+both when no list is supplied, and refuses to replace a missing or invalid key
+for an existing HMAC.
+
 Evidence is written locally under the selected output directory. Auditex does
 not send raw evidence to an external service. Customer handoff packs copy
 selected artifacts and include checksums. Selected artifacts can still contain

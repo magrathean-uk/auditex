@@ -1,11 +1,12 @@
-"""The bundle hash manifest: a SHA-256 for every artifact of a finalized run.
+"""The bundle hash manifest: a SHA-256 for every eligible artifact of a finalized run.
 
 ``finalize_bundle_contract`` writes ``bundle-hashes.json`` as its last step. Handoff, the explorer
 and customer-pack creation recompute the hashes and compare them, so a bundle edited after it was
 finalized is reported (and a customer pack is refused) instead of being passed on as it was.
 
-The manifest lists every file under the run directory except itself and the append-only logs (they
-grow after finalization by design). Files added later are reported as ``unlisted``. Three kinds of added
+The manifest hashes files except itself, append-only logs and the named private operator inputs.
+Private inputs are listed only by path and exclusion reason, without hashes or byte lengths.
+Files added later are reported as ``unlisted``. Three kinds of added
 file fail the check, because consumers (handoff, the customer pack, the gates, the explorer) would read
 them as if the run had produced them:
 
@@ -31,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from .evidence_refs import HASH_ALGORITHM, confined_file, file_sha256
+from .sensitive_users import BUNDLE_PATH, KEY_PATH
 
 BUNDLE_HASHES_PATH = "bundle-hashes.json"
 BUNDLE_HASHES_SCHEMA_VERSION = "2026-10-22"
@@ -41,6 +43,7 @@ _APPEND_ONLY_LOGS = frozenset({"audit-log.jsonl", "audit-command-log.jsonl", "au
 _SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 EVIDENCE_DB_SIDECARS = tuple(f"{EVIDENCE_DB_PATH}{suffix}" for suffix in _SIDECAR_SUFFIXES)
 _IGNORED_NAMES = frozenset({".DS_Store"})
+_PRIVATE_OPERATOR_INPUTS = frozenset({BUNDLE_PATH, KEY_PATH, "operator-inputs/.gitignore"})
 _LIST_LIMIT = 100
 
 # Outputs written on request after finalisation, outside the original seal.
@@ -69,6 +72,8 @@ def is_evidence_sidecar(relative: str) -> bool:
 
 
 def _excluded_reason(relative: str) -> str | None:
+    if relative in _PRIVATE_OPERATOR_INPUTS:
+        return "redacted_operator_input"
     # A sidecar is not excluded: the index is closed before it is hashed, so one present at that moment is
     # hashed like any file, and one that appears later is an unlisted file the check refuses.
     if relative == BUNDLE_HASHES_PATH:

@@ -2,6 +2,73 @@
 
 Contract version: `2026-10-22`. This version makes evidence traceable. The validator resolves every evidence reference against the bundle; references carry `collected_at`, `content_hash` and `resolved`; a proof row is `supported` only when its reference resolved and a finding's `confidence` follows from how many resolved; finalization writes `bundle-hashes.json`, which handoff, the explorer and customer-pack creation recompute; and the OSCAL export is OSCAL 1.1.2 Assessment Results that validates against the official schema, with the run manifest's `created_utc` as its collection time. It adds the validation codes `unresolved_evidence_ref`, `evidence_ref_hash_mismatch`, `unresolved_report_proof_table_ref`, `unresolved_report_evidence_ref` and `legacy_unresolved_ref` (see "Evidence references and traceability"). Bundles written under earlier versions stay readable, but the validator now reports any of their references that do not resolve, and handoff, the explorer and the gates recompute validation, so an older bundle with such references reads as invalid; its files are not rewritten. It also adds the validation codes `unwaived_accepted_status` and `unknown_finding_status` (see "Finding status"), the manifest key `rule_parameters` (see "Rule parameters and reassessment"), and, additively, the coverage rows of an offline replay (including `status: skipped`), section gaps with `status: skipped` and explicit skip reasons (`teams_token_unavailable`, `teams_powershell_not_supported`), the ledger's `graph.redirects`, the gate codes `bundle_integrity_mismatch`, `bundle_integrity_invalid`, `bundle_integrity_absent`, `expected_manifest_sha256_mismatch` and `expected_manifest_sha256_invalid`, the manifest key `replay_source` and the rule parameter `break_glass_accounts`, and, from the third product review, `coverage_gaps[].section_gaps` and `surface_coverage[].section_gap_collectors` (see "Collection limits and coverage gaps"), the warnings `section_gap_not_recorded` and `observed_call_outside_declared`, `observed_ledger.log.empty`, the replay row error class `section_absent`, the per-collector `since` and `until` of a checkpoint, the `casMailboxSmtpAuth` section of `exchange_policy_objects`, the reasons of "Rules that need the whole input" and, from the PIM role policy reads of `identity_governance` (see "PIM role policy reads"), the normalized artefact `normalized/privileged_roles.json`, the `governance_objects` record kinds `role_management_policy_assignment` and `role_management_policy_rule`, the coverage rows `roleManagementPolicyAssignments`, `roleManagementPolicyRules` and `roleManagementPolicyRulesFanout`, and the `collection_gaps` reasons `endpoint_unavailable` and `artefact_withheld` (with its `reasons` field); none of these needs a new contract version while `2026-10-22` is unreleased.
 
+## Local sensitive-user operator input (additive)
+
+Microsoft 365 runs, including offline replay and guided audit flows, accept
+`--sensitive-users FILE` or `AUDITEX_SENSITIVE_USERS_FILE` (the flag wins).
+An empty environment variable is treated as unset; demos never load this input.
+The regular local UTF-8 file is opened once read-only before collection, capped
+at 256 KiB and 10,000 entries, and rejected as a usage error if empty or invalid.
+Entries are e-mail strings in a JSON array or one per plain-text line;
+`name;email` is accepted. Addresses are trimmed, lower-cased, de-duplicated and
+sorted. Blank plain-text lines are ignored. Validation errors give a physical
+line number and never quote the input.
+
+`run-manifest.json` adds `operator_inputs.sensitive_users`:
+
+```json
+{"supplied": true, "count": 2, "hmac_sha256": "<64 lower-case hexadecimal characters>"}
+```
+
+`supplied` is a boolean. When true, `count` is an integer of at least 1 giving
+the number of unique normalised addresses; `hmac_sha256` is HMAC-SHA256
+of their UTF-8 newline-joined list, sorted, **without** a trailing newline,
+using a per-run key from `secrets.token_bytes(32)`. When absent,
+the entry is `{"supplied": false}`; older bundles may omit it altogether.
+No addresses, display names or source path are recorded in that entry.
+
+The sole list copy is `operator-inputs/sensitive-users.txt`, mode 0600 inside
+a 0700 directory: bare normalised addresses, one per line, with a final newline.
+The key is stored as exactly 32 **raw bytes**, without encoding or a trailing
+newline, only in `operator-inputs/sensitive-users.key`, also mode 0600.
+Both appear in `artifacts` and `redacted_artifacts` in the run manifest and are
+listed as `redacted_operator_input` in `bundle-hashes.json`, without a file
+checksum or byte length. The writer places a `.gitignore` containing `*` in
+`operator-inputs/`, including in custom output directories; it receives the same
+integrity exclusion. **REDACTED** means this local personal
+data and the key must not be disclosed: their contents are excluded from the evidence index,
+AI context, logs, reports, built-in exports and customer packs. Customer packs
+may carry their relative paths and exclusion reasons, but never the files or
+their checksums or byte lengths; the manifest HMAC remains present. The key never leaves
+the private area, including through run-copy helpers. The source path
+is redacted from recorded command arguments. No list is uploaded.
+
+The copy is reserved for local loading into the in-memory rule view; it must
+never become a persisted rule-view section. On resume the current invocation
+replaces it, or removes it and records `supplied: false` if no input is supplied.
+Resume retains the same key when replacing a supplied list and recomputes its
+HMAC; clearing the list removes the key too. A missing or invalid key for an
+existing HMAC is an error, never a silent key rotation. Supplying a list after
+clearing it generates a fresh key.
+Support can call `azure_tenant_audit.sensitive_users.verify_sensitive_users(run_dir)`
+to recompute the HMAC from the private files and compare with
+`hmac.compare_digest`. It returns false for missing, malformed or inconsistent
+inputs. This proves consistency, not authenticity against an operator who can
+rewrite the manifest and both private files.
+
+The definition is `properties.operator_inputs.properties.sensitive_users` in `schemas/run_manifest.schema.json`.
+
+The projection integration is a separate product change. In v3.9.1, SS 2.1
+uses `SensitiveUsers`; SS 2.3 uses the distinct `PartnerDomains` input. This
+channel supplies only sensitive users and does not supply partner domains.
+
+## Contract history
+
+The optional `operator_inputs.sensitive_users` and `redacted_artifacts` manifest
+keys and the private-input integrity exclusion above are additive under this version.
+
+Contract version: `2026-10-22`. This version makes evidence traceable. The validator resolves every evidence reference against the bundle; references carry `collected_at`, `content_hash` and `resolved`; a proof row is `supported` only when its reference resolved and a finding's `confidence` follows from how many resolved; finalization writes `bundle-hashes.json`, which handoff, the explorer and customer-pack creation recompute; and the OSCAL export is OSCAL 1.1.2 Assessment Results that validates against the official schema, with the run manifest's `created_utc` as its collection time. It adds the validation codes `unresolved_evidence_ref`, `evidence_ref_hash_mismatch`, `unresolved_report_proof_table_ref`, `unresolved_report_evidence_ref` and `legacy_unresolved_ref` (see "Evidence references and traceability"). Bundles written under earlier versions stay readable, but the validator now reports any of their references that do not resolve, and handoff, the explorer and the gates recompute validation, so an older bundle with such references reads as invalid; its files are not rewritten. It also adds the validation codes `unwaived_accepted_status` and `unknown_finding_status` (see "Finding status"), the manifest key `rule_parameters` (see "Rule parameters and reassessment"), and, additively, the coverage rows of an offline replay, the ledger's `graph.redirects`, the gate codes `bundle_integrity_mismatch`, `bundle_integrity_invalid`, `bundle_integrity_absent`, `expected_manifest_sha256_mismatch` and `expected_manifest_sha256_invalid`, the manifest key `replay_source` and the rule parameter `break_glass_accounts`, and, from the third product review, `coverage_gaps[].section_gaps` and `surface_coverage[].section_gap_collectors` (see "Collection limits and coverage gaps"), the warnings `section_gap_not_recorded` and `observed_call_outside_declared`, `observed_ledger.log.empty`, the replay row error class `section_absent`, the per-collector `since` and `until` of a checkpoint, the `casMailboxSmtpAuth` section of `exchange_policy_objects`, the reasons of "Rules that need the whole input" and, from the PIM role policy reads of `identity_governance` (see "PIM role policy reads"), the normalized artefact `normalized/privileged_roles.json`, the `governance_objects` record kinds `role_management_policy_assignment` and `role_management_policy_rule`, the coverage rows `roleManagementPolicyAssignments`, `roleManagementPolicyRules` and `roleManagementPolicyRulesFanout`, and the `collection_gaps` reasons `endpoint_unavailable` and `artefact_withheld` (with its `reasons` field); none of these needs a new contract version while `2026-10-22` is unreleased.
+
 Version `2026-10-20` records every list that was cut short as a coverage gap (see "Collection limits and coverage gaps") and adds the `truncated_list_reported_ok` and `collection_gap_not_recorded` validation codes. Bundles written under `2026-04-21` stay valid: a coverage row is checked only when it carries a `truncation_reason`, and older rows that flag `collection_truncated` on an `ok` row carry none.
 
 Auditex treats completed run directories as product contracts, not incidental implementation output. Public `run` and `probe` flows must finish through the shared bundle finalizer so the same required artifacts and validation semantics are applied.
@@ -17,7 +84,7 @@ Every successful bundle must contain:
 - `ai_context.json`
 - `validation.json`
 
-Finalization also writes `bundle-hashes.json`, the SHA-256 of every artifact (see "Bundle hash manifest"). It is not a required artifact, so bundles finalized before it existed stay valid.
+Finalization also writes `bundle-hashes.json`, the SHA-256 of each non-excluded artifact (see "Bundle hash manifest"). It is not a required artifact, so bundles finalized before it existed stay valid.
 
 `validation.json` is built last and records the contract version, required artifact list, issue count, and issue details. The final `run-manifest.json` mirrors this with `schema_contract_version`, `contract_status`, and `contract_issue_count`.
 
@@ -654,7 +721,9 @@ What the finding builders cite, so that every reference resolves in a bundle the
 
 ### Bundle hash manifest
 
-`bundle-hashes.json` is the last file finalization writes (schema: `schemas/bundle_hashes.schema.json`). It holds `schema_version`, `algorithm` (`sha256`), `run_id`, `created_utc` (the run manifest's), `artifact_count`, `artifacts` (`path`, `sha256`, `bytes` for every file under the run directory, sorted by path) and `excluded`. The append-only logs (`audit-log.jsonl`, `audit-command-log.jsonl`, `audit-debug.log`) and operating-system metadata change after finalization by design, so they are named under `excluded` with a `reason` and not hashed. The manifest does not hash itself. `index/evidence.sqlite` is closed before it is hashed, so the file holds the whole index and not a stub with the data in a `-wal` sidecar, and no sidecar exists to hash. A SQLite sidecar (`index/evidence.sqlite-wal`, `-shm`, `-journal`) that turns up afterwards is an unlisted file the check refuses (`unexpected`, below): SQLite would replay a `-wal` file over the hashed index, so it could change what every consumer reads while the hashed file stays as it was. The `sqlite_sidecar` value of `excluded[].reason` is no longer written; older manifests may carry it. Its path is fixed; `run-manifest.json` lists it under `artifacts`.
+`bundle-hashes.json` is the last file finalization writes (schema: `schemas/bundle_hashes.schema.json`). It holds `schema_version`, `algorithm` (`sha256`), `run_id`, `created_utc` (the run manifest's), `artifact_count`, `artifacts` (`path`, `sha256`, `bytes` for every non-excluded file under the run directory, sorted by path) and `excluded`. The append-only logs (`audit-log.jsonl`, `audit-command-log.jsonl`, `audit-debug.log`) and operating-system metadata change after finalization by design, so they are named under `excluded` with a `reason` and not hashed. The manifest does not hash itself. `index/evidence.sqlite` is closed before it is hashed, so the file holds the whole index and not a stub with the data in a `-wal` sidecar, and no sidecar exists to hash. A SQLite sidecar (`index/evidence.sqlite-wal`, `-shm`, `-journal`) that turns up afterwards is an unlisted file the check refuses (`unexpected`, below): SQLite would replay a `-wal` file over the hashed index, so it could change what every consumer reads while the hashed file stays as it was. The `sqlite_sidecar` value of `excluded[].reason` is no longer written; older manifests may carry it. Its path is fixed; `run-manifest.json` lists it under `artifacts`.
+
+`operator-inputs/` files, including the local `.gitignore`, appear only in `excluded` with reason `redacted_operator_input`, without `sha256` or `bytes`; this exclusion also applies to the customer pack copy of the hash manifest.
 
 Consumers read the index read-only (`azure_tenant_audit.evidence_db.open_index_read_only`: SQLite `mode=ro&immutable=1`, which writes nothing, creates no sidecar, opens on read-only media and ignores a `-wal` file). When `bundle-hashes.json` lists the index and a sidecar stands beside it, `load_run_index_summary` returns nothing (callers fall back to the manifest) and the read-only validation copies the hashed file alone. An index no hash manifest covers (a bundle from before it existed) is still read with its sidecar, because its data may still sit there.
 
