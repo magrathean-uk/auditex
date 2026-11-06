@@ -134,6 +134,17 @@ def test_run_manifest_schema_documents_assurance_coverage_fields() -> None:
     assert {"assurance", "surface_coverage", "coverage_gaps", "provider_scorecard", "data_handling_path", "api_inventory_path"}.issubset(properties)
 
 
+def test_summary_schema_accepts_an_optional_string_partial_workload_notice() -> None:
+    schema = json.loads(Path("schemas/summary.schema.json").read_text(encoding="utf-8"))
+    validator = jsonschema.Draft202012Validator(schema)
+    summary = {"schema_version": "2026-04-21", "tenant_name": "constructed", "run_id": "constructed",
+               "overall_status": "partial", "collectors": []}
+    validator.validate(summary)
+    validator.validate({**summary, "partial_workload_notice": "Incomplete: dns_posture"})
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate({**summary, "partial_workload_notice": ["dns_posture"]})
+
+
 @pytest.mark.parametrize("metadata", [None, {"supplied": False},
     {"supplied": True, "count": 1, "hmac_sha256": "a" * 64}])
 def test_run_manifest_schema_accepts_optional_sensitive_users(metadata) -> None:

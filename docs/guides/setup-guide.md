@@ -56,9 +56,10 @@ In the guided `gr-audit` flow, answering No to Exchange excludes both Exchange c
 Answering Yes selects the Microsoft 365 CLI `exchange` collector in delegated mode.
 Guided `app-audit` keeps both default policy collectors and honours an explicitly
 named or profile-selected Microsoft 365 CLI `exchange` collector. Outside a
-`gr-audit` No answer, guided flows add no Exchange exclusion. Generated setup plans resolve
-app and delegated selections separately; each command has its own permissions, tooling
-and collection notices, including app requirements in the default delegated guide.
+`gr-audit` No answer, guided flows add no Exchange exclusion. Generated setup plans derive
+the delegated selection from the app selection; each command has its own permissions, tooling
+and collection notices, including app requirements in the default delegated guide. An empty
+delegated selection is omitted from an app guide with a note.
 If an explicit Exchange policy or DNS posture name is removed from a generated
 delegated command, its setup steps explain the app-mode-only restriction.
 Generated app and delegated probes also retain the probe-only `windows365` surface.
@@ -69,6 +70,7 @@ are the only failures, the run is **partial**, collection exits **0**, and the g
 blocks unless `--allow-partial` is supplied. Required collector/authentication
 failures retain their non-zero exit behaviour. Missing tooling, consent and real
 Exchange session failures retain the tooling or app-consent remediation.
+The CLI writes a collector-only notice to stderr and records it as `partial_workload_notice` in the summary.
 
 App-mode `auditex probe live --surface all` includes Exchange policy and DNS posture.
 The standalone probe prints the Exchange session and Cloudflare resolver notices

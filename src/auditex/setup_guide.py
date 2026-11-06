@@ -268,26 +268,23 @@ def build_m365_setup_guide(
     config = CollectorConfig.from_path(config_path)
     profile = get_profile(auditor_profile)
     presets = load_collector_presets()
-    delegated_omissions: list[str] = []
-
-    def selection(auth_mode: str) -> list[str]:
-        names = select_collectors(
-            available=config.default_order,
-            profile_default_collectors=profile.default_collectors,
-            preset_name=collector_preset, presets=presets,
-            explicit_collectors=_split_values(collectors),
-            excluded_collectors=_split_values(exclude),
-            include_exchange=include_exchange, auth_mode=auth_mode,
-        )
-        # Generated delegated commands cannot open the app-only policy session.
-        if auth_mode != "app":
-            delegated_omissions.extend(name for name in names if name in {"exchange_policy", "dns_posture"})
-        return names if auth_mode == "app" else [
-            name for name in names if name not in {"exchange_policy", "dns_posture"}
-        ]
-
-    selections = {auth_mode: selection(auth_mode) for auth_mode in ("app", "delegated")}
-    selected = selections["app" if mode == "app" else "delegated"]
+    app_selection = select_collectors(
+        available=config.default_order,
+        profile_default_collectors=profile.default_collectors,
+        preset_name=collector_preset, presets=presets,
+        explicit_collectors=_split_values(collectors),
+        excluded_collectors=_split_values(exclude),
+        include_exchange=include_exchange, auth_mode="app",
+    )
+    # Generated delegated commands omit these app-only workloads.
+    delegated_omissions = [name for name in app_selection if name in {"exchange_policy", "dns_posture"}]
+    delegated_selection = [name for name in app_selection if name not in {"exchange_policy", "dns_posture"}]
+    if mode != "app" and not delegated_selection:
+        raise ValueError("No collectors selected for this authentication mode.")
+    selections = {"app": app_selection}
+    if delegated_selection:
+        selections["delegated"] = delegated_selection
+    selected = app_selection if mode == "app" else delegated_selection
     hints = _load_permission_hints(permission_hints_path)
     catalog = build_m365_scope_catalog(
         collector_config=config,
@@ -327,7 +324,7 @@ def build_m365_setup_guide(
             "tool_requirements": tools,
             "collection_notices": collector_activity_notices(names, auth_mode),
         }
-    # Both modes' commands are printed, so disclose the requirements for both.
+    # Disclose requirements for every mode with generated commands.
     exchange_permissions = authentication_plans["app"]["exchange_application_permissions"]
     exchange_blast_radius = (
         "Write-capable Exchange application permission used read-only: read-only Get-* cmdlets only; "
@@ -375,7 +372,8 @@ def build_m365_setup_guide(
             "Exchange policy and DNS posture are app-mode only in generated setup commands. "
             "Delegated commands omit them, including explicitly selected names; DNS itself needs no Exchange session."
         )
-    delegated_steps.extend(authentication_plans["delegated"]["collection_notices"])
+    if delegated_selection:
+        delegated_steps.extend(authentication_plans["delegated"]["collection_notices"])
     app_steps.extend(authentication_plans["app"]["collection_notices"])
     if "exchange_policy" in selections["app"]:
         app_steps.append(
@@ -385,15 +383,46 @@ def build_m365_setup_guide(
         )
 
     authentication_plans["app"]["setup_steps"] = app_steps
-    authentication_plans["delegated"]["setup_steps"] = delegated_steps
+    if delegated_selection:
+        authentication_plans["delegated"]["setup_steps"] = delegated_steps
 
-    app_csv = ",".join(selections["app"])
-    delegated_csv = ",".join(selections["delegated"])
-    app_probe_selection = f" --surface {','.join(_dedupe([*selections['app'], 'windows365']))}"
+    app_csv = ",".join(app_selection)
+    delegated_csv = ",".join(delegated_selection)
+    app_probe_selection = f" --surface {','.join(_dedupe([*app_selection, 'windows365']))}"
     preset_flag = f" --collector-preset {collector_preset}" if collector_preset else ""
     app_run_selection = f"{preset_flag} --collectors {app_csv}"
-    delegated_run_selection = f"{preset_flag} --collectors {delegated_csv}"
-    delegated_probe_surface = ",".join(_dedupe([*selections["delegated"], "windows365"]))
+    setup_notices = []
+    alternate_setup_steps = {"app": app_steps, "exchange_assisted": exchange_steps}
+    commands = {}
+    if delegated_selection:
+        delegated_run_selection = f"{preset_flag} --collectors {delegated_csv}"
+        delegated_probe_surface = ",".join(_dedupe([*delegated_selection, "windows365"]))
+        alternate_setup_steps["delegated"] = delegated_steps
+        commands.update({
+            "delegated_login": f"az login --allow-no-subscriptions --tenant {tenant_id}",
+            "delegated_probe": (
+                f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
+                f"--auditor-profile {auditor_profile} --mode delegated --surface {delegated_probe_surface} --use-azure-cli-token"
+            ),
+            "delegated_run": (
+                f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
+                f"--auditor-profile {auditor_profile} --plane {plane} --use-azure-cli-token --probe-first --throttle-mode safe{delegated_run_selection}"
+            ),
+        })
+    else:
+        setup_notices.append("Delegated setup omitted: no selected collectors support generated delegated commands.")
+    commands.update({
+        "app_probe": (
+            f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
+            f"--auditor-profile {auditor_profile} --mode app --client-id <app-id> --client-secret <client-secret>"
+            f"{app_probe_selection}"
+        ),
+        "app_run": (
+            f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
+            f"--auditor-profile {auditor_profile} --plane {plane} --client-id <app-id> --client-secret <client-secret> "
+            f"--probe-first --throttle-mode safe{app_run_selection}"
+        ),
+    })
 
     return {
         "schema_version": "2026-05-22",
@@ -422,28 +451,9 @@ def build_m365_setup_guide(
             "broad_permissions_recorded_as_scope_risk": bool(broad_permissions),
         },
         "setup_steps": app_steps if mode == "app" else delegated_steps,
-        "alternate_setup_steps": {"delegated": delegated_steps, "app": app_steps, "exchange_assisted": exchange_steps},
-        "commands": {
-            "delegated_login": f"az login --allow-no-subscriptions --tenant {tenant_id}",
-            "delegated_probe": (
-                f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --mode delegated --surface {delegated_probe_surface} --use-azure-cli-token"
-            ) if delegated_csv else None,
-            "delegated_run": (
-                f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --plane {plane} --use-azure-cli-token --probe-first --throttle-mode safe{delegated_run_selection}"
-            ) if delegated_csv else None,
-            "app_probe": (
-                f"auditex probe live --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --mode app --client-id <app-id> --client-secret <client-secret>"
-                f"{app_probe_selection}"
-            ),
-            "app_run": (
-                f"auditex run --tenant-name {tenant_name} --tenant-id {tenant_id} "
-                f"--auditor-profile {auditor_profile} --plane {plane} --client-id <app-id> --client-secret <client-secret> "
-                f"--probe-first --throttle-mode safe{app_run_selection}"
-            ),
-        },
+        "setup_notices": setup_notices,
+        "alternate_setup_steps": alternate_setup_steps,
+        "commands": commands,
         "review_artifacts": [
             "audit-plan.json",
             "live-readiness.json",
@@ -506,6 +516,9 @@ def render_setup_guide_markdown(payload: Mapping[str, Any]) -> str:
     lines.extend(["", "## Setup Steps", ""])
     for index, step in enumerate(payload.get("setup_steps") or [], start=1):
         lines.append(f"{index}. {step}")
+
+    for notice in payload.get("setup_notices") or []:
+        lines.extend(["", str(notice)])
 
     lines.extend(["", "## Verify Commands", ""])
     for auth_mode, plan in _mapping(payload.get("authentication_plans")).items():

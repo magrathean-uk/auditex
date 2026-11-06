@@ -224,13 +224,50 @@ def test_setup_guide_deselection_survives_generated_run_commands(tmp_path, exclu
             assert {"exchange_policy", "dns_posture"}.isdisjoint(plan.selected_collectors)
 
 
-def test_setup_explicit_app_only_scope_does_not_emit_empty_delegated_commands():
-    guide = build_setup_guide(provider='m365', mode='app', collectors='exchange_policy')
-    assert guide['commands']['delegated_run'] is None
-    assert guide['commands']['delegated_probe'] is None
-    assert guide['authentication_plans']['delegated']['selected_collectors'] == []
-    assert '--collectors exchange_policy' in guide['commands']['app_run']
-    assert '### delegated_run' not in render_setup_guide_markdown(guide)
+@pytest.mark.parametrize("collectors", ["exchange_policy", "dns_posture", "exchange_policy,dns_posture"])
+def test_setup_explicit_app_only_scope_does_not_emit_empty_delegated_commands(collectors):
+    guide = build_setup_guide(provider="m365", mode="app", collectors=collectors)
+    assert not any(key.startswith("delegated_") for key in guide["commands"])
+    assert "delegated" not in guide["authentication_plans"]
+    assert "delegated" not in guide["alternate_setup_steps"]
+    assert f"--collectors {collectors}" in guide["commands"]["app_run"]
+    assert "Delegated setup omitted" in render_setup_guide_markdown(guide)
+
+
+def test_app_exchange_reader_with_only_app_collectors_omits_delegated_guide(tmp_path):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.run import build_live_run_plan
+
+    guide = build_setup_guide(
+        provider="m365", mode="app", auditor_profile="exchange-reader", exclude="exchange,security,identity"
+    )
+    assert guide["selected_collectors"] == ["exchange_policy"]
+    args = tenant_cli.build_parser().parse_args(shlex.split(guide["commands"]["app_run"])[2:])
+    plan = build_live_run_plan(args, output_dir=tmp_path,
+                               collector_config=CollectorConfig.from_path(Path("configs/collector-definitions.json")),
+                               permission_hints={}, collector_presets=load_collector_presets())
+    assert plan.selected_collectors == guide["selected_collectors"]
+    assert "delegated" not in guide["authentication_plans"]
+    assert "delegated" not in guide["alternate_setup_steps"]
+    assert not any(key.startswith("delegated_") for key in guide["commands"])
+    notice = "Delegated setup omitted: no selected collectors support generated delegated commands."
+    assert guide["setup_notices"] == [notice]
+    markdown = render_setup_guide_markdown(guide)
+    assert markdown.count(notice) == 1
+    assert "## Delegated command requirements" not in markdown
+    assert "### delegated_" not in markdown
+
+
+@pytest.mark.parametrize("selection", [
+    {"mode": "delegated", "auditor_profile": "exchange-reader", "exclude": "exchange,security,identity"},
+    {"mode": "delegated", "collectors": "exchange_policy"},
+    {"mode": "app", "collectors": "identity", "exclude": "identity"},
+    {"mode": "delegated", "collectors": "identity", "exclude": "identity"},
+])
+def test_setup_guide_rejects_empty_requested_mode(selection):
+    with pytest.raises(ValueError, match="No collectors selected"):
+        build_setup_guide(provider="m365", **selection)
 
 
 def test_exchange_tooling_follows_explicit_selection_in_other_profiles():
@@ -239,7 +276,7 @@ def test_exchange_tooling_follows_explicit_selection_in_other_profiles():
 
 
 @pytest.mark.parametrize('collectors', ['identity,exchange_policy', 'identity,dns_posture',
-                                        'identity,exchange_policy,dns_posture', 'exchange_policy'])
+                                        'identity,exchange_policy,dns_posture'])
 @pytest.mark.parametrize('mode', ['app', 'delegated'])
 def test_setup_discloses_explicit_names_filtered_from_delegated_commands(collectors, mode):
     guide = build_setup_guide(provider='m365', mode=mode, collectors=collectors)
