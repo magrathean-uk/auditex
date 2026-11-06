@@ -286,14 +286,22 @@ passed to `verify-pack --expect-checksums-sha256`.
 
 Before sharing, identity discovery reads all `normalized/**/*.json` files. It
 refuses malformed, unreadable or non-regular entries, unsafe links, changes
-during discovery and scans exceeding 5,000 files, 32 MiB per file, 128 MiB
-in total or 32 directory levels. A subsequent snapshot also refuses scan
+during discovery and scans exceeding 5,000 files, 64 MiB per file, 256 MiB
+in total per run or 32 directory levels. A subsequent snapshot also refuses scan
 problems or changed fingerprints. These checks cover shareable reports, exports,
 customer packs, notifications and MCP tools. The MCP `summarize_run` and
 `probe_summarize` tools also use a bundle reader that can block on a non-regular
 entry before discovery completes, so refusal is not guaranteed for those two
-tools. The refusal identifies the reason and uses safe file labels. Repair the
-evidence before retrying.
+tools. A size-limit refusal reports the supported sizes without naming files;
+other refusals identify the reason using safe file labels. Repair the evidence
+before retrying.
+
+The limits are on bytes scanned, not a resident-memory ceiling. A synthetic
+25,000-user run had 54 normalised files totalling 23.6 MiB; a 90,000-user run
+had 54 files totalling 84.1 MiB, with a largest file of 44.1 MiB. On the test
+machine, their shareable HTML previews peaked at about 0.5 GiB and 1.5 GiB of
+resident memory respectively. The 2 GiB ceiling used for these tests is not
+enforced by the scanner; memory use also depends on the evidence and output.
 
 These are pattern and structure rules, not a guarantee that every personal
 value in arbitrary prose is recognised. URL userinfo passwords are matched

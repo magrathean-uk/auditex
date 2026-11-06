@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
@@ -16,7 +17,8 @@ from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.output_redaction import (
-    PROFILE_LOCAL, PROFILE_SHAREABLE, Snapshot, assert_snapshot_stable, context_for_run, redact_output, snapshot_run,
+    PROFILE_LOCAL, PROFILE_SHAREABLE, ContextIncompleteError, Snapshot, assert_snapshot_stable, context_for_run,
+    redact_output, snapshot_run,
 )
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
@@ -897,6 +899,21 @@ def _build_notify_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _cli_size_refusal(function: Callable[[list[str] | None], int]) -> Callable[[list[str] | None], int]:
+    """Let the CLI print the size refusal once, without a traceback containing paths."""
+    @wraps(function)
+    def wrapped(argv: list[str] | None = None) -> int:
+        try:
+            return function(argv)
+        except ContextIncompleteError as exc:
+            if exc.size_limit:
+                raise SystemExit(str(exc)) from None
+            raise
+
+    return wrapped
+
+
+@_cli_size_refusal
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv if argv is not None else sys.argv[1:])
     if not argv:

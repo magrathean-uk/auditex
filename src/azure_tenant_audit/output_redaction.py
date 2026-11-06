@@ -45,20 +45,28 @@ class RedactionDepthError(RedactionError):
 class ContextIncompleteError(RedactionError):
     """The run's identities could not all be discovered (see ``RedactionContext.incomplete``): fail closed.
 
-    The message and the attributes name each unusable file by a *safe label* (its run-relative path with every
+    The attributes, and most messages, name each unusable file by a *safe label* (its run-relative path with every
     segment that is not a recognised public section label, ``_PUBLIC_SECTION_LABELS``, replaced by ``<redacted-segment-N>``) and a reason class
-    (``unreadable``, ``malformed JSON``, ``oversize``, ``non-regular``, ``dangling link``, ``limit``, ``outside run``,
-    ``changed during scan``). Never file content, an operating-system message or the absolute run path.
+    (``unreadable``, ``malformed JSON``, ``oversize``, ``scan bytes limit``, ``non-regular``, ``dangling link``,
+    ``limit``, ``outside run``, ``changed during scan``). Never file content, an operating-system message or the
+    absolute run path. Size-budget refusals use one message without file labels, even if other problems were found.
 
-    ``files`` is the sorted list shown, at most ``_MAX_LISTED_FILES`` ``(label, reason class)`` pairs; ``omitted``
-    counts the unusable files beyond it.
+    ``files`` is a sorted list of at most ``_MAX_LISTED_FILES`` ``(label, reason class)`` pairs; ``omitted`` counts
+    the unusable files beyond it. ``size_limit`` records a byte-budget refusal even when its reason was omitted.
     """
 
-    def __init__(self, files: Iterable[tuple[str, str]] = (), omitted: int = 0) -> None:
+    def __init__(self, files: Iterable[tuple[str, str]] = (), omitted: int = 0, *, size_limit: bool = False) -> None:
         listed = tuple((str(label), str(reason)) for label, reason in files)
         shown, rest = listed[:_MAX_LISTED_FILES], max(0, int(omitted)) + max(0, len(listed) - _MAX_LISTED_FILES)
         self.files: tuple[tuple[str, str], ...] = shown
         self.omitted: int = rest
+        self.size_limit = size_limit or _size_budget_exceeded(listed)
+        if self.size_limit:
+            super().__init__(
+                "Shareable output refused: identity discovery is incomplete. Supported normalised evidence is up to "
+                f"{_format_byte_limit(_MAX_FILE_BYTES)} per file and {_format_byte_limit(_MAX_SCAN_BYTES)} total per run."
+            )
+            return
         total = len(shown) + rest
         names = "; ".join(f"{label} ({reason})" for label, reason in shown) or "no file could be named"
         more = f"; and {rest} more" if rest else ""
@@ -245,6 +253,8 @@ class RedactionContext:
     incomplete_reasons: tuple[str, ...] = ()
     incomplete_files: tuple[tuple[str, str], ...] = ()
     incomplete_omitted: int = 0
+    # Retained separately because the associated reason can fall beyond the displayed-reasons limit.
+    scan_size_exceeded: bool = False
     # The state of the run's ``normalized/`` files as discovery read them (see ``snapshot_run``); empty for a context
     # that was not built from one run directory.
     snapshot: tuple[tuple[str, tuple[int, int, int, int, int]], ...] = ()
@@ -425,9 +435,10 @@ def _collect(value: Any, found: _Found, *, names: bool) -> None:
 # -- contexts ---------------------------------------------------------------------------------------------------------
 
 # Discovery limits. Hitting one is never silent: the context is flagged ``incomplete`` (see ``RedactionContext``).
+# A synthetic 90k-user run measured 44.1 MiB for its largest file and 84.1 MiB total. These limit scan bytes, not RSS.
 _MAX_SCAN_FILES = 5_000            # ``normalized/**/*.json`` files per run
-_MAX_FILE_BYTES = 32 * 1024 * 1024  # one file; a larger one is not read
-_MAX_SCAN_BYTES = 128 * 1024 * 1024  # all files of one run together
+_MAX_FILE_BYTES = 64 * 1024 * 1024  # one file; a larger one is not read
+_MAX_SCAN_BYTES = 256 * 1024 * 1024  # all files of one run together
 _MAX_SCAN_DEPTH = 32               # directory levels below ``normalized/``
 _MAX_REASONS = 20                  # problems a context keeps (the rest is only counted)
 _MAX_LISTED_FILES = 10             # problems a refusal names (the rest is only counted)
@@ -436,11 +447,22 @@ _MAX_LISTED_FILES = 10             # problems a refusal names (the rest is only 
 REASON_UNREADABLE = "unreadable"
 REASON_MALFORMED = "malformed JSON"
 REASON_OVERSIZE = "oversize"
+REASON_SCAN_BYTES = "scan bytes limit"
 REASON_NON_REGULAR = "non-regular"
 REASON_DANGLING = "dangling link"
 REASON_LIMIT = "limit"
 REASON_OUTSIDE = "outside run"
 REASON_CHANGED = "changed during scan"
+
+
+def _size_budget_exceeded(problems: Iterable[tuple[str, str]]) -> bool:
+    return any(reason in (REASON_OVERSIZE, REASON_SCAN_BYTES) for _, reason in problems)
+
+
+def _format_byte_limit(value: int) -> str:
+    mib = 1024 * 1024
+    return f"{value // mib} MiB" if value and value % mib == 0 else f"{value} bytes"
+
 
 # The only path segments a refusal ever shows: the run's ``normalized`` directory and the ``normalized/<section>.json``
 # names the product itself writes. A file name is untrusted text (``alice_smith.json``, ``acme_corp.json``), so spelling
@@ -557,7 +579,7 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
             raise _Unsafe(REASON_CHANGED)  # grown, shrunk or rewritten between the listing and the open
         limit = min(cap, _MAX_FILE_BYTES)
         if info.st_size > limit:
-            raise _Unsafe(REASON_OVERSIZE if limit >= _MAX_FILE_BYTES else REASON_LIMIT)
+            raise _Unsafe(REASON_OVERSIZE if limit >= _MAX_FILE_BYTES else REASON_SCAN_BYTES)
         chunks: list[bytes] = []
         while total < info.st_size:
             chunk = os.read(descriptor, min(1 << 20, info.st_size - total))
@@ -575,7 +597,11 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     except OSError as exc:
         raise _Unsafe(REASON_UNREADABLE, total) from exc
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError as exc:
+            # Closing can fail after the read has consumed budget too.
+            raise _Unsafe(REASON_UNREADABLE, total) from exc
 
 
 def _open_chain(root_fd: int, parts: tuple[str, ...]) -> tuple[int, str]:
@@ -674,9 +700,10 @@ class _Scan:
             self.problem(parts, REASON_OVERSIZE)
             return
         if size > self.budget:
-            self.problem(parts, REASON_LIMIT)
+            self.problem(parts, REASON_SCAN_BYTES)
             return
         if not self.read:
+            self.budget -= size  # snapshots also enforce the aggregate size limit
             return
         try:
             data = reader(self.budget)
@@ -809,7 +836,7 @@ def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
                     if entry.st_size > _MAX_FILE_BYTES:
                         raise _Unsafe(REASON_OVERSIZE)
                     if entry.st_size > budget:
-                        raise _Unsafe(REASON_LIMIT)
+                        raise _Unsafe(REASON_SCAN_BYTES)
                     data = reader(budget)
                     budget -= len(data)  # charged for the bytes really read
                     payload = json.loads(data.decode("utf-8"))
@@ -906,7 +933,7 @@ def snapshot_run(run_dir: str | Path) -> Snapshot:
     discovery = _scan_run_identities(Path(run_dir), read=False)
     if discovery.problems:
         files, omitted = _problem_fields(list(discovery.problems))
-        raise ContextIncompleteError(files, omitted)
+        raise ContextIncompleteError(files, omitted, size_limit=_size_budget_exceeded(discovery.problems))
     return discovery.snapshot
 
 
@@ -940,6 +967,7 @@ def context_for_run(run_dir: str | Path) -> RedactionContext:
         "incomplete_reasons": _reason_strings(files, omitted),
         "incomplete_files": files,
         "incomplete_omitted": omitted,
+        "scan_size_exceeded": _size_budget_exceeded(discovery.problems),
         "salt": run_salt(run_path),
         "run_paths": run_path_roots(run_path),
         "protected_names": names,
@@ -962,12 +990,14 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
     files: list[tuple[str, str]] = []
     omitted = 0
     incomplete = False
+    size_limit = False
     salt = ""
     snapshot: list[tuple[str, tuple[int, int, int, int, int]]] = []
     for index, run_dir in enumerate(run_dirs):
         context = context_for_run(run_dir)
         snapshot.extend((f"{index}/{path}", state) for path, state in context.snapshot)
         incomplete = incomplete or context.incomplete
+        size_limit = size_limit or context.scan_size_exceeded
         files.extend((f"run {index + 1}: {label}", reason) for label, reason in context.incomplete_files)
         omitted += context.incomplete_omitted
         salt = salt if index else context.salt
@@ -989,6 +1019,7 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         incomplete_reasons=_reason_strings(kept, omitted),
         incomplete_files=kept,
         incomplete_omitted=omitted,
+        scan_size_exceeded=size_limit,
         snapshot=tuple(snapshot),
     )
 
@@ -1070,7 +1101,8 @@ class _Redactor:
             # Fail closed: the names and ids of this run were not all discovered, so free text may carry ones this
             # redactor was never told about. The shareable profiles refuse rather than return a partial result.
             raise ContextIncompleteError(
-                context.incomplete_files or (("<context>", "incomplete"),), context.incomplete_omitted
+                context.incomplete_files or (("<context>", "incomplete"),), context.incomplete_omitted,
+                size_limit=context.scan_size_exceeded,
             )
         found = _Found()
         names = set(context.protected_names)
