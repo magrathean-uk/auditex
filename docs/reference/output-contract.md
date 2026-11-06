@@ -837,7 +837,10 @@ A failed or partial read keeps its actual status, diagnostics,
 coverage gap and customer reason; policies depending on unavailable evidence stay
 `not_assessed`. When these are the only incomplete collectors, the overall run
 status remains `partial`, but collection exits **0**, in live collection and offline
-replay. Failures of required collectors and their authentication retain their
+replay. One stderr line names the incomplete non-fatal collectors, says the run is
+partial and directs the operator to diagnostics; the same line is in `summary.md`
+and `summary.json` as `partial_workload_notice`. It includes no tenant data or error
+text. Failures of required collectors and their authentication retain their
 existing non-zero exits. No `ok_with_gaps` status is introduced. Coverage gates
 continue to reject partial runs unless `--allow-partial` is supplied.
 

@@ -43,6 +43,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   and visible limitations. Real Exchange/DNS failures leave policies not assessed
   and the run `partial`, with collection exit 0 when they are the only failures;
   coverage gates still block partial runs unless `--allow-partial` is supplied.
+  Live runs and offline replays print one stderr line naming the incomplete
+  collectors and put the same notice in the run summary, without error details.
 - Include Exchange/DNS in app-mode probe surfaces and avoid a duplicate full pass
   for these collectors during `--probe-first`; redact collector crash diagnostics.
 

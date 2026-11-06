@@ -784,10 +784,10 @@ class AuditWriter:
             f"- Run ID: {self.run_id}",
             f"- Tenant: {self._manifest['tenant_name']}",
             f"- Mode: {self._manifest['mode']}",
-            "",
-            "| Collector | Status | Items | Details |",
-            "| --- | --- | --- | --- |",
         ]
+        if self.summary.get("partial_workload_notice"):
+            lines.append(f"- {self.summary['partial_workload_notice']}")
+        lines.extend(["", "| Collector | Status | Items | Details |", "| --- | --- | --- | --- |"])
         for row in self.summary.get("collectors", []):
             lines.append(
                 f"| {row.get('name')} | {row.get('status')} | {row.get('item_count', 0)} | {row.get('message', '')} |"
