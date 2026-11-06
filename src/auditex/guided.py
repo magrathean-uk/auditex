@@ -13,6 +13,7 @@ from azure_tenant_audit import cli as tenant_cli
 from azure_tenant_audit.m365_home import m365_environment, m365_subprocess_kwargs
 from azure_tenant_audit.output_redaction import PROFILE_LOCAL
 from azure_tenant_audit.profiles import profile_choices
+from azure_tenant_audit.secret_hygiene import build_argument_parser
 
 from . import auth as auditex_auth
 from .bootstrap import build_doctor_report, run_setup
@@ -300,7 +301,7 @@ def _ensure_m365_login(
 
 
 def build_guided_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex guided-run", description="Interactive guided tenant audit.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex guided-run", description="Interactive guided tenant audit.")
     parser.add_argument("--flow", choices=flow_choices(), default="auto")
     parser.add_argument("--tenant-id", default=None)
     parser.add_argument("--tenant-name", default=None)

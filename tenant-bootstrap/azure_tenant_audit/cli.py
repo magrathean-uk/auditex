@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .collectors import REGISTRY
 from .collectors.base import CollectorResult
+from .argument_parser import build_argument_parser
 from .config import AuthConfig, CollectorConfig, RunConfig
 from .graph import GraphClient
 from .output import AuditWriter
@@ -64,7 +65,7 @@ def _scrub_command_line(command_line: list[str]) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
+    parser = build_argument_parser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--tenant-name", default="tenant", help="Label for the output folder.")
     parser.add_argument("--tenant-id", default=None, help="Entra tenant ID.")
     parser.add_argument("--client-id", default=None, help="App registration ID.")

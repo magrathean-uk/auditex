@@ -6,7 +6,6 @@ runtime consumes only configs/explainer-baselines.json. No network is used.
 """
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 import subprocess
@@ -15,6 +14,8 @@ import sys
 # -I deliberately ignores editable installs/PYTHONPATH; import this worktree.
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 from azure_tenant_audit.explainer.baselines import SOURCE_COMMIT, build_baselines  # noqa: E402
 
 
@@ -40,7 +41,7 @@ def generate_baselines(checkout: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = build_argument_parser(description=__doc__)
     parser.add_argument("--checkout", required=True, type=Path, help="ScubaGear checkout at the full pinned commit")
     parser.add_argument("--output", type=Path, help="write JSON here; default: stdout")
     args = parser.parse_args(argv)

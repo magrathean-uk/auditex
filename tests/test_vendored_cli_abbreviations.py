@@ -74,7 +74,7 @@ def test_vendored_main_rejects_all_sensitive_abbreviations(vendored_cli, flag, i
         with pytest.raises(SystemExit) as exc:
             vendored_cli.main(argv)
         assert exc.value.code == 2
-        assert "unrecognized arguments:" in capsys.readouterr().err
+        assert "error: invalid arguments" in capsys.readouterr().err
     assert not list(tmp_path.iterdir())
 
 

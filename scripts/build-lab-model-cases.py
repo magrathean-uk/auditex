@@ -6,7 +6,6 @@ All cases from a tenant share a train family; this is not an independent holdout
 """
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -15,6 +14,8 @@ import sys
 from uuid import UUID
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 from auditex.model_training import validate_cases  # noqa: E402
 from azure_tenant_audit.contracts import build_validation_report  # noqa: E402
@@ -164,7 +165,7 @@ def export_cases(run_dir: Path, fixture_prefix: str, output_dir: Path) -> dict:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = build_argument_parser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--fixture-prefix", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)

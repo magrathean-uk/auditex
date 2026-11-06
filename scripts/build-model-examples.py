@@ -6,7 +6,6 @@ Run with --check to verify the three checked-in JSONL artifacts without writing.
 """
 from __future__ import annotations
 
-import argparse
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime
@@ -17,6 +16,8 @@ import sys
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
+
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 from auditex.model_training import validate_case, validate_cases  # noqa: E402
 
@@ -251,7 +252,7 @@ def generated_artifacts() -> tuple[dict[str, bytes], list[dict]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = build_argument_parser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Compare deterministic artifacts without writing files")
     args = parser.parse_args(argv)
     artifacts, cases = generated_artifacts()

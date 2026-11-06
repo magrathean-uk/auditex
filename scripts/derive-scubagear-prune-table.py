@@ -5,7 +5,6 @@ This is an offline, conservative scan of the pinned OPA parser AST. It never inv
 """
 from __future__ import annotations
 
-import argparse
 from collections import deque
 from hashlib import sha256
 import inspect
@@ -17,6 +16,8 @@ import tempfile
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 from auditex.scuba_projection import PACK_SHAPE_DIGESTS, _json  # noqa: E402
 
@@ -630,7 +631,7 @@ def derive(rego_dir: Path, shapes: Path) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = build_argument_parser(description=__doc__)
     parser.add_argument("rego_dir", type=Path)
     parser.add_argument("--shapes", type=Path, default=Path(__file__).resolve().parents[1] /
                         "tests/fixtures/scuba-projection-shapes-v7.json")

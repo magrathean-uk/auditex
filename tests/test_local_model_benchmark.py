@@ -530,7 +530,7 @@ def test_enable_and_disable_thinking_are_mutually_exclusive(runner, capsys):
     with pytest.raises(SystemExit) as raised:
         runner.parser().parse_args(["--enable-thinking", "--disable-thinking"])
     assert raised.value.code == 2
-    assert "not allowed with argument" in capsys.readouterr().err
+    assert "error: invalid arguments" in capsys.readouterr().err
     with pytest.raises(SystemExit):
         runner.main(["--check-runtime", "--disable-thinking", "--enable-thinking"])
 

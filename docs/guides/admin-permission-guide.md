@@ -29,8 +29,9 @@ Use UTF-8 plain text with one e-mail address per line, or a JSON array of
 e-mail strings. `name;email` lines or array strings are accepted; the name is
 discarded. Addresses are trimmed, lower-cased, de-duplicated and sorted.
 The file must be non-empty, at most 256 KiB and at most 10,000 entries before
-de-duplication. Invalid entries reject the whole file before collection; errors
-identify the line without displaying personal data.
+de-duplication. Invalid entries reject the whole file before collection. Parser
+errors show a fixed message; direct validation can identify the line without
+displaying personal data.
 
 Auditex opens this file once locally, read-only. The list is never uploaded or
 logged. It retains one confidential copy at

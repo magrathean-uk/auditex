@@ -7,7 +7,6 @@ with current provenance retain byte-identical lines.
 """
 from __future__ import annotations
 
-import argparse
 import copy
 import json
 import os
@@ -17,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 from auditex.model_training import _outside_audit_runs, distinct_prompt_sha256, load_cases, validate_cases  # noqa: E402
 from azure_tenant_audit.external_sharing import annotate_enum_names  # noqa: E402
@@ -120,7 +121,7 @@ def write_outputs(output: Path, report_path: Path | None, cases: list[dict], rep
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = build_argument_parser(description=__doc__)
     parser.add_argument("input", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--report", type=Path)

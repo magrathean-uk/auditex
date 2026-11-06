@@ -39,6 +39,7 @@ import asyncio
 import contextlib
 import hashlib
 import importlib
+import importlib.util
 import json
 import logging
 import re
@@ -50,6 +51,16 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parents[1]
+# This script is intentionally usable with the standard library alone. Load
+# the shared parser without importing the package's dependency-heavy CLI.
+_parser_spec = importlib.util.spec_from_file_location(
+    "_auditex_maintenance.argument_parser", REPO / "src" / "azure_tenant_audit" / "argument_parser.py"
+)
+if _parser_spec is None or _parser_spec.loader is None:
+    raise ImportError("cannot load the Auditex argument parser")
+_parser_module = importlib.util.module_from_spec(_parser_spec)
+_parser_spec.loader.exec_module(_parser_module)
+
 DEFAULT_MAP = REPO / "configs" / "oracle-policy-map.json"
 M365_SERVICES = "prowler.providers.m365.services"
 PROVENANCE_RE = re.compile(r"\.rego (MS\.[A-Z0-9]+\.\d+\.\d+v\d+); variant=(.*?); opa=[^;]*; input_sha256=([0-9a-f]{64})")
@@ -1115,7 +1126,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = _parser_module.build_argument_parser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--kit-dir", required=True, help="oracle-case kit written by build-oracle-cases.py (summary.json, cases-*.jsonl, variants-*)")
     parser.add_argument("--prowler-root", required=True, help="Prowler checkout whose prowler/providers/m365 is on disk; added to sys.path")
     parser.add_argument("--output-dir", required=True, help="new directory for verdicts.jsonl, consensus.jsonl, unmapped-evidence.json, summary.json")

@@ -28,6 +28,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.model_serving import canonical, policy_catalogue  # noqa: E402
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS  # noqa: E402
 from azure_tenant_audit.model_evidence import NOT_COLLECTED  # noqa: E402
@@ -146,7 +148,7 @@ def _write_new(path: Path, payload: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = build_argument_parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pack", type=Path, required=True, help="training pack directory holding the JSONL files (read only)")
     parser.add_argument("--output", type=Path, required=True, help="new fixture file; an existing one is refused")
     parser.add_argument("--files", nargs="+", default=list(DEFAULT_FILES), help=f"pack files to read (default: {' '.join(DEFAULT_FILES)})")

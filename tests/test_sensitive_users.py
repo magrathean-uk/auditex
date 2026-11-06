@@ -170,7 +170,7 @@ def test_sensitive_user_prefix_redaction(equals):
 
 @pytest.mark.parametrize("guided", [False, True])
 @pytest.mark.parametrize("equals", [False, True])
-def test_sensitive_user_prefix_rejected_before_file_open(tmp_path, monkeypatch, guided, equals):
+def test_sensitive_user_prefix_rejected_before_file_open(tmp_path, monkeypatch, capsys, caplog, guided, equals):
     from auditex.guided import build_guided_parser
 
     path = tmp_path / (CANARIES[0] + ".txt")
@@ -193,8 +193,104 @@ def test_sensitive_user_prefix_rejected_before_file_open(tmp_path, monkeypatch, 
         with pytest.raises(SystemExit) as caught:
             parser.parse_args(["--out", str(out), *argv])
         assert caught.value.code == 2
+        diagnostic = capsys.readouterr().err + caplog.text
+        assert "error: invalid arguments" in diagnostic
+        assert str(path) not in diagnostic
+        assert path.name not in diagnostic
         assert opened == []
         assert not out.exists()
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "product", "product-run", "guided"])
+@pytest.mark.parametrize("equals", [False, True])
+def test_sensitive_user_rejected_prefix_keeps_stderr_private(tmp_path, capsys, caplog, entrypoint, equals):
+    from auditex.cli import main as product_main
+
+    path = tmp_path / "confidential user@example.invalid.json"
+    option = "--sensitive-user"
+    argv = [option + "=" + str(path)] if equals else [option, str(path)]
+    command = cli.main if entrypoint == "engine" else product_main
+    if entrypoint == "product-run":
+        argv = ["run", *argv]
+    elif entrypoint == "guided":
+        argv = ["guided-run", *argv]
+    with pytest.raises(SystemExit) as caught:
+        command(argv)
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err + caplog.text
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "guided"])
+@pytest.mark.parametrize("equals", [False, True])
+@pytest.mark.parametrize("option", [
+    "--sensitive-usres", "--sensitive-users-file", "--Sensitive-Users",
+    "--sensitive\u2010users", "-sensitive-users",
+])
+def test_misspelled_sensitive_user_option_does_not_disclose_path(tmp_path, capsys, entrypoint, equals, option):
+    from auditex.cli import main as product_main
+
+    path = tmp_path / "confidential user path.json"
+    argv = [f"{option}={path}"] if equals else [option, str(path)]
+    command = cli.main if entrypoint == "engine" else product_main
+    if entrypoint == "guided":
+        argv = ["guided-run", *argv]
+    with pytest.raises(SystemExit) as caught:
+        command(argv)
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "guided"])
+@pytest.mark.parametrize("equals", [False, True])
+@pytest.mark.parametrize("placement", ["after-option", "after-double-dash", "repeated"])
+def test_rejected_sensitive_user_path_is_hidden_in_any_position(tmp_path, capsys, entrypoint, equals, placement):
+    from auditex.cli import main as product_main
+
+    path = tmp_path / "confidential user path.json"
+    extra = [f"--sensitive-usres={path}"] if equals else ["--sensitive-usres", str(path)]
+    prefixes = {
+        "after-option": ["--tenant-name", "constructed"],
+        "after-double-dash": ["--"],
+        "repeated": ["--sensitive-users", "constructed"],
+    }
+    argv = [*prefixes[placement], *extra]
+    command = cli.main if entrypoint == "engine" else product_main
+    if entrypoint == "guided":
+        argv = ["guided-run", *argv]
+    with pytest.raises(SystemExit) as caught:
+        command(argv)
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "guided"])
+def test_short_sensitive_value_does_not_corrupt_parser_diagnostics(capsys, entrypoint):
+    from auditex.cli import main as product_main
+
+    command = cli.main if entrypoint == "engine" else product_main
+    prefix = [] if entrypoint == "engine" else ["guided-run"]
+    with pytest.raises(SystemExit):
+        command([*prefix, "--sensitive-user", "r", "--bogus"])
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert "--bogus" not in diagnostic
+    with pytest.raises(SystemExit):
+        command([*prefix, "--sensitive-users", "r", "--throttle-mode", "invalid"])
+    assert "error: invalid arguments" in capsys.readouterr().err
+    options = ("--tenant-id", "--client-secret") + (("--access-token",) if entrypoint == "engine" else ())
+    for option in options:
+        with pytest.raises(SystemExit):
+            command([*prefix, "--sensitive-users", "r", option])
+        assert "error: invalid arguments" in capsys.readouterr().err
 
 
 def test_recording_private_artifact_never_reads_hashes_or_sizes_it(tmp_path, monkeypatch):
@@ -236,7 +332,10 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
         assert caught.value.code == 2
     captured = capsys.readouterr()
     output = captured.out + captured.err + caplog.text
-    assert "line 2" in output
+    if entrypoint in {"engine", "product"}:
+        assert "error: invalid arguments" in output
+    else:
+        assert "line 2" in output
     assert all(address not in output for address in CANARIES)
     assert not (tmp_path / "out").exists()
 

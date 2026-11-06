@@ -94,6 +94,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.model_training import _outside_audit_runs, distinct_prompt_sha256, validate_cases  # noqa: E402
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names  # noqa: E402
 from azure_tenant_audit.model_evidence import NOT_COLLECTED  # noqa: E402
@@ -2769,7 +2771,7 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = build_argument_parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--scuba", type=Path, required=True, help="PowerShell/ScubaGear directory of a ScubaGear checkout")
     parser.add_argument("--opa", type=Path, required=True, help="OPA binary of a ScubaGear-compatible version (ScubaGear pins 1.20.2)")
     parser.add_argument("--output-dir", type=Path, required=True, help="new directory; an existing one is refused")

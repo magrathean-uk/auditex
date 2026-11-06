@@ -70,7 +70,7 @@ def test_every_parser_rejects_sensitive_abbreviations(builder, capsys, monkeypat
                 with pytest.raises(SystemExit) as exc:
                     parser.parse_args([*required, *extra])
                 assert exc.value.code == 2, parser.prog
-                assert "unrecognized arguments:" in capsys.readouterr().err, parser.prog
+                assert "error: invalid arguments" in capsys.readouterr().err, parser.prog
     assert not list(tmp_path.rglob("run-manifest.json"))
 
 
@@ -120,7 +120,7 @@ def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypa
     with pytest.raises(SystemExit) as exc:
         main([*argv, *extra])
     assert exc.value.code == 2
-    assert "unrecognized arguments:" in capsys.readouterr().err
+    assert "error: invalid arguments" in capsys.readouterr().err
     assert not list(tmp_path.rglob("run-manifest.json"))
 
 
@@ -130,6 +130,51 @@ def test_all_parser_constructions_explicitly_disable_abbreviations() -> None:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"ArgumentParser", "add_parser"}:
                 assert any(keyword.arg == "allow_abbrev" and isinstance(keyword.value, ast.Constant) and keyword.value.value is False for keyword in node.keywords), (path, node.lineno)
+
+
+def test_public_parsers_use_the_shared_redacting_factory(monkeypatch) -> None:
+    from azure_tenant_audit.secret_hygiene import DiagnosticRedactingArgumentParser
+
+    root = Path(__file__).resolve().parents[1] / "src"
+    plain = []
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        modules = {alias.asname or alias.name for node in ast.walk(tree)
+                   if isinstance(node, ast.Import) for alias in node.names if alias.name == "argparse"}
+        constructors = {alias.asname or alias.name for node in ast.walk(tree)
+                        if isinstance(node, ast.ImportFrom) and node.module == "argparse"
+                        for alias in node.names if alias.name == "ArgumentParser"}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    and func.value.id in modules and func.attr == "ArgumentParser"):
+                plain.append((str(path.relative_to(root)), node.lineno))
+            if isinstance(func, ast.Name) and func.id in constructors:
+                plain.append((str(path.relative_to(root)), node.lineno))
+    assert not plain
+    monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
+    for builder in BUILDERS:
+        for parser in _parsers(builder()):
+            assert isinstance(parser, DiagnosticRedactingArgumentParser), parser.prog
+            assert parser.allow_abbrev is False, parser.prog
+
+
+@pytest.mark.parametrize("entry", ["probe", "google-run"])
+@pytest.mark.parametrize("equals", [False, True])
+def test_other_product_parsers_hide_rejected_sensitive_user_paths(entry, equals, tmp_path, capsys):
+    path = tmp_path / "confidential user path.json"
+    prefix = (["probe", "live", "--tenant-name", "constructed"] if entry == "probe"
+              else ["google", "run", "--tenant-name", "constructed"])
+    extra = [f"--sensitive-users={path}"] if equals else ["--sensitive-users", str(path)]
+    with pytest.raises(SystemExit) as caught:
+        product_cli.main([*prefix, *extra])
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
 
 
 @pytest.mark.parametrize("flag", SENSITIVE_FLAGS)

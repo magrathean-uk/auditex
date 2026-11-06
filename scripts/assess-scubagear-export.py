@@ -9,11 +9,13 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.model_serving import assess_scubagear_export  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = build_argument_parser(description=__doc__)
     parser.add_argument("export", metavar="EXPORT")
     parser.add_argument("--output-dir", required=True, metavar="DIR")
     parser.add_argument("--results", metavar="FILE")

@@ -172,6 +172,11 @@ supplied through `--tenant-name`, `--tenant-id`, `--out`, `--run-name`, `--targe
 preserved for tool chaining only where not preceded by an e-mail local-part
 character; an operator address does not exempt a suffix of another address.
 Credentials are redacted before those exemptions.
+Syntax errors in the product CLIs (`azure-tenant-audit`, `auditex`, `auditex-mcp`
+and the vendored `tenant-bootstrap` package copy) print usage and a fixed error
+message without echoing supplied argument values. The lab scripts under
+`tenant-bootstrap/scripts` and `benchmarks` are outside this guarantee. Use
+`--help` to inspect the available options.
 Collected evidence and raw inputs to parsers and error classifiers retain their
 original values. This is a boundary for command diagnostics, not a guarantee that
 all other exception messages or API logs are anonymised.

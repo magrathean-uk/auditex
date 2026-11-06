@@ -2,18 +2,19 @@
 """Score the product rule pre-check locally; never loads or calls a model."""
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.model_precheck import evaluate_precheck  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = build_argument_parser(description=__doc__)
     parser.add_argument("--cases", required=True, help="Frozen oracle cases JSONL, e.g. test-v7.")
     parser.add_argument("--responses", help="Optional case_id/model_id/response JSONL from the checkpoint scorer.")
     parser.add_argument("--absent-fields", action="store_true",

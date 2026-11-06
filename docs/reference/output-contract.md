@@ -11,8 +11,8 @@ The regular local UTF-8 file is opened once read-only before collection, capped
 at 256 KiB and 10,000 entries, and rejected as a usage error if empty or invalid.
 Entries are e-mail strings in a JSON array or one per plain-text line;
 `name;email` is accepted. Addresses are trimmed, lower-cased, de-duplicated and
-sorted. Blank plain-text lines are ignored. Validation errors give a physical
-line number and never quote the input.
+sorted. Blank plain-text lines are ignored. Parser errors show a fixed message;
+direct validation can give a physical line number. Neither quotes the input.
 
 `run-manifest.json` adds `operator_inputs.sensitive_users`:
 

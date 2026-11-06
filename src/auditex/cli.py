@@ -23,6 +23,7 @@ from azure_tenant_audit.output_redaction import (
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
+from azure_tenant_audit.secret_hygiene import build_argument_parser
 from azure_tenant_audit.versioning import package_version_line
 from .google_workspace.run import GoogleRunConfig, google_doctor, run_google_live, run_google_offline, run_google_probe
 
@@ -37,7 +38,7 @@ def _probe_mode_choices() -> tuple[str, ...]:
 
 
 def _build_root_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = build_argument_parser(
         allow_abbrev=False,
         prog="auditex",
         description="Auditex operator CLI.",
@@ -191,7 +192,7 @@ def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[
 
 
 def _build_probe_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex probe", description="Run live capability probes against a tenant.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex probe", description="Run live capability probes against a tenant.")
     subparsers = parser.add_subparsers(dest="probe_command", required=True)
 
     live = subparsers.add_parser("live", allow_abbrev=False, help="Run a live capability probe.")
@@ -226,7 +227,7 @@ def _build_probe_parser() -> argparse.ArgumentParser:
 
 
 def _build_auth_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex auth", description="Inspect and manage local Auditex auth state.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex auth", description="Inspect and manage local Auditex auth state.")
     subparsers = parser.add_subparsers(dest="auth_command", required=True)
 
     subparsers.add_parser("status", allow_abbrev=False, help="Show Azure CLI, local auth env, and active m365 connection state.")
@@ -356,7 +357,7 @@ def _add_google_findings_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_google_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex google", description="Run Google Workspace audit flows.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex google", description="Run Google Workspace audit flows.")
     subparsers = parser.add_subparsers(dest="google_command", required=True)
     doctor = subparsers.add_parser("doctor", allow_abbrev=False, help="Inspect Google Workspace runtime readiness.")
     _add_google_common_args(doctor)
@@ -398,7 +399,7 @@ def _google_config_from_args(args: argparse.Namespace) -> GoogleRunConfig:
 
 
 def _build_response_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex response", description="Run guarded response actions.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex response", description="Run guarded response actions.")
     subparsers = parser.add_subparsers(dest="response_command", required=True)
 
     run = subparsers.add_parser("run", allow_abbrev=False, help="Plan or execute a guarded response action.")
@@ -431,7 +432,7 @@ def _build_response_parser() -> argparse.ArgumentParser:
 
 
 def _build_rules_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex rules", description="Inspect built-in Auditex rule packs.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex rules", description="Inspect built-in Auditex rule packs.")
     subparsers = parser.add_subparsers(dest="rules_command", required=True)
     inventory = subparsers.add_parser("inventory", allow_abbrev=False, help="List rule inventory rows.")
     inventory.add_argument("--tag", default=None, help="Optional rule tag filter.")
@@ -446,7 +447,7 @@ def _build_rules_parser() -> argparse.ArgumentParser:
 
 
 def _build_setup_guide_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = build_argument_parser(
         allow_abbrev=False,
         prog="auditex setup-guide",
         description="Print tenant setup scopes, roles, admin steps, and verification commands.",
@@ -486,7 +487,7 @@ def _build_setup_guide_parser() -> argparse.ArgumentParser:
 
 
 def _build_compare_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex compare", description="Compare multiple completed run directories.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex compare", description="Compare multiple completed run directories.")
     parser.add_argument("--run-dir", action="append", required=True, dest="run_dirs", help="Run directory to compare.")
     parser.add_argument("--allow-cross-tenant", action="store_true", help="Allow comparing runs from different tenants.")
     parser.add_argument("--classic", action="store_true", help="Use classic raw compare without noise suppression.")
@@ -509,7 +510,7 @@ def _build_compare_parser() -> argparse.ArgumentParser:
 
 
 def _build_report_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex report", description="Render reports from a completed run.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex report", description="Render reports from a completed run.")
     subparsers = parser.add_subparsers(dest="report_command", required=True)
     render = subparsers.add_parser("render", allow_abbrev=False, help="Render a report bundle in one format.")
     render.add_argument("run_dir", help="Completed run directory.")
@@ -648,7 +649,7 @@ def _emit_setup_guide(payload: dict[str, object], *, format_name: str, output_pa
 
 
 def _build_export_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex export", description="List and run offline exporters.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex export", description="List and run offline exporters.")
     subparsers = parser.add_subparsers(dest="export_command", required=True)
     subparsers.add_parser("list", allow_abbrev=False, help="List available exporters.")
     run = subparsers.add_parser("run", allow_abbrev=False, help="Run one exporter.")
@@ -671,7 +672,7 @@ def gate_findings(
 
 
 def _build_model_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = build_argument_parser(
         allow_abbrev=False,
         prog="auditex model",
         description="Prepare model-development materials and assess runs using deterministic rules.",
@@ -733,7 +734,7 @@ def _model_output_directory(value: str) -> str:
 
 
 def _build_assessment_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = build_argument_parser(
         allow_abbrev=False,
         prog="auditex assessment",
         description="Review external Microsoft assessment results locally without tenant access.",
@@ -824,7 +825,7 @@ def _emit_gate_result(command: str, result: dict[str, object]) -> int:
 
 
 def _build_gate_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex gate", description="Severity-threshold gate for CI / GitHub Action integration.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex gate", description="Severity-threshold gate for CI / GitHub Action integration.")
     parser.add_argument("run_dir", help="Completed run directory.")
     parser.add_argument(
         "--fail-on",
@@ -865,7 +866,7 @@ def gate_drift(
 
 
 def _build_gate_drift_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = build_argument_parser(
         allow_abbrev=False,
         prog="auditex gate-drift",
         description="Compare two completed run directories and fail when new findings appear above a severity threshold.",
@@ -890,7 +891,7 @@ def _build_gate_drift_parser() -> argparse.ArgumentParser:
 
 
 def _build_notify_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex notify", description="Create or send post-run notifications.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex notify", description="Create or send post-run notifications.")
     subparsers = parser.add_subparsers(dest="notify_command", required=True)
     send = subparsers.add_parser("send", allow_abbrev=False, help="Build or send a notification from a run bundle.")
     send.add_argument("run_dir")
@@ -928,7 +929,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0].startswith("-"):
         return tenant_audit_main(argv)
     if argv[0] == "setup":
-        parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex setup", description="Bootstrap local Auditex prerequisites.")
+        parser = build_argument_parser(allow_abbrev=False, prog="auditex setup", description="Bootstrap local Auditex prerequisites.")
         parser.add_argument("--mcp", action="store_true", help="Install optional MCP extras during bootstrap.")
         parser.add_argument("--exchange", action="store_true", help="Install optional Exchange adapter tooling.")
         parser.add_argument("--pwsh", action="store_true", help="Install optional PowerShell runtime.")
@@ -966,7 +967,7 @@ def main(argv: list[str] | None = None) -> int:
         _emit_setup_guide(payload, format_name=args.format, output_path=args.output)
         return 0
     if argv[0] == "doctor":
-        parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex doctor", description="Inspect local tool and auth readiness.")
+        parser = build_argument_parser(allow_abbrev=False, prog="auditex doctor", description="Inspect local tool and auth readiness.")
         parser.add_argument("--json", action="store_true", help="Print JSON report.")
         args = parser.parse_args(argv[1:])
         return print_doctor_report(json_output=args.json)

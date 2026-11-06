@@ -33,6 +33,7 @@ from .graph import GraphClient
 from .normalize import build_ai_safe_summary, build_normalization_diagnostics, build_normalized_snapshot
 from .offline_replay import absent_section_rows, planned_sections, replay_collector_status, replay_coverage_rows, replay_source
 from .output import AuditWriter
+from .secret_hygiene import build_argument_parser
 from .sensitive_users import SensitiveUsers, SensitiveUsersError, load_sensitive_users
 from .presets import load_collector_presets
 from .profiles import get_profile, profile_choices
@@ -102,7 +103,7 @@ def _stale_sync_days(value: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
+    parser = build_argument_parser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
     parser.add_argument("--tenant-name", default="tenant", help="Label for the output folder.")
     parser.add_argument("--tenant-id", default=None, help="Entra tenant ID.")

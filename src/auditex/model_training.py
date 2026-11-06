@@ -16,6 +16,8 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
+from azure_tenant_audit.secret_hygiene import build_argument_parser
+
 SCHEMA_VERSION = "2026-10-18"
 DEFAULT_BASE_MODEL = "Qwen/Qwen3.8-27B"
 RUNTIME_PACKAGE_CANDIDATES = {
@@ -601,7 +603,7 @@ def _validate_resume_input(output: Path, checkpoint: Path, input_record: dict[st
 
 def training_main(argv: list[str] | None = None) -> int:
     """Optional training entry point. Preparation and tests never invoke it."""
-    parser = argparse.ArgumentParser(allow_abbrev=False, description="Train one reviewed Auditex LoRA adapter using staged local weights")
+    parser = build_argument_parser(allow_abbrev=False, description="Train one reviewed Auditex LoRA adapter using staged local weights")
     parser.add_argument("--pack-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--resume-from-checkpoint")

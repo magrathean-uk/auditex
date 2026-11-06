@@ -53,6 +53,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.model_training import _answer_key, _outside_audit_runs, distinct_prompt_sha256, load_cases, validate_cases  # noqa: E402
 
 SPLITS = ("train", "validation", "test")
@@ -407,7 +409,7 @@ def split_cases(cases: list[dict], *, approve_as_oracle: bool = False, holdout_f
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = build_argument_parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cases", type=Path, required=True, help="cases.jsonl from build-oracle-cases.py")
     parser.add_argument("--output", type=Path, required=True, help="new JSONL file; an existing one is refused")
     parser.add_argument("--report", type=Path, help="default: split-report.json beside --output; an existing one is refused")

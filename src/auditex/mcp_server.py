@@ -14,6 +14,7 @@ from azure_tenant_audit.adapters import list_adapters as _list_adapters
 from azure_tenant_audit.citations import build_citation_summary
 from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, assert_snapshot_stable, redact_payload, snapshot_run
 from azure_tenant_audit.response import response_actions
+from azure_tenant_audit.secret_hygiene import build_argument_parser
 from azure_tenant_audit.contracts import contract_schema_manifest
 from .rules import list_rule_inventory
 from .command_runner import run_cli_command
@@ -763,7 +764,7 @@ def rules_inventory(
 
 
 def _build_mcp_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, prog="auditex-mcp", description="Auditex MCP server.")
+    parser = build_argument_parser(allow_abbrev=False, prog="auditex-mcp", description="Auditex MCP server.")
     parser.add_argument("--version", action="version", version=package_version_line("auditex-mcp"))
     return parser
 

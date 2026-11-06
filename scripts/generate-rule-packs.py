@@ -12,7 +12,6 @@ generated ones (used by ``make release-check``).
 """
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -20,11 +19,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.rules import build_rule_packs, list_rule_packs  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = build_argument_parser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--check", action="store_true", help="exit 1 if configs/rule-packs.json is stale; write nothing")
     args = parser.parse_args(argv)
 

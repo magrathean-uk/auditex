@@ -27,6 +27,8 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.model_eval import evaluate_responses  # noqa: E402
 from auditex.model_training import (  # noqa: E402
     _MODEL_ID, _REVISION, _load_text_model, _load_tokenizer, _outside_audit_runs, _parse_json, _trl_record, load_cases,
@@ -580,7 +582,7 @@ class TransformersBackend:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = build_argument_parser(
         description="Select a LoRA checkpoint by strictly parsed generated answers on held-out cases (gate G3), never by eval loss.",
     )
     parser.add_argument("--base-model", required=True, help="owner/model repository the adapters were trained on.")

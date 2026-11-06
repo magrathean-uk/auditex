@@ -19,6 +19,7 @@ from typing import Any, Callable, TextIO
 
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.resources import resolve_resource_path
+from azure_tenant_audit.secret_hygiene import build_argument_parser
 
 from .setup_guide import build_setup_guide
 
@@ -86,7 +87,7 @@ def _is_tty(stream: TextIO) -> bool:
 
 
 def build_demo_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = build_argument_parser(
         allow_abbrev=False,
         prog="auditex demo",
         description="Walk through Auditex on a fictional, synthetic tenant. No tenant is contacted.",

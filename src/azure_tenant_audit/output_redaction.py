@@ -1165,7 +1165,8 @@ class _Redactor:
                 return [self.walk(item, controlled) for item in value]
             if isinstance(value, tuple):
                 return tuple(self.walk(item, controlled) for item in value)
-            return type(value)(self.walk(item, controlled) for item in value)
+            collection_type = type(value)
+            return collection_type(self.walk(item, controlled) for item in value)
         finally:
             self.depth -= 1
 

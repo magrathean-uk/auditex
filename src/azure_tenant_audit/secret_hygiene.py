@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from .argument_parser import DiagnosticRedactingArgumentParser, build_argument_parser
+
 SENSITIVE_ARG_FLAGS = frozenset(
     {
         "--access-token",

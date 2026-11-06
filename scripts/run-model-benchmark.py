@@ -36,6 +36,8 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
+
 from auditex.model_eval import _validate_response, evaluate_responses  # noqa: E402
 from auditex.model_training import _parse_json, validate_cases  # noqa: E402
 
@@ -575,7 +577,7 @@ def _timeout(value: str) -> float:
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description=__doc__)
+    result = build_argument_parser(description=__doc__)
     result.add_argument("--server", default="llama-server", help="existing native executable, never an endpoint")
     result.add_argument("--check-runtime", action="store_true", help="version/help only; no model loading or output files")
     result.add_argument("--model", type=Path, help="existing single-file GGUF")
