@@ -206,50 +206,38 @@ def test_failed_close_after_read_debits_budget(tmp_path: Path, monkeypatch: pyte
 
 
 @pytest.mark.usefixtures("low_limits")
-@pytest.mark.parametrize("partial_failure", [False, True])
-def test_failed_symlink_parent_close_debits_read_bytes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, partial_failure: bool
+@pytest.mark.parametrize("inside", [False, True])
+def test_json_symlink_is_refused_without_reading_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inside: bool,
 ) -> None:
     root = tmp_path / "run"
     normalized, targets = root / "normalized", root / "targets"
     normalized.mkdir(parents=True)
     targets.mkdir()
-    target, other = targets / "target.json", normalized / "b.json"
-    for file in (target, other):
-        with file.open("wb") as stream:
-            stream.truncate(90)
-    (normalized / "a.json").symlink_to("../targets/target.json")
-    target_inode, other_inode, directory_inode = target.stat().st_ino, other.stat().st_ino, targets.stat().st_ino
-    original_read, original_close = os.read, os.close
-    total = 0
-    target_read = False
+    target = (targets if inside else tmp_path) / "target.json"
+    target.write_bytes(b'{"pad":"' + b'x' * 80 + b'"}')
+    other = normalized / "b.json"
+    other.write_bytes(b'{"pad":"' + b'x' * 60 + b'"}')
+    (normalized / "a.json").symlink_to(target)
+    target_inode, other_inode = target.stat().st_ino, other.stat().st_ino
+    original_read = os.read
+    other_bytes = 0
 
-    def read_with_optional_failure(fd: int, count: int) -> bytes:
-        nonlocal total, target_read
+    def count_reads(fd: int, count: int) -> bytes:
+        nonlocal other_bytes
         inode = os.fstat(fd).st_ino
-        if partial_failure and inode == target_inode:
-            if target_read:
-                raise OSError("synthetic partial read failure")
-            target_read = True
-            count = min(count, 70)
+        assert inode != target_inode, "the symlink target was opened"
         data = original_read(fd, count)
-        if inode in (target_inode, other_inode):
-            total += len(data)
+        if inode == other_inode:
+            other_bytes += len(data)
         return data
 
-    def fail_parent_close(fd: int) -> None:
-        inode = os.fstat(fd).st_ino
-        original_close(fd)
-        if inode == directory_inode:
-            raise OSError("synthetic directory close failure")
-
-    monkeypatch.setattr(redaction.os, "read", read_with_optional_failure)
-    monkeypatch.setattr(redaction.os, "close", fail_parent_close)
+    monkeypatch.setattr(redaction.os, "read", count_reads)
     context = redaction.context_for_run(root)
-    assert total == (70 if partial_failure else 90) and context.incomplete
+    assert other_bytes == 70 and context.incomplete
     with pytest.raises(redaction.ContextIncompleteError) as error:
         redaction.redact_output({}, context=context)
-    _message(error, root)
+    assert "non-regular" in str(error.value) and str(root) not in str(error.value)
 
 
 @pytest.mark.usefixtures("low_limits")
@@ -282,38 +270,29 @@ def test_file_close_failure_preserves_prior_oversize_reason(tmp_path: Path, monk
 
 
 @pytest.mark.usefixtures("low_limits")
-@pytest.mark.parametrize("reason", [redaction.REASON_OVERSIZE, redaction.REASON_SCAN_BYTES])
-def test_symlink_parent_close_failure_preserves_size_reason_and_debit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+@pytest.mark.parametrize("target_size", [90, 101])
+def test_refused_json_symlink_does_not_consume_scan_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_size: int,
 ) -> None:
     root = tmp_path / "run"
     normalized, targets = root / "normalized", root / "targets"
     normalized.mkdir(parents=True)
     targets.mkdir()
     target, other = targets / "target.json", normalized / "b.json"
-    target.write_bytes(b'x' * 90)
-    other.write_bytes(b'x' * 70)
+    target.write_bytes(b'x' * target_size)
+    other.write_bytes(b'{"pad":"' + b'x' * 60 + b'"}')
     (normalized / "a.json").symlink_to("../targets/target.json")
-    directory_inode = targets.stat().st_ino
-    original_reader, original_close = redaction._read_file_at, os.close
+    original_reader = redaction._read_file_at
     other_caps: list[int] = []
 
-    def size_failure(parent_fd: int, name: str, info: os.stat_result, cap: int) -> bytes:
-        if name == "target.json":
-            raise redaction._Unsafe(reason, 70)
+    def record_budget(parent_fd: int, name: str, info: os.stat_result, cap: int) -> bytes:
+        assert name != "target.json", "the symlink target was opened"
         other_caps.append(cap)
         return original_reader(parent_fd, name, info, cap)
 
-    def fail_parent_close(fd: int) -> None:
-        inode = os.fstat(fd).st_ino
-        original_close(fd)
-        if inode == directory_inode:
-            raise OSError("synthetic directory close failure")
-
-    monkeypatch.setattr(redaction, "_read_file_at", size_failure)
-    monkeypatch.setattr(redaction.os, "close", fail_parent_close)
+    monkeypatch.setattr(redaction, "_read_file_at", record_budget)
     context = redaction.context_for_run(root)
-    assert other_caps == [80]
+    assert other_caps == [150] and context.incomplete
     with pytest.raises(redaction.ContextIncompleteError) as error:
         redaction.redact_output({}, context=context)
-    _message(error, root)
+    assert "non-regular" in str(error.value) and str(root) not in str(error.value)
