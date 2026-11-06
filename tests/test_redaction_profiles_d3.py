@@ -48,9 +48,9 @@ def test_d3_free_text_keys_in_nested_values(profile: str, key: str) -> None:
 def test_d3_local_report_retains_values_in_preview_and_file(run: Path, tmp_path: Path) -> None:
     from auditex.reporting import preview_report, render_report
 
-    preview = preview_report(run_dir=str(run), format_name="json", include_sections=["executive_summary"])
+    preview = preview_report(run_dir=str(run), format_name="json", include_sections=["executive_summary"], profile="local")
     target = tmp_path / "local.json"
-    render_report(run_dir=str(run), format_name="json", include_sections=["executive_summary"], output_path=str(target))
+    render_report(run_dir=str(run), format_name="json", include_sections=["executive_summary"], output_path=str(target), profile="local")
     for value in (OWNER, NOTES, GUID, ADDRESS, NAME, "example.test", "Operations Group", "Global Administrator"):
         assert value in preview["content"]
         assert value in target.read_text()
@@ -62,7 +62,7 @@ def test_d3_local_report_does_not_apply_shareable_scan_limits(run: Path, monkeyp
 
     (run / "normalized" / "large.json").write_text(json.dumps({"text": "LOCAL-CONTENT-726" * 20}))
     monkeypatch.setattr(redaction, "_MAX_FILE_BYTES", 20)
-    result = preview_report(run_dir=str(run), format_name="json", include_sections=["normalized"])
+    result = preview_report(run_dir=str(run), format_name="json", include_sections=["normalized"], profile="local")
     assert "LOCAL-CONTENT-726" in result["content"]
 
 

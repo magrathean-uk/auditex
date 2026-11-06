@@ -11,6 +11,7 @@ from typing import Any
 
 from azure_tenant_audit import cli as tenant_cli
 from azure_tenant_audit.m365_home import m365_environment, m365_subprocess_kwargs
+from azure_tenant_audit.output_redaction import PROFILE_LOCAL
 from azure_tenant_audit.profiles import profile_choices
 
 from . import auth as auditex_auth
@@ -569,5 +570,5 @@ def run_guided(args: argparse.Namespace) -> int:
 
         latest = sorted(Path(args.out).expanduser().resolve().glob(f"{tenant_name}-*"))
         if latest:
-            render_report(run_dir=str(latest[-1]), format_name=args.report_format)
+            render_report(run_dir=str(latest[-1]), format_name=args.report_format, profile=PROFILE_LOCAL)
     return rc

@@ -241,6 +241,7 @@ def test_render_report_respects_section_filters(tmp_path: Path) -> None:
         run_dir=str(run_dir),
         format_name="json",
         include_sections=["summary", "action_plan"],
+        profile="local",
     )
 
     payload = json.loads(Path(result["output_path"]).read_text(encoding="utf-8"))
@@ -253,9 +254,9 @@ def test_render_report_supports_md_csv_and_html(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     _write_run(run_dir)
 
-    md_result = render_report(run_dir=str(run_dir), format_name="md")
-    csv_result = render_report(run_dir=str(run_dir), format_name="csv")
-    html_result = render_report(run_dir=str(run_dir), format_name="html")
+    md_result = render_report(run_dir=str(run_dir), format_name="md", profile="local")
+    csv_result = render_report(run_dir=str(run_dir), format_name="csv", profile="local")
+    html_result = render_report(run_dir=str(run_dir), format_name="html", profile="local")
 
     md_content = Path(md_result["output_path"]).read_text(encoding="utf-8")
     assert md_content.startswith("# Auditex Report")
@@ -308,7 +309,7 @@ def test_preview_report_returns_content_without_writing(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     _write_run(run_dir)
 
-    result = preview_report(run_dir=str(run_dir), format_name="json", include_sections=["summary"])
+    result = preview_report(run_dir=str(run_dir), format_name="json", include_sections=["summary"], profile="local")
 
     payload = json.loads(result["content"])
     assert result["format"] == "json"

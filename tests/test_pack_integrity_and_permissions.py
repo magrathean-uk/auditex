@@ -626,7 +626,7 @@ def test_a_pack_written_into_a_loose_empty_directory_tightens_it(bundle: Path, t
 def test_the_rendered_report_and_the_explorer_are_private_inside_the_run(bundle: Path, umask_022) -> None:
     (bundle / "reports").chmod(0o700)
 
-    rendered = render_report(run_dir=str(bundle), format_name="html")
+    rendered = render_report(run_dir=str(bundle), format_name="html", profile="local")
     page = write_explorer([bundle], bundle / "reports" / "explorer.html")
     via_cli = auditex_cli.main(["report", "explorer", str(bundle)])
 

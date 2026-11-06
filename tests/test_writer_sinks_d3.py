@@ -1,6 +1,7 @@
 """Classify every discovered writer and verify the routed call sites."""
 from __future__ import annotations
 import ast
+import importlib.util
 import re
 from pathlib import Path
 
@@ -262,13 +263,117 @@ def test_profiled_report_routes_choose_their_audience() -> None:
 
     assert NOTIFY_PROFILE == "customer_pack"
     assert _profile_keywords(_function("auditex.exporters:_run_builtin"), "render_report") == ["PROFILE_SHAREABLE"]
+    assert _profile_keywords(_function("auditex.cli:render_report"), "_render_report") == ["PROFILE_LOCAL"]
+    assert _profile_keywords(_function("auditex.guided:run_guided"), "render_report") == ["PROFILE_LOCAL"]
     assert _profile_keywords(_function("auditex.mcp_server:preview_report"), "_preview_report") == ["PROFILE_SHAREABLE"]
     assert "PROFILE_CUSTOMER_PACK" in _profile_keywords(_function("auditex.reporting:write_enterprise_handoff_pack"), "preview_report")
     for name in ("preview_report", "render_report"):
         function = _functions("auditex.reporting")[name]
         assert isinstance(function, ast.FunctionDef)
         defaults = dict(zip((arg.arg for arg in function.args.kwonlyargs), function.args.kw_defaults))
-        assert ast.unparse(defaults["profile"]) == "PROFILE_LOCAL"
+        assert "profile" in defaults and defaults["profile"] is None
+
+
+def _missing_report_profiles(source: str, module: str) -> list[int]:
+    """Find calls to the reporting APIs without a literal ``profile=`` keyword, including imported aliases."""
+    targets = {"auditex.reporting.preview_report", "auditex.reporting.render_report"}
+    package = module.rpartition(".")[0]
+
+    def bindings(node: ast.AST) -> dict[str, str | None]:
+        result: dict[str, str | None] = {}
+        if module == "auditex.reporting" and isinstance(node, ast.Module):
+            result.update({name.rsplit(".", 1)[-1]: name for name in targets})
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args
+            for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+                result[arg.arg] = None
+            if args.vararg:
+                result[args.vararg.arg] = None
+            if args.kwarg:
+                result[args.kwarg.arg] = None
+
+        def collect(child: ast.AST) -> None:
+            if child is not node and isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                if hasattr(child, "name") and not (module == "auditex.reporting" and isinstance(node, ast.Module)
+                                                     and child.name in {"preview_report", "render_report"}):
+                    result[child.name] = None
+                return
+            if isinstance(child, ast.Import):
+                for alias in child.names:
+                    result[alias.asname or alias.name.split(".")[0]] = alias.name if alias.asname else alias.name.split(".")[0]
+            elif isinstance(child, ast.ImportFrom):
+                name = child.module or ""
+                if child.level:
+                    name = importlib.util.resolve_name("." * child.level + name, package)
+                for alias in child.names:
+                    if alias.name == "*" and name == "auditex.reporting":
+                        raise AssertionError("wildcard reporting imports defeat the profile caller scan")
+                    result[alias.asname or alias.name] = f"{name}.{alias.name}"
+            for part in ast.iter_child_nodes(child):
+                collect(part)
+
+        collect(node)
+        return result
+
+    class Scanner(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.scopes: list[dict[str, str | None]] = []
+            self.missing: list[int] = []
+
+        def resolve(self, node: ast.AST) -> str | None:
+            if isinstance(node, ast.Name):
+                return next((scope[node.id] for scope in reversed(self.scopes) if node.id in scope), None)
+            if isinstance(node, ast.Attribute):
+                base = self.resolve(node.value)
+                return f"{base}.{node.attr}" if base else None
+            return None
+
+        def scoped(self, node: ast.AST) -> None:
+            self.scopes.append(bindings(node))
+            self.generic_visit(node)
+            self.scopes.pop()
+
+        visit_Module = scoped
+        visit_FunctionDef = scoped
+        visit_AsyncFunctionDef = scoped
+        visit_ClassDef = scoped
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if self.resolve(node.func) in targets and not any(keyword.arg == "profile" for keyword in node.keywords):
+                self.missing.append(node.lineno)
+            self.generic_visit(node)
+
+    scanner = Scanner()
+    scanner.visit(ast.parse(source))
+    return scanner.missing
+
+
+def test_report_profile_caller_scan_recognises_aliases_and_scopes() -> None:
+    source = """from auditex.reporting import preview_report as preview
+from auditex import reporting as report
+from auditex.mcp_server import preview_report as mcp_preview
+preview(run_dir='r', format_name='json')
+report.render_report(run_dir='r', format_name='json', **options)
+mcp_preview('r')
+def local():
+    from auditex.mcp_server import preview_report
+    preview_report('r')
+def good():
+    from auditex.reporting import render_report as render
+    render(run_dir='r', format_name='json', profile='local')
+"""
+    assert _missing_report_profiles(source, "tests.example") == [4, 5]
+    assert _missing_report_profiles("preview_report(run_dir='r', format_name='json')", "auditex.reporting") == [1]
+
+
+def test_every_reporting_caller_selects_a_profile_explicitly() -> None:
+    missing = []
+    for root in (SRC, SRC.parent / "tests"):
+        for path in sorted(root.rglob("*.py")):
+            module = ".".join(path.relative_to(root).with_suffix("").parts)
+            for line in _missing_report_profiles(path.read_text(encoding="utf-8"), module):
+                missing.append(f"{path.relative_to(SRC.parent)}:{line}")
+    assert not missing, f"reporting callers must pass profile= explicitly: {missing}"
 
 
 def test_every_mcp_tool_is_classified_and_every_routed_one_redacts_its_response() -> None:

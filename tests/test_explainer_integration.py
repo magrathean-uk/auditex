@@ -411,7 +411,7 @@ def test_runtime_replay_is_byte_identical_across_fresh_processes(tmp_path):
 
 
 def test_existing_report_writers_preserve_synthetic_identifiers(tmp_path, monkeypatch):
-    """Evidence for the missing output-redaction gate, not a redaction substitute."""
+    """Local writers preserve these values; explainer output wiring remains separate."""
     from azure_tenant_audit.output import AuditWriter
     from auditex import reporting
     payload = {"explainer": {"explanation": "SYNTHETIC_SECRET alice@example.com 01234567-89ab-cdef-0123-456789abcdef",
@@ -427,7 +427,7 @@ def test_existing_report_writers_preserve_synthetic_identifiers(tmp_path, monkey
     monkeypatch.setattr(reporting, "write_private_text", private_write)
     monkeypatch.setattr(reporting, "preview_report", lambda **kwargs: {
         "content": json.dumps(payload), "sections": ["explainer"]})
-    reporting.render_report(run_dir=str(tmp_path), format_name="json")
+    reporting.render_report(run_dir=str(tmp_path), format_name="json", profile="local")
     assert json.loads(captured["content"]) == payload
 
 

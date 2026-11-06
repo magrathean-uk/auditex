@@ -35,7 +35,7 @@ def test_list_exporters_includes_sarif_and_oscal() -> None:
 
 
 def test_preview_report_supports_sarif_format(offline_run_dir: Path) -> None:
-    preview = preview_report(run_dir=str(offline_run_dir), format_name="sarif")
+    preview = preview_report(run_dir=str(offline_run_dir), format_name="sarif", profile="local")
 
     document = json.loads(preview["content"])
     assert document["version"] == "2.1.0"
@@ -673,7 +673,7 @@ def google_bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def _export(run_dir: Path, name: str) -> dict:
-    preview = preview_report(run_dir=str(run_dir), format_name=name)
+    preview = preview_report(run_dir=str(run_dir), format_name=name, profile="local")
     return json.loads(preview["content"])
 
 

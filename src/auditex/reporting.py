@@ -3717,12 +3717,12 @@ def preview_report(
     format_name: str,
     include_sections: list[str] | None = None,
     exclude_sections: list[str] | None = None,
-    profile: str = PROFILE_LOCAL,
+    profile: str,
 ) -> dict[str, Any]:
     """The report as rendered text. ``profile`` is the redaction profile applied to the report's STRUCTURE before it is
     rendered (the free-text keys ``owner``, ``notes`` and the rest can only be recognised there, never in the rendered
-    Markdown or HTML) and again, idempotently, over the rendered text. The default is the local report; the customer
-    pack passes ``customer_pack``."""
+    Markdown or HTML) and again, idempotently, over the rendered text. Callers must select a profile explicitly;
+    the customer pack passes ``customer_pack``."""
     if format_name not in FORMAT_EXTENSIONS:
         raise ValueError(f"Unsupported report format: {format_name}")
     if profile not in PROFILES:
@@ -3787,7 +3787,7 @@ def render_report(
     include_sections: list[str] | None = None,
     exclude_sections: list[str] | None = None,
     output_path: str | None = None,
-    profile: str = PROFILE_LOCAL,
+    profile: str,
 ) -> dict[str, Any]:
     preview = preview_report(
         run_dir=run_dir,

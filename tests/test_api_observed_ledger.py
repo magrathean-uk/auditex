@@ -475,7 +475,7 @@ def test_teams_summary_line_is_conditional_across_markdown_surfaces(tmp_path: Pa
         render_api_call_inventory_markdown(inventory),
         render_enterprise_handoff_markdown(handoff),
         _render_pack_readme({"source": handoff}),
-        preview_report(run_dir=str(writer.run_dir), format_name="md")["content"],
+        preview_report(run_dir=str(writer.run_dir), format_name="md", profile="local")["content"],
         (pack / "README.md").read_text(),
         (pack / "handoff.md").read_text(),
     ):

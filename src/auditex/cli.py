@@ -15,7 +15,7 @@ from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
-from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, assert_snapshot_stable, context_for_run, redact_output
+from azure_tenant_audit.output_redaction import PROFILE_LOCAL, PROFILE_SHAREABLE, assert_snapshot_stable, context_for_run, redact_output
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
@@ -97,6 +97,7 @@ def render_report(
         include_sections=include_sections,
         exclude_sections=exclude_sections,
         output_path=output_path,
+        profile=PROFILE_LOCAL,
     )
 
 
