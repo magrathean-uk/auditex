@@ -649,6 +649,123 @@ def test_rule_input_rejects_mutation(tmp_path, monkeypatch, damage, capsys, capl
     assert all(address not in public for address in CANARIES)
 
 
+@pytest.mark.parametrize("entrypoint", ["project", "assess"])
+@pytest.mark.parametrize("invalid", ["UPPERCASE@EXAMPLE.INVALID", "not-an-email"])
+def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path, monkeypatch, entrypoint, invalid):
+    from auditex import model_serving, scuba_projection
+    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+    from azure_tenant_audit.value_rules import assess
+
+    root = rule_input_bundle(tmp_path, (invalid,))
+    operations_path = root / "raw/exchange_policy.json"
+    operations = json.loads(operations_path.read_text())
+    operations["antiPhishPolicies"]["value"][0]["TargetedUserProtectionAction"] = "NoAction"
+    operations_path.write_text(json.dumps(operations))
+    target = root / BUNDLE_PATH
+    manifest_path = root / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    key = (root / KEY_PATH).read_bytes()
+    assert manifest["operator_inputs"]["sensitive_users"] == SensitiveUsers((invalid,)).manifest(key)
+
+    replacement_list = tmp_path / "replacement-list"
+    replacement_list.write_text(CANARIES[0] + "\n")
+    replacement_manifest = tmp_path / "replacement-manifest"
+    manifest["operator_inputs"]["sensitive_users"] = SensitiveUsers(CANARIES[:1]).manifest(key)
+    replacement_manifest.write_text(json.dumps(manifest))
+
+    # Swap both files only after the projection has captured the original list
+    # and key, and after it has already read the original manifest.
+    original_open, original_close = os.open, os.close
+    private_directory = None
+    private_file_opens = []
+    swapped = False
+
+    def capture_open(path, flags, *args, **kwargs):
+        nonlocal private_directory
+        fd = original_open(path, flags, *args, **kwargs)
+        if path == root / "operator-inputs":
+            private_directory = fd
+        if Path(path).name in {"sensitive-users.txt", "sensitive-users.key"}:
+            private_file_opens.append(Path(path).name)
+        return fd
+
+    def replace_on_close(fd):
+        nonlocal swapped
+        original_close(fd)
+        if fd == private_directory and not swapped:
+            os.replace(replacement_list, target)
+            os.replace(replacement_manifest, manifest_path)
+            swapped = True
+
+    monkeypatch.setattr(os, "open", capture_open)
+    monkeypatch.setattr(os, "close", replace_on_close)
+    projections = []
+    if entrypoint == "project":
+        projections.append(scuba_projection.project_run(root))
+    else:
+        def capture_projection(*args, **kwargs):
+            projection = scuba_projection.project_run(*args, **kwargs)
+            projections.append(projection)
+            return projection
+
+        monkeypatch.setattr(model_serving, "project_run", capture_projection)
+        result = model_serving.assess_run(root, policies=[SS21])
+
+    assert swapped
+    assert len(projections) == 1
+    if entrypoint == "assess":
+        assert result["policies"][0]["rule_precheck"]["cell"] == "section_not_collected"
+    projection = projections[0]
+    assert private_config(projection) == NOT_COLLECTED
+    assert projection.report["sections"]["scuba_config"]["synthesis"]["policies"][SS21] == "operator_input_required"
+    sections = {**projection.rule_sections, "scuba_config": private_config(projection)}
+    assert assess(SS21, sections)["cell"] == "section_not_collected"
+    assert private_file_opens == ["sensitive-users.txt", "sensitive-users.key"]
+    assert verify_sensitive_users(root)  # The replacement is independently valid.
+
+
+@pytest.mark.parametrize("data", [
+    b" A@example.invalid \n",
+    b"Name;a@example.invalid\n",
+    b'["a@example.invalid"]\n',
+    b"\xef\xbb\xbfa@example.invalid\n",
+])
+def test_rule_input_rejects_noncanonical_snapshot_with_matching_hmac(tmp_path, data):
+    from auditex.scuba_projection import project_run
+    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+
+    root = rule_input_bundle(tmp_path, CANARIES[:1])
+    (root / BUNDLE_PATH).write_bytes(data)
+    manifest_path = root / "run-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    key = (root / KEY_PATH).read_bytes()
+    captured = (data.decode("utf-8").removesuffix("\n"),)
+    manifest["operator_inputs"]["sensitive_users"] = SensitiveUsers(captured).manifest(key)
+    manifest_path.write_text(json.dumps(manifest))
+
+    projection = project_run(root)
+    assert private_config(projection) == NOT_COLLECTED
+    assert projection.report["sections"]["scuba_config"]["synthesis"]["policies"][SS21] == "operator_input_required"
+
+
+def test_rule_input_reads_valid_private_files_once(tmp_path, monkeypatch):
+    from auditex.scuba_projection import project_run
+
+    root = rule_input_bundle(tmp_path)
+    original_open = os.open
+    private_file_opens = []
+
+    def capture_open(path, flags, *args, **kwargs):
+        if Path(path).name in {"sensitive-users.txt", "sensitive-users.key"}:
+            private_file_opens.append(Path(path).name)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", capture_open)
+    projection = project_run(root)
+    assert private_config(projection) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(CANARIES)}}}
+    assert private_file_opens == ["sensitive-users.txt", "sensitive-users.key"]
+
+
 def test_rule_input_private_capture_ignores_model_budgets_and_never_enters_gate(tmp_path, monkeypatch):
     from auditex import scuba_projection as module
     from azure_tenant_audit.model_evidence import NOT_COLLECTED

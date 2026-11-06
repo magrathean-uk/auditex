@@ -59,8 +59,9 @@ ScubaGear export assessment retains its existing provider-config path.
 The projection requires `supplied: true`, a positive integer count and a
 64-character lower-case HMAC, regular non-symlink list/key files within the
 non-symlink `operator-inputs` directory, collect's 256 KiB / 10,000-entry bounds,
-canonical list bytes, and a matching count and HMAC verified with collect's
-helper. The existing closed synthesis outcome `operator_input_required` means
+canonical list bytes validated by collect's parser, and a matching count and
+HMAC over the captured list, key and manifest. Verification does not reopen
+those files. The existing closed synthesis outcome `operator_input_required` means
 that a verified required input is unavailable, including absent, false, malformed,
 unreadable or tampered inputs; `oversize` identifies a list byte or entry bound.
 The rule still reports `section_not_collected` in those cases. Additional files

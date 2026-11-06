@@ -150,6 +150,26 @@ def _normalise(entry: str, line: int) -> str:
     return address
 
 
+def parse_sensitive_users(data: bytes) -> SensitiveUsers:
+    """Validate and normalise captured input bytes without reopening a file."""
+    if len(data) > MAX_BYTES:
+        raise _error(1, "file exceeds 256 KiB")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise _error(exc.object[:exc.start].count(b"\n") + 1, "expected UTF-8") from None
+    if "\x00" in text:
+        raise _error(text.count("\n", 0, text.index("\x00")) + 1, "NUL is not allowed")
+    entries = _json_entries(text) if text.lstrip(" \t\r\n").startswith("[") else [
+        (line, entry.rstrip("\r")) for line, entry in enumerate(text.split("\n"), 1) if entry.strip()
+    ]
+    if not entries:
+        raise _error(1, "empty list")
+    if len(entries) > MAX_ENTRIES:
+        raise _error(entries[MAX_ENTRIES][0], "too many entries (maximum 10000)")
+    return SensitiveUsers(tuple(sorted({_normalise(entry, line) for line, entry in entries})))
+
+
 def load_sensitive_users(path: str | Path | None = None) -> SensitiveUsers:
     """Open once, read only, before collection. An explicit path wins over the environment."""
     selected = path if path is not None else (os.environ.get(ENV_VAR) or None)
@@ -169,19 +189,4 @@ def load_sensitive_users(path: str | Path | None = None) -> SensitiveUsers:
         raise
     except (OSError, ValueError, RuntimeError):
         raise _error(1, "unable to read a regular local file") from None
-    if len(data) > MAX_BYTES:
-        raise _error(1, "file exceeds 256 KiB")
-    try:
-        text = data.decode("utf-8-sig")
-    except UnicodeError as exc:
-        raise _error(exc.object[:exc.start].count(b"\n") + 1, "expected UTF-8") from None
-    if "\x00" in text:
-        raise _error(text.count("\n", 0, text.index("\x00")) + 1, "NUL is not allowed")
-    entries = _json_entries(text) if text.lstrip(" \t\r\n").startswith("[") else [
-        (line, entry.rstrip("\r")) for line, entry in enumerate(text.split("\n"), 1) if entry.strip()
-    ]
-    if not entries:
-        raise _error(1, "empty list")
-    if len(entries) > MAX_ENTRIES:
-        raise _error(entries[MAX_ENTRIES][0], "too many entries (maximum 10000)")
-    return SensitiveUsers(tuple(sorted({_normalise(entry, line) for line, entry in entries})))
+    return parse_sensitive_users(data)

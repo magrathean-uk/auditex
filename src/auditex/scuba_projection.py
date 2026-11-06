@@ -1262,12 +1262,12 @@ def _operator_config_views(*, sensitive_users: tuple[str, ...] | None = None,
 def _sensitive_users_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
     """Read only the bounded private files; emit only existing closed outcomes.
 
-    Read through a no-follow directory descriptor, then verify the captured
-    canonical list against this manifest as well as collect's verification
-    helper. No input text, path, key or digest enters diagnostics.
+    Read through a no-follow directory descriptor, then validate the captured
+    bytes against the captured key and manifest. No input text, path, key or
+    digest enters diagnostics.
     """
     from azure_tenant_audit.sensitive_users import (
-        MAX_BYTES, MAX_ENTRIES, sensitive_users_digest, verify_sensitive_users,
+        MAX_BYTES, MAX_ENTRIES, parse_sensitive_users, sensitive_users_digest,
     )
 
     try:
@@ -1297,14 +1297,14 @@ def _sensitive_users_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[st
             key = read("sensitive-users.key", 32)
         finally:
             os.close(directory)
-        # The bundle copy is canonical bare lower-case emails with a final newline.
-        addresses = tuple(data.decode("utf-8").removesuffix("\n").split("\n"))
-        if len(addresses) > MAX_ENTRIES:
+        # Count physical lines first to retain the existing oversize outcome.
+        if len(data.decode("utf-8").removesuffix("\n").split("\n")) > MAX_ENTRIES:
             raise Unavailable("oversize")
-        if (not data.endswith(b"\n") or addresses != tuple(sorted(set(addresses)))
+        addresses = parse_sensitive_users(data).addresses
+        # The bundle copy must be exactly the canonical list with a final newline.
+        if (data != ("\n".join(addresses) + "\n").encode("utf-8")
                 or len(addresses) != metadata["count"]
-                or not hmac.compare_digest(sensitive_users_digest(addresses, key), metadata["hmac_sha256"])
-                or not verify_sensitive_users(root)):
+                or not hmac.compare_digest(sensitive_users_digest(addresses, key), metadata["hmac_sha256"])):
             raise Unavailable("operator_input_required")
         return addresses
     except Unavailable:
