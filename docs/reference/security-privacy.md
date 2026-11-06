@@ -288,8 +288,12 @@ Before sharing, identity discovery reads all `normalized/**/*.json` files. It
 refuses malformed, unreadable or non-regular entries, unsafe links, changes
 during discovery and scans exceeding 5,000 files, 32 MiB per file, 128 MiB
 in total or 32 directory levels. A subsequent snapshot also refuses scan
-problems or changed fingerprints. The refusal identifies the reason and uses
-safe file labels. Repair the evidence before retrying.
+problems or changed fingerprints. These checks cover shareable reports, exports,
+customer packs, notifications and MCP tools. The MCP `summarize_run` and
+`probe_summarize` tools also use a bundle reader that can block on a non-regular
+entry before discovery completes, so refusal is not guaranteed for those two
+tools. The refusal identifies the reason and uses safe file labels. Repair the
+evidence before retrying.
 
 These are pattern and structure rules, not a guarantee that every personal
 value in arbitrary prose is recognised. URL userinfo passwords are matched
