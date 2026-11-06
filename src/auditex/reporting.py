@@ -20,6 +20,23 @@ from azure_tenant_audit.bundle_integrity import (
     listed_artifact_paths,
 )
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
+from azure_tenant_audit.output_redaction import (
+    PROFILE_CUSTOMER_PACK,
+    PROFILE_LOCAL,
+    PROFILE_SHAREABLE,
+    PROFILES,
+    REASON_CHANGED,
+    ContextIncompleteError,
+    RedactionContext,
+    assert_snapshot_stable,
+    context_for_run,
+    read_normalized_sections,
+    redact_output,
+    run_path_roots,
+    scrub_run_paths,
+    settle_citations,
+    snapshot_run,
+)
 from azure_tenant_audit.private_io import copy_private_file, harden_tree, make_private_dirs, write_private_text
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.waivers import accepted_risk_summary
@@ -471,7 +488,7 @@ def _preview_section_citations(
     return _dedupe_citations(citations), sorted(set(missing))
 
 
-def load_report_bundle(run_dir: str | Path) -> dict[str, Any]:
+def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[str, Any]:
     run_path = Path(run_dir)
     bundle = RunBundle(run_path)
     manifest = bundle.manifest()
@@ -489,7 +506,7 @@ def load_report_bundle(run_dir: str | Path) -> dict[str, Any]:
         "proof_table": bundle.proof_table_rows(),
         "action_plan": bundle.action_plan_rows(),
         "api_inventory": _mapping(bundle.api_inventory()[1]),
-        "normalized": _load_normalized_sections(run_path),
+        "normalized": read_normalized_sections(run_path) if shareable else _load_normalized_sections(run_path),
         "blockers": bundle.blocker_rows(),
         "manifest": manifest,
     }
@@ -1591,8 +1608,10 @@ def render_proof_table_markdown(payload: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_text_artifact(path: Path, content: str) -> dict[str, Any]:
-    write_private_text(path, content)
+def _write_text_artifact(path: Path, content: str, context: RedactionContext | None = None) -> dict[str, Any]:
+    # Every generated customer-pack file passes the shared output redaction at the last step; the digest the
+    # manifest records is therefore the digest of what the customer receives.
+    write_private_text(path, redact_output(content, profile=PROFILE_CUSTOMER_PACK, context=context, markup=True))
     return {
         "path": str(path),
         "name": path.name,
@@ -1629,6 +1648,14 @@ def _plain_run_file(run_path: Path, relative: str) -> tuple[Path | None, str | N
 # The one source artifact that records where the operator ran the audit. It is copied with those paths made
 # pack-relative, and says so (``transformed``), so ``verify-pack`` can still tie it to ``bundle-hashes.json``.
 _PACK_RELATIVE_PATHS = "pack_relative_paths"
+# Every other JSON source artifact is a redacted derivative of the run's own file (customer-pack profile, the pack's
+# salt, paths made pack-relative): the private original stays in the run, the pack carries the derivative, and the row
+# records the digest of the original (``source_sha256``, the one ``bundle-hashes.json`` lists) and of the copy.
+_REDACTED_DERIVATIVE = "customer_pack_redaction"
+# The hash manifest is the one artifact that cannot be derived: its bytes are what the run was verified against. It is
+# copied verbatim only when the customer-pack redaction leaves it exactly as it is (it holds paths and digests); a
+# manifest the redaction would alter is left out of the pack and the row says why.
+_VERBATIM_IF_UNCHANGED = frozenset({"bundle-hashes.json"})
 _LOCAL_PATH_LABEL = "<local-path>"
 
 
@@ -1665,15 +1692,20 @@ def _copy_source_artifact(
     relative: str,
     purpose: str,
     listed: set[str] | None = None,
+    context: RedactionContext | None = None,
 ) -> dict[str, Any]:
     """Copy one run artifact into the pack as a private file.
 
     A link is never followed. When the run has a hash manifest (``listed`` is its path set), only a file the
     manifest names is copied: the pack vouches for what the run produced, not for what was added later.
-    ``run-manifest.json`` is the exception to "byte for byte": it records the operator's absolute run path, which
-    a pack for a customer must not carry, so the copy has paths made pack-relative. Its row then has
-    ``transformed: "pack_relative_paths"`` and ``source_sha256``, the digest of the run's own file (the one
-    ``bundle-hashes.json`` lists), and ``sha256``, the digest of the copy.
+    Nothing is copied raw. ``run-manifest.json`` records the operator's absolute run path, which a pack for a
+    customer must not carry, so its copy has paths made pack-relative (``transformed: "pack_relative_paths"``);
+    every other JSON artifact is a redacted derivative under the customer-pack profile
+    (``transformed: "customer_pack_redaction"``), because the originals hold identifiers and free text a customer
+    file must not (the report pack keeps GUIDs and names so its references resolve inside the run; that is a private
+    working property). A transformed row has ``source_sha256``, the digest of the run's own file (the one
+    ``bundle-hashes.json`` lists), and ``sha256``, the digest of the copy. The hash manifest is copied verbatim only
+    when redaction would not change it, else it is left out (``skipped_reason``).
     """
     if Path(relative.replace("\\", "/")).as_posix().startswith("operator-inputs/"):
         return {"source_path": relative, "purpose": purpose, "present": False,
@@ -1693,13 +1725,32 @@ def _copy_source_artifact(
         row["skipped_reason"] = "not_in_bundle_hashes"
         return row
     destination = output_root / relative
-    payload = _read_json(source, None) if relative == "run-manifest.json" else None
-    if isinstance(payload, Mapping):
+    payload = _read_json(source, None)
+    if relative == "run-manifest.json" and isinstance(payload, Mapping):
         row["source_sha256"] = _sha256_file(source)
         row["transformed"] = _PACK_RELATIVE_PATHS
-        write_private_text(destination, json.dumps(_pack_relative_run_manifest(payload, run_path), indent=2, ensure_ascii=False) + "\n")
+        manifest_copy = _settle_citations(
+            redact_output(_pack_relative_run_manifest(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=context)
+        )
+        write_private_text(destination, json.dumps(manifest_copy, indent=2, ensure_ascii=False) + "\n")
+    elif isinstance(payload, (Mapping, list)):
+        local_free = _pack_payload(payload, run_path) if isinstance(payload, Mapping) else _pack_safe(payload, run_path)
+        derived = settle_citations(redact_output(local_free, profile=PROFILE_CUSTOMER_PACK, context=context))
+        if relative in _VERBATIM_IF_UNCHANGED:
+            if derived != payload:
+                row["customer_safe"] = False
+                row["skipped_reason"] = "redaction_would_change_hash_manifest"
+                return row
+            copy_private_file(source, destination)
+        else:
+            row["source_sha256"] = _sha256_file(source)
+            row["transformed"] = _REDACTED_DERIVATIVE
+            write_private_text(destination, json.dumps(derived, indent=2, ensure_ascii=False) + "\n")
     else:
-        copy_private_file(source, destination)
+        # Not JSON the product can parse and redact as structure: nothing is copied (a customer file is never raw).
+        row["customer_safe"] = False
+        row["skipped_reason"] = "not_redactable_json"
+        return row
     row.update(
         {
             "present": True,
@@ -1807,9 +1858,11 @@ def _render_pack_readme(manifest: Mapping[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                "`source-artifacts/run-manifest.json` is the run's manifest with the paths of the machine that ran the audit "
-                "made pack-relative. `pack-manifest.json` records the SHA-256 of the run's own file as `source_sha256` (the "
-                "value `bundle-hashes.json` lists); as copied, the file is covered by `checksums.sha256`.",
+                "The files under `source-artifacts/` are derivatives of the run's own files: `run-manifest.json` has the paths "
+                "of the machine that ran the audit made pack-relative and every other JSON file has its tenant identifiers "
+                "and free text redacted (the originals stay in the run). `pack-manifest.json` records the SHA-256 of the "
+                "run's own file as `source_sha256` (the value `bundle-hashes.json` lists); as copied, each file is covered "
+                "by `checksums.sha256`.",
             ]
         )
     return "\n".join(lines) + "\n"
@@ -1827,25 +1880,14 @@ def _write_checksums(pack_dir: Path, rows: list[dict[str, Any]]) -> dict[str, An
 
 
 _PACK_KIND = "auditex_enterprise_handoff_pack"
-_RUN_DIR_PLACEHOLDER = "<run-dir>"
-
-
 def _run_path_roots(run_path: Path) -> list[str]:
     """Every spelling of the run directory a payload may carry, longest first."""
-    roots = {str(run_path), os.path.abspath(run_path), os.path.realpath(run_path)}
-    return sorted((root.rstrip(os.sep) for root in roots if root and root != os.sep), key=len, reverse=True)
+    return list(run_path_roots(run_path))
 
 
 def _scrub_run_path(text: str, roots: list[str]) -> str:
     """Remove the operator's local run path from text: paths below the run become run-relative, the run ``<run-dir>``."""
-    for root in roots:
-        if text == root:
-            return _RUN_DIR_PLACEHOLDER
-        if text.startswith(root + os.sep):
-            return text[len(root) + 1 :]
-    for root in roots:
-        text = text.replace(root, _RUN_DIR_PLACEHOLDER)
-    return text
+    return scrub_run_paths(text, roots)
 
 
 def _pack_safe(value: Any, run_path: Path, *, roots: list[str] | None = None) -> Any:
@@ -1898,6 +1940,10 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     run_path = Path(run_dir)
     target_dir = Path(output_dir)
 
+    # Validation reads normalised files too, so discovery must run first.
+    redaction = context_for_run(run_path)
+    redact_output({}, profile=PROFILE_CUSTOMER_PACK, context=redaction)
+    assert_snapshot_stable(run_path, redaction.snapshot)
     handoff_payload = enterprise_handoff(run_path)
     integrity = _mapping(handoff_payload.get("integrity"))
     recomputed = _mapping(_mapping(handoff_payload.get("contract")).get("recomputed"))
@@ -1916,17 +1962,28 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
             integrity,
             recomputed,
         )
+    # Everything the pack carries is pack-relative, free of the operator's local paths and passes the shared
+    # output redaction (customer-pack profile) with the run's own salt, so references stay consistent.
     _prepare_pack_directory(target_dir)
-    # Everything the pack carries is pack-relative and free of the operator's local paths.
-    handoff_payload = _pack_payload(handoff_payload, run_path)
+
+    def pack_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+        return _settle_citations(
+            redact_output(_pack_payload(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=redaction)
+        )
+
+    handoff_payload = pack_payload(handoff_payload)
     integrity = _mapping(handoff_payload.get("integrity"))
-    api_payload = _pack_payload(api_call_inventory(run_path), run_path)
-    permissions_payload = _pack_payload(permissions_ledger(run_path), run_path)
-    proof_payload = _pack_payload(proof_table(run_path), run_path)
-    rendered_report = _pack_safe(preview_report(run_dir=str(run_path), format_name="md")["content"], run_path)
+    api_payload = pack_payload(api_call_inventory(run_path))
+    permissions_payload = pack_payload(permissions_ledger(run_path))
+    proof_payload = pack_payload(proof_table(run_path))
+    # The report is redacted as structure under the customer-pack profile before it is rendered (the free-text keys
+    # cannot be recognised in Markdown); the shareable preview is never the source of a customer file.
+    rendered_report = _pack_safe(
+        preview_report(run_dir=str(run_path), format_name="md", profile=PROFILE_CUSTOMER_PACK)["content"], run_path
+    )
 
     def generated_row(name: str, content: str) -> dict[str, Any]:
-        row = _write_text_artifact(target_dir / name, content)
+        row = _write_text_artifact(target_dir / name, content, redaction)
         row["path"] = name
         return row
 
@@ -1945,7 +2002,7 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     listed = listed_artifact_paths(run_path)
     source_artifacts = []
     for relative, purpose in _CUSTOMER_SAFE_SOURCE_ARTIFACTS:
-        row = _copy_source_artifact(run_path, source_dir, relative, purpose, listed)
+        row = _copy_source_artifact(run_path, source_dir, relative, purpose, listed, redaction)
         if row.get("path"):
             row["path"] = f"source-artifacts/{relative}"
         source_artifacts.append(row)
@@ -1975,7 +2032,7 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
         "generated_files": generated,
         "source_artifacts": source_artifacts,
     }
-    readme = _write_text_artifact(target_dir / "README.md", _render_pack_readme(manifest))
+    readme = _write_text_artifact(target_dir / "README.md", _render_pack_readme(manifest), redaction)
     readme["path"] = "README.md"
     manifest["generated_files"].append(readme)
     checksum = _write_checksums(
@@ -1986,10 +2043,15 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     manifest["generated_files"].append(checksum)
     manifest_path = target_dir / "pack-manifest.json"
     manifest["pack_manifest_path"] = "pack-manifest.json"
-    write_private_text(manifest_path, _json(manifest) + "\n")
+    assert_snapshot_stable(run_path, redaction.snapshot)
+    safe_manifest = _settle_citations(redact_output(manifest, profile=PROFILE_CUSTOMER_PACK, context=redaction))
+    write_private_text(manifest_path, _json(safe_manifest) + "\n")
     harden_tree(target_dir)
-    # The caller gets the pack's location; the file on disk keeps pack-relative paths only.
-    return {**manifest, "pack_dir": str(target_dir), "pack_manifest_path": str(manifest_path)}
+    return redact_output(
+        {**safe_manifest, "pack_dir": str(target_dir), "pack_manifest_path": str(manifest_path)},
+        profile=PROFILE_CUSTOMER_PACK,
+        context=redaction,
+    )
 
 
 def _bundle_hash_rows(path: Path) -> dict[str, str] | None:
@@ -2509,11 +2571,10 @@ def verify_enterprise_handoff_pack(
                         continue
                     row = rows_by_file.get(copied.resolve(), {})
                     if (
-                        relative == "run-manifest.json"
-                        and row.get("transformed") == _PACK_RELATIVE_PATHS
+                        row.get("transformed") == (_PACK_RELATIVE_PATHS if relative == "run-manifest.json" else _REDACTED_DERIVATIVE)
                         and row.get("source_sha256") == expected_hash
                     ):
-                        # The copy has its local paths made pack-relative; the run's own file is the one hashed.
+                        # The copy is redacted (or has its local paths made pack-relative); the run's own file is the one hashed.
                         # The copy itself is bound only by checksums.sha256 (see --expect-checksums-sha256).
                         transformed_sources.append(relative)
                         continue
@@ -3634,17 +3695,41 @@ def _render_oscal(selected_sections: dict[str, Any]) -> str:
     return _json(render_oscal(findings=findings, summary=summary, manifest=manifest))
 
 
+_STRUCTURED_FORMATS = frozenset({"json", "sarif", "oscal"})
+
+
+def _settle_citations(payload: dict[str, Any]) -> dict[str, Any]:
+    """Re-derive the citation list and summary of a redacted payload (``output_redaction.settle_citations``)."""
+    return settle_citations(payload)
+
+
+def _final_pass(content: str, format_name: str, context: RedactionContext, profile: str = PROFILE_SHAREABLE) -> str:
+    """The last redaction step over rendered text. The structured formats were redacted as structure before they
+    were serialised (their text cannot be edited safely), so they are returned as rendered."""
+    if format_name in _STRUCTURED_FORMATS:
+        return content
+    return redact_output(content, profile=profile, context=context, markup=True)
+
+
 def preview_report(
     *,
     run_dir: str,
     format_name: str,
     include_sections: list[str] | None = None,
     exclude_sections: list[str] | None = None,
+    profile: str = PROFILE_LOCAL,
 ) -> dict[str, Any]:
+    """The report as rendered text. ``profile`` is the redaction profile applied to the report's STRUCTURE before it is
+    rendered (the free-text keys ``owner``, ``notes`` and the rest can only be recognised there, never in the rendered
+    Markdown or HTML) and again, idempotently, over the rendered text. The default is the local report; the customer
+    pack passes ``customer_pack``."""
     if format_name not in FORMAT_EXTENSIONS:
         raise ValueError(f"Unsupported report format: {format_name}")
+    if profile not in PROFILES:
+        raise KeyError(profile)  # a typo must not silently publish under a weaker profile
+    before = snapshot_run(run_dir) if profile != PROFILE_LOCAL else None
 
-    bundle = load_report_bundle(run_dir)
+    bundle = load_report_bundle(run_dir, shareable=profile != PROFILE_LOCAL)
     selected = _select_sections(bundle, include_sections=include_sections, exclude_sections=exclude_sections)
     run_path = Path(run_dir)
     citations, evidence_missing = _preview_section_citations(
@@ -3660,12 +3745,37 @@ def preview_report(
         "sarif": _render_sarif,
         "oscal": _render_oscal,
     }
+    if profile == PROFILE_LOCAL:
+        return {
+            "format": format_name,
+            "content": renderers[format_name](selected),
+            "sections": list(selected.keys()),
+            "citations": citations,
+            "citation_summary": build_citation_summary(citations),
+            "evidence_missing": evidence_missing,
+        }
+    # The output redaction boundary: the sections are redacted as structure before rendering (so key-based
+    # rules such as privileged-user names apply in every format) and the rendered text is passed through the
+    # same function again (idempotent) as the last step. Citations above were built from the real paths.
+    redaction = context_for_run(run_path)
+    # Masking can make two citations equal: every nested citation list, count and summary is re-derived after
+    # redaction, before any format renders the sections.
+    safe_sections = _settle_citations(redact_output(selected, profile=profile, context=redaction))
+    safe_citations = _settle_citations(
+        {"citations": redact_output(citations, profile=profile, context=redaction), "citation_summary": None}
+    )
+    content = _final_pass(renderers[format_name](safe_sections), format_name, redaction, profile)
+    # What was read to build the sections, what discovery read and what is on disk now must be the same files:
+    # a run changed while the report was built is refused, never published half old, half new.
+    if before != redaction.snapshot:
+        raise ContextIncompleteError((("<run>", REASON_CHANGED),))
+    assert_snapshot_stable(run_path, redaction.snapshot)
     return {
         "format": format_name,
-        "content": renderers[format_name](selected),
+        "content": content,
         "sections": list(selected.keys()),
-        "citations": citations,
-        "citation_summary": build_citation_summary(citations),
+        "citations": safe_citations["citations"],
+        "citation_summary": safe_citations["citation_summary"],
         "evidence_missing": evidence_missing,
     }
 
@@ -3677,12 +3787,14 @@ def render_report(
     include_sections: list[str] | None = None,
     exclude_sections: list[str] | None = None,
     output_path: str | None = None,
+    profile: str = PROFILE_LOCAL,
 ) -> dict[str, Any]:
     preview = preview_report(
         run_dir=run_dir,
         format_name=format_name,
         include_sections=include_sections,
         exclude_sections=exclude_sections,
+        profile=profile,
     )
     target = Path(output_path) if output_path else _default_output_path(Path(run_dir), format_name)
     # A rendered report holds the same tenant metadata as the bundle: 0600 in a 0700 directory whatever the umask.

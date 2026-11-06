@@ -513,7 +513,7 @@ def test_mcp_ordinary_operator_label_does_not_exempt_email_local_part(monkeypatc
 
 
 def test_mcp_offline_guid_run_path_can_be_used_by_next_tool(monkeypatch, tmp_path) -> None:
-    from auditex.mcp_server import build_cli_command, summarize_run
+    from auditex.mcp_server import build_cli_command, summarize_run, summarize_run_raw
 
     repo = Path(__file__).resolve().parents[1]
     monkeypatch.setenv("PYTHONPATH", str(repo / "src"))
@@ -531,7 +531,8 @@ def test_mcp_offline_guid_run_path_can_be_used_by_next_tool(monkeypatch, tmp_pat
     run_dir = next(tmp_path.glob(f"{GUID}-run_*"))
     assert str(run_dir) in response["stderr"]
     assert EMAIL not in response["stderr"] and "recipient-canary" not in response["stderr"]
-    assert summarize_run(str(run_dir))["manifest"]["tenant_name"] == GUID
+    assert summarize_run_raw(str(run_dir))["manifest"]["tenant_name"] == GUID
+    assert summarize_run(str(run_dir))["manifest"]["tenant_name"].startswith("Guid ")
 
 
 @pytest.mark.parametrize("adapter,command", [

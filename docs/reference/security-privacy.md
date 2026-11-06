@@ -262,6 +262,44 @@ Notification preview is local by default. `auditex notify send --execute`
 sends the chosen notification to an external sink. Review the recipient and
 payload separately from pack verification before using `--execute`.
 
+## Output redaction boundary
+
+The local rendered report retains the original values. Shareable reports and
+built-in exports, MCP report payloads, customer packs, notifications and the
+explainer profile redact dashed GUIDs and strings under `owner`, `justification`,
+`comment`, `comments` and `notes`, including strings used as keys in nested containers. Domains, group
+names and role names remain. The redactor also masks e-mail local parts, known
+privileged-user display names and immutable IDs, credentials and run-directory
+paths. Public baseline example addresses are kept. A run-specific pseudonym uses
+the resolved run path as its salt input. GUIDs become `Guid` plus a digest,
+which is stable on another pass without reserving a range of real GUIDs.
+
+The report structure is redacted before rendering, so free-text keys work in
+Markdown and HTML as well as JSON. Customer-pack source JSON is a redacted
+derivative: the pack records the original and derivative hashes separately.
+The original hash manifest is copied only when redaction leaves it unchanged.
+The run bundle and its working report pack stay local and retain their values.
+The original hash identifies the source; it does not prove how a derivative was
+produced. A derivative is bound to the pack checksums, so detecting an edit
+followed by recomputing those checksums requires a separately recorded digest
+passed to `verify-pack --expect-checksums-sha256`.
+
+Before sharing, identity discovery reads all `normalized/**/*.json` files. It
+refuses malformed, unreadable or non-regular entries, unsafe links, changes
+during discovery and scans exceeding 5,000 files, 32 MiB per file, 128 MiB
+in total or 32 directory levels. A subsequent snapshot also refuses scan
+problems or changed fingerprints. The refusal identifies the reason and uses
+safe file labels. Repair the evidence before retrying.
+
+These are pattern and structure rules, not a guarantee that every personal
+value in arbitrary prose is recognised. URL userinfo passwords are matched
+for schemes of 1 to 32 characters and scheme-relative URLs. Known immutable
+IDs are matched in narrative only at word-character boundaries and when at
+least four characters long; a structured immutable-ID field is redacted even
+when shorter. Narrative name matching has the same minimum length and word
+boundaries, and preserves recognised structural, group and role vocabulary.
+Names not discovered in the run or output can remain in prose.
+
 ## Credentials and local files
 
 Never commit or ship Azure app authentication values, Google service-account

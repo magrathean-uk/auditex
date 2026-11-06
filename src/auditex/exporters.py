@@ -4,6 +4,8 @@ from collections.abc import Callable
 from importlib.metadata import EntryPoint, entry_points
 from typing import Any
 
+from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE
+
 from .reporting import render_report
 
 
@@ -50,6 +52,7 @@ def _run_builtin(
         include_sections=include_sections,
         exclude_sections=exclude_sections,
         output_path=output_path,
+        profile=PROFILE_SHAREABLE,
     )
     return {"name": name, "artifacts": [{"path": result["output_path"], "format": name}]}
 

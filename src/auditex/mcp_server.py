@@ -12,6 +12,7 @@ from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.profiles import PROFILES
 from azure_tenant_audit.adapters import list_adapters as _list_adapters
 from azure_tenant_audit.citations import build_citation_summary
+from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, redact_payload
 from azure_tenant_audit.response import response_actions
 from azure_tenant_audit.contracts import contract_schema_manifest
 from .rules import list_rule_inventory
@@ -509,6 +510,13 @@ def build_response_command(
 
 
 def summarize_run(run_dir: str) -> dict[str, Any]:
+    """The run summary an MCP client receives: the shareable redaction over the complete payload (its citation
+    summary re-derived). The operator's own terminal reads ``summarize_run_raw``."""
+    return redact_payload(summarize_run_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+
+
+def summarize_run_raw(run_dir: str) -> dict[str, Any]:
+    """Operator-only: the whole run summary, unredacted (``auditex summarize`` and ``auditex probe summarize``)."""
     bundle = RunBundle(run_dir).read()
     citations: list[dict[str, Any]] = []
     evidence_missing: list[str] = []
@@ -553,10 +561,18 @@ def summarize_run(run_dir: str) -> dict[str, Any]:
 
 
 def diff_runs(run_a: str, run_b: str, classic: bool = False) -> dict[str, Any]:
-    return diff_run_directories(run_a, run_b, classic=classic)
+    # Discover normalised evidence before the diff reader visits it.
+    redact_payload({}, run_dirs=[run_a, run_b], profile=PROFILE_SHAREABLE)
+    return redact_payload(diff_run_directories(run_a, run_b, classic=classic), run_dirs=[run_a, run_b], profile=PROFILE_SHAREABLE)
 
 
 def list_blockers(run_dir: str) -> dict[str, Any]:
+    """The blockers an MCP client receives (shareable redaction); the operator's terminal reads ``list_blockers_raw``."""
+    return redact_payload(list_blockers_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+
+
+def list_blockers_raw(run_dir: str) -> dict[str, Any]:
+    """Operator-only: the blockers, unredacted (``auditex blockers``)."""
     bundle = RunBundle(run_dir)
     path, blockers = bundle.blockers()
     citations = (
@@ -579,13 +595,16 @@ def list_blockers(run_dir: str) -> dict[str, Any]:
 def compare_many_runs(run_dirs: list[str], allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
     from .compare import compare_runs
 
-    return compare_runs(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic)
+    redact_payload({}, run_dirs=run_dirs, profile=PROFILE_SHAREABLE)
+    return redact_payload(
+        compare_runs(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic), run_dirs=list(run_dirs), profile=PROFILE_SHAREABLE
+    )
 
 
 def normalize_external_assessment(source: str, input_path: str, tenant_id: str | None = None) -> dict[str, Any]:
     from .external_assessments import import_assessment
 
-    return import_assessment(source, input_path, tenant_id=tenant_id)
+    return redact_payload(import_assessment(source, input_path, tenant_id=tenant_id), profile=PROFILE_SHAREABLE)
 
 
 def compare_external_assessment_files(
@@ -593,7 +612,13 @@ def compare_external_assessment_files(
 ) -> dict[str, Any]:
     from .assessment_review import compare_external_assessments
 
-    return compare_external_assessments(assessment_paths, expected_tenant_id=expected_tenant_id, run_dir=run_dir)
+    if run_dir:
+        redact_payload({}, run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    return redact_payload(
+        compare_external_assessments(assessment_paths, expected_tenant_id=expected_tenant_id, run_dir=run_dir),
+        run_dirs=[run_dir] if run_dir else [],
+        profile=PROFILE_SHAREABLE,
+    )
 
 
 def preview_report(
@@ -611,37 +636,39 @@ def preview_report(
         format_name=format_name,
         include_sections=include or None,
         exclude_sections=exclude or None,
+        profile=PROFILE_SHAREABLE,
     )
 
 
 def analyze_report(run_dir: str) -> dict[str, Any]:
     from .reporting import analyze_report as _analyze_report
 
-    return _analyze_report(run_dir)
+    return redact_payload(_analyze_report(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
 
 
 def api_inventory(run_dir: str) -> dict[str, Any]:
     from .reporting import api_call_inventory as _api_call_inventory
 
-    return _api_call_inventory(run_dir)
+    return redact_payload(_api_call_inventory(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
 
 
 def permissions_ledger(run_dir: str) -> dict[str, Any]:
     from .reporting import permissions_ledger as _permissions_ledger
 
-    return _permissions_ledger(run_dir)
+    return redact_payload(_permissions_ledger(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
 
 
 def proof_table(run_dir: str) -> dict[str, Any]:
     from .reporting import proof_table as _proof_table
 
-    return _proof_table(run_dir)
+    return redact_payload(_proof_table(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
 
 
 def enterprise_handoff(run_dir: str) -> dict[str, Any]:
     from .reporting import enterprise_handoff as _enterprise_handoff
 
-    return _enterprise_handoff(run_dir)
+    redact_payload({}, run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    return redact_payload(_enterprise_handoff(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
 
 
 def verify_customer_pack(
@@ -651,10 +678,14 @@ def verify_customer_pack(
 ) -> dict[str, Any]:
     from .reporting import verify_enterprise_handoff_pack
 
-    return verify_enterprise_handoff_pack(
-        pack_dir,
-        expect_manifest_sha256=expect_manifest_sha256,
-        expect_checksums_sha256=expect_checksums_sha256,
+    return redact_payload(
+        verify_enterprise_handoff_pack(
+            pack_dir,
+            expect_manifest_sha256=expect_manifest_sha256,
+            expect_checksums_sha256=expect_checksums_sha256,
+        ),
+        paths=[pack_dir],
+        profile=PROFILE_SHAREABLE,
     )
 
 

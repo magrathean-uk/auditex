@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any, Callable
 
 from . import auth as auditex_auth
 from .bootstrap import print_doctor_report, run_setup
@@ -14,13 +15,14 @@ from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
+from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, assert_snapshot_stable, context_for_run, redact_output
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
 from azure_tenant_audit.versioning import package_version_line
 from .google_workspace.run import GoogleRunConfig, google_doctor, run_google_live, run_google_offline, run_google_probe
 
-from .mcp_server import list_blockers, summarize_run
+from .mcp_server import list_blockers_raw as list_blockers, summarize_run_raw as summarize_run
 
 REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
 
@@ -125,6 +127,9 @@ def proof_table(run_dir: str) -> dict[str, object]:
 def enterprise_handoff(run_dir: str) -> dict[str, object]:
     from .reporting import enterprise_handoff as _enterprise_handoff
 
+    context = context_for_run(run_dir)
+    redact_output({}, profile=PROFILE_SHAREABLE, context=context)
+    assert_snapshot_stable(run_dir, context.snapshot)
     return _enterprise_handoff(run_dir)
 
 
@@ -556,7 +561,65 @@ def _build_report_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit_report_payload(*, content: str, format_name: str, output_path: str | None) -> None:
+def _redact_report_content(content: str, format_name: str, run_dir: str | None) -> str:
+    """The shareable redaction for report text that was rendered before it reached the emitter.
+
+    JSON is redacted as structure (so key-based rules apply) and re-serialised the way the callers serialise it.
+    Markdown arrives without its structure, so it is redacted as text with the full secret patterns (not the
+    markup-safe subset): callers that hold the payload pass ``payload=`` and ``renderer=`` instead, and the
+    structure is redacted before it is rendered.
+    """
+    context = context_for_run(run_dir) if run_dir else None
+    if format_name == "json":
+        try:
+            parsed = json.loads(content)
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            content = json.dumps(redact_output(parsed, profile=PROFILE_SHAREABLE, context=context), indent=2) + "\n"
+        else:
+            content = redact_output(content, profile=PROFILE_SHAREABLE, context=context)
+    else:
+        content = redact_output(content, profile=PROFILE_SHAREABLE, context=context)
+    if run_dir and context:
+        assert_snapshot_stable(run_dir, context.snapshot)
+    return content
+
+
+def _redacted_report_payload(
+    payload: Any, renderer: Callable[[Any], str] | None, format_name: str, run_dir: str | None
+) -> str:
+    """Redact the payload as structure first, then render it; the markup-safe text pass only runs over the
+    already redacted Markdown (it repeats the redaction, idempotently, and skips the inline secret pattern)."""
+    context = context_for_run(run_dir) if run_dir else None
+    safe = redact_output(payload, profile=PROFILE_SHAREABLE, context=context)
+    if format_name == "md" and renderer is not None:
+        content = redact_output(renderer(safe), profile=PROFILE_SHAREABLE, context=context, markup=True)
+    else:
+        content = json.dumps(safe, indent=2) + "\n"
+    if run_dir and context:
+        assert_snapshot_stable(run_dir, context.snapshot)
+    return content
+
+
+def _emit_report_payload(
+    *,
+    content: str | None = None,
+    payload: Any = None,
+    renderer: Callable[[Any], str] | None = None,
+    format_name: str,
+    output_path: str | None,
+    run_dir: str | None = None,
+    redact: bool = True,
+) -> None:
+    # Every report payload leaves through the output redaction boundary. Pass ``payload`` (and, for Markdown, a
+    # ``renderer``) so it is redacted before it is rendered; ``content`` is for text that is already rendered.
+    # Only the setup guide (the operator's own parameters, no tenant evidence) opts out with ``redact=False``.
+    if payload is not None:
+        content = _redacted_report_payload(payload, renderer, format_name, run_dir)
+    elif redact:
+        content = _redact_report_content(content or "", format_name, run_dir)
+    content = content or ""
     if not output_path:
         print(content, end="")
         return
@@ -571,7 +634,7 @@ def _emit_setup_guide(payload: dict[str, object], *, format_name: str, output_pa
         content = render_setup_guide_markdown(payload)
     else:
         content = json.dumps(payload, indent=2) + "\n"
-    _emit_report_payload(content=content, format_name=format_name, output_path=output_path)
+    _emit_report_payload(content=content, format_name=format_name, output_path=output_path, redact=False)
 
 
 def _build_export_parser() -> argparse.ArgumentParser:
@@ -1016,47 +1079,41 @@ def main(argv: list[str] | None = None) -> int:
         parser = _build_report_parser()
         args = parser.parse_args(argv[1:])
         if args.report_command == "analyze":
-            print(json.dumps(analyze_report(args.run_dir), indent=2))
+            _emit_report_payload(
+                payload=analyze_report(args.run_dir), renderer=None, format_name="json", output_path=None, run_dir=args.run_dir
+            )
             return 0
         if args.report_command == "api-calls":
-            inventory = api_call_inventory(args.run_dir)
-            if args.format == "md":
-                from .reporting import render_api_call_inventory_markdown
+            from .reporting import render_api_call_inventory_markdown
 
-                content = render_api_call_inventory_markdown(inventory)
-            else:
-                content = json.dumps(inventory, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(
+                payload=api_call_inventory(args.run_dir), renderer=render_api_call_inventory_markdown, format_name=args.format, output_path=args.output,
+                run_dir=args.run_dir,
+            )
             return 0
         if args.report_command == "permissions":
-            payload = permissions_ledger(args.run_dir)
-            if args.format == "md":
-                from .reporting import render_permissions_ledger_markdown
+            from .reporting import render_permissions_ledger_markdown
 
-                content = render_permissions_ledger_markdown(payload)
-            else:
-                content = json.dumps(payload, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(
+                payload=permissions_ledger(args.run_dir), renderer=render_permissions_ledger_markdown, format_name=args.format, output_path=args.output,
+                run_dir=args.run_dir,
+            )
             return 0
         if args.report_command == "proof-table":
-            payload = proof_table(args.run_dir)
-            if args.format == "md":
-                from .reporting import render_proof_table_markdown
+            from .reporting import render_proof_table_markdown
 
-                content = render_proof_table_markdown(payload)
-            else:
-                content = json.dumps(payload, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(
+                payload=proof_table(args.run_dir), renderer=render_proof_table_markdown, format_name=args.format, output_path=args.output,
+                run_dir=args.run_dir,
+            )
             return 0
         if args.report_command == "handoff":
-            payload = enterprise_handoff(args.run_dir)
-            if args.format == "md":
-                from .reporting import render_enterprise_handoff_markdown
+            from .reporting import render_enterprise_handoff_markdown
 
-                content = render_enterprise_handoff_markdown(payload)
-            else:
-                content = json.dumps(payload, indent=2) + "\n"
-            _emit_report_payload(content=content, format_name=args.format, output_path=args.output)
+            _emit_report_payload(
+                payload=enterprise_handoff(args.run_dir), renderer=render_enterprise_handoff_markdown, format_name=args.format, output_path=args.output,
+                run_dir=args.run_dir,
+            )
             return 0
         if args.report_command == "customer-pack":
             from .reporting import BundleIntegrityError, PackOutputError

@@ -140,17 +140,19 @@ def test_report_render_cli_dispatches(monkeypatch, capsys) -> None:
     assert payload["include_sections"] == ["summary", "findings"]
 
 
-def test_report_analyze_cli_dispatches(monkeypatch, capsys) -> None:
+def test_report_analyze_cli_dispatches(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.setattr(
         "auditex.cli.analyze_report",
         lambda run_dir: {"run_dir": run_dir, "auditor_score": {"grade": "usable"}},
     )
 
-    rc = auditex_cli.main(["report", "analyze", "run-a"])
+    run = tmp_path / "run-a"
+    run.mkdir()
+    rc = auditex_cli.main(["report", "analyze", str(run)])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["run_dir"] == "run-a"
+    assert payload["run_dir"] == "<run-dir>"
     assert payload["auditor_score"]["grade"] == "usable"
 
 

@@ -7,6 +7,8 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Apply the D3 redaction profile to shareable reports, built-in exports, MCP payloads, notifications and customer packs. GUIDs and the free-text keys `owner`, `justification`, `comment`, `comments` and `notes` are redacted; domains, group names and role names remain. Local reports retain their data. Incomplete or unstable normalised evidence refuses shareable output. URL userinfo passwords are recognised for schemes of up to 32 characters; known immutable IDs in narrative need at least four characters and word-character boundaries.
+
 - Let SS 2.1 decide from verified SensitiveUsers operator input in its private in-memory rule view, including offline bundle replay; retain existing not-assessed outcomes for missing or unusable input. Addresses never enter model views or assessment outputs. Current collection still excludes `TargetedUsersToProtect`, so proving met from target membership needs a separate collector/privacy change. SS 2.3 still needs PartnerDomains; the ScubaGear export path is unchanged.
 
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.

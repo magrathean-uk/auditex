@@ -37,6 +37,7 @@ from auditex.reporting import (
 )
 from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundle_hashes
 from azure_tenant_audit.cli import run_offline
+from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, context_for_run, redact_output
 from azure_tenant_audit.contracts import build_validation_report
 from azure_tenant_audit.evidence_db import load_run_index_summary
 from azure_tenant_audit.rule_parameters import effective_rule_parameters, rule_parameter_gap
@@ -141,6 +142,14 @@ def _rewrite_the_copied_report_pack(pack: Path) -> None:
     for row in document.get("findings") or []:
         row["severity"] = "low"
     _write_json(target, document)
+    _rehash_pack(pack, "source-artifacts/reports/report-pack.json")
+    # A derivative that keeps its "transformed" row is bound by checksums.sha256 only; a row that claims the file is the
+    # run's own (no ``transformed``) must match ``bundle-hashes.json`` and is what these tests exercise.
+    manifest_path = pack / "pack-manifest.json"
+    manifest = _json(manifest_path)
+    row = next(row for row in manifest["source_artifacts"] if row.get("source_path") == "reports/report-pack.json")
+    row.pop("transformed", None)
+    _write_json(manifest_path, manifest)
     _rehash_pack(pack, "source-artifacts/reports/report-pack.json")
 
 
@@ -754,10 +763,12 @@ def test_a_pack_from_a_run_written_with_an_absolute_out_carries_no_local_path(tm
     assert copied["run_dir"] == "halcyon-abs"
     assert copied["waiver_path"] == "<local-path>/waivers.json"
     assert copied["command_line"] == ["azure-tenant-audit", "--offline", "--out", "<local-path>/outputs", "--tenant-name", "halcyon"]
-    # Everything else in the run manifest is as the run wrote it.
-    assert {key: value for key, value in copied.items() if key not in {"run_dir", "waiver_path", "command_line"}} == {
-        key: value for key, value in manifest.items() if key not in {"run_dir", "waiver_path", "command_line"}
-    }
+    # Everything else in the run manifest is as the run wrote it, after the customer-pack output redaction (the tenant
+    # GUIDs in ``tenant_identity`` are pseudonymised with the run's salt; the old assertion expected them verbatim).
+    others = {key: value for key, value in manifest.items() if key not in {"run_dir", "waiver_path", "command_line"}}
+    assert {key: value for key, value in copied.items() if key not in {"run_dir", "waiver_path", "command_line"}} == (
+        redact_output(others, profile=PROFILE_CUSTOMER_PACK, context=context_for_run(run))
+    )
 
 
 def test_the_pack_copy_of_the_run_manifest_is_tied_to_the_run_file_the_manifest_lists(bundle: Path, tmp_path: Path) -> None:
@@ -770,10 +781,19 @@ def test_the_pack_copy_of_the_run_manifest_is_tied_to_the_run_file_the_manifest_
     assert row["transformed"] == "pack_relative_paths" and row["source_sha256"] == listed["run-manifest.json"]
     assert row["sha256"] != row["source_sha256"]
     result = verify_enterprise_handoff_pack(pack)
-    assert result["valid"] is True and result["transformed_source_artifacts"] == ["run-manifest.json"]
-    # The other artifacts are copied byte for byte and none claims a transformation.
-    others = [item for item in _json(pack / "pack-manifest.json")["source_artifacts"] if item.get("source_path") != "run-manifest.json"]
-    assert all("transformed" not in item for item in others)
+    assert result["valid"] is True and "run-manifest.json" in result["transformed_source_artifacts"]
+    # Every other JSON artifact is a redacted derivative tied to the run's file the same way; only the hash manifest
+    # (whose bytes are what the run was verified against) is copied as it is, and says so by claiming nothing.
+    others = [item for item in _json(pack / "pack-manifest.json")["source_artifacts"] if item.get("present") and item.get("source_path") != "run-manifest.json"]
+    assert others
+    for item in others:
+        if item["source_path"] == BUNDLE_HASHES_PATH:
+            assert "transformed" not in item and item["sha256"] == _digest(bundle)
+        else:
+            assert item["transformed"] == "customer_pack_redaction" and item["source_sha256"] == listed[item["source_path"]], item["source_path"]
+    assert set(result["transformed_source_artifacts"]) == {
+        "run-manifest.json", *(i["source_path"] for i in others if i["source_path"] != BUNDLE_HASHES_PATH)
+    }
 
 
 def test_a_rewritten_run_manifest_copy_that_names_another_source_digest_is_caught(bundle: Path, tmp_path: Path) -> None:

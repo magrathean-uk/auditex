@@ -228,8 +228,10 @@ def test_the_pack_copy_never_follows_a_link_or_copies_a_file_the_manifest_does_n
     assert linked["present"] is False and linked["skipped_reason"] == "symbolic_link"
     assert through_a_link_in_the_run["present"] is False and through_a_link_in_the_run["skipped_reason"] == "symbolic_link"
     assert unlisted["present"] is False and unlisted["skipped_reason"] == "not_in_bundle_hashes"
-    assert plain["present"] is True and Path(plain["path"]).read_bytes() == (bundle / "summary.json").read_bytes()
-    assert "transformed" not in plain
+    # Nothing is copied raw: a JSON artifact is a redacted derivative tied to the run's file by ``source_sha256``.
+    listed_hashes = {row["path"]: row["sha256"] for row in _json(bundle / BUNDLE_HASHES_PATH)["artifacts"]}
+    assert plain["present"] is True and plain["transformed"] == "customer_pack_redaction"
+    assert plain["source_sha256"] == listed_hashes["summary.json"] and plain["sha256"] != plain["source_sha256"]
     assert missing["present"] is False and "skipped_reason" not in missing
     assert sorted(path.name for path in root.rglob("*") if path.is_file()) == ["summary.json"]
 
@@ -270,6 +272,14 @@ def test_verify_pack_catches_an_edited_source_artifact_that_was_rehashed_with_th
     document["summary"]["edited"] = True
     target.write_text(json.dumps(document), encoding="utf-8")
     _rehash(pack, "source-artifacts/reports/report-pack.json")
+    # The derivative is bound to the run's file by ``source_sha256`` and to the pack by ``checksums.sha256`` only; an
+    # editor who also keeps the row's "transformed" claim is caught by the digest supplied out of band (see the next
+    # test); one whose row claims the file is the run's own is caught here.
+    manifest_path = pack / "pack-manifest.json"
+    manifest = _json(manifest_path)
+    row = next(row for row in manifest["source_artifacts"] if row.get("source_path") == "reports/report-pack.json")
+    row.pop("transformed")
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     result = verify_enterprise_handoff_pack(pack)
 
@@ -277,6 +287,24 @@ def test_verify_pack_catches_an_edited_source_artifact_that_was_rehashed_with_th
     issue = next(item for item in result["issues"] if item["code"] == "source_artifact_bundle_hash_mismatch")
     assert issue["source_path"] == "reports/report-pack.json" and issue["expected"] != issue["actual"]
     assert issue["path"] == "source-artifacts/reports/report-pack.json"
+
+
+def test_an_edited_derivative_that_keeps_its_transformed_row_is_caught_only_by_the_digest_supplied_separately(
+    bundle: Path, tmp_path: Path
+) -> None:
+    """The honest limit of a redacted derivative: it is bound to the run's file by ``source_sha256`` and to the pack by
+    ``checksums.sha256``, so an editor who re-hashes the pack and keeps the row is invisible to ``verify-pack`` unless
+    the ``checksums.sha256`` digest was recorded elsewhere (``--expect-checksums-sha256``)."""
+    pack = _write_pack(bundle, tmp_path)
+    genuine = verify_enterprise_handoff_pack(pack)["digests"]["checksums_sha256"]
+    target = pack / "source-artifacts" / "reports" / "report-pack.json"
+    document = _json(target)
+    document["summary"]["edited"] = True
+    target.write_text(json.dumps(document), encoding="utf-8")
+    _rehash(pack, "source-artifacts/reports/report-pack.json")
+    assert verify_enterprise_handoff_pack(pack)["valid"] is True
+    result = verify_enterprise_handoff_pack(pack, expect_checksums_sha256=genuine)
+    assert result["valid"] is False and "expected_checksums_sha256_mismatch" in {item["code"] for item in result["issues"]}
 
 
 def test_verify_pack_catches_a_replaced_bundle_hash_manifest(bundle: Path, tmp_path: Path) -> None:

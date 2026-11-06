@@ -14,7 +14,13 @@ import requests
 
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 
+from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, redact_payload
+
 from .run_bundle import RunBundle
+
+# Notifications use the customer-pack profile for every transport. Under D3 it
+# has the same redaction rules as the shareable and explainer profiles.
+NOTIFY_PROFILE = PROFILE_CUSTOMER_PACK
 
 
 # E4 redaction: any token-shaped string in an outbound webhook body gets
@@ -26,17 +32,23 @@ from .run_bundle import RunBundle
 # regardless of whether the key name was on the existing sensitive-key
 # allowlist.
 _REDACTION_PLACEHOLDER = "[REDACTED]"
+# Every pattern is linear in the input: a left boundary so a match can only start where a run of its own alphabet starts
+# (not at each of the many overlapping ``eyJ`` of ``"eyJ" * n``), and possessive quantifiers so a failed match never
+# backtracks through the run it just read (Python 3.11+).
 _TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # OAuth Authorization headers: ``Authorization: Bearer <token>`` and
     # bare ``Bearer <token>``.
-    (re.compile(r"Bearer\s+[A-Za-z0-9._\-+=/]{8,}", re.IGNORECASE), "Bearer [REDACTED]"),
+    (re.compile(r"Bearer\s++[A-Za-z0-9._\-+=/]{8,}+", re.IGNORECASE), "Bearer [REDACTED]"),
     # JWTs (header.payload.signature, base64url everywhere). The header
     # almost always starts with ``eyJ`` (decoded ``{"``).
-    (re.compile(r"eyJ[A-Za-z0-9_\-]{15,}\.[A-Za-z0-9_\-]{15,}\.[A-Za-z0-9_\-]+"), "[REDACTED-JWT]"),
+    (
+        re.compile(r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]{15,}+\.[A-Za-z0-9_\-]{15,}+\.[A-Za-z0-9_\-]++"),
+        "[REDACTED-JWT]",
+    ),
     # Long base64 blobs — DSC export payloads, encrypted credential blobs,
     # PFX-encoded certificates. 200 chars is well above any legitimate
     # short ID / display name and short of a full RSA key dump.
-    (re.compile(r"[A-Za-z0-9+/]{200,}={0,2}"), "[REDACTED-BLOB]"),
+    (re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{200,}+={0,2}"), "[REDACTED-BLOB]"),
 ]
 # Sensitive key names whose VALUES (regardless of shape) get fully
 # replaced. Mirrors the contracts.py sensitive-keys regex but scoped
@@ -84,14 +96,19 @@ def _redact_value(value: Any, current_key: str = "") -> Any:
 def _run_fingerprint(payload: dict[str, Any]) -> str:
     """Stable per-run fingerprint used to dedup notify-sink tickets.
 
-    Hash includes tenant_name + run_dir basename so re-running ``auditex
-    notify send`` against the same bundle hits the deduplication path
-    instead of creating a fresh ticket on each invocation.
+    Hash includes tenant_name + run_dir (as the operator wrote it) so re-running ``auditex notify send`` against
+    the same bundle hits the deduplication path instead of creating a fresh ticket on each invocation, and two
+    runs of one tenant never share a fingerprint. ``send_notification`` computes it from the real run directory
+    BEFORE the payload is redacted (redaction replaces the run path) and carries the 16-hex digest in the
+    payload as ``run_fingerprint``; it is a one-way hash of the path, so the path itself never leaves.
 
     The 16-char hex prefix is short enough to embed in a Jira label
     (50-char max per label) and long enough that collisions across an
     operator's portfolio are vanishingly unlikely.
     """
+    carried = payload.get("run_fingerprint")
+    if isinstance(carried, str) and re.fullmatch(r"[0-9a-f]{16}", carried):
+        return carried
     tenant = str(payload.get("tenant_name") or "")
     run_dir = str(payload.get("run_dir") or "")
     digest = hashlib.sha256(f"{tenant}|{run_dir}".encode("utf-8")).hexdigest()
@@ -629,25 +646,43 @@ def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
 def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[str, Any]:
     payload = _build_payload(run_dir)
     citations, evidence_missing = _notification_proof(run_dir, payload)
-    base = {
-        "sink": sink,
-        "payload": payload,
-        "citations": citations,
-        "citation_summary": build_citation_summary(citations),
-        "evidence_missing": evidence_missing,
-    }
+    # The run identity is computed from the real run directory before redaction replaces it, and travels in the
+    # payload as a one-way digest, so the ticket de-duplication of every sink keeps telling two runs apart.
+    payload = {**payload, "run_fingerprint": _run_fingerprint(payload)}
+    # Every sink leaves the machine, and so does the envelope this function returns (the preview reaches MCP
+    # clients). The payload, the citations (built from the real paths) and every service response pass the shared
+    # output redaction with the run's salt and path spellings; the citation summary is re-derived from the
+    # redacted list. Nothing unredacted is handed to a sink or returned.
+    envelope = _redact_envelope(
+        {
+            "sink": sink,
+            "payload": payload,
+            "citations": citations,
+            "citation_summary": build_citation_summary(citations),
+            "evidence_missing": evidence_missing,
+        },
+        run_dir,
+    )
+    payload = envelope["payload"]
+    base = envelope
     if dry_run:
         return {"status": "planned", "dry_run": True, **base}
     if sink in WEBHOOK_ENV:
         result = _send_webhook(sink, payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     if sink == "smtp":
         result = _send_smtp(payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     if sink == "jira":
         result = _send_jira(payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     if sink == "github":
         result = _send_github(payload)
-        return {**result, **base, "dry_run": False}
+        return {**_redact_envelope(result, run_dir), **base, "dry_run": False}
     return {"status": "blocked", "dry_run": False, "reason": "unsupported sink", **base}
+
+
+def _redact_envelope(envelope: dict[str, Any], run_dir: str) -> dict[str, Any]:
+    """The customer-pack redaction over a whole notification result (payload, citations, service responses)."""
+    redacted = redact_payload(envelope, run_dirs=[run_dir], profile=NOTIFY_PROFILE)
+    return dict(redacted)
