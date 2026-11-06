@@ -202,5 +202,7 @@ Synthetic regression, mutation and canary test material includes no tenant evide
 and is generated, not stored: it is derived in memory from the value-rule vector
 fixtures, which hold only constructed rows and model-pack train and validation rows.
 The small explainer fixtures that are stored (including the pinned baseline markdown)
-use lossless gzip where large; hashes cover the decompressed bytes. Held-out test rows,
-pilot rows, sealed freeze rows and diagnostic rows are never stored or used.
+use lossless gzip where large. The fixture `SHA256SUMS` hashes the stored bytes,
+including gzip bytes; upstream baseline hashes identify the original uncompressed
+source bytes. Held-out test rows, pilot rows, sealed freeze rows and diagnostic rows
+are never stored or used.
