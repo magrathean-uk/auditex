@@ -9,6 +9,20 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 Nothing yet.
 
+## [1.2.4] - 2026-11-06
+
+### Security
+
+Packaging fix for the 1.2.2 and 1.2.3 security releases. The v1.2.1, v1.2.2 and v1.2.3 tags
+tracked a stale `build/` tree from 1.2.0, so a wheel built in the source tree (for example
+`pip install` of a GitHub source archive, or `pip wheel .` in an extracted archive) could install
+the 1.2.0 code: for 1.2.2 and 1.2.3 that meant without the argv redaction fixes. Editable installs
+and builds through `python -m build` were not affected. 1.2.4 ships the 1.2.3 code with `build/`
+removed and ignored.
+
+If you installed 1.2.2 or 1.2.3 from a source archive and passed a secret through an abbreviated
+flag, rotate that secret, delete or rebuild the affected run bundles, and upgrade to 1.2.4.
+
 ## [1.2.3] - 2026-11-05
 
 ### Security
@@ -815,7 +829,8 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/magrathean-uk/auditex/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/magrathean-uk/auditex/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/magrathean-uk/auditex/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/magrathean-uk/auditex/compare/v1.2.0...v1.2.1
