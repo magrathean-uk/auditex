@@ -50,11 +50,11 @@ otherwise; support can call
 `azure_tenant_audit.sensitive_users.verify_sensitive_users(run_dir)` to check
 the private files against the manifest.
 
-SS 2.1 remains not assessed without this operator input. SS 2.3 also remains
-not assessed without its operator input, but the v3.9.1 specification calls
-that separate input `PartnerDomains`; this file does not supply it. Connecting
-the sensitive-user copy to the in-memory `scuba_config` rule view is a separate
-product integration; collection alone does not enable the assessment.
+SS 2.1 remains not assessed without a verified sensitive-user list. A verified
+list reaches its private in-memory rule view; a decision also needs usable
+policy evidence. The current collector does not select `TargetedUsersToProtect`,
+so target membership cannot yet establish a met verdict. SS 2.3 uses the separate
+`PartnerDomains` input; integrating it into the rule view is a product change.
 
 ### Local partner domains for SS 2.3
 
@@ -68,8 +68,10 @@ a JSON array of strings, at most 256 KiB and 10,000 entries. Blank text lines
 are ignored; comments and `name;domain` are rejected. Entries are trimmed,
 lower-cased, stripped of one trailing dot, sorted and de-duplicated. Use ASCII
 DNS names with at least one dot, labels 1-63 characters and total length at most
-253; no leading or trailing hyphen. Non-ASCII input is rejected; ASCII punycode
-is accepted. Do not use e-mail addresses, URLs, `@` prefixes or wildcards.
+253; no leading or trailing hyphen, and the last label cannot be all digits or
+`0x` followed by hexadecimal digits.
+Non-ASCII input is rejected; ASCII punycode is accepted. Do not use e-mail
+addresses, URLs, `@` prefixes or wildcards.
 Explicit subdomains are literal domains; SS 2.3 v3.9.1 matches exact strings.
 Parser errors show a fixed message; direct validation can identify the line.
 Neither exposes entries or the source path.
@@ -89,7 +91,8 @@ list and key. The sibling input is preserved. An existing HMAC with an unusable
 key stops the run. Support can use
 `azure_tenant_audit.partner_domains.verify_partner_domains(run_dir)` locally;
 it checks consistency with the private files, not authenticity against someone
-able to rewrite them. The output contract describes the schema handoff to product.
+able to rewrite them. The manifest schema defines this field; the output contract
+describes its constraints.
 
 ### Delegated Read Login
 

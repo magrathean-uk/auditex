@@ -69,6 +69,9 @@ def test_normalisation_and_hash(tmp_path, content):
     (b"ok.example.invalid\n.example.invalid", 2),
     (b"ok.example.invalid\nexample..invalid", 2),
     (b"ok.example.invalid\nexample.invalid..", 2),
+    (b"ok.example.invalid\n1.2.3.4", 2),
+    (b"ok.example.invalid\nexample.123", 2),
+    (b"ok.example.invalid\nexample.0.", 2),
     (b"ok.example.invalid\nexample", 2),
     (b"ok.example.invalid\nexample invalid", 2),
     (b"ok.example.invalid\n" + b"a" * 64 + b".invalid", 2),
@@ -91,13 +94,25 @@ def test_invalid_file_is_sanitised(tmp_path, content, line):
 
 
 @pytest.mark.parametrize("domain", [
-    "xn--bcher-kva.invalid", "sub.partner.example.invalid", "0.1", "a" * 63 + ".invalid",
+    "xn--bcher-kva.invalid", "sub.partner.example.invalid", "0.1a", "1.2.3.example", "a" * 63 + ".invalid",
     ".".join(["a" * 63] * 3 + ["a" * 61]),
 ])
 def test_valid_dns_boundaries(tmp_path, domain):
     path = tmp_path / "input.txt"
     path.write_text(domain.upper() + ".")
     assert load_partner_domains(path).domains == (domain,)
+
+
+@pytest.mark.parametrize("last_label", ["0x", "0x1", "0xabcd", "0XABC"])
+def test_numeric_suffix_and_trailing_dot_ip_are_rejected(tmp_path, last_label):
+    path = tmp_path / "input.txt"
+    for domain in (f"example.{last_label}", "1.2.3.4."):
+        path.write_text(domain)
+        with pytest.raises(PartnerDomainsError, match="invalid DNS domain name"):
+            load_partner_domains(path)
+    for domain in ("0x1.example",):
+        path.write_text(domain)
+        assert load_partner_domains(path).domains == (domain,)
 
 
 def test_regular_file_only_and_read_once(tmp_path, monkeypatch):
@@ -192,7 +207,7 @@ def test_partner_domain_prefix_redaction(equals):
 
 @pytest.mark.parametrize("guided", [False, True])
 @pytest.mark.parametrize("equals", [False, True])
-def test_partner_domain_prefix_rejected_before_file_open(tmp_path, monkeypatch, guided, equals):
+def test_partner_domain_prefix_rejected_before_file_open(tmp_path, monkeypatch, capsys, caplog, guided, equals):
     from auditex.guided import build_guided_parser
 
     path = tmp_path / (CANARIES[0] + ".txt")
@@ -215,8 +230,128 @@ def test_partner_domain_prefix_rejected_before_file_open(tmp_path, monkeypatch, 
         with pytest.raises(SystemExit) as caught:
             parser.parse_args(["--out", str(out), *argv])
         assert caught.value.code == 2
+        diagnostic = capsys.readouterr().err + caplog.text
+        assert "error: invalid arguments" in diagnostic
+        assert str(path) not in diagnostic
+        assert path.name not in diagnostic
         assert opened == []
         assert not out.exists()
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "product", "product-run", "guided"])
+@pytest.mark.parametrize("equals", [False, True])
+def test_partner_domain_rejected_prefix_keeps_stderr_private(tmp_path, capsys, caplog, entrypoint, equals):
+    from auditex.cli import main as product_main
+
+    path = tmp_path / "confidential partner.example.invalid.json"
+    option = "--partner-domain"
+    argv = [option + "=" + str(path)] if equals else [option, str(path)]
+    command = cli.main if entrypoint == "engine" else product_main
+    if entrypoint == "product-run":
+        argv = ["run", *argv]
+    elif entrypoint == "guided":
+        argv = ["guided-run", *argv]
+    with pytest.raises(SystemExit) as caught:
+        command(argv)
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err + caplog.text
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
+
+
+def test_partner_domain_parser_redacts_escaped_value_in_other_diagnostics(tmp_path, capsys):
+    from auditex.guided import build_guided_parser
+
+    path = tmp_path / "confidential\npartner.example.invalid.json"
+    with pytest.raises(SystemExit) as caught:
+        build_guided_parser().parse_args(["--partner-domain", str(path), "--flow", str(path)])
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
+    assert repr(path.name)[1:-1] not in diagnostic
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "guided"])
+@pytest.mark.parametrize("equals", [False, True])
+@pytest.mark.parametrize("option", [
+    "--partner-domian", "--partner-domains-file", "--Partner-Domains",
+    "--partner\u2010domains", "-partner-domains",
+])
+def test_misspelled_partner_domain_option_hides_path(tmp_path, capsys, entrypoint, equals, option):
+    from auditex.cli import main as product_main
+
+    path = tmp_path / "confidential partner domain list.json"
+    argv = [f"{option}={path}"] if equals else [option, str(path)]
+    command = cli.main if entrypoint == "engine" else product_main
+    if entrypoint == "guided":
+        argv = ["guided-run", *argv]
+    with pytest.raises(SystemExit) as caught:
+        command(argv)
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "guided"])
+@pytest.mark.parametrize("equals", [False, True])
+@pytest.mark.parametrize("placement", ["after-option", "after-double-dash", "repeated"])
+def test_rejected_partner_domain_path_is_hidden_in_any_position(tmp_path, capsys, entrypoint, equals, placement):
+    from auditex.cli import main as product_main
+
+    path = tmp_path / "confidential partner domain list.json"
+    extra = [f"--partner-domian={path}"] if equals else ["--partner-domian", str(path)]
+    prefixes = {
+        "after-option": ["--tenant-name", "constructed"],
+        "after-double-dash": ["--"],
+        "repeated": extra,
+    }
+    argv = [*prefixes[placement], *extra]
+    command = cli.main if entrypoint == "engine" else product_main
+    if entrypoint == "guided":
+        argv = ["guided-run", *argv]
+    with pytest.raises(SystemExit) as caught:
+        command(argv)
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "guided"])
+def test_short_partner_domain_value_does_not_corrupt_error(capsys, entrypoint):
+    from auditex.cli import main as product_main
+
+    command = cli.main if entrypoint == "engine" else product_main
+    prefix = [] if entrypoint == "engine" else ["guided-run"]
+    with pytest.raises(SystemExit) as caught:
+        command([*prefix, "--partner-dom", "r", "--bogus"])
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert "--bogus" not in diagnostic
+
+
+@pytest.mark.parametrize("entrypoint", ["probe", "google"])
+@pytest.mark.parametrize("equals", [False, True])
+def test_other_product_parsers_hide_rejected_partner_domain_path(tmp_path, capsys, entrypoint, equals):
+    from auditex.cli import main as product_main
+
+    path = tmp_path / "confidential partner domain list.json"
+    prefix = ["probe", "live", "--tenant-name", "t"] if entrypoint == "probe" else ["google", "run"]
+    extra = [f"--partner-domains={path}"] if equals else ["--partner-domains", str(path)]
+    with pytest.raises(SystemExit) as caught:
+        product_main([*prefix, *extra])
+    assert caught.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert str(path) not in diagnostic
+    assert path.name not in diagnostic
 
 
 def test_recording_private_artifact_never_reads_hashes_or_sizes_it(tmp_path, monkeypatch):
@@ -239,7 +374,7 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
     from auditex import cli as product_cli
     from auditex import guided
 
-    path = tmp_path / "input.txt"
+    path = tmp_path / "PRIVATE-PARTNER-FILENAME-1234.txt"
     path.write_text(CANARIES[0] + "\nname;" + CANARIES[1] + ";bad")
     monkeypatch.setenv("AUDITEX_PARTNER_DOMAINS_FILE", str(path))
 
@@ -258,12 +393,51 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
         assert caught.value.code == 2
     captured = capsys.readouterr()
     output = captured.out + captured.err + caplog.text
+    assert "line 2" in output
     if entrypoint in {"engine", "product"}:
-        assert "error: invalid arguments" in output
-    else:
-        assert "line 2" in output
+        assert "usage:" in captured.err
+        assert "error: Partner-domains input: line 2:" in captured.err
     assert all(domain not in output for domain in CANARIES)
+    assert str(path) not in output and path.name not in output
     assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("entrypoint", ["engine", "product"])
+@pytest.mark.parametrize("input_kind", ["sensitive-users", "partner-domains"])
+@pytest.mark.parametrize("case,reason", [
+    ("value", "line 2:"),
+    ("json", "line 2: invalid JSON array"),
+    ("utf8", "line 2: expected UTF-8"),
+    ("missing", "line 1: unable to read a regular local file"),
+])
+def test_operator_validation_diagnostics_hide_source_values_and_path(
+    tmp_path, monkeypatch, capsys, entrypoint, input_kind, case, reason
+):
+    from auditex import cli as product_cli
+
+    path = tmp_path / "PRIVATE-SOURCE-FILENAME-1234.txt"
+    secret = "PRIVATE-SOURCE-VALUE-1234"
+    if case == "value":
+        first = "valid@example.invalid" if input_kind == "sensitive-users" else "valid.example.invalid"
+        path.write_text(f"{first}\n{secret};invalid;entry")
+    elif case == "json":
+        path.write_text(f'["{secret}",\n]')
+    elif case == "utf8":
+        path.write_bytes(secret.encode() + b"\n\xff")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("collection reached after invalid input")
+
+    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", forbidden)
+    argv = [f"--{input_kind}", str(path)]
+    with pytest.raises(SystemExit) as caught:
+        cli.main(argv) if entrypoint == "engine" else product_cli.main(["run", *argv])
+    captured = capsys.readouterr()
+    diagnostic = captured.out + captured.err
+    assert caught.value.code == 2
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+    assert "usage:" in captured.err and f"error: {input_kind.capitalize()} input: {reason}" in captured.err
+    assert secret not in diagnostic and str(path) not in diagnostic and path.name not in diagnostic
 
 
 @pytest.mark.parametrize("entrypoint", ["engine", "product"])
@@ -647,13 +821,8 @@ def test_inputs_use_separate_keys_and_clear_independently(tmp_path, clear_first)
 
 @pytest.fixture
 def partner_manifest_schema():
-    # Schema files are product-owned (orchestrator amendment 5). Keep the exact
-    # acceptance vectors ready for product integration without editing schemas/.
     schema = json.loads(Path("schemas/run_manifest.schema.json").read_text())
-    properties = schema["properties"]["operator_inputs"]["properties"]
-    if "partner_domains" not in properties:
-        pytest.skip("partner_domains schema integration is reserved for product")
-    return properties["partner_domains"]
+    return schema["properties"]["operator_inputs"]["properties"]["partner_domains"]
 
 
 @pytest.mark.parametrize("metadata", [

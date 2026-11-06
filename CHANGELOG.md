@@ -12,7 +12,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Guard MCP bundle artefacts and customer-pack source reads against unsafe types and links, including shareable normalised report sections; bound data reads, stream bundle hashing without a size cap, and inspect SQLite indexes in private temporary copies while preserving legacy WAL reads.
 - Keep all `AUDITEX_*` variables and operator-input flags out of MCP offline validation sample runs, and close child stdin; real audits retain their environment.
 
-- Let SS 2.1 decide from verified SensitiveUsers operator input in its private in-memory rule view, including offline bundle replay; retain existing not-assessed outcomes for missing or unusable input. Addresses never enter model views or assessment outputs. Current collection still excludes `TargetedUsersToProtect`, so proving met from target membership needs a separate collector/privacy change. SS 2.3 still needs PartnerDomains; the ScubaGear export path is unchanged.
+- Let SS 2.1 decide from verified SensitiveUsers operator input in its private in-memory rule view, including offline bundle replay; retain existing not-assessed outcomes for missing or unusable input. Addresses never enter model views or assessment outputs. Current collection still excludes `TargetedUsersToProtect`, so proving met from target membership needs a separate collector/privacy change. SS 2.3 still needs PartnerDomains in its rule view; the ScubaGear export path is unchanged.
 - Retain exit-0 JSON evidence with stderr warnings in the shared PowerShell adapter.
   Every adapter command uses `$ErrorActionPreference = 'Stop'`, including
   Microsoft365DSC and lab-only response actions; empty stdout with stderr remains
@@ -25,7 +25,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   explicit app-only names omitted from delegated setup commands, and print session
   and resolver notices before standalone probe reads. Clarify the permission
   catalogue's `ipps_session_not_opened` skip.
-- Add `--partner-domains` and `AUDITEX_PARTNER_DOMAINS_FILE` for bounded local customer-confidential SS 2.3 input, with sanitised domain validation, private bundle storage, separate per-run HMAC key, resume consistency and report/export/pack exclusions; schema and in-memory projection integration remain product-owned.
+- Add `--partner-domains` and `AUDITEX_PARTNER_DOMAINS_FILE` for bounded local customer-confidential SS 2.3 input, with sanitised domain validation, private bundle storage, separate per-run HMAC key, resume consistency and report/export/pack exclusions; the manifest schema defines the field, while in-memory rule-view projection integration remains product-owned.
 
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
 - Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`. SS 2.1 private rule-view integration is described above.

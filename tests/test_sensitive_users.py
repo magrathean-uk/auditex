@@ -313,7 +313,7 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
     from auditex import cli as product_cli
     from auditex import guided
 
-    path = tmp_path / "input.txt"
+    path = tmp_path / "PRIVATE-SENSITIVE-FILENAME-1234.txt"
     path.write_text(CANARIES[0] + "\nname;" + CANARIES[1] + ";bad")
     monkeypatch.setenv("AUDITEX_SENSITIVE_USERS_FILE", str(path))
 
@@ -332,11 +332,12 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
         assert caught.value.code == 2
     captured = capsys.readouterr()
     output = captured.out + captured.err + caplog.text
+    assert "line 2" in output
     if entrypoint in {"engine", "product"}:
-        assert "error: invalid arguments" in output
-    else:
-        assert "line 2" in output
+        assert "usage:" in captured.err
+        assert "error: Sensitive-users input: line 2:" in captured.err
     assert all(address not in output for address in CANARIES)
+    assert str(path) not in output and path.name not in output
     assert not (tmp_path / "out").exists()
 
 

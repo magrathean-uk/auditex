@@ -106,8 +106,10 @@ are ignored; `#` comment lines and `name;domain` entries are rejected. Normalisa
 trims whitespace, lower-cases, strips one trailing dot, then sorts unique entries.
 A domain must have at least one dot, at most 253 characters after normalisation,
 and labels of 1-63 ASCII letters, digits or hyphens, without leading or trailing
-hyphens. Non-ASCII domains are rejected with a sanitised error; supply an ASCII
-DNS name (punycode is accepted). E-mail addresses, leading `@`, URLs and wildcards
+hyphens; the final label cannot consist entirely of digits or match `0x` followed
+by hexadecimal digits. Non-ASCII domains are
+rejected with a sanitised error; supply an ASCII DNS name (punycode is accepted).
+E-mail addresses, leading `@`, URLs and wildcards
 are rejected. An explicit subdomain is a literal domain, without expansion.
 This follows v3.9.1 SS 2.3's `PartnerDomains` shape and exact trimmed, lower-case
 set comparison; it defines no IDNA conversion or wildcard semantics.
@@ -150,13 +152,11 @@ manifest count and HMAC against the private files using `hmac.compare_digest`.
 It returns false for absent, malformed or inconsistent inputs. This establishes
 consistency, not authenticity against someone able to rewrite all three files.
 
-Schema integration is reserved for product: add
-`properties.operator_inputs.properties.partner_domains` to
-`schemas/run_manifest.schema.json`, identical to `sensitive_users` (boolean
+`schemas/run_manifest.schema.json` defines
+`properties.operator_inputs.properties.partner_domains`, identical to `sensitive_users` (boolean
 `supplied`; when true require positive integer `count` and a lower-case 64-hex
-`hmac_sha256`; when false forbid both; reject other properties). Until that
-product-owned definition is integrated, the existing schema does not constrain
-this field, and the partner-domain schema vectors are skipped.
+`hmac_sha256`; when false forbid both; reject other properties). Integration of
+the in-memory rule-view projection remains a separate product change.
 
 ## Contract history
 

@@ -799,18 +799,18 @@ def _parse_expected_digests(
             path, digest = "", value
         try:
             wanted = normalize_digest(digest)
-        except ValueError as exc:
-            parser.error(f"--expect-manifest-sha256 {value!r}: {exc}")
+        except ValueError:
+            parser.error_prevalidated("--expect-manifest-sha256: expected a 64-character hexadecimal digest")
         if path:
             run_dir = resolved.get(os.path.realpath(path))
             if run_dir is None:
-                parser.error(f"--expect-manifest-sha256 names {path}, which is not one of the runs given")
+                parser.error_prevalidated("--expect-manifest-sha256: run is not one of the runs given")
         elif len(run_dirs) == 1:
             run_dir = run_dirs[0]
         else:
-            parser.error("--expect-manifest-sha256 needs RUN_DIR=DIGEST when more than one run is given")
+            parser.error_prevalidated("--expect-manifest-sha256: needs RUN_DIR=DIGEST when more than one run is given")
         if run_dir in expected and expected[run_dir] != wanted:
-            parser.error(f"--expect-manifest-sha256 gives two different digests for {run_dir}")
+            parser.error_prevalidated("--expect-manifest-sha256: conflicting digests for one run")
         expected[run_dir] = wanted
     return expected
 

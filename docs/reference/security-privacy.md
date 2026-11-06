@@ -175,8 +175,9 @@ Credentials are redacted before those exemptions.
 Syntax errors in the product CLIs (`azure-tenant-audit`, `auditex`, `auditex-mcp`
 and the vendored `tenant-bootstrap` package copy) print usage and a fixed error
 message without echoing supplied argument values. The lab scripts under
-`tenant-bootstrap/scripts` and `benchmarks` are outside this guarantee. Use
-`--help` to inspect the available options.
+`tenant-bootstrap/scripts` and `benchmarks` are outside this guarantee.
+Operator-input validation can also show a line number and a fixed reason,
+without the source value or path. Use `--help` to inspect options.
 Collected evidence and raw inputs to parsers and error classifiers retain their
 original values. This is a boundary for command diagnostics, not a guarantee that
 all other exception messages or API logs are anonymised.
@@ -319,9 +320,11 @@ before collection, capped at 256 KiB and 10,000 entries; parser errors show a
 fixed message, while direct validation can name a physical line and fixed reason.
 Neither exposes source content or its path. UTF-8/BOM text or a JSON string array is
 normalised into bare sorted unique ASCII domains, lower-case with one trailing
-dot removed. No comments, e-mail addresses, URLs, wildcards or non-ASCII input;
-ASCII punycode is accepted. SS 2.3 v3.9.1 uses exact domain matching, including
-explicit subdomains, without IDNA conversion or subdomain expansion.
+dot removed and a final label that is neither all digits nor `0x` followed by
+zero or more hexadecimal digits. No comments, e-mail
+addresses, URLs, wildcards or non-ASCII input; ASCII punycode is accepted.
+SS 2.3 v3.9.1 uses exact domain matching, including explicit subdomains, without
+IDNA conversion or subdomain expansion.
 
 The sole persisted list is `operator-inputs/partner-domains.txt` (0600, directory
 0700). `operator_inputs.partner_domains` records only `supplied`, and when true
@@ -342,7 +345,8 @@ existing HMAC with an unusable key is an error. The local helper
 `azure_tenant_audit.partner_domains.verify_partner_domains(run_dir)` verifies count
 and HMAC consistency; it cannot establish authenticity against someone able to
 replace the manifest and both private files. Treat the list and key as private
-run material. See the output contract for the product-owned schema integration.
+run material. The manifest schema defines this field; see the output contract for
+its constraints. In-memory rule-view projection integration remains product-owned.
 
 ## Output redaction boundary
 

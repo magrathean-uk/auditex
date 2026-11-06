@@ -107,6 +107,12 @@ class DiagnosticRedactingArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         self.exit(2)
 
+    def error_prevalidated(self, message: str) -> NoReturn:
+        """Print an already value-free validation message, never raw argv or paths."""
+        self.print_usage(sys.stderr)
+        self._print_public_message(f"error: {message}\n", sys.stderr)
+        _raise_without_context(SystemExit(2))
+
 
 def build_argument_parser(*args: Any, **kwargs: Any) -> DiagnosticRedactingArgumentParser:
     """Construct every public parser and subparser with the same privacy policy."""

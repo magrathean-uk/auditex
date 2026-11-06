@@ -739,6 +739,34 @@ def test_gate_drift_and_compare_need_the_run_named_with_each_digest(pair: tuple[
         assert "RUN_DIR=DIGEST" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("case,reason", [
+    ("malformed", "expected a 64-character hexadecimal digest"),
+    ("unknown", "run is not one of the runs given"),
+    ("unnamed", "needs RUN_DIR=DIGEST when more than one run is given"),
+    ("conflict", "conflicting digests for one run"),
+])
+def test_digest_usage_errors_are_specific_and_hide_supplied_values(case, reason, capsys):
+    parser = auditex_cli._build_gate_parser()
+    run = "/PRIVATE-RUN-PATH-1234/PRIVATE-RUN-NAME-1234"
+    other = "/PRIVATE-OTHER-PATH-1234/PRIVATE-OTHER-NAME-1234"
+    first, second = "a" * 64, "b" * 64
+    values = {
+        "malformed": ["PRIVATE-INVALID-DIGEST-1234"],
+        "unknown": [f"{other}={first}"],
+        "unnamed": [first],
+        "conflict": [f"{run}={first}", f"{run}={second}"],
+    }[case]
+    with pytest.raises(SystemExit) as caught:
+        auditex_cli._parse_expected_digests(parser, values, [run, "/another-run"])
+    captured = capsys.readouterr()
+    assert caught.value.code == 2
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+    assert "usage:" in captured.err
+    assert f"error: --expect-manifest-sha256: {reason}" in captured.err
+    for secret in (run, Path(run).name, other, Path(other).name, first, second, "PRIVATE-INVALID-DIGEST-1234"):
+        assert secret not in captured.out + captured.err
+
+
 # ---- h. a pack carries no absolute path of the operator's machine, in the run manifest either -----------------------
 
 

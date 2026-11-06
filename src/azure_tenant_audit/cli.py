@@ -1030,7 +1030,7 @@ def main(
         sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(args.sensitive_users)
         partner_domains = partner_domains if partner_domains is not None else load_partner_domains(args.partner_domains)
     except (SensitiveUsersError, PartnerDomainsError) as exc:
-        parser.error(str(exc))
+        parser.error_prevalidated(str(exc))
 
     args.tenant_id = args.tenant_id or None
     args.client_id = args.client_id or None

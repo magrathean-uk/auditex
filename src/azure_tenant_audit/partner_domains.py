@@ -20,6 +20,7 @@ BUNDLE_PATH = "operator-inputs/partner-domains.txt"
 KEY_PATH = "operator-inputs/partner-domains.key"
 ENV_VAR = "AUDITEX_PARTNER_DOMAINS_FILE"
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.ASCII)
+_HEX_LABEL = re.compile(r"0x[0-9a-f]*", re.ASCII)
 
 
 class PartnerDomainsError(ValueError):
@@ -142,9 +143,10 @@ def _normalise(entry: str, line: int) -> str:
     if not domain.isascii():
         raise _error(line, "non-ASCII domain; use an ASCII DNS name")
     domain = domain.lower().removesuffix(".")
+    labels = domain.split(".")
     if (
-        len(domain) > 253 or "." not in domain
-        or not all(_LABEL.fullmatch(label) for label in domain.split("."))
+        len(domain) > 253 or len(labels) < 2 or labels[-1].isdigit() or _HEX_LABEL.fullmatch(labels[-1])
+        or not all(_LABEL.fullmatch(label) for label in labels)
     ):
         raise _error(line, "invalid DNS domain name")
     return domain

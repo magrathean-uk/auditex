@@ -74,6 +74,21 @@ def test_every_parser_rejects_sensitive_abbreviations(builder, capsys, monkeypat
     assert not list(tmp_path.rglob("run-manifest.json"))
 
 
+@pytest.mark.parametrize("builder", [engine_cli.build_parser, build_guided_parser])
+@pytest.mark.parametrize("flag", sorted(SENSITIVE_ARG_FLAGS))
+@pytest.mark.parametrize("inline", [False, True])
+def test_audit_parsers_redact_rejected_sensitive_arguments(builder, flag, inline, capsys) -> None:
+    option = _abbreviation(flag)
+    canary = "constructed-private-value-zz9"
+    argv = [f"{option}={canary}"] if inline else [option, canary]
+    with pytest.raises(SystemExit) as exc:
+        builder().parse_args(argv)
+    assert exc.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert "error: invalid arguments" in diagnostic
+    assert canary not in diagnostic
+
+
 @pytest.mark.parametrize("flag", SENSITIVE_FLAGS)
 @pytest.mark.parametrize("inline", [False, True])
 @pytest.mark.parametrize("entry", ["engine", "legacy", "run", "guided", "probe", "login", "import-token", "inspect-token", "google-run", "google-probe", "google-doctor", "setup-google", "response", "mcp", "setup", "doctor", "training"])
