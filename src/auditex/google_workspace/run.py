@@ -63,7 +63,7 @@ def _merged_fixture_provenance(
             else:
                 merged[key] = value
     return merged or None
-_SENSITIVE_COMMAND_FLAGS = {"--service-account-key", "--oauth-client", "--token-cache"}
+_SENSITIVE_COMMAND_FLAGS = {"--sensitive-users", "--partner-domains", "--service-account-key", "--oauth-client", "--token-cache"}
 
 
 @dataclass(frozen=True)

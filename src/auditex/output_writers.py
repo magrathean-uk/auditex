@@ -132,6 +132,14 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.graph:*", "private", "read-only Microsoft Graph requests and token exchange (credentials stay in the request)"),
     SinkEntry("azure_tenant_audit.output:*", "private", "run bundle working files and the private audit log"),
     SinkEntry(
+        "azure_tenant_audit.partner_domains:load_partner_domains", "private",
+        "read-only open of the operator's private input; the scanner treats the flags variable as a write",
+    ),
+    SinkEntry(
+        "azure_tenant_audit.partner_domains:read_partner_domains_key", "private",
+        "read-only open of the private key below operator-inputs; the scanner treats the flags variable as a write",
+    ),
+    SinkEntry(
         "azure_tenant_audit.sensitive_users:load_sensitive_users", "private",
         "read-only open of the operator's own sensitive-users input before collection (the scan reads the flags variable as a write); nothing is written or returned to a client",
     ),

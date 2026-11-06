@@ -310,6 +310,40 @@ Notification preview is local by default. `auditex notify send --execute`
 sends the chosen notification to an external sink. Review the recipient and
 payload separately from pack verification before using `--execute`.
 
+### Partner domains: customer-confidential operator input
+
+Partner domains are not personal data, but are customer-confidential. Microsoft
+365 audit commands, guided flows and offline replay accept `--partner-domains FILE`
+or `AUDITEX_PARTNER_DOMAINS_FILE` (flag wins). Local regular files only, read once
+before collection, capped at 256 KiB and 10,000 entries; parser errors show a
+fixed message, while direct validation can name a physical line and fixed reason.
+Neither exposes source content or its path. UTF-8/BOM text or a JSON string array is
+normalised into bare sorted unique ASCII domains, lower-case with one trailing
+dot removed. No comments, e-mail addresses, URLs, wildcards or non-ASCII input;
+ASCII punycode is accepted. SS 2.3 v3.9.1 uses exact domain matching, including
+explicit subdomains, without IDNA conversion or subdomain expansion.
+
+The sole persisted list is `operator-inputs/partner-domains.txt` (0600, directory
+0700). `operator_inputs.partner_domains` records only `supplied`, and when true
+`count` and `hmac_sha256`, covering the normalised newline-joined UTF-8 list
+without its final newline. A separate random 32-byte key per input per run is
+stored only at `operator-inputs/partner-domains.key` (raw bytes, 0600). It is never
+shared with sensitive users. Both paths are marked `redacted_artifacts`, excluded
+from evidence and its index, AI context, logs, reports, exports and customer packs.
+Bundle hashes list exact-path `redacted_operator_input` exclusions without hashes
+or byte lengths, including the shared `.gitignore`; the directory is not blanket
+excluded. Source paths are redacted in command arguments. Nothing is uploaded;
+rule-view use must be memory-only, with projection integration owned by product.
+Demos never resolve this input.
+
+Resume retains a valid key while replacing the list; clearing removes this input
+and key, preserving the sibling input and shared ignore file when needed. An
+existing HMAC with an unusable key is an error. The local helper
+`azure_tenant_audit.partner_domains.verify_partner_domains(run_dir)` verifies count
+and HMAC consistency; it cannot establish authenticity against someone able to
+replace the manifest and both private files. Treat the list and key as private
+run material. See the output contract for the product-owned schema integration.
+
 ## Output redaction boundary
 
 The local rendered report retains the original values. Shareable reports and

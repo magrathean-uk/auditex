@@ -69,6 +69,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
         'azure_tenant_audit.output:AuditWriter.write_chunk_records',
         'azure_tenant_audit.output:AuditWriter.write_export_records',
         'azure_tenant_audit.output:AuditWriter.write_index_records',
+        'azure_tenant_audit.output:AuditWriter.write_partner_domains',
         'azure_tenant_audit.output:AuditWriter.write_sensitive_users',
         'azure_tenant_audit.output:_open_private',
     ),
