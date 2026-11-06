@@ -104,6 +104,12 @@ assessment files must sit under it. The shipped defaults for `config_path`,
 `auditex_setup_guide` path arguments are rendered into guide text and are never
 opened.
 
+The MCP offline validation tool removes all `AUDITEX_*` variables from its
+sample-run process, retains other environment variables unchanged, and closes
+the child's standard input. It also drops the registered operator-input CLI
+flags. Real-audit tools retain their environment; direct CLI offline replay can
+still use operator inputs deliberately.
+
 Not enforced by these layers: Google Workspace SDK calls are not routed through
 a method check and write no per-call audit events, so Google bundles say
 `observation_basis: "coverage_ledger_only"` and rely on read-only scopes and the

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,6 +21,32 @@ OPERATOR_ARGS = {
     "--tenant-name", "--tenant-id", "--out", "--run-name",
     "--target", "--subject", "--domain", "--run-dir",
 }
+# Extend this registry when adding an operator input, including inputs whose
+# environment name does not end in _FILE. Values are their CLI flag forms.
+OPERATOR_INPUTS = {
+    "AUDITEX_SENSITIVE_USERS_FILE": "--sensitive-users",
+    "AUDITEX_PARTNER_DOMAINS_FILE": "--partner-domains",
+    "AUDITEX_BREAK_GLASS_ACCOUNTS": "--break-glass-accounts",
+}
+# Offline validation needs no AUDITEX_* environment settings. Any future
+# exception must be deliberately added here after reviewing its effect.
+OFFLINE_AUDITEX_ENV_ALLOWLIST: frozenset[str] = frozenset()
+
+
+def _without_operator_input_args(command: list[str]) -> list[str]:
+    flags = set(OPERATOR_INPUTS.values())
+    result: list[str] = []
+    index = 0
+    while index < len(command):
+        name, separator, _ = command[index].partition("=")
+        if name in flags:
+            index += 1
+            if not separator and index < len(command) and not command[index].startswith("-"):
+                index += 1
+        else:
+            result.append(command[index])
+            index += 1
+    return result
 
 
 def _sensitive_values(command: list[str]) -> set[str]:
@@ -52,7 +79,17 @@ def _redact_text(value: str | bytes, sensitive_values: set[str], operator_values
     return text
 
 
-def run_cli_command(command: list[str], cwd: str | None = None, *, timeout_seconds: int = 900) -> dict[str, Any]:
+def run_cli_command(
+    command: list[str], cwd: str | None = None, *, timeout_seconds: int = 900,
+    scrub_operator_inputs: bool = False,
+) -> dict[str, Any]:
+    child_env = None
+    if scrub_operator_inputs:
+        command = _without_operator_input_args(command)
+        child_env = {
+            key: value for key, value in os.environ.items()
+            if not key.startswith("AUDITEX_") or key in OFFLINE_AUDITEX_ENV_ALLOWLIST
+        }
     sensitive_values = _sensitive_values(command)
     operator_values = collect_sensitive_argv_values(command, sensitive_flags=OPERATOR_ARGS)
     for path in collect_sensitive_argv_values(command, sensitive_flags={"--out", "--run-dir"}):
@@ -68,6 +105,8 @@ def run_cli_command(command: list[str], cwd: str | None = None, *, timeout_secon
             capture_output=True,
             check=False,
             timeout=timeout_seconds,
+            env=child_env,
+            stdin=subprocess.DEVNULL if scrub_operator_inputs else None,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""

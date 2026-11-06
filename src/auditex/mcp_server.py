@@ -881,7 +881,7 @@ def tool_handlers() -> dict[str, Any]:
             offline=True,
             sample_path=sample_path,
         )
-        return run_cli_command(command)
+        return run_cli_command(command, scrub_operator_inputs=True)
 
     def auditex_run_delegated_audit(
         tenant_name: str,
