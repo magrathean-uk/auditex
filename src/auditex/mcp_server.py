@@ -12,7 +12,7 @@ from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.profiles import PROFILES
 from azure_tenant_audit.adapters import list_adapters as _list_adapters
 from azure_tenant_audit.citations import build_citation_summary
-from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, redact_payload
+from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, assert_snapshot_stable, redact_payload, snapshot_run
 from azure_tenant_audit.response import response_actions
 from azure_tenant_audit.contracts import contract_schema_manifest
 from .rules import list_rule_inventory
@@ -512,7 +512,10 @@ def build_response_command(
 def summarize_run(run_dir: str) -> dict[str, Any]:
     """The run summary an MCP client receives: the shareable redaction over the complete payload (its citation
     summary re-derived). The operator's own terminal reads ``summarize_run_raw``."""
-    return redact_payload(summarize_run_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    before = snapshot_run(run_dir)
+    result = redact_payload(summarize_run_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def summarize_run_raw(run_dir: str) -> dict[str, Any]:
@@ -561,14 +564,21 @@ def summarize_run_raw(run_dir: str) -> dict[str, Any]:
 
 
 def diff_runs(run_a: str, run_b: str, classic: bool = False) -> dict[str, Any]:
-    # Discover normalised evidence before the diff reader visits it.
+    # Discover normalised evidence before the diff reader visits it and retain both snapshots until after redaction.
+    before = [(run_dir, snapshot_run(run_dir)) for run_dir in (run_a, run_b)]
     redact_payload({}, run_dirs=[run_a, run_b], profile=PROFILE_SHAREABLE)
-    return redact_payload(diff_run_directories(run_a, run_b, classic=classic), run_dirs=[run_a, run_b], profile=PROFILE_SHAREABLE)
+    result = redact_payload(diff_run_directories(run_a, run_b, classic=classic), run_dirs=[run_a, run_b], profile=PROFILE_SHAREABLE)
+    for run_dir, snapshot in before:
+        assert_snapshot_stable(run_dir, snapshot)
+    return result
 
 
 def list_blockers(run_dir: str) -> dict[str, Any]:
     """The blockers an MCP client receives (shareable redaction); the operator's terminal reads ``list_blockers_raw``."""
-    return redact_payload(list_blockers_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    before = snapshot_run(run_dir)
+    result = redact_payload(list_blockers_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def list_blockers_raw(run_dir: str) -> dict[str, Any]:
@@ -595,10 +605,14 @@ def list_blockers_raw(run_dir: str) -> dict[str, Any]:
 def compare_many_runs(run_dirs: list[str], allow_cross_tenant: bool = False, classic: bool = False) -> dict[str, Any]:
     from .compare import compare_runs
 
+    before = [(run_dir, snapshot_run(run_dir)) for run_dir in run_dirs]
     redact_payload({}, run_dirs=run_dirs, profile=PROFILE_SHAREABLE)
-    return redact_payload(
+    result = redact_payload(
         compare_runs(run_dirs, allow_cross_tenant=allow_cross_tenant, classic=classic), run_dirs=list(run_dirs), profile=PROFILE_SHAREABLE
     )
+    for run_dir, snapshot in before:
+        assert_snapshot_stable(run_dir, snapshot)
+    return result
 
 
 def normalize_external_assessment(source: str, input_path: str, tenant_id: str | None = None) -> dict[str, Any]:
@@ -612,13 +626,17 @@ def compare_external_assessment_files(
 ) -> dict[str, Any]:
     from .assessment_review import compare_external_assessments
 
+    before = snapshot_run(run_dir) if run_dir else None
     if run_dir:
         redact_payload({}, run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
-    return redact_payload(
+    result = redact_payload(
         compare_external_assessments(assessment_paths, expected_tenant_id=expected_tenant_id, run_dir=run_dir),
         run_dirs=[run_dir] if run_dir else [],
         profile=PROFILE_SHAREABLE,
     )
+    if run_dir and before is not None:
+        assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def preview_report(
@@ -643,32 +661,47 @@ def preview_report(
 def analyze_report(run_dir: str) -> dict[str, Any]:
     from .reporting import analyze_report as _analyze_report
 
-    return redact_payload(_analyze_report(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    before = snapshot_run(run_dir)
+    result = redact_payload(_analyze_report(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def api_inventory(run_dir: str) -> dict[str, Any]:
     from .reporting import api_call_inventory as _api_call_inventory
 
-    return redact_payload(_api_call_inventory(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    before = snapshot_run(run_dir)
+    result = redact_payload(_api_call_inventory(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def permissions_ledger(run_dir: str) -> dict[str, Any]:
     from .reporting import permissions_ledger as _permissions_ledger
 
-    return redact_payload(_permissions_ledger(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    before = snapshot_run(run_dir)
+    result = redact_payload(_permissions_ledger(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def proof_table(run_dir: str) -> dict[str, Any]:
     from .reporting import proof_table as _proof_table
 
-    return redact_payload(_proof_table(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    before = snapshot_run(run_dir)
+    result = redact_payload(_proof_table(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def enterprise_handoff(run_dir: str) -> dict[str, Any]:
     from .reporting import enterprise_handoff as _enterprise_handoff
 
+    before = snapshot_run(run_dir)
     redact_payload({}, run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
-    return redact_payload(_enterprise_handoff(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    result = redact_payload(_enterprise_handoff(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
+    assert_snapshot_stable(run_dir, before)
+    return result
 
 
 def verify_customer_pack(

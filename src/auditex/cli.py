@@ -15,7 +15,9 @@ from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.diffing import diff_run_directories
-from azure_tenant_audit.output_redaction import PROFILE_LOCAL, PROFILE_SHAREABLE, assert_snapshot_stable, context_for_run, redact_output
+from azure_tenant_audit.output_redaction import (
+    PROFILE_LOCAL, PROFILE_SHAREABLE, Snapshot, assert_snapshot_stable, context_for_run, redact_output, snapshot_run,
+)
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
@@ -612,6 +614,7 @@ def _emit_report_payload(
     output_path: str | None,
     run_dir: str | None = None,
     redact: bool = True,
+    expected_snapshot: Snapshot | None = None,
 ) -> None:
     # Every report payload leaves through the output redaction boundary. Pass ``payload`` (and, for Markdown, a
     # ``renderer``) so it is redacted before it is rendered; ``content`` is for text that is already rendered.
@@ -620,6 +623,10 @@ def _emit_report_payload(
         content = _redacted_report_payload(payload, renderer, format_name, run_dir)
     elif redact:
         content = _redact_report_content(content or "", format_name, run_dir)
+    if expected_snapshot is not None:
+        if run_dir is None:
+            raise ValueError("A run directory is required for the expected snapshot")
+        assert_snapshot_stable(run_dir, expected_snapshot)
     content = content or ""
     if not output_path:
         print(content, end="")
@@ -1079,9 +1086,12 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "report":
         parser = _build_report_parser()
         args = parser.parse_args(argv[1:])
+        if args.report_command in {"analyze", "api-calls", "permissions", "proof-table", "handoff"}:
+            before = snapshot_run(args.run_dir)
         if args.report_command == "analyze":
             _emit_report_payload(
-                payload=analyze_report(args.run_dir), renderer=None, format_name="json", output_path=None, run_dir=args.run_dir
+                payload=analyze_report(args.run_dir), renderer=None, format_name="json", output_path=None,
+                run_dir=args.run_dir, expected_snapshot=before,
             )
             return 0
         if args.report_command == "api-calls":
@@ -1089,7 +1099,7 @@ def main(argv: list[str] | None = None) -> int:
 
             _emit_report_payload(
                 payload=api_call_inventory(args.run_dir), renderer=render_api_call_inventory_markdown, format_name=args.format, output_path=args.output,
-                run_dir=args.run_dir,
+                run_dir=args.run_dir, expected_snapshot=before,
             )
             return 0
         if args.report_command == "permissions":
@@ -1097,7 +1107,7 @@ def main(argv: list[str] | None = None) -> int:
 
             _emit_report_payload(
                 payload=permissions_ledger(args.run_dir), renderer=render_permissions_ledger_markdown, format_name=args.format, output_path=args.output,
-                run_dir=args.run_dir,
+                run_dir=args.run_dir, expected_snapshot=before,
             )
             return 0
         if args.report_command == "proof-table":
@@ -1105,7 +1115,7 @@ def main(argv: list[str] | None = None) -> int:
 
             _emit_report_payload(
                 payload=proof_table(args.run_dir), renderer=render_proof_table_markdown, format_name=args.format, output_path=args.output,
-                run_dir=args.run_dir,
+                run_dir=args.run_dir, expected_snapshot=before,
             )
             return 0
         if args.report_command == "handoff":
@@ -1113,7 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
 
             _emit_report_payload(
                 payload=enterprise_handoff(args.run_dir), renderer=render_enterprise_handoff_markdown, format_name=args.format, output_path=args.output,
-                run_dir=args.run_dir,
+                run_dir=args.run_dir, expected_snapshot=before,
             )
             return 0
         if args.report_command == "customer-pack":

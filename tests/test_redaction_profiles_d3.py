@@ -353,3 +353,93 @@ def test_d3_failed_link_target_open_is_reported_without_path(run: Path, monkeypa
     with pytest.raises(redaction.ContextIncompleteError) as caught:
         redaction.redact_output({"name": NAME}, context=context)
     assert str(run) not in str(caught.value)
+
+
+@pytest.mark.parametrize("family", [
+    "summarize", "blockers", "analyze", "api", "permissions", "proof", "notify_preview", "notify_send",
+    "mcp_handoff", "mcp_diff", "mcp_diff_second", "mcp_compare", "mcp_compare_second", "mcp_external",
+    "cli_analyze", "cli_api", "cli_permissions", "cli_proof", "cli_handoff",
+])
+def test_d3_refuses_change_between_payload_build_and_discovery(
+    family: str, run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A name read into prose must not outlive the evidence that discovery uses to recognise it."""
+    from auditex import assessment_review, cli, compare, mcp_server, notify, reporting
+    from azure_tenant_audit.output_redaction import ContextIncompleteError
+
+    target = run / "normalized" / "users.json"
+    sent: list[object] = []
+    output = tmp_path / "handoff.json"
+    other = tmp_path / "other-run"
+    if family in {"mcp_diff", "mcp_diff_second", "mcp_compare", "mcp_compare_second"}:
+        _write_run(other)
+        (other / "normalized" / "users.json").write_text(target.read_text())
+        if family.endswith("_second"):
+            target = other / "normalized" / "users.json"
+    builders = {
+        "summarize": (mcp_server, "summarize_run_raw"),
+        "blockers": (mcp_server, "list_blockers_raw"),
+        "analyze": (reporting, "analyze_report"),
+        "api": (reporting, "api_call_inventory"),
+        "permissions": (reporting, "permissions_ledger"),
+        "proof": (reporting, "proof_table"),
+        "notify_preview": (notify, "_build_payload"),
+        "notify_send": (notify, "_build_payload"),
+        "mcp_handoff": (reporting, "enterprise_handoff"),
+        "mcp_diff": (mcp_server, "diff_run_directories"),
+        "mcp_diff_second": (mcp_server, "diff_run_directories"),
+        "mcp_compare": (compare, "compare_runs"),
+        "mcp_compare_second": (compare, "compare_runs"),
+        "mcp_external": (assessment_review, "compare_external_assessments"),
+        "cli_analyze": (reporting, "analyze_report"),
+        "cli_api": (reporting, "api_call_inventory"),
+        "cli_permissions": (reporting, "permissions_ledger"),
+        "cli_proof": (reporting, "proof_table"),
+        "cli_handoff": (reporting, "enterprise_handoff"),
+    }
+    owner, builder_name = builders[family]
+    original = getattr(owner, builder_name)
+
+    def race(*args: object, **kwargs: object) -> dict:
+        # The external comparison builder is isolated from its input format; the planted result still models
+        # a name read into prose before the corresponding normalised identity disappears.
+        result = {} if family == "mcp_external" else original(*args, **kwargs)
+        before = target.read_text()
+        assert NAME in before
+        # Keep the file valid and the same size, while removing the only structured copy of the name.
+        after = before.replace(NAME, "Z" * len(NAME))
+        assert len(before) == len(after)
+        target.write_text(after)
+        stat = target.stat()
+        os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        result["race_probe"] = f"Escalate to {NAME} for review"
+        return result
+
+    monkeypatch.setattr(owner, builder_name, race)
+    monkeypatch.setattr(notify, "_send_webhook", lambda *args: sent.append(args) or {})
+    calls = {
+        "summarize": lambda: mcp_server.summarize_run(str(run)),
+        "blockers": lambda: mcp_server.list_blockers(str(run)),
+        "analyze": lambda: mcp_server.analyze_report(str(run)),
+        "api": lambda: mcp_server.api_inventory(str(run)),
+        "permissions": lambda: mcp_server.permissions_ledger(str(run)),
+        "proof": lambda: mcp_server.proof_table(str(run)),
+        "notify_preview": lambda: mcp_server.preview_notification(str(run)),
+        "notify_send": lambda: notify.send_notification(run_dir=str(run), sink="teams", dry_run=False),
+        "mcp_handoff": lambda: mcp_server.enterprise_handoff(str(run)),
+        "mcp_diff": lambda: mcp_server.diff_runs(str(run), str(other)),
+        "mcp_diff_second": lambda: mcp_server.diff_runs(str(run), str(other)),
+        "mcp_compare": lambda: mcp_server.compare_many_runs([str(run), str(other)]),
+        "mcp_compare_second": lambda: mcp_server.compare_many_runs([str(run), str(other)]),
+        "mcp_external": lambda: mcp_server.compare_external_assessment_files([], run_dir=str(run)),
+        "cli_analyze": lambda: cli.main(["report", "analyze", str(run)]),
+        "cli_api": lambda: cli.main(["report", "api-calls", str(run), "--output", str(output)]),
+        "cli_permissions": lambda: cli.main(["report", "permissions", str(run), "--output", str(output)]),
+        "cli_proof": lambda: cli.main(["report", "proof-table", str(run), "--output", str(output)]),
+        "cli_handoff": lambda: cli.main(["report", "handoff", str(run), "--output", str(output)]),
+    }
+    with pytest.raises(ContextIncompleteError, match="changed during scan"):
+        calls[family]()
+    assert NAME not in capsys.readouterr().out
+    assert not output.exists()
+    assert not sent

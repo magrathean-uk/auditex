@@ -14,7 +14,7 @@ import requests
 
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 
-from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, redact_payload
+from azure_tenant_audit.output_redaction import PROFILE_CUSTOMER_PACK, assert_snapshot_stable, redact_payload, snapshot_run
 
 from .run_bundle import RunBundle
 
@@ -644,6 +644,7 @@ def _send_github(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[str, Any]:
+    before = snapshot_run(run_dir)
     payload = _build_payload(run_dir)
     citations, evidence_missing = _notification_proof(run_dir, payload)
     # The run identity is computed from the real run directory before redaction replaces it, and travels in the
@@ -663,6 +664,8 @@ def send_notification(*, run_dir: str, sink: str, dry_run: bool = True) -> dict[
         },
         run_dir,
     )
+    # Compare after redaction and before any network send or preview is returned.
+    assert_snapshot_stable(run_dir, before)
     payload = envelope["payload"]
     base = envelope
     if dry_run:
