@@ -218,10 +218,10 @@ raise `FileNotFoundError`.
 Control files, including manifests, summaries, validation, AI context and
 salt, have a 32 MiB limit (`MAX_RUN_FILE_BYTES`). Evidence and other data
 files have a 256 MiB limit (`MAX_RUN_DATA_BYTES`). Hashing and copies use
-guarded streams. Guarded reads during writer finalisation have no size cap,
-and bundle hash manifest generation streams without a cap, so the reader
-limits do not constrain the writer's own artifacts. Verification applies the
-reader's class limits.
+guarded streams. Guarded reads during writer finalisation have no size cap.
+Bundle hash manifest generation and verification stream without a size cap;
+they still reject unsafe file types and links. Identity discovery has its own
+limits, described below.
 
 The guard rejects paths outside the root, symbolic links, non-regular files
 and files whose hard-link count is not exactly one. On systems with
@@ -229,14 +229,18 @@ descriptor-relative opens, it checks each parent and the opened file without
 following links; the portable fallback checks paths before opening and
 compares file identity afterwards. Hard-linked backup bundles, including those
 made with `rsync --link-dest`, cannot be read until their files are copied
-without hard links. Legacy SQLite WAL data is inspected in a private temporary
-directory under `TMPDIR`, streaming the index and sidecars without a size cap.
-If that directory is unavailable or is inside the run's parent, the index is
-opened in place with SQLite's read-only mode after the inputs are checked. This
-fallback must reopen the checked paths so SQLite can find the sidecars; it
-cannot provide the same protection against concurrent path replacement as the
-temporary-copy path.
-SQLite may also update an existing shared-memory sidecar in this mode.
+without hard links. Read-only index inspection streams a guarded copy to a
+private temporary directory under `TMPDIR`, with files created as `0600`.
+The copy contains run evidence, so `TMPDIR` must be on encrypted storage for
+live tenant data.
+Closed indexes retain the data-file size limit. Legacy SQLite WAL indexes
+and their sidecars are copied without a size cap. For a legacy WAL, if that
+directory is unavailable or inside the run's parent, the index is opened in
+place with SQLite's read-only mode after the inputs are checked. This fallback
+must reopen the checked paths so SQLite can find the sidecars; it cannot provide
+the same protection against concurrent path replacement as the temporary-copy
+path. SQLite may also update an existing shared-memory sidecar in this mode.
+For a closed index, an unavailable private directory causes inspection to fail.
 
 ## Evidence and customer packs
 
@@ -316,16 +320,13 @@ followed by recomputing those checksums requires a separately recorded digest
 passed to `verify-pack --expect-checksums-sha256`.
 
 Before sharing, identity discovery reads all `normalized/**/*.json` files. It
-refuses malformed, unreadable or non-regular entries, unsafe links, changes
+refuses malformed, unreadable or non-regular entries, symbolic and hard links, changes
 during discovery and scans exceeding 5,000 files, 64 MiB per file, 256 MiB
 in total per run or 32 directory levels. A subsequent snapshot also refuses scan
 problems or changed fingerprints. These checks cover shareable reports, exports,
-customer packs, notifications and MCP tools. The MCP `summarize_run` and
-`probe_summarize` tools also use a bundle reader that can block on a non-regular
-entry before discovery completes, so refusal is not guaranteed for those two
-tools. A size-limit refusal reports the supported sizes without naming files;
-other refusals identify the reason using safe file labels. Repair the evidence
-before retrying.
+customer packs, notifications and MCP tools. A size-limit refusal reports the
+supported sizes without naming files; other refusals identify the reason using
+safe file labels. Repair the evidence before retrying.
 
 The limits are on bytes scanned, not a resident-memory ceiling. A synthetic
 25,000-user run had 54 normalised files totalling 23.6 MiB; a 90,000-user run

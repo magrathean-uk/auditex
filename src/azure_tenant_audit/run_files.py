@@ -165,9 +165,18 @@ def copy_run_file(run_dir: str | Path, relative: str | Path, destination: str | 
     limit = _effective_limit(relative, max_bytes)
     with open_run_file(run_dir, relative, max_bytes=limit) as descriptor:
         if isinstance(destination, (str, Path)):
-            with Path(destination).open("xb") as output:
-                for chunk in _chunks(descriptor, limit):
-                    output.write(chunk)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            output_fd = os.open(destination, flags, 0o600)
+            try:
+                if hasattr(os, "fchmod"):
+                    os.fchmod(output_fd, 0o600)
+                else:
+                    os.chmod(destination, 0o600)
+                with os.fdopen(output_fd, "wb", closefd=False) as output:
+                    for chunk in _chunks(descriptor, limit):
+                        output.write(chunk)
+            finally:
+                os.close(output_fd)
         else:
             for chunk in _chunks(descriptor, limit):
                 destination.write(chunk)

@@ -11,7 +11,7 @@ from typing import Any
 
 from .bundle_integrity import evidence_index_is_hashed
 from .collection_gaps import list_truncations, section_gap_records
-from .evidence_db import open_index_snapshot, open_private_run_index
+from .evidence_db import open_private_run_index
 from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .provider_registry import provider_collectors
 from .resources import list_resource_files, resolve_resource_path
@@ -552,13 +552,8 @@ def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_o
                 (candidate := db_path.with_name(db_path.name + suffix)).exists() or candidate.is_symlink()
                 for suffix in suffixes[1:]
             )
-            if not has_sidecars and hasattr(sqlite3.Connection, "deserialize"):
-                db_data = read_run_file(run_dir, "index/evidence.sqlite")
-                with closing(open_index_snapshot(db_data)) as conn:
-                    inspect(conn)
-            else:
-                with open_private_run_index(run_dir, include_sidecars=has_sidecars) as conn:
-                    inspect(conn)
+            with open_private_run_index(run_dir, include_sidecars=has_sidecars) as conn:
+                inspect(conn)
         else:
             with closing(sqlite3.connect(db_path)) as conn:
                 inspect(conn)

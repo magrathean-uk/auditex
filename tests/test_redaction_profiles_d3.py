@@ -331,23 +331,17 @@ def test_d3_missing_run_refuses_shareable_output(tmp_path: Path) -> None:
         redact_payload({"notes": NOTES}, run_dirs=[tmp_path / "missing"])
 
 
-def test_d3_failed_link_target_open_is_reported_without_path(run: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_d3_link_target_is_not_opened_and_refusal_hides_path(run: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from azure_tenant_audit import output_redaction as redaction
 
     (run / "linked-source.json").write_text("{}")
     (run / "normalized" / "linked.json").symlink_to("../linked-source.json")
     original_open = os.open
-    root_opens = 0
-
-    def fail_second_root(path, flags, *args, **kwargs):
-        nonlocal root_opens
-        if os.fspath(path) == str(run.resolve()) and "dir_fd" not in kwargs:
-            root_opens += 1
-            if root_opens == 2:
-                raise PermissionError("synthetic link target failure")
+    def refuse_target_open(path, flags, *args, **kwargs):
+        assert os.fspath(path) not in ("linked.json", "linked-source.json", str(run / "linked-source.json"))
         return original_open(path, flags, *args, **kwargs)
 
-    monkeypatch.setattr(redaction.os, "open", fail_second_root)
+    monkeypatch.setattr(redaction.os, "open", refuse_target_open)
     context = redaction.context_for_run(run)
     assert context.incomplete
     with pytest.raises(redaction.ContextIncompleteError) as caught:

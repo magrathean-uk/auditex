@@ -126,7 +126,6 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.cli:run_offline", "private", "offline replay copy inside the run's raw directory"),
     SinkEntry("azure_tenant_audit.adapters.teams_admin_rest:*", "private", "read-only Teams admin API GET with the app token (collection)"),
     SinkEntry("azure_tenant_audit.collectors.*", "private", "collection: read-only request to the audited tenant's own API"),
-    SinkEntry("azure_tenant_audit.contracts:_validate_evidence_db", "private", "copies the run's evidence index to scratch to validate it"),
     SinkEntry("azure_tenant_audit.dns_lookup:*", "private", "public DNS-over-HTTPS query for a domain the operator audits"),
     SinkEntry("azure_tenant_audit.evidence_db:*", "private", "run evidence index (private working file)"),
     SinkEntry("azure_tenant_audit.exposure_lookup:*", "private", "public HTTPS fetch of the audited domain's own policy files"),
@@ -144,6 +143,8 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.power_bi:*", "private", "read-only Power BI requests"),
     SinkEntry("azure_tenant_audit.power_platform:*", "private", "read-only Power Platform requests"),
     SinkEntry("azure_tenant_audit.private_io:*", "private", "unredacted 0600 file primitives; protection is the caller's"),
+    SinkEntry("azure_tenant_audit.run_files:copy_run_file", "private", "guarded unredacted copies to a caller-selected destination"),
+    SinkEntry("azure_tenant_audit.run_files:open_run_file", "private", "read-only guarded descriptor; the scanner treats its flags as a write"),
     SinkEntry("azure_tenant_audit.secret_hygiene:secure_write_*", "private", "unredacted 0600 file primitives for credentials"),
     SinkEntry("azure_tenant_audit.waivers:load_waivers", "private", "warning on the operator's terminal about a waiver file"),
 )

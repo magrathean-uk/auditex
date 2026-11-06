@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -165,6 +164,8 @@ def test_mcp_tools_reject_unsafe_manifests(tmp_path: Path, tool: str, kind: str)
     ("auditex_diff_runs:left", "normalized/users.json"),
     ("auditex_diff_runs:left", "reports/report-pack.json"),
     ("auditex_report_preview", "normalized/users.json"),
+    ("auditex_report_preview", "normalized/snapshot.json"),
+    ("auditex_report_preview", "normalized/coverage_ledger.json"),
     ("auditex_api_inventory", "audit-log.jsonl"),
     ("auditex_enterprise_handoff", "bundle-hashes.json"),
     ("auditex_enterprise_handoff", "model_assessment.json"),
@@ -190,7 +191,9 @@ def test_mcp_tools_reject_unsafe_bundle_files(tmp_path: Path, tool: str, relativ
     with pytest.raises(UnsafeRunFileError):
         read_run_file(bad, relative)
     assert _CANARY not in json.dumps(outcome)
-    assert outcome.get("error") in (None, "UnsafeRunFileError", "ValueError"), outcome
+    assert outcome.get("error") in (None, "UnsafeRunFileError", "ValueError", "ContextIncompleteError"), outcome
+    if outcome.get("error") == "ContextIncompleteError":
+        assert "result" not in outcome
 
 
 @pytest.mark.parametrize("kind", ("fifo", "symlink", "directory", "oversize"))
@@ -200,17 +203,64 @@ def test_projection_salt_rejects_unsafe_manifest(tmp_path: Path, kind: str) -> N
     assert outcome.get("error") == "UnsafeRunFileError", outcome
 
 
-@pytest.mark.skipif(
-    importlib.util.find_spec("azure_tenant_audit.output_redaction") is None,
-    reason="run_salt is only present on the separate redaction branch",
-)
-def test_reference_run_salt_uses_the_same_guard(tmp_path: Path) -> None:
+def test_reference_run_salt_does_not_read_the_manifest(tmp_path: Path) -> None:
+    import hashlib
+
     for kind in ("fifo", "symlink", "directory", "oversize"):
         run = tmp_path / kind
         run.mkdir()
         _plant_bad_file(run / "run-manifest.json", kind)
         outcome = _call_tool("reference_run_salt", str(run))
-        assert outcome.get("error") == "UnsafeRunFileError", outcome
+        assert outcome == {"result": hashlib.sha256(os.path.realpath(run).encode()).hexdigest()}
+
+
+@pytest.mark.parametrize("relative", ("users.json", "snapshot.json", "coverage_ledger.json"))
+@pytest.mark.parametrize("kind", ("symlink", "hardlink"))
+def test_shareable_normalized_read_and_snapshot_refuse_links(tmp_path: Path, relative: str, kind: str) -> None:
+    from azure_tenant_audit.output_redaction import ContextIncompleteError, read_normalized_sections, snapshot_run
+
+    normalized = tmp_path / "run" / "normalized"
+    normalized.mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"secret": _CANARY}), encoding="utf-8")
+    target = normalized / relative
+    if kind == "symlink":
+        inside = normalized / "inside"
+        inside.write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+        target.symlink_to(inside.name)
+    else:
+        os.link(outside, target)
+    for reader in (read_normalized_sections, snapshot_run):
+        with pytest.raises(ContextIncompleteError) as caught:
+            reader(normalized.parent)
+        assert relative in str(caught.value) and _CANARY not in str(caught.value)
+
+
+def test_discovery_refuses_a_hard_link_added_during_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from azure_tenant_audit import output_redaction as redaction
+
+    normalized = tmp_path / "run" / "normalized"
+    normalized.mkdir(parents=True)
+    source = normalized / "users.json"
+    source.write_text(json.dumps({"records": [{"displayName": _CANARY}]}), encoding="utf-8")
+    inode = source.stat().st_ino
+    original_read = os.read
+    linked = False
+
+    def add_link(fd: int, count: int) -> bytes:
+        nonlocal linked
+        data = original_read(fd, count)
+        if data and not linked and os.fstat(fd).st_ino == inode:
+            os.link(source, tmp_path / "outside.json")
+            linked = True
+        return data
+
+    monkeypatch.setattr(redaction.os, "read", add_link)
+    context = redaction.context_for_run(normalized.parent)
+    assert linked and context.incomplete
+    with pytest.raises(redaction.ContextIncompleteError) as caught:
+        redaction.redact_output({"value": _CANARY}, context=context)
+    assert _CANARY not in str(caught.value)
 
 
 def test_guard_rejects_device_without_opening_it() -> None:
@@ -268,17 +318,18 @@ def test_guard_fallback_rejects_symlinked_parent(tmp_path: Path, monkeypatch: py
         read_run_file(tmp_path, "linked/file.json")
 
 
-def test_closed_sqlite_index_needs_no_temporary_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_closed_wal_mode_index_is_read_without_changing_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import sqlite3
-    import tempfile
     from contextlib import closing
     from azure_tenant_audit.contracts import _validate_evidence_db
     from azure_tenant_audit.evidence_db import load_run_index_summary
 
-    if not hasattr(sqlite3.Connection, "deserialize"):
-        pytest.skip("SQLite does not support in-memory snapshots")
-    index = tmp_path / "index" / "evidence.sqlite"
-    index.parent.mkdir()
+    run = tmp_path / "runs" / "run"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("TMPDIR", str(scratch))
+    index = run / "index" / "evidence.sqlite"
+    index.parent.mkdir(parents=True)
     with closing(sqlite3.connect(index)) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
@@ -287,14 +338,14 @@ def test_closed_sqlite_index_needs_no_temporary_copy(tmp_path: Path, monkeypatch
         conn.execute("INSERT INTO run_meta VALUES ('run_id', 'synthetic')")
         conn.commit()
 
-    def no_temporary_file(*args: object, **kwargs: object) -> None:
-        pytest.fail("closed evidence index was copied to disk")
-
-    monkeypatch.setattr(tempfile, "TemporaryDirectory", no_temporary_file)
-    assert load_run_index_summary(tmp_path)["run_id"] == "synthetic"
+    before = index.read_bytes()
+    assert load_run_index_summary(run)["run_id"] == "synthetic"
     issues: list[dict[str, object]] = []
-    _validate_evidence_db(tmp_path, issues, read_only=True)
+    _validate_evidence_db(run, issues, read_only=True)
     assert issues == []
+    assert index.read_bytes() == before
+    assert sorted(path.name for path in index.parent.iterdir()) == ["evidence.sqlite"]
+    assert list(scratch.iterdir()) == []
 
 
 @pytest.mark.parametrize("kind", ("fifo", "symlink"))
@@ -375,7 +426,11 @@ def test_handoff_rejects_unsafe_referenced_artifact(tmp_path: Path, kind: str, s
     assert _CANARY not in json.dumps(outcome)
     if source == "hash_manifest":
         assert outcome["result"]["integrity"]["status"] == "mismatch", outcome
-        assert relative in outcome["result"]["integrity"]["missing_paths"], outcome
+        if kind == "oversize":
+            assert relative in outcome["result"]["integrity"]["modified_paths"], outcome
+            assert relative not in outcome["result"]["integrity"]["missing_paths"], outcome
+        else:
+            assert relative in outcome["result"]["integrity"]["missing_paths"], outcome
     else:
         assert outcome.get("error") in (None, "UnsafeRunFileError"), outcome
 

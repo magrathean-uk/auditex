@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
 from .perf_runtime import sqlite_bulk_pragmas
-from .run_files import UnsafeRunFileError, copy_run_file, open_run_file, read_run_file
+from .run_files import UnsafeRunFileError, copy_run_file, open_run_file
 from .tenant_identity import decode_identity_metadata
 
 
@@ -208,25 +208,9 @@ def open_index_read_only(db_path: str | Path, *, immutable: bool = True) -> sqli
     return sqlite3.connect(_read_only_uri(db_path, immutable=immutable), uri=True)
 
 
-def open_index_snapshot(data: bytes) -> sqlite3.Connection:
-    """Open a closed, guarded index in memory without creating SQLite sidecars."""
-    snapshot = bytearray(data)
-    # A checkpointed WAL-mode database still requests WAL in its header;
-    # SQLite cannot open that mode after deserialize. Change only the copy.
-    if snapshot.startswith(b"SQLite format 3\x00") and snapshot[18:20] == b"\x02\x02":
-        snapshot[18:20] = b"\x01\x01"
-    connection = sqlite3.connect(":memory:")
-    try:
-        connection.deserialize(snapshot)
-    except BaseException:
-        connection.close()
-        raise
-    return connection
-
-
 @contextmanager
 def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
-    """Inspect a guarded index copy in TMPDIR, or fall back to an in-place read-only open."""
+    """Inspect a guarded private copy; legacy WAL reads may fall back to an in-place read-only open."""
     root = Path(run_dir)
     relative = "index/evidence.sqlite"
     suffixes = ("", "-wal", "-shm", "-journal") if include_sidecars else ("",)
@@ -239,6 +223,7 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
                 temporary = stack.enter_context(tempfile.TemporaryDirectory(
                     prefix="auditex-index-", dir=temporary_root,
                 ))
+                os.chmod(temporary, 0o700)
         except (OSError, RuntimeError):
             temporary = None
         if temporary is not None:
@@ -246,7 +231,11 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
             try:
                 for suffix in suffixes:
                     try:
-                        copy_run_file(root, relative + suffix, copied.with_name(copied.name + suffix), max_bytes=None)
+                        destination = copied.with_name(copied.name + suffix)
+                        if include_sidecars:
+                            copy_run_file(root, relative + suffix, destination, max_bytes=None)
+                        else:
+                            copy_run_file(root, relative, destination)
                     except FileNotFoundError:
                         if not suffix:
                             raise
@@ -257,6 +246,8 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
             except OSError:
                 temporary = None
         if temporary is None:
+            if not include_sidecars:
+                raise OSError("Cannot create a private evidence index copy")
             # SQLite needs the original filenames to see a legacy WAL. Hold
             # guarded descriptors for every existing input before opening it
             # with mode=ro; no copy is placed beside the run.
@@ -274,7 +265,7 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
 def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     """The run metadata held in ``index/evidence.sqlite``, or ``{}`` when it cannot be trusted or read.
 
-    Closed indices are inspected in memory, so reading them neither changes them nor creates a sidecar. When
+    Closed indices are inspected in a private temporary copy, so reading them neither changes them nor creates a sidecar. When
     ``bundle-hashes.json`` lists the index, a sidecar beside it makes this return ``{}``: the sidecar is not
     covered by the hash, so whatever it holds was not part of the run as finalized, and callers fall back to
     the manifest. Only an index no hash manifest covers (a bundle from before it existed) is read together
@@ -295,13 +286,8 @@ def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
         return meta, stats
 
     try:
-        if not sidecars and hasattr(sqlite3.Connection, "deserialize"):
-            db_data = read_run_file(run_dir, "index/evidence.sqlite")
-            with closing(open_index_snapshot(db_data)) as conn:
-                meta, stats = inspect(conn)
-        else:
-            with open_private_run_index(run_dir, include_sidecars=bool(sidecars)) as conn:
-                meta, stats = inspect(conn)
+        with open_private_run_index(run_dir, include_sidecars=bool(sidecars)) as conn:
+            meta, stats = inspect(conn)
     except (OSError, sqlite3.DatabaseError):
         return {}
 

@@ -316,7 +316,7 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
         relative = str(row["path"])
         listed.add(relative)
         try:
-            actual, _ = hash_run_file(root, relative)
+            actual, _ = hash_run_file(root, relative, max_bytes=None)
         except OSError:
             missing.append(relative)
             continue

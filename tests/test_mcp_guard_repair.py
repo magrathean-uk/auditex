@@ -153,7 +153,7 @@ def test_offline_finalization_ignores_reader_caps(tmp_path: Path, small_limits: 
     assert validation["valid"], validation["issues"]
 
 
-def test_customer_pack_copy_uses_guarded_stream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_customer_pack_skips_non_json_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from auditex.reporting import _copy_source_artifact
 
     run = tmp_path / "run"
@@ -171,22 +171,23 @@ def test_customer_pack_copy_uses_guarded_stream(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(Path, "open", no_path_read)
     row = _copy_source_artifact(run, pack, "normalized/users.json", "test")
     copied = pack / "normalized/users.json"
-    assert row["present"] and copied.read_bytes() == b"synthetic evidence"
-    assert stat.S_IMODE(copied.stat().st_mode) == 0o600
+    assert not row["present"] and row["skipped_reason"] == "not_redactable_json"
+    assert not copied.exists()
 
 
 def test_customer_pack_copy_refuses_hardlinked_source(tmp_path: Path) -> None:
     from auditex.reporting import _copy_source_artifact
-    from azure_tenant_audit.run_files import UnsafeRunFileError
 
     run = tmp_path / "run"
     source = run / "normalized/users.json"
     source.parent.mkdir(parents=True)
     outside = tmp_path / "outside"
-    outside.write_bytes(b"private")
+    outside.write_bytes(b'{"secret":"private"}')
     os.link(outside, source)
-    with pytest.raises(UnsafeRunFileError, match="exactly one link"):
-        _copy_source_artifact(run, tmp_path / "pack", "normalized/users.json", "test")
+    pack = tmp_path / "pack"
+    row = _copy_source_artifact(run, pack, "normalized/users.json", "test")
+    assert not row["present"] and row["skipped_reason"] == "not_redactable_json"
+    assert not (pack / "normalized/users.json").exists()
 
 
 def test_customer_pack_manifest_from_relative_run_is_transformed(
@@ -216,7 +217,7 @@ def test_old_oserror_fallback_still_applies(tmp_path: Path) -> None:
     assert RunBundle(run).summary() == {}
 
 
-@pytest.mark.parametrize("kind", ("fifo", "directory", "symlink", "oversize", "hardlink"))
+@pytest.mark.parametrize("kind", ("fifo", "directory", "symlink", "hardlink"))
 def test_verifier_reports_unsafe_listed_artifact(tmp_path: Path, kind: str) -> None:
     from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
 
@@ -234,9 +235,6 @@ def test_verifier_reports_unsafe_listed_artifact(tmp_path: Path, kind: str) -> N
         outside = tmp_path.parent / (tmp_path.name + "-outside")
         outside.write_text("private", encoding="utf-8")
         os.link(outside, path)
-    else:
-        with path.open("wb") as handle:
-            handle.truncate(32 * 1024 * 1024 + 1)
     (tmp_path / "bundle-hashes.json").write_text(json.dumps({
         "artifacts": [{"path": relative, "sha256": "a" * 64}],
     }), encoding="utf-8")
@@ -246,31 +244,35 @@ def test_verifier_reports_unsafe_listed_artifact(tmp_path: Path, kind: str) -> N
     assert relative in result["missing"]
 
 
-def test_verifier_reports_oversize_data_without_reading_it(
-    tmp_path: Path, small_limits: None, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("relative", ("normalized/users.json", "summary.md"))
+def test_verifier_streams_files_above_reader_limits(
+    tmp_path: Path, small_limits: None, monkeypatch: pytest.MonkeyPatch, relative: str,
 ) -> None:
     from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
     from azure_tenant_audit import run_files
 
-    monkeypatch.setattr(run_files, "MAX_RUN_FILE_BYTES", 1024)
-    artifact = tmp_path / "normalized/users.json"
-    artifact.parent.mkdir()
-    artifact.write_bytes(b"x" * 257)
+    monkeypatch.setattr(run_files, "MAX_RUN_FILE_BYTES", 256)
+    artifact = tmp_path / relative
+    artifact.parent.mkdir(exist_ok=True)
+    data = b"x" * 257
+    artifact.write_bytes(data)
     (tmp_path / "bundle-hashes.json").write_text(json.dumps({
-        "artifacts": [{"path": "normalized/users.json", "sha256": "a" * 64}],
+        "artifacts": [{"path": relative, "sha256": hashlib.sha256(data).hexdigest()}],
     }), encoding="utf-8")
     original_read = os.read
     artifact_id = (artifact.stat().st_dev, artifact.stat().st_ino)
+    read_sizes: list[int] = []
 
     def guarded_read(descriptor: int, count: int) -> bytes:
         opened = os.fstat(descriptor)
-        assert (opened.st_dev, opened.st_ino) != artifact_id
+        if (opened.st_dev, opened.st_ino) == artifact_id:
+            read_sizes.append(count)
         return original_read(descriptor, count)
 
     monkeypatch.setattr(os, "read", guarded_read)
     result = verify_bundle_hashes(tmp_path)
-    assert result["status"] == "mismatch"
-    assert result["missing"] == ["normalized/users.json"]
+    assert result["status"] == "verified", result
+    assert read_sizes and max(read_sizes) <= 1024 * 1024
 
 
 def test_section_registry_is_not_a_run_file(tmp_path: Path) -> None:
@@ -281,6 +283,81 @@ def test_section_registry_is_not_a_run_file(tmp_path: Path) -> None:
     link = tmp_path / "link.json"
     link.symlink_to(registry.name)
     assert load_section_registry(link)[0]["id"] == "example"
+
+
+@pytest.mark.parametrize("fail_open", (False, True))
+def test_closed_index_uses_private_streamed_copy_and_cleans_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_open: bool,
+) -> None:
+    from azure_tenant_audit import evidence_db
+    from azure_tenant_audit.contracts import _validate_evidence_db
+
+    run = tmp_path / "run-parent" / "run"
+    index = run / "index/evidence.sqlite"
+    index.parent.mkdir(parents=True)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("TMPDIR", str(scratch))
+    with closing(sqlite3.connect(index)) as writer:
+        writer.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
+        writer.execute("CREATE TABLE section_stats (section_name TEXT, item_count INTEGER, source_path TEXT)")
+        writer.execute("CREATE TABLE normalized_records (record TEXT)")
+        writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'SYNTHETIC')")
+        writer.commit()
+
+    original = evidence_db.open_index_read_only
+    seen: list[Path] = []
+
+    def inspect_copy(path: Path, *, immutable: bool = True) -> sqlite3.Connection:
+        path = Path(path)
+        seen.append(path)
+        assert path.parent.parent == scratch
+        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert immutable
+        if fail_open:
+            raise OSError("synthetic failure")
+        return original(path, immutable=immutable)
+
+    monkeypatch.setattr(evidence_db, "open_index_read_only", inspect_copy)
+    before = sorted(path.name for path in index.parent.iterdir())
+    previous_umask = os.umask(0o777)
+    try:
+        summary = evidence_db.load_run_index_summary(run)
+        issues: list[dict[str, object]] = []
+        _validate_evidence_db(run, issues, read_only=True)
+    finally:
+        os.umask(previous_umask)
+    assert len(seen) == 2
+    if fail_open:
+        assert summary == {}
+    else:
+        assert summary["tenant_name"] == "SYNTHETIC"
+    assert [issue["code"] for issue in issues] == (["invalid_evidence_sqlite"] if fail_open else [])
+    assert list(scratch.iterdir()) == []
+    assert sorted(path.name for path in index.parent.iterdir()) == before
+    assert sorted(path.name for path in run.parent.iterdir()) == ["run"]
+
+
+def test_closed_index_refuses_scratch_inside_run_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from azure_tenant_audit import evidence_db
+    from azure_tenant_audit.contracts import _validate_evidence_db
+
+    parent = tmp_path / "run-parent"
+    index = parent / "run/index/evidence.sqlite"
+    index.parent.mkdir(parents=True)
+    index.write_bytes(b"not a database")
+    monkeypatch.setenv("TMPDIR", str(parent))
+
+    def no_sqlite(*args: object, **kwargs: object) -> None:
+        pytest.fail("opened a closed index without a private copy")
+
+    monkeypatch.setattr(evidence_db, "open_index_read_only", no_sqlite)
+    assert evidence_db.load_run_index_summary(parent / "run") == {}
+    issues: list[dict[str, object]] = []
+    _validate_evidence_db(parent / "run", issues, read_only=True)
+    assert [issue["code"] for issue in issues] == ["invalid_evidence_sqlite"]
+    assert sorted(path.name for path in parent.iterdir()) == ["run"]
 
 
 @pytest.mark.parametrize("parent_readonly", (True, False))

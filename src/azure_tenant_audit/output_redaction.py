@@ -518,10 +518,6 @@ _DIR_MODE = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLO
 _FILE_MODE = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
-def _inside(path: str, root: str) -> bool:
-    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
-
-
 def _open_dir_at(parent_fd: int, name: str, expected: os.stat_result | None = None) -> int:
     """A directory descriptor for ``name`` below ``parent_fd``, opened without following a link and checked on the
     descriptor (type, and identity when ``expected`` is the earlier ``lstat``)."""
@@ -570,7 +566,7 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     read_failed = False
     try:
         info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode):
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise _Unsafe(REASON_NON_REGULAR)
         if (info.st_dev, info.st_ino) != (expected.st_dev, expected.st_ino):
             raise _Unsafe(REASON_CHANGED)
@@ -589,7 +585,7 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
             total += len(chunk)
             chunks.append(chunk)
         after = os.fstat(descriptor)
-        if total != info.st_size or _fingerprint(after) != _fingerprint(info):
+        if after.st_nlink != 1 or total != info.st_size or _fingerprint(after) != _fingerprint(info):
             raise _Unsafe(REASON_CHANGED)
         return b"".join(chunks)
     except _Unsafe as exc:
@@ -608,82 +604,8 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
                 raise _Unsafe(REASON_UNREADABLE, total) from exc
 
 
-def _open_chain(root_fd: int, parts: tuple[str, ...]) -> tuple[int, str]:
-    """``(directory descriptor, final name)`` for the file ``parts`` below ``root_fd``, every directory opened
-    without following links (an ancestor swapped for a symlink is refused). The caller closes the descriptor."""
-    current = os.dup(root_fd)
-    try:
-        for part in parts[:-1]:
-            nxt = _open_dir_at(current, part)
-            os.close(current)
-            current = nxt
-        return current, parts[-1]
-    except BaseException:
-        os.close(current)
-        raise
-
-
-def _link_reader(
-    run_real: str, dir_fd: int, parts: tuple[str, ...], name: str
-) -> tuple[Callable[[int], bytes], os.stat_result] | None:
-    """A symlink below ``normalized/``: a ``.json`` link to a regular file inside the run is read through its
-    resolved path (every ancestor opened without following links); a link to a directory is not followed.
-
-    Returns ``(reader(cap), listed stat of the target)``, ``None`` for a link that is not a ``.json`` file, or raises
-    ``_Unsafe``.
-    """
-    is_json = name.lower().endswith(".json")
-    try:
-        target_info = os.stat(name, dir_fd=dir_fd)
-    except FileNotFoundError:
-        if is_json:
-            raise _Unsafe(REASON_DANGLING) from None
-        return None
-    except OSError:
-        if is_json:
-            raise _Unsafe(REASON_UNREADABLE) from None
-        return None
-    if stat.S_ISDIR(target_info.st_mode):
-        raise _Unsafe(REASON_NON_REGULAR)  # a symlinked directory is not followed
-    if not is_json:
-        return None
-    target = os.path.realpath(os.path.join(run_real, *parts, name))
-    if not _inside(target, run_real) or target == run_real:
-        raise _Unsafe(REASON_OUTSIDE)
-    if not stat.S_ISREG(target_info.st_mode):
-        raise _Unsafe(REASON_NON_REGULAR)
-    relative = tuple(Path(target).relative_to(run_real).parts)
-
-    def reader(cap: int = _MAX_FILE_BYTES) -> bytes:
-        root_fd = os.open(run_real, _DIR_MODE)
-        try:
-            parent_fd, leaf = _open_chain(root_fd, relative)
-        finally:
-            os.close(root_fd)
-        bytes_read = 0
-        read_failed = False
-        try:
-            data = _read_file_at(parent_fd, leaf, target_info, cap)
-            bytes_read = len(data)
-            return data
-        except _Unsafe as exc:
-            read_failed = True
-            bytes_read = exc.bytes_read
-            raise
-        finally:
-            try:
-                os.close(parent_fd)
-            except OSError as exc:
-                # An earlier refusal already carries its reason and debit; otherwise account for the successful read.
-                if not read_failed:
-                    raise _Unsafe(REASON_UNREADABLE, bytes_read) from exc
-
-    return reader, target_info
-
-
 class _Scan:
-    def __init__(self, run_real: str, *, read: bool = True) -> None:
-        self.run_real = run_real
+    def __init__(self, *, read: bool = True) -> None:
         self.read = read  # False: only list and fingerprint (``snapshot_run``)
         self.found = _Found()
         self.problems: list[tuple[tuple[str, ...], str]] = []
@@ -711,6 +633,9 @@ class _Scan:
             self.problem(parts, REASON_LIMIT)
             return
         self.files += 1
+        if info.st_nlink != 1:
+            self.problem(parts, REASON_NON_REGULAR)
+            return
         size = info.st_size
         self.fingerprints.append(("/".join(parts), _fingerprint(info)))
         if size > _MAX_FILE_BYTES:
@@ -733,17 +658,6 @@ class _Scan:
             return
         self.budget -= len(data)  # what was really read, not what was listed
         self.collect(parts, data)
-
-    def symlink(self, dir_fd: int, parts: tuple[str, ...], name: str) -> None:
-        """A symlink below ``normalized/`` (see ``_link_reader``)."""
-        here = (*parts, name)
-        try:
-            resolved = _link_reader(self.run_real, dir_fd, parts, name)
-        except _Unsafe as exc:
-            self.problem(here, exc.reason)
-            return
-        if resolved is not None:
-            self.take(here, *resolved)
 
     def _enter(self, frames: list["_Frame"], descriptor: int, parts: tuple[str, ...], depth: int) -> None:
         """Push the directory ``descriptor`` (owned from here on) unless it is too deep or cannot be listed."""
@@ -786,7 +700,7 @@ class _Scan:
                     else:
                         self._enter(frames, child, here, len(frames))
                 elif stat.S_ISLNK(mode):
-                    self.symlink(frame.descriptor, frame.parts, name)
+                    self.problem(here, REASON_NON_REGULAR)
                 elif not name.lower().endswith(".json"):
                     continue
                 elif not stat.S_ISREG(mode):
@@ -841,12 +755,7 @@ def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
                     entry = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
                     if stat.S_ISDIR(entry.st_mode):
                         continue
-                    if stat.S_ISLNK(entry.st_mode):
-                        resolved = _link_reader(run_real, root_fd, ("normalized",), name)
-                        if resolved is None:
-                            raise _Unsafe(REASON_NON_REGULAR)
-                        reader, entry = resolved
-                    elif stat.S_ISREG(entry.st_mode):
+                    if stat.S_ISREG(entry.st_mode) and entry.st_nlink == 1:
                         reader = lambda cap, d=root_fd, n=name, i=entry: _read_file_at(d, n, i, cap)  # noqa: E731
                     else:
                         raise _Unsafe(REASON_NON_REGULAR)
@@ -904,7 +813,7 @@ def _scan_run_identities(run_path: Path, *, read: bool = True) -> _Discovery:
         run_fd = os.open(run_real, _DIR_MODE)
     except OSError:
         return _Discovery(problems=(("<run>", REASON_UNREADABLE),))
-    scan = _Scan(run_real, read=read)
+    scan = _Scan(read=read)
     try:
         try:
             info = os.stat("normalized", dir_fd=run_fd, follow_symlinks=False)
