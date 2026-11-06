@@ -250,3 +250,70 @@ def test_failed_symlink_parent_close_debits_read_bytes(
     with pytest.raises(redaction.ContextIncompleteError) as error:
         redaction.redact_output({}, context=context)
     _message(error, root)
+
+
+@pytest.mark.usefixtures("low_limits")
+def test_file_close_failure_preserves_prior_oversize_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "run"
+    _sparse_run(root, (90,))
+    inode = (root / "normalized" / "private-name-0.json").stat().st_ino
+    original_fstat, original_close = os.fstat, os.close
+
+    def grew_before_open(fd: int) -> os.stat_result:
+        info = original_fstat(fd)
+        if info.st_ino == inode:
+            fields = list(info)
+            fields[6] = 101
+            return os.stat_result(fields)
+        return info
+
+    def fail_file_close(fd: int) -> None:
+        close_inode = original_fstat(fd).st_ino
+        original_close(fd)
+        if close_inode == inode:
+            raise OSError("synthetic close failure")
+
+    monkeypatch.setattr(redaction.os, "fstat", grew_before_open)
+    monkeypatch.setattr(redaction.os, "close", fail_file_close)
+    context = redaction.context_for_run(root)
+    with pytest.raises(redaction.ContextIncompleteError) as error:
+        redaction.redact_output({}, context=context)
+    _message(error, root)
+
+
+@pytest.mark.usefixtures("low_limits")
+@pytest.mark.parametrize("reason", [redaction.REASON_OVERSIZE, redaction.REASON_SCAN_BYTES])
+def test_symlink_parent_close_failure_preserves_size_reason_and_debit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    root = tmp_path / "run"
+    normalized, targets = root / "normalized", root / "targets"
+    normalized.mkdir(parents=True)
+    targets.mkdir()
+    target, other = targets / "target.json", normalized / "b.json"
+    target.write_bytes(b'x' * 90)
+    other.write_bytes(b'x' * 70)
+    (normalized / "a.json").symlink_to("../targets/target.json")
+    directory_inode = targets.stat().st_ino
+    original_reader, original_close = redaction._read_file_at, os.close
+    other_caps: list[int] = []
+
+    def size_failure(parent_fd: int, name: str, info: os.stat_result, cap: int) -> bytes:
+        if name == "target.json":
+            raise redaction._Unsafe(reason, 70)
+        other_caps.append(cap)
+        return original_reader(parent_fd, name, info, cap)
+
+    def fail_parent_close(fd: int) -> None:
+        inode = os.fstat(fd).st_ino
+        original_close(fd)
+        if inode == directory_inode:
+            raise OSError("synthetic directory close failure")
+
+    monkeypatch.setattr(redaction, "_read_file_at", size_failure)
+    monkeypatch.setattr(redaction.os, "close", fail_parent_close)
+    context = redaction.context_for_run(root)
+    assert other_caps == [80]
+    with pytest.raises(redaction.ContextIncompleteError) as error:
+        redaction.redact_output({}, context=context)
+    _message(error, root)

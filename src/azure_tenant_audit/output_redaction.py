@@ -567,6 +567,7 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     except OSError as exc:
         raise _Unsafe(REASON_CHANGED) from exc
     total = 0
+    read_failed = False
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
@@ -592,16 +593,19 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
             raise _Unsafe(REASON_CHANGED)
         return b"".join(chunks)
     except _Unsafe as exc:
+        read_failed = True
         exc.bytes_read += total
         raise
     except OSError as exc:
+        read_failed = True
         raise _Unsafe(REASON_UNREADABLE, total) from exc
     finally:
         try:
             os.close(descriptor)
         except OSError as exc:
-            # Closing can fail after the read has consumed budget too.
-            raise _Unsafe(REASON_UNREADABLE, total) from exc
+            # Preserve an earlier refusal; otherwise closing can fail after consuming budget too.
+            if not read_failed:
+                raise _Unsafe(REASON_UNREADABLE, total) from exc
 
 
 def _open_chain(root_fd: int, parts: tuple[str, ...]) -> tuple[int, str]:
@@ -657,19 +661,22 @@ def _link_reader(
         finally:
             os.close(root_fd)
         bytes_read = 0
+        read_failed = False
         try:
             data = _read_file_at(parent_fd, leaf, target_info, cap)
             bytes_read = len(data)
             return data
         except _Unsafe as exc:
+            read_failed = True
             bytes_read = exc.bytes_read
             raise
         finally:
             try:
                 os.close(parent_fd)
             except OSError as exc:
-                # Preserve both successful and partial-read debits if the containing directory fails to close.
-                raise _Unsafe(REASON_UNREADABLE, bytes_read) from exc
+                # An earlier refusal already carries its reason and debit; otherwise account for the successful read.
+                if not read_failed:
+                    raise _Unsafe(REASON_UNREADABLE, bytes_read) from exc
 
     return reader, target_info
 
