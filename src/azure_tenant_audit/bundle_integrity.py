@@ -32,8 +32,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .evidence_refs import HASH_ALGORITHM, file_sha256
-from .run_files import UnsafeRunFileError, read_run_file
+from .evidence_refs import HASH_ALGORITHM
+from .run_files import hash_run_file, read_run_file
 from .sensitive_users import BUNDLE_PATH, KEY_PATH
 
 BUNDLE_HASHES_PATH = "bundle-hashes.json"
@@ -204,8 +204,8 @@ def build_bundle_hash_manifest(
             if reason != "bundle_hash_manifest":
                 excluded.append({"path": relative, "reason": reason})
             continue
-        path = root / relative
-        artifacts.append({"path": relative, "sha256": file_sha256(path), "bytes": path.stat().st_size})
+        digest, size = hash_run_file(root, relative, max_bytes=None)
+        artifacts.append({"path": relative, "sha256": digest, "bytes": size})
     return {
         "schema_version": BUNDLE_HASHES_SCHEMA_VERSION,
         "algorithm": HASH_ALGORITHM,
@@ -286,6 +286,9 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
             # A link needs no manifest to be wrong: consumers would follow it out of the run.
             result.update(status="mismatch", message="The run contains symbolic links, which are never followed or trusted.")
         return result
+    except OSError as exc:
+        result.update(status="invalid", message=f"bundle-hashes.json cannot be read: {exc}")
+        return result
     result["manifest_sha256"] = hashlib.sha256(manifest_data).hexdigest()
     try:
         payload = json.loads(manifest_data.decode("utf-8"))
@@ -313,12 +316,7 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
         relative = str(row["path"])
         listed.add(relative)
         try:
-            actual = hashlib.sha256(read_run_file(root, relative)).hexdigest()
-        except UnsafeRunFileError as exc:
-            if exc.reason != "outside":
-                raise
-            missing.append(relative)
-            continue
+            actual, _ = hash_run_file(root, relative)
         except OSError:
             missing.append(relative)
             continue

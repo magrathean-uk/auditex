@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from .run_files import read_run_file
+from .run_files import read_run_file, unbounded_writer_reads
 
 IDENTITY_FIELDS = ("tenant_id", "tenant_id_requested", "tenant_identity")
 _AUTHORITIES = {"common", "organizations", "consumers"}
@@ -115,7 +115,14 @@ def resolve_tenant_identity(
     requested: Any = None,
     metadata: Mapping[str, Any] | None = None,
     additional_requests: Iterable[tuple[str, Any]] = (),
+    unbounded: bool = False,
 ) -> dict[str, Any]:
+    if unbounded:
+        with unbounded_writer_reads():
+            return resolve_tenant_identity(
+                run_dir, platform=platform, requested=requested, metadata=metadata,
+                additional_requests=additional_requests,
+            )
     metadata = metadata or {}
     requested = _text(requested)
     identity: dict[str, Any] = {"status": "unknown", "kind": "entra_tenant_id", "sources": [], "conflicts": []}

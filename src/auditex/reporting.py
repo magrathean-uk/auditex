@@ -37,9 +37,9 @@ from azure_tenant_audit.output_redaction import (
     settle_citations,
     snapshot_run,
 )
-from azure_tenant_audit.private_io import copy_private_file, harden_tree, make_private_dirs, write_private_text
+from azure_tenant_audit.private_io import harden_tree, make_private_dirs, write_private_bytes, write_private_text
 from azure_tenant_audit.resources import resolve_resource_path
-from azure_tenant_audit.run_files import UnsafeRunFileError, read_run_file
+from azure_tenant_audit.run_files import UnsafeRunFileError, hash_run_file, read_run_file
 from azure_tenant_audit.waivers import accepted_risk_summary
 
 from .run_bundle import RunBundle, summarize_recomputed_validation
@@ -370,7 +370,10 @@ def _relative_source(path: Path, run_path: Path) -> str:
 
 
 def load_section_registry(path: Path | None = None) -> list[dict[str, Any]]:
-    payload = _mapping(_read_json(resolve_resource_path(path or DEFAULT_SECTION_REGISTRY_PATH), {}))
+    try:
+        payload = _mapping(json.loads(resolve_resource_path(path or DEFAULT_SECTION_REGISTRY_PATH).read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        payload = {}
     rows = payload.get("sections")
     if not isinstance(rows, list):
         return []
@@ -779,7 +782,7 @@ def _sha256_file(path: Path, *, root: Path | None = None) -> str | None:
             relative = path.relative_to(base)
         except ValueError as exc:
             raise UnsafeRunFileError("Bundle file path must stay inside the bundle directory") from exc
-        return hashlib.sha256(read_run_file(base, relative)).hexdigest()
+        return hash_run_file(base, relative)[0]
     except OSError:
         return None
 
@@ -787,7 +790,7 @@ def _sha256_file(path: Path, *, root: Path | None = None) -> str | None:
 def _artifact_row(run_path: Path, relative: str, purpose: str, *, customer_safe: bool = True) -> dict[str, Any]:
     path = run_path / relative
     try:
-        digest = hashlib.sha256(read_run_file(run_path, relative)).hexdigest()
+        digest = hash_run_file(run_path, relative)[0]
         present = True
     except FileNotFoundError:
         digest = None
@@ -1746,9 +1749,14 @@ def _copy_source_artifact(
         row["skipped_reason"] = "not_in_bundle_hashes"
         return row
     destination = output_root / relative
-    payload = _read_json(source, None)
+    guard_root = Path(os.path.realpath(run_path))
+    try:
+        source_bytes = read_run_file(guard_root, relative)
+        payload = json.loads(source_bytes.decode("utf-8"))
+    except (OSError, ValueError):
+        payload = None
     if relative == "run-manifest.json" and isinstance(payload, Mapping):
-        row["source_sha256"] = _sha256_file(source)
+        row["source_sha256"] = hashlib.sha256(source_bytes).hexdigest()
         row["transformed"] = _PACK_RELATIVE_PATHS
         manifest_copy = _settle_citations(
             redact_output(_pack_relative_run_manifest(payload, run_path), profile=PROFILE_CUSTOMER_PACK, context=context)
@@ -1762,9 +1770,10 @@ def _copy_source_artifact(
                 row["customer_safe"] = False
                 row["skipped_reason"] = "redaction_would_change_hash_manifest"
                 return row
-            copy_private_file(source, destination)
+            # Copy the same bytes that passed the redaction check, not a reopened path.
+            write_private_bytes(destination, source_bytes)
         else:
-            row["source_sha256"] = _sha256_file(source)
+            row["source_sha256"] = hashlib.sha256(source_bytes).hexdigest()
             row["transformed"] = _REDACTED_DERIVATIVE
             write_private_text(destination, json.dumps(derived, indent=2, ensure_ascii=False) + "\n")
     else:

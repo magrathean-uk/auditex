@@ -5,14 +5,14 @@ import os
 import sqlite3
 import tempfile
 from collections.abc import Iterable, Mapping
-from contextlib import closing
+from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
 from .perf_runtime import sqlite_bulk_pragmas
-from .run_files import read_run_file, temporary_run_data_dir
+from .run_files import UnsafeRunFileError, copy_run_file, open_run_file, read_run_file
 from .tenant_identity import decode_identity_metadata
 
 
@@ -224,6 +224,53 @@ def open_index_snapshot(data: bytes) -> sqlite3.Connection:
     return connection
 
 
+@contextmanager
+def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
+    """Inspect a guarded index copy in TMPDIR, or fall back to an in-place read-only open."""
+    root = Path(run_dir)
+    relative = "index/evidence.sqlite"
+    suffixes = ("", "-wal", "-shm", "-journal") if include_sidecars else ("",)
+    with ExitStack() as stack:
+        try:
+            temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
+            if temporary_root.is_relative_to(root.resolve().parent):
+                temporary = None
+            else:
+                temporary = stack.enter_context(tempfile.TemporaryDirectory(
+                    prefix="auditex-index-", dir=temporary_root,
+                ))
+        except (OSError, RuntimeError):
+            temporary = None
+        if temporary is not None:
+            copied = Path(temporary) / "evidence.sqlite"
+            try:
+                for suffix in suffixes:
+                    try:
+                        copy_run_file(root, relative + suffix, copied.with_name(copied.name + suffix), max_bytes=None)
+                    except FileNotFoundError:
+                        if not suffix:
+                            raise
+            except UnsafeRunFileError:
+                raise
+            except FileNotFoundError:
+                raise
+            except OSError:
+                temporary = None
+        if temporary is None:
+            # SQLite needs the original filenames to see a legacy WAL. Hold
+            # guarded descriptors for every existing input before opening it
+            # with mode=ro; no copy is placed beside the run.
+            for suffix in suffixes:
+                try:
+                    stack.enter_context(open_run_file(root, relative + suffix))
+                except FileNotFoundError:
+                    if not suffix:
+                        raise
+            copied = root / relative
+        with closing(open_index_read_only(copied, immutable=not include_sidecars)) as conn:
+            yield conn
+
+
 def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     """The run metadata held in ``index/evidence.sqlite``, or ``{}`` when it cannot be trusted or read.
 
@@ -233,11 +280,6 @@ def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     the manifest. Only an index no hash manifest covers (a bundle from before it existed) is read together
     with a sidecar, because its data may still sit there.
     """
-    db_path = Path(run_dir) / "index" / "evidence.sqlite"
-    try:
-        db_data = read_run_file(run_dir, "index/evidence.sqlite")
-    except FileNotFoundError:
-        return {}
     sidecars = evidence_sidecars(run_dir)
     if sidecars and evidence_index_is_hashed(run_dir):
         return {}
@@ -254,22 +296,12 @@ def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
 
     try:
         if not sidecars and hasattr(sqlite3.Connection, "deserialize"):
+            db_data = read_run_file(run_dir, "index/evidence.sqlite")
             with closing(open_index_snapshot(db_data)) as conn:
                 meta, stats = inspect(conn)
         else:
-            # Legacy unsealed indices can retain committed data in a WAL;
-            # some SQLite builds also lack the in-memory deserialize API.
-            with tempfile.TemporaryDirectory(prefix="auditex-index-", dir=temporary_run_data_dir(run_dir)) as temporary:
-                copy_path = Path(temporary) / db_path.name
-                copy_path.write_bytes(db_data)
-                for suffix in ("-wal", "-shm", "-journal") if sidecars else ():
-                    try:
-                        data = read_run_file(run_dir, f"index/evidence.sqlite{suffix}")
-                    except FileNotFoundError:
-                        continue
-                    copy_path.with_name(copy_path.name + suffix).write_bytes(data)
-                with closing(open_index_read_only(copy_path, immutable=not sidecars)) as conn:
-                    meta, stats = inspect(conn)
+            with open_private_run_index(run_dir, include_sidecars=bool(sidecars)) as conn:
+                meta, stats = inspect(conn)
     except (OSError, sqlite3.DatabaseError):
         return {}
 

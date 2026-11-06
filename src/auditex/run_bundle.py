@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from azure_tenant_audit.run_files import UnsafeRunFileError, read_run_file
+from azure_tenant_audit.run_files import UnsafeRunFileError, open_run_file, read_run_file
 from azure_tenant_audit.tenant_identity import IDENTITY_FIELDS, reconcile_tenant_identity
 
 
@@ -265,7 +265,8 @@ class RunBundle:
         if not _present(path):
             return None
         try:
-            read_run_file(self.run_dir, _relative_to_run(self.run_dir, path))
+            with open_run_file(self.run_dir, _relative_to_run(self.run_dir, path)):
+                pass
         except FileNotFoundError:
             return None
         return path

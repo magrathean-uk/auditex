@@ -36,7 +36,6 @@ from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundl
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.data_handling import build_data_handling_summary, classify_auth_scope
 from azure_tenant_audit.private_io import copy_private_file, write_private_text
-from azure_tenant_audit.run_files import UnsafeRunFileError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -151,10 +150,12 @@ def test_a_symlink_makes_the_handoff_and_pack_fail_before_reading(bundle: Path, 
     outside.write_text('{"trust_level": "trusted_complete"}', encoding="utf-8")
     (bundle / "live-readiness.json").symlink_to(outside)
 
-    with pytest.raises(UnsafeRunFileError, match="regular file"):
-        enterprise_handoff(bundle)
+    handoff = enterprise_handoff(bundle)
+    assert handoff["handoff_status"] == "unusable"
+    assert handoff["integrity"]["status"] == "mismatch"
+    assert handoff["integrity"]["symlink_paths"] == ["live-readiness.json"]
     pack = tmp_path / "pack"
-    with pytest.raises(UnsafeRunFileError, match="regular file"):
+    with pytest.raises(BundleIntegrityError):
         write_enterprise_handoff_pack(bundle, pack)
     assert not pack.exists()
 

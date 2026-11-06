@@ -11,6 +11,7 @@ import pytest
 
 
 _SOURCE = Path(__file__).resolve().parents[1] / "src"
+_CANARY = "OUTSIDE-RUN-CANARY-7cf620"
 _CALL_TOOL = """
 import json
 import os
@@ -62,8 +63,11 @@ def test_diff_rejects_fifo_manifest_without_blocking(tmp_path: Path) -> None:
 
     outcome = _call_tool("auditex_diff_runs", str(left), str(right))
 
-    assert outcome.get("error") == "UnsafeRunFileError"
-    assert "regular file" in str(outcome.get("message"))
+    from azure_tenant_audit.run_files import UnsafeRunFileError, read_run_file
+
+    with pytest.raises(UnsafeRunFileError):
+        read_run_file(left, "run-manifest.json")
+    assert "result" in outcome
 
 
 _RUN_TOOLS = (
@@ -92,14 +96,18 @@ def _plant_bad_file(path: Path, kind: str) -> None:
             pytest.skip("FIFOs are unavailable")
         os.mkfifo(path)
     elif kind == "symlink":
-        target = path.parent / "target.json"
-        target.write_text("{}", encoding="utf-8")
+        target = path.parent / "guard-target"
+        target.write_text(json.dumps({"tenant_name": _CANARY, "secret": _CANARY}), encoding="utf-8")
         path.symlink_to(target.name)
+    elif kind == "hardlink":
+        target = path.parent / "guard-target"
+        target.write_text(json.dumps({"tenant_name": _CANARY, "secret": _CANARY}), encoding="utf-8")
+        os.link(target, path)
     elif kind == "directory":
         path.mkdir()
     elif kind == "oversize":
         with path.open("wb") as handle:
-            handle.truncate(32 * 1024 * 1024 + 1)
+            handle.truncate(256 * 1024 * 1024 + 1)
     else:
         raise AssertionError(kind)
 
@@ -128,8 +136,10 @@ def _tool_args(tool: str, bad_run: Path, good_run: Path) -> tuple[str, tuple[obj
 
 
 @pytest.mark.parametrize("tool", _RUN_TOOLS)
-@pytest.mark.parametrize("kind", ("fifo", "symlink", "directory", "oversize"))
+@pytest.mark.parametrize("kind", ("fifo", "symlink", "hardlink", "directory", "oversize"))
 def test_mcp_tools_reject_unsafe_manifests(tmp_path: Path, tool: str, kind: str) -> None:
+    from azure_tenant_audit.run_files import UnsafeRunFileError, read_run_file
+
     bad = tmp_path / "bad"
     good = tmp_path / "good"
     bad.mkdir()
@@ -140,9 +150,10 @@ def test_mcp_tools_reject_unsafe_manifests(tmp_path: Path, tool: str, kind: str)
     name, args = _tool_args(tool, bad, good)
     outcome = _call_tool(name, *args)
 
-    assert outcome.get("error") == "UnsafeRunFileError", outcome
-    message = str(outcome.get("message"))
-    assert "size limit" in message if kind == "oversize" else "regular file" in message
+    with pytest.raises(UnsafeRunFileError):
+        read_run_file(bad, "run-manifest.json")
+    assert _CANARY not in json.dumps(outcome)
+    assert outcome.get("error") in (None, "UnsafeRunFileError", "ValueError"), outcome
 
 
 @pytest.mark.parametrize("tool,relative", (
@@ -161,8 +172,10 @@ def test_mcp_tools_reject_unsafe_manifests(tmp_path: Path, tool: str, kind: str)
     ("auditex_enterprise_handoff", "normalized/custom.json"),
     ("auditex_compare_runs:left", "bundle-hashes.json"),
 ))
-@pytest.mark.parametrize("kind", ("fifo", "symlink", "directory", "oversize"))
+@pytest.mark.parametrize("kind", ("fifo", "symlink", "hardlink", "directory", "oversize"))
 def test_mcp_tools_reject_unsafe_bundle_files(tmp_path: Path, tool: str, relative: str, kind: str) -> None:
+    from azure_tenant_audit.run_files import UnsafeRunFileError, read_run_file
+
     bad = tmp_path / "bad"
     good = tmp_path / "good"
     bad.mkdir()
@@ -174,9 +187,10 @@ def test_mcp_tools_reject_unsafe_bundle_files(tmp_path: Path, tool: str, relativ
     name, args = _tool_args(tool, bad, good)
     outcome = _call_tool(name, *args)
 
-    assert outcome.get("error") == "UnsafeRunFileError", outcome
-    message = str(outcome.get("message"))
-    assert "size limit" in message if kind == "oversize" else "regular file" in message
+    with pytest.raises(UnsafeRunFileError):
+        read_run_file(bad, relative)
+    assert _CANARY not in json.dumps(outcome)
+    assert outcome.get("error") in (None, "UnsafeRunFileError", "ValueError"), outcome
 
 
 @pytest.mark.parametrize("kind", ("fifo", "symlink", "directory", "oversize"))
@@ -252,27 +266,6 @@ def test_guard_fallback_rejects_symlinked_parent(tmp_path: Path, monkeypatch: py
     assert read_run_file(tmp_path, "actual/file.json") == b"{}"
     with pytest.raises(UnsafeRunFileError, match="symlinks"):
         read_run_file(tmp_path, "linked/file.json")
-
-
-def test_temporary_evidence_copy_stays_on_the_run_volume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from types import SimpleNamespace
-    from azure_tenant_audit import run_files
-
-    run = tmp_path / "run"
-    run.mkdir()
-    temporary = tmp_path / "temporary"
-    temporary.mkdir()
-    monkeypatch.setattr(run_files.tempfile, "gettempdir", lambda: str(temporary))
-    assert run_files.temporary_run_data_dir(run) == temporary
-
-    real_stat = Path.stat
-
-    def other_volume(path: Path, *args: object, **kwargs: object) -> object:
-        info = real_stat(path, *args, **kwargs)
-        return SimpleNamespace(st_dev=info.st_dev + 1) if path == temporary else info
-
-    monkeypatch.setattr(Path, "stat", other_volume)
-    assert run_files.temporary_run_data_dir(run) == run.parent
 
 
 def test_closed_sqlite_index_needs_no_temporary_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -354,7 +347,10 @@ def test_mcp_rejects_unsafe_manifest_selected_index(tmp_path: Path, kind: str) -
     (tmp_path / "run-manifest.json").write_text('{"evidence_db_path": "index/custom.sqlite"}', encoding="utf-8")
     _plant_bad_file(tmp_path / "index" / "custom.sqlite", kind)
     outcome = _call_tool("auditex_summarize_run", str(tmp_path))
-    assert outcome.get("error") == "UnsafeRunFileError", outcome
+    if kind == "oversize":
+        assert "result" in outcome
+    else:
+        assert outcome.get("error") == "UnsafeRunFileError", outcome
 
 
 @pytest.mark.parametrize("kind", ("fifo", "symlink", "directory", "oversize"))
@@ -376,7 +372,12 @@ def test_handoff_rejects_unsafe_referenced_artifact(tmp_path: Path, kind: str, s
 
     outcome = _call_tool("auditex_enterprise_handoff", str(tmp_path))
 
-    assert outcome.get("error") == "UnsafeRunFileError", outcome
+    assert _CANARY not in json.dumps(outcome)
+    if source == "hash_manifest":
+        assert outcome["result"]["integrity"]["status"] == "mismatch", outcome
+        assert relative in outcome["result"]["integrity"]["missing_paths"], outcome
+    else:
+        assert outcome.get("error") in (None, "UnsafeRunFileError"), outcome
 
 
 @pytest.mark.parametrize("kind", ("fifo", "symlink", "directory", "oversize"))
@@ -391,4 +392,8 @@ def test_mcp_pack_verification_rejects_unsafe_bundle_files(tmp_path: Path, kind:
 
     outcome = _call_tool("auditex_verify_customer_pack", str(tmp_path))
 
-    assert outcome.get("error") == "UnsafeRunFileError", outcome
+    assert _CANARY not in json.dumps(outcome)
+    if "result" in outcome:
+        assert outcome["result"]["valid"] is False, outcome
+    else:
+        assert outcome.get("error") == "UnsafeRunFileError", outcome

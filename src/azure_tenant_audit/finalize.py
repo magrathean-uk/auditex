@@ -17,6 +17,7 @@ from .evidence_refs import seal_findings
 from .output import AuditWriter
 from .scope_catalog import build_google_scope_catalog, load_m365_scope_catalog
 from .tenant_identity import canonical_tenant_uuid, resolve_tenant_identity
+from .run_files import unbounded_writer_reads
 
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,7 @@ def _apply_report_pack_citations(writer: AuditWriter, metadata: dict[str, Any]) 
     writer.write_report_pack(report_pack)
 
 
+@unbounded_writer_reads()
 def finalize_bundle_contract(
     *,
     writer: AuditWriter,

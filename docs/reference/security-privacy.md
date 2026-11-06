@@ -207,6 +207,37 @@ The opt-in `identity_protection` collector stores only aggregate risky-user
 counts, never user names or UPNs. The `exchange_policy` mailbox audit bypass
 check stores only a count of bypassed accounts.
 
+## Guarded run and pack reads
+
+`azure_tenant_audit.run_files.read_run_file` reads a file beneath a run or pack
+directory through a guarded descriptor. `UnsafeRunFileError`, an `OSError`,
+has a path-free message and a `.reason` attribute; `outside`, `oversize`,
+`hardlink` and `type` identify those specific refusals. Missing files still
+raise `FileNotFoundError`.
+
+Control files, including manifests, summaries, validation, AI context and
+salt, have a 32 MiB limit (`MAX_RUN_FILE_BYTES`). Evidence and other data
+files have a 256 MiB limit (`MAX_RUN_DATA_BYTES`). Hashing and copies use
+guarded streams. Guarded reads during writer finalisation have no size cap,
+and bundle hash manifest generation streams without a cap, so the reader
+limits do not constrain the writer's own artifacts. Verification applies the
+reader's class limits.
+
+The guard rejects paths outside the root, symbolic links, non-regular files
+and files whose hard-link count is not exactly one. On systems with
+descriptor-relative opens, it checks each parent and the opened file without
+following links; the portable fallback checks paths before opening and
+compares file identity afterwards. Hard-linked backup bundles, including those
+made with `rsync --link-dest`, cannot be read until their files are copied
+without hard links. Legacy SQLite WAL data is inspected in a private temporary
+directory under `TMPDIR`, streaming the index and sidecars without a size cap.
+If that directory is unavailable or is inside the run's parent, the index is
+opened in place with SQLite's read-only mode after the inputs are checked. This
+fallback must reopen the checked paths so SQLite can find the sidecars; it
+cannot provide the same protection against concurrent path replacement as the
+temporary-copy path.
+SQLite may also update an existing shared-memory sidecar in this mode.
+
 ## Evidence and customer packs
 
 `operator_inputs.sensitive_users.supplied` is a boolean; when true,
