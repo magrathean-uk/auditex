@@ -339,25 +339,101 @@ def test_closed_index_uses_private_streamed_copy_and_cleans_it(
     assert sorted(path.name for path in run.parent.iterdir()) == ["run"]
 
 
-def test_closed_index_refuses_scratch_inside_run_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("scratch_failure", ("directory", "copy", "destination_missing"))
+def test_closed_index_falls_back_to_guarded_immutable_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_failure: str,
+) -> None:
     from azure_tenant_audit import evidence_db
     from azure_tenant_audit.contracts import _validate_evidence_db
 
     parent = tmp_path / "run-parent"
-    index = parent / "run/index/evidence.sqlite"
+    run = parent / "run"
+    index = run / "index/evidence.sqlite"
     index.parent.mkdir(parents=True)
-    index.write_bytes(b"not a database")
+    with closing(sqlite3.connect(index)) as writer:
+        writer.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
+        writer.execute("CREATE TABLE section_stats (section_name TEXT, item_count INTEGER, source_path TEXT)")
+        writer.execute("CREATE TABLE normalized_records (record TEXT)")
+        writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'SYNTHETIC')")
+        writer.commit()
     monkeypatch.setenv("TMPDIR", str(parent))
 
-    def no_sqlite(*args: object, **kwargs: object) -> None:
-        pytest.fail("opened a closed index without a private copy")
+    def fail(*args: object, **kwargs: object) -> None:
+        if scratch_failure == "destination_missing":
+            Path(args[2]).parent.rmdir()
+            raise FileNotFoundError("synthetic temporary destination disappeared")
+        raise OSError("synthetic scratch failure")
 
-    monkeypatch.setattr(evidence_db, "open_index_read_only", no_sqlite)
-    assert evidence_db.load_run_index_summary(parent / "run") == {}
+    if scratch_failure == "directory":
+        monkeypatch.setattr(evidence_db.tempfile, "TemporaryDirectory", fail)
+    else:
+        monkeypatch.setattr(evidence_db, "copy_run_file", fail)
+    original = evidence_db.open_index_read_only
+    seen: list[Path] = []
+
+    def inspect(path: Path, *, immutable: bool = True) -> sqlite3.Connection:
+        seen.append(Path(path))
+        assert immutable
+        return original(path, immutable=immutable)
+
+    monkeypatch.setattr(evidence_db, "open_index_read_only", inspect)
+    before = index.read_bytes()
+    assert evidence_db.load_run_index_summary(run)["tenant_name"] == "SYNTHETIC"
     issues: list[dict[str, object]] = []
-    _validate_evidence_db(parent / "run", issues, read_only=True)
-    assert [issue["code"] for issue in issues] == ["invalid_evidence_sqlite"]
+    _validate_evidence_db(run, issues, read_only=True)
+    assert issues == []
+    assert seen == [index, index]
+    assert index.read_bytes() == before
+    assert sorted(path.name for path in index.parent.iterdir()) == ["evidence.sqlite"]
     assert sorted(path.name for path in parent.iterdir()) == ["run"]
+
+
+@pytest.mark.parametrize("kind", ("symlink", "hardlink"))
+def test_closed_index_fallback_still_refuses_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    from azure_tenant_audit import evidence_db
+    from azure_tenant_audit.run_files import UnsafeRunFileError
+
+    run = tmp_path / "run"
+    index = run / "index/evidence.sqlite"
+    index.parent.mkdir(parents=True)
+    outside = tmp_path / "outside.sqlite"
+    outside.write_bytes(b"private")
+    if kind == "symlink":
+        index.symlink_to(outside)
+    else:
+        os.link(outside, index)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "missing"))
+    with pytest.raises(UnsafeRunFileError):
+        with evidence_db.open_private_run_index(run, include_sidecars=False):
+            pytest.fail("opened an unsafe index")
+
+
+def test_closed_index_copy_is_not_subject_to_data_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, small_limits: None,
+) -> None:
+    from azure_tenant_audit import evidence_db
+    from azure_tenant_audit.contracts import _validate_evidence_db
+
+    run = tmp_path / "runs" / "run"
+    index = run / "index/evidence.sqlite"
+    index.parent.mkdir(parents=True)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("TMPDIR", str(scratch))
+    with closing(sqlite3.connect(index)) as writer:
+        writer.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
+        writer.execute("CREATE TABLE section_stats (section_name TEXT, item_count INTEGER, source_path TEXT)")
+        writer.execute("CREATE TABLE normalized_records (record TEXT)")
+        writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'SYNTHETIC')")
+        writer.commit()
+    assert index.stat().st_size > 256
+    assert evidence_db.load_run_index_summary(run)["tenant_name"] == "SYNTHETIC"
+    issues: list[dict[str, object]] = []
+    _validate_evidence_db(run, issues, read_only=True)
+    assert issues == []
+    assert list(scratch.iterdir()) == []
 
 
 @pytest.mark.parametrize("parent_readonly", (True, False))

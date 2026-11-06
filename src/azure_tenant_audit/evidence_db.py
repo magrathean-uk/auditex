@@ -210,14 +210,14 @@ def open_index_read_only(db_path: str | Path, *, immutable: bool = True) -> sqli
 
 @contextmanager
 def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
-    """Inspect a guarded private copy; legacy WAL reads may fall back to an in-place read-only open."""
+    """Inspect a guarded private copy, or fall back to an in-place read-only open."""
     root = Path(run_dir)
     relative = "index/evidence.sqlite"
     suffixes = ("", "-wal", "-shm", "-journal") if include_sidecars else ("",)
     with ExitStack() as stack:
         try:
             temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
-            if temporary_root.is_relative_to(root.resolve().parent):
+            if include_sidecars and temporary_root.is_relative_to(root.resolve().parent):
                 temporary = None
             else:
                 temporary = stack.enter_context(tempfile.TemporaryDirectory(
@@ -232,25 +232,24 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
                 for suffix in suffixes:
                     try:
                         destination = copied.with_name(copied.name + suffix)
-                        if include_sidecars:
-                            copy_run_file(root, relative + suffix, destination, max_bytes=None)
-                        else:
-                            copy_run_file(root, relative, destination)
+                        copy_run_file(root, relative + suffix, destination, max_bytes=None)
                     except FileNotFoundError:
                         if not suffix:
                             raise
             except UnsafeRunFileError:
                 raise
             except FileNotFoundError:
-                raise
+                if include_sidecars:
+                    raise
+                # The source or temporary destination may have disappeared.
+                # The guarded in-place open below distinguishes the two.
+                temporary = None
             except OSError:
                 temporary = None
         if temporary is None:
-            if not include_sidecars:
-                raise OSError("Cannot create a private evidence index copy")
-            # SQLite needs the original filenames to see a legacy WAL. Hold
-            # guarded descriptors for every existing input before opening it
-            # with mode=ro; no copy is placed beside the run.
+            # Hold guarded descriptors before reopening the original paths.
+            # SQLite needs those names to see a legacy WAL; closed indexes use
+            # immutable mode and cannot create sidecars.
             for suffix in suffixes:
                 try:
                     stack.enter_context(open_run_file(root, relative + suffix))
@@ -265,7 +264,7 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
 def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     """The run metadata held in ``index/evidence.sqlite``, or ``{}`` when it cannot be trusted or read.
 
-    Closed indices are inspected in a private temporary copy, so reading them neither changes them nor creates a sidecar. When
+    Closed indices use a private temporary copy or an immutable in-place read. When
     ``bundle-hashes.json`` lists the index, a sidecar beside it makes this return ``{}``: the sidecar is not
     covered by the hash, so whatever it holds was not part of the run as finalized, and callers fall back to
     the manifest. Only an index no hash manifest covers (a bundle from before it existed) is read together

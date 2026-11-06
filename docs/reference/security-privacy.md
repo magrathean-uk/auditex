@@ -230,17 +230,19 @@ following links; the portable fallback checks paths before opening and
 compares file identity afterwards. Hard-linked backup bundles, including those
 made with `rsync --link-dest`, cannot be read until their files are copied
 without hard links. Read-only index inspection streams a guarded copy to a
-private temporary directory under `TMPDIR`, with files created as `0600`.
+private `0700` temporary directory under `TMPDIR`, with files created as `0600`.
 The copy contains run evidence, so `TMPDIR` must be on encrypted storage for
-live tenant data.
-Closed indexes retain the data-file size limit. Legacy SQLite WAL indexes
-and their sidecars are copied without a size cap. For a legacy WAL, if that
-directory is unavailable or inside the run's parent, the index is opened in
-place with SQLite's read-only mode after the inputs are checked. This fallback
-must reopen the checked paths so SQLite can find the sidecars; it cannot provide
-the same protection against concurrent path replacement as the temporary-copy
-path. SQLite may also update an existing shared-memory sidecar in this mode.
-For a closed index, an unavailable private directory causes inspection to fail.
+live tenant data. Closed indexes and legacy SQLite WAL indexes with their
+sidecars are copied without a size cap; available temporary disk space and the
+time needed to copy the index are the practical limits. For a closed index the
+private directory may be inside the run or its parent. If it cannot be created
+or the copy cannot be made, the checked index is opened in place with SQLite's
+read-only immutable mode, which creates no sidecars. For a legacy WAL, if the
+temporary directory is unavailable or inside the run's parent, the checked
+index and sidecars are opened in place with SQLite's read-only mode instead.
+Both fallbacks reopen the checked paths and cannot provide the same protection
+against concurrent path replacement as the temporary-copy path. SQLite may
+also update an existing shared-memory sidecar when reading a legacy WAL in place.
 
 ## Evidence and customer packs
 

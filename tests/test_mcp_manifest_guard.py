@@ -236,6 +236,43 @@ def test_shareable_normalized_read_and_snapshot_refuse_links(tmp_path: Path, rel
         assert relative in str(caught.value) and _CANARY not in str(caught.value)
 
 
+@pytest.mark.parametrize("kind", ("dangling", "inside"))
+@pytest.mark.parametrize("nested", (False, True))
+def test_shareable_output_ignores_non_json_symlinks(tmp_path: Path, kind: str, nested: bool) -> None:
+    from azure_tenant_audit.output_redaction import context_for_run, redact_output, snapshot_run
+
+    normalized = tmp_path / "run" / "normalized"
+    directory = normalized / "nested" if nested else normalized
+    directory.mkdir(parents=True)
+    (normalized / "users.json").write_text('{"records": []}', encoding="utf-8")
+    if kind == "inside":
+        (directory / "target.txt").write_text("ordinary", encoding="utf-8")
+    (directory / "notes.txt").symlink_to("target.txt")
+    snapshot_run(normalized.parent)
+    assert redact_output({"ok": True}, context=context_for_run(normalized.parent)) == {"ok": True}
+
+
+@pytest.mark.parametrize("nested", (False, True))
+@pytest.mark.parametrize("kind", ("symlink", "hardlink"))
+def test_shareable_scanner_refuses_json_links(tmp_path: Path, nested: bool, kind: str) -> None:
+    from azure_tenant_audit.output_redaction import ContextIncompleteError, context_for_run, redact_output, snapshot_run
+
+    normalized = tmp_path / "run" / "normalized"
+    directory = normalized / "nested" if nested else normalized
+    directory.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.write_text(json.dumps({"secret": _CANARY}), encoding="utf-8")
+    target = directory / "link.json"
+    if kind == "symlink":
+        target.symlink_to(outside)
+    else:
+        os.link(outside, target)
+    with pytest.raises(ContextIncompleteError):
+        snapshot_run(normalized.parent)
+    with pytest.raises(ContextIncompleteError):
+        redact_output({}, context=context_for_run(normalized.parent))
+
+
 def test_discovery_refuses_a_hard_link_added_during_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from azure_tenant_audit import output_redaction as redaction
 

@@ -699,10 +699,10 @@ class _Scan:
                         self.problem(here, exc.reason)
                     else:
                         self._enter(frames, child, here, len(frames))
-                elif stat.S_ISLNK(mode):
-                    self.problem(here, REASON_NON_REGULAR)
                 elif not name.lower().endswith(".json"):
                     continue
+                elif stat.S_ISLNK(mode):
+                    self.problem(here, REASON_NON_REGULAR)
                 elif not stat.S_ISREG(mode):
                     self.problem(here, REASON_NON_REGULAR)  # FIFO, socket, device: never opened
                 else:
