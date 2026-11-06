@@ -17,6 +17,7 @@ from azure_tenant_audit.collectors.onedrive_posture import OneDrivePostureCollec
 from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 from azure_tenant_audit.findings import build_findings
 from azure_tenant_audit.normalize import build_normalized_snapshot
+from test_teams_admin_rest import CONSTRUCTED_ROW, Client as TeamsClient, Response, command_reader, connect
 
 ANYONE = "externalUserAndGuestSharing"
 
@@ -309,20 +310,37 @@ def test_the_onedrive_collector_marks_a_copied_tenant_value_and_keeps_a_site_s_o
 
 
 def test_the_teams_collector_selects_the_allow_and_block_lists(monkeypatch: pytest.MonkeyPatch) -> None:
-    commands: list[str] = []
+    expected = {
+        "AllowFederatedUsers": True,
+        "AllowTeamsConsumer": True,
+        "AllowPublicUsers": False,
+        "AllowedDomains": {"AllowedDomain": [{"Domain": "partner.example"}]},
+        "BlockedDomains": [{"Domain": "blocked.example"}],
+    }
+    federation = {**CONSTRUCTED_ROW, **expected, "UnselectedField": "discarded"}
+    commands = command_reader(monkeypatch)
+    session = connect(monkeypatch, [Response(parsed={"value": [federation]}) for _ in range(5)])
 
-    class _Adapter:
-        def run(self, command: str, **_kwargs: Any) -> dict[str, Any]:
-            commands.append(command)
-            return {"value": []}
+    result = TeamsPolicyCollector().run({"client": TeamsClient(), "audit_logger": None})
 
-    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", lambda _name: _Adapter())
+    assert len(session.calls) == 5 and commands.calls == []
+    response = result.payload["tenantFederationConfiguration"]
+    assert response["command"] == "GET /Skype.Policy/configurations/TenantFederationSettings"
+    (selected,) = response["value"]
+    assert {field: selected[field] for field in expected} == expected
+    assert "UnselectedField" not in selected
 
-    TeamsPolicyCollector().run({"audit_logger": None})
 
-    (federation,) = [command for command in commands if command.startswith("Get-CsTenantFederationConfiguration")]
-    selected = {field.strip() for field in federation.split("Select-Object", 1)[1].strip().split(",")}
-    assert {"AllowFederatedUsers", "AllowTeamsConsumer", "AllowPublicUsers", "AllowedDomains", "BlockedDomains"} <= selected
+def test_the_teams_collector_skips_reads_without_a_certificate_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands = command_reader(monkeypatch)
+    session = connect(monkeypatch, [])
+
+    result = TeamsPolicyCollector().run({"client": TeamsClient(None), "audit_logger": None})
+
+    assert commands.calls == [] and session.calls == []
+    assert len(result.coverage) == 7
+    assert all(row["status"] == "skipped" and row["reason"] == "teams_token_unavailable" for row in result.coverage)
+    assert result.payload["tenantFederationConfiguration"]["reason"] == "teams_token_unavailable"
 
 
 # ---- normalization -----------------------------------------------------------------------------------
