@@ -203,3 +203,50 @@ def test_failed_close_after_read_debits_budget(tmp_path: Path, monkeypatch: pyte
     with pytest.raises(redaction.ContextIncompleteError) as error:
         redaction.redact_output({}, context=context)
     _message(error, root)
+
+
+@pytest.mark.usefixtures("low_limits")
+@pytest.mark.parametrize("partial_failure", [False, True])
+def test_failed_symlink_parent_close_debits_read_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, partial_failure: bool
+) -> None:
+    root = tmp_path / "run"
+    normalized, targets = root / "normalized", root / "targets"
+    normalized.mkdir(parents=True)
+    targets.mkdir()
+    target, other = targets / "target.json", normalized / "b.json"
+    for file in (target, other):
+        with file.open("wb") as stream:
+            stream.truncate(90)
+    (normalized / "a.json").symlink_to("../targets/target.json")
+    target_inode, other_inode, directory_inode = target.stat().st_ino, other.stat().st_ino, targets.stat().st_ino
+    original_read, original_close = os.read, os.close
+    total = 0
+    target_read = False
+
+    def read_with_optional_failure(fd: int, count: int) -> bytes:
+        nonlocal total, target_read
+        inode = os.fstat(fd).st_ino
+        if partial_failure and inode == target_inode:
+            if target_read:
+                raise OSError("synthetic partial read failure")
+            target_read = True
+            count = min(count, 70)
+        data = original_read(fd, count)
+        if inode in (target_inode, other_inode):
+            total += len(data)
+        return data
+
+    def fail_parent_close(fd: int) -> None:
+        inode = os.fstat(fd).st_ino
+        original_close(fd)
+        if inode == directory_inode:
+            raise OSError("synthetic directory close failure")
+
+    monkeypatch.setattr(redaction.os, "read", read_with_optional_failure)
+    monkeypatch.setattr(redaction.os, "close", fail_parent_close)
+    context = redaction.context_for_run(root)
+    assert total == (70 if partial_failure else 90) and context.incomplete
+    with pytest.raises(redaction.ContextIncompleteError) as error:
+        redaction.redact_output({}, context=context)
+    _message(error, root)

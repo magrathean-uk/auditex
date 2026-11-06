@@ -656,10 +656,20 @@ def _link_reader(
             parent_fd, leaf = _open_chain(root_fd, relative)
         finally:
             os.close(root_fd)
+        bytes_read = 0
         try:
-            return _read_file_at(parent_fd, leaf, target_info, cap)
+            data = _read_file_at(parent_fd, leaf, target_info, cap)
+            bytes_read = len(data)
+            return data
+        except _Unsafe as exc:
+            bytes_read = exc.bytes_read
+            raise
         finally:
-            os.close(parent_fd)
+            try:
+                os.close(parent_fd)
+            except OSError as exc:
+                # Preserve both successful and partial-read debits if the containing directory fails to close.
+                raise _Unsafe(REASON_UNREADABLE, bytes_read) from exc
 
     return reader, target_info
 
