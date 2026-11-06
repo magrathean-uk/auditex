@@ -10,7 +10,7 @@ builder asserted.
 Resolution rules:
 
 - ``artifact_path`` is relative to the run directory. An absolute path, a ``..`` segment or a
-  symlink that leaves the run directory is refused.
+  symlink is refused.
 - ``json_pointer`` (RFC 6901), when present, must exist in the artifact.
 - Without a pointer, ``record_key`` must name a record. A JSON artifact has records in its
   ``records`` list (normalized sections) or is itself a list of rows; a JSONL artifact has one
@@ -27,9 +27,11 @@ import json
 import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .run_files import UnsafeRunFileError, read_run_file
 HASH_ALGORITHM = "sha256"
 
 REASON_ARTIFACT_MISSING = "artifact_missing"
@@ -179,8 +181,9 @@ class EvidenceIndex:
     time. ``resolve`` answers from that work, and falls back to a one-reference prime.
     """
 
-    def __init__(self, run_dir: str | Path) -> None:
+    def __init__(self, run_dir: str | Path, *, strict: bool = False) -> None:
         self.run_dir = Path(run_dir)
+        self.strict = strict
         self._results: dict[tuple[str, str, str, int | None], RefResolution] = {}
 
     def prime(self, refs: Iterable[Any]) -> None:
@@ -204,13 +207,35 @@ class EvidenceIndex:
     def _resolve_artifact(
         self, artifact: str, items: dict[tuple[str, str, str, int | None], Mapping[str, Any]]
     ) -> None:
-        path, reason = confined_file(self.run_dir, artifact)
-        if path is None:
+        text = str(artifact or "").strip().replace("\\", "/")
+        relative = PurePosixPath(text)
+        reason = REASON_ARTIFACT_MISSING if not text else REASON_OUTSIDE_RUN if relative.is_absolute() or ".." in relative.parts else None
+        if reason:
             for signature in items:
                 self._results[signature] = RefResolution(False, reason)
             return
+        path = self.run_dir / relative.as_posix()
         try:
-            digest = file_sha256(path)
+            data = read_run_file(self.run_dir, relative.as_posix())
+            digest = hashlib.sha256(data).hexdigest()
+        except FileNotFoundError:
+            for signature in items:
+                self._results[signature] = RefResolution(False, REASON_ARTIFACT_MISSING)
+            return
+        except UnsafeRunFileError:
+            if self.strict:
+                raise
+            root = Path(os.path.realpath(self.run_dir))
+            resolved = Path(os.path.realpath(path))
+            if not resolved.is_relative_to(root):
+                reason = REASON_OUTSIDE_RUN
+            elif not path.is_file():
+                reason = REASON_ARTIFACT_MISSING
+            else:
+                reason = REASON_UNREADABLE
+            for signature in items:
+                self._results[signature] = RefResolution(False, reason)
+            return
         except OSError:
             for signature in items:
                 self._results[signature] = RefResolution(False, REASON_UNREADABLE)
@@ -219,14 +244,14 @@ class EvidenceIndex:
         suffix = path.suffix.lower()
         if suffix == ".json":
             try:
-                document: Any = json.loads(path.read_text(encoding="utf-8"))
+                document: Any = json.loads(data.decode("utf-8"))
             except (OSError, ValueError):
                 for signature in items:
                     self._results[signature] = RefResolution(False, REASON_UNREADABLE, digest)
                 return
             self._resolve_json(path, document, digest, items)
         elif suffix == ".jsonl":
-            self._resolve_jsonl(path, digest, items)
+            self._resolve_jsonl(path, digest, items, data)
         else:
             for signature in items:
                 self._results[signature] = RefResolution(False, REASON_NOT_ADDRESSABLE, digest)
@@ -265,20 +290,20 @@ class EvidenceIndex:
         path: Path,
         digest: str,
         items: dict[tuple[str, str, str, int | None], Mapping[str, Any]],
+        data: bytes,
     ) -> None:
         rows: list[Any] = []
         try:
-            with path.open("r", encoding="utf-8") as handle:
-                for raw_line in handle:
-                    text = raw_line.strip()
-                    if not text:
-                        rows.append(None)
-                        continue
-                    try:
-                        rows.append(json.loads(text))
-                    except ValueError:
-                        rows.append(None)
-        except OSError:
+            for raw_line in StringIO(data.decode("utf-8"), newline=None):
+                text = raw_line.strip()
+                if not text:
+                    rows.append(None)
+                    continue
+                try:
+                    rows.append(json.loads(text))
+                except ValueError:
+                    rows.append(None)
+        except UnicodeError:
             for signature in items:
                 self._results[signature] = RefResolution(False, REASON_UNREADABLE, digest)
             return

@@ -24,6 +24,7 @@ change the digest of the manifest after it was handed over. The handoff lists th
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -31,7 +32,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .evidence_refs import HASH_ALGORITHM, confined_file, file_sha256
+from .evidence_refs import HASH_ALGORITHM, file_sha256
+from .run_files import UnsafeRunFileError, read_run_file
 from .sensitive_users import BUNDLE_PATH, KEY_PATH
 
 BUNDLE_HASHES_PATH = "bundle-hashes.json"
@@ -87,7 +89,7 @@ def _excluded_reason(relative: str) -> str | None:
 
 def _json_object(path: Path) -> Mapping[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(read_run_file(path.parent, path.name).decode("utf-8"))
     except (OSError, ValueError):
         return {}
     return payload if isinstance(payload, Mapping) else {}
@@ -155,7 +157,7 @@ def manifest_digest_problem(integrity: Mapping[str, Any], expected: Any) -> str 
 
 def _run_manifest_lists_hashes(run_dir: Path) -> bool:
     try:
-        manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads(read_run_file(run_dir, "run-manifest.json").decode("utf-8"))
     except (OSError, ValueError):
         return False
     artifacts = manifest.get("artifacts") if isinstance(manifest, Mapping) else None
@@ -230,7 +232,6 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
     ``manifest_sha256`` is the digest of ``bundle-hashes.json`` whenever the file exists.
     """
     root = Path(run_dir)
-    manifest_path = root / BUNDLE_HASHES_PATH
     result: dict[str, Any] = {
         "status": "absent",
         "path": BUNDLE_HASHES_PATH,
@@ -252,12 +253,9 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
     symlinks = _bundle_symlinks(root)
     result["symlinks"] = symlinks[:_LIST_LIMIT]
     result["symlink_count"] = len(symlinks)
-    if manifest_path.is_file():
-        try:
-            result["manifest_sha256"] = file_sha256(manifest_path)
-        except OSError:
-            pass
-    else:
+    try:
+        manifest_data = read_run_file(root, BUNDLE_HASHES_PATH)
+    except FileNotFoundError:
         if _run_manifest_lists_hashes(root):
             # Finalization registers the manifest in run-manifest.json before it writes it, so a
             # bundle that lists it and has none lost it after finalization: that is not "absent".
@@ -288,8 +286,9 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
             # A link needs no manifest to be wrong: consumers would follow it out of the run.
             result.update(status="mismatch", message="The run contains symbolic links, which are never followed or trusted.")
         return result
+    result["manifest_sha256"] = hashlib.sha256(manifest_data).hexdigest()
     try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload = json.loads(manifest_data.decode("utf-8"))
         rows = payload.get("artifacts") if isinstance(payload, Mapping) else None
         if not isinstance(rows, list) or any(
             not isinstance(row, Mapping) or not isinstance(row.get("path"), str) or not isinstance(row.get("sha256"), str)
@@ -313,12 +312,13 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
     for row in rows:
         relative = str(row["path"])
         listed.add(relative)
-        path, _reason = confined_file(root, relative)
-        if path is None or path.is_symlink():
+        try:
+            actual = hashlib.sha256(read_run_file(root, relative)).hexdigest()
+        except UnsafeRunFileError as exc:
+            if exc.reason != "outside":
+                raise
             missing.append(relative)
             continue
-        try:
-            actual = file_sha256(path)
         except OSError:
             missing.append(relative)
             continue

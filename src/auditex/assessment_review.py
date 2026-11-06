@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from azure_tenant_audit.run_files import read_run_file
+
 from .external_assessments import validate_assessment
 
 
@@ -36,11 +38,14 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _read_json(path: Path) -> tuple[dict[str, Any], str]:
+def _read_json(path: Path, *, run_dir: Path | None = None) -> tuple[dict[str, Any], str]:
     try:
-        if path.stat().st_size > 64 * 1024 * 1024:
-            raise ValueError(f"Assessment artifact exceeds 64 MiB: {path}")
-        data = path.read_bytes()
+        if run_dir is not None:
+            data = read_run_file(run_dir, path.relative_to(run_dir))
+        else:
+            if path.stat().st_size > 64 * 1024 * 1024:
+                raise ValueError(f"Assessment artifact exceeds 64 MiB: {path}")
+            data = path.read_bytes()
         payload = json.loads(data, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError(f"Cannot read assessment artifact {path}: {exc}") from exc
@@ -111,26 +116,30 @@ def _auditex_assessment(run_dir: Path) -> dict[str, Any]:
 
     if not run_dir.is_dir():
         raise ValueError(f"Auditex run directory not found: {run_dir}")
-    for relative in ROOT_REQUIRED_ARTIFACTS:
-        if not (run_dir / relative).is_file():
-            raise ValueError(f"Incomplete Auditex bundle: missing {relative}")
     manifest_path = run_dir / "run-manifest.json"
-    manifest, manifest_digest = _read_json(manifest_path)
-    validation, _ = _read_json(run_dir / "validation.json")
+    manifest, manifest_digest = _read_json(manifest_path, run_dir=run_dir)
+    for relative in ROOT_REQUIRED_ARTIFACTS:
+        path = run_dir / relative
+        if not path.is_file() or path.is_symlink():
+            try:
+                read_run_file(run_dir, relative)
+            except FileNotFoundError:
+                raise ValueError(f"Incomplete Auditex bundle: missing {relative}") from None
+    validation, _ = _read_json(run_dir / "validation.json", run_dir=run_dir)
     if manifest.get("contract_status") != "valid" or validation.get("valid") is not True:
         raise ValueError("Auditex bundle must have completed, valid contract validation")
     if manifest.get("platform", "m365") != "m365":
         raise ValueError("External Microsoft assessments require a Microsoft 365 Auditex bundle")
     tenant_id = _tenant_key(manifest.get("tenant_id"))
-    summary, _ = _read_json(run_dir / "summary.json")
+    summary, _ = _read_json(run_dir / "summary.json", run_dir=run_dir)
     _check_explicit_tenant(summary, tenant_id, "summary.json")
-    context, _ = _read_json(run_dir / "ai_context.json")
+    context, _ = _read_json(run_dir / "ai_context.json", run_dir=run_dir)
     if "run" in context:
         if not isinstance(context["run"], dict):
             raise ValueError("Invalid Auditex bundle identity metadata at ai_context.json/run")
         _check_explicit_tenant(context["run"], tenant_id, "ai_context.json/run")
     report_path = run_dir / "reports" / "report-pack.json"
-    report, digest = _read_json(report_path)
+    report, digest = _read_json(report_path, run_dir=run_dir)
     # Current report packs identify their tenant by summary.tenant_name only.
     # Honor explicit IDs in either metadata position without treating IDs of
     # partner tenants or affected resources inside findings as bundle identity.

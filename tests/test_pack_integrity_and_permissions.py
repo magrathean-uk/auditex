@@ -36,6 +36,7 @@ from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundl
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.data_handling import build_data_handling_summary, classify_auth_scope
 from azure_tenant_audit.private_io import copy_private_file, write_private_text
+from azure_tenant_audit.run_files import UnsafeRunFileError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -145,19 +146,15 @@ def test_a_link_in_a_bundle_without_a_hash_manifest_is_still_a_mismatch(bundle: 
     assert result["status"] == "mismatch" and result["symlinks"] == ["audit-plan.json"]
 
 
-def test_a_symlink_makes_the_handoff_unusable_and_the_pack_is_refused(bundle: Path, tmp_path: Path) -> None:
+def test_a_symlink_makes_the_handoff_and_pack_fail_before_reading(bundle: Path, tmp_path: Path) -> None:
     outside = tmp_path / "outside.json"
     outside.write_text('{"trust_level": "trusted_complete"}', encoding="utf-8")
     (bundle / "live-readiness.json").symlink_to(outside)
 
-    handoff = enterprise_handoff(bundle)
-
-    assert handoff["handoff_status"] == "unusable" and "bundle_integrity_mismatch" in handoff["status_reasons"]
-    assert handoff["integrity"]["symlink_paths"] == ["live-readiness.json"]
-    limit = next(row for row in handoff["limitations"] if row["surface"] == "bundle_integrity")
-    assert "live-readiness.json" in limit["paths"] and "symbolic link" in limit["message"]
+    with pytest.raises(UnsafeRunFileError, match="regular file"):
+        enterprise_handoff(bundle)
     pack = tmp_path / "pack"
-    with pytest.raises(BundleIntegrityError):
+    with pytest.raises(UnsafeRunFileError, match="regular file"):
         write_enterprise_handoff_pack(bundle, pack)
     assert not pack.exists()
 

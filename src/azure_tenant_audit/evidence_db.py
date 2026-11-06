@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import tempfile
 from collections.abc import Iterable, Mapping
 from contextlib import closing
 from pathlib import Path
@@ -11,6 +12,7 @@ from urllib.parse import quote
 
 from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
 from .perf_runtime import sqlite_bulk_pragmas
+from .run_files import read_run_file, temporary_run_data_dir
 from .tenant_identity import decode_identity_metadata
 
 
@@ -206,32 +208,69 @@ def open_index_read_only(db_path: str | Path, *, immutable: bool = True) -> sqli
     return sqlite3.connect(_read_only_uri(db_path, immutable=immutable), uri=True)
 
 
+def open_index_snapshot(data: bytes) -> sqlite3.Connection:
+    """Open a closed, guarded index in memory without creating SQLite sidecars."""
+    snapshot = bytearray(data)
+    # A checkpointed WAL-mode database still requests WAL in its header;
+    # SQLite cannot open that mode after deserialize. Change only the copy.
+    if snapshot.startswith(b"SQLite format 3\x00") and snapshot[18:20] == b"\x02\x02":
+        snapshot[18:20] = b"\x01\x01"
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.deserialize(snapshot)
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
 def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     """The run metadata held in ``index/evidence.sqlite``, or ``{}`` when it cannot be trusted or read.
 
-    The index is opened immutable, so reading it neither changes it nor creates a sidecar. When
+    Closed indices are inspected in memory, so reading them neither changes them nor creates a sidecar. When
     ``bundle-hashes.json`` lists the index, a sidecar beside it makes this return ``{}``: the sidecar is not
     covered by the hash, so whatever it holds was not part of the run as finalized, and callers fall back to
     the manifest. Only an index no hash manifest covers (a bundle from before it existed) is read together
     with a sidecar, because its data may still sit there.
     """
     db_path = Path(run_dir) / "index" / "evidence.sqlite"
-    if not db_path.exists():
+    try:
+        db_data = read_run_file(run_dir, "index/evidence.sqlite")
+    except FileNotFoundError:
         return {}
     sidecars = evidence_sidecars(run_dir)
     if sidecars and evidence_index_is_hashed(run_dir):
         return {}
 
+    def inspect(conn: sqlite3.Connection) -> tuple[dict[str, str], list[dict[str, Any]]]:
+        meta = dict(conn.execute("SELECT key, value FROM run_meta").fetchall())
+        stats = [
+            {"name": row[0], "item_count": row[1], "source_path": row[2]}
+            for row in conn.execute(
+                "SELECT section_name, item_count, source_path FROM section_stats ORDER BY section_name"
+            ).fetchall()
+        ]
+        return meta, stats
+
     try:
-        with closing(open_index_read_only(db_path, immutable=not sidecars)) as conn:
-            meta = dict(conn.execute("SELECT key, value FROM run_meta").fetchall())
-            stats = [
-                {"name": row[0], "item_count": row[1], "source_path": row[2]}
-                for row in conn.execute(
-                    "SELECT section_name, item_count, source_path FROM section_stats ORDER BY section_name"
-                ).fetchall()
-            ]
-    except sqlite3.DatabaseError:
+        if not sidecars and hasattr(sqlite3.Connection, "deserialize"):
+            with closing(open_index_snapshot(db_data)) as conn:
+                meta, stats = inspect(conn)
+        else:
+            # Legacy unsealed indices can retain committed data in a WAL;
+            # some SQLite builds also lack the in-memory deserialize API.
+            with tempfile.TemporaryDirectory(prefix="auditex-index-", dir=temporary_run_data_dir(run_dir)) as temporary:
+                copy_path = Path(temporary) / db_path.name
+                copy_path.write_bytes(db_data)
+                for suffix in ("-wal", "-shm", "-journal") if sidecars else ():
+                    try:
+                        data = read_run_file(run_dir, f"index/evidence.sqlite{suffix}")
+                    except FileNotFoundError:
+                        continue
+                    copy_path.with_name(copy_path.name + suffix).write_bytes(data)
+                with closing(open_index_read_only(copy_path, immutable=not sidecars)) as conn:
+                    meta, stats = inspect(conn)
+    except (OSError, sqlite3.DatabaseError):
         return {}
 
     return {

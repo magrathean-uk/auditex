@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from .run_files import read_run_file
 
 IDENTITY_FIELDS = ("tenant_id", "tenant_id_requested", "tenant_identity")
 _AUTHORITIES = {"common", "organizations", "consumers"}
@@ -41,9 +42,9 @@ def _domain(value: Any) -> str | None:
     return text if re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*", text) else None
 
 
-def _read(path: Path) -> dict[str, Any]:
+def _read(run_dir: Path, relative: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(read_run_file(run_dir, relative).decode("utf-8"))
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
@@ -67,8 +68,8 @@ def _observations(run_dir: Path, auth_path: Any = None) -> tuple[list[dict[str, 
         if tenant_id:
             observations.append({"tenant_id": tenant_id, "source": source, "artifact_path": path, "json_pointer": pointer})
 
-    payloads = [(f"raw/{name}.json", "", _read(run_dir / "raw" / f"{name}.json")) for name in ("identity", "domains_hybrid")]
-    sample = _read(run_dir / "raw" / "sample_input.json")
+    payloads = [(f"raw/{name}.json", "", _read(run_dir, f"raw/{name}.json")) for name in ("identity", "domains_hybrid")]
+    sample = _read(run_dir, "raw/sample_input.json")
     payloads.extend(("raw/sample_input.json", f"/{name}", sample.get(name, {})) for name in ("identity", "domains_hybrid"))
     for path, prefix, payload in payloads:
         if not isinstance(payload, dict):
@@ -94,11 +95,11 @@ def _observations(run_dir: Path, auth_path: Any = None) -> tuple[list[dict[str, 
 
     auth_paths = {"normalized/auth_context.json", "auth-context.json"}
     if isinstance(auth_path, str):
-        candidate = run_dir / auth_path
-        if candidate.resolve().is_relative_to(run_dir.resolve()):
-            auth_paths.add(str(candidate.resolve().relative_to(run_dir.resolve())))
+        candidate = Path(auth_path)
+        if not candidate.is_absolute() and ".." not in candidate.parts:
+            auth_paths.add(str(candidate))
     for path in sorted(auth_paths):
-        auth = _read(run_dir / path)
+        auth = _read(run_dir, path)
         requests.append((f"{path}#/tenant_id", auth.get("tenant_id")))
         claims = auth.get("token_claims")
         if isinstance(claims, dict):

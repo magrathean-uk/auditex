@@ -6,11 +6,13 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from io import BytesIO, TextIOWrapper
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlparse
 
 from .adapters.read_guard import CommandRefused, check_m365_command, m365_command_words, words_are_read
+from .run_files import read_run_file
 
 
 SCHEMA_VERSION = "2026-10-22"
@@ -348,11 +350,15 @@ class AuditEvents(list):
         self.malformed_lines = malformed_lines
 
 
-def read_audit_events(path: str | Path) -> AuditEvents:
+def read_audit_events(path: str | Path, *, run_dir: str | Path | None = None) -> AuditEvents:
     """Events of an ``audit-log.jsonl`` file, with the count of malformed lines and whether it was readable."""
     events = AuditEvents()
     try:
-        handle = Path(path).open(encoding="utf-8")
+        if run_dir is None:
+            handle = Path(path).open(encoding="utf-8")
+        else:
+            root = Path(run_dir)
+            handle = TextIOWrapper(BytesIO(read_run_file(root, Path(path).relative_to(root))), encoding="utf-8")
     except OSError:
         events.readable = False
         return events

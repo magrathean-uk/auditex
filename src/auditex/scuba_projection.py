@@ -20,6 +20,7 @@ from azure_tenant_audit.chunk_reader import _open_chunk
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
 from azure_tenant_audit.model_assessment import collector_error_class, safe_projection_enum_value
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.run_files import MAX_RUN_FILE_BYTES, UnsafeRunFileError, read_run_file
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
@@ -366,10 +367,17 @@ class Bundle:
         # Reuse no-symlink, regular-file, beneath-root bundle opens. A file is read whole, so the byte bound
         # applies before anything is parsed.
         try:
-            with _open_chunk(self.root, relative) as handle:
-                data = handle.read(self.scan_max_bytes + 1)
+            if relative == "run-manifest.json":
+                data = read_run_file(self.root, relative, max_bytes=min(self.scan_max_bytes, MAX_RUN_FILE_BYTES))
+            else:
+                with _open_chunk(self.root, relative) as handle:
+                    data = handle.read(self.scan_max_bytes + 1)
         except FileNotFoundError:
             raise Unavailable("missing_artifact") from None
+        except UnsafeRunFileError as exc:
+            if exc.reason == "oversize" and self.scan_max_bytes < MAX_RUN_FILE_BYTES:
+                raise _scan_bound("scan_max_bytes") from None
+            raise
         except (OSError, ValueError, UnicodeError):
             raise Unavailable() from None
         if len(data) > self.scan_max_bytes:

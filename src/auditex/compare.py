@@ -12,6 +12,7 @@ from azure_tenant_audit.bundle_integrity import integrity_failed, manifest_diges
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.rule_parameters import recorded_rule_parameters, rule_parameter_gap
+from azure_tenant_audit.run_files import read_run_file
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
 from .run_bundle import RunBundle
@@ -333,11 +334,10 @@ class NormalizedSections(Mapping[str, Any]):
         if name not in self._cache:
             value: Any = None
             path = self._bundle.path(f"normalized/{name}.json")
-            if path.is_file():
-                try:
-                    value = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    value = None
+            try:
+                value = json.loads(read_run_file(self._bundle.run_dir, path.relative_to(self._bundle.run_dir)).decode("utf-8"))
+            except (OSError, ValueError):
+                value = None
             self._cache[name] = value
         if self._cache[name] is None:
             raise KeyError(name)

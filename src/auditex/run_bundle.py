@@ -1,25 +1,38 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.run_files import UnsafeRunFileError, read_run_file
 from azure_tenant_audit.tenant_identity import IDENTITY_FIELDS, reconcile_tenant_identity
 
 
-def _read_json(path: Path, fallback: Any) -> Any:
+def _read_json(run_dir: Path, path: Path, fallback: Any) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_run_file(run_dir, _relative_to_run(run_dir, path)).decode("utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
         return fallback
 
 
-def _read_text(path: Path) -> str | None:
+def _read_text(run_dir: Path, path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        return read_run_file(run_dir, _relative_to_run(run_dir, path)).decode("utf-8")
     except (FileNotFoundError, OSError):
         return None
+
+
+def _relative_to_run(run_dir: Path, path: Path) -> Path:
+    try:
+        return path.relative_to(run_dir)
+    except ValueError as exc:
+        raise UnsafeRunFileError("Run file path must stay inside the run directory") from exc
+
+
+def _present(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -118,44 +131,52 @@ class RunBundle:
     def _candidate_path(self, key: str, fallback: str) -> Path:
         manifest = self.manifest()
         relative = manifest.get(key)
-        return self.path(str(relative)) if relative else self.path(fallback)
+        selected = Path(str(relative)) if relative else Path(fallback)
+        if selected.is_absolute() or selected.drive or ".." in selected.parts or (os.sep != "\\" and "\\" in str(selected)):
+            raise UnsafeRunFileError("Run file path must stay inside the run directory")
+        parent = self.run_dir
+        for part in selected.parts[:-1]:
+            parent = parent / part
+            if parent.is_symlink():
+                raise UnsafeRunFileError("Run file path must contain only directories, without symlinks")
+        return self.path(str(selected))
 
     def _artifact_path(self, key: str, fallback: str) -> Path:
         candidate = self._candidate_path(key, fallback)
         default = self.path(fallback)
-        if candidate.exists() or not default.exists():
+        if _present(candidate) or not _present(default):
             return candidate
         return default
 
     def _artifact_json(self, key: str, fallback: str, default: Any) -> tuple[Path | None, Any]:
         path = self._artifact_path(key, fallback)
-        return (path, _read_json(path, default)) if path.exists() else (None, None)
+        return (path, _read_json(self.run_dir, path, default)) if _present(path) else (None, None)
 
     def manifest(self) -> dict[str, Any]:
-        return _mapping(_read_json(self.path("run-manifest.json"), {}))
+        return _mapping(_read_json(self.run_dir, self.path("run-manifest.json"), {}))
 
     def summary(self) -> dict[str, Any]:
         path = self._artifact_path("summary_path", "summary.json")
-        return _mapping(_read_json(path, {}))
+        return _mapping(_read_json(self.run_dir, path, {}))
 
     def summary_md(self) -> str | None:
-        return _read_text(self._artifact_path("summary_md_path", "summary.md"))
+        return _read_text(self.run_dir, self._artifact_path("summary_md_path", "summary.md"))
 
     def diagnostics(self) -> Any:
-        return _read_json(self.path("diagnostics.json"), None)
+        return _read_json(self.run_dir, self.path("diagnostics.json"), None)
 
     def capability_matrix(self) -> tuple[Path | None, Any]:
         root_path = self.path("capability-matrix.json")
         normalized_path = self.path("normalized/capability_matrix.json")
-        if root_path.exists():
-            return root_path, _read_json(root_path, [])
-        if normalized_path.exists():
-            return normalized_path, _read_json(normalized_path, {})
+        if _present(root_path):
+            return root_path, _read_json(self.run_dir, root_path, [])
+        if _present(normalized_path):
+            return normalized_path, _read_json(self.run_dir, normalized_path, {})
         return None, None
 
     def toolchain_readiness(self) -> tuple[Path | None, Any]:
         path = self.path("toolchain-readiness.json")
-        return (path, _read_json(path, {})) if path.exists() else (None, None)
+        return (path, _read_json(self.run_dir, path, {})) if _present(path) else (None, None)
 
     def live_readiness(self) -> tuple[Path | None, Any]:
         return self._artifact_json("live_readiness_path", "live-readiness.json", {})
@@ -172,15 +193,15 @@ class RunBundle:
     def auth_context(self) -> tuple[Path | None, Any]:
         path = self._candidate_path("auth_context_path", "auth-context.json")
         normalized_path = self.path("normalized/auth_context.json")
-        if path.exists():
-            return path, _read_json(path, {})
-        if normalized_path.exists():
-            return normalized_path, _read_json(normalized_path, {})
+        if _present(path):
+            return path, _read_json(self.run_dir, path, {})
+        if _present(normalized_path):
+            return normalized_path, _read_json(self.run_dir, normalized_path, {})
         return None, None
 
     def coverage_ledger(self) -> tuple[Path | None, Any]:
         path = self.path("normalized/coverage_ledger.json")
-        return (path, _read_json(path, {})) if path.exists() else (None, None)
+        return (path, _read_json(self.run_dir, path, {})) if _present(path) else (None, None)
 
     def collector_coverage(self) -> dict[str, dict[str, Any]]:
         """Per-collector completion: ``{collector: {"complete": bool, "status": str}}``.
@@ -206,7 +227,7 @@ class RunBundle:
 
     def ai_context(self) -> tuple[Path | None, Any]:
         path = self.path("ai_context.json")
-        return (path, _read_json(path, {})) if path.exists() else (None, None)
+        return (path, _read_json(self.run_dir, path, {})) if _present(path) else (None, None)
 
     def validation(self) -> tuple[Path | None, Any]:
         return self._artifact_json("validation_path", "validation.json", {})
@@ -241,7 +262,13 @@ class RunBundle:
 
     def evidence_db_path(self) -> Path | None:
         path = self._artifact_path("evidence_db_path", "index/evidence.sqlite")
-        return path if path.exists() else None
+        if not _present(path):
+            return None
+        try:
+            read_run_file(self.run_dir, _relative_to_run(self.run_dir, path))
+        except FileNotFoundError:
+            return None
+        return path
 
     def report_summary(self) -> dict[str, Any]:
         _, report_pack = self.report_pack()
@@ -381,9 +408,9 @@ class RunBundle:
             "diagnostics_path": _path_text(diagnostics_path),
         }
 
-        if manifest_path.exists():
+        if _present(manifest_path):
             result["manifest"] = self.manifest()
-        if summary_path.exists():
+        if _present(summary_path):
             result["summary"] = self.summary()
         summary_md = self.summary_md()
         if summary_md is not None:

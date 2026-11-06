@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import sqlite3
 import tempfile
 from collections import Counter
@@ -14,9 +12,11 @@ from typing import Any
 
 from .bundle_integrity import evidence_index_is_hashed
 from .collection_gaps import list_truncations, section_gap_records
+from .evidence_db import open_index_snapshot
 from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .provider_registry import provider_collectors
 from .resources import list_resource_files, resolve_resource_path
+from .run_files import UnsafeRunFileError, read_run_file, temporary_run_data_dir
 from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
 from .waivers import has_matching_waiver, is_accepted_status
 
@@ -124,9 +124,13 @@ _KNOWN_FRAMEWORK_KEYS = frozenset(
 _KNOWN_NON_COLLECTOR_PROVENANCE = frozenset({"response", "toolchain", "windows365"})
 
 
-def _read_json(path: Path, fallback: Any = None) -> Any:
+def _read_json(path: Path, fallback: Any = None, *, run_dir: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            relative = path.relative_to(run_dir)
+        except ValueError as exc:
+            raise UnsafeRunFileError("Run file path must stay inside the run directory") from exc
+        return json.loads(read_run_file(run_dir, relative).decode("utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
         return fallback
 
@@ -143,7 +147,7 @@ def _issue(code: str, *, path: str | None = None, details: Any = None, severity:
 def _validate_required_json_fields(run_dir: Path, issues: list[dict[str, Any]]) -> None:
     for relative, required_fields in _REQUIRED_FIELDS.items():
         path = run_dir / relative
-        payload = _read_json(path, fallback=None)
+        payload = _read_json(path, fallback=None, run_dir=run_dir)
         if not isinstance(payload, Mapping):
             issues.append(_issue("invalid_json_artifact", path=relative))
             continue
@@ -155,7 +159,7 @@ def _validate_required_json_fields(run_dir: Path, issues: list[dict[str, Any]]) 
 def _load_findings(run_dir: Path, supplied: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     if supplied is not None:
         return [dict(item) for item in supplied if isinstance(item, Mapping)]
-    payload = _read_json(run_dir / "findings" / "findings.json", fallback=[])
+    payload = _read_json(run_dir / "findings" / "findings.json", fallback=[], run_dir=run_dir)
     return [dict(item) for item in payload if isinstance(item, Mapping)] if isinstance(payload, list) else []
 
 
@@ -317,7 +321,7 @@ def _validate_record_key_uniqueness(run_dir: Path, issues: list[dict[str, Any]])
     if not normalized_dir.exists():
         return
     for path in sorted(normalized_dir.glob("*.json")):
-        payload = _read_json(path, fallback={})
+        payload = _read_json(path, fallback={}, run_dir=run_dir)
         if not isinstance(payload, Mapping):
             continue
         records = payload.get("records")
@@ -450,7 +454,7 @@ def _validate_normalized_records(run_dir: Path, issues: list[dict[str, Any]]) ->
         issues.append(_issue("missing_artifact_directory", path="normalized"))
         return
     for path in sorted(normalized_dir.glob("*.json")):
-        payload = _read_json(path, fallback={})
+        payload = _read_json(path, fallback={}, run_dir=run_dir)
         if not isinstance(payload, Mapping):
             issues.append(_issue("invalid_json_artifact", path=str(path.relative_to(run_dir))))
             continue
@@ -499,7 +503,7 @@ def _validate_ai_safe(run_dir: Path, issues: list[dict[str, Any]]) -> None:
     if not ai_safe_dir.exists():
         return
     for path in sorted(ai_safe_dir.glob("*.json")):
-        payload = _read_json(path, fallback={})
+        payload = _read_json(path, fallback={}, run_dir=run_dir)
         hits: list[dict[str, Any]] = []
         _walk_sensitive_ai_safe(payload, "", hits)
         if hits:
@@ -511,7 +515,7 @@ def _validate_sensitive_contract_artifacts(run_dir: Path, issues: list[dict[str,
         path = run_dir / relative
         if not path.exists():
             continue
-        payload = _read_json(path, fallback={})
+        payload = _read_json(path, fallback={}, run_dir=run_dir)
         hits: list[dict[str, Any]] = []
         _walk_sensitive_ai_safe(payload, "", hits)
         if hits:
@@ -526,18 +530,15 @@ def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_o
 
     metadata: dict[str, Any] = {}
 
-    def inspect(path: Path) -> None:
+    def inspect(conn: sqlite3.Connection) -> None:
         nonlocal metadata
-        # Connection context managers do not close SQLite connections. Close
-        # explicitly before cleaning up the temporary database and sidecars.
-        with closing(sqlite3.connect(path)) as conn:
-            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            required = {"run_meta", "section_stats", "normalized_records"}
-            missing = sorted(required - tables)
-            if missing:
-                issues.append(_issue("invalid_evidence_sqlite_schema", path="index/evidence.sqlite", details=missing))
-            if "run_meta" in tables:
-                metadata = decode_identity_metadata(dict(conn.execute("SELECT key, value FROM run_meta")))
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        required = {"run_meta", "section_stats", "normalized_records"}
+        missing = sorted(required - tables)
+        if missing:
+            issues.append(_issue("invalid_evidence_sqlite_schema", path="index/evidence.sqlite", details=missing))
+        if "run_meta" in tables:
+            metadata = decode_identity_metadata(dict(conn.execute("SELECT key, value FROM run_meta")))
 
     try:
         if read_only:
@@ -548,15 +549,29 @@ def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_o
             # beside it is not covered by the hash, and SQLite would replay it over the hashed file.
             # (verify_bundle_hashes reports the sidecar as an unexpected file.)
             suffixes = ("",) if evidence_index_is_hashed(run_dir) else ("", "-wal", "-shm")
-            with tempfile.TemporaryDirectory(prefix="auditex-validation-", dir=os.environ.get("TMPDIR")) as temporary:
-                copied_path = Path(temporary) / db_path.name
-                for suffix in suffixes:
-                    source = db_path.with_name(db_path.name + suffix)
-                    if source.exists():
-                        shutil.copy2(source, copied_path.with_name(copied_path.name + suffix))
-                inspect(copied_path)
+            db_data = read_run_file(run_dir, "index/evidence.sqlite")
+            has_sidecars = any(
+                (candidate := db_path.with_name(db_path.name + suffix)).exists() or candidate.is_symlink()
+                for suffix in suffixes[1:]
+            )
+            if not has_sidecars and hasattr(sqlite3.Connection, "deserialize"):
+                with closing(open_index_snapshot(db_data)) as conn:
+                    inspect(conn)
+            else:
+                with tempfile.TemporaryDirectory(prefix="auditex-validation-", dir=temporary_run_data_dir(run_dir)) as temporary:
+                    copied_path = Path(temporary) / db_path.name
+                    copied_path.write_bytes(db_data)
+                    for suffix in suffixes[1:]:
+                        try:
+                            data = read_run_file(run_dir, f"index/evidence.sqlite{suffix}")
+                        except FileNotFoundError:
+                            continue
+                        copied_path.with_name(copied_path.name + suffix).write_bytes(data)
+                    with closing(sqlite3.connect(copied_path)) as conn:
+                        inspect(conn)
         else:
-            inspect(db_path)
+            with closing(sqlite3.connect(db_path)) as conn:
+                inspect(conn)
     except (sqlite3.DatabaseError, OSError) as exc:
         issues.append(_issue("invalid_evidence_sqlite", path="index/evidence.sqlite", details=str(exc)))
     return metadata
@@ -569,8 +584,8 @@ def _validate_tenant_identity(
     indexed: Mapping[str, Any],
     issues: list[dict[str, Any]],
 ) -> None:
-    summary = _read_json(run_dir / "summary.json", {})
-    report = _read_json(run_dir / "reports/report-pack.json", {})
+    summary = _read_json(run_dir / "summary.json", {}, run_dir=run_dir)
+    report = _read_json(run_dir / "reports/report-pack.json", {}, run_dir=run_dir)
     report_summary = report.get("summary") if isinstance(report, Mapping) else {}
     ai_run = ai_context.get("run") if isinstance(ai_context, Mapping) else {}
     surfaces = {
@@ -588,7 +603,7 @@ def _validate_tenant_identity(
 
 
 def _validate_manifest_artifact_paths(run_dir: Path, issues: list[dict[str, Any]]) -> dict[str, Any]:
-    manifest = _read_json(run_dir / "run-manifest.json", fallback={})
+    manifest = _read_json(run_dir / "run-manifest.json", fallback={}, run_dir=run_dir)
     if not isinstance(manifest, Mapping):
         return {}
     for field in _OPTIONAL_MANIFEST_ARTIFACT_FIELDS:
@@ -606,7 +621,7 @@ def _validate_collection_gaps(run_dir: Path, manifest: Mapping[str, Any], issues
     coverage_path = manifest.get("coverage_path")
     if not coverage_path:
         return
-    coverage = _read_json(run_dir / str(coverage_path), fallback=[])
+    coverage = _read_json(run_dir / str(coverage_path), fallback=[], run_dir=run_dir)
     coverage_rows = coverage if isinstance(coverage, list) else []
     # A section-scoped read that was cut or refused leaves its collector ok; the manifest still has to name it. A
     # warning, not an error: bundles from before section gaps were recorded stay valid.
@@ -650,7 +665,7 @@ def _validate_data_handling(run_dir: Path, manifest: Mapping[str, Any], issues: 
     if not relative:
         return
     path = run_dir / str(relative)
-    payload = _read_json(path, fallback=None)
+    payload = _read_json(path, fallback=None, run_dir=run_dir)
     if not isinstance(payload, Mapping):
         issues.append(_issue("invalid_json_artifact", path=str(relative)))
         return
@@ -687,7 +702,7 @@ def _validate_live_readiness(run_dir: Path, manifest: Mapping[str, Any], issues:
     if not relative:
         return
     path = run_dir / str(relative)
-    payload = _read_json(path, fallback=None)
+    payload = _read_json(path, fallback=None, run_dir=run_dir)
     if not isinstance(payload, Mapping):
         issues.append(_issue("invalid_json_artifact", path=str(relative)))
         return
@@ -701,7 +716,7 @@ def _validate_audit_plan(run_dir: Path, manifest: Mapping[str, Any], issues: lis
     if not relative:
         return
     path = run_dir / str(relative)
-    payload = _read_json(path, fallback=None)
+    payload = _read_json(path, fallback=None, run_dir=run_dir)
     if not isinstance(payload, Mapping):
         issues.append(_issue("invalid_json_artifact", path=str(relative)))
         return
@@ -718,7 +733,7 @@ def _validate_api_inventory(run_dir: Path, manifest: Mapping[str, Any], issues: 
     if not relative:
         return
     path = run_dir / str(relative)
-    payload = _read_json(path, fallback=None)
+    payload = _read_json(path, fallback=None, run_dir=run_dir)
     if not isinstance(payload, Mapping):
         issues.append(_issue("invalid_json_artifact", path=str(relative)))
         return
@@ -943,20 +958,18 @@ def build_validation_report(
     assessment_path = run_path / MODEL_ASSESSMENT_PATH
     if assessment_path.exists() or assessment_path.is_symlink():
         try:
-            if assessment_path.is_symlink():
-                raise ValueError("Model assessment must not be a symbolic link")
-            assessment = json.loads(assessment_path.read_text(encoding="utf-8"))
+            assessment = json.loads(read_run_file(run_path, MODEL_ASSESSMENT_PATH).decode("utf-8"))
             validate_assessment(assessment)
-            run_manifest = _read_json(run_path / "run-manifest.json", {})
+            run_manifest = _read_json(run_path / "run-manifest.json", {}, run_dir=run_path)
             if not isinstance(run_manifest, Mapping) or assessment["run_id"] != run_manifest.get("run_id"):
                 raise ValueError("Model assessment run_id mismatch")
         except (OSError, ValueError, TypeError, KeyError, RecursionError):
             issues.append(_issue("invalid_model_assessment", path=MODEL_ASSESSMENT_PATH, severity="warning"))
     loaded_findings = _load_findings(run_path, findings)
     # Each cited artifact is read once for the findings, the proof table and the report sections.
-    report_pack = _read_json(run_path / "reports" / "report-pack.json", fallback=None)
-    legacy = _is_legacy_bundle(_read_json(run_path / "run-manifest.json", fallback=None))
-    evidence_index = EvidenceIndex(run_path)
+    report_pack = _read_json(run_path / "reports" / "report-pack.json", fallback=None, run_dir=run_path)
+    legacy = _is_legacy_bundle(_read_json(run_path / "run-manifest.json", fallback=None, run_dir=run_path))
+    evidence_index = EvidenceIndex(run_path, strict=read_only)
     evidence_index.prime(
         [
             *(
@@ -991,7 +1004,7 @@ def build_validation_report(
     _validate_api_inventory(run_path, manifest, issues)
     _validate_report_pack(run_path, issues, evidence_index, report_pack, legacy=legacy)
 
-    context = ai_context if isinstance(ai_context, Mapping) else _read_json(run_path / "ai_context.json", fallback={})
+    context = ai_context if isinstance(ai_context, Mapping) else _read_json(run_path / "ai_context.json", fallback={}, run_dir=run_path)
     _validate_tenant_identity(run_path, manifest, context, indexed_identity, issues)
     if not isinstance(context, Mapping):
         issues.append(_issue("invalid_json_artifact", path="ai_context.json"))

@@ -39,6 +39,7 @@ from azure_tenant_audit.output_redaction import (
 )
 from azure_tenant_audit.private_io import copy_private_file, harden_tree, make_private_dirs, write_private_text
 from azure_tenant_audit.resources import resolve_resource_path
+from azure_tenant_audit.run_files import UnsafeRunFileError, read_run_file
 from azure_tenant_audit.waivers import accepted_risk_summary
 
 from .run_bundle import RunBundle, summarize_recomputed_validation
@@ -130,9 +131,16 @@ _SEVERITY_RANK: Mapping[str, int] = {
 }
 
 
-def _read_json(path: Path, fallback: Any) -> Any:
+def _read_json(path: Path | None, fallback: Any, *, root: Path | None = None) -> Any:
+    if path is None:
+        return fallback
+    base = root if root is not None else path.parent
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            relative = path.relative_to(base)
+        except ValueError as exc:
+            raise UnsafeRunFileError("Bundle file path must stay inside the bundle directory") from exc
+        return json.loads(read_run_file(base, relative).decode("utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
         return fallback
 
@@ -393,7 +401,10 @@ def _load_normalized_sections(run_path: Path) -> dict[str, Any]:
 
     sections: dict[str, Any] = {}
     for path in sorted(normalized_dir.glob("*.json"), key=lambda item: item.name):
-        payload = _read_json(path, {})
+        try:
+            payload = json.loads(read_run_file(run_path, path.relative_to(run_path)).decode("utf-8"))
+        except (OSError, ValueError):
+            payload = {}
         if payload not in ({}, [], None):
             sections[path.stem] = payload
     return sections
@@ -594,7 +605,7 @@ def _replay_source_file(bundle: RunBundle, inventory: Mapping[str, Any] | None =
     if not name:
         from azure_tenant_audit.api_inventory import read_audit_events
 
-        for event in read_audit_events(bundle.path("audit-log.jsonl")):
+        for event in read_audit_events(bundle.path("audit-log.jsonl"), run_dir=bundle.run_dir):
             if event.get("event") == "run.started":
                 name = Path(_text(_mapping(event.get("details")).get("sample"))).name
                 break
@@ -761,25 +772,35 @@ def proof_table(run_dir: str | Path) -> dict[str, Any]:
     }
 
 
-def _sha256_file(path: Path) -> str | None:
+def _sha256_file(path: Path, *, root: Path | None = None) -> str | None:
+    base = root if root is not None else path.parent
     try:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+        try:
+            relative = path.relative_to(base)
+        except ValueError as exc:
+            raise UnsafeRunFileError("Bundle file path must stay inside the bundle directory") from exc
+        return hashlib.sha256(read_run_file(base, relative)).hexdigest()
     except OSError:
         return None
 
 
 def _artifact_row(run_path: Path, relative: str, purpose: str, *, customer_safe: bool = True) -> dict[str, Any]:
     path = run_path / relative
+    try:
+        digest = hashlib.sha256(read_run_file(run_path, relative)).hexdigest()
+        present = True
+    except FileNotFoundError:
+        digest = None
+        present = False
+    except OSError:
+        digest = None
+        present = path.exists()
     return {
         "path": relative,
-        "present": path.exists(),
+        "present": present,
         "purpose": purpose,
         "customer_safe": customer_safe,
-        "sha256": _sha256_file(path) if path.exists() else None,
+        "sha256": digest,
     }
 
 
@@ -2054,9 +2075,9 @@ def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -
     )
 
 
-def _bundle_hash_rows(path: Path) -> dict[str, str] | None:
+def _bundle_hash_rows(path: Path, *, root: Path | None = None) -> dict[str, str] | None:
     """``path -> sha256`` from a copied ``bundle-hashes.json``, or ``None`` when it is not a hash manifest."""
-    payload = _read_json(path, None)
+    payload = _read_json(path, None, root=root)
     rows = payload.get("artifacts") if isinstance(payload, Mapping) else None
     if not isinstance(rows, list):
         return None
@@ -2110,7 +2131,7 @@ def verify_enterprise_handoff_pack(
     """
     pack_path = Path(pack_dir)
     manifest_path = pack_path / "pack-manifest.json"
-    manifest = _mapping(_read_json(manifest_path, {}))
+    manifest = _mapping(_read_json(manifest_path, {}, root=pack_path))
     issues: list[dict[str, Any]] = []
     checked_files: set[str] = set()
     listed_paths: set[Path] = {manifest_path.resolve()}
@@ -2125,13 +2146,13 @@ def verify_enterprise_handoff_pack(
             add_issue("missing_path", "Manifest row has no file path.", source=source)
             return
         checked_files.add(str(path))
-        if not path.exists():
+        if not path.exists() and not path.is_symlink():
             add_issue("missing_file", "Expected pack file is missing.", path=str(path), source=source)
             return
         if not expected:
             add_issue("missing_expected_hash", "Expected SHA-256 is missing.", path=str(path), source=source)
             return
-        actual = _sha256_file(path)
+        actual = _sha256_file(path, root=pack_path)
         if actual != expected:
             add_issue(
                 "checksum_mismatch",
@@ -2200,8 +2221,9 @@ def verify_enterprise_handoff_pack(
     handoff_row = generated_by_name.get("handoff.json")
     handoff_payload = _mapping(
         _read_json(
-            _pack_file_path(pack_path, manifest_output_dir, handoff_row.get("path")) if handoff_row else Path("missing"),
+            _pack_file_path(pack_path, manifest_output_dir, handoff_row.get("path")) if handoff_row else None,
             {},
+            root=pack_path,
         )
     )
     if not manifest_validation_summary:
@@ -2241,7 +2263,7 @@ def verify_enterprise_handoff_pack(
         if not row:
             return
         helper_file = _pack_file_path(pack_path, manifest_output_dir, row.get("path"))
-        helper_payload = _mapping(_read_json(helper_file, {}))
+        helper_payload = _mapping(_read_json(helper_file, {}, root=pack_path))
         if "citations" not in helper_payload:
             add_issue(
                 "missing_generated_helper_citations",
@@ -2352,7 +2374,7 @@ def verify_enterprise_handoff_pack(
     )
     if report_pack_source and report_pack_source.get("present") is not False:
         report_pack_file = _pack_file_path(pack_path, manifest_output_dir, report_pack_source.get("path"))
-        report_pack_payload = _mapping(_read_json(report_pack_file, {}))
+        report_pack_payload = _mapping(_read_json(report_pack_file, {}, root=pack_path))
         citations = _dict_rows(report_pack_payload.get("citations"))
         if not citations:
             add_issue(
@@ -2443,10 +2465,12 @@ def verify_enterprise_handoff_pack(
 
     checksum_path = pack_path / "checksums.sha256"
     checksum_line_count = 0
-    if not checksum_path.exists():
+    try:
+        checksum_text = read_run_file(pack_path, "checksums.sha256").decode("utf-8")
+    except FileNotFoundError:
         add_issue("missing_checksum_file", "checksums.sha256 is missing.", path=str(checksum_path))
     else:
-        for line_number, line in enumerate(checksum_path.read_text(encoding="utf-8").splitlines(), start=1):
+        for line_number, line in enumerate(checksum_text.splitlines(), start=1):
             text = line.strip()
             if not text:
                 continue
@@ -2470,10 +2494,7 @@ def verify_enterprise_handoff_pack(
                     line=line_number,
                 )
                 continue
-            candidate = (pack_path / relative_path).resolve()
-            try:
-                candidate.relative_to(pack_path.resolve())
-            except ValueError:
+            if ".." in relative_path.parts:
                 add_issue(
                     "checksum_path_outside_pack",
                     "checksums.sha256 references a path outside the pack directory.",
@@ -2481,6 +2502,7 @@ def verify_enterprise_handoff_pack(
                     line=line_number,
                 )
                 continue
+            candidate = pack_path / relative_path
             check_file(candidate, expected, source=f"checksums.sha256:{line_number}")
 
     if checksum_path.exists():
@@ -2493,10 +2515,10 @@ def verify_enterprise_handoff_pack(
     # was "absent" or "mismatch" would skip the one check that the genuine digest makes decisive.
     integrity_status = str(_mapping(source_payload.get("integrity")).get("status") or _mapping(handoff_payload.get("integrity")).get("status") or "")
     bundle_hashes_path = pack_path / "source-artifacts" / "bundle-hashes.json"
-    bundle_hashes_sha256 = _sha256_file(bundle_hashes_path) if bundle_hashes_path.is_file() else None
+    bundle_hashes_sha256 = _sha256_file(bundle_hashes_path, root=pack_path)
     transformed_sources: list[str] = []
     if bundle_hashes_sha256 is None:
-        copied_manifest = _mapping(_read_json(pack_path / "source-artifacts" / "run-manifest.json", {}))
+        copied_manifest = _mapping(_read_json(pack_path / "source-artifacts" / "run-manifest.json", {}, root=pack_path))
         copied_version = copied_manifest.get("schema_contract_version")
         if integrity_status == "verified":
             add_issue(
@@ -2532,7 +2554,7 @@ def verify_enterprise_handoff_pack(
                 expected=recorded_digest,
                 actual=bundle_hashes_sha256,
             )
-        hash_rows = _bundle_hash_rows(bundle_hashes_path)
+        hash_rows = _bundle_hash_rows(bundle_hashes_path, root=pack_path)
         if hash_rows is None:
             add_issue(
                 "invalid_bundle_hashes",
@@ -2566,7 +2588,7 @@ def verify_enterprise_handoff_pack(
                             source_path=relative,
                         )
                         continue
-                    actual_hash = _sha256_file(copied)
+                    actual_hash = _sha256_file(copied, root=pack_path)
                     if actual_hash == expected_hash:
                         continue
                     row = rows_by_file.get(copied.resolve(), {})
@@ -2586,7 +2608,7 @@ def verify_enterprise_handoff_pack(
                         expected=expected_hash,
                         actual=actual_hash,
                     )
-    checksums_sha256 = _sha256_file(checksum_path) if checksum_path.is_file() else None
+    checksums_sha256 = _sha256_file(checksum_path, root=pack_path)
     for label, expected_digest, actual_digest, code in (
         ("bundle-hashes.json", expect_manifest_sha256, bundle_hashes_sha256, "expected_manifest_sha256_mismatch"),
         ("checksums.sha256", expect_checksums_sha256, checksums_sha256, "expected_checksums_sha256_mismatch"),
@@ -2630,7 +2652,7 @@ def verify_enterprise_handoff_pack(
         "digests": {
             "bundle_hashes_sha256": bundle_hashes_sha256,
             "checksums_sha256": checksums_sha256,
-            "pack_manifest_sha256": _sha256_file(manifest_path) if manifest_path.is_file() else None,
+            "pack_manifest_sha256": _sha256_file(manifest_path, root=pack_path),
         },
         "issues": issues,
     }

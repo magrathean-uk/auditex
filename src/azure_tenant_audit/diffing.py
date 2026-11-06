@@ -6,21 +6,20 @@ from pathlib import Path
 from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
+from .run_files import read_run_file
 from .waivers import accepted_risk_summary, is_accepted_status
 
 
-def _load_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
+def _load_json(run_dir: Path, relative: str) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(read_run_file(run_dir, relative).decode("utf-8"))
     except (json.JSONDecodeError, OSError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
 
 def _load_findings(run_dir: Path) -> list[dict[str, Any]]:
-    pack = _load_json(run_dir / "reports" / "report-pack.json")
+    pack = _load_json(run_dir, "reports/report-pack.json")
     rows = pack.get("findings") if isinstance(pack, dict) else []
     if not isinstance(rows, list):
         rows = []
@@ -215,8 +214,8 @@ def _filter_changed_rows(
     return changed, suppressed
 
 
-def _load_records(path: Path) -> tuple[str, list[dict[str, Any]]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+def _load_records(run_dir: Path, path: Path) -> tuple[str, list[dict[str, Any]]]:
+    payload = json.loads(read_run_file(run_dir, path.relative_to(run_dir)).decode("utf-8"))
     kind = str(payload.get("kind") or path.stem)
     records = payload.get("records", [])
     if not isinstance(records, list):
@@ -236,7 +235,7 @@ def _records_for_run(run_dir: Path) -> tuple[dict[str, str], dict[str, list[dict
     files: dict[str, str] = {}
     records_by_kind: dict[str, list[dict[str, Any]]] = {}
     for path in sorted(normalized_dir.glob("*.json")):
-        kind, records = _load_records(path)
+        kind, records = _load_records(run_dir, path)
         if not records:
             continue
         files[kind] = path.name
@@ -245,8 +244,8 @@ def _records_for_run(run_dir: Path) -> tuple[dict[str, str], dict[str, list[dict
 
 
 def _run_metadata(run_dir: Path) -> dict[str, Any]:
-    manifest = _load_json(run_dir / "run-manifest.json")
-    snapshot = _load_json(run_dir / "normalized" / "snapshot.json")
+    manifest = _load_json(run_dir, "run-manifest.json")
+    snapshot = _load_json(run_dir, "normalized/snapshot.json")
     snapshot_meta = snapshot if isinstance(snapshot, dict) else {}
     platform = manifest.get("platform") or snapshot_meta.get("platform") or "m365"
     return {
