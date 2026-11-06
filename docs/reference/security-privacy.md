@@ -307,13 +307,12 @@ Instructions retain their example addresses until final output redaction.
 Every returned explanation, step and reference must pass the product's output
 redaction before serialisation or display. That report boundary could not be
 identified in the current writer trace: `auditex.reporting.render_report`
-(`src/auditex/reporting.py:3641`) calls `write_private_text` at line 3657;
-`AuditWriter.write_report_pack` (`src/azure_tenant_audit/output.py:571`)
-calls `_write_json_atomic` at line 573, which serialises at line 239.
+calls `write_private_text`; `AuditWriter.write_report_pack` calls
+`_write_json_atomic`, which serialises the payload.
 These writers restrict filesystem permissions, but do not redact payloads.
 Integration tests plant synthetic addresses and identifiers to pin that fact.
-`reporting._pack_safe` (line 1820) only removes local run paths;
-`scuba_projection._redact` (line 1413) is input projection redaction.
+`reporting._pack_safe` only removes local run paths;
+`scuba_projection._redact` is input projection redaction.
 Neither establishes complete output handling. No equivalent coverage is
 claimed for the diagnostic helper `secret_hygiene.redact_text`.
 
