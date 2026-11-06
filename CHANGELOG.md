@@ -60,7 +60,7 @@ the bundle gains the `privileged_roles` artefact, both additive.
   ignored and warned once without echoing values; they cannot change answers.
 - **`--no-redaction` can no longer unmask anything.** It used to leave e-mail local parts in the Conditional Access
   policy names listed under `scope_post_check` when the endpoint was a loopback host; redaction now always stays on.
-  Model client, configuration and offline tooling remain available for development. An optional explainer remains planned.
+  Model client, configuration and offline tooling remain available for development. Report and CLI wiring for the optional explainer remains planned.
 
 ### Command-output privacy
 

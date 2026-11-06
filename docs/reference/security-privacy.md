@@ -340,28 +340,23 @@ null is preserved and other shapes become `{not_shown: "shape"}`.
 Pass the redacted view as is, without extra pseudonymisation. The existing
 idempotent email-local-part guard remains on section values and reason text.
 Projection already pseudonymises privileged-user DisplayName and non-null
-OnPremisesImmutableId with the run salt. Domains, GUIDs, roles, free text and
-dictionary keys may remain visible; this is not full anonymisation. Internal
-rule views, detail, labels, tenant/run identifiers, paths, timestamps,
-credentials and uncited records are not explainer inputs. Public baseline
-Instructions retain their example addresses until final output redaction.
+OnPremisesImmutableId with the run salt. Internal rule views, detail, labels,
+tenant/run identifiers, paths, timestamps, credentials and uncited records are
+not explainer inputs. Public baseline Instructions retain their example
+addresses until final output redaction.
 
-Every returned explanation, step and reference must pass the product's output
-redaction before serialisation or display. That report boundary could not be
-identified in the current writer trace: `auditex.reporting.render_report`
-calls `write_private_text`; `AuditWriter.write_report_pack` calls
-`_write_json_atomic`, which serialises the payload.
-These writers restrict filesystem permissions, but do not redact payloads.
-Integration tests plant synthetic addresses and identifiers to pin that fact.
-`reporting._pack_safe` only removes local run paths;
-`scuba_projection._redact` is input projection redaction.
-Neither establishes complete output handling. No equivalent coverage is
-claimed for the diagnostic helper `secret_hygiene.redact_text`.
+Every returned explanation, step and reference must pass through the D3
+`explainer` output profile before serialisation or display. As described in
+[Output redaction boundary](#output-redaction-boundary), this profile redacts
+GUIDs and strings under the free-text keys `owner`, `justification`, `comment`,
+`comments` and `notes`, as well as the other values listed there. Domains,
+group names and role names remain. This is not full anonymisation.
 
-Report/CLI wiring therefore remains with product, together with identifying or
-implementing the actual output-redaction function and testing all returned
-strings through it. The entry point raises a controlled error on rendering or
-validation failure; callers suppress explanations without changing verdicts.
+The profile exists and is tested at the redaction boundary, but no explainer
+producer is wired to it yet. Report and CLI integration must apply the profile
+to the complete explainer output and test it before exposing that output. The
+entry point raises a controlled error on rendering or validation failure;
+callers suppress explanations without changing verdicts.
 It has no inference dependency, endpoint or model fallback. Model use is parked;
 if separately authorised later, it must be loopback only, with this same input
 and output boundary and no `--no-redaction` path.
