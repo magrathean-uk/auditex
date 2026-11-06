@@ -361,8 +361,8 @@ def test_stage3_rule_output_never_echoes_evidence(policy, sections):
                for value in record["detail"].values())
 
 
-# Rows of the spec's full source whose gold response cites sections the rule no longer reads (keyed by the source's own
-# parity marker, never by row id): one SS 3.2 row (D90) and three AAD 3.3v2 rows (D94), 4 in all over the 26,898 vectors.
+# Gold responses can differ in citations for one D90 and three D94 rows. Four
+# other D94-marked controls match exactly and must still be compared in full.
 FULL_SOURCE_PARITY_EXEMPT = {
     "D90": "D90: the gold response cites scuba_config, which the rule does not read from v3.6",
     "D94": "D94: the gold response cites conditional_access_policies or scuba_config, which the rule does not read from v3.7",
@@ -370,14 +370,71 @@ FULL_SOURCE_PARITY_EXEMPT = {
 FULL_SOURCE_PARITY_EXEMPT_COUNTS = {"D90": 1, "D94": 3}
 
 
+def _source_response_exemption(row, response, overrides):
+    """Compare gold first; permit only the replay's documented citation differences."""
+    gold = row["gold_response"]
+    if response == gold:
+        return None
+    marker = row.get("parity_exempt") or ""
+    key = marker[:3]
+    assert FULL_SOURCE_PARITY_EXEMPT.get(key) == marker, row["vector_id"]
+    assert row["policy"] == {"D90": "MS.SECURITYSUITE.3.2v1", "D94": "MS.AAD.3.3v2"}[key], row["vector_id"]
+    # When A2 is available, its exact override set separates the three D94
+    # citation changes from the four controls that must match unmodified gold.
+    if key == "D94" and overrides is not None:
+        assert row["vector_id"] in overrides, row["vector_id"]
+    assert [(c["id"], c["status"], c["value"]) for c in response["claims"]] == [
+        (c["id"], c["status"], c["value"]) for c in gold["claims"]], row["vector_id"]
+    assert (response["limitations"], response["recommendations"]) == (
+        gold["limitations"], gold["recommendations"]), row["vector_id"]
+    return key
+
+
+def test_full_source_response_guard_checks_controls_and_citation_exceptions():
+    gold = {"claims": [{"id": "requirement_met", "status": "satisfied", "value": True, "evidence_ids": ["e0"]}],
+            "limitations": [], "recommendations": []}
+    row = {"vector_id": "constructed:guard", "policy": "MS.AAD.3.3v2",
+           "parity_exempt": FULL_SOURCE_PARITY_EXEMPT["D94"], "gold_response": gold}
+    assert _source_response_exemption(row, deepcopy(gold), {}) is None
+    citation_change = deepcopy(gold)
+    citation_change["claims"][0]["evidence_ids"] = ["e1"]
+    assert _source_response_exemption(row, citation_change, None) == "D94"
+    assert _source_response_exemption(row, citation_change, {row["vector_id"]: {}}) == "D94"
+    with pytest.raises(AssertionError):
+        _source_response_exemption(row, citation_change, {})
+    for field, value in (("id", "different"), ("status", "different"), ("value", False)):
+        changed = deepcopy(citation_change)
+        changed["claims"][0][field] = value
+        with pytest.raises(AssertionError):
+            _source_response_exemption(row, changed, {row["vector_id"]: {}})
+    for field in ("limitations", "recommendations"):
+        changed = deepcopy(citation_change)
+        changed[field] = ["different"]
+        with pytest.raises(AssertionError):
+            _source_response_exemption(row, changed, {row["vector_id"]: {}})
+
+
 def test_optional_full_source_vectors():
     path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
     if not path:
         pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+    from hashlib import sha256
+    from test_value_rules_replay import MANIFEST, _overrides, override_gold
+
+    override_path = Path(path).with_name("a2-label-overrides.jsonl")
+    overrides = _overrides(override_path) if override_path.is_file() else None
+    if overrides is not None:
+        pins = json.loads(MANIFEST.read_text())
+        with Path(path).open("rb") as source:
+            assert sha256(source.read()).hexdigest() == pins["source_vectors_sha256"]
+        assert sha256(override_path.read_bytes()).hexdigest() == pins["a2_label_overrides_sha256"]
+        assert len(overrides) == 190
     policy_items = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
     reached = defaultdict(set)
     licence_excluded = 0
     parity_exempt = {}
+    d94_controls = 0
+    overlays_applied = set()
     for row in _rows(Path(path)):
         if row["policy"] not in STAGE_POLICIES:
             continue
@@ -393,32 +450,40 @@ def test_optional_full_source_vectors():
         if "origin" in row or detail["cell"] not in {"licence_false", "licence_flag_unusable"}:
             assert detail["reason_text"] == row["rule_reason_text"]
         criticality = policy_items[row["policy"]]["policy_item"]["criticality"]
-        response = precheck_response(detail, {"policy_id": row["policy"], "criticality": criticality},
-                                     list(row["sections"]), named_limitations=False)
+        item = {"policy_id": row["policy"], "criticality": criticality}
+        response = precheck_response(detail, item, list(row["sections"]), named_limitations=False)
         if row.get("gold_response") is not None and row.get("disagreement") is None:
             if row["source_kind"].startswith("packlic-"):
                 # Match the reference checker: these twins' gold predates the
                 # licence section. All exact rule assertions above still run.
                 licence_excluded += 1
-            elif (row.get("parity_exempt") or "")[:3] in FULL_SOURCE_PARITY_EXEMPT:
-                marker = row["parity_exempt"]
-                assert marker == FULL_SOURCE_PARITY_EXEMPT[marker[:3]]
-                assert row["vector_id"] not in parity_exempt
-                parity_exempt[row["vector_id"]] = marker
             else:
-                # S2 markers and the other D94 rows already match this legacy
-                # vocabulary; keep checking them instead of blanket exemption.
-                assert response == row["gold_response"], row["vector_id"]
+                exemption = _source_response_exemption(row, response, overrides)
+                if exemption is not None:
+                    assert row["vector_id"] not in parity_exempt
+                    parity_exempt[row["vector_id"]] = exemption
+                elif (row.get("parity_exempt") or "").startswith("D94"):
+                    d94_controls += 1
+                entry = overrides.get(row["vector_id"]) if overrides is not None else None
+                if entry is not None:
+                    gold = override_gold(row, entry)
+                    overlaid_response = precheck_response(detail, item, entry["evidence_section_order"],
+                                                          named_limitations=False)
+                    assert overlaid_response == gold, row["vector_id"]
+                    assert row["vector_id"] not in overlays_applied
+                    overlays_applied.add(row["vector_id"])
         assert row.get("disagreement") is None or row["disagreement"].startswith("expected:")
         reached[row["policy"]].add(detail["cell"])
     assert all(reached[policy] == set(cells_for(policy)) for policy in reached)
     assert set(reached) in (STAGE1_POLICIES, STAGE_POLICIES)
     if set(reached) == STAGE_POLICIES:
         assert licence_excluded == 45
-        assert {key: sum(m[:3] == key for m in parity_exempt.values())
-                for key in FULL_SOURCE_PARITY_EXEMPT} == FULL_SOURCE_PARITY_EXEMPT_COUNTS
+        assert dict(Counter(parity_exempt.values())) == FULL_SOURCE_PARITY_EXEMPT_COUNTS
+        assert d94_controls == 4
+        if overrides is not None:
+            assert overlays_applied == set(overrides)
     else:
-        assert licence_excluded == 0 and parity_exempt == {}
+        assert licence_excluded == 0 and parity_exempt == {} and d94_controls == 0
 
 
 def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
