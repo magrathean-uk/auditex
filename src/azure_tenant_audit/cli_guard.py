@@ -8,7 +8,9 @@ import stat
 import sys
 from typing import Any
 
-from .guarded_io import UnsafeRunFileError, guard_session, open_pinned_binary
+from .guarded_io import (
+    _DIR_FLAGS, _MAX_MANIFEST, UnsafeRunFileError, _identity, _safe_directory, guard_session, open_pinned_binary,
+)
 from .secret_hygiene import SENSITIVE_ARG_FLAGS, _sensitive_option, collect_sensitive_argv_values
 
 _INPUT_FLAGS = frozenset({
@@ -84,14 +86,99 @@ def _inode_alias(path: str) -> bool:
     return collapsed.lower().startswith(("/.vol/", "/dev/fd/", "/dev/stdin", "/proc/"))
 
 
+class RunArgumentRefusal(UnsafeRunFileError):
+    """A run argument the guard did not admit, with an optional ordinary condition.
+
+    The refusal itself never changes: callers that do not look further print
+    the same fixed message as any :class:`UnsafeRunFileError`. ``condition`` is
+    ``"absent"``, ``"no_manifest"`` or ``"malformed_manifest"`` only when
+    metadata alone shows an ordinary unusable run; it is ``None`` for anything
+    unsafe or unclassified. ``argument`` is the fixed flag name, never a path.
+    """
+
+    def __init__(self, argument: str, condition: str | None) -> None:
+        super().__init__(argument)
+        self.argument = argument
+        self.condition = condition
+
+
+_PRIVATE_NAMES = ("sensitive-users.txt", "sensitive-users.key", "partner-domains.txt", "partner-domains.key")
+
+
+def _ordinary_condition(context, path: str) -> str | None:
+    """Name an ordinary absent, empty or malformed run from metadata, after the guard refused it.
+
+    Only no-follow ``lstat`` calls and directory descriptors are used, the same
+    access ``bind_run`` already had; no file is opened and no byte is read. Any
+    link, special file, foreign or writable directory, inode alias, private
+    input file or storage error answers ``None`` (unsafe or unclassified).
+    """
+    if _inode_alias(path) or not context._eligible_run_root(path):
+        return None
+    parent = root = private = None
+    try:
+        with context._lock:
+            try:
+                parent, name = context._parent(path)
+                info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                return "absent"
+            if (stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.geteuid()
+                    and _identity(info) not in context._identities):
+                # A plain file where a run directory was named: there is no run there.
+                return "absent"
+            if not _safe_directory(info):
+                return None
+            root = os.open(name, _DIR_FLAGS, dir_fd=parent)
+            if _identity(os.fstat(root)) != _identity(info):
+                return None
+            try:
+                private_info = os.stat("operator-inputs", dir_fd=root, follow_symlinks=False)
+            except FileNotFoundError:
+                private_info = None
+            if private_info is not None:
+                if not _safe_directory(private_info):
+                    return None
+                private = os.open("operator-inputs", _DIR_FLAGS, dir_fd=root)
+                if _identity(os.fstat(private)) != _identity(private_info):
+                    return None
+                for member in _PRIVATE_NAMES:
+                    try:
+                        os.stat(member, dir_fd=private, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    # A private input exists: only the guard's own verification may judge this run.
+                    return None
+            try:
+                manifest = os.stat("run-manifest.json", dir_fd=root, follow_symlinks=False)
+            except FileNotFoundError:
+                return "no_manifest"
+            if (stat.S_ISREG(manifest.st_mode) and manifest.st_uid == os.geteuid() and manifest.st_nlink == 1
+                    and manifest.st_size <= _MAX_MANIFEST and _identity(manifest) not in context._identities):
+                # A plain, admissible-looking manifest with no private inputs: what the guard
+                # refused is its content (not JSON, not an object, or an inconsistent record).
+                return "malformed_manifest"
+            return None
+    except (OSError, ValueError, TypeError):
+        return None
+    finally:
+        for descriptor in (private, root, parent):
+            if descriptor is not None:
+                os.close(descriptor)
+
+
 def _bind(context, path: str, field: str) -> None:
     failed = False
+    reason = None
     try:
         context.bind_run(path)
-    except UnsafeRunFileError:
+    except UnsafeRunFileError as exc:
         failed = True
+        reason = exc.reason
     if failed:
-        raise UnsafeRunFileError(field) from None
+        # A refusal with a reason is an admission finding (owner, link, alias, size): never ordinary.
+        condition = _ordinary_condition(context, path) if reason is None else None
+        raise RunArgumentRefusal(field, condition) from None
 
 
 def _pin(context, path: str, field: str) -> None:
