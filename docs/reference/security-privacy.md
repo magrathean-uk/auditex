@@ -347,8 +347,16 @@ Target-list limits are 10,000 raw entries and 262,144 compact-JSON UTF-8 bytes
 per policy, measured before filtering or de-duplication. A streamed 64 MiB
 stdout bound terminates and reaps an over-limit child. Unknown shapes, malformed
 fields and failed transforms never persist the original target material.
+Retained policy settings accept only scalars or flat bounded lists; a nested
+structure drops that setting alone. Replay reduces unsupported Exchange
+operations and components that name the target field, including JSON-escaped
+text, to safe settings and closed diagnostic classes. Unknown diagnostic text
+is discarded or replaced with a fixed error class.
 Fresh offline replay cannot reuse an old summary without fresh literals;
 resume cannot reuse known membership after the verified input binding changes.
+If the resulting selected Exchange re-run fails, its failed status and coverage
+remain authoritative while safe earlier settings survive without membership
+proof. Healthy fresh operations replace their earlier settings.
 Live Exchange wire-shape validation remains unverified; unexpected shapes are
 unusable evidence.
 
