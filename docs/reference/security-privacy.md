@@ -266,20 +266,33 @@ links. Recover with an independent `cp` copy owned by the operator, not hard
 links, and restore safe directory permissions. Each copy's private pair is
 verified on admission.
 
-Read-only index inspection copies guarded descriptors into a private `0700`
-temporary directory under an operator-owned parent that is not group- or
-world-writable, with files created as `0600`, only after that directory is
-proved to be on encrypted internal storage. The proof is implemented for macOS
-Data volumes. No evidence index is copied to unproved temporary storage. When
-the proof is unavailable or a protected copy cannot be made, SQLite reads the
-index in place through a read-only `immutable=1` URI, after guarded descriptor
-admission and a device/inode re-check following the SQLite open. A swapped file
-is refused. The in-place route records one info line in the run's debug log when
-the log is writable, without printing it to the console. A writer running as the
-same user can still alter or exchange the file around these checks. Immutable
-reads ignore WAL and other sidecars, so uncheckpointed legacy WAL data is visible
-only when a protected copy can be made. Index and supported sidecar copies have
-no size cap, so copy time and available temporary space matter.
+Index inspection admits the main index file and every sidecar beside it by guarded
+descriptor (no-follow walk, regular file, single link, owner and private-pair identity);
+any failure is the fixed refusal. Only the admitted main file is ever copied, into a
+private `0700` temporary directory (files `0600`) under an operator-owned parent that
+is not group- or world-writable, never under the run's parent directory, and only after
+that directory is proved to be on encrypted internal storage. The proof is implemented
+for macOS Data volumes. No evidence is copied to unproved temporary storage. Every
+SQLite open uses `mode=ro&immutable=1`, on the copy or in place. A missing proof, a
+failed copy or an SQLite error is never an admission refusal: the read falls back to
+the admitted path in place, or the index is reported as invalid.
+
+Sidecars are never copied or replayed, so the verdict does not depend on the host.
+A hashed index is authoritative as hashed; the hash check reports any sidecar. An
+unhashed legacy index with a non-empty `-wal` or `-journal` is untrusted: its summary
+is empty, consumers use the manifest and report metadata, and validation records
+`invalid_evidence_sqlite`. An empty `-wal` or any `-shm` is ignored. This is
+deliberately conservative, even when the WAL frames were already checkpointed.
+
+After an in-place read the held main descriptor is checked again, and a file that
+changed during the read is refused. Read-only consumers never create, append to or
+change anything in a bundle they inspect. A process that is producing a run appends
+one constant info line (no path or value, never the console) to that run's debug log
+the first time it reads the index in place, when the existing guarded log accepts an
+append; an unwritable or unsafe log gets no line and the read still succeeds. A resume
+is a new producing invocation and logs its own line. A writer running as the same user
+can still alter or exchange the file around these checks. Index copies have no size
+cap, so copy time and available temporary space matter.
 A killed or interrupted index build can leave a private staging directory beside the index.
 
 ## Evidence and customer packs
