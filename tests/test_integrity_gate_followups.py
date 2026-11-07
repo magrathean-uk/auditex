@@ -318,12 +318,19 @@ def test_read_only_validation_does_not_read_a_sidecar_beside_a_hashed_index(bund
     assert verify_bundle_hashes(bundle)["status"] == "mismatch"
 
 
-def test_a_sidecar_beside_an_index_no_hash_manifest_covers_is_still_read(bundle: Path) -> None:
-    """A bundle from before the hash manifest may hold committed data in its WAL; that stays readable."""
+def test_a_wal_beside_an_index_no_hash_manifest_covers_is_untrusted(bundle: Path) -> None:
+    """A pre-manifest bundle with uncheckpointed WAL data is never replayed: its metadata comes from the manifest."""
     (bundle / BUNDLE_HASHES_PATH).unlink()
-    _plant_wal(bundle, _REWRITE_DATE)
+    planted = _plant_wal(bundle, _REWRITE_DATE)
+    index = bundle / "index" / "evidence.sqlite"
+    before = (index.read_bytes(), planted.read_bytes(), sorted(path.name for path in index.parent.iterdir()))
 
-    assert load_run_index_summary(bundle)["created_utc"] == _PLANTED_DATE
+    assert load_run_index_summary(bundle) == {}
+    metadata = RunBundle(bundle).metadata()
+    assert metadata["created_utc"] == read_json(bundle / "run-manifest.json")["created_utc"] != _PLANTED_DATE
+    issues = build_validation_report(run_dir=bundle, read_only=True)["issues"]
+    assert "invalid_evidence_sqlite" in [issue["code"] for issue in issues]
+    assert (index.read_bytes(), planted.read_bytes(), sorted(path.name for path in index.parent.iterdir())) == before
 
 
 def test_a_gate_blocks_a_run_with_a_planted_sidecar(run_dir: Path) -> None:

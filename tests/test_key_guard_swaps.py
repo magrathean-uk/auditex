@@ -188,12 +188,12 @@ def test_sqlite_copy_failure_never_reopens_source_after_swap(
     def fail_copy(descriptor: int, destination: Path) -> None:
         nonlocal copy_attempts, swapped
         copy_attempts += 1
-        if swap_target == "wal" and not str(destination).endswith("-wal"):
+        assert not str(destination).endswith(("-wal", "-shm", "-journal")), "a sidecar was copied"
+        if swap_target == "wal":
             original_copy(descriptor, destination)
             return
-        target = index if swap_target == "index" else wal
-        os.rename(target, target.with_name("held-" + target.name))
-        target.symlink_to(hostile)
+        os.rename(index, index.with_name("held-" + index.name))
+        index.symlink_to(hostile)
         swapped = True
         raise OSError("forced copy failure")
 
@@ -201,21 +201,32 @@ def test_sqlite_copy_failure_never_reopens_source_after_swap(
     opened_source = False
 
     def swap_then_open(path: str | Path, *, immutable: bool = True) -> sqlite3.Connection:
-        nonlocal opened_source
+        nonlocal opened_source, swapped
+        assert immutable is True
         if Path(path) == index:
             opened_source = True
+        if swap_target == "wal":
+            # The sidecar is admitted but never copied or read, so a swap before the open changes nothing read.
+            os.rename(wal, wal.with_name("held-" + wal.name))
+            wal.symlink_to(hostile)
+            swapped = True
         return sqlite_open(path, immutable=immutable)
 
     monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: True)
     monkeypatch.setattr(evidence_db, "_copy_index_descriptor", fail_copy)
     monkeypatch.setattr(evidence_db, "open_index_read_only", swap_then_open)
-    with pytest.raises(OSError, match="Refusing evidence index: unsafe input") as error:
-        with evidence_db.open_private_run_index(run, include_sidecars=swap_target == "wal") as conn:
-            conn.execute("SELECT value FROM run_meta").fetchall()
-    assert copy_attempts == (2 if swap_target == "wal" else 1)
+    if swap_target == "index":
+        with pytest.raises(OSError, match="Refusing evidence index: unsafe input") as error:
+            with evidence_db.open_private_run_index(run, hashed=False) as conn:
+                conn.execute("SELECT value FROM run_meta").fetchall()
+        assert "sqlite-swap-canary" not in "".join(traceback.format_exception(error.value))
+        assert not opened_source
+    else:
+        with evidence_db.open_private_run_index(run, hashed=True) as conn:
+            assert conn.execute("SELECT value FROM run_meta").fetchall() == [("ordinary",)]
+        assert not opened_source
+    assert copy_attempts == 1
     assert swapped
-    assert not opened_source
-    assert "sqlite-swap-canary" not in "".join(traceback.format_exception(error.value))
 
 
 def test_sqlite_uses_in_place_read_for_unproved_temporary_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,7 +240,7 @@ def test_sqlite_uses_in_place_read_for_unproved_temporary_storage(tmp_path: Path
         conn.execute("INSERT INTO example VALUES (7)")
     monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: False)
     monkeypatch.setattr(evidence_db, "_copy_index_descriptor", lambda *args: pytest.fail("unsafe snapshot copied"))
-    with evidence_db.open_private_run_index(run, include_sidecars=False) as conn:
+    with evidence_db.open_private_run_index(run, hashed=False) as conn:
         assert conn.execute("SELECT value FROM example").fetchone() == (7,)
 
 
@@ -246,7 +257,7 @@ def test_sqlite_real_unproved_storage_reads_without_changing_index(tmp_path: Pat
     evidence_db.build_run_evidence_index(run)
     original = index.read_bytes()
     assert original.startswith(b"SQLite format 3\0")
-    with evidence_db.open_private_run_index(run, include_sidecars=False) as conn:
+    with evidence_db.open_private_run_index(run, hashed=False) as conn:
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"run_meta", "section_stats", "normalized_records"} <= tables
     assert index.read_bytes() == original
@@ -304,7 +315,8 @@ def test_fresh_index_proof_and_in_place_read_are_separate(
             contracts._validate_evidence_db(run, issues, _fresh_index_proof=proof[0])
     read_only_issues: list = []
     contracts._validate_evidence_db(run, read_only_issues, read_only=True, _fresh_index_proof=proof[0])
-    assert bool(read_only_issues) == (change == "contents")
+    # An unhashed index with non-empty WAL data is untrusted, so validation records it.
+    assert bool(read_only_issues) == (change in {"contents", "sidecar"})
 
 
 @pytest.mark.parametrize("failure", ["busy-checkpoint", "remaining-wal"])

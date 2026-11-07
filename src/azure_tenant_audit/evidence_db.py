@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Iterable, Mapping
 from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
@@ -338,39 +339,68 @@ class _MissingIndex(Exception):
 
 
 _IN_PLACE_NOTICE = b"INFO: Evidence index read in place; a protected temporary copy was unavailable."
+_NOTICE_LOCK = threading.Lock()
+_OWNED_RUNS: set[tuple[int, int]] = set()
+_NOTED_RUNS: set[tuple[int, int]] = set()
 
 
-def _log_in_place_once(root: Path) -> None:
-    """Record the route in the run's append-only debug log, without using the console."""
+class UntrustedIndexError(sqlite3.DatabaseError):
+    """An unhashed index has uncheckpointed sidecar data, so its main file is not authoritative."""
+
+
+def _run_key(run_dir: str | Path) -> tuple[int, int] | None:
     try:
-        with guard_session() as context, context._lock:
-            try:
-                with open_run_file(root, "audit-debug.log", max_bytes=None) as descriptor:
-                    tail = b""
-                    while data := os.read(descriptor, 65536):
-                        block = tail + data
-                        if _IN_PLACE_NOTICE in block:
-                            return
-                        tail = block[-len(_IN_PLACE_NOTICE):]
-            except FileNotFoundError:
-                pass
-            from .private_io import _write_all
+        info = os.stat(run_dir)
+    except OSError:
+        return None
+    return info.st_dev, info.st_ino
+
+
+def register_run_log(run_dir: str | Path) -> None:
+    """Record that this process is producing ``run_dir``, so it may log one in-place notice for it."""
+    key = _run_key(run_dir)
+    if key is None:
+        return
+    with _NOTICE_LOCK:
+        _OWNED_RUNS.add(key)
+        _NOTED_RUNS.discard(key)
+
+
+def _note_in_place(root: Path) -> None:
+    """Append the constant notice once for a run this process produces; never touch any other bundle."""
+    key = _run_key(root)
+    with _NOTICE_LOCK:
+        if key is None or key not in _OWNED_RUNS or key in _NOTED_RUNS:
+            return
+        _NOTED_RUNS.add(key)
+    try:
+        from .private_io import _write_all
+        with guard_session() as context:
             with open_private_output(root / "audit-debug.log", field="output", context=context, append=True) as descriptor:
                 _write_all(descriptor, _IN_PLACE_NOTICE + b"\n")
     except OSError:
-        # A read-only bundle must remain readable even if it cannot accept a log line.
+        # A read must succeed even if the log cannot accept a line.
         pass
 
 
 @contextmanager
-def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
-    """Inspect a protected copy, or the admitted index in place when storage is unproved."""
+def open_private_run_index(run_dir: str | Path, *, hashed: bool):
+    """Inspect a protected copy of the admitted index, or the admitted index in place, always immutably.
+
+    Sidecars are admitted but never copied or replayed. A hashed index is authoritative as hashed (the hash
+    check reports any sidecar). An unhashed index with a non-empty ``-wal`` or ``-journal`` is untrusted.
+    """
     root = Path(run_dir)
     relative = "index/evidence.sqlite"
     suffixes = ("", "-wal", "-shm", "-journal")
     failed = False
     missing = False
+    changed = False
+    untrusted = False
     with ExitStack() as stack:
+        in_place = False
+        main_state = None
+        main_descriptor = -1
         try:
             sources: dict[str, tuple[int, tuple[int, int, int, int, int]]] = {}
             absent: list[str] = []
@@ -382,50 +412,56 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
                         raise _MissingIndex
                     absent.append(suffix)
                     continue
-                if suffix and not include_sidecars:
-                    raise UnsafeRunFileError("evidence index")
                 sources[suffix] = (descriptor, _file_state(os.fstat(descriptor)))
-            try:
-                temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
-                proved = _safe_directory(os.stat(temporary_root)) and _encrypted_internal_storage(temporary_root)
-                if include_sidecars and temporary_root.is_relative_to(root.resolve().parent):
-                    proved = False
-            except (OSError, RuntimeError, ValueError):
-                proved = False
-            copied = None
-            if proved:
-                try:
-                    temporary = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="auditex-index-", dir=temporary_root)))
-                    os.chmod(temporary, 0o700)
-                    if _safe_directory(os.stat(temporary)) and _encrypted_internal_storage(temporary):
-                        copied = temporary / "evidence.sqlite"
-                        for suffix, (descriptor, _) in sources.items():
-                            _copy_index_descriptor(descriptor, copied.with_name(copied.name + suffix))
-                except OSError:
-                    copied = None
-            for suffix, (descriptor, before) in sources.items():
-                if _file_state(os.fstat(descriptor)) != before:
-                    raise UnsafeRunFileError("evidence index")
-                if copied is None:
-                    with open_run_file(root, relative + suffix, max_bytes=None) as current:
-                        if _file_state(os.fstat(current)) != before:
-                            raise UnsafeRunFileError("evidence index")
-            for suffix in absent:
-                try:
-                    with open_run_file(root, relative + suffix, max_bytes=None):
-                        raise UnsafeRunFileError("evidence index")
-                except FileNotFoundError:
-                    pass
-            if copied is None:
-                conn = stack.enter_context(closing(open_index_read_only(root / relative, immutable=True)))
-                with open_run_file(root, relative, max_bytes=None) as current:
-                    original_info = os.fstat(sources[""][0])
-                    current_info = os.fstat(current)
-                    if (current_info.st_dev, current_info.st_ino) != (original_info.st_dev, original_info.st_ino):
-                        raise UnsafeRunFileError("evidence index")
-                _log_in_place_once(root)
+            if not hashed and any(sources[suffix][1][2] > 0 for suffix in ("-wal", "-journal") if suffix in sources):
+                untrusted = True
             else:
-                conn = stack.enter_context(closing(open_index_read_only(copied, immutable=not include_sidecars)))
+                main_descriptor, main_state = sources[""]
+                try:
+                    temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
+                    proved = _safe_directory(os.stat(temporary_root)) and _encrypted_internal_storage(temporary_root)
+                    if temporary_root.is_relative_to(root.resolve().parent):
+                        proved = False
+                except (OSError, RuntimeError, ValueError):
+                    proved = False
+                copied = None
+                if proved:
+                    try:
+                        temporary = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="auditex-index-", dir=temporary_root)))
+                        os.chmod(temporary, 0o700)
+                        if _safe_directory(os.stat(temporary)) and _encrypted_internal_storage(temporary):
+                            copied = temporary / "evidence.sqlite"
+                            _copy_index_descriptor(main_descriptor, copied)
+                    except OSError:
+                        copied = None
+                for suffix, (descriptor, before) in sources.items():
+                    if _file_state(os.fstat(descriptor)) != before:
+                        raise UnsafeRunFileError("evidence index")
+                    if copied is None:
+                        with open_run_file(root, relative + suffix, max_bytes=None) as current:
+                            if _file_state(os.fstat(current)) != before:
+                                raise UnsafeRunFileError("evidence index")
+                for suffix in absent:
+                    try:
+                        with open_run_file(root, relative + suffix, max_bytes=None):
+                            raise UnsafeRunFileError("evidence index")
+                    except FileNotFoundError:
+                        pass
+                target = root / relative if copied is None else copied
+                try:
+                    connection = open_index_read_only(target, immutable=True)
+                except (sqlite3.Error, OSError):
+                    untrusted = True
+                else:
+                    conn = stack.enter_context(closing(connection))
+                    if copied is None:
+                        in_place = True
+                        with open_run_file(root, relative, max_bytes=None) as current:
+                            original_info = os.fstat(main_descriptor)
+                            current_info = os.fstat(current)
+                            if (current_info.st_dev, current_info.st_ino) != (original_info.st_dev, original_info.st_ino):
+                                raise UnsafeRunFileError("evidence index")
+                        _note_in_place(root)
         except _MissingIndex:
             missing = True
         except (OSError, RuntimeError, ValueError):
@@ -434,7 +470,16 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
             raise FileNotFoundError("Evidence index is absent.") from None
         if failed:
             raise UnsafeRunFileError("evidence index") from None
+        if untrusted:
+            raise UntrustedIndexError("evidence index is not authoritative") from None
         yield conn
+        if in_place:
+            try:
+                changed = _file_state(os.fstat(main_descriptor)) != main_state
+            except OSError:
+                changed = True
+        if changed:
+            raise UnsafeRunFileError("evidence index", reason="changed") from None
 
 
 def _file_state(info: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -508,7 +553,7 @@ def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
         return meta, stats
 
     try:
-        with open_private_run_index(run_dir, include_sidecars=bool(sidecars)) as conn:
+        with open_private_run_index(run_dir, hashed=False) as conn:
             meta, stats = inspect(conn)
     except UnsafeRunFileError:
         raise

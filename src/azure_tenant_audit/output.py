@@ -16,6 +16,7 @@ from .api_inventory import API_INVENTORY_ARTIFACT, read_audit_events, with_obser
 from .assurance import build_assurance_summary, build_coverage_gap_summary, build_provider_scorecard, build_surface_coverage_map
 from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
+from .evidence_db import register_run_log
 from .findings import apply_coverage_gaps_to_report_pack
 from .tenant_identity import IDENTITY_FIELDS
 from .private_io import make_private_dirs, write_private_text
@@ -112,6 +113,7 @@ class AuditLogger:
         for path in (self.jsonl_path, self.command_log_path, self.debug_path):
             with _open_private(path, "a"):
                 pass
+        register_run_log(run_dir)
 
     def log(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
         payload = {

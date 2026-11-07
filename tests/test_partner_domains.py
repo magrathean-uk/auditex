@@ -461,9 +461,12 @@ def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplo
     original = os.open
 
     def spy(name, flags, *args, **kwargs):
-        if Path(name) == path:
+        fd = original(name, flags, *args, **kwargs)
+        info = os.fstat(fd)
+        target = path.stat()
+        if (info.st_dev, info.st_ino) == (target.st_dev, target.st_ino):
             opened.append(flags)
-        return original(name, flags, *args, **kwargs)
+        return fd
 
     monkeypatch.setattr(os, "open", spy)
     argv = ["--offline", "--sample", SAMPLE, "--out", str(tmp_path / "runs"),

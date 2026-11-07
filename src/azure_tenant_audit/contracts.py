@@ -562,14 +562,8 @@ def _validate_evidence_db(
             if missing:
                 issues.append(_issue("invalid_evidence_sqlite_schema", path="index/evidence.sqlite", details=missing))
             return decode_identity_metadata(_fresh_index_proof.metadata)
-        # SQLite consumers see a protected snapshot or an immutable in-place read.
-        # Hashed indices must not replay sidecars that the manifest did not cover.
-        suffixes = ("",) if evidence_index_is_hashed(run_dir) else ("", "-wal", "-shm", "-journal")
-        has_sidecars = any(
-            (candidate := db_path.with_name(db_path.name + suffix)).exists() or candidate.is_symlink()
-            for suffix in suffixes[1:]
-        )
-        with open_private_run_index(run_dir, include_sidecars=has_sidecars) as conn:
+        # SQLite consumers see a protected snapshot or an immutable in-place read; sidecars are never replayed.
+        with open_private_run_index(run_dir, hashed=evidence_index_is_hashed(run_dir)) as conn:
             inspect(conn)
     except UnsafeRunFileError:
         raise
