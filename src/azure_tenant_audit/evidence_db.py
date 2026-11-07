@@ -328,8 +328,8 @@ def open_index_read_only(db_path: str | Path, *, immutable: bool = True) -> sqli
     ``immutable`` (the default) makes SQLite read the main file as it is: it takes no lock, writes nothing,
     never creates ``-wal`` or ``-shm`` (so an index on read-only media opens) and ignores a ``-wal`` file
     that sits beside it. A plain connection to a WAL-mode index replays such a file over the main file and,
-    when it closes, checkpoints it into the main file. Pass ``immutable=False`` only for a legacy index
-    whose data may still sit in its ``-wal`` file.
+    when it closes, may checkpoint it into the main file. Guarded bundle readers always use immutable
+    mode and never replay an unverified sidecar, including for legacy indexes.
     """
     return sqlite3.connect(_read_only_uri(db_path, immutable=immutable), uri=True)
 
@@ -534,9 +534,8 @@ def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     in-place read. When ``bundle-hashes.json`` lists the
     index, a sidecar beside it makes this return ``{}``: the sidecar is not
     covered by the hash, so whatever it holds was not part of the run as finalized, and callers fall back to
-    the manifest. Only an index no hash manifest covers (a bundle from before it existed) is read together
-    with a sidecar when a protected copy can be made, because its data may
-    still sit there. An immutable in-place read does not replay sidecars.
+    the manifest. An unhashed legacy index with a non-empty WAL or journal is untrusted on every host;
+    callers fall back to independently available bundle metadata. Neither route replays sidecars.
     """
     sidecars = evidence_sidecars(run_dir)
     if sidecars and evidence_index_is_hashed(run_dir):

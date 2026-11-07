@@ -183,7 +183,7 @@ def _open_index(run: Path, *, hashed: bool = False):
     try:
         return evidence_db.open_private_run_index(run, hashed=hashed)
     except TypeError:
-        return evidence_db.open_private_run_index(run, hashed=False)
+        return evidence_db.open_private_run_index(run, include_sidecars=False)
 
 
 def _summary_run(tmp_path: Path, *, hashed: bool = False) -> tuple[Path, Path]:
