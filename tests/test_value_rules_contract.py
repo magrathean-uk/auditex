@@ -42,6 +42,8 @@ def assessment(tmp_path, monkeypatch):
 
 def assessment_for(template, record, *, legacy=False):
     result = deepcopy(template)
+    # The helper replaces the answer; an explanation of the old answer cannot be carried across.
+    result["policies"][0].pop("explainer", None)
     policy = record["policy_id"]
     item = policy_catalogue()["policies"][policy]
     detail = {"class": "value_rule", "rule_id": loader.row_for(policy)["rule_id"],

@@ -22,9 +22,11 @@ from azure_tenant_audit.bundle_integrity import (
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.output_redaction import (
     PROFILE_CUSTOMER_PACK,
+    PROFILE_EXPLAINER,
     PROFILE_LOCAL,
     PROFILE_SHAREABLE,
     PROFILES,
+    PUBLIC_ADDRESSES,
     REASON_CHANGED,
     ContextIncompleteError,
     RedactionContext,
@@ -95,6 +97,7 @@ _SECTION_ORDER = (
     "attack_paths",
     "control_simulator",
     "baseline_alignment",
+    "policy_explanations",
     "report_qa",
     "findings",
     "proof_table",
@@ -477,6 +480,9 @@ def _preview_section_citations(
         else:
             missing.append("reports/report-pack.json")
 
+    if "policy_explanations" in selected_sections:
+        citations.append(_citation("model_assessment.json", reason="Validated policy explanations used in this preview."))
+
     findings_path, _ = bundle.findings()
     if "findings" in selected_sections:
         if findings_path is not None:
@@ -560,7 +566,47 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
     ):
         if key in report_pack:
             sections[key] = report_pack[key]
+    explanations = _load_policy_explanations(run_path, manifest)
+    if explanations:
+        sections["policy_explanations"] = explanations
     return {"run_dir": str(run_path), "manifest": manifest, "summary_json": fallback_summary, "sections": sections}
+
+
+def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Read the optional assessment through the existing run-file guard and fail closed on damage."""
+    from azure_tenant_audit.model_assessment import (MODEL_ASSESSMENT_PATH, derive_explainer, validate_assessment,
+                                                  value_rule_verdict)
+    from .model_eval import _invalid_constant, _pairs
+
+    try:
+        assessment = json.loads(read_run_file(run_path, MODEL_ASSESSMENT_PATH).decode("utf-8"),
+                                object_pairs_hook=_pairs, parse_constant=_invalid_constant)
+        validate_assessment(assessment)
+        if assessment["run_id"] != manifest.get("run_id"):
+            return []
+        candidates = [row for row in assessment["policies"] if "explainer" in row]
+        if candidates:
+            # Assessment files can be changed after creation, so apply the explainer boundary again even for local reports.
+            context = context_for_run(run_path)
+            rows = []
+            for row in candidates:
+                # The text is a pure function of the template and the public rule answer: re-derive it and keep
+                # a stored explanation only if it matches, so schema-valid tampered text never becomes report content.
+                derived = derive_explainer(row)
+                if derived is None:
+                    continue
+                safe_derived = redact_output(derived, profile=PROFILE_EXPLAINER, context=context)
+                if safe_derived == redact_output(row["explainer"], profile=PROFILE_EXPLAINER, context=context):
+                    rows.append({"policy_id": row["policy_id"], "verdict": value_rule_verdict(row),
+                                 "explainer": safe_derived})
+            assert_snapshot_stable(run_path, context.snapshot)
+            return rows
+    except UnsafeRunFileError:
+        raise
+    except Exception:
+        # Missing, invalid or unredactable optional content is omitted; unsafe admission always refuses.
+        return []
+    return []
 
 
 def analyze_report(run_dir: str | Path) -> dict[str, Any]:
@@ -2756,6 +2802,40 @@ def _markdown_value(value: Any) -> str:
     return _markdown_cell(value)
 
 
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+.!|~\-])")
+_PUBLIC_ADDRESS_TEXT = re.compile(
+    r"(?<![A-Za-z0-9._%+\-])(" + "|".join(re.escape(item) for item in sorted(PUBLIC_ADDRESSES)) + r")(?![A-Za-z0-9\-]|\.[A-Za-z0-9])",
+    re.IGNORECASE)
+
+
+def _markdown_plain(value: Any) -> str:
+    """Escape HTML and Markdown control characters in untrusted explainer text."""
+    escaped = html.escape(_text(value).replace("\n", " ").replace("\r", " "), quote=False)
+    parts = _PUBLIC_ADDRESS_TEXT.split(escaped)
+    # Odd items are exact public addresses (kept verbatim so the final redaction pass still recognises
+    # them); everything around them is escaped.
+    return "".join(part if index % 2 else _MARKDOWN_SPECIAL.sub(r"\\\1", part)
+                   for index, part in enumerate(parts))
+
+
+def _append_policy_explanations_markdown(lines: list[str], rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    lines.extend(["", "## Policy explanations", ""])
+    for row in rows:
+        explainer = row["explainer"]
+        verdict = row["verdict"].replace("_", " ").capitalize()
+        lines.extend([f"### {_markdown_plain(row['policy_id'])} - {_markdown_plain(verdict)}", "",
+                      "**What this means**", "", _markdown_plain(explainer["explanation"]), "",
+                      "**What to do**", ""])
+        if explainer["remediation_steps"]:
+            lines.extend(f"{index}. {_markdown_plain(step)}"
+                         for index, step in enumerate(explainer["remediation_steps"], 1))
+        else:
+            lines.append("No actions recorded.")
+        lines.append("")
+
+
 def _append_mapping_markdown(lines: list[str], title: str, payload: Mapping[str, Any]) -> None:
     if not payload:
         return
@@ -3017,6 +3097,7 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     _append_mapping_markdown(lines, "Control Simulator", _mapping(selected_sections.get("control_simulator")))
     if "baseline_alignment" in selected_sections:
         _append_baseline_alignment_markdown(lines, _mapping(selected_sections.get("baseline_alignment")))
+    _append_policy_explanations_markdown(lines, _dict_rows(selected_sections.get("policy_explanations")))
     _append_mapping_markdown(lines, "Report QA", _mapping(selected_sections.get("report_qa")))
     if "detection_coverage" in selected_sections:
         detection = _mapping(selected_sections.get("detection_coverage"))
@@ -3252,6 +3333,19 @@ def _render_json_section(title: str, payload: Any) -> str:
     return f"<section><h2>{_html(title)}</h2><pre>{_html(_json(payload))}</pre></section>"
 
 
+def _render_policy_explanations_html(rows: list[dict[str, Any]]) -> str:
+    parts = ["<section><h2>Policy explanations</h2>"]
+    for row in rows:
+        explainer = row["explainer"]
+        verdict = row["verdict"].replace("_", " ").capitalize()
+        parts.append(f"<h3>{_html(row['policy_id'])} - {_html(verdict)}</h3>")
+        parts.append(f"<h4>What this means</h4><p>{_html(explainer['explanation'])}</p><h4>What to do</h4>")
+        steps = explainer["remediation_steps"]
+        parts.append("<ol>" + "".join(f"<li>{_html(step)}</li>" for step in steps) + "</ol>"
+                     if steps else "<p>No actions recorded.</p>")
+    return "".join(parts) + "</section>"
+
+
 def _render_html(selected_sections: dict[str, Any]) -> str:
     summary = _mapping(selected_sections.get("summary"))
     sections = [
@@ -3281,6 +3375,8 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
         sections.append(_render_json_section("Reviewer Index", selected_sections.get("reviewer_index")))
     if "baseline_alignment" in selected_sections:
         sections.append(_render_json_section("Baseline Alignment", selected_sections.get("baseline_alignment")))
+    if "policy_explanations" in selected_sections:
+        sections.append(_render_policy_explanations_html(_dict_rows(selected_sections["policy_explanations"])))
     if "limitations" in selected_sections:
         sections.append(_render_json_section("Limitations", selected_sections.get("limitations")))
     if "next_actions" in selected_sections:
@@ -3801,6 +3897,8 @@ def preview_report(
 
     bundle = load_report_bundle(run_dir, shareable=profile != PROFILE_LOCAL)
     selected = _select_sections(bundle, include_sections=include_sections, exclude_sections=exclude_sections)
+    if format_name in {"csv", "sarif", "oscal"}:
+        selected.pop("policy_explanations", None)
     run_path = Path(run_dir)
     citations, evidence_missing = _preview_section_citations(
         run_path=run_path,

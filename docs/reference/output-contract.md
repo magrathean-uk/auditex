@@ -285,7 +285,7 @@ baseline has none. That `result` value and the baseline's `not_assessed` status 
 four verdict totals (`answered`, `unknown`, `invalid`, `skipped`) are internal counters and keep their names.
 Rules decide all product answers; every catalogue policy has a value rule, so no current row reports
 `rule_not_implemented`.
-The model never answers a product policy; an optional explainer remains planned and unimplemented.
+The model never answers a product policy; an optional deterministic explainer can describe value-rule answers.
 
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
@@ -1452,7 +1452,7 @@ success branch requires both an explicitly array-wrapped read and empty stderr;
 empty stdout with stderr is `command_error`. Error-preference propagation into
 Exchange module proxy functions has not been verified with PowerShell.
 
-## Explainer (planned output)
+## Explainer (additive field, schema 2026-11-05)
 
 The deterministic template port provides
 `azure_tenant_audit.explainer.explain(record, redacted_sections, section_order)`.
@@ -1466,10 +1466,29 @@ customer-output fields. The explainer never changes a verdict, claim or evidence
 id. A controlled `ExplainerError` means the caller suppresses the explanation
 and retains the original assessment.
 
-This object is **not yet part of report schema 2026-11-05**. No report or CLI
-output is changed by this port; adding an optional policy-row object requires
-a product schema and output-redaction decision. The expanded `render_full`
-helper is outside the compact schema and is not the integration entry point.
+An optional `explainer` object is part of a `value_rule` policy row in
+`model_assessment.json` schema `2026-11-05`. It must cite `e0` first and only
+ids in the requirement claim. Met and not-applicable rows have no steps;
+not-met rows have at least one. Historical date-named schemas reject the field.
+`rule_not_implemented` has no explainer and the schema rejects one there.
+The expanded `render_full` helper is outside the compact schema and is not the
+integration entry point.
+
+Serving enables the explainer after building the rule answer; offline precheck
+scoring leaves it off. A failure suppresses only the explainer and logs the
+policy id and exception class, without the exception message. The whole fixed
+rule read set must exist in the model case, and a fault explanation also needs
+that set collected. Optional-collection `absent_section` rows are suppressed.
+Ten SECURITYSUITE policies (1.3, 2.1-2.3, 3.1, 3.3, 3.4 and 7.1-7.3) cannot
+be explained because their model cases omit `defender_license`, `atp_policy_rules`
+or `defender_dlp_license`; no evidence is invented to fill those gaps.
+
+Reports read the assessment through the guarded run-file reader, validate it
+and match its run id before adding `policy_explanations`, containing only
+`policy_id`, `verdict` and `explainer`. The section is absent for an invalid,
+unreadable or unredactable assessment, or when no row has an explainer.
+JSON includes the structured section; Markdown and HTML show what each policy
+means and numbered actions. CSV, SARIF and OSCAL do not include the section.
 
 A1 (5 November 2026, 11:25 GMT) governs these shared reasons, dispatched before
 cell lookup. Neither adds a decision cell to the 1,084-cell v3.9.1 inventory:
@@ -1485,8 +1504,10 @@ policy read set. The product now emits exactly this representation, so the adapt
 no longer normalises anything: a shared reason with a non-null cell, including the
 old cell named `rule_evaluation_failed`, is rejected with a clear error. The
 superseded NOTE text is rejected. No-rule routing is still a product
-decision: the entry point conservatively accepts known template policies with
-their complete fixed read set, and does not route or invent policies.
+decision: serving does not attach an explainer to a no-rule row. The entry point
+accepts known template policies with their complete fixed read set, and does
+not route or invent policies. The fault step is redacted before output; the
+exact public support address is preserved, while ordinary personal addresses remain masked.
 
 The product catalogue is v3.9.1 (102 policies, 1,084 cells) and the template is
 generated from it (`scripts/generate-explainer.py`; the catalogue's canonical digest is

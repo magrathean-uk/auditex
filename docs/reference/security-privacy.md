@@ -460,7 +460,7 @@ the pack from its transfer channel, rotate the exposed material, regenerate the
 run or pack after correcting the source, verify the pack again, and record the
 incident through the customer's process.
 
-## Deterministic explainer boundary (planned output)
+## Deterministic explainer boundary
 
 The template explainer uses only the rule's cited, already redacted sections.
 Null citations resolve to the fixed policy read set, never all supplied
@@ -485,11 +485,21 @@ GUIDs and strings under the free-text keys `owner`, `justification`, `comment`,
 `comments` and `notes`, as well as the other values listed there. Domains,
 group names and role names remain. This is not full anonymisation.
 
-The profile exists and is tested at the redaction boundary, but no explainer
-producer is wired to it yet. Report and CLI integration must apply the profile
-to the complete explainer output and test it before exposing that output. The
-entry point raises a controlled error on rendering or validation failure;
-callers suppress explanations without changing verdicts.
+Serving passes the public rule answer and redacted model-case sections to the
+explainer, never the private rule view. It redacts the complete result with the
+`explainer` profile before attaching it. For run bundles the context contains
+the run salt, paths and discovered identities; incomplete discovery or any
+rendering or redaction exception suppresses the explanation without changing
+the verdict. Logs contain only the policy id and exception class. An internal
+ScubaGear export has no run context, so its explainer uses an empty context:
+pseudonyms are unsalted and run paths and undiscovered names are not known to
+that context. The same profile still masks recognised identifiers and secrets.
+
+Reports guard and validate the assessment before reading explanations and apply
+the explainer profile again, including for local reports, so modified
+assessment text does not bypass that boundary. If the context or assessment is
+unusable, explanations are omitted. The support address in the fixed fault
+step currently has its local part masked by this profile.
 It has no inference dependency, endpoint or model fallback. Model use is parked;
 if separately authorised later, it must be loopback only, with this same input
 and output boundary and no `--no-redaction` path.

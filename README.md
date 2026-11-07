@@ -134,7 +134,7 @@ SharePoint and Teams. Rule availability does not guarantee a verdict: available 
 permissions determine whether a policy can be assessed. A policy without a rule reports not assessed
 (`rule_not_implemented`): "Not assessed: Auditex has no rule for this policy yet."
 The model layer is parked and never called by assessment; no endpoint or model name is required.
-An optional explainer for rule results remains planned and unimplemented. Findings are unchanged.
+Assessments can attach deterministic template explanations to supported rule results. JSON, Markdown and HTML reports show them when present; findings are unchanged.
 Each policy's status is in the run's `model_assessment.json`; see [AI assessment](docs/guides/ai-assessment.md#run-and-read-the-result) for coverage and output.
 `auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` remain available for
 [offline model development](docs/guides/model-development.md).

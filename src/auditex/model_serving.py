@@ -8,6 +8,7 @@ from hashlib import sha256
 from http.client import HTTPException
 import ipaddress
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
 from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.output_redaction import RedactionContext, context_for_run
 from azure_tenant_audit.private_io import make_private_dirs, write_private_text
 from azure_tenant_audit.resources import open_text_resource
 
@@ -41,6 +43,7 @@ _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 _TRANSPORT_BACKOFF_SECONDS = 2.0
 # finish_reason is server text: keep it only when it is a plain token such as stop or length.
 _FINISH_REASON = re.compile(r"[a-z][a-z0-9_]{0,31}")
+LOG = logging.getLogger(__name__)
 
 
 def canonical(value: Any) -> str:
@@ -375,7 +378,8 @@ def _uncovered_record(case: dict[str, Any]) -> dict[str, Any]:
 
 def _assess_policies(projection: dict[str, Any], selected: list[str],
                      catalogue: dict[str, Any], generated_at: str, *, dry_run: bool,
-                     baseline: dict[str, str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                     baseline: dict[str, str], explainer_context: RedactionContext | None = None,
+                     explainer_context_error: str | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     records, prompts = [], []
     for policy_id in selected:
         try:
@@ -408,9 +412,12 @@ def _assess_policies(projection: dict[str, Any], selected: list[str],
                     if "scuba_config" in row["sections"]:
                         rule_projection["scuba_config"] = deepcopy(rule_policy_section(projection, policy_id, "scuba_config"))
             record = (precheck_case(case, absent_fields=True, empty_lists=True, value_rules=True,
-                                    rule_projection=rule_projection) if row else None)
+                                    rule_projection=rule_projection, explain=explainer_context is not None,
+                                    redaction_context=explainer_context) if row else None)
             if record is None:
                 record = _uncovered_record(case)
+            elif explainer_context_error and record["rule_precheck"]["class"] == "value_rule":
+                LOG.debug("Explainer %s failed (%s)", policy_id, explainer_context_error)
         record["comparison"] = _comparison(policy_id, record, baseline)
         records.append(record)
     return records, prompts
@@ -472,8 +479,16 @@ def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, polici
         root, projection, redact=True, max_items=projection_max_items,
         scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
         scan_max_chunks=projection_scan_max_chunks)
+    explainer_context = None
+    explainer_context_error = None
+    if not dry_run:
+        try:
+            explainer_context = context_for_run(root)
+        except Exception as exc:
+            explainer_context_error = type(exc).__name__
     records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
-                                        dry_run=dry_run, baseline=baseline)
+                                        dry_run=dry_run, baseline=baseline, explainer_context=explainer_context,
+                                        explainer_context_error=explainer_context_error)
     if dry_run:
         write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
         return {"path": str(target), "dry_run": True, "prompts": sum("messages" in row for row in prompts),
@@ -554,7 +569,8 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
     scope = None if dry_run else scope_from_export(projection, extras["raw_ca"],
                                                    redact=True, max_items=projection_max_items)
     records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
-                                        dry_run=dry_run, baseline=baseline)
+                                        dry_run=dry_run, baseline=baseline,
+                                        explainer_context=None if dry_run else RedactionContext())
     sidecar = build_sidecar(loaded, projection, extras, catalogue["policies"], selected, baseline,
                             reasons, unmappable, verdict_source, verdict_state, verdict_map, generated_at, scope)
     filename = "model_assessment_prompts.jsonl" if dry_run else "model_assessment.json"
