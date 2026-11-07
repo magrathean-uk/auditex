@@ -230,8 +230,8 @@ def _rows_healthy(rows: list, target_key: str | None) -> bool:
     return True
 
 
-def _admit(response: object, target_key: str | None) -> str:
-    if type(response) is not dict:
+def _admit(response: object, target_key: str | None, observed: bool) -> str:
+    if type(response) is not dict or type(observed) is not bool:
         return REFUSED
     if _present(response.get("error")) or _present(response.get("error_class")):
         return FAILED
@@ -252,25 +252,27 @@ def _admit(response: object, target_key: str | None) -> str:
             return REFUSED
     if "result_limit" in response and len(rows) >= response["result_limit"]:
         return REFUSED  # a read that reached its limit may be cut
-    if not rows and not any(key in response for key in ("status", "complete", "collection_status")):
-        return REFUSED  # an empty read with no health statement, as in the projection
+    if not rows and not observed and not any(key in response for key in ("status", "complete", "collection_status")):
+        return REFUSED  # replay needs a health statement; a fresh successful adapter read is observed directly
     return ADMITTED if _rows_healthy(rows, target_key) else REFUSED
 
 
-def admit_response(response: object, *, target_key: str | None = TARGET_KEY) -> str:
+def admit_response(response: object, *, target_key: str | None = TARGET_KEY, observed: bool = False) -> str:
     """``ADMITTED``, ``FAILED`` or ``REFUSED`` for an original operation response; see the module docstring.
 
     ``target_key`` names the one top-level row field whose value is not walked; ``None`` walks every field.
+    ``observed=True`` is reserved for a successful live adapter read: an explicit empty list is a valid read even
+    without replay health metadata. It never bypasses a refusal marker, unsupported type, count or missing value.
     """
     try:
-        return _admit(response, target_key)
+        return _admit(response, target_key, observed)
     except Exception:  # noqa: BLE001 - unexpected input refuses; no text, value or reference leaves this module
         return REFUSED
 
 
-def is_admitted(response: object, *, target_key: str | None = TARGET_KEY) -> bool:
+def is_admitted(response: object, *, target_key: str | None = TARGET_KEY, observed: bool = False) -> bool:
     """Whether ``admit_response`` admits ``response`` as a supported inline success."""
-    return admit_response(response, target_key=target_key) is ADMITTED
+    return admit_response(response, target_key=target_key, observed=observed) is ADMITTED
 
 
 def scan_admitted(envelope: object) -> bool:

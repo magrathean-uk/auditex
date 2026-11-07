@@ -342,3 +342,13 @@ def test_scan_admitted_accepts_supported_inline_metadata(envelope):
 @pytest.mark.parametrize("envelope", SCAN_FALSE, ids=[str(i) for i in range(len(SCAN_FALSE))])
 def test_scan_admitted_refuses_scan_count_and_chunk_metadata(envelope):
     assert adm.scan_admitted(envelope) is False
+
+
+def test_observed_empty_live_read_is_supported_without_replay_health_metadata():
+    assert adm.admit_response({"value": []}, observed=True) is ADMITTED
+    assert adm.admit_response({"value": []}) is REFUSED
+    assert adm.admit_response({"value": [], "item_count": 0}, observed=True) is ADMITTED
+    assert adm.admit_response({"value": [], "item_count": True}, observed=True) is REFUSED
+    assert adm.admit_response({"value": [], "complete": False}, observed=True) is REFUSED
+    assert adm.admit_response({}, observed=True) is REFUSED
+    assert adm.admit_response({"value": []}, observed="yes") is REFUSED

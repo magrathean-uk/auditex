@@ -26,6 +26,7 @@ from ..value_rules.defender_targeted_users import (
     COVERAGE_KEY, MAX_INPUT_COUNT, SensitiveUsersBinding, membership, minimal_coverage, validate_coverage_shape,
 )
 from .exchange_defender_commands import ANTI_PHISH_POLICY_FIELDS
+from .anti_phish_admission import ADMITTED, FAILED, admit_response
 
 COLLECTOR = "exchange_policy"
 OPERATION = "antiPhishPolicies"
@@ -369,11 +370,16 @@ def sanitise_response(
             return [{**_retained(row), COVERAGE_KEY: minimal_coverage("not_collected")}
                     for row in response if isinstance(row, Mapping)]
         return _parse_error({"command": command} if isinstance(command, str) else {})
+    admission = admit_response(response, observed=observed)
     out = _envelope_metadata(response)
     if isinstance(command, str):
         out["command"] = command
     elif _controlled_command(response.get("command")):
         out["command"] = response["command"]
+    if admission not in (ADMITTED, FAILED):
+        # Keep fixed refusal metadata for replay coverage, but never generate a membership summary from a rejected read.
+        out.update(error=PARSE_ERROR, error_class=PARSE_ERROR_CLASS)
+        return out
     failed = "error" in out or ("error_class" in out and out["error_class"] is not None)
     if "value" in response:
         rows = response["value"]
@@ -400,6 +406,8 @@ def enforce_response(response: object, *, command: str) -> dict[str, object]:
     """
     if type(response) is not dict or not set(response) <= _ENVELOPE_KEYS:
         raise BoundaryError("anti-phish response shape")
+    if admit_response(response, observed=True) not in (ADMITTED, FAILED):
+        raise BoundaryError("anti-phish response admission")
     for key in _ENVELOPE_TEXT:
         if key in response and not _known_text(key, response[key]):
             raise BoundaryError("anti-phish response text")
@@ -488,6 +496,11 @@ def _reduce(mapping: Mapping[Any, Any], walk: _Walk, depth: int, *, strict_rows:
     named the field or held a summary, is marked ``not_collected``."""
     walk.step(depth)
     out: dict[str, Any] = _envelope_metadata(mapping)
+    if "value" in mapping and admit_response(mapping) not in (ADMITTED, FAILED):
+        # An affected operation envelope must be supported before fields can be removed from it. Row objects are
+        # handled separately, so harmless unknown row fields still drop without changing their selected settings.
+        out.update(error=PARSE_ERROR, error_class=PARSE_ERROR_CLASS)
+        return out
     if _controlled_command(mapping.get("command")):
         out["command"] = mapping["command"]
     retained = {} if "value" in mapping else _retained(mapping)
@@ -572,7 +585,11 @@ def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
             continue
         if isinstance(item, (Mapping, list)):
             try:
-                out[name] = _clean(item, _Walk(), 2)
+                if (isinstance(item, Mapping) and _bears(item, _Walk(), 2)
+                        and admit_response(item) not in (ADMITTED, FAILED)):
+                    out[name] = {**_envelope_metadata(item), "error": PARSE_ERROR, "error_class": PARSE_ERROR_CLASS}
+                else:
+                    out[name] = _clean(item, _Walk(), 2)
             except Exception:  # noqa: BLE001 - past the bounds or unexpected: omit, never copy and never raise text
                 continue
         elif item is None or type(item) in (bool, int, float):
@@ -611,6 +628,9 @@ def _section(
         try:
             if name == OPERATION:
                 out[name] = sanitise_response(item, sensitive_users, binding, observed=False)
+            elif (name in known and isinstance(item, Mapping) and _bears(item, _Walk(), 2)
+                  and admit_response(item) not in (ADMITTED, FAILED)):
+                out[name] = {**_envelope_metadata(item), "error": PARSE_ERROR, "error_class": PARSE_ERROR_CLASS}
             elif name in known and isinstance(item, (Mapping, list)):
                 out[name] = _clean(item, _Walk(), 2)
             elif isinstance(item, Mapping):

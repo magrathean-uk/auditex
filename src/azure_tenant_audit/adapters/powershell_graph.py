@@ -486,11 +486,16 @@ class PowerShellGraphAdapter(Adapter):
             del stdout, combined, stderr
             response = self._normalize_payload(parsed)
             del parsed
+            # Validate the original successful read before an untrusted transform can remove its refusal metadata.
+            from ..collectors.anti_phish_admission import ADMITTED, admit_response
+            original_admission = admit_response(response, observed=True) if response_transform is not None else None
             try:
                 if response_transform is None:
                     shaped = boundary.sanitise_response(response, None, None, observed=True, command=safe_command)
                 else:
                     shaped = boundary.enforce_response(response_transform(response), command=safe_command)
+                    if original_admission != ADMITTED and shaped.get("error") is None and shaped.get("error_class") is None:
+                        shaped = None
             except Exception:  # noqa: BLE001 - a transform failure never carries its message out
                 shaped = None
             if shaped is None:
