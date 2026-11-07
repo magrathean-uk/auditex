@@ -1070,7 +1070,7 @@ _SENSITIVE_USERS_SHAREABLE_NORMS = frozenset({"supplied"})
 
 
 def _structured_rewrite(value: Any, rewrite: Callable[[Mapping[Any, Any]], Any]) -> Any:
-    """``rewrite`` applied to a mapping, or to the mapping a JSON-object string holds (written back in its layout)."""
+    """Rewrite valid metadata mappings; withhold malformed containers and scalars."""
     if isinstance(value, Mapping):
         return rewrite(value)
     if isinstance(value, str):
@@ -1082,11 +1082,12 @@ def _structured_rewrite(value: Any, rewrite: Callable[[Mapping[Any, Any]], Any])
             stripped = value.strip()
             lead, trail = value[: len(value) - len(value.lstrip())], value[len(value.rstrip()):]
             return lead + _dump_like(stripped, parsed, rewrite(parsed)) + trail
-    return value
+    return {}
 
 
 def _shareable_sensitive_users(record: Mapping[Any, Any]) -> dict[Any, Any]:
-    return {key: item for key, item in record.items() if _norm(key) in _SENSITIVE_USERS_SHAREABLE_NORMS}
+    return {key: item for key, item in record.items()
+            if _norm(key) in _SENSITIVE_USERS_SHAREABLE_NORMS and type(item) is bool}
 
 
 def _shareable_operator_inputs(record: Mapping[Any, Any]) -> dict[Any, Any]:
@@ -1325,7 +1326,7 @@ def redact_output(
     context: RedactionContext | None = None,
     markup: bool = False,
 ) -> Any:
-    """``value`` with the identifiers ``profile`` protects removed; same shape, deterministic, idempotent.
+    """``value`` with protected identifiers and local-only proof fields removed; deterministic and idempotent.
 
     ``markup=True`` is for text that is already rendered (HTML, CSV, Markdown, serialised JSON): it skips the
     inline ``key=value`` secret pattern, which cannot tell where a value ends in markup. Redact the structure
