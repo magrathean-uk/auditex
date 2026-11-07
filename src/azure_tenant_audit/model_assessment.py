@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from functools import lru_cache
 from typing import Any
 
 from .resources import open_text_resource
@@ -171,6 +172,52 @@ def _validate_post_check(row: dict[str, Any], summary: Any) -> None:
             or not set(post["conditions"]) <= allowed or len(post["policies"]) > post["count"]
             or any(len(name) > SCOPE_NAME_LIMIT for name in post["policies"])):
         raise ValueError("Invalid scope post-check")
+
+
+def value_rule_verdict(row: dict[str, Any]) -> str:
+    """Derive the public verdict from the requirement claim of a value-rule row."""
+    claim = next(c for c in row["claims"] if c["id"] == "requirement_met")
+    if claim["status"] == "unknown" and claim["value"] is None:
+        return "not_assessed"
+    if claim["status"] == "inferred" and claim["value"] is True and "policy_not_applicable" in row["limitations"]:
+        return "not_applicable"
+    if claim["status"] == "confirmed" and type(claim["value"]) is bool:
+        return "met" if claim["value"] else "not_met"
+    raise ValueError("Invalid value-rule verdict")
+
+
+def _validate_explainer(row: dict[str, Any], requirement: dict[str, Any]) -> None:
+    """Check the explanation against the validated rule answer and its citations."""
+    from .explainer.textkit import sentences, words
+
+    if row["reason"] != "rule_precheck" or row.get("rule_precheck", {}).get("class") != "value_rule":
+        raise ValueError("Explainer requires a value rule")
+    result = row["explainer"]
+    verdict = value_rule_verdict(row)
+    refs = result["evidence_refs"]
+    try:
+        for text in (result["explanation"], *result["remediation_steps"]):
+            text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Invalid value-rule explanation text") from exc
+    if (refs[0] != "e0" or not set(refs) <= set(requirement["evidence_ids"])
+            or verdict in {"met", "not_applicable"} and result["remediation_steps"]
+            or verdict == "not_met" and not result["remediation_steps"]
+            or words(result["explanation"]) > 80 or sentences(result["explanation"]) > 3):
+        raise ValueError("Invalid value-rule explanation")
+
+
+@lru_cache(maxsize=1)
+def _explainer_schema() -> dict[str, Any]:
+    return json.loads(open_text_resource("schemas/explainer.schema.json"))
+
+
+def validate_explainer(row: dict[str, Any], result: Any) -> None:
+    """Validate a redacted explainer before it is attached to its rule answer."""
+    schema = _explainer_schema()
+    _check(result, schema, schema, "explainer")
+    requirement = next((claim for claim in row["claims"] if claim["id"] == "requirement_met"), {})
+    _validate_explainer({**row, "explainer": result}, requirement)
 
 
 def validate_assessment(payload: Any) -> None:
@@ -441,6 +488,8 @@ def validate_assessment(payload: Any) -> None:
                 previous = precheck_response(detail, policy["policy_item"], sections, legacy=True)
                 if detail["class"] != "value_rule" or any(row[key] != previous[key] for key in previous):
                     raise ValueError("Invalid rule pre-check answer")
+            if "explainer" in row:
+                _validate_explainer(row, requirement)
             if "model_shadow" in row:
                 shadow = row["model_shadow"]
                 if shadow["policy_id"] != row["policy_id"]:

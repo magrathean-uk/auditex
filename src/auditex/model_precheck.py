@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 import json
 import logging
 from typing import Any
 
+from azure_tenant_audit.explainer import explain as render_explanation
+from azure_tenant_audit.model_assessment import validate_explainer, value_rule_verdict
+from azure_tenant_audit.output_redaction import PROFILE_EXPLAINER, RedactionContext, redact_output
 from azure_tenant_audit.scuba_precheck import optional_collection_entry, precheck_policy, precheck_response
 
 from .model_eval import _evaluate, _invalid_constant, _load_cases, _load_responses, _pairs, _score
@@ -16,7 +20,8 @@ LOG = logging.getLogger(__name__)
 def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
                   named_limitations: bool = True, absent_fields: bool = False,
                   empty_lists: bool = False, value_rules: bool = False,
-                  rule_projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
+                  rule_projection: dict[str, Any] | None = None, explain: bool = False,
+                  redaction_context: RedactionContext | None = None) -> dict[str, Any] | None:
     sections = [item["section"] for item in case["evidence"][1:]]
     projection = {item["section"]: item["observed"] for item in case["evidence"][1:]}
     detail = None
@@ -64,12 +69,28 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
                                  empty_lists=empty_lists, value_rules=False)
     if detail is None:
         return None
-    return {**precheck_response(detail, case["evidence"][0]["observed"], sections,
-                               named_limitations=named_limitations),
-            "policy_id": case["policy_id"], "rule_precheck": detail,
-            "validation_status": "valid", "reason": "rule_precheck", "latency_ms": 0,
-            "attempts": 0, "prompt_sha256": None, "response_sha256": None,
-            "thinking_disabled": False, "thinking_stripped": False}
+    record = {**precheck_response(detail, case["evidence"][0]["observed"], sections,
+                                  named_limitations=named_limitations),
+              "policy_id": case["policy_id"], "rule_precheck": detail,
+              "validation_status": "valid", "reason": "rule_precheck", "latency_ms": 0,
+              "attempts": 0, "prompt_sha256": None, "response_sha256": None,
+              "thinking_disabled": False, "thinking_stripped": False}
+    if explain and detail["class"] == "value_rule":
+        try:
+            # The case must carry the complete fixed read set, even if this cell cites only a subset.
+            if row is None or not set(row["sections"]) <= set(sections):
+                return record
+            # Only the public rule answer and the case's redacted model-view evidence cross this boundary.
+            public = {"policy_id": record["policy_id"], "verdict": value_rule_verdict(record),
+                      "cell": detail["cell"], "reason_code": detail["reason_code"],
+                      "reason_text": detail["reason_text"], "cited_sections": list(detail["section"])}
+            explanation = render_explanation(public, deepcopy(projection), list(sections))
+            safe = redact_output(explanation, profile=PROFILE_EXPLAINER, context=redaction_context)
+            validate_explainer(record, safe)
+            record["explainer"] = safe
+        except Exception as exc:
+            LOG.debug("Explainer %s failed (%s)", case["policy_id"], type(exc).__name__)
+    return record
 
 
 def evaluate_precheck(cases_path: str, responses_path: str | None = None, *,

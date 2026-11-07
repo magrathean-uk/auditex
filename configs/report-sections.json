@@ -51,6 +51,11 @@
       "description": "Dry-run-only impact model for closing open findings."
     },
     {
+      "id": "policy_explanations",
+      "title": "Policy Explanations",
+      "description": "Validated explanations and actions for assessed SCuBA policies."
+    },
+    {
       "id": "report_qa",
       "title": "Report QA",
       "description": "Unsupported claims, low-confidence findings, and coverage warnings."

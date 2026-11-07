@@ -7,6 +7,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Add redacted deterministic explanations to supported value-rule assessment rows and validated JSON, Markdown and HTML reports; incomplete model-case evidence and optional-collection gaps leave the explanation absent.
 - Apply the D3 redaction profile to shareable reports, built-in exports, MCP payloads, notifications and customer packs. GUIDs and the free-text keys `owner`, `justification`, `comment`, `comments` and `notes` are redacted; domains, group names and role names remain. Local reports retain their data. Incomplete or unstable normalised evidence refuses shareable output. URL userinfo passwords are recognised for schemes of up to 32 characters; known immutable IDs in narrative need at least four characters and word-character boundaries.
 - Raise the shareable identity-discovery limits to 64 MiB per normalised file and 256 MiB per run. Synthetic 25,000- and 90,000-user runs fit; their HTML previews used about 0.5 GiB and 1.5 GiB peak resident memory on the test machine. The scan limits are not memory ceilings. Over-limit output is refused without naming files.
 - Guard MCP bundle artefacts and customer-pack source reads against unsafe types and links, including shareable normalised report sections; bound data reads, stream bundle hashing without a size cap, and inspect SQLite indexes in private temporary copies while preserving legacy WAL reads.
