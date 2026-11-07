@@ -85,7 +85,6 @@ ENVELOPE_REFUSED = [
     ("unknown-object", {"paging": {"next": None}}),
     ("unknown-diagnostic", {"warning": "ordinary"}),
     ("unknown-odata-context", {"@odata.context": "https://graph.invalid/$metadata"}),
-    ("status-complete", {"status": "complete"}),
     ("return_code-string", {"return_code": "0"}),
     ("return_code-bool", {"return_code": False}),
     ("return_code-nonzero", {"return_code": 1}),
@@ -271,6 +270,15 @@ def test_row_health_marker_is_refused_before_its_fields_are_dropped(name, row, o
     assert _leaks(out) == []
     assert _refused(out), f"{name}: a refused original row must not become a fresh known summary"
     tuc.enforce_response(deepcopy(out), command="cmd")
+
+
+@pytest.mark.parametrize("observed", [True, False], ids=["observed", "replayed"])
+def test_status_complete_keeps_the_projection_operation_refusal(observed):
+    """``status: complete`` is healthy to ``_healthy`` but refused by the operation scan; the boundary keeps it
+    verbatim (or refuses outright), so the projection still refuses after minimisation."""
+    out = tuc.sanitise_response(_envelope({"status": "complete"}), USERS, BINDING, observed=observed)
+    assert _leaks(out) == []
+    assert out.get("status") == "complete" or _refused(out)
 
 
 def test_explicit_failure_envelope_keeps_its_fixed_failure():
