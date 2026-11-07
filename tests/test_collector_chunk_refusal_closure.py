@@ -19,7 +19,7 @@ from azure_tenant_audit.collectors.identity_governance import IdentityGovernance
 from azure_tenant_audit.collectors.onedrive_posture import OneDrivePostureCollector
 
 CANARY = "inline-only-canary-site.example.invalid"
-PRIVATE = "private-operator-canary-row"
+PRIVATE = "private-operator-canary@example.invalid"
 VARIANTS = ("symlink", "hardlink", "outside")
 
 
@@ -27,8 +27,12 @@ def _run(tmp_path: Path) -> Path:
     root = tmp_path / "run"
     private = root / "operator-inputs"
     private.mkdir(parents=True, mode=0o700)
-    (private / "sensitive-users.txt").write_text(json.dumps({"id": PRIVATE}) + "\n", encoding="utf-8")
-    (private / "sensitive-users.key").write_bytes(b"k" * 32)
+    from azure_tenant_audit.sensitive_users import SensitiveUsers
+
+    key = b"k" * 32
+    (private / "sensitive-users.txt").write_text(PRIVATE + "\n", encoding="utf-8")
+    (private / "sensitive-users.key").write_bytes(key)
+    (root / "run-manifest.json").write_text(json.dumps({"operator_inputs": {"sensitive_users": SensitiveUsers((PRIVATE,)).manifest(key)}}), encoding="utf-8")
     (root / "chunks").mkdir(mode=0o700)
     return root
 
@@ -40,7 +44,10 @@ def _refused(root: Path, variant: str, name: str) -> str:
         target.symlink_to(private)
         return f"chunks/{name}"
     if variant == "hardlink":
-        os.link(private, target)
+        # Refuse this multiply-linked chunk without invalidating the private pair for every otherwise valid chunk.
+        original = root / ("hardlink-source-" + name)
+        original.write_text(json.dumps({"id": PRIVATE}) + "\n", encoding="utf-8")
+        os.link(original, target)
         return f"chunks/{name}"
     return f"../{name}"
 
@@ -173,21 +180,21 @@ def test_governance_refused_assignment_chunks_stay_partial_with_fixed_issues(tmp
     row = _marker(result)
     assert row["status"] == "partial" and row["error_class"] == "incomplete_evidence"
     assert row["input_complete"] is False and row["input_unreadable"] is True
-    assert row["input_issues"] and all(set(issue) <= {"code", "chunk_index"} for issue in row["input_issues"])
+    assert row["input_issues"] and all(set(issue) <= {"code", "chunk_index", "expected_count", "observed_count"} for issue in row["input_issues"])
     section = result.payload[governance_module.POLICY_RULES]
     assert section["value"] == []
     rendered = json.dumps(result.payload) + json.dumps(result.coverage)
     assert "inline-only-policy" not in json.dumps(section) and PRIVATE not in rendered and str(tmp_path) not in rendered
 
 
-def test_governance_mixed_chunks_expand_only_readable_policies_and_stay_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_governance_mixed_chunks_stop_expansion_and_stay_partial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _run(tmp_path)
     chunks = [_valid(root, "assign-1.jsonl", [{"policyId": "p1"}]), _refused(root, "symlink", "assign-2.jsonl")]
     result, client = _governance(monkeypatch, root, _section(chunks, [{"policyId": "inline-only-policy"}], 2))
 
     assert result.status == "partial"
     assert _marker(result)["input_complete"] is False
-    assert all("inline-only-policy" not in call for call in client.calls)
+    assert client.calls == []
 
 
 def test_governance_valid_collection_is_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
