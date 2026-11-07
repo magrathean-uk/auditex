@@ -58,7 +58,10 @@ No mailbox enumeration or message/file content reads are added:
 * ``Get-MalwareFilterRule`` -> anti-malware policy assignment, priority, state and scope.
 * ``Get-SafeAttachmentPolicy`` -> attachment protection action.
 * ``Get-SafeAttachmentRule`` -> attachment policy assignment, priority, state and scope.
-* ``Get-AntiPhishPolicy`` -> protection flags, actions and domains; targeted users are not selected.
+* ``Get-AntiPhishPolicy`` -> protection flags, actions and domains, plus ``TargetedUsersToProtect`` for SS 2.1. The
+  list stays in memory: the adapter rebuilds each policy row from the other selected fields and a per-policy
+  ``TargetedUsersCoverage`` summary (counts bound to the run's private SensitiveUsers copy by its manifest HMAC),
+  and keeps no stdout, stderr or sample text for this read. See ``targeted_users_coverage``.
 * ``Get-AntiPhishRule`` -> anti-phish policy assignment, state and scope.
 * ``Get-HostedContentFilterPolicy`` -> spam/phish actions and allowed sender domains.
 * ``Get-HostedContentFilterRule`` -> content filter policy assignment, state and scope.
@@ -71,6 +74,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ..adapters import get_adapter
+from ..adapters.powershell_graph import PowerShellGraphAdapter
 from ..collection_gaps import (
     IPPS_SKIP_TEXT, REASON_IPPS_SESSION_NOT_OPENED, SECTION_SCOPED,
     REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS,
@@ -162,6 +166,7 @@ class ExchangePolicyCollector(Collector):
         total = 0
 
         exchange_session = _exchange_session(context.get("client"), log_event)
+        anti_phish = _anti_phish_boundary(context)
         for name, command in self.command_collectors:
             # Auditex deliberately opens no IPPS session. Never invoke this cmdlet.
             if name == "protectionAlerts":
@@ -170,6 +175,10 @@ class ExchangePolicyCollector(Collector):
                     "reason": REASON_IPPS_SESSION_NOT_OPENED,
                     "error_class": REASON_IPPS_SESSION_NOT_OPENED, "error": IPPS_SKIP_TEXT,
                 }
+                continue
+            if name == anti_phish.OPERATION:
+                response = _run_anti_phish(adapter, command, log_event, exchange_session, anti_phish, context)
+                payload[name] = response
                 continue
             response = adapter.run(command, log_event=log_event, session=exchange_session)
             response.setdefault("command", command)
@@ -232,3 +241,38 @@ class ExchangePolicyCollector(Collector):
             message="Exchange policy collector partially completed" if partial else "",
             coverage=coverage,
         )
+
+
+def _anti_phish_boundary(context: dict[str, Any]) -> Any:
+    from . import targeted_users_coverage
+    return targeted_users_coverage
+
+
+def _run_anti_phish(
+    adapter: Any, command: str, log_event: Any, session: dict[str, Any], boundary: Any, context: dict[str, Any],
+) -> dict[str, Any]:
+    """The anti-phish read through the targeted-users boundary.
+
+    The run's SensitiveUsers tuple and opaque writer binding come from this collector's context only and travel in
+    the transform, never in the session, an event or the payload. The real adapter applies the transform inside its
+    boundary; any other adapter's response is put through the same boundary here, so no caller returns the list.
+    """
+    sensitive_users = context.get(boundary.CONTEXT_USERS)
+    binding = context.get(boundary.CONTEXT_BINDING)
+
+    def transform(response: dict[str, Any]) -> dict[str, Any]:
+        return boundary.sanitise_response(response, sensitive_users, binding, observed=True)
+
+    if isinstance(adapter, PowerShellGraphAdapter):
+        response = adapter.run(command, log_event=log_event, session=session, response_transform=transform)
+    else:
+        raw = adapter.run(command, log_event=log_event, session=session)
+        try:
+            response = boundary.sanitise_response(raw, sensitive_users, binding, observed=True)
+        except Exception:  # noqa: BLE001 - a value-bearing failure never leaves as text
+            response = {"error": "command_exception", "error_class": "command_exception"}
+        del raw
+        if not isinstance(response, dict):
+            response = {"error": boundary.PARSE_ERROR, "error_class": boundary.PARSE_ERROR_CLASS}
+    response.setdefault("command", command)
+    return response

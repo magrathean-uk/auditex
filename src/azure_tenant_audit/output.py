@@ -361,14 +361,23 @@ class AuditWriter:
     def record_artifact(self, target: Path) -> None:
         self._record_artifact(target)
 
-    def write_sensitive_users(self, supplied: SensitiveUsers) -> None:
-        self._write_operator_pair("sensitive-users", supplied.addresses, supplied)
+    def write_sensitive_users(self, supplied: SensitiveUsers) -> Any:
+        """Write the private pair and manifest entry; return their ``SensitiveUsersBinding`` (or ``None``).
+
+        The binding is the count and HMAC of the manifest entry this call wrote, computed once from the writer's own
+        key and the captured tuple in memory: no file is reread and the raw key never leaves the writer. ``None``
+        when nothing was supplied or the tuple is not the parser's canonical form, so no summary can be bound.
+        """
+        entry = self._write_operator_pair("sensitive-users", supplied.addresses, supplied)
+        return _sensitive_users_binding(supplied, entry)
 
     def write_partner_domains(self, supplied: PartnerDomains) -> None:
         self._write_operator_pair("partner-domains", supplied.domains, supplied)
 
-    def _write_operator_pair(self, stem: str, entries: tuple[str, ...], supplied: SensitiveUsers | PartnerDomains) -> None:
-        """Publish an operator pair and register its identities before rename."""
+    def _write_operator_pair(
+        self, stem: str, entries: tuple[str, ...], supplied: SensitiveUsers | PartnerDomains,
+    ) -> dict[str, object]:
+        """Publish an operator pair and register its identities before rename; return the manifest entry written."""
         from .guarded_io import _safe_directory, guard_session
         from .private_io import _write_all
 
@@ -378,6 +387,7 @@ class AuditWriter:
         failed = False
         keep_ignore = False
         key = b""
+        entry: dict[str, object] = {}
         with guard_session() as context:
             descriptor = None
             temporaries: list[str] = []
@@ -462,8 +472,9 @@ class AuditWriter:
                         removed = private_paths if keep_ignore else (*private_paths, "operator-inputs/.gitignore")
                         for relative in removed:
                             self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != relative]
+                    entry = supplied.manifest(key)
                     self._manifest["operator_inputs"] = {
-                        **self._manifest.get("operator_inputs", {}), stem.replace("-", "_"): supplied.manifest(key),
+                        **self._manifest.get("operator_inputs", {}), stem.replace("-", "_"): entry,
                     }
                     redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
                     self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if entries else [])
@@ -482,6 +493,7 @@ class AuditWriter:
         if failed:
             error = SensitiveUsersError if stem == "sensitive-users" else PartnerDomainsError
             raise error(f"Unable to write the private {stem} bundle artefact.") from None
+        return entry
 
     def artifact_paths(self) -> list[str]:
         return list(self._manifest.get("artifacts", []))
@@ -925,3 +937,23 @@ class AuditWriter:
                     "contract_issue_count": self._manifest.get("contract_issue_count"),
                 },
             )
+
+
+def _sensitive_users_binding(supplied: SensitiveUsers, entry: object) -> Any:
+    """The SS 2.1 summary binding of a written manifest entry, when the tuple is canonical; never the key."""
+    from .sensitive_users import MAX_ENTRIES, SensitiveUsersError, _normalise
+    from .value_rules.defender_targeted_users import SensitiveUsersBinding
+
+    if type(entry) is not dict or entry.get("supplied") is not True:
+        return None
+    addresses = supplied.addresses
+    if type(addresses) is not tuple or not 1 <= len(addresses) <= MAX_ENTRIES:
+        return None
+    if any(type(address) is not str for address in addresses) or addresses != tuple(sorted(set(addresses))):
+        return None
+    try:
+        if any(_normalise(address, 1) != address for address in addresses):
+            return None
+        return SensitiveUsersBinding(entry["count"], entry["hmac_sha256"])
+    except (SensitiveUsersError, KeyError, ValueError):
+        return None

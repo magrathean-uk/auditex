@@ -248,11 +248,15 @@ def run_offline(
 
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     try:
-        writer.write_sensitive_users(sensitive_users)
+        sensitive_binding = writer.write_sensitive_users(sensitive_users)
         writer.write_partner_domains(partner_domains)
     except (SensitiveUsersError, PartnerDomainsError) as exc:
         LOG.error("%s", exc)
         return 2
+    # The anti-phish target lists in the sample are summarised under this run's binding and dropped in memory, before
+    # the replay copy and before any collector replays; nothing later reads the original sample object again.
+    from .collectors.targeted_users_coverage import sanitise_sample
+    sample = sanitise_sample(sample, sensitive_users, sensitive_binding)
     writer.log_event(
         "run.started",
         "Offline run started",
@@ -462,6 +466,48 @@ def _resume_carried_collectors(
     return carried
 
 
+def _resume_exchange_binding(
+    carried: dict[str, dict[str, Any]],
+    selected: Collection[str],
+    *,
+    sensitive_users: SensitiveUsers,
+    binding: Any,
+) -> dict[str, dict[str, Any]]:
+    """Carry ``exchange_policy`` forward only while its SS 2.1 summaries stand for this session's operator input.
+
+    The old raw summaries are compared with the binding the writer just returned for the current canonical tuple
+    under the run's retained key (so case, order, duplicates and ``name;email`` forms that normalise alike still
+    match). A changed, cleared or newly supplied list, a missing, unknown or mismatched summary, or stale literal
+    targets end the carry: the collector re-runs when this session selected it. If it cannot re-run, the rest of its
+    evidence is kept in memory with every anti-phish summary ``not_collected``, so it proves no membership. The
+    stored raw file and its HMAC are never rewritten or rebound, and no replacement key is ever made.
+    """
+    from .collectors.targeted_users_coverage import COLLECTOR, resume_payload
+
+    if COLLECTOR not in carried:
+        return carried
+    payload, reusable = resume_payload(carried[COLLECTOR], sensitive_users, binding)
+    carried = dict(carried)
+    if not reusable and COLLECTOR in selected and COLLECTOR in REGISTRY:
+        del carried[COLLECTOR]
+    else:
+        carried[COLLECTOR] = payload
+    return carried
+
+
+def _collector_extra(
+    name: str, collector_payloads: dict[str, dict[str, Any]], sensitive_users: SensitiveUsers, binding: Any,
+) -> dict[str, Any]:
+    """Run-scoped private context: accepted domains for ``dns_posture``; SensitiveUsers and its opaque writer binding
+    for ``exchange_policy`` only (never the key, a session, an event or a checkpoint)."""
+    if name == "dns_posture":
+        return {"exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains")}
+    if name == "exchange_policy":
+        from .collectors.targeted_users_coverage import CONTEXT_BINDING, CONTEXT_USERS
+        return {CONTEXT_USERS: sensitive_users, CONTEXT_BINDING: binding}
+    return {}
+
+
 def _resumed_row(name: str, state: dict[str, Any], coverage_rows: list[dict[str, Any]]) -> dict[str, object]:
     """The result row of a collector carried over from the checkpoint, with the status it finished with."""
     previous_message = str(state.get("message") or "").strip()
@@ -542,7 +588,7 @@ def run_live(
     )
     completed_state = writer.load_checkpoint_state() if resume_from else {}
     try:
-        writer.write_sensitive_users(sensitive_users)
+        sensitive_binding = writer.write_sensitive_users(sensitive_users)
         writer.write_partner_domains(partner_domains)
     except (SensitiveUsersError, PartnerDomainsError) as exc:
         LOG.error("%s", exc)
@@ -563,6 +609,11 @@ def run_live(
         if resume_from
         else {}
     )
+    if resume_from:
+        # After this session's operator input is written: SS 2.1 summaries are carried only under the same binding.
+        carried_payloads = _resume_exchange_binding(
+            carried_payloads, selected, sensitive_users=sensitive_users, binding=sensitive_binding,
+        )
     completed_collectors = set(carried_payloads)
     if resume_from:
         # Every collector that finished in an earlier session is part of this run's evidence, whatever this session
@@ -824,9 +875,7 @@ def run_live(
                 hooks=writer_adapter.hooks(),
                 # Only completed evidence from this run (including a validated resume),
                 # never another tenant read or an arbitrary raw artefact from disk.
-                extra={
-                    "exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains"),
-                } if name == "dns_posture" else {},
+                extra=_collector_extra(name, collector_payloads, sensitive_users, sensitive_binding),
             ),
             name=name,
         )
