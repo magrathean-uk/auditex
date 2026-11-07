@@ -563,7 +563,8 @@ def _validate_evidence_db(
                 issues.append(_issue("invalid_evidence_sqlite_schema", path="index/evidence.sqlite", details=missing))
             return decode_identity_metadata(_fresh_index_proof.metadata)
         # SQLite consumers see a protected snapshot or an immutable in-place read; sidecars are never replayed.
-        with open_private_run_index(run_dir, hashed=evidence_index_is_hashed(run_dir)) as conn:
+        with open_private_run_index(run_dir, hashed=evidence_index_is_hashed(run_dir),
+                                    record_notice=not read_only) as conn:
             inspect(conn)
     except UnsafeRunFileError:
         raise
