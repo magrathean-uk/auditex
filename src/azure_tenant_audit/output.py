@@ -358,6 +358,12 @@ class AuditWriter:
                 with context._lock:
                     root_key = context._absolute(self.run_dir)
                     manifest_exists = os.path.lexists(self.run_dir / "run-manifest.json")
+                    if not manifest_exists and supplied.addresses:
+                        # Establish an empty run before publishing its private
+                        # pair, then replace this manifest under the same lock.
+                        # The guarded write refuses a pre-existing unmarked pair.
+                        write_private_text(self.run_dir / "run-manifest.json", json.dumps(self._manifest, indent=2))
+                        manifest_exists = True
                     if manifest_exists:
                         context.bind_run(self.run_dir)
                     if supplied.addresses:

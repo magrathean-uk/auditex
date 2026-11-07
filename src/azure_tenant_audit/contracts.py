@@ -541,10 +541,6 @@ def _validate_evidence_db(
     _fresh_index_proof: _FreshIndexProof | None = None,
 ) -> dict[str, Any]:
     db_path = run_dir / "index" / "evidence.sqlite"
-    if not db_path.exists():
-        issues.append(_issue("missing_required_artifact", path="index/evidence.sqlite"))
-        return {}
-
     metadata: dict[str, Any] = {}
 
     def inspect(conn: sqlite3.Connection) -> None:
@@ -577,6 +573,10 @@ def _validate_evidence_db(
             inspect(conn)
     except UnsafeRunFileError:
         raise
+    except FileNotFoundError:
+        if not read_only and _fresh_index_proof is not None:
+            raise UnsafeRunFileError("evidence index") from None
+        issues.append(_issue("missing_required_artifact", path="index/evidence.sqlite"))
     except (sqlite3.DatabaseError, OSError) as exc:
         issues.append(_issue("invalid_evidence_sqlite", path="index/evidence.sqlite", details=str(exc)))
     return metadata

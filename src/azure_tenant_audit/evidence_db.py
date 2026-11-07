@@ -242,7 +242,9 @@ def build_run_evidence_index(
             os.close(descriptor)
             with closing(sqlite3.connect(snapshot)) as conn:
                 for pragma in sqlite_bulk_pragmas():
-                    conn.execute(pragma)
+                    result = conn.execute(pragma)
+                    if pragma == "PRAGMA journal_mode=WAL" and result.fetchone()[0].lower() != "wal":
+                        raise UnsafeRunFileError("evidence index")
                 _create_schema(conn)
                 _insert_meta(conn, run_path, manifest, summary)
                 run_id = _scalar(manifest.get("run_id"))
@@ -251,9 +253,23 @@ def build_run_evidence_index(
                     _insert_records(conn, run_path, section_name, path, records, run_id=run_id, tenant_name=tenant_name)
                 _create_indexes(conn)
                 conn.commit()
+                checkpoint = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                if checkpoint != (0, 0, 0):
+                    raise UnsafeRunFileError("evidence index")
                 if _proof_out is not None:
                     tables = frozenset(row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"))
                     metadata = dict(conn.execute("SELECT key, value FROM run_meta"))
+            try:
+                wal = os.open("evidence.sqlite-wal", _FILE_FLAGS, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+            else:
+                try:
+                    context._check_file(os.fstat(wal), "evidence index", None)
+                    if os.fstat(wal).st_size:
+                        raise UnsafeRunFileError("evidence index")
+                finally:
+                    os.close(wal)
             source = os.open("evidence.sqlite", _FILE_FLAGS, dir_fd=directory_fd)
             try:
                 context._check_file(os.fstat(source), "evidence index", None)

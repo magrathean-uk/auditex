@@ -112,3 +112,18 @@ def test_parser_chained_exception_traceback_does_not_echo_secret(tmp_path: Path)
     rendered = "".join(traceback.format_exception(error.value))
     assert not any(CANARY[i:i + 16] in rendered for i in range(len(CANARY) - 15))
     assert error.value.__cause__ is None and error.value.__context__ is None
+
+
+@pytest.mark.parametrize("entry", ["engine", "product"])
+def test_single_malformed_sensitive_option_does_not_echo_value(entry: str, capsys) -> None:
+    from auditex.cli import main as product_main
+    from azure_tenant_audit.cli import main as engine_main
+
+    main = engine_main if entry == "engine" else product_main
+    argv = [f"--sensitive-users {CANARY}"]
+    if entry == "product":
+        argv.insert(0, "run")
+    with pytest.raises(SystemExit):
+        main(argv)
+    output = capsys.readouterr()
+    assert CANARY not in output.out + output.err

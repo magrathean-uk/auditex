@@ -26,6 +26,14 @@ KEY_CANARY = b"constructed-private-key-canary-1"
 SAMPLE = "examples/sample_audit_bundle/sample_result.json"
 
 
+def test_new_private_pair_is_published_with_a_verifying_manifest(tmp_path):
+    from azure_tenant_audit.output import AuditWriter
+
+    writer = AuditWriter(tmp_path, tenant_name="synthetic", run_name="new")
+    writer.write_sensitive_users(SensitiveUsers((CANARIES[0],)))
+    assert verify_sensitive_users(writer.run_dir)
+
+
 @pytest.mark.parametrize("content", [
     " Name;Sensitive-Canary-B@Example.Invalid \n sensitive-canary-a@example.invalid\nSENSITIVE-CANARY-A@EXAMPLE.INVALID\n",
     json.dumps(["Name;Sensitive-Canary-B@Example.Invalid", " sensitive-canary-a@example.invalid ", CANARIES[0]]),

@@ -305,6 +305,62 @@ def test_fresh_index_validation_does_not_read_sqlite_from_unproved_storage(
         contracts._validate_evidence_db(run, [], read_only=True, _fresh_index_proof=proof[0])
 
 
+@pytest.mark.parametrize("failure", ["busy-checkpoint", "remaining-wal"])
+def test_index_builder_refuses_uncheckpointed_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    from azure_tenant_audit import evidence_db
+
+    run = RunBundleBuilder(tmp_path).build()
+    original_connect = sqlite3.connect
+
+    class Connection:
+        def __init__(self, path: Path):
+            self.path = Path(path)
+            self.wrapped = original_connect(path)
+
+        def __getattr__(self, name: str):
+            return getattr(self.wrapped, name)
+
+        def execute(self, sql: str, *args: object):
+            if sql == "PRAGMA wal_checkpoint(TRUNCATE)" and failure == "busy-checkpoint":
+                class Busy:
+                    def fetchone(self):
+                        return (1, 1, 0)
+                return Busy()
+            return self.wrapped.execute(sql, *args)
+
+        def close(self):
+            self.wrapped.close()
+            if failure == "remaining-wal":
+                self.path.with_name(self.path.name + "-wal").write_bytes(b"uncheckpointed")
+
+    monkeypatch.setattr(evidence_db.sqlite3, "connect", Connection)
+    proof: list = []
+    with pytest.raises(evidence_db.UnsafeRunFileError):
+        evidence_db.build_run_evidence_index(run, _proof_out=proof)
+    assert not proof
+    assert not (run / "index/evidence.sqlite").exists()
+
+
+@pytest.mark.parametrize("link", ["index", "parent"])
+def test_contract_validation_refuses_dangling_index_links(tmp_path: Path, link: str) -> None:
+    from azure_tenant_audit import contracts
+    from azure_tenant_audit.run_files import UnsafeRunFileError
+
+    run = tmp_path / "run"
+    run.mkdir()
+    if link == "index":
+        (run / "index").mkdir()
+        (run / "index/evidence.sqlite").symlink_to(tmp_path / "missing.sqlite")
+    else:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (run / "index").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(UnsafeRunFileError):
+        contracts._validate_evidence_db(run, [], read_only=True)
+
+
 def test_discovery_refuses_non_json_symlink_to_directory(tmp_path: Path) -> None:
     from azure_tenant_audit.output_redaction import ContextIncompleteError, snapshot_run
 

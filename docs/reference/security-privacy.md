@@ -271,6 +271,7 @@ storage; unproved or external storage is refused. The encrypted-internal proof
 is implemented for macOS Data volumes; other platforms refuse index snapshot
 reads. Index and supported sidecar copies have no size cap, so available
 temporary space and copy time matter.
+An interrupted index build can leave a private staging directory beside the index.
 
 ## Evidence and customer packs
 

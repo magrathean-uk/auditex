@@ -9,7 +9,7 @@ import sys
 from typing import Any
 
 from .guarded_io import UnsafeRunFileError, guard_session, open_pinned_binary
-from .secret_hygiene import collect_sensitive_argv_values
+from .secret_hygiene import SENSITIVE_ARG_FLAGS, _sensitive_option, collect_sensitive_argv_values
 
 _INPUT_FLAGS = frozenset({
     "--assessment", "--break-glass-accounts", "--cases", "--config", "--env", "--input",
@@ -134,13 +134,19 @@ def _admit_destination(context, path: str, field: str) -> None:
 def parse_guarded(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.Namespace:
     normalized, explicit = _arguments(parser, list(argv))
     sensitive_values = collect_sensitive_argv_values(normalized)
+    # An option and its value may arrive as a single malformed, quoted token.
+    # Do not allow argparse to echo that token in its unknown-argument error.
+    sensitive_syntax = bool(sensitive_values) or any(
+        _sensitive_option(parts[0].partition("=")[0], set(SENSITIVE_ARG_FLAGS))
+        for item in normalized if (parts := item.split(maxsplit=1))
+    )
     class _SafeParseFailure(Exception):
         def __init__(self, current: argparse.ArgumentParser, message: str) -> None:
             self.parser = current
             self.message = message
 
     original_errors: list[tuple[argparse.ArgumentParser, Any]] = []
-    if sensitive_values:
+    if sensitive_syntax:
         # argparse can echo unknown or invalid values before returning control.
         # Keep its usage/help while replacing the diagnostic on every subparser.
         def sanitise_errors(current: argparse.ArgumentParser) -> None:
@@ -161,7 +167,7 @@ def parse_guarded(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.
     try:
         args, unknown = parser.parse_known_args(normalized)
         if unknown:
-            if sensitive_values:
+            if sensitive_syntax:
                 parser.error("unrecognized arguments: ***redacted***")
             else:
                 parser.error("unrecognized arguments: " + " ".join(unknown))

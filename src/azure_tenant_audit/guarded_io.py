@@ -356,19 +356,20 @@ class GuardContext:
                 raise UnsafeRunFileError("run") from None
             return found
 
+        nested_manifest = False
         for parent in absolute.parents:
             private = parent / "operator-inputs"
             manifest = parent / "run-manifest.json"
             private_info = optional_lstat(private)
             if private_info is None:
-                # A nested run or pack source manifest is a boundary; do not
-                # misclassify it from an unrelated higher ancestor's marker.
                 if optional_lstat(manifest) is not None:
-                    return
+                    nested_manifest = True
                 continue
             if optional_lstat(manifest) is None:
                 if private_pair_present(private):
                     raise UnsafeRunFileError("run") from None
+                if nested_manifest:
+                    continue
                 # The filesystem can resolve a case or Unicode variant to the
                 # same directory even when the path spellings are unequal.
                 for ancestor in absolute.parents:
@@ -379,7 +380,7 @@ class GuardContext:
                         raise UnsafeRunFileError("run") from None
                 continue
             self.bind_run(parent)
-            return
+            # A nested marker cannot hide an enclosing run's private pair.
 
 
 @contextmanager

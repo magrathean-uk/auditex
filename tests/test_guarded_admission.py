@@ -394,6 +394,30 @@ def test_any_selected_file_in_run_with_unmanifested_pair_is_refused(private_run:
             pytest.fail("file in an unverified run was admitted")
 
 
+@pytest.mark.parametrize("outer_manifest", [True, False])
+@pytest.mark.parametrize("decoy_private_dir", [True, False])
+@pytest.mark.parametrize("private_name", ["sensitive-users.key", "sensitive-users.txt"])
+@pytest.mark.parametrize("consumer", ["open", "hash"])
+def test_nested_manifest_never_hides_enclosing_private_pair(
+    private_run: Path, outer_manifest: bool, decoy_private_dir: bool, private_name: str, consumer: str,
+) -> None:
+    from azure_tenant_audit.evidence_refs import file_sha256
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    private = private_run / "operator-inputs"
+    (private / "run-manifest.json").write_text("{}")
+    if decoy_private_dir:
+        (private / "operator-inputs").mkdir(mode=0o700)
+    if not outer_manifest:
+        (private_run / "run-manifest.json").unlink()
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        if consumer == "hash":
+            file_sha256(private / private_name)
+        else:
+            with open_guarded_file(private / private_name, field="input", context=context):
+                pytest.fail("nested marker hid the enclosing private pair")
+
+
 def test_unrelated_operator_inputs_ancestor_does_not_capture_a_nested_run(tmp_path: Path) -> None:
     from azure_tenant_audit.guarded_io import GuardContext, open_guarded_file
 
