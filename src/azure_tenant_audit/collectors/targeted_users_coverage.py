@@ -97,6 +97,9 @@ _ENVELOPE_KEYS = frozenset({"value", "command", *_ENVELOPE_TEXT, *_ENVELOPE_NUMB
 _COMPONENT_KEYS = frozenset({*_ENVELOPE_KEYS, "message", "stdout", "stderr", "stdout_sample", "stderr_sample",
                              "details", "exception", "traceback", "warning", "warnings"})
 _ROW_KEYS = frozenset({*RETAINED_FIELDS, COVERAGE_KEY})
+# Sample-root keys that hold sample metadata rather than a collector section (the CLI's offline metadata keys). They
+# keep the component walk; the CLI applies ``strip_targets`` to provenance again before it is published.
+_SAMPLE_METADATA_KEYS = frozenset({"_fixture_provenance"})
 _TARGET_FOLD = TARGET_KEY.casefold()
 
 
@@ -529,26 +532,51 @@ def _clean(value: Any, walk: _Walk, depth: int) -> Any:
     return value
 
 
-def _is_container(mapping: Mapping[Any, Any]) -> bool:
-    """A sample-root mapping that holds only operations: every value a mapping or list, no envelope or diagnostic key."""
-    return all(isinstance(item, (Mapping, list)) and key not in _COMPONENT_KEYS for key, item in mapping.items())
+def _own_slot(name: Any) -> bool:
+    """A collector-section key that belongs to the section itself, as in a flat or legacy layout where the section is
+    also an envelope or a policy row: an envelope or diagnostic slot, a policy field, a supplied summary or a key
+    naming the field. Every other key is one of the collector's operations or its scalar metadata."""
+    return name in _COMPONENT_KEYS or name in _ROW_KEYS or _key_names_target(name)
 
 
-def _container(mapping: Mapping[Any, Any]) -> dict[str, Any]:
-    """A sample-root collector section: each operation is its own component with its own walking budget, so one
-    target-bearing operation never costs its siblings their evidence. A key naming the field is omitted, a supplied
-    summary becomes ``not_collected`` and an operation past the bounds is omitted."""
-    out: dict[str, Any] = {}
-    for name, item in mapping.items():
-        if name == COVERAGE_KEY:
-            out[name] = minimal_coverage("not_collected")
-            continue
-        if type(name) is not str or _key_names_target(name) or _mentions_target(name):
-            continue
+def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
+    """A sample-root collector section, routed by its position in the sample and never by the types of its values.
+
+    A section with nothing target-bearing below it is copied as it was. Otherwise its own slots (``_own_slot``) are
+    reduced together as one component, exactly as a reduced envelope or row: closed metadata, refusal markers as fixed
+    tokens, the adapter's own command, safe rows and policy fields, no diagnostic text. Every other key is an
+    independent operation with its own walking budget, copied unless it bears the target (then reduced) or passes the
+    bounds (then omitted), so one carrier never costs its siblings their evidence or health markers. Scalar metadata
+    beside them keeps numbers, booleans and null; free text in a bearing section goes, as at the sample root. A key
+    naming the field in another form is omitted, and the section's own slots past the bounds are omitted as an
+    operation would be.
+    """
+    try:
+        bearing = _bears(section, _Walk(), 1)
+    except Exception:  # noqa: BLE001 - past the bounds: route key by key, each operation with its own budget
+        bearing = True
+    if not bearing:
         try:
-            out[name] = _clean(item, _Walk(), 2)
+            return _clean(section, _Walk(), 1)
+        except Exception:  # noqa: BLE001 - the copy passed the bounds: route key by key instead
+            pass
+    out: dict[str, Any] = {}
+    own = {name: item for name, item in section.items() if _own_slot(name)}
+    if own:
+        try:
+            out.update(_reduce(own, _Walk(), 1, strict_rows=False))
         except Exception:  # noqa: BLE001 - past the bounds or unexpected: omit, never copy and never raise text
+            pass
+    for name, item in section.items():
+        if _own_slot(name) or type(name) is not str or _mentions_target(name):
             continue
+        if isinstance(item, (Mapping, list)):
+            try:
+                out[name] = _clean(item, _Walk(), 2)
+            except Exception:  # noqa: BLE001 - past the bounds or unexpected: omit, never copy and never raise text
+                continue
+        elif item is None or type(item) in (bool, int, float):
+            out[name] = item
     return out
 
 
@@ -633,10 +661,13 @@ def sanitise_sample(
     legacy, nested, error and encoded layouts, reduces each component that is target-bearing anywhere below it
     (a row, a nested object, a list or encoded text) to closed metadata, refusal markers as fixed tokens, the
     adapter's own command and its rows, so no ancestor keeps diagnostic text; unknown exchange_policy operations keep
-    only closed metadata and safe retained fields. A collector section of operations keeps every operation that
-    bears nothing as it was. A top-level key naming the field is omitted, and when anything in the sample bears the
-    target the top level's own free text goes too. A section past the bounds is replaced by an empty mapping (an
-    operation past them, inside a section of operations, is omitted). The source mapping is not modified.
+    only closed metadata and safe retained fields. Every other top-level mapping except sample metadata is a collector
+    section (``_collector_section``): its own envelope slots are reduced, while each operation beside them keeps its
+    own budget and is kept as it was unless it bears the target, whatever scalar metadata sits beside it. A top-level
+    key naming the field is omitted, and when anything in the sample bears the target the top level's own free text
+    goes too. Sample metadata and a top-level list keep the component walk; one past the bounds is replaced by an
+    empty mapping (an operation past them, inside a collector section, is omitted). The source mapping is not
+    modified and the result shares no container with it.
     """
     try:
         top_bearing = _bears(sample, _Walk(), 0)
@@ -649,8 +680,8 @@ def sanitise_sample(
         try:
             if key == COLLECTOR:
                 out[key] = _section(value, sensitive_users, binding)
-            elif isinstance(value, Mapping) and _is_container(value):
-                out[key] = _container(value)
+            elif isinstance(value, Mapping) and key not in _SAMPLE_METADATA_KEYS:
+                out[key] = _collector_section(value)
             elif isinstance(value, (Mapping, list)):
                 out[key] = _clean(value, _Walk(), 1)
             elif type(value) is str:
