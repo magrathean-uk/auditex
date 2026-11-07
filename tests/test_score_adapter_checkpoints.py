@@ -404,10 +404,17 @@ def test_selection_without_base_keeps_noise_band_behaviour():
     ("results-v6-20261025T225631Z/real-v6-validation-20261025T144736Z", 18, 290, 12, "checkpoint-150"),
 ])
 def test_selection_on_real_validation_runs_when_present(relative, models, scored, width, previous):
-    root = Path(os.environ.get("AUDITEX_TEST_JUPITER_RESULTS",
-                               Path.home() / "dev/machine/work/auditex-data/development-kit/jupiter-results")) / relative
+    # Explicit opt-in only. Historical real model results are never discovered under the home directory:
+    # with the variable unset (the model streams are parked) nothing is probed or opened and the test skips.
+    configured = os.environ.get("AUDITEX_TEST_JUPITER_RESULTS", "").strip()
+    if not configured:
+        pytest.skip("set AUDITEX_TEST_JUPITER_RESULTS to an existing results directory to run this check")
+    base = Path(configured)
+    if not base.is_absolute() or not base.is_dir():
+        pytest.skip("AUDITEX_TEST_JUPITER_RESULTS is not an existing absolute directory")
+    root = base / relative
     if not all((root / name).is_file() for name in ("evaluation.json", "scored-cases.jsonl")):
-        pytest.skip(f"local validation scoring files are absent: {root}")
+        pytest.skip("the opted-in results directory lacks this validation run's scoring files")
     evaluation = json.loads((root / "evaluation.json").read_text(encoding="utf-8"))
     cases = load_cases([root / "scored-cases.jsonl"])
     assert len(evaluation["model_scores"]) == models

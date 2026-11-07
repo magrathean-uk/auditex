@@ -2294,10 +2294,16 @@ def test_splitter_reports_invalid_input_without_writing(miner, splitter, tmp_pat
 def test_splitter_rejects_unreadable_or_malformed_input_without_writing(splitter, tmp_path, capsys):
     out = tmp_path / "out.jsonl"
     assert splitter.main(["--cases", str(tmp_path / "missing.jsonl"), "--output", str(out)]) == 1
+    assert "Input is absent." in capsys.readouterr().err
     bad = tmp_path / "bad.jsonl"
     bad.write_text('{"id":"first","id":"second"}\n', encoding="utf-8")
     assert splitter.main(["--cases", str(bad), "--output", str(out)]) == 1
-    assert not out.exists() and not (tmp_path / "split-report.json").exists() and "duplicate JSON key" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # A duplicate key is still rejected, but the loader reports one fixed sanitized message: no key or
+    # value text from the input, and no path, reaches the operator.
+    assert err == "error: ValueError: invalid case JSON at line 1\n"
+    assert "duplicate" not in err and "first" not in err and "second" not in err and "bad.jsonl" not in err
+    assert not out.exists() and not (tmp_path / "split-report.json").exists()
 
 
 # --- end to end against the real oracle (skipped unless OPA and ScubaGear are present) --------------------------
