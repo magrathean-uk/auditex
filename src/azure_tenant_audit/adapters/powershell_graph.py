@@ -484,11 +484,18 @@ class PowerShellGraphAdapter(Adapter):
                     completed("command_parse_error")
                     return failure("command_output_parse_error", "command_parse_error", numbers)
             del stdout, combined, stderr
-            response = self._normalize_payload(parsed)
+            from ..collectors.anti_phish_admission import ADMITTED, REFUSED, SUCCESS_KEYS, admit_response
+            # A wire object declaring operation metadata is an envelope, even when its value is missing or invalid.
+            # Generic normalisation would otherwise wrap it as a policy row and hide its original refusal semantics.
+            envelope_keys = SUCCESS_KEYS | {"chunk_files", "chunk_count", "details", "exception", "traceback",
+                                           "warning", "warnings"}
+            response = parsed if isinstance(parsed, dict) and any(key in envelope_keys for key in parsed) else self._normalize_payload(parsed)
             del parsed
-            # Validate the original successful read before an untrusted transform can remove its refusal metadata.
-            from ..collectors.anti_phish_admission import ADMITTED, admit_response
-            original_admission = admit_response(response, observed=True) if response_transform is not None else None
+            # Validate before a transform can mutate the original response, on the no-callback path as well.
+            original_admission = admit_response(response, observed=True)
+            if original_admission == REFUSED:
+                completed("command_parse_error")
+                return failure("command_output_parse_error", "command_parse_error", numbers)
             try:
                 if response_transform is None:
                     shaped = boundary.sanitise_response(response, None, None, observed=True, command=safe_command)

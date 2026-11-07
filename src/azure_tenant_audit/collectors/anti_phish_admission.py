@@ -206,6 +206,8 @@ def _rows_healthy(rows: list, target_key: str | None) -> bool:
         value, depth, top = stack.pop()
         kind = type(value)
         if kind is dict:
+            if any(type(key) is not str for key in value):
+                return False  # validate keys before string lookups could invoke a non-JSON key's equality
             if depth > MAX_DEPTH or not _mapping_healthy(value):
                 return False
             nodes += len(value)
@@ -233,10 +235,12 @@ def _rows_healthy(rows: list, target_key: str | None) -> bool:
 def _admit(response: object, target_key: str | None, observed: bool) -> str:
     if type(response) is not dict or type(observed) is not bool:
         return REFUSED
+    if any(type(key) is not str for key in response):
+        return REFUSED
     if _present(response.get("error")) or _present(response.get("error_class")):
         return FAILED
     for key in response:
-        if type(key) is not str or key not in SUCCESS_KEYS:
+        if key not in SUCCESS_KEYS:
             return REFUSED  # includes chunk_files, chunk_count and every unknown envelope key
     for key, check in _SUCCESS_TYPES.items():
         if key in response and not check(response[key]):
