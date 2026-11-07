@@ -50,6 +50,14 @@ _PRIVATE_OPERATOR_INPUTS = frozenset({
     BUNDLE_PATH, KEY_PATH, PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH, "operator-inputs/.gitignore",
 })
 _LIST_LIMIT = 100
+# Leftover temporary files of the private operator-input writers (a crash can skip their cleanup). They hold
+# list or key bytes, so they are named by path and reason only and never read. Current form
+# ``.<name>.<24 hex>.tmp``; older writers used ``.<name>.tmp`` and ``.<name>.<pid>.tmp``. Only these exact
+# names directly under ``operator-inputs`` qualify; any other file there is still hashed or reported unlisted.
+_PRIVATE_TEMPORARY = re.compile(
+    r"^\.(?:sensitive-users\.txt|sensitive-users\.key|partner-domains\.txt|partner-domains\.key|\.gitignore)"
+    r"(?:\.(?:[0-9a-f]{24}|[0-9]{1,10}))?\.tmp$"
+)
 
 # Outputs written on request after finalisation, outside the original seal.
 # Optional model assessment JSON is checked by contract validation when present.
@@ -78,6 +86,9 @@ def is_evidence_sidecar(relative: str) -> bool:
 
 def _excluded_reason(relative: str) -> str | None:
     if relative in _PRIVATE_OPERATOR_INPUTS:
+        return "redacted_operator_input"
+    directory, separator, name = relative.partition("/")
+    if separator and "/" not in name and directory.casefold() == "operator-inputs" and _PRIVATE_TEMPORARY.match(name):
         return "redacted_operator_input"
     # A sidecar is not excluded: the index is closed before it is hashed, so one present at that moment is
     # hashed like any file, and one that appears later is an unlisted file the check refuses.
