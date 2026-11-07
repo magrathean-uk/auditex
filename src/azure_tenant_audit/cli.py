@@ -247,11 +247,6 @@ def run_offline(
     except (ValueError, OSError):
         LOG.error("Unable to load sample bundle.")
         return 2
-    fixture_provenance = _merged_fixture_provenance(
-        sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
-        fixture_provenance_override,
-    )
-
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     try:
         sensitive_binding = writer.write_sensitive_users(sensitive_users)
@@ -261,8 +256,14 @@ def run_offline(
         return 2
     # The anti-phish target lists in the sample are summarised under this run's binding and dropped in memory, before
     # the replay copy and before any collector replays; nothing later reads the original sample object again.
-    from .collectors.targeted_users_coverage import sanitise_sample
+    from .collectors.targeted_users_coverage import sanitise_sample, strip_targets
     sample = sanitise_sample(sample, sensitive_users, sensitive_binding)
+    # Provenance is persisted separately in the manifest and report pack. Derive it only from the sanitised
+    # sample, and give an explicit override the same boundary before it can bypass the replay-copy boundary.
+    fixture_provenance = strip_targets(_merged_fixture_provenance(
+        sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
+        fixture_provenance_override,
+    ))
     writer.log_event(
         "run.started",
         "Offline run started",
