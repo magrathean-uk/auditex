@@ -464,28 +464,50 @@ def _text_buffer_is_empty(stream: io.TextIOWrapper) -> bool:
     return encoding_seen and errors_seen and newline_seen
 
 
-def _stdin_text_buffer_is_empty() -> bool:
-    """Prove CPython's standard text wrapper has no decoded characters buffered."""
-    if (sys.implementation.name != "cpython" or sys.version_info[:2] not in {(3, 11), (3, 12), (3, 13), (3, 14)}
-            or not _text_buffer_is_empty(sys.stdin)):
-        return False
+def _probe_text_wrapper(payload: bytes, consume) -> tuple[bool, bool] | None:
+    """Return the emptiness proof for a probe wrapper built like stdin, before and after ``consume``."""
     read_fd, write_fd = os.pipe()
     try:
-        os.write(write_fd, b"xy")
+        os.write(write_fd, payload)
         os.close(write_fd)
         write_fd = -1
         with io.TextIOWrapper(io.BufferedReader(io.FileIO(read_fd, "rb", closefd=True)),
-                              encoding=sys.stdin.encoding, errors=sys.stdin.errors, newline="\n") as probe:
+                              encoding=sys.stdin.encoding, errors=sys.stdin.errors, newline="\n",
+                              line_buffering=sys.stdin.line_buffering,
+                              write_through=sys.stdin.write_through) as probe:
             read_fd = -1
-            if not _text_buffer_is_empty(probe):
-                return False
-            probe.read(1)
-            return not _text_buffer_is_empty(probe)
+            fresh = _text_buffer_is_empty(probe)
+            consume(probe)
+            return fresh, _text_buffer_is_empty(probe)
+    except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
+        return None
     finally:
         if read_fd >= 0:
             os.close(read_fd)
         if write_fd >= 0:
             os.close(write_fd)
+
+
+def _text_wrapper_layout_proved() -> bool:
+    """Prove at run time that this interpreter's wrapper exposes pending decoded text to the check.
+
+    No interpreter version is trusted by number. The same wrapper type and configuration as stdin must read
+    as empty when fresh and as non-empty with decoded characters pending, by character read and by line
+    read. An unknown layout that hides pending text, or that exposes other strings, fails this proof, and
+    admission then refuses stdin rather than guess.
+    """
+    for payload, consume in ((b"xy", lambda probe: probe.read(1)), (b"a\nb", lambda probe: probe.readline())):
+        if _probe_text_wrapper(payload, consume) != (True, False):
+            return False
+    return True
+
+
+def _stdin_text_buffer_is_empty() -> bool:
+    """Prove CPython's standard text wrapper has no decoded characters buffered."""
+    if (sys.implementation.name != "cpython" or sys.version_info < (3, 11)
+            or not _text_buffer_is_empty(sys.stdin)):
+        return False
+    return _text_wrapper_layout_proved()
 
 
 def _prime_stdin_binary_buffer() -> bool:
@@ -726,6 +748,47 @@ def open_private_output(path: str | Path, *, field: str, context: GuardContext,
             os.fchmod(fd, 0o600)
             if not append:
                 os.ftruncate(fd, 0)
+            context._pinned.pop(context._absolute(path), None)
+    except UnsafeRunFileError as exc:
+        failed = True
+        reason = exc.reason
+    except (OSError, ValueError, TypeError):
+        failed = True
+    if parent is not None:
+        os.close(parent)
+    if failed:
+        if fd is not None:
+            os.close(fd)
+        raise UnsafeRunFileError(field, reason=reason) from None
+    try:
+        assert fd is not None
+        yield fd
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def open_existing_append(path: str | Path, *, field: str, context: GuardContext) -> Iterator[int]:
+    """Admit an existing destination for appending only; never create, truncate or change its mode.
+
+    For producer-owned logs: the entry is opened once without following a final link, and must pass the
+    same admission as any guarded file (regular, owned, single link, not a private input). Its permissions
+    are left exactly as they are, so a notice can never widen or narrow what the operator chose.
+    """
+    parent = None
+    fd = None
+    failed = False
+    reason = None
+    try:
+        with context._lock:
+            context.discover_run(path)
+            parent, name = context._parent(path)
+            if not _safe_directory(os.fstat(parent)):
+                raise UnsafeRunFileError(field, reason="owner")
+            flags = (os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_CLOEXEC", 0))
+            fd = os.open(name, flags, dir_fd=parent)
+            context._check_file(os.fstat(fd), field, None)
             context._pinned.pop(context._absolute(path), None)
     except UnsafeRunFileError as exc:
         failed = True
