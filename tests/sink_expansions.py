@@ -17,6 +17,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
     ),
     'auditex.demo:*': (
         'auditex.demo:_Console.line',
+        'auditex.demo:_Console.pause',
         'auditex.demo:_step_handoff',
     ),
     'auditex.google_workspace.run:run_google_*': (
@@ -27,6 +28,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
         'auditex.guided:ProgressRenderer.__call__',
         'auditex.guided:_offer_m365_setup',
         'auditex.guided:_prompt_choice',
+        'auditex.guided:_read_prompt',
         'auditex.guided:run_guided',
     ),
     'auditex.model_serving:ModelClient.*': (
@@ -52,6 +54,7 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
         'azure_tenant_audit.dns_lookup:DohClient.query_detailed',
     ),
     'azure_tenant_audit.evidence_db:*': (
+        'azure_tenant_audit.evidence_db:_copy_index_descriptor',
         'azure_tenant_audit.evidence_db:build_run_evidence_index',
     ),
     'azure_tenant_audit.exposure_lookup:*': (
@@ -65,12 +68,11 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
     ),
     'azure_tenant_audit.output:*': (
         'azure_tenant_audit.output:AuditLogger.log',
+        'azure_tenant_audit.output:AuditWriter._write_operator_pair',
         'azure_tenant_audit.output:AuditWriter._write_text_atomic',
         'azure_tenant_audit.output:AuditWriter.write_chunk_records',
         'azure_tenant_audit.output:AuditWriter.write_export_records',
         'azure_tenant_audit.output:AuditWriter.write_index_records',
-        'azure_tenant_audit.output:AuditWriter.write_partner_domains',
-        'azure_tenant_audit.output:AuditWriter.write_sensitive_users',
         'azure_tenant_audit.output:_open_private',
     ),
     'azure_tenant_audit.perf_runtime:*': (
@@ -83,8 +85,8 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
         'azure_tenant_audit.power_platform:PowerPlatformClient.request',
     ),
     'azure_tenant_audit.private_io:*': (
-        'azure_tenant_audit.private_io:copy_private_file',
-        'azure_tenant_audit.private_io:write_private_bytes',
+        'azure_tenant_audit.private_io:_write_all',
+        'azure_tenant_audit.private_io:_write_private',
         'azure_tenant_audit.private_io:write_private_text',
     ),
     'azure_tenant_audit.secret_hygiene:secure_write_*': (
