@@ -150,6 +150,7 @@ def test_live_readiness_summary_distinguishes_trusted_blocked_and_unverified() -
             {"collector": "google_directory", "status": "supported_exact_scope"},
             {"collector": "google_reports", "status": "blocked_by_scope", "missing_permissions": ["reports.scope"]},
         ],
+        coverage_rows=[{"collector": "google_directory", "status": "ok", "item_count": 1}],
     )
 
     assert summary["trust_level"] == "partial"

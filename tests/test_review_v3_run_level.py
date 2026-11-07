@@ -46,6 +46,10 @@ def test_no_teams_token_leaves_run_ok_and_customer_limitations_visible(monkeypat
     assert rc == 0
     manifest = load(run_dir, "run-manifest.json")
     assert manifest["overall_status"] == "ok"
+    readiness = load(run_dir, "live-readiness.json")
+    assert readiness["trust_level"] == "partial"
+    assert readiness["trusted_collectors"] == ["licensing"]
+    assert readiness["unverified_collectors"] == ["teams_policy"]
     assert load(run_dir, "validation.json")["valid"] is True
     teams_rows = [row for row in load(run_dir, "coverage.json") if row["collector"] == "teams_policy"]
     assert len(teams_rows) == 7 and all(row["status"] == "skipped" for row in teams_rows)
@@ -99,6 +103,9 @@ def test_teams_token_runs_five_rest_reads_and_skips_commands_without_partial_run
     assert len(session.calls) == (10 if probe_first else 5)
     manifest = load(run_dir, "run-manifest.json")
     assert manifest["overall_status"] == "ok"
+    readiness = load(run_dir, "live-readiness.json")
+    assert readiness["trust_level"] == "live_verified"
+    assert readiness["trusted_collectors"] == ["teams_policy"]
     assert load(run_dir, "validation.json")["valid"] is True
     rows = load(run_dir, "coverage.json")
     assert len(rows) == 7

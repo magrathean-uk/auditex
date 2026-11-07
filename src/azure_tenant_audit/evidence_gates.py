@@ -48,11 +48,21 @@ def capability_status(row: Mapping[str, Any] | None) -> str:
     return "unverified"
 
 
+def collectors_with_successful_reads(coverage_rows: Any) -> set[str]:
+    """Return collectors with at least one successful, non-derived read."""
+    return {
+        str(row.get("collector") or "")
+        for row in _rows(coverage_rows)
+        if row.get("status") == "ok" and row.get("type") != "derived"
+    }
+
+
 def build_evidence_gate_summary(
     *,
     selected_collectors: list[str],
     capability_rows: list[dict[str, Any]],
     dependency_available: bool = True,
+    coverage_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     selected = [str(item) for item in selected_collectors if str(item)]
     rows_by_collector = {
@@ -60,6 +70,9 @@ def build_evidence_gate_summary(
         for row in _rows(capability_rows)
         if row.get("collector") or row.get("name")
     }
+    # A successful empty read is still evidence; a derived fan-out summary is
+    # not a read and cannot establish live access on its own.
+    read_collectors = collectors_with_successful_reads(coverage_rows)
 
     trusted: list[str] = []
     partial: list[str] = []
@@ -86,7 +99,14 @@ def build_evidence_gate_summary(
         for collector in selected:
             row = rows_by_collector.get(collector)
             status = capability_status(row)
+            original_status = status
             missing = _strings(row.get("missing_permissions")) if row else []
+            no_live_read = (
+                collector not in read_collectors
+                or (row is not None and str(row.get("status") or "") in {"offline_sample", "complete_offline_sample"})
+            )
+            if no_live_read and status == "complete":
+                status = "unverified"
             if status == "complete":
                 trusted.append(collector)
             elif status == "partial":
@@ -98,13 +118,28 @@ def build_evidence_gate_summary(
             if missing:
                 missing_permissions[collector] = missing
             blocker = classify_capability_blocker(row)
+            raw_status = str(row.get("status") or "") if row else ""
+            specific = bool(row) and (
+                bool(missing)
+                or raw_status == "not_applicable"
+                or blocker["blocker_kind"] not in {"none", "unverified"}
+                or (original_status == "unverified" and (
+                    raw_status not in {"", "unknown", "unverified"}
+                    or any(row.get(key) for key in ("reason", "error_class", "error", "message", "endpoint_statuses"))
+                ))
+            )
+            # A successful capability check is not a live read. Keep any existing
+            # blocker or inapplicability reason when the collector has one.
+            generic_unverified = no_live_read and status == "unverified" and not specific
+            if generic_unverified:
+                blocker = classify_capability_blocker(None)
             evidence_gates.append(
                 {
                     "collector": collector,
                     "status": status,
                     "required_permissions": _strings(row.get("required_permissions")) if row else [],
                     "missing_permissions": missing,
-                    "reason": str(row.get("reason") or "") if row else "not live-verified",
+                    "reason": "not live-verified" if generic_unverified or not row else str(row.get("reason") or ""),
                     "blocker_kind": blocker["blocker_kind"],
                     "blocker_reason": blocker["blocker_reason"],
                     "next_step": blocker["next_step"],

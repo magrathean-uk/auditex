@@ -426,6 +426,8 @@ machine, their shareable HTML previews peaked at about 0.5 GiB and 1.5 GiB of
 resident memory respectively. The 2 GiB ceiling used for these tests is not
 enforced by the scanner; memory use also depends on the evidence and output.
 
+On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 4 GiB at the 64 MiB per-file cap. This is an upper bound that ordinary evidence does not reach; the tested sizes remain as listed above.
+
 These are pattern and structure rules, not a guarantee that every personal
 value in arbitrary prose is recognised. URL userinfo passwords are matched
 for schemes of 1 to 32 characters and scheme-relative URLs. Known immutable

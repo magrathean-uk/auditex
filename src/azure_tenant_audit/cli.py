@@ -986,6 +986,7 @@ def run_live(
             capability_rows=capability_rows,
             coverage_ledger=coverage_ledger,
             privacy=privacy,
+            trust_selected_collectors=selected_before_preflight,
             bundle_metadata={
                 "collector_preset": args.collector_preset,
                 "waiver_path": args.waiver_file,

@@ -51,6 +51,8 @@ class ProviderFinalizePlan:
     capability_rows: list[dict[str, Any]]
     coverage_ledger: list[dict[str, Any]]
     privacy: dict[str, Any]
+    trust_coverage_rows: list[dict[str, Any]] | None = None
+    trust_selected_collectors: list[str] | None = None
     bundle_metadata: dict[str, Any] = field(default_factory=dict)
     run_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -112,4 +114,6 @@ def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
         coverage_ledger=plan.coverage_ledger,
         blockers=plan.blockers,
         findings=findings,
+        trust_coverage_rows=plan.trust_coverage_rows,
+        trust_selected_collectors=plan.trust_selected_collectors,
     )
