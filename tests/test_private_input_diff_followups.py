@@ -59,13 +59,24 @@ def test_unsafe_report_pack_is_refused_not_read_as_all_resolved(tmp_path):
             diffing._posture_drift_summary(after, before)
 
 
-def test_cli_diff_refuses_unsafe_report_pack(tmp_path, capsys):
+def test_cli_diff_refuses_unsafe_report_pack(tmp_path, capsys, monkeypatch):
     from auditex import cli
+    from gate_support import offline_run
 
-    before, after = tmp_path / "before", tmp_path / "after"
+    before = offline_run(tmp_path / "b", "before")
+    after = offline_run(tmp_path / "a", "after")
     _write_pack(before, ["F1"])
     _write_pack(after, ["F1"])
-    for _ in _unsafe_variants(after, tmp_path):
+    reached = []
+    original = diffing._load_json
+
+    def spy(run, relative, *args, **kwargs):
+        reached.append(relative)
+        return original(run, relative, *args, **kwargs)
+
+    monkeypatch.setattr(diffing, "_load_json", spy)
+    for variant in _unsafe_variants(after, tmp_path):
+        reached.clear()
         try:
             code = cli.main(["diff", str(before), str(after)])
         except SystemExit as caught:
@@ -73,6 +84,7 @@ def test_cli_diff_refuses_unsafe_report_pack(tmp_path, capsys):
         except UnsafeRunFileError:
             pytest.fail("unsafe input escaped the CLI as an exception")
         captured = capsys.readouterr()
-        assert code == 2
+        assert code == 2, variant
+        assert "reports/report-pack.json" in reached, variant  # the changed loader ran, not an earlier admission
         assert '"resolved"' not in captured.out
         assert str(tmp_path) not in captured.err
