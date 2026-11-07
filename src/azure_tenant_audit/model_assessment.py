@@ -207,6 +207,33 @@ def _validate_explainer(row: dict[str, Any], requirement: dict[str, Any]) -> Non
         raise ValueError("Invalid value-rule explanation")
 
 
+def derive_explainer(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Re-derive a row's template explanation from its validated public rule fields and evidence references.
+
+    Only the public rule_precheck fields and the requirement claim's evidence ids are read; no evidence content,
+    rule_projection or stored explanation. Returns None when the context is incomplete.
+    """
+    from .explainer import explain
+
+    try:
+        detail = row["rule_precheck"]
+        if row["reason"] != "rule_precheck" or detail.get("class") != "value_rule":
+            return None
+        pid = row["policy_id"]
+        catalogue = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
+        order = list(catalogue[pid]["sections"])
+        requirement = next(c for c in row["claims"] if c["id"] == "requirement_met")
+        present = set(requirement["evidence_ids"])
+        # Placeholders only mark which cited sections the case carried; the explainer never renders their content.
+        sections = {s: {} for i, s in enumerate(order, 1) if f"e{i}" in present}
+        public = {"policy_id": pid, "verdict": value_rule_verdict(row), "cell": detail["cell"],
+                  "reason_code": detail["reason_code"], "reason_text": detail["reason_text"],
+                  "cited_sections": list(detail["section"])}
+        return explain(public, sections, order)
+    except Exception:
+        return None
+
+
 @lru_cache(maxsize=1)
 def _explainer_schema() -> dict[str, Any]:
     return json.loads(open_text_resource("schemas/explainer.schema.json"))

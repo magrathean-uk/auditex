@@ -88,6 +88,8 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
             safe = redact_output(explanation, profile=PROFILE_EXPLAINER, context=redaction_context)
             validate_explainer(record, safe)
             record["explainer"] = safe
+        except MemoryError:
+            raise
         except Exception as exc:
             LOG.debug("Explainer %s failed (%s)", case["policy_id"], type(exc).__name__)
     return record

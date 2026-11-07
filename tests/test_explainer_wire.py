@@ -66,7 +66,7 @@ def test_four_verdicts_follow_rule_and_use_real_explainer(verdict):
     assert bool(result["remediation_steps"]) == (verdict in {"not_met", "not_assessed"})
 
 
-@pytest.mark.parametrize("error", [ExplainerError, ValueError, KeyError, MemoryError])
+@pytest.mark.parametrize("error", [ExplainerError, ValueError, KeyError, RecursionError])
 def test_explainer_failures_are_suppressed_and_log_no_values(monkeypatch, caplog, error):
     secret = "sensitive-person@example.invalid"
     def broken(*args, **kwargs):
@@ -432,13 +432,15 @@ def test_report_loader_suppresses_explanations_if_identity_snapshot_changes(tmp_
 
 
 @pytest.mark.parametrize("profile", ["local", "shareable"])
-def test_report_escapes_markup_and_redacts_assessment_again(tmp_path, assessment, profile):
+def test_report_escapes_markup_and_redacts_assessment_again(tmp_path, assessment, profile, monkeypatch):
     root, payload = make_report_run(tmp_path, assessment)
     row = payload["policies"][0]["explainer"]
     row["explanation"] = '<script>alert(1)</script> **bold** hidden-person@example.invalid'
     row["remediation_steps"] = ['<img src=x onerror=alert(1)> [click](https://example.invalid) password=canaryvalue']
     validate_assessment(payload)
     (root / "model_assessment.json").write_text(json.dumps(payload))
+    # Isolate the escaping and redaction layers: the integrity re-derivation is covered separately below.
+    monkeypatch.setattr("azure_tenant_audit.model_assessment.derive_explainer", lambda _row: deepcopy(row))
     outputs = {fmt: preview_report(run_dir=str(root), format_name=fmt, profile=profile) for fmt in ("json", "md", "html")}
     for output in outputs.values():
         assert "policy_explanations" in output["sections"]
@@ -469,3 +471,73 @@ def test_no_explainer_keeps_report_unchanged(tmp_path, assessment, fmt, monkeypa
     (root / "model_assessment.json").write_text(json.dumps(payload))
     after = preview_report(run_dir=str(root), format_name=fmt, profile="local")
     assert after == before
+
+
+def test_markdown_keeps_apostrophes_but_escapes_markup():
+    from auditex.reporting import _markdown_plain
+    text = _markdown_plain("(formerly 'All cloud apps') baseline's <b>x</b> & y")
+    assert "'All cloud apps'" in text and "baseline's" in text
+    assert "&#x27;" not in text and "&\\#" not in text
+    assert "&lt;b&gt;" in text and "<b>" not in text and "&amp;" in text
+
+
+def test_support_address_survives_every_shareable_profile_but_personal_ones_mask():
+    from azure_tenant_audit.output_redaction import redact_output
+    support, personal = "contact+auditex@magrathean.uk", "someone.else@magrathean.uk"
+    for profile in ("explainer", "shareable", "customer_pack"):
+        out = redact_output({"t": f"Report this to {support}, not {personal}."}, profile=profile,
+                            context=RedactionContext())
+        assert support in out["t"] and personal not in out["t"]
+
+
+def test_fault_explanation_and_report_keep_support_address(tmp_path, assessment, monkeypatch):
+    from azure_tenant_audit.value_rules import rule_failure
+    def boom(*args, **kwargs):
+        raise ValueError("x")
+    monkeypatch.setattr(model_precheck, "precheck_policy", boom)
+    row = precheck_case(case_for("not_met"), value_rules=True, explain=True, redaction_context=RedactionContext())
+    assert row["rule_precheck"]["reason_code"] == rule_failure(PBI)["reason_code"]
+    steps = " ".join(row["explainer"]["remediation_steps"])
+    assert "contact+auditex@magrathean.uk" in steps and "***@" not in steps
+
+
+@pytest.mark.parametrize("field", ["explanation", "step", "refs"])
+def test_tampered_schema_valid_explanation_never_reaches_customer_pack_report(tmp_path, assessment, field):
+    root, payload = make_report_run(tmp_path, assessment)
+    item = payload["policies"][0]["explainer"]
+    planted = "Planted-by-attacker advice: send your admin password to the helpdesk."
+    if field == "explanation": item["explanation"] = planted
+    elif field == "step": item["remediation_steps"] = [planted]
+    else: item["evidence_refs"] = item["evidence_refs"][:1]
+    validate_assessment(payload)
+    (root / "model_assessment.json").write_text(json.dumps(payload))
+    for profile in ("customer_pack", "shareable", "local"):
+        output = preview_report(run_dir=str(root), format_name="md", profile=profile)
+        assert "Planted-by-attacker" not in output["content"]
+        assert "policy_explanations" not in output["sections"]
+
+
+def test_untampered_explanation_is_kept_after_rederivation(tmp_path, assessment):
+    root, payload = make_report_run(tmp_path, assessment)
+    for profile in ("customer_pack", "shareable", "local"):
+        output = preview_report(run_dir=str(root), format_name="json", profile=profile)
+        rows = json.loads(output["content"])["sections"]["policy_explanations"]
+        assert rows[0]["explainer"] == payload["policies"][0]["explainer"]
+
+
+def test_derivation_never_reads_rule_projection_or_missing_context():
+    from azure_tenant_audit.model_assessment import derive_explainer
+    row = explained("not_met")
+    expected = row["explainer"]
+    row["rule_projection"] = {"poison": object()}
+    assert derive_explainer(row) == expected
+    del row["rule_precheck"]
+    assert derive_explainer(row) is None
+
+
+def test_memory_and_recursion_errors_in_explainer(monkeypatch):
+    def broken(*args, **kwargs):
+        raise MemoryError()
+    monkeypatch.setattr(model_precheck, "render_explanation", broken)
+    with pytest.raises(MemoryError):
+        precheck_case(case_for("not_met"), value_rules=True, explain=True)

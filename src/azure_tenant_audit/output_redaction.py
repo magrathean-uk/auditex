@@ -90,6 +90,7 @@ PUBLIC_ADDRESSES = frozenset(
         "cyberliaison@cisa.dhs.gov",
         "reports@example.com",
         "username@somedomain.com",
+        "contact+auditex@magrathean.uk",
     }
 )
 

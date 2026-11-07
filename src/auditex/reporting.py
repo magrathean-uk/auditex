@@ -557,7 +557,8 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
 
 def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Read the optional assessment through the existing run-file guard and fail closed on damage."""
-    from azure_tenant_audit.model_assessment import MODEL_ASSESSMENT_PATH, validate_assessment, value_rule_verdict
+    from azure_tenant_audit.model_assessment import (MODEL_ASSESSMENT_PATH, derive_explainer, validate_assessment,
+                                                  value_rule_verdict)
     from .model_eval import _invalid_constant, _pairs
 
     try:
@@ -566,14 +567,23 @@ def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> li
         validate_assessment(assessment)
         if assessment["run_id"] != manifest.get("run_id"):
             return []
-        rows = [{"policy_id": row["policy_id"], "verdict": value_rule_verdict(row), "explainer": row["explainer"]}
-                for row in assessment["policies"] if "explainer" in row]
-        if rows:
+        candidates = [row for row in assessment["policies"] if "explainer" in row]
+        if candidates:
             # Assessment files can be changed after creation, so apply the explainer boundary again even for local reports.
             context = context_for_run(run_path)
-            safe = redact_output(rows, profile=PROFILE_EXPLAINER, context=context)
+            rows = []
+            for row in candidates:
+                # The text is a pure function of the template and the public rule answer: re-derive it and keep
+                # a stored explanation only if it matches, so schema-valid tampered text never becomes report content.
+                derived = derive_explainer(row)
+                if derived is None:
+                    continue
+                safe_derived = redact_output(derived, profile=PROFILE_EXPLAINER, context=context)
+                if safe_derived == redact_output(row["explainer"], profile=PROFILE_EXPLAINER, context=context):
+                    rows.append({"policy_id": row["policy_id"], "verdict": value_rule_verdict(row),
+                                 "explainer": safe_derived})
             assert_snapshot_stable(run_path, context.snapshot)
-            return safe
+            return rows
     except Exception:
         # An optional, unreadable, unsafe, invalid or unredactable assessment never becomes report content.
         return []
@@ -2754,7 +2764,7 @@ def _markdown_value(value: Any) -> str:
 
 def _markdown_plain(value: Any) -> str:
     """Escape HTML and Markdown control characters in untrusted explainer text."""
-    escaped = html.escape(_text(value).replace("\n", " ").replace("\r", " "), quote=True)
+    escaped = html.escape(_text(value).replace("\n", " ").replace("\r", " "), quote=False)
     return re.sub(r"([\\`*_{}\[\]()#+.!|~\-])", r"\\\1", escaped)
 
 
