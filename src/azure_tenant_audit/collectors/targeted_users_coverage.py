@@ -496,7 +496,7 @@ def _reduce(mapping: Mapping[Any, Any], walk: _Walk, depth: int, *, strict_rows:
     named the field or held a summary, is marked ``not_collected``."""
     walk.step(depth)
     out: dict[str, Any] = _envelope_metadata(mapping)
-    if "value" in mapping and admit_response(mapping) not in (ADMITTED, FAILED):
+    if "value" in mapping and admit_response(mapping, target_key=None) not in (ADMITTED, FAILED):
         # An affected operation envelope must be supported before fields can be removed from it. Row objects are
         # handled separately, so harmless unknown row fields still drop without changing their selected settings.
         out.update(error=PARSE_ERROR, error_class=PARSE_ERROR_CLASS)
@@ -614,7 +614,7 @@ def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
         if isinstance(item, (Mapping, list)):
             try:
                 if (isinstance(item, Mapping) and _bears(item, _Walk(), 2)
-                        and admit_response(item) not in (ADMITTED, FAILED)):
+                        and admit_response(item, target_key=None) not in (ADMITTED, FAILED)):
                     out[name] = {**_envelope_metadata(item), "error": PARSE_ERROR, "error_class": PARSE_ERROR_CLASS}
                 else:
                     out[name] = _clean(item, _Walk(), 2)
@@ -657,7 +657,7 @@ def _section(
             if name == OPERATION:
                 out[name] = sanitise_response(item, sensitive_users, binding, observed=False)
             elif (name in known and isinstance(item, Mapping) and _bears(item, _Walk(), 2)
-                  and admit_response(item) not in (ADMITTED, FAILED)):
+                  and admit_response(item, target_key=None) not in (ADMITTED, FAILED)):
                 out[name] = {**_envelope_metadata(item), "error": PARSE_ERROR, "error_class": PARSE_ERROR_CLASS}
             elif name in known and isinstance(item, (Mapping, list)):
                 out[name] = _clean(item, _Walk(), 2)
