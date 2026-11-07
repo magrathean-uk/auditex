@@ -20,6 +20,7 @@ from azure_tenant_audit.adapters import powershell_graph as pg
 from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 from azure_tenant_audit.collectors.base import CollectorResult
 from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
+from azure_tenant_audit.guarded_io import UnsafeRunFileError
 
 SS21 = "MS.SECURITYSUITE.2.1v1"
 ALICE, BOB, CAROL = (f"{n}@configured-canary.invalid" for n in ("ss21-alice", "ss21-bob", "ss21-carol"))
@@ -81,13 +82,15 @@ def harness(tmp_path, monkeypatch):
     monkeypatch.delenv("AUDITEX_SENSITIVE_USERS_FILE", raising=False)
     out = tmp_path / "out"
 
-    def live(collectors: str, users: str | None, *extra: str) -> int:
+    def live(collectors: str, users: str | None, *extra: str, public: bool = False) -> int:
         argv = ["--tenant-name", "acme", "--tenant-id", "t-123", "--use-azure-cli-token", "--collectors", collectors,
                 "--out", str(out), "--run-name", "resume", *extra]
         if users is not None:
             source = tmp_path / f"users-{abs(hash(users))}.txt"
             source.write_text(users)
             argv += ["--sensitive-users", str(source)]
+        if public:
+            return cli.main(argv)  # the guarded console entry point, as an operator runs it
         return cli.run_live(cli.build_parser().parse_args(argv))
     return live, out / "acme-resume"
 
@@ -184,7 +187,12 @@ def test_a_missing_key_keeps_the_existing_refusal_and_makes_no_replacement(harne
     summary = _raw_summary(run_dir)
     key = run_dir / "operator-inputs/sensitive-users.key"
     key.unlink()
-    assert live("exchange_policy", f"{ALICE}\n{BOB}\n", "--resume-from", str(run_dir)) == 2
+    # The writer's existing refusal is UnsafeRunFileError (as for AuditWriter alone); the public entry point turns it
+    # into the fixed exit 2. Neither path reads anti-phish again, makes a replacement key or rewrites the summary.
+    with pytest.raises(UnsafeRunFileError):
+        live("exchange_policy", f"{ALICE}\n{BOB}\n", "--resume-from", str(run_dir))
+    assert not key.exists() and _Adapter.anti_phish_calls == 1 and _raw_summary(run_dir) == summary
+    assert live("exchange_policy", f"{ALICE}\n{BOB}\n", "--resume-from", str(run_dir), public=True) == 2
     assert not key.exists() and _Adapter.anti_phish_calls == 1 and _raw_summary(run_dir) == summary
 
 
