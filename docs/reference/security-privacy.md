@@ -316,8 +316,9 @@ This configuration bypasses the model shape gate and model budgets, never the
 loader's byte/entry bounds. Addresses never enter public projection views,
 prompts, assessment records, sidecars, logs, AI context, reports, exports or
 packs. Absent input stays not collected; a present but invalid private pair is
-refused during run admission. SS 2.3 still requires a
-separate PartnerDomains input. Current collection still excludes
+refused during run admission. SS 2.3 consumes its separate verified
+PartnerDomains input in a private rule view, independently of SensitiveUsers.
+Current collection still excludes
 `TargetedUsersToProtect`; enabling met from collected target membership needs a
 separate privacy review. Offline copies use the same verification and private
 view; the ScubaGear export path is unchanged.
@@ -376,7 +377,9 @@ from evidence and its index, AI context, logs, reports, exports and customer pac
 Bundle hashes list exact-path `redacted_operator_input` exclusions without hashes
 or byte lengths, including the shared `.gitignore`; the directory is not blanket
 excluded. Source paths are redacted in command arguments. Nothing is uploaded;
-rule-view use must be memory-only, with projection integration owned by product.
+assessment reads the verified snapshot only into SS 2.3's in-memory private
+rule configuration. Ordinary absence of SensitiveUsers does not disable this
+input, or vice versa; malformed private material still refuses run admission.
 Demos never resolve this input.
 
 Resume retains a valid key while replacing the list; clearing removes this input
@@ -386,7 +389,7 @@ existing HMAC with an unusable key is an error. The local helper
 and HMAC consistency; it cannot establish authenticity against someone able to
 replace the manifest and both private files. Treat the list and key as private
 run material. The manifest schema defines this field; see the output contract for
-its constraints. In-memory rule-view projection integration remains product-owned.
+its constraints. The model projection and shape gate never receive either list.
 
 ## Output redaction boundary
 
