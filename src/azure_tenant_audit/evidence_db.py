@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
 import sqlite3
+import subprocess
+import sys
 import tempfile
 from collections.abc import Iterable, Mapping
 from contextlib import ExitStack, closing, contextmanager
@@ -11,8 +14,9 @@ from typing import Any
 from urllib.parse import quote
 
 from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
+from .guarded_io import current_context, guarded_operation
 from .perf_runtime import sqlite_bulk_pragmas
-from .run_files import UnsafeRunFileError, copy_run_file, open_run_file
+from .run_files import UnsafeRunFileError, open_run_file
 from .tenant_identity import decode_identity_metadata
 
 
@@ -48,7 +52,10 @@ _INDEXES = (
 
 def _read_json(path: Path, fallback: Any) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        from .run_files import read_run_file
+        return json.loads(read_run_file(path.parent, path.name).decode("utf-8"))
+    except UnsafeRunFileError:
+        raise
     except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
         return fallback
 
@@ -153,41 +160,59 @@ def _insert_records(
     )
 
 
+@guarded_operation
 def build_run_evidence_index(run_dir: str | Path, db_path: str | Path | None = None) -> Path:
     run_path = Path(run_dir)
+    if os.path.lexists(run_path / "run-manifest.json") or os.path.lexists(run_path / "operator-inputs"):
+        current_context().bind_run(run_path)
     target = Path(db_path) if db_path is not None else run_path / "index" / "evidence.sqlite"
-    target.parent.mkdir(parents=True, exist_ok=True)
+    from .private_io import make_private_dirs, _write_all
+    make_private_dirs(target.parent)
 
-    # Hard-reset the file (and any WAL/SHM/journal sidecars) before rebuilding.
-    # The DROP TABLE IF EXISTS chain in _SCHEMA only knows about the canonical
-    # tables, so a renamed or added table from a newer/older auditex release
-    # — or a foreign DB planted by a third-party inspection tool — would leak
-    # into the rebuilt DB and break the contract that index/evidence.sqlite
-    # contains exactly the canonical tables and indexes.
-    for suffix in ("", "-wal", "-shm", "-journal"):
-        sidecar = target.with_name(target.name + suffix)
-        sidecar.unlink(missing_ok=True)
-    # Create the file 0600 before SQLite opens it; its journal and WAL sidecars inherit the mode.
-    os.close(os.open(target, os.O_CREAT | os.O_WRONLY, 0o600))
-
+    # Construct a fresh database so tables from an older, newer or foreign
+    # index cannot survive the rebuild.
+    from .guarded_io import guard_session, open_private_output, remove_guarded_output
     manifest = _read_json(run_path / "run-manifest.json", {})
     summary = _read_json(run_path / "summary.json", {})
     manifest = manifest if isinstance(manifest, Mapping) else {}
     summary = summary if isinstance(summary, Mapping) else {}
 
-    # Close the connection (``with`` only ends the transaction): in WAL mode the index stays in the
-    # ``-wal`` sidecar until the last connection closes, and the bundle hash manifest hashes the file.
-    with closing(sqlite3.connect(target)) as conn:
-        for pragma in sqlite_bulk_pragmas():
-            conn.execute(pragma)
-        _create_schema(conn)
-        _insert_meta(conn, run_path, manifest, summary)
-        run_id = _scalar(manifest.get("run_id"))
-        tenant_name = _scalar(manifest.get("tenant_name"))
-        for section_name, path, records in _normalized_payloads(run_path):
-            _insert_records(conn, run_path, section_name, path, records, run_id=run_id, tenant_name=tenant_name)
-        _create_indexes(conn)
-        conn.commit()
+    # SQLite writes only inside a protected snapshot directory. Publish the
+    # completed database through an admitted destination descriptor.
+    from .guarded_io import open_guarded_file
+    failed = False
+    try:
+        temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
+        if not _encrypted_internal_storage(temporary_root):
+            raise UnsafeRunFileError("evidence index")
+        with tempfile.TemporaryDirectory(prefix="auditex-index-build-", dir=temporary_root) as directory:
+            os.chmod(directory, 0o700)
+            snapshot = Path(directory) / "evidence.sqlite"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(snapshot, flags, 0o600)
+            os.close(descriptor)
+            with closing(sqlite3.connect(snapshot)) as conn:
+                for pragma in sqlite_bulk_pragmas():
+                    conn.execute(pragma)
+                _create_schema(conn)
+                _insert_meta(conn, run_path, manifest, summary)
+                run_id = _scalar(manifest.get("run_id"))
+                tenant_name = _scalar(manifest.get("tenant_name"))
+                for section_name, path, records in _normalized_payloads(run_path):
+                    _insert_records(conn, run_path, section_name, path, records, run_id=run_id, tenant_name=tenant_name)
+                _create_indexes(conn)
+                conn.commit()
+            with guard_session() as context, open_guarded_file(snapshot, field="index", context=context) as source:
+                with open_private_output(target, field="index", context=context, append=True) as destination:
+                    for suffix in ("-wal", "-shm", "-journal"):
+                        remove_guarded_output(target.with_name(target.name + suffix))
+                    os.ftruncate(destination, 0)
+                    while data := os.read(source, 1024 * 1024):
+                        _write_all(destination, data)
+    except (OSError, sqlite3.DatabaseError, ValueError):
+        failed = True
+    if failed:
+        raise UnsafeRunFileError("evidence index") from None
 
     return target
 
@@ -208,64 +233,114 @@ def open_index_read_only(db_path: str | Path, *, immutable: bool = True) -> sqli
     return sqlite3.connect(_read_only_uri(db_path, immutable=immutable), uri=True)
 
 
+class _MissingIndex(Exception):
+    pass
+
+
 @contextmanager
 def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
-    """Inspect a guarded private copy, or fall back to an in-place read-only open."""
+    """Inspect only a private, coherent snapshot of admitted index descriptors."""
     root = Path(run_dir)
     relative = "index/evidence.sqlite"
-    suffixes = ("", "-wal", "-shm", "-journal") if include_sidecars else ("",)
+    suffixes = ("", "-wal", "-shm", "-journal")
+    failed = False
+    missing = False
     with ExitStack() as stack:
         try:
-            temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
-            if include_sidecars and temporary_root.is_relative_to(root.resolve().parent):
-                temporary = None
-            else:
-                temporary = stack.enter_context(tempfile.TemporaryDirectory(
-                    prefix="auditex-index-", dir=temporary_root,
-                ))
-                os.chmod(temporary, 0o700)
-        except (OSError, RuntimeError):
-            temporary = None
-        if temporary is not None:
-            copied = Path(temporary) / "evidence.sqlite"
-            try:
-                for suffix in suffixes:
-                    try:
-                        destination = copied.with_name(copied.name + suffix)
-                        copy_run_file(root, relative + suffix, destination, max_bytes=None)
-                    except FileNotFoundError:
-                        if not suffix:
-                            raise
-            except UnsafeRunFileError:
-                raise
-            except FileNotFoundError:
-                if include_sidecars:
-                    raise
-                # The source or temporary destination may have disappeared.
-                # The guarded in-place open below distinguishes the two.
-                temporary = None
-            except OSError:
-                temporary = None
-        if temporary is None:
-            # Hold guarded descriptors before reopening the original paths.
-            # SQLite needs those names to see a legacy WAL; closed indexes use
-            # immutable mode and cannot create sidecars.
+            sources: dict[str, tuple[int, tuple[int, int, int, int, int]]] = {}
+            absent: list[str] = []
             for suffix in suffixes:
                 try:
-                    stack.enter_context(open_run_file(root, relative + suffix))
+                    descriptor = stack.enter_context(open_run_file(root, relative + suffix, max_bytes=None))
                 except FileNotFoundError:
                     if not suffix:
-                        raise
-            copied = root / relative
+                        raise _MissingIndex
+                    absent.append(suffix)
+                    continue
+                if suffix and not include_sidecars:
+                    raise UnsafeRunFileError("evidence index")
+                sources[suffix] = (descriptor, _file_state(os.fstat(descriptor)))
+            temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
+            if not _encrypted_internal_storage(temporary_root):
+                raise UnsafeRunFileError("evidence index")
+            if include_sidecars and temporary_root.is_relative_to(root.resolve().parent):
+                raise UnsafeRunFileError("evidence index")
+            temporary = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="auditex-index-", dir=temporary_root)))
+            os.chmod(temporary, 0o700)
+            copied = temporary / "evidence.sqlite"
+            for suffix, (descriptor, _) in sources.items():
+                _copy_index_descriptor(descriptor, copied.with_name(copied.name + suffix))
+            for descriptor, before in sources.values():
+                if _file_state(os.fstat(descriptor)) != before:
+                    raise UnsafeRunFileError("evidence index")
+            for suffix in absent:
+                try:
+                    with open_run_file(root, relative + suffix, max_bytes=None):
+                        raise UnsafeRunFileError("evidence index")
+                except FileNotFoundError:
+                    pass
+        except _MissingIndex:
+            missing = True
+        except (OSError, RuntimeError, ValueError):
+            failed = True
+        if missing:
+            raise FileNotFoundError("Evidence index is absent.") from None
+        if failed:
+            raise UnsafeRunFileError("evidence index") from None
         with closing(open_index_read_only(copied, immutable=not include_sidecars)) as conn:
             yield conn
+
+
+def _file_state(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def _copy_index_descriptor(descriptor: int, destination: Path) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    output = os.open(destination, flags, 0o600)
+    try:
+        os.fchmod(output, 0o600)
+        while data := os.read(descriptor, 1024 * 1024):
+            view = memoryview(data)
+            while view:
+                count = os.write(output, view)
+                if count <= 0:
+                    raise OSError("short write")
+                view = view[count:]
+    finally:
+        os.close(output)
+
+
+def _encrypted_internal_storage(path: Path) -> bool:
+    """Prove the temporary directory is on an encrypted internal macOS data volume."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        data_volume = Path("/System/Volumes/Data")
+        if os.stat(path).st_dev != os.stat(data_volume).st_dev:
+            return False
+        info = plistlib.loads(subprocess.run(
+            ["/usr/sbin/diskutil", "info", "-plist", str(data_volume)], check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5,
+        ).stdout)
+        if info.get("Internal") is not True or not isinstance(info.get("DeviceIdentifier"), str):
+            return False
+        volume_id = info["DeviceIdentifier"]
+        apfs = plistlib.loads(subprocess.run(
+            ["/usr/sbin/diskutil", "apfs", "list", "-plist"], check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5,
+        ).stdout)
+        return any(volume.get("DeviceIdentifier") == volume_id and volume.get("Encryption") is True
+                   for container in apfs.get("Containers", []) for volume in container.get("Volumes", []))
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return False
 
 
 def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     """The run metadata held in ``index/evidence.sqlite``, or ``{}`` when it cannot be trusted or read.
 
-    Closed indices use a private temporary copy or an immutable in-place read. When
-    ``bundle-hashes.json`` lists the index, a sidecar beside it makes this return ``{}``: the sidecar is not
+    Indices use a private temporary copy. When ``bundle-hashes.json`` lists the
+    index, a sidecar beside it makes this return ``{}``: the sidecar is not
     covered by the hash, so whatever it holds was not part of the run as finalized, and callers fall back to
     the manifest. Only an index no hash manifest covers (a bundle from before it existed) is read together
     with a sidecar, because its data may still sit there.
@@ -287,6 +362,8 @@ def load_run_index_summary(run_dir: str | Path) -> dict[str, Any]:
     try:
         with open_private_run_index(run_dir, include_sidecars=bool(sidecars)) as conn:
             meta, stats = inspect(conn)
+    except UnsafeRunFileError:
+        raise
     except (OSError, sqlite3.DatabaseError):
         return {}
 

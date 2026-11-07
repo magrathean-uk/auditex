@@ -15,12 +15,14 @@ from .guided import build_guided_parser, run_guided
 from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
+from azure_tenant_audit.cli_guard import guarded_cli, parse_guarded
+from azure_tenant_audit.guarded_io import guard_session, open_private_output, read_guarded_bytes
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.output_redaction import (
     PROFILE_LOCAL, PROFILE_SHAREABLE, ContextIncompleteError, Snapshot, assert_snapshot_stable, context_for_run,
     redact_output, snapshot_run,
 )
-from azure_tenant_audit.private_io import write_private_text
+from azure_tenant_audit.private_io import make_private_dirs, write_private_text
 from azure_tenant_audit.probe import ProbeConfig, probe_mode_choices, run_live_probe
 from azure_tenant_audit.response import ResponseConfig, response_actions, run_response
 from azure_tenant_audit.secret_hygiene import build_argument_parser
@@ -727,7 +729,7 @@ def _build_model_parser() -> argparse.ArgumentParser:
 
 
 def _model_output_directory(value: str) -> str:
-    path = Path(value).expanduser().resolve()
+    path = Path(value).expanduser().absolute()
     if any((parent / "run-manifest.json").exists() for parent in (path, *path.parents)):
         raise ValueError("Model-development output must be outside finalized run bundles.")
     return str(path)
@@ -758,12 +760,14 @@ def _emit_assessment(payload: dict[str, object], output: str | None) -> None:
     if output is None:
         print(json.dumps(payload, indent=2))
         return
-    path = Path(output).expanduser().resolve()
+    path = Path(output).expanduser().absolute()
     if any((parent / "run-manifest.json").exists() for parent in path.parents):
         raise ValueError("Assessment output must be outside finalized run bundles.")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, indent=2) + "\n")
+    make_private_dirs(path.parent)
+    data = (json.dumps(payload, indent=2) + "\n").encode("utf-8")
+    with guard_session() as context, open_private_output(path, field="output", context=context, exclusive=True) as fd:
+        with os.fdopen(os.dup(fd), "wb") as handle:
+            handle.write(data)
     print(json.dumps({"output": str(path)}, indent=2))
 
 
@@ -915,6 +919,7 @@ def _cli_size_refusal(function: Callable[[list[str] | None], int]) -> Callable[[
 
 
 @_cli_size_refusal
+@guarded_cli
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv if argv is not None else sys.argv[1:])
     if not argv:
@@ -933,7 +938,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--mcp", action="store_true", help="Install optional MCP extras during bootstrap.")
         parser.add_argument("--exchange", action="store_true", help="Install optional Exchange adapter tooling.")
         parser.add_argument("--pwsh", action="store_true", help="Install optional PowerShell runtime.")
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         setup_kwargs: dict[str, object] = {"with_mcp": args.mcp}
         if args.exchange:
             setup_kwargs["with_exchange"] = True
@@ -942,7 +947,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_setup(**setup_kwargs)
     if argv[0] == "setup-guide":
         parser = _build_setup_guide_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         payload = build_setup_guide(
             provider=args.provider,
             collector_preset=getattr(args, "collector_preset", None),
@@ -969,7 +974,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "doctor":
         parser = build_argument_parser(allow_abbrev=False, prog="auditex doctor", description="Inspect local tool and auth readiness.")
         parser.add_argument("--json", action="store_true", help="Print JSON report.")
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         return print_doctor_report(json_output=args.json)
     if argv[0] == "assessment":
         from .assessment_review import compare_external_assessments
@@ -977,7 +982,7 @@ def main(argv: list[str] | None = None) -> int:
         from .external_assessments import import_assessment
 
         parser = _build_assessment_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         try:
             if args.assessment_command == "sources":
                 print(json.dumps(list_assessment_sources(), indent=2))
@@ -997,7 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] == "model":
         parser = _build_model_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         try:
             if args.model_command == "sources":
                 from .model_sources import list_model_sources
@@ -1029,7 +1034,7 @@ def main(argv: list[str] | None = None) -> int:
 
                 overrides = None
                 if args.training_overrides:
-                    overrides = _parse_json(Path(args.training_overrides).read_text(encoding="utf-8"))
+                    overrides = _parse_json(read_guarded_bytes(args.training_overrides, field="training-overrides").decode("utf-8"))
                 payload = prepare_training_pack(
                     args.cases, _model_output_directory(args.output_dir),
                     base_model=args.base_model, revision=args.revision, max_steps=args.max_steps,
@@ -1054,11 +1059,11 @@ def main(argv: list[str] | None = None) -> int:
         return demo_main(argv[1:])
     if argv[0] == "guided-run":
         parser = build_guided_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         return run_guided(args)
     if argv[0] == "rules":
         parser = _build_rules_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         if args.rules_command == "inventory":
             filters: dict[str, object] = {}
             if args.tag is not None:
@@ -1086,7 +1091,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if argv[0] == "compare":
         parser = _build_compare_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         expected_digests = _parse_expected_digests(parser, args.expect_manifest_sha256, args.run_dirs)
         result = compare_runs(
             args.run_dirs,
@@ -1103,7 +1108,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] == "report":
         parser = _build_report_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         if args.report_command in {"analyze", "api-calls", "permissions", "proof-table", "handoff"}:
             before = snapshot_run(args.run_dir)
         if args.report_command == "analyze":
@@ -1188,7 +1193,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[0] == "export":
         parser = _build_export_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         if args.export_command == "list":
             print(json.dumps({"exporters": list_exporters()}, indent=2))
             return 0
@@ -1209,14 +1214,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if argv[0] == "notify":
         parser = _build_notify_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         if args.notify_command != "send":
             return 2
         print(json.dumps(send_notification(run_dir=args.run_dir, sink=args.sink, dry_run=not args.execute), indent=2))
         return 0
     if argv[0] == "auth":
         parser = _build_auth_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         if args.auth_command == "status":
             print(json.dumps(auditex_auth.get_auth_status(), indent=2))
             return 0
@@ -1295,7 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if argv[0] == "google":
         parser = _build_google_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         cfg = _google_config_from_args(args)
         if args.google_command == "doctor":
             payload = google_doctor(cfg)
@@ -1335,7 +1340,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if argv[0] == "gate":
         parser = _build_gate_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         expected = _parse_expected_digests(parser, args.expect_manifest_sha256, [args.run_dir])
         return _emit_gate_result(
             "gate",
@@ -1348,7 +1353,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     if argv[0] == "gate-drift":
         parser = _build_gate_drift_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         expected = _parse_expected_digests(parser, args.expect_manifest_sha256, [args.baseline, args.current])
         return _emit_gate_result(
             "gate-drift",
@@ -1367,23 +1372,31 @@ def main(argv: list[str] | None = None) -> int:
         if len(argv) != 2:
             print("usage: auditex summarize <run-dir>", file=sys.stderr)
             return 2
+        from azure_tenant_audit.guarded_io import current_context
+        current_context().bind_run(argv[1])
         print(json.dumps(summarize_run(argv[1]), indent=2))
         return 0
     if argv[0] == "blockers":
         if len(argv) != 2:
             print("usage: auditex blockers <run-dir>", file=sys.stderr)
             return 2
+        from azure_tenant_audit.guarded_io import current_context
+        current_context().bind_run(argv[1])
         print(json.dumps(list_blockers(argv[1]), indent=2))
         return 0
     if argv[0] == "diff":
         if len(argv) != 3:
             print("usage: auditex diff <run-a> <run-b>", file=sys.stderr)
             return 2
+        from azure_tenant_audit.guarded_io import current_context
+        context = current_context()
+        context.bind_run(argv[1])
+        context.bind_run(argv[2])
         print(json.dumps(diff_run_directories(argv[1], argv[2]), indent=2))
         return 0
     if argv[0] == "probe":
         parser = _build_probe_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         if args.probe_command == "summarize":
             print(json.dumps(summarize_run(args.run_dir), indent=2))
             return 0
@@ -1424,7 +1437,7 @@ def main(argv: list[str] | None = None) -> int:
             print(response_disabled_message(), file=sys.stderr)
             return 2
         parser = _build_response_parser()
-        args = parser.parse_args(argv[1:])
+        args = parse_guarded(parser, argv[1:])
         if args.response_command == "list-actions":
             print(json.dumps({"actions": response_actions()}, indent=2))
             return 0

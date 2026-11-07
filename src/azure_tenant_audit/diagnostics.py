@@ -11,11 +11,13 @@ from .resources import resolve_resource_path
 
 
 def load_permission_hints(path: Path) -> dict[str, dict[str, Any]]:
-    path = resolve_resource_path(path)
-    if not path.exists():
-        return {}
+    from .guarded_io import UnsafeRunFileError
+    from .resources import read_selected_resource
+
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(read_selected_resource(path, default="configs/collector-permissions.json", field="permission-hints"))
+    except UnsafeRunFileError:
+        raise
     except (OSError, ValueError):
         return {}
     raw = payload.get("collector_permissions") or {}

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.private_io import write_private_text
+from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
 from azure_tenant_audit.collection_gaps import SECTION_GAP_REASON_TEXT
 from azure_tenant_audit.resources import load_json_resource, resolve_resource_path
 
@@ -169,7 +170,9 @@ _MS_STATE_LABELS = {"implemented": "Completed", "partial": "Partial", "not_imple
 
 def _read_json(path: Path, default: Any) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_guarded_bytes(path, field="evidence").decode("utf-8"))
+    except UnsafeRunFileError:
+        raise
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return default
 
@@ -228,11 +231,10 @@ def _evidence_records(run_dir: Path, refs: Iterable[tuple[str, str]]) -> dict[st
             keys.append(key)
     records: dict[str, dict[str, Any]] = {}
     for artifact, keys in wanted.items():
-        candidate = (run_dir / artifact).resolve()
-        try:
-            candidate.relative_to(run_dir.resolve())
-        except ValueError:
-            continue
+        relative = Path(artifact)
+        if relative.is_absolute() or ".." in relative.parts or "\\" in artifact:
+            raise UnsafeRunFileError("evidence", reason="outside")
+        candidate = run_dir / relative
         index = {row.get("key"): row for row in _records(_read_json(candidate, {}))}
         for key in keys:
             if key in index and len(records) < _EVIDENCE_LIMIT:
@@ -886,9 +888,11 @@ def _path_headline(foothold: str, target: str, hop_count: int) -> str:
     return f"{who} can reach {reach} in {steps}" if hop_count else f"{who} can reach {reach}"
 
 
+@guarded_operation
 def build_explorer_data(run_dir: Path | str) -> dict[str, Any]:
     """Return the explorer payload for one finalized run directory."""
     run_dir = Path(run_dir)
+    current_context().bind_run(run_dir)
     manifest = _read_json(run_dir / "run-manifest.json", {})
     manifest = manifest if isinstance(manifest, dict) else {}
     report_pack = _read_json(run_dir / "reports" / "report-pack.json", {})
@@ -1078,6 +1082,7 @@ def _compare(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@guarded_operation
 def build_explorer_bundle(run_dirs: Path | str | Sequence[Path | str]) -> dict[str, Any]:
     """Return the page payload for one or more runs.
 
@@ -1088,6 +1093,8 @@ def build_explorer_bundle(run_dirs: Path | str | Sequence[Path | str]) -> dict[s
     dirs = [Path(run_dirs)] if isinstance(run_dirs, (str, Path)) else [Path(item) for item in run_dirs]
     if not dirs:
         raise ExplorerCompareError("at least one run directory is required")
+    for path in dirs:
+        current_context().bind_run(path)
     runs = [build_explorer_data(path) for path in dirs]
     if len(runs) > 1:
         _identity_guard(runs)
@@ -1200,6 +1207,7 @@ def render_explorer_html(data: dict[str, Any] | list[dict[str, Any]]) -> str:
     return re.sub(r"__(?:CSP|TITLE|STYLE|LOGO|DATA|SCRIPT)__", lambda match: replacements[match.group(0)], _asset("explorer.html"))
 
 
+@guarded_operation
 def write_explorer(run_dirs: Path | str | Sequence[Path | str], output_path: Path | str) -> Path:
     """Write the explorer for one run, or several runs of one tenant, to ``output_path``."""
     bundle = build_explorer_bundle(run_dirs)

@@ -16,6 +16,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
+from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 
 SCHEMA_VERSION = "2026-10-18"
@@ -257,32 +258,47 @@ def _read_case_sources(paths: str | Path | Iterable[str | Path]) -> tuple[list[d
     selected = [paths] if isinstance(paths, (str, Path)) else list(paths)
     cases = []
     sources = []
+    context = current_context()
+    if context is not None:
+        for path in selected:
+            context.discover_run(path)
     for path in selected:
-        data = Path(path).read_bytes()
-        sources.append({"path": str(Path(path).resolve()), "sha256": hashlib.sha256(data).hexdigest()})
-        for number, line in enumerate(data.decode("utf-8-sig").splitlines(), 1):
+        data = read_guarded_bytes(path, field="cases")
+        sources.append({"path": os.path.abspath(path), "sha256": hashlib.sha256(data).hexdigest()})
+        invalid_text = False
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeError:
+            invalid_text = True
+        if invalid_text:
+            raise UnsafeRunFileError("cases") from None
+        for number, line in enumerate(text.splitlines(), 1):
             if not line.strip():
                 continue
             try:
                 cases.append(_parse_json(line))
-            except (ValueError, TypeError) as exc:
-                raise ValueError(f"invalid case JSON at {path}:{number}: {exc}") from exc
+            except (ValueError, TypeError):
+                raise ValueError(f"invalid case JSON at line {number}") from None
     return validate_cases(cases), sources
 
 
-def load_cases(paths: str | Path | Iterable[str | Path]) -> list[dict[str, Any]]:
+@guarded_operation
+def load_cases(paths: str | Path | Iterable[str | Path], *, sources_out: list[dict[str, str]] | None = None) -> list[dict[str, Any]]:
     """Read strict JSONL without dropping unreviewed cases or relaxing splits."""
-    return _read_case_sources(paths)[0]
+    cases, sources = _read_case_sources(paths)
+    if sources_out is not None:
+        sources_out.extend(sources)
+    return cases
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    from azure_tenant_audit.private_io import write_private_text
+    write_private_text(path, json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    path.write_text("".join(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n" for row in rows), encoding="utf-8")
-    path.chmod(0o600)
+    from azure_tenant_audit.private_io import write_private_text
+    write_private_text(path, "".join(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n" for row in rows))
 
 
 def _digest(path: Path) -> str:
@@ -384,6 +400,7 @@ srun --ntasks=1 --gpus-per-task=4 "$PYTHON_BIN" -m torch.distributed.run --stand
 '''
 
 
+@guarded_operation
 def prepare_training_pack(
     case_paths: str | Path | Iterable[str | Path],
     output_dir: str | Path,
@@ -417,7 +434,8 @@ def prepare_training_pack(
     _outside_audit_runs(destination)
     if destination.is_symlink() or destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
         raise ValueError("training output directory must be new or empty")
-    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    from azure_tenant_audit.private_io import make_private_dirs
+    make_private_dirs(destination)
     _write_jsonl(destination / "train.jsonl", (_trl_record(case) for case in distinct_train))
     _write_jsonl(destination / "validation.jsonl", (_trl_record(case) for case in distinct_validation))
     _write_jsonl(destination / "test.jsonl", splits["test"])
@@ -447,10 +465,9 @@ def prepare_training_pack(
     }
     config = _apply_training_overrides(config, training_overrides)
     _write_json(destination / "training-config.json", config)
-    (destination / "train_lora.py").write_text(_TRAIN_SCRIPT, encoding="utf-8")
-    (destination / "jupiter-auditex.sbatch").write_text(_SLURM_SCRIPT, encoding="utf-8")
-    (destination / "train_lora.py").chmod(0o600)
-    (destination / "jupiter-auditex.sbatch").chmod(0o600)
+    from azure_tenant_audit.private_io import write_private_text
+    write_private_text(destination / "train_lora.py", _TRAIN_SCRIPT)
+    write_private_text(destination / "jupiter-auditex.sbatch", _SLURM_SCRIPT)
     blocked = []
     if not revision:
         blocked.append("immutable_base_revision_missing")

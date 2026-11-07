@@ -22,6 +22,12 @@ from .operator_flow import flow_choices, flow_plan, guided_choice_options, resol
 REPORT_FORMAT_CHOICES = ("json", "md", "csv", "html", "sarif", "oscal")
 
 
+def _read_prompt(prompt: str) -> str:
+    from azure_tenant_audit.guarded_io import read_guarded_stdin
+    print(prompt, end="", flush=True)
+    return read_guarded_stdin(line=True)
+
+
 def _default_browser_command() -> str:
     if platform.system() == "Darwin":
         return "safari"
@@ -30,13 +36,13 @@ def _default_browser_command() -> str:
 
 def _prompt(label: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default else ""
-    value = input(f"{label}{suffix}: ").strip()
+    value = _read_prompt(f"{label}{suffix}: ").strip()
     return value or (default or "")
 
 
 def _confirm(label: str, default: bool = True) -> bool:
     default_hint = "Y/n" if default else "y/N"
-    value = input(f"{label} [{default_hint}]: ").strip().lower()
+    value = _read_prompt(f"{label} [{default_hint}]: ").strip().lower()
     if not value:
         return default
     return value in {"y", "yes"}
@@ -47,7 +53,7 @@ def _prompt_choice(label: str, options: list[tuple[str, str]], default: str) -> 
     for index, (_value, text) in enumerate(options, start=1):
         print(f"  {index}. {text}")
     default_index = next((index for index, (value, _text) in enumerate(options, start=1) if value == default), 1)
-    raw = input(f"Choice [{default_index}]: ").strip()
+    raw = _read_prompt(f"Choice [{default_index}]: ").strip()
     if not raw:
         return default
     if raw.isdigit():

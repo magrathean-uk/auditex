@@ -97,10 +97,17 @@ def load_accounts_argument(value: str | Sequence[str] | None) -> list[str]:
         return []
     if not isinstance(value, str):
         return parse_accounts(list(value))
-    text = value.strip()
-    if text.startswith("@"):
-        return parse_accounts(Path(text[1:]).expanduser().read_text(encoding="utf-8"))
-    return parse_accounts(text)
+    if value.startswith("@"):
+        from .guarded_io import UnsafeRunFileError, read_guarded_bytes
+        invalid = False
+        try:
+            text = read_guarded_bytes(value[1:], field="break-glass-accounts").decode("utf-8")
+        except UnicodeError:
+            invalid = True
+        if invalid:
+            raise UnsafeRunFileError("break-glass-accounts") from None
+        return parse_accounts(text)
+    return parse_accounts(value.strip())
 
 
 def configured_accounts(explicit: Sequence[str] | None = None) -> list[str]:

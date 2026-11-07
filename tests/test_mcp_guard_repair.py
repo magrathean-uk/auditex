@@ -73,7 +73,7 @@ def test_reader_rejects_hard_link_before_read(tmp_path: Path, monkeypatch: pytes
         monkeypatch.setattr(os, "supports_dir_fd", set())
     with pytest.raises(UnsafeRunFileError) as caught:
         read_run_file(run, "summary.md")
-    assert caught.value.reason == "hardlink"
+    assert caught.value.reason == (None if fallback else "hardlink")
     assert isinstance(caught.value, OSError)
 
 
@@ -206,15 +206,17 @@ def test_customer_pack_manifest_from_relative_run_is_transformed(
     assert str(tmp_path) not in json.dumps(copied)
 
 
-def test_old_oserror_fallback_still_applies(tmp_path: Path) -> None:
+def test_unsafe_oserror_never_falls_back_to_an_empty_summary(tmp_path: Path) -> None:
     from auditex.run_bundle import RunBundle
+    from azure_tenant_audit.run_files import UnsafeRunFileError
 
     outside = tmp_path / "outside"
     outside.write_text('{"secret":"private"}', encoding="utf-8")
     run = tmp_path / "run"
     run.mkdir()
     os.link(outside, run / "summary.json")
-    assert RunBundle(run).summary() == {}
+    with pytest.raises(UnsafeRunFileError):
+        RunBundle(run).summary()
 
 
 @pytest.mark.parametrize("kind", ("fifo", "directory", "symlink", "hardlink"))
@@ -340,11 +342,12 @@ def test_closed_index_uses_private_streamed_copy_and_cleans_it(
 
 
 @pytest.mark.parametrize("scratch_failure", ("directory", "copy", "destination_missing"))
-def test_closed_index_falls_back_to_guarded_immutable_read(
+def test_closed_index_copy_failure_refuses_without_pathname_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_failure: str,
 ) -> None:
     from azure_tenant_audit import evidence_db
     from azure_tenant_audit.contracts import _validate_evidence_db
+    from azure_tenant_audit.run_files import UnsafeRunFileError
 
     parent = tmp_path / "run-parent"
     run = parent / "run"
@@ -360,14 +363,13 @@ def test_closed_index_falls_back_to_guarded_immutable_read(
 
     def fail(*args: object, **kwargs: object) -> None:
         if scratch_failure == "destination_missing":
-            Path(args[2]).parent.rmdir()
             raise FileNotFoundError("synthetic temporary destination disappeared")
         raise OSError("synthetic scratch failure")
 
     if scratch_failure == "directory":
         monkeypatch.setattr(evidence_db.tempfile, "TemporaryDirectory", fail)
     else:
-        monkeypatch.setattr(evidence_db, "copy_run_file", fail)
+        monkeypatch.setattr(evidence_db, "_copy_index_descriptor", fail)
     original = evidence_db.open_index_read_only
     seen: list[Path] = []
 
@@ -378,11 +380,13 @@ def test_closed_index_falls_back_to_guarded_immutable_read(
 
     monkeypatch.setattr(evidence_db, "open_index_read_only", inspect)
     before = index.read_bytes()
-    assert evidence_db.load_run_index_summary(run)["tenant_name"] == "SYNTHETIC"
+    with pytest.raises(UnsafeRunFileError):
+        evidence_db.load_run_index_summary(run)
     issues: list[dict[str, object]] = []
-    _validate_evidence_db(run, issues, read_only=True)
+    with pytest.raises(UnsafeRunFileError):
+        _validate_evidence_db(run, issues, read_only=True)
     assert issues == []
-    assert seen == [index, index]
+    assert seen == []
     assert index.read_bytes() == before
     assert sorted(path.name for path in index.parent.iterdir()) == ["evidence.sqlite"]
     assert sorted(path.name for path in parent.iterdir()) == ["run"]
@@ -447,7 +451,7 @@ def test_legacy_wal_copy_uses_private_tmpdir_and_preserves_data(
     from azure_tenant_audit.evidence_db import load_run_index_summary
 
     # Both the index and committed WAL exceed the lowered read limit. The
-    # private copy is streamed, and the in-place fallback only checks type.
+    # private copy is streamed, or the read is refused if scratch is absent.
     monkeypatch.setattr(evidence_db, "MAX_RUN_DATA_BYTES", 256, raising=False)
     parent = tmp_path / "run-parent"
     run = parent / "run"
@@ -470,9 +474,15 @@ def test_legacy_wal_copy_uses_private_tmpdir_and_preserves_data(
         if parent_readonly:
             parent.chmod(0o500)
         before = sorted(path.name for path in index.parent.iterdir())
-        assert load_run_index_summary(run)["tenant_name"] == "WALNAME"
         issues: list[dict[str, object]] = []
-        _validate_evidence_db(run, issues, read_only=True)
+        if scratch_available:
+            assert load_run_index_summary(run)["tenant_name"] == "WALNAME"
+            _validate_evidence_db(run, issues, read_only=True)
+        else:
+            with pytest.raises(evidence_db.UnsafeRunFileError):
+                load_run_index_summary(run)
+            with pytest.raises(evidence_db.UnsafeRunFileError):
+                _validate_evidence_db(run, issues, read_only=True)
         assert issues == []
         assert sorted(path.name for path in index.parent.iterdir()) == before
         assert list(scratch.iterdir()) == []
@@ -513,9 +523,11 @@ def test_legacy_wal_never_copies_under_run_parent(
         writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'WALNAME')")
         writer.commit()
         monkeypatch.setattr(evidence_db.tempfile, "TemporaryDirectory", no_copy)
-        assert evidence_db.load_run_index_summary(run)["tenant_name"] == "WALNAME"
+        with pytest.raises(evidence_db.UnsafeRunFileError):
+            evidence_db.load_run_index_summary(run)
         issues: list[dict[str, object]] = []
-        _validate_evidence_db(run, issues, read_only=True)
+        with pytest.raises(evidence_db.UnsafeRunFileError):
+            _validate_evidence_db(run, issues, read_only=True)
         assert issues == []
     finally:
         writer.close()
@@ -525,6 +537,7 @@ def test_legacy_wal_never_copies_under_run_parent(
 def test_legacy_wal_sidecars_require_guarded_regular_files(tmp_path: Path, kind: str) -> None:
     from azure_tenant_audit.contracts import _validate_evidence_db
     from azure_tenant_audit.evidence_db import load_run_index_summary
+    from azure_tenant_audit.run_files import UnsafeRunFileError
 
     run = tmp_path / "run"
     index = run / "index/evidence.sqlite"
@@ -548,7 +561,9 @@ def test_legacy_wal_sidecars_require_guarded_regular_files(tmp_path: Path, kind:
             sidecar.symlink_to(outside)
         else:
             os.link(outside, sidecar)
-    assert load_run_index_summary(run) == {}
+    with pytest.raises(UnsafeRunFileError):
+        load_run_index_summary(run)
     issues: list[dict[str, object]] = []
-    _validate_evidence_db(run, issues, read_only=True)
-    assert {item["code"] for item in issues} == {"invalid_evidence_sqlite"}
+    with pytest.raises(UnsafeRunFileError):
+        _validate_evidence_db(run, issues, read_only=True)
+    assert issues == []

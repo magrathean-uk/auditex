@@ -42,6 +42,8 @@ from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .resources import resolve_resource_path
 from .rule_parameters import effective_rule_parameters
 from .utils import load_env_file
+from .cli_guard import admit_sensitive_env, guarded_cli, parse_guarded
+from .guarded_io import current_context
 from .versioning import package_version_line
 from .waivers import WaiverFileError, apply_waivers, load_waivers
 from .ai_context import build_privacy_block
@@ -230,14 +232,14 @@ def run_offline(
     """Replay an offline sample. ``as_of`` pins the instant that stale sync and operating-system end of life are judged at."""
     sensitive_users = sensitive_users if sensitive_users is not None else SensitiveUsers()
     partner_domains = partner_domains if partner_domains is not None else PartnerDomains()
+    selected_sample = sample_path
     sample_path = resolve_resource_path(sample_path)
-    if not sample_path.exists():
-        LOG.error("Sample file not found: %s", sample_path)
-        return 2
     try:
-        sample = json.loads(sample_path.read_text(encoding="utf-8"))
-    except (ValueError, OSError) as exc:
-        LOG.error("Unable to load sample bundle: %s", exc)
+        from .resources import read_selected_resource
+        sample_bytes = read_selected_resource(selected_sample, default="examples/sample_audit_bundle/sample_result.json", field="sample")
+        sample = json.loads(sample_bytes.decode("utf-8"))
+    except (ValueError, OSError):
+        LOG.error("Unable to load sample bundle.")
         return 2
     fixture_provenance = _merged_fixture_provenance(
         sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
@@ -269,10 +271,8 @@ def run_offline(
     # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was.
     coverage_rows: list[dict[str, Any]] = []
     # The replay input is copied into the bundle: mailbox text a live run would have dropped is dropped here too.
-    (writer.raw_dir / "sample_input.json").write_text(
-        json.dumps(minimise_user_text(sample), indent=2),
-        encoding="utf-8",
-    )
+    from .private_io import write_private_text
+    write_private_text(writer.raw_dir / "sample_input.json", json.dumps(minimise_user_text(sample), indent=2))
     writer.record_artifact(writer.raw_dir / "sample_input.json")
     for key, value in sample.items():
         if key in _OFFLINE_SAMPLE_METADATA_KEYS:
@@ -399,7 +399,7 @@ def run_offline(
                 "rule_parameters": effective_rule_parameters(
                     stale_sync_days=stale_sync_days, break_glass_accounts=break_glass_accounts
                 ),
-                "replay_source": replay_source(sample_path),
+                "replay_source": replay_source(sample_path, data=sample_bytes),
             },
         ),
     )
@@ -1013,18 +1013,22 @@ def run_live(
     return exit_code
 
 
+@guarded_cli
 def main(
     argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]], None] | None = None,
     *, sensitive_users: SensitiveUsers | None = None, partner_domains: PartnerDomains | None = None,
 ) -> int:
     parser = build_parser()
     parsed_argv = list(argv if argv is not None else sys.argv[1:])
-    args = parser.parse_args(parsed_argv)
+    args = parse_guarded(parser, parsed_argv)
     args._command_line = ["azure-tenant-audit", *parsed_argv]
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
 
     if args.env:
-        load_env_file(Path(args.env))
+        load_env_file(Path(args.env), guarded=True)
+
+    if sensitive_users is None:
+        admit_sensitive_env(current_context(), args.sensitive_users)
 
     try:
         sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(args.sensitive_users)

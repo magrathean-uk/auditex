@@ -68,8 +68,8 @@ class CollectorConfig:
 
     @classmethod
     def from_path(cls, path: str | Path) -> "CollectorConfig":
-        target = resolve_resource_path(path)
-        payload = json.loads(target.read_text(encoding="utf-8"))
+        from .resources import read_selected_resource
+        payload = json.loads(read_selected_resource(path, default="configs/collector-definitions.json", field="config"))
         collectors = {
             key: CollectorDefinition(
                 collector_id=key,

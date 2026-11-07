@@ -20,8 +20,9 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
+from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
-from azure_tenant_audit.private_io import write_private_text
+from azure_tenant_audit.private_io import make_private_dirs, write_private_text
 from azure_tenant_audit.resources import open_text_resource
 
 from .model_eval import _invalid_constant, _pairs, validate_model_response
@@ -335,7 +336,7 @@ def _comparison(policy_id: str, record: dict[str, Any], baseline: dict[str, str]
 def _baseline_statuses(pack_path: Path) -> dict[str, str]:
     """Ignore malformed optional report-pack comparison data."""
     try:
-        node = json.loads(pack_path.read_text(encoding="utf-8"))
+        node = json.loads(read_guarded_bytes(pack_path, field="input").decode("utf-8"))
         for key in ("baseline_alignment", "frameworks", "cisa_scuba", "controls"):
             node = node.get(key) if isinstance(node, dict) else None
         if not isinstance(node, list):
@@ -343,6 +344,8 @@ def _baseline_statuses(pack_path: Path) -> dict[str, str]:
         return {row["control_id"]: row["status"] for row in node if isinstance(row, dict)
                 and isinstance(row.get("control_id"), str)
                 and row.get("status") in ("pass", "fail", "accepted_risk", "not_assessed")}
+    except UnsafeRunFileError:
+        raise
     except (OSError, ValueError, RecursionError):
         return {}
 
@@ -429,6 +432,7 @@ def _totals(records: list[dict[str, Any]]) -> dict[str, int]:
     return totals
 
 
+@guarded_operation
 def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, policies: list[str] | None = None,
                dry_run: bool = False, shadow_model_on_precheck: bool = False, legacy_options: bool = False,
                no_redaction: bool = False, projection_max_items: int = DEFAULT_MAX_ITEMS,
@@ -437,8 +441,10 @@ def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, polici
                projection_scan_max_chunks: int = DEFAULT_SCAN_MAX_CHUNKS) -> dict[str, Any]:
     if config is not None or no_redaction or shadow_model_on_precheck or legacy_options or legacy_model_options_set():
         warn_ignored_model_options()
-    root = Path(run_dir).expanduser().resolve()
-    manifest = json.loads((root / "run-manifest.json").read_text(encoding="utf-8"))
+    root = Path(os.path.abspath(os.path.expanduser(run_dir)))
+    current_context().bind_run(root)
+    from azure_tenant_audit.run_files import read_run_file
+    manifest = json.loads(read_run_file(root, "run-manifest.json").decode("utf-8"))
     if not isinstance(manifest, dict) or not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
         raise ValueError("Run manifest requires a run_id")
     catalogue = policy_catalogue()
@@ -485,6 +491,7 @@ def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, polici
     return result
 
 
+@guarded_operation
 def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, config: ModelConfig | None = None, *,
                             results_path: str | Path | None = None, policies: list[str] | None = None,
                             dry_run: bool = False, no_redaction: bool = False, legacy_options: bool = False,
@@ -515,6 +522,8 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
     if results_path is not None:
         try:
             verdict_rows, verdict_kind = load_results(results_path)
+        except UnsafeRunFileError:
+            raise
         except (OSError, ValueError):
             verdict_rows, verdict_kind, verdict_error = None, "none", True
         verdict_source = "results_file"
@@ -569,8 +578,15 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
         content = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     sidecar_text = json.dumps(sidecar, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     resolve_output_directory(target_dir)
-    target_dir.mkdir(mode=0o700, exist_ok=True)
-    os.chmod(target_dir, 0o700)
+    make_private_dirs(target_dir)
+    from azure_tenant_audit.guarded_io import _safe_directory
+    directory_fd = current_context()._directory(target_dir)
+    try:
+        if not _safe_directory(os.fstat(directory_fd)):
+            raise UnsafeRunFileError("output-dir")
+        os.fchmod(directory_fd, 0o700)
+    finally:
+        os.close(directory_fd)
     created: list[Path] = []
     try:
         for name, data in ((filename, content), ("scubagear_adapter_report.json", sidecar_text)):
@@ -578,7 +594,8 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
             created.append(path)
             write_private_text(path, data)
     except OSError:
+        from azure_tenant_audit.guarded_io import remove_guarded_output
         for path in created:
-            path.unlink(missing_ok=True)
+            remove_guarded_output(path)
         raise
     return result

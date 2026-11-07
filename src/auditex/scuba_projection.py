@@ -17,6 +17,7 @@ import stat
 from typing import Any
 
 from azure_tenant_audit.chunk_reader import _open_chunk
+from azure_tenant_audit.guarded_io import guarded_operation
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
 from azure_tenant_audit.model_assessment import collector_error_class, safe_projection_enum_value
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
@@ -1268,57 +1269,20 @@ def _operator_config_views(*, sensitive_users: tuple[str, ...] | None = None,
 
 
 def _sensitive_users_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
-    """Read only the bounded private files; emit only existing closed outcomes.
+    """Use the private pair captured and verified by the current admission context."""
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError, guard_session
 
-    Read through a no-follow directory descriptor, then validate the captured
-    bytes against the captured key and manifest. No input text, path, key or
-    digest enters diagnostics.
-    """
-    from azure_tenant_audit.sensitive_users import (
-        MAX_BYTES, MAX_ENTRIES, parse_sensitive_users, sensitive_users_digest,
-    )
-
+    reason = "operator_input_required"
     try:
-        metadata = manifest["operator_inputs"]["sensitive_users"]
-        if (not isinstance(metadata, dict) or set(metadata) != {"supplied", "count", "hmac_sha256"}
-                or metadata.get("supplied") is not True
-                or type(metadata.get("count")) is not int or not 0 < metadata["count"] <= MAX_ENTRIES
-                or not isinstance(metadata.get("hmac_sha256"), str)
-                or not re.fullmatch(r"[0-9a-f]{64}", metadata["hmac_sha256"])):
-            raise Unavailable("operator_input_required")
-        flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
-        directory = os.open(root / "operator-inputs", flags | os.O_DIRECTORY)
-        try:
-            def read(name: str, bound: int) -> bytes:
-                with os.fdopen(os.open(name, flags, dir_fd=directory), "rb") as handle:
-                    info = os.fstat(handle.fileno())
-                    if not stat.S_ISREG(info.st_mode):
-                        raise Unavailable("operator_input_required")
-                    if info.st_size > bound:
-                        raise Unavailable("oversize" if name.endswith(".txt") else "operator_input_required")
-                    data = handle.read(bound + 1)
-                    if len(data) > bound:
-                        raise Unavailable("oversize" if name.endswith(".txt") else "operator_input_required")
-                    return data
-
-            data = read("sensitive-users.txt", MAX_BYTES)
-            key = read("sensitive-users.key", 32)
-        finally:
-            os.close(directory)
-        # Count physical lines first to retain the existing oversize outcome.
-        if len(data.decode("utf-8").removesuffix("\n").split("\n")) > MAX_ENTRIES:
-            raise Unavailable("oversize")
-        addresses = parse_sensitive_users(data).addresses
-        # The bundle copy must be exactly the canonical list with a final newline.
-        if (data != ("\n".join(addresses) + "\n").encode("utf-8")
-                or len(addresses) != metadata["count"]
-                or not hmac.compare_digest(sensitive_users_digest(addresses, key), metadata["hmac_sha256"])):
-            raise Unavailable("operator_input_required")
-        return addresses
-    except Unavailable:
-        raise
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
-        raise Unavailable("operator_input_required") from None
+        with guard_session() as context:
+            addresses = context.verified_sensitive_users(root)
+    except UnsafeRunFileError as exc:
+        if exc.reason == "oversize":
+            reason = "oversize"
+        addresses = None
+    if not addresses:
+        raise Unavailable(reason) from None
+    return addresses
 
 
 def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str, Any],
@@ -1532,6 +1496,7 @@ def _redact(projection: Projection, salt: str, enabled: bool) -> dict[str, Any]:
     return {"enabled": enabled, "strategy": "run-salted-sha256-v1", **counts}
 
 
+@guarded_operation
 def project_run(run_dir: str | Path, *, redact: bool = True,
                 max_items: int = DEFAULT_MAX_ITEMS, max_chars: int = DEFAULT_MAX_CHARS,
                 scan_max_rows: int = DEFAULT_SCAN_MAX_ROWS, scan_max_bytes: int = DEFAULT_SCAN_MAX_BYTES,
@@ -1547,7 +1512,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
               "scan_max_bytes": scan_max_bytes, "scan_max_chunks": scan_max_chunks}
     if any(type(value) is not int or value < 1 for value in bounds.values()):
         raise ValueError("Projection bounds must be positive integers")
-    bundle = Bundle(Path(run_dir).resolve(), scan_max_rows, scan_max_bytes, scan_max_chunks)
+    bundle = Bundle(Path(os.path.abspath(run_dir)), scan_max_rows, scan_max_bytes, scan_max_chunks)
     manifest_error: Unavailable | None = None
     try:
         manifest = bundle.read("run-manifest.json")

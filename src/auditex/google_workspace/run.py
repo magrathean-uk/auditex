@@ -481,9 +481,11 @@ def run_google_offline(
         return 2
     target = resolve_resource_path(sample_path)
     try:
-        sample = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        LOG.error("Unable to load Google sample bundle: %s", exc)
+        from azure_tenant_audit.resources import read_selected_resource
+        sample_bytes = read_selected_resource(sample_path, default="examples/google_workspace_sample.json", field="sample")
+        sample = json.loads(sample_bytes.decode("utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        LOG.error("Unable to load Google sample bundle.")
         return 2
     if not isinstance(sample, dict):
         LOG.error("Google sample bundle must be a JSON object.")
@@ -565,7 +567,7 @@ def run_google_offline(
         mode="offline",
         command_line=[],
         waiver_rows=waiver_rows,
-        replay=replay_source(target),
+        replay=replay_source(target, data=sample_bytes),
     )
 
 

@@ -566,6 +566,10 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     read_failed = False
     try:
         info = os.fstat(descriptor)
+        from .guarded_io import current_context
+        context = current_context()
+        if context is not None:
+            context._check_file(info, "run-file", _MAX_FILE_BYTES)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise _Unsafe(REASON_NON_REGULAR)
         if (info.st_dev, info.st_ino) != (expected.st_dev, expected.st_ino):
@@ -629,6 +633,14 @@ class _Scan:
             self.problem(parts, REASON_LIMIT)
 
     def take(self, parts: tuple[str, ...], reader: Callable[[int], bytes], info: os.stat_result) -> None:
+        from .guarded_io import UnsafeRunFileError, current_context
+        context = current_context()
+        if context is not None:
+            try:
+                context._check_file(info, "run-file", None)
+            except UnsafeRunFileError:
+                self.problem(parts, REASON_NON_REGULAR)
+                return
         if self.files >= _MAX_SCAN_FILES:
             self.problem(parts, REASON_LIMIT)
             return
@@ -699,10 +711,18 @@ class _Scan:
                         self.problem(here, exc.reason)
                     else:
                         self._enter(frames, child, here, len(frames))
+                elif stat.S_ISLNK(mode):
+                    if name.lower().endswith(".json"):
+                        self.problem(here, REASON_NON_REGULAR)
+                    else:
+                        try:
+                            target = os.stat(name, dir_fd=frame.descriptor, follow_symlinks=True)
+                        except OSError:
+                            continue
+                        if stat.S_ISDIR(target.st_mode):
+                            self.problem(here, REASON_NON_REGULAR)
                 elif not name.lower().endswith(".json"):
                     continue
-                elif stat.S_ISLNK(mode):
-                    self.problem(here, REASON_NON_REGULAR)
                 elif not stat.S_ISREG(mode):
                     self.problem(here, REASON_NON_REGULAR)  # FIFO, socket, device: never opened
                 else:
@@ -722,12 +742,23 @@ class _Frame:
         self.position = 0
 
 
+from .guarded_io import UnsafeRunFileError, current_context, guarded_operation
+
+
+@guarded_operation
 def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
     """Read shareable report sections; refuse a failed read even if it later recovers."""
     sections: dict[str, Any] = {}
-    run_real = os.path.realpath(run_dir)
     try:
-        run_fd = os.open(run_real, _DIR_MODE)
+        context = current_context()
+        run_path = Path(run_dir)
+        if (context._absolute(run_path) in context._runs or os.path.lexists(run_path / "run-manifest.json")
+                or os.path.lexists(run_path / "operator-inputs")):
+            run_fd = os.dup(context.bind_run(run_path))
+        else:
+            run_fd = context._directory(run_path)
+    except UnsafeRunFileError:
+        raise
     except OSError:
         raise ContextIncompleteError((("<run>", REASON_UNREADABLE),)) from None
     try:
@@ -794,6 +825,7 @@ class _Discovery:
     snapshot: Snapshot = ()
 
 
+@guarded_operation
 def _scan_run_identities(run_path: Path, *, read: bool = True) -> _Discovery:
     """Privileged-user names, immutable ids, role vocabulary and the files discovery could not use.
 
@@ -808,9 +840,15 @@ def _scan_run_identities(run_path: Path, *, read: bool = True) -> _Discovery:
     read is a ``changed during scan`` problem, and the fingerprints of every file listed are returned as the
     ``snapshot`` the caller can compare later (``read=False`` lists and fingerprints without reading).
     """
-    run_real = os.path.realpath(run_path)
     try:
-        run_fd = os.open(run_real, _DIR_MODE)
+        from .guarded_io import current_context
+        context = current_context()
+        if os.path.lexists(run_path / "run-manifest.json") or os.path.lexists(run_path / "operator-inputs"):
+            run_fd = os.dup(context.bind_run(run_path))
+        else:
+            run_fd = context._directory(run_path)
+    except UnsafeRunFileError:
+        raise
     except OSError:
         return _Discovery(problems=(("<run>", REASON_UNREADABLE),))
     scan = _Scan(read=read)

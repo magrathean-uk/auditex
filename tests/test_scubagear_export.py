@@ -308,8 +308,10 @@ def test_parse_fail_closed_and_repairs(tmp_path, capsys):
     old = adapter._MAX_EXPORT_BYTES
     adapter._MAX_EXPORT_BYTES = 1
     try:
-        with pytest.raises(ValueError, match="Invalid ScubaGear export"):
+        from azure_tenant_audit.run_files import UnsafeRunFileError
+        with pytest.raises(UnsafeRunFileError) as error:
             load_export(over)
+        assert error.value.reason == "oversize"
     finally:
         adapter._MAX_EXPORT_BYTES = old
 

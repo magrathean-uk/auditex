@@ -240,11 +240,14 @@ def test_bad_json_and_oversized_lines_are_quarantined_without_losing_line_number
 
 
 def test_file_size_limit_is_checked_before_output_creation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from azure_tenant_audit.run_files import UnsafeRunFileError
+
     train = _write(tmp_path / "train.jsonl", [_row(answer="x" * 1000)])
     manifest = _manifest(tmp_path, [train])
     monkeypatch.setattr(model_corpus, "MAX_FILE_BYTES", 700)
-    with pytest.raises(ValueError, match="exceeds"):
+    with pytest.raises(UnsafeRunFileError) as error:
         stage_public_corpus(manifest, tmp_path / "staged")
+    assert error.value.reason == "oversize"
     assert not (tmp_path / "staged").exists()
 
 

@@ -1,0 +1,431 @@
+"""Descriptor admission for registered runs and standalone inputs."""
+from __future__ import annotations
+
+import os
+import json
+from pathlib import Path
+import shutil
+import stat
+import threading
+import traceback
+
+import pytest
+
+from azure_tenant_audit.sensitive_users import SensitiveUsers
+from support import RunBundleBuilder
+
+
+KEY = b"admission-canary-012345678901234"
+ADDRESS = "private-admission@example.invalid"
+
+
+@pytest.fixture
+def private_run(tmp_path: Path) -> Path:
+    run = RunBundleBuilder(tmp_path).summary_md().manifest(
+        operator_inputs={"sensitive_users": SensitiveUsers((ADDRESS,)).manifest(KEY)},
+    ).build()
+    private = run / "operator-inputs"
+    private.mkdir(mode=0o700)
+    (private / "sensitive-users.key").write_bytes(KEY)
+    (private / "sensitive-users.txt").write_text(ADDRESS + "\n", encoding="utf-8")
+    return run
+
+
+@pytest.mark.parametrize("member", ["sensitive-users.key", "sensitive-users.txt"])
+@pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink", "devfd"])
+def test_admission_refuses_registered_pair_and_aliases(private_run: Path, tmp_path: Path, member: str, alias: str) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    source = private_run / "operator-inputs" / member
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        fd = None
+        if alias == "direct":
+            candidate = source
+        elif alias == "devfd":
+            fd = os.open(source, os.O_RDONLY)
+            candidate = Path(f"/DEV/fd/{fd}")
+            if not candidate.exists():
+                os.close(fd)
+                pytest.skip("/DEV/fd is unavailable")
+        else:
+            candidate = tmp_path / "whitespace alias\u2003."
+            if alias == "symlink":
+                candidate.symlink_to(source)
+            else:
+                os.link(source, candidate)
+        try:
+            with pytest.raises(UnsafeRunFileError, match=r"^Refusing input: unsafe input\.$") as error:
+                with open_guarded_file(candidate, field="input", context=context):
+                    pytest.fail("private bytes became readable")
+            rendered = "".join(traceback.format_exception(error.value))
+            assert KEY.decode() not in rendered and ADDRESS not in rendered
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+
+@pytest.mark.parametrize("directory", ["run", "private"])
+def test_group_or_world_writable_run_directories_are_refused(private_run: Path, directory: str) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError
+
+    target = private_run if directory == "run" else private_run / "operator-inputs"
+    target.chmod(0o770)
+    try:
+        with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+            context.bind_run(private_run)
+    finally:
+        target.chmod(0o700)
+
+
+def test_admission_traceback_does_not_include_original_os_error(
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    target = tmp_path / "argument-path-canary"
+    target.write_text("ordinary", encoding="utf-8")
+    original = os.open
+
+    with GuardContext() as context:
+        context.bind_run(private_run)
+
+        def fail_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+            if str(path) == target.name:
+                raise PermissionError("argument-path-canary private-os-error")
+            return original(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", fail_open)
+        with pytest.raises(UnsafeRunFileError) as caught:
+            with open_guarded_file(target, field="input", context=context):
+                pytest.fail("unexpected open")
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert "argument-path-canary" not in rendered
+    assert "private-os-error" not in rendered
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def test_pinned_descriptor_failure_has_no_original_exception_or_argument(
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_pinned_binary
+
+    target = tmp_path / "pinned-argument-canary"
+    target.write_bytes(b"public")
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        with open_pinned_binary(target, field="input", context=context):
+            pass
+        descriptor = context._pinned[context._absolute(target)][0]
+        original_fstat = os.fstat
+
+        def fail_fstat(fd: int) -> os.stat_result:
+            if fd == descriptor:
+                raise PermissionError("pinned-argument-canary private-os-error")
+            return original_fstat(fd)
+
+        monkeypatch.setattr(os, "fstat", fail_fstat)
+        with pytest.raises(UnsafeRunFileError) as error:
+            with open_pinned_binary(target, field="input", context=context):
+                pytest.fail("unexpected open")
+    rendered = "".join(traceback.format_exception(error.value))
+    assert "pinned-argument-canary" not in rendered and "private-os-error" not in rendered
+    assert error.value.__cause__ is None and error.value.__context__ is None
+
+
+@pytest.mark.parametrize("target_kind", ["key", "list", "hardlink"])
+def test_writer_refuses_before_truncating_private_or_multilink_file(
+    private_run: Path, tmp_path: Path, target_kind: str,
+) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_private_output
+
+    key = private_run / "operator-inputs" / "sensitive-users.key"
+    private_list = private_run / "operator-inputs" / "sensitive-users.txt"
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        target = key if target_kind == "key" else private_list
+        if target_kind == "hardlink":
+            target = tmp_path / "hardlinked-output"
+            os.link(key, target)
+        before = target.read_bytes()
+        with pytest.raises(UnsafeRunFileError):
+            with open_private_output(target, field="output", context=context) as fd:
+                os.write(fd, b"overwritten")
+        assert target.read_bytes() == before
+
+
+def test_registered_run_does_not_block_an_independent_ordinary_file(private_run: Path, tmp_path: Path) -> None:
+    from azure_tenant_audit.run_files import GuardContext, open_guarded_file
+
+    target = tmp_path / "ordinary.txt"
+    target.write_bytes(b"public")
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        with open_guarded_file(target, field="input", context=context) as fd:
+            assert os.read(fd, 10) == b"public"
+
+
+def test_independent_copy_recovers_from_hardlinked_backup(private_run: Path, tmp_path: Path) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    linked_backup = tmp_path / "linked-backup"
+    recovered = tmp_path / "independent-copy"
+    shutil.copytree(private_run, linked_backup, copy_function=os.link)
+    shutil.copytree(private_run, recovered, copy_function=shutil.copy2)
+    with GuardContext() as context:
+        with pytest.raises(UnsafeRunFileError):
+            context.bind_run(private_run)
+        with pytest.raises(UnsafeRunFileError):
+            context.bind_run(linked_backup)
+        context.bind_run(recovered)
+        for member in ("sensitive-users.key", "sensitive-users.txt"):
+            with pytest.raises(UnsafeRunFileError):
+                with open_guarded_file(recovered / "operator-inputs" / member, field="input", context=context):
+                    pytest.fail("copied private pair was admitted")
+
+
+def test_private_registration_and_input_admission_are_serialised(
+    private_run: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    pair_opened, release_registration = threading.Event(), threading.Event()
+    reader_started, reader_finished = threading.Event(), threading.Event()
+    failures: list[BaseException] = []
+    original_open = os.open
+
+    def hold_pair(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        descriptor = original_open(path, flags, *args, **kwargs)
+        if str(path) == "sensitive-users.key":
+            pair_opened.set()
+            assert release_registration.wait(5)
+        return descriptor
+
+    monkeypatch.setattr(os, "open", hold_pair)
+    with GuardContext() as context:
+        def register() -> None:
+            try:
+                context.bind_run(private_run)
+            except BaseException as exc:
+                failures.append(exc)
+
+        def read_private() -> None:
+            reader_started.set()
+            try:
+                with open_guarded_file(private_run / "operator-inputs/sensitive-users.key",
+                                       field="input", context=context):
+                    failures.append(AssertionError("private key was admitted"))
+            except UnsafeRunFileError:
+                pass
+            except BaseException as exc:
+                failures.append(exc)
+            finally:
+                reader_finished.set()
+
+        writer = threading.Thread(target=register)
+        reader = threading.Thread(target=read_private)
+        writer.start()
+        try:
+            assert pair_opened.wait(5)
+            reader.start()
+            assert reader_started.wait(5)
+            assert not reader_finished.wait(0.05)
+        finally:
+            release_registration.set()
+            writer.join(5)
+            if reader.ident is not None:
+                reader.join(5)
+        assert not writer.is_alive() and not reader.is_alive()
+        assert reader_finished.is_set() and failures == []
+
+
+@pytest.mark.parametrize("suffix", [" ", ".", "\u00a0", "\u2003", "\u3000", "\u200b"])
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+@pytest.mark.parametrize("member", ["sensitive-users.key", "sensitive-users.txt"])
+def test_whitespace_dot_and_unicode_alias_matrix(
+    private_run: Path, tmp_path: Path, suffix: str, link: str, member: str,
+) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    source = private_run / "operator-inputs" / member
+    alias = tmp_path / ("seemingly-public.json" + suffix)
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        if link == "symlink":
+            alias.symlink_to(source)
+        else:
+            os.link(source, alias)
+        with pytest.raises(UnsafeRunFileError):
+            with open_guarded_file(alias, field="input", context=context):
+                pytest.fail("private alias was opened")
+
+
+def test_equal_inode_numbers_on_different_devices_are_not_the_same_file(
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit.run_files import GuardContext, open_guarded_file
+
+    private = private_run / "operator-inputs" / "sensitive-users.key"
+    ordinary = tmp_path / "ordinary"
+    ordinary.write_bytes(b"public")
+    private_info, ordinary_info = private.stat(), ordinary.stat()
+    original = os.fstat
+
+    def same_inode_other_device(fd: int) -> os.stat_result:
+        info = original(fd)
+        identity = (info.st_dev, info.st_ino)
+        if identity in {(private_info.st_dev, private_info.st_ino), (ordinary_info.st_dev, ordinary_info.st_ino)}:
+            fields = list(info)
+            fields[stat.ST_INO] = 12345
+            fields[stat.ST_DEV] = 100 if identity == (private_info.st_dev, private_info.st_ino) else 200
+            return os.stat_result(fields)
+        return info
+
+    monkeypatch.setattr(os, "fstat", same_inode_other_device)
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        with open_guarded_file(ordinary, field="input", context=context) as fd:
+            assert os.read(fd, 10) == b"public"
+
+
+@pytest.mark.skipif(not os.environ.get("AUDITEX_TEST_SECOND_RUN"),
+                    reason="set AUDITEX_TEST_SECOND_RUN to a constructed run on a different volume")
+def test_independent_private_pairs_are_registered_across_volumes(private_run: Path) -> None:
+    """Bind an independently created synthetic run from a genuinely different device."""
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    second = Path(os.environ["AUDITEX_TEST_SECOND_RUN"])
+    assert private_run.stat().st_dev != second.stat().st_dev
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        context.bind_run(second)
+        for run in (private_run, second):
+            for member in ("sensitive-users.key", "sensitive-users.txt"):
+                with pytest.raises(UnsafeRunFileError):
+                    with open_guarded_file(run / "operator-inputs" / member, field="input", context=context):
+                        pytest.fail("a registered private pair was admitted")
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo", "hardlink", "oversize"])
+def test_standalone_inputs_refuse_unsafe_type_link_count_or_size(tmp_path: Path, kind: str) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    target = tmp_path / "input"
+    if kind == "directory":
+        target.mkdir()
+    elif kind == "fifo":
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFO creation unavailable")
+        os.mkfifo(target)
+    else:
+        target.write_bytes(b"ordinary")
+        if kind == "hardlink":
+            os.link(target, tmp_path / "second-link")
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        with open_guarded_file(target, field="input", context=context, max_bytes=2 if kind == "oversize" else None):
+            pytest.fail("unsafe input opened")
+
+
+@pytest.mark.parametrize("target_kind", ["run", "private-file", "ordinary-file"])
+def test_wrong_owner_is_refused(
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_kind: str,
+) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    ordinary = tmp_path / "ordinary"
+    ordinary.write_bytes(b"public")
+    target = {"run": private_run, "private-file": private_run / "operator-inputs" / "sensitive-users.key",
+              "ordinary-file": ordinary}[target_kind]
+    expected = target.stat()
+    original = os.fstat
+
+    def wrong_owner(fd: int) -> os.stat_result:
+        info = original(fd)
+        if (info.st_dev, info.st_ino) == (expected.st_dev, expected.st_ino):
+            values = list(info)
+            values[stat.ST_UID] = os.geteuid() + 1
+            return os.stat_result(values)
+        return info
+
+    monkeypatch.setattr(os, "fstat", wrong_owner)
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        context.bind_run(private_run)
+        if target_kind == "ordinary-file":
+            with open_guarded_file(ordinary, field="input", context=context):
+                pytest.fail("wrong-owner file opened")
+
+
+@pytest.mark.parametrize("damage", ["missing-key", "missing-list", "missing-manifest", "invalid-hmac"])
+def test_partial_or_unverified_pair_fails_closed(private_run: Path, damage: str) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError
+
+    manifest = private_run / "run-manifest.json"
+    if damage == "invalid-hmac":
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["operator_inputs"]["sensitive_users"]["hmac_sha256"] = "0" * 64
+        manifest.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        target = {"missing-key": private_run / "operator-inputs" / "sensitive-users.key",
+                  "missing-list": private_run / "operator-inputs" / "sensitive-users.txt",
+                  "missing-manifest": manifest}[damage]
+        target.unlink()
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        context.bind_run(private_run)
+
+
+def test_non_posix_without_descriptor_relative_open_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    target = tmp_path / "ordinary"
+    target.write_bytes(b"public")
+    monkeypatch.setattr(os, "supports_dir_fd", set())
+    with pytest.raises(UnsafeRunFileError):
+        with GuardContext() as context:
+            with open_guarded_file(target, field="input", context=context):
+                pytest.fail("unproved confinement was accepted")
+
+
+@pytest.mark.parametrize("kind", ["key", "hardlink"])
+def test_atomic_writer_refuses_private_replacement(private_run: Path, tmp_path: Path, kind: str) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError
+    from azure_tenant_audit.private_io import write_private_bytes
+
+    key = private_run / "operator-inputs" / "sensitive-users.key"
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        destination = key
+        if kind == "hardlink":
+            destination = tmp_path / "backup"
+            os.link(key, destination)
+        with pytest.raises(UnsafeRunFileError):
+            write_private_bytes(destination, b"replacement")
+        assert key.read_bytes() == KEY
+        assert destination.read_bytes() == KEY
+
+
+def test_atomic_writer_never_truncates_a_linked_temporary_sibling(
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit import private_io
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError
+
+    key = private_run / "operator-inputs" / "sensitive-users.key"
+    target = tmp_path / "report.json"
+    temporary = tmp_path / "temporary-sibling"
+    with GuardContext() as context:
+        context.bind_run(private_run)
+        os.link(key, temporary)
+        monkeypatch.setattr(private_io, "_temporary_sibling", lambda path: temporary)
+        with pytest.raises(UnsafeRunFileError):
+            private_io.write_private_bytes(target, b"replacement")
+        assert key.read_bytes() == KEY
+        assert temporary.read_bytes() == KEY
+
+
+def test_atomic_writer_creates_a_new_private_file(tmp_path: Path) -> None:
+    from azure_tenant_audit.private_io import write_private_bytes
+
+    target = tmp_path / "new" / "output"
+    write_private_bytes(target, b"ordinary")
+    assert target.read_bytes() == b"ordinary"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600

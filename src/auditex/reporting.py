@@ -38,6 +38,7 @@ from azure_tenant_audit.output_redaction import (
     snapshot_run,
 )
 from azure_tenant_audit.private_io import harden_tree, make_private_dirs, write_private_bytes, write_private_text
+from azure_tenant_audit.guarded_io import guard_session, open_pinned_binary
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.run_files import UnsafeRunFileError, hash_run_file, read_run_file
 from azure_tenant_audit.waivers import accepted_risk_summary
@@ -136,12 +137,27 @@ def _read_json(path: Path | None, fallback: Any, *, root: Path | None = None) ->
         return fallback
     base = root if root is not None else path.parent
     try:
-        try:
-            relative = path.relative_to(base)
-        except ValueError as exc:
-            raise UnsafeRunFileError("Bundle file path must stay inside the bundle directory") from exc
-        return json.loads(read_run_file(base, relative).decode("utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
+        relative = path.relative_to(base)
+    except ValueError:
+        relative = None
+    if relative is None:
+        raise UnsafeRunFileError("run-file", reason="outside") from None
+    try:
+        data = read_run_file(base, relative)
+    except UnsafeRunFileError:
+        raise
+    except (FileNotFoundError, OSError):
+        return fallback
+    invalid = False
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        invalid = True
+    if invalid:
+        raise UnsafeRunFileError("run-file") from None
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
         return fallback
 
 
@@ -779,11 +795,19 @@ def proof_table(run_dir: str | Path) -> dict[str, Any]:
 def _sha256_file(path: Path, *, root: Path | None = None) -> str | None:
     base = root if root is not None else path.parent
     try:
-        try:
-            relative = path.relative_to(base)
-        except ValueError as exc:
-            raise UnsafeRunFileError("Bundle file path must stay inside the bundle directory") from exc
-        return hash_run_file(base, relative)[0]
+        relative = path.relative_to(base)
+    except ValueError:
+        relative = None
+    if relative is None:
+        raise UnsafeRunFileError("run-file", reason="outside") from None
+    try:
+        digest = hashlib.sha256()
+        with guard_session() as context, open_pinned_binary(path, field="run-file", context=context) as stream:
+            while block := stream.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
+    except UnsafeRunFileError:
+        raise
     except OSError:
         return None
 
@@ -796,6 +820,10 @@ def _artifact_row(run_path: Path, relative: str, purpose: str, *, customer_safe:
     except FileNotFoundError:
         digest = None
         present = False
+    except UnsafeRunFileError:
+        digest = None
+        present = False
+        customer_safe = False
     except OSError:
         digest = None
         present = path.exists()
@@ -1662,9 +1690,9 @@ _CUSTOMER_SAFE_SOURCE_ARTIFACTS: tuple[tuple[str, str], ...] = (
 
 def _plain_run_file(run_path: Path, relative: str) -> tuple[Path | None, str | None]:
     """The regular file ``relative`` names in the run, or ``(None, reason)``. A link, or a link anywhere on the path, is refused."""
-    root = Path(os.path.realpath(run_path))
+    root = Path(os.path.abspath(run_path))
     candidate = root / relative
-    if os.path.islink(candidate) or Path(os.path.realpath(candidate)) != candidate:
+    if os.path.islink(candidate):
         return None, "symbolic_link"
     if not candidate.is_file():
         return None, "missing"
@@ -1733,7 +1761,11 @@ def _copy_source_artifact(
     ``bundle-hashes.json`` lists), and ``sha256``, the digest of the copy. The hash manifest is copied verbatim only
     when redaction would not change it, else it is left out (``skipped_reason``).
     """
-    if Path(relative.replace("\\", "/")).as_posix().startswith("operator-inputs/"):
+    relative_path = Path(relative)
+    if (relative_path.is_absolute() or relative_path.drive or ".." in relative_path.parts or "\\" in relative):
+        return {"source_path": "<refused>", "purpose": purpose, "present": False,
+                "customer_safe": False, "skipped_reason": "unsafe_input"}
+    if relative_path.as_posix().startswith("operator-inputs/"):
         return {"source_path": relative, "purpose": purpose, "present": False,
                 "customer_safe": False, "skipped_reason": "redacted_operator_input"}
     source, reason = _plain_run_file(run_path, relative)
@@ -1746,12 +1778,13 @@ def _copy_source_artifact(
     if source is None:
         if reason != "missing":
             row["skipped_reason"] = reason
+            row["customer_safe"] = False
         return row
     if listed is not None and relative != "bundle-hashes.json" and relative not in listed:
         row["skipped_reason"] = "not_in_bundle_hashes"
         return row
     destination = output_root / relative
-    guard_root = Path(os.path.realpath(run_path))
+    guard_root = Path(os.path.abspath(run_path))
     try:
         source_bytes = read_run_file(guard_root, relative)
         payload = json.loads(source_bytes.decode("utf-8"))
@@ -1815,7 +1848,7 @@ def _pack_file_path(pack_dir: Path, manifest_output_dir: Path, value: Any) -> Pa
         try:
             return pack_dir / path.relative_to(manifest_output_dir)
         except ValueError:
-            return path
+            return None
     if ".." in path.parts:
         return None
     if manifest_output_dir.parts:
@@ -1949,7 +1982,7 @@ def _prepare_pack_directory(target_dir: Path) -> None:
     does not stay behind.
     """
     if target_dir.is_symlink() or (target_dir.exists() and not target_dir.is_dir()):
-        raise PackOutputError(f"refusing to write a customer pack to {target_dir}: it is not a directory.")
+        raise UnsafeRunFileError("output-dir")
     if not target_dir.exists():
         make_private_dirs(target_dir)
         return
@@ -1957,20 +1990,23 @@ def _prepare_pack_directory(target_dir: Path) -> None:
         return
     previous = _mapping(_read_json(target_dir / "pack-manifest.json", {}))
     if previous.get("kind") != _PACK_KIND:
-        raise PackOutputError(
-            f"refusing to write a customer pack into {target_dir}: it is not empty and holds no earlier pack "
-            "(no pack-manifest.json). Use a new directory."
-        )
+        raise UnsafeRunFileError("output-dir")
     stale = target_dir / "source-artifacts"
     if stale.is_symlink():
-        stale.unlink()
-    elif stale.is_dir():
-        shutil.rmtree(stale)
+        raise UnsafeRunFileError("output-dir")
+    if stale.is_dir():
+        from azure_tenant_audit.guarded_io import remove_guarded_tree
+        remove_guarded_tree(stale)
 
 
+from azure_tenant_audit.guarded_io import current_context, guarded_operation
+
+
+@guarded_operation
 def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     target_dir = Path(output_dir)
+    current_context().bind_run(run_path)
 
     # Validation reads normalised files too, so discovery must run first.
     redaction = context_for_run(run_path)
@@ -2127,6 +2163,7 @@ def _merge_pack_issues(issues: list[dict[str, Any]], pack_path: Path) -> list[di
     return list(merged.values())
 
 
+@guarded_operation
 def verify_enterprise_handoff_pack(
     pack_dir: str | Path,
     *,

@@ -14,6 +14,8 @@ from pathlib import Path
 import stat
 from typing import Any, BinaryIO
 
+from .run_files import UnsafeRunFileError
+
 
 class EndpointEvidenceError(ValueError):
     """An endpoint's collected rows could not be read completely."""
@@ -32,44 +34,12 @@ def _issue(issues: list[dict[str, Any]] | None, code: str, **details: Any) -> No
 
 @contextmanager
 def _open_chunk(run_dir: Path, relative: str) -> Iterator[BinaryIO]:
-    """Open beneath a trusted root without following file/directory symlinks.
+    """Read the admitted chunk descriptor without reopening its pathname."""
+    from .run_files import open_run_file
 
-    Directory descriptors keep the containment check effective even if a path
-    component is replaced during the read. Reject special files before reading.
-    """
-    path = Path(relative)
-    if not relative or path.anchor or ".." in path.parts or "\\" in relative or not path.parts:
-        raise EndpointEvidenceError({"code": "unsafe_chunk_path", "chunk_file": relative})
-    if os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
-        # Windows lacks directory-descriptor opens. Check every component,
-        # including junction/reparse-point destinations, before opening it.
-        root = run_dir.resolve(strict=True)
-        target = root
-        for part in path.parts:
-            target = target / part
-            if target.is_symlink() or not target.resolve(strict=True).is_relative_to(root):
-                raise EndpointEvidenceError({"code": "unsafe_chunk_path", "chunk_file": relative})
-        if not target.is_file():
-            raise EndpointEvidenceError({"code": "invalid_chunk_file", "chunk_file": relative})
-        with target.open("rb") as handle:
+    with open_run_file(run_dir, relative, field="evidence") as descriptor:
+        with os.fdopen(os.dup(descriptor), "rb") as handle:
             yield handle
-        return
-    descriptors: list[int] = []
-    try:
-        descriptor = os.open(run_dir, os.O_RDONLY | os.O_DIRECTORY)
-        descriptors.append(descriptor)
-        for part in path.parts[:-1]:
-            descriptor = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
-            descriptors.append(descriptor)
-        descriptor = os.open(path.parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
-        descriptors.append(descriptor)
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise EndpointEvidenceError({"code": "invalid_chunk_file", "chunk_file": relative})
-        with os.fdopen(descriptors.pop(), "rb") as handle:
-            yield handle
-    finally:
-        for descriptor in reversed(descriptors):
-            os.close(descriptor)
 
 
 def iter_endpoint_records(
@@ -140,6 +110,8 @@ def iter_endpoint_records(
                             continue
                         observed_count += 1
                         yield row
+            except UnsafeRunFileError:
+                raise
             except EndpointEvidenceError as exc:
                 if issues is None:
                     raise

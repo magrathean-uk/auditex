@@ -66,7 +66,7 @@ def test_diff_rejects_fifo_manifest_without_blocking(tmp_path: Path) -> None:
 
     with pytest.raises(UnsafeRunFileError):
         read_run_file(left, "run-manifest.json")
-    assert "result" in outcome
+    assert outcome.get("error") == "UnsafeRunFileError"
 
 
 _RUN_TOOLS = (
@@ -305,8 +305,9 @@ def test_guard_rejects_device_without_opening_it() -> None:
 
     if not Path("/dev/null").exists():
         pytest.skip("No local null device")
-    with pytest.raises(UnsafeRunFileError, match="regular file"):
+    with pytest.raises(UnsafeRunFileError) as error:
         read_run_file("/dev", "null")
+    assert error.value.reason == "type"
 
 
 def test_guard_rejects_file_growing_past_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,8 +327,9 @@ def test_guard_rejects_file_growing_past_limit(tmp_path: Path, monkeypatch: pyte
         return original_read(fd, size)
 
     monkeypatch.setattr(os, "read", grow_before_read)
-    with pytest.raises(UnsafeRunFileError, match="size limit"):
+    with pytest.raises(UnsafeRunFileError) as error:
         read_run_file(tmp_path, path.name, max_bytes=4)
+    assert error.value.reason == "oversize"
 
 
 def test_guarded_jsonl_preserves_unicode_line_separators(tmp_path: Path) -> None:
@@ -350,8 +352,9 @@ def test_guard_fallback_rejects_symlinked_parent(tmp_path: Path, monkeypatch: py
     (tmp_path / "linked").symlink_to(actual, target_is_directory=True)
     monkeypatch.setattr(os, "supports_dir_fd", set())
 
-    assert read_run_file(tmp_path, "actual/file.json") == b"{}"
-    with pytest.raises(UnsafeRunFileError, match="symlinks"):
+    with pytest.raises(UnsafeRunFileError):
+        read_run_file(tmp_path, "actual/file.json")
+    with pytest.raises(UnsafeRunFileError):
         read_run_file(tmp_path, "linked/file.json")
 
 
@@ -427,7 +430,7 @@ def test_manifest_artifact_cannot_use_symlinked_directory(tmp_path: Path) -> Non
     (tmp_path / "run-manifest.json").write_text('{"summary_md_path": "linked/summary.md"}', encoding="utf-8")
     outcome = _call_tool("auditex_summarize_run", str(tmp_path))
     assert outcome.get("error") == "UnsafeRunFileError", outcome
-    assert "symlinks" in str(outcome.get("message"))
+    assert outcome.get("message") == "Refusing run-file: unsafe input."
 
 
 @pytest.mark.parametrize("kind", ("fifo", "symlink", "directory", "oversize"))

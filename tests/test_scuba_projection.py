@@ -1019,8 +1019,10 @@ def test_empty_collection_success_cannot_override_failure_metadata(complete_bund
 
 
 def test_malformed_manifest_cannot_hide_coverage_failures(complete_bundle):
+    from azure_tenant_audit.run_files import UnsafeRunFileError
     (complete_bundle / 'run-manifest.json').write_text('{"coverage_gaps":')
-    assert all(v == NOT_COLLECTED for v in project_run(complete_bundle).values())
+    with pytest.raises(UnsafeRunFileError):
+        project_run(complete_bundle)
 
 
 @pytest.mark.parametrize('raw', [
@@ -1043,15 +1045,19 @@ def test_unserialisable_manifest_withholds_without_redaction(complete_bundle):
     assert all(v == NOT_COLLECTED for v in project_run(complete_bundle, redact=False).values())
 
 
-def test_manifest_nested_beyond_the_parser_depth_is_withheld_not_raised(complete_bundle):
+def test_manifest_nested_beyond_the_parser_depth_is_refused(complete_bundle):
+    from azure_tenant_audit.run_files import UnsafeRunFileError
     (complete_bundle / 'run-manifest.json').write_text('[' * 100000 + ']' * 100000)
-    assert all(v == NOT_COLLECTED for v in project_run(complete_bundle).values())
+    with pytest.raises(UnsafeRunFileError):
+        project_run(complete_bundle)
 
 
-def test_manifest_with_a_huge_integer_is_withheld_not_raised(complete_bundle):
+def test_manifest_with_a_huge_integer_is_refused(complete_bundle):
+    from azure_tenant_audit.run_files import UnsafeRunFileError
     # Pin: already withheld at parse (int max str digits); not part of the salt fix.
     (complete_bundle / 'run-manifest.json').write_text('{"run_id":"x","platform":"m365","n":' + '9' * 5000 + '}')
-    assert all(v == NOT_COLLECTED for v in project_run(complete_bundle).values())
+    with pytest.raises(UnsafeRunFileError):
+        project_run(complete_bundle)
 
 
 def test_manifest_gaps_deeper_than_the_walkers_are_withheld_not_raised(complete_bundle):

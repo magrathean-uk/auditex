@@ -7,28 +7,55 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.run_files import UnsafeRunFileError, open_run_file, read_run_file
+from azure_tenant_audit.guarded_io import guarded_operation
 from azure_tenant_audit.tenant_identity import IDENTITY_FIELDS, reconcile_tenant_identity
 
 
-def _read_json(run_dir: Path, path: Path, fallback: Any) -> Any:
+def _read_json(run_dir: Path, path: Path, fallback: Any, *, field: str = "run-file") -> Any:
     try:
-        return json.loads(read_run_file(run_dir, _relative_to_run(run_dir, path)).decode("utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
+        data = read_run_file(run_dir, _relative_to_run(run_dir, path), field=field)
+    except UnsafeRunFileError:
+        raise
+    except (FileNotFoundError, OSError):
+        return fallback
+    invalid_text = False
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        invalid_text = True
+    if invalid_text:
+        raise UnsafeRunFileError(field) from None
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
         return fallback
 
 
-def _read_text(run_dir: Path, path: Path) -> str | None:
+def _read_text(run_dir: Path, path: Path, *, field: str = "run-file") -> str | None:
     try:
-        return read_run_file(run_dir, _relative_to_run(run_dir, path)).decode("utf-8")
+        data = read_run_file(run_dir, _relative_to_run(run_dir, path), field=field)
+    except UnsafeRunFileError:
+        raise
     except (FileNotFoundError, OSError):
         return None
+    invalid_text = False
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        invalid_text = True
+    if invalid_text:
+        raise UnsafeRunFileError(field) from None
+    return text
 
 
 def _relative_to_run(run_dir: Path, path: Path) -> Path:
     try:
-        return path.relative_to(run_dir)
-    except ValueError as exc:
-        raise UnsafeRunFileError("Run file path must stay inside the run directory") from exc
+        relative = path.relative_to(run_dir)
+    except ValueError:
+        relative = None
+    if relative is None:
+        raise UnsafeRunFileError("run-file", reason="outside") from None
+    return relative
 
 
 def _present(path: Path) -> bool:
@@ -131,6 +158,8 @@ class RunBundle:
     def _candidate_path(self, key: str, fallback: str) -> Path:
         manifest = self.manifest()
         relative = manifest.get(key)
+        if relative is not None and not isinstance(relative, str):
+            raise UnsafeRunFileError(key)
         selected = Path(str(relative)) if relative else Path(fallback)
         if selected.is_absolute() or selected.drive or ".." in selected.parts or (os.sep != "\\" and "\\" in str(selected)):
             raise UnsafeRunFileError("Run file path must stay inside the run directory")
@@ -143,6 +172,8 @@ class RunBundle:
 
     def _artifact_path(self, key: str, fallback: str) -> Path:
         candidate = self._candidate_path(key, fallback)
+        if self.manifest().get(key) and not _present(candidate):
+            raise UnsafeRunFileError(key)
         default = self.path(fallback)
         if _present(candidate) or not _present(default):
             return candidate
@@ -150,17 +181,30 @@ class RunBundle:
 
     def _artifact_json(self, key: str, fallback: str, default: Any) -> tuple[Path | None, Any]:
         path = self._artifact_path(key, fallback)
-        return (path, _read_json(self.run_dir, path, default)) if _present(path) else (None, None)
+        return (path, _read_json(self.run_dir, path, default, field=key)) if _present(path) else (None, None)
 
+    @guarded_operation
     def manifest(self) -> dict[str, Any]:
-        return _mapping(_read_json(self.run_dir, self.path("run-manifest.json"), {}))
+        manifest = _mapping(_read_json(self.run_dir, self.path("run-manifest.json"), {}, field="manifest"))
+        for field, value in manifest.items():
+            if not field.endswith("_path") or not isinstance(value, str) or not value:
+                continue
+            path = Path(value)
+            if path.is_absolute():
+                try:
+                    path = path.relative_to(self.run_dir.absolute())
+                except ValueError:
+                    continue
+            if path.parts and path.parts[0].casefold() == "operator-inputs":
+                raise UnsafeRunFileError(field)
+        return manifest
 
     def summary(self) -> dict[str, Any]:
         path = self._artifact_path("summary_path", "summary.json")
-        return _mapping(_read_json(self.run_dir, path, {}))
+        return _mapping(_read_json(self.run_dir, path, {}, field="summary_path"))
 
     def summary_md(self) -> str | None:
-        return _read_text(self.run_dir, self._artifact_path("summary_md_path", "summary.md"))
+        return _read_text(self.run_dir, self._artifact_path("summary_md_path", "summary.md"), field="summary_md_path")
 
     def diagnostics(self) -> Any:
         return _read_json(self.run_dir, self.path("diagnostics.json"), None)

@@ -38,6 +38,8 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.bundle_integrity import integrity_failed, manifest_digest_problem, normalize_digest
+from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guard_session, guarded_operation, read_guarded_bytes
+from azure_tenant_audit.run_files import read_run_file
 from azure_tenant_audit.rule_parameters import changed_rule_parameters, recorded_rule_parameters
 from azure_tenant_audit.waivers import (
     accepted_risk_summary,
@@ -184,10 +186,14 @@ def _open_run(run_dir: str | Path, label: str) -> RunBundle:
     if not root.is_dir():
         raise GateInputError("run_dir_missing", f"{label} directory not found: {run_dir}")
     manifest_path = root / "run-manifest.json"
-    if not manifest_path.is_file():
-        raise GateInputError("missing_manifest", f"{label} has no run-manifest.json: {run_dir}")
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        with guard_session() as guard:
+            guard.bind_run(root)
+            manifest = json.loads(read_run_file(root, "run-manifest.json"))
+    except UnsafeRunFileError:
+        raise
+    except FileNotFoundError:
+        raise GateInputError("missing_manifest", f"{label} has no run-manifest.json: {run_dir}") from None
     except (OSError, ValueError) as exc:
         raise GateInputError("unreadable_manifest", f"{label} run-manifest.json is unreadable: {exc}") from exc
     if not isinstance(manifest, dict) or not manifest:
@@ -196,7 +202,7 @@ def _open_run(run_dir: str | Path, label: str) -> RunBundle:
 
 
 def _read_json_file(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(read_guarded_bytes(path, field="run-file"))
 
 
 def _verify_contract(bundle: RunBundle, label: str) -> dict[str, Any]:
@@ -212,6 +218,8 @@ def _verify_contract(bundle: RunBundle, label: str) -> dict[str, Any]:
     manifest = bundle.manifest()
     try:
         recorded = _read_json_file(root / "validation.json")
+    except UnsafeRunFileError:
+        raise
     except (OSError, ValueError) as exc:
         raise GateInputError("contract_invalid", f"{label} validation.json is missing or unreadable: {exc}") from exc
     recorded_valid = isinstance(recorded, Mapping) and recorded.get("valid") is True
@@ -224,6 +232,8 @@ def _verify_contract(bundle: RunBundle, label: str) -> dict[str, Any]:
         )
     try:
         report = build_validation_report(run_dir=root, read_only=True)
+    except UnsafeRunFileError:
+        raise
     except Exception as exc:  # noqa: BLE001 - any failure to validate means the evidence cannot be trusted
         raise GateInputError(
             "contract_invalid", f"{label} contract could not be recomputed: {type(exc).__name__}: {exc}"
@@ -361,17 +371,16 @@ def _verify_findings(bundle: RunBundle, label: str) -> list[dict[str, Any]]:
     path = root / relative
     if not path.is_file() and (root / "findings/findings.json").is_file():
         path = root / "findings/findings.json"
-    try:
-        inside = path.resolve().is_relative_to(root.resolve())
-    except OSError:
-        inside = False
-    if not inside:
-        raise GateInputError("unreadable_findings", f"{label} findings path escapes the run directory: {relative}")
+    relative_path = Path(relative)
+    if relative_path.is_absolute() or ".." in relative_path.parts or "\\" in relative:
+        raise UnsafeRunFileError("findings_path", reason="outside")
 
     file_rows: list[dict[str, Any]] | None = None
     if path.is_file():
         try:
             payload = _read_json_file(path)
+        except UnsafeRunFileError:
+            raise
         except (OSError, ValueError) as exc:
             raise GateInputError("unreadable_findings", f"{label} {relative} is empty or unreadable: {exc}") from exc
         if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
@@ -539,9 +548,11 @@ def _verified_run(
     return bundle, {**contract, "integrity": integrity}, rows, coverage, warnings
 
 
+@guarded_operation
 def gate_findings(
     *, run_dir: str, fail_on: str, allow_partial: bool = False, expect_manifest_sha256: str | None = None
 ) -> dict[str, object]:
+    current_context().bind_run(run_dir)
     threshold, threshold_rank = _threshold(fail_on)
     context = {"fail_on": threshold, "run_dir": str(run_dir)}
     try:
@@ -616,6 +627,7 @@ def _index(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return index
 
 
+@guarded_operation
 def gate_drift(
     *,
     baseline_run_dir: str,
@@ -625,6 +637,8 @@ def gate_drift(
     expect_baseline_manifest_sha256: str | None = None,
     expect_current_manifest_sha256: str | None = None,
 ) -> dict[str, object]:
+    current_context().bind_run(baseline_run_dir)
+    current_context().bind_run(current_run_dir)
     threshold, threshold_rank = _threshold(fail_on)
     context = {"fail_on": threshold, "baseline_run_dir": str(baseline_run_dir), "current_run_dir": str(current_run_dir)}
     try:

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from azure_tenant_audit import cli
+from azure_tenant_audit.guarded_io import UnsafeRunFileError
 from azure_tenant_audit.sensitive_users import (
     BUNDLE_PATH, KEY_PATH, MAX_BYTES, SensitiveUsers, SensitiveUsersError,
     load_sensitive_users, sensitive_users_digest, verify_sensitive_users,
@@ -72,8 +73,11 @@ def test_normalisation_and_hash(tmp_path, content):
 def test_invalid_file_is_sanitised(tmp_path, content, line):
     path = tmp_path / "input.txt"
     path.write_bytes(content)
-    with pytest.raises(SensitiveUsersError, match=f"line {line}:") as caught:
+    expected = UnsafeRunFileError if len(content) > MAX_BYTES else SensitiveUsersError
+    with pytest.raises(expected) as caught:
         load_sensitive_users(path)
+    if expected is SensitiveUsersError:
+        assert f"line {line}:" in str(caught.value)
     assert "@" not in str(caught.value)
     assert str(path) not in str(caught.value)
 
@@ -85,27 +89,30 @@ def test_regular_file_only_and_read_once(tmp_path, monkeypatch):
     original = os.open
 
     def open_spy(name, flags, *args, **kwargs):
-        if Path(name) == path:
+        fd = original(name, flags, *args, **kwargs)
+        info = os.fstat(fd)
+        target = path.stat()
+        if (info.st_dev, info.st_ino) == (target.st_dev, target.st_ino):
             opened.append(flags)
-        return original(name, flags, *args, **kwargs)
+        return fd
 
     monkeypatch.setattr(os, "open", open_spy)
     assert load_sensitive_users(path).addresses == CANARIES[:1]
     assert len(opened) == 1
     assert opened[0] & os.O_ACCMODE == os.O_RDONLY
     for non_file in (tmp_path, tmp_path / "missing"):
-        with pytest.raises(SensitiveUsersError):
+        with pytest.raises((SensitiveUsersError, UnsafeRunFileError)):
             load_sensitive_users(non_file)
     link = tmp_path / "link"
     link.symlink_to(path)
-    with pytest.raises(SensitiveUsersError):
+    with pytest.raises(UnsafeRunFileError):
         load_sensitive_users(link)
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo)
-    with pytest.raises(SensitiveUsersError, match="line 1: expected a regular file"):
+    with pytest.raises(UnsafeRunFileError):
         load_sensitive_users(fifo)
     if Path("/dev/zero").exists():
-        with pytest.raises(SensitiveUsersError, match="line 1: expected a regular file"):
+        with pytest.raises(UnsafeRunFileError):
             load_sensitive_users("/dev/zero")
 
 
@@ -344,6 +351,7 @@ def test_invalid_input_stops_before_collection(tmp_path, monkeypatch, capsys, ca
 @pytest.mark.parametrize("entrypoint", ["engine", "product"])
 def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplog, entrypoint):
     from azure_tenant_audit import output
+    from azure_tenant_audit import evidence_db
     from auditex import cli as product_cli
     from auditex.explorer import write_explorer
     from auditex.exporters import BUILTIN_EXPORTERS, run_exporter
@@ -355,6 +363,9 @@ def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplo
     from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
     from azure_tenant_audit.secret_hygiene import redact_argv
 
+    # This test creates constructed evidence only; exercise a successful snapshot
+    # even when the test runner's temporary directory is on an external volume.
+    monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: True)
     monkeypatch.setattr(output.secrets, "token_bytes", lambda size: KEY_CANARY if size == 32 else pytest.fail("key size"))
     path = tmp_path / (CANARIES[0] + ".txt")
     path.write_text(DISCARDED_NAME + ";" + CANARIES[1].upper() + "\n" + CANARIES[0])
@@ -362,9 +373,12 @@ def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplo
     original = os.open
 
     def spy(name, flags, *args, **kwargs):
-        if Path(name) == path:
+        fd = original(name, flags, *args, **kwargs)
+        info = os.fstat(fd)
+        target = path.stat()
+        if (info.st_dev, info.st_ino) == (target.st_dev, target.st_ino):
             opened.append(flags)
-        return original(name, flags, *args, **kwargs)
+        return fd
 
     monkeypatch.setattr(os, "open", spy)
     argv = ["--offline", "--sample", SAMPLE, "--out", str(tmp_path / "runs"),
@@ -558,8 +572,8 @@ def test_resume_never_silently_replaces_unusable_key(tmp_path, damage):
         key_file.symlink_to(writer.run_dir / BUNDLE_PATH)
     elif damage == "fifo":
         os.mkfifo(key_file)
-    resumed = AuditWriter(tmp_path, "test", run_dir=writer.run_dir)
-    with pytest.raises(SensitiveUsersError):
+    with pytest.raises(UnsafeRunFileError):
+        resumed = AuditWriter(tmp_path, "test", run_dir=writer.run_dir)
         resumed.write_sensitive_users(SensitiveUsers(CANARIES[:1]))
     assert (writer.run_dir / BUNDLE_PATH).read_text() == "\n".join(CANARIES) + "\n"
     assert not verify_sensitive_users(writer.run_dir)
@@ -680,7 +694,6 @@ def private_config(projection):
 ])
 def test_rule_input_rejects_mutation(tmp_path, monkeypatch, damage, capsys, caplog):
     from auditex.scuba_projection import project_run
-    from azure_tenant_audit.model_evidence import NOT_COLLECTED
     from azure_tenant_audit.sensitive_users import MAX_ENTRIES
 
     root = rule_input_bundle(tmp_path)
@@ -740,12 +753,11 @@ def test_rule_input_rejects_mutation(tmp_path, monkeypatch, damage, capsys, capl
     elif damage == "noncanonical":
         target.write_text("\n".join(reversed(CANARIES)) + "\n")
     manifest_path.write_text(json.dumps(manifest))
-    projection = project_run(root)
-    assert private_config(projection) == NOT_COLLECTED
-    outcome = projection.report["sections"]["scuba_config"]["synthesis"]["policies"][SS21]
-    assert outcome == ("oversize" if damage in {"oversize", "entries"} else "operator_input_required")
+    with pytest.raises(UnsafeRunFileError) as refusal:
+        project_run(root)
+    assert not verify_sensitive_users(root)
     captured = capsys.readouterr()
-    public = json.dumps([projection, projection.views, projection.report]) + captured.out + captured.err + caplog.text
+    public = str(refusal.value) + captured.out + captured.err + caplog.text
     assert all(address not in public for address in CANARIES)
 
 
@@ -753,10 +765,8 @@ def test_rule_input_rejects_mutation(tmp_path, monkeypatch, damage, capsys, capl
 @pytest.mark.parametrize("invalid", ["UPPERCASE@EXAMPLE.INVALID", "not-an-email"])
 def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path, monkeypatch, entrypoint, invalid):
     from auditex import model_serving, scuba_projection
-    from azure_tenant_audit.model_evidence import NOT_COLLECTED
-    from azure_tenant_audit.value_rules import assess
 
-    root = rule_input_bundle(tmp_path, (invalid,))
+    root = rule_input_bundle(tmp_path)
     operations_path = root / "raw/exchange_policy.json"
     operations = json.loads(operations_path.read_text())
     operations["antiPhishPolicies"]["value"][0]["TargetedUserProtectionAction"] = "NoAction"
@@ -765,6 +775,9 @@ def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path
     manifest_path = root / "run-manifest.json"
     manifest = json.loads(manifest_path.read_text())
     key = (root / KEY_PATH).read_bytes()
+    target.write_text(invalid + "\n")
+    manifest["operator_inputs"]["sensitive_users"] = SensitiveUsers((invalid,)).manifest(key)
+    manifest_path.write_text(json.dumps(manifest))
     assert manifest["operator_inputs"]["sensitive_users"] == SensitiveUsers((invalid,)).manifest(key)
 
     replacement_list = tmp_path / "replacement-list"
@@ -783,7 +796,7 @@ def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path
     def capture_open(path, flags, *args, **kwargs):
         nonlocal private_directory
         fd = original_open(path, flags, *args, **kwargs)
-        if path == root / "operator-inputs":
+        if str(path) == "operator-inputs":
             private_directory = fd
         if Path(path).name in {"sensitive-users.txt", "sensitive-users.key"}:
             private_file_opens.append(Path(path).name)
@@ -799,27 +812,13 @@ def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path
 
     monkeypatch.setattr(os, "open", capture_open)
     monkeypatch.setattr(os, "close", replace_on_close)
-    projections = []
-    if entrypoint == "project":
-        projections.append(scuba_projection.project_run(root))
-    else:
-        def capture_projection(*args, **kwargs):
-            projection = scuba_projection.project_run(*args, **kwargs)
-            projections.append(projection)
-            return projection
-
-        monkeypatch.setattr(model_serving, "project_run", capture_projection)
-        result = model_serving.assess_run(root, policies=[SS21])
+    with pytest.raises(UnsafeRunFileError):
+        if entrypoint == "project":
+            scuba_projection.project_run(root)
+        else:
+            model_serving.assess_run(root, policies=[SS21])
 
     assert swapped
-    assert len(projections) == 1
-    if entrypoint == "assess":
-        assert result["policies"][0]["rule_precheck"]["cell"] == "section_not_collected"
-    projection = projections[0]
-    assert private_config(projection) == NOT_COLLECTED
-    assert projection.report["sections"]["scuba_config"]["synthesis"]["policies"][SS21] == "operator_input_required"
-    sections = {**projection.rule_sections, "scuba_config": private_config(projection)}
-    assert assess(SS21, sections)["cell"] == "section_not_collected"
     assert private_file_opens == ["sensitive-users.txt", "sensitive-users.key"]
     assert verify_sensitive_users(root)  # The replacement is independently valid.
 
@@ -832,7 +831,6 @@ def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path
 ])
 def test_rule_input_rejects_noncanonical_snapshot_with_matching_hmac(tmp_path, data):
     from auditex.scuba_projection import project_run
-    from azure_tenant_audit.model_evidence import NOT_COLLECTED
 
     root = rule_input_bundle(tmp_path, CANARIES[:1])
     (root / BUNDLE_PATH).write_bytes(data)
@@ -843,9 +841,9 @@ def test_rule_input_rejects_noncanonical_snapshot_with_matching_hmac(tmp_path, d
     manifest["operator_inputs"]["sensitive_users"] = SensitiveUsers(captured).manifest(key)
     manifest_path.write_text(json.dumps(manifest))
 
-    projection = project_run(root)
-    assert private_config(projection) == NOT_COLLECTED
-    assert projection.report["sections"]["scuba_config"]["synthesis"]["policies"][SS21] == "operator_input_required"
+    with pytest.raises(UnsafeRunFileError):
+        project_run(root)
+    assert not verify_sensitive_users(root)
 
 
 def test_rule_input_reads_valid_private_files_once(tmp_path, monkeypatch):
@@ -907,21 +905,15 @@ def test_rule_input_does_not_consume_extra_private_files_or_unmanifested_input(t
     manifest = json.loads(manifest_path.read_text())
     manifest.pop("operator_inputs")
     manifest_path.write_text(json.dumps(manifest))
-    baseline = project_run(root)
-    # False / absent metadata must not open any private file and must preserve
-    # all public bytes, including the existing synthesis record and prompt view.
-    original = os.open
-
-    def denied(path, *args, **kwargs):
-        assert "operator-inputs" not in str(path)
-        return original(path, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", denied)
+    # A present pair without verifying metadata is now refused at admission.
+    with pytest.raises(UnsafeRunFileError):
+        project_run(root)
+    assert not verify_sensitive_users(root)
     manifest["operator_inputs"] = {"sensitive_users": {"supplied": False}}
     manifest_path.write_text(json.dumps(manifest))
-    absent = project_run(root)
-    assert json.dumps([absent, absent.views, absent.report], sort_keys=True) == json.dumps(
-        [baseline, baseline.views, baseline.report], sort_keys=True)
+    with pytest.raises(UnsafeRunFileError):
+        project_run(root)
+    assert not verify_sensitive_users(root)
 
 
 @pytest.mark.parametrize("action,cell", [("Quarantine", "policy_field_unusable"),

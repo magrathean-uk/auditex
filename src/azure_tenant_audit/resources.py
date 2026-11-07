@@ -96,6 +96,31 @@ def resolve_resource_path(path: str | Path) -> Path:
     return _repo_root() / target
 
 
+def read_selected_resource(path: str | Path, *, default: str, field: str) -> bytes:
+    """Keep the shipped default route; admit explicit alternate local inputs."""
+    from .guarded_io import current_context, read_guarded_bytes
+
+    context = current_context()
+    pinned = context is not None and context._absolute(path) in context._pinned
+    if not pinned and (str(path) == default or is_shipped_resource(path)):
+        return resolve_resource_path(path).read_bytes()
+    return read_guarded_bytes(resolve_resource_path(path), field=field)
+
+
+def is_shipped_resource(path: str | Path) -> bool:
+    """Whether a lexical path belongs to a shipped-content area of a resource root."""
+    target = Path(path).expanduser()
+    for adapter in _resource_adapters():
+        try:
+            relative = target.relative_to(adapter.root) if target.is_absolute() else target
+        except ValueError:
+            continue
+        if ".." not in relative.parts and any(relative.match(pattern) for area in SHIPPED_CONTENT_AREAS
+                                                for pattern in area.package_patterns):
+            return True
+    return False
+
+
 def open_text_resource(path: str | Path) -> str:
     return resolve_resource_path(path).read_text(encoding="utf-8")
 

@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterator
+
+from azure_tenant_audit.guarded_io import guard_session, guarded_operation, open_pinned_binary
 
 SCHEMA_VERSION = "2026-10-18"
 MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -55,16 +58,20 @@ def _text(value: Any, label: str) -> str:
 
 
 def _file_info(path: Path) -> dict:
-    if not path.is_file():
-        raise ValueError(f"input is not a regular file: {path}")
     digest = hashlib.sha256()
     size = 0
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            size += len(chunk)
-            if size > MAX_FILE_BYTES:
-                raise ValueError(f"input exceeds {MAX_FILE_BYTES} bytes: {path}")
-            digest.update(chunk)
+    missing = False
+    try:
+        with guard_session() as context, open_pinned_binary(path, field="input", context=context, max_bytes=MAX_FILE_BYTES) as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                size += len(chunk)
+                if size > MAX_FILE_BYTES:
+                    raise ValueError(f"input exceeds {MAX_FILE_BYTES} bytes")
+                digest.update(chunk)
+    except FileNotFoundError:
+        missing = True
+    if missing:
+        raise ValueError("input file is missing") from None
     return {"path": str(path), "bytes": size, "sha256": digest.hexdigest()}
 
 
@@ -72,7 +79,7 @@ def _manifest(path: Path) -> tuple[dict, list[dict], list[dict]]:
     info = _file_info(path)
     if info["bytes"] > MAX_LINE_BYTES:
         raise ValueError("source manifest exceeds size limit")
-    with path.open("rb") as handle:
+    with guard_session() as context, open_pinned_binary(path, field="manifest", context=context, max_bytes=MAX_LINE_BYTES) as handle:
         raw = handle.read(MAX_LINE_BYTES + 1)
     if len(raw) > MAX_LINE_BYTES:
         raise ValueError("source manifest exceeds size limit")
@@ -104,7 +111,7 @@ def _manifest(path: Path) -> tuple[dict, list[dict], list[dict]]:
                 raise ValueError(f"{role}_files must be an array")
             for name in names:
                 candidate = Path(_text(name, "input path"))
-                candidate = (path.parent / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+                candidate = Path(os.path.abspath(path.parent / candidate if not candidate.is_absolute() else candidate))
                 extension = candidate.suffix.lower()
                 if role == "training" and extension != ".jsonl":
                     raise ValueError("training files must be JSONL")
@@ -132,7 +139,7 @@ def _rows(info: dict) -> Iterator[tuple[int, Any, str | None]]:
     """Stream bounded lines, then detect changes since the manifest preflight."""
     digest = hashlib.sha256()
     size = 0
-    with Path(info["path"]).open("rb") as handle:
+    with guard_session() as context, open_pinned_binary(info["path"], field="input", context=context, max_bytes=MAX_FILE_BYTES) as handle:
         line_number = 0
         while True:
             line = handle.readline(MAX_LINE_BYTES + 1)
@@ -161,7 +168,7 @@ def _rows(info: dict) -> Iterator[tuple[int, Any, str | None]]:
             except (ValueError, UnicodeError, RecursionError) as exc:
                 yield line_number, None, f"invalid JSONL: {exc}"
     if size != info["bytes"] or digest.hexdigest() != info["sha256"]:
-        raise ValueError(f"input changed during staging: {info['path']}")
+        raise ValueError("input changed during staging")
 
 
 def _tools(value: Any) -> list[dict]:
@@ -278,14 +285,15 @@ def _ref(info: dict, line: int) -> dict:
     return {key: info[key] for key in ("upstream_source_id", "revision", "path", "sha256")} | {"line": line}
 
 
+@guarded_operation
 def stage_public_corpus(source_manifest_path: str | Path, output_dir: str | Path) -> dict:
     """Validate and stage public JSONL candidates, retaining source hashes/lines.
 
     No input content is executed. Invalid manifests or unreadable/changed inputs
     fail before output creation. Existing output files are never overwritten.
     """
-    source_path = Path(source_manifest_path).resolve()
-    output = Path(output_dir).resolve()
+    source_path = Path(os.path.abspath(source_manifest_path))
+    output = Path(os.path.abspath(output_dir))
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise FileExistsError("output directory must be absent or empty")
     manifest_info, training, evaluation = _manifest(source_path)
@@ -376,18 +384,21 @@ def stage_public_corpus(source_manifest_path: str | Path, output_dir: str | Path
                               for name, data in outputs.items()}}
     outputs["manifest.json"] = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     # Every validation above completes before any output path is created.
-    output.mkdir(parents=True, exist_ok=True)
+    from azure_tenant_audit.guarded_io import open_private_output
+    from azure_tenant_audit.private_io import _write_all, make_private_dirs
+    make_private_dirs(output)
     if any(output.iterdir()):
         raise FileExistsError("output directory must be empty")
     created: list[Path] = []
     try:
         for name in _OUTPUT_NAMES:
             destination = output / name
-            with destination.open("xb") as handle:
+            with guard_session() as context, open_private_output(destination, field="output", context=context, exclusive=True) as fd:
                 created.append(destination)
-                handle.write(outputs[name])
+                _write_all(fd, outputs[name])
     except BaseException:
+        from azure_tenant_audit.guarded_io import remove_guarded_output
         for destination in created:
-            destination.unlink(missing_ok=True)
+            remove_guarded_output(destination)
         raise
     return manifest

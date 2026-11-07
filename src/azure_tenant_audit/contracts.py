@@ -125,12 +125,27 @@ _KNOWN_NON_COLLECTOR_PROVENANCE = frozenset({"response", "toolchain", "windows36
 
 def _read_json(path: Path, fallback: Any = None, *, run_dir: Path) -> Any:
     try:
-        try:
-            relative = path.relative_to(run_dir)
-        except ValueError as exc:
-            raise UnsafeRunFileError("Run file path must stay inside the run directory") from exc
-        return json.loads(read_run_file(run_dir, relative).decode("utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
+        relative = path.relative_to(run_dir)
+    except ValueError:
+        relative = None
+    if relative is None:
+        raise UnsafeRunFileError("run-file", reason="outside") from None
+    try:
+        data = read_run_file(run_dir, relative)
+    except UnsafeRunFileError:
+        raise
+    except (FileNotFoundError, OSError):
+        return fallback
+    invalid = False
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        invalid = True
+    if invalid:
+        raise UnsafeRunFileError("run-file") from None
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
         return fallback
 
 
@@ -540,23 +555,17 @@ def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_o
             metadata = decode_identity_metadata(dict(conn.execute("SELECT key, value FROM run_meta")))
 
     try:
-        if read_only:
-            # Even SELECT against a WAL database can modify its shared-memory
-            # sidecar. Inspect only a private copy, including committed data
-            # still in the WAL, without opening the original through SQLite.
-            # When bundle-hashes.json lists the index, only the hashed main file is copied: a sidecar
-            # beside it is not covered by the hash, and SQLite would replay it over the hashed file.
-            # (verify_bundle_hashes reports the sidecar as an unexpected file.)
-            suffixes = ("",) if evidence_index_is_hashed(run_dir) else ("", "-wal", "-shm")
-            has_sidecars = any(
-                (candidate := db_path.with_name(db_path.name + suffix)).exists() or candidate.is_symlink()
-                for suffix in suffixes[1:]
-            )
-            with open_private_run_index(run_dir, include_sidecars=has_sidecars) as conn:
-                inspect(conn)
-        else:
-            with closing(sqlite3.connect(db_path)) as conn:
-                inspect(conn)
+        # SQLite sees only a protected snapshot, even during finalisation.
+        # Hashed indices must not replay sidecars that the manifest did not cover.
+        suffixes = ("",) if evidence_index_is_hashed(run_dir) else ("", "-wal", "-shm", "-journal")
+        has_sidecars = any(
+            (candidate := db_path.with_name(db_path.name + suffix)).exists() or candidate.is_symlink()
+            for suffix in suffixes[1:]
+        )
+        with open_private_run_index(run_dir, include_sidecars=has_sidecars) as conn:
+            inspect(conn)
+    except UnsafeRunFileError:
+        raise
     except (sqlite3.DatabaseError, OSError) as exc:
         issues.append(_issue("invalid_evidence_sqlite", path="index/evidence.sqlite", details=str(exc)))
     return metadata

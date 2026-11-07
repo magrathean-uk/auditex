@@ -258,8 +258,17 @@ def resolve_token_input(
             raise ValueError(f"environment variable '{token_env}' is empty or missing")
         return value.strip(), f"env:{token_env}"
     if token_file:
-        return Path(token_file).expanduser().read_text(encoding="utf-8").strip(), f"file:{token_file}"
-    return sys.stdin.read().strip(), "stdin"
+        failed = False
+        try:
+            token = Path(token_file).expanduser().read_text(encoding="utf-8").strip()
+        except (OSError, ValueError, UnicodeError):
+            failed = True
+        if failed:
+            from azure_tenant_audit.guarded_io import UnsafeRunFileError
+            raise UnsafeRunFileError("input") from None
+        return token, f"file:{token_file}"
+    from azure_tenant_audit.guarded_io import read_guarded_stdin
+    return read_guarded_stdin().strip(), "stdin"
 
 
 def _redacted_token_preview(token: str) -> str:

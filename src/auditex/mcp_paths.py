@@ -66,7 +66,7 @@ def confine_name(value: str, *, argument: str = "name") -> str:
 
 
 def confine_path(value: str, *, argument: str = "path", root: Path | None = None) -> str:
-    """Resolved absolute path of ``value`` inside the MCP root, or McpPathError."""
+    """Confined absolute spelling of ``value``, retaining links for admission."""
     base = (root or mcp_root()).resolve()
     if not isinstance(value, str):
         raise McpPathError(f"{argument} must be a string path")
@@ -80,7 +80,9 @@ def confine_path(value: str, *, argument: str = "path", root: Path | None = None
     resolved = (candidate if candidate.is_absolute() else base / candidate).resolve()
     if resolved != base and base not in resolved.parents:
         raise McpPathError(f"{argument} is outside the MCP root {base}")
-    return str(resolved)
+    # Keep the lexical path for the descriptor guard: resolving here would
+    # erase a symlink before the consumer can refuse it.
+    return os.path.abspath(candidate if candidate.is_absolute() else base / candidate)
 
 
 def confine_value(value: Any, *, argument: str = "path", root: Path | None = None) -> Any:

@@ -235,26 +235,40 @@ Bundle hash manifest generation and verification stream without a size cap;
 they still reject unsafe file types and links. Identity discovery has its own
 limits, described below.
 
-The guard rejects paths outside the root, symbolic links, non-regular files
-and files whose hard-link count is not exactly one. On systems with
-descriptor-relative opens, it checks each parent and the opened file without
-following links; the portable fallback checks paths before opening and
-compares file identity afterwards. Hard-linked backup bundles, including those
-made with `rsync --link-dest`, cannot be read until their files are copied
-without hard links. Read-only index inspection streams a guarded copy to a
-private `0700` temporary directory under `TMPDIR`, with files created as `0600`.
-The copy contains run evidence, so `TMPDIR` must be on encrypted storage for
-live tenant data. Closed indexes and legacy SQLite WAL indexes with their
-sidecars are copied without a size cap; available temporary disk space and the
-time needed to copy the index are the practical limits. For a closed index the
-private directory may be inside the run or its parent. If it cannot be created
-or the copy cannot be made, the checked index is opened in place with SQLite's
-read-only immutable mode, which creates no sidecars. For a legacy WAL, if the
-temporary directory is unavailable or inside the run's parent, the checked
-index and sidecars are opened in place with SQLite's read-only mode instead.
-Both fallbacks reopen the checked paths and cannot provide the same protection
-against concurrent path replacement as the temporary-copy path. SQLite may
-also update an existing shared-memory sidecar when reading a legacy WAL in place.
+The guard rejects paths outside the root, symbolic links, non-regular files,
+files owned by another user, and files with more than one hard link. A run and
+its `operator-inputs` directory must be owned by the effective user and must not
+be group- or world-writable. It refuses where descriptor-relative, no-follow
+opens or the required identity and permission checks are unavailable.
+
+The context for an operation verifies a run's sensitive-user pair against its
+manifest and keeps the pair's file identities open while admitting inputs. A
+missing, partial or invalid claimed pair is refused. Independently copied runs
+are verified and registered separately. A standalone copy without a run marker
+and with an unseen file identity cannot be recognised as a private pair. There
+is no global registry of private files.
+
+The guard does not contain a writer running as the same user, an earlier rename,
+replacement or writable ancestors, ACL grants, privilege, or restored modes.
+Shipped resources, including `AUDITEX_RESOURCE_ROOT` and import-time rule
+configuration, remain outside it. So do token files, OAuth and service-account
+files, token caches, `AUDITEX_LOCAL_AUTH_ENV`, `AUDITEX_AUTH_CONTEXTS_PATH`,
+and inherited descriptors other than standard input. Child processes using `AUDITEX_M365_HOME` or
+`XDG_DATA_HOME`, external exporters given run paths, and delegated
+Transformers/Datasets reads are trusted code and are outside this boundary.
+
+Hard-linked backup bundles, including those made with `rsync --link-dest`, are
+refused; the original run is also refused while its files have those extra
+links. Recover with an independent `cp` copy owned by the operator, not hard
+links, and restore safe directory permissions. Each copy's private pair is
+verified on admission.
+
+Read-only index inspection streams guarded descriptors into a private `0700`
+temporary directory under `TMPDIR`, with files created as `0600`, then opens
+the snapshot. A failed or incoherent copy is refused, with no in-place SQLite
+fallback. The temporary directory must be proved to be on encrypted internal
+storage; unproved or external storage is refused. Index and supported sidecar
+copies have no size cap, so available temporary space and copy time matter.
 
 ## Evidence and customer packs
 
@@ -276,7 +290,8 @@ supplying bare lower-case addresses to SS 2.1's in-memory rule configuration.
 This configuration bypasses the model shape gate and model budgets, never the
 loader's byte/entry bounds. Addresses never enter public projection views,
 prompts, assessment records, sidecars, logs, AI context, reports, exports or
-packs. Absent or unusable input stays not collected. SS 2.3 still requires a
+packs. Absent input stays not collected; a present but invalid private pair is
+refused during run admission. SS 2.3 still requires a
 separate PartnerDomains input. Current collection still excludes
 `TargetedUsersToProtect`; enabling met from collected target membership needs a
 separate privacy review. Offline copies use the same verification and private

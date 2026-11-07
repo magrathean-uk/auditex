@@ -100,11 +100,10 @@ def _load_chunk_records(run_dir: Path | None, relative_paths: list[str]) -> list
         return []
     rows: list[Mapping[str, Any]] = []
     for relative in relative_paths:
-        path = run_dir / relative
-        if not path.exists():
-            continue
+        from .chunk_reader import _open_chunk
+        from .run_files import UnsafeRunFileError
         try:
-            with path.open("r", encoding="utf-8") as handle:
+            with _open_chunk(run_dir, relative) as handle:
                 for line in handle:
                     line = line.strip()
                     if not line:
@@ -112,6 +111,8 @@ def _load_chunk_records(run_dir: Path | None, relative_paths: list[str]) -> list
                     payload = json.loads(line)
                     if isinstance(payload, Mapping):
                         rows.append(payload)
+        except UnsafeRunFileError:
+            raise
         except (OSError, json.JSONDecodeError, ValueError):
             continue
     return rows
