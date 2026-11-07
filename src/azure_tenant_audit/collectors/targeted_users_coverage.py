@@ -600,9 +600,13 @@ def _section(
     if not isinstance(section, Mapping):
         return _clean(section, _Walk(), 1)
     known = _known_operations()
-    out: dict[str, Any] = {}
+    # These are the collector's own health fields, not operation names. Preserve their refusal meaning through
+    # fixed metadata before reducing operations, including mapping-valued errors that must stay truthy.
+    out: dict[str, Any] = _envelope_metadata(section)
+    metadata_keys = frozenset({*_ENVELOPE_TEXT, *_ENVELOPE_NUMBERS, *_ENVELOPE_FLAGS, *_ENVELOPE_MARKERS, "command"})
     for name, item in section.items():
-        if type(name) is not str or name == COVERAGE_KEY or _key_names_target(name) or _mentions_target(name):
+        if (type(name) is not str or name in metadata_keys or name == COVERAGE_KEY
+                or _key_names_target(name) or _mentions_target(name)):
             continue
         try:
             if name == OPERATION:
