@@ -139,10 +139,12 @@ def parse_guarded(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.
             self.parser = current
             self.message = message
 
+    original_errors: list[tuple[argparse.ArgumentParser, Any]] = []
     if sensitive_values:
         # argparse can echo unknown or invalid values before returning control.
         # Keep its usage/help while replacing the diagnostic on every subparser.
         def sanitise_errors(current: argparse.ArgumentParser) -> None:
+            original_errors.append((current, current.error))
             def safe_error(message: str) -> None:
                 reason = ("unrecognized arguments: ***redacted***" if message.startswith("unrecognized arguments:")
                           else "invalid arguments")
@@ -165,6 +167,9 @@ def parse_guarded(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.
                 parser.error("unrecognized arguments: " + " ".join(unknown))
     except _SafeParseFailure as exc:
         failure = exc.parser, exc.message
+    finally:
+        for current, original_error in original_errors:
+            current.error = original_error
     if failure is not None:
         failed_parser, reason = failure
         failed_parser.print_usage(sys.stderr)

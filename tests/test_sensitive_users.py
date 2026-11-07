@@ -145,6 +145,17 @@ def test_empty_environment_is_unset_but_empty_explicit_path_is_invalid(monkeypat
         load_sensitive_users("")
 
 
+def test_invalid_explicit_sensitive_file_is_a_sanitised_cli_usage_error(tmp_path, capsys):
+    path = tmp_path / "private-path-canary"
+    path.write_text("private-value-canary\n")
+    with pytest.raises(SystemExit) as error:
+        cli.main(["--offline", "--sensitive-users", str(path)])
+    output = capsys.readouterr()
+    assert error.value.code == 2
+    assert "private-path-canary" not in output.out + output.err
+    assert "private-value-canary" not in output.out + output.err
+
+
 @pytest.mark.parametrize("failure", [ValueError, RecursionError])
 def test_decoder_failures_are_sanitised(tmp_path, monkeypatch, failure):
     path = tmp_path / "input.txt"

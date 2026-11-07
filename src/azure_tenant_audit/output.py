@@ -373,7 +373,8 @@ class AuditWriter:
                         existing = {}
                         for name in ("sensitive-users.key", "sensitive-users.txt", ".gitignore"):
                             try:
-                                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+                                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                                             | getattr(os, "O_CLOEXEC", 0), dir_fd=descriptor)
                             except FileNotFoundError:
                                 continue
                             try:
@@ -391,7 +392,8 @@ class AuditWriter:
                             prepared: list[tuple[str, str, int]] = []
                             for name, data in values.items():
                                 temporary = "." + name + "." + os.urandom(12).hex() + ".tmp"
-                                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                                             | getattr(os, "O_CLOEXEC", 0),
                                              BUNDLE_FILE_MODE, dir_fd=descriptor)
                                 temporaries.append(temporary)
                                 try:
@@ -399,7 +401,8 @@ class AuditWriter:
                                     _write_all(fd, data)
                                 finally:
                                     os.close(fd)
-                                pinned = os.open(temporary, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+                                pinned = os.open(temporary, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                                                 | getattr(os, "O_CLOEXEC", 0), dir_fd=descriptor)
                                 context._fds.append(pinned)
                                 info = os.fstat(pinned)
                                 context._check_file(info, "private input", None, private_verifier=True)

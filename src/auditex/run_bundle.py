@@ -235,10 +235,10 @@ class RunBundle:
         return self._artifact_json("data_handling_path", "data-handling.json", {})
 
     def auth_context(self) -> tuple[Path | None, Any]:
-        path = self._candidate_path("auth_context_path", "auth-context.json")
+        path = self._artifact_path("auth_context_path", "auth-context.json")
         normalized_path = self.path("normalized/auth_context.json")
         if _present(path):
-            return path, _read_json(self.run_dir, path, {})
+            return path, _read_json(self.run_dir, path, {}, field="auth_context_path")
         if _present(normalized_path):
             return normalized_path, _read_json(self.run_dir, normalized_path, {})
         return None, None

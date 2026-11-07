@@ -151,7 +151,9 @@ def build_validation_report(
     run_dir: Path,
     ai_context: dict[str, Any],
     findings: list[dict[str, Any]],
+    _fresh_index_proof: Any = None,
 ) -> dict[str, Any]:
     from .contracts import build_validation_report as _build_contract_validation_report
 
-    return _build_contract_validation_report(run_dir=run_dir, ai_context=ai_context, findings=findings)
+    return _build_contract_validation_report(run_dir=run_dir, ai_context=ai_context, findings=findings,
+                                             _fresh_index_proof=_fresh_index_proof)

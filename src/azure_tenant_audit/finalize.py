@@ -295,7 +295,8 @@ def finalize_bundle_contract(
         writer.record_artifact(writer.run_dir / relative)
 
     writer.write_bundle({**metadata, "_suppress_completion_log": True})
-    evidence_db_path = build_run_evidence_index(writer.run_dir)
+    fresh_index_proof: list = []
+    evidence_db_path = build_run_evidence_index(writer.run_dir, _proof_out=fresh_index_proof)
     writer.record_artifact(evidence_db_path)
 
     ai_context = build_ai_context(
@@ -308,7 +309,8 @@ def finalize_bundle_contract(
         findings=findings,
     )
     writer.write_json_artifact("ai_context.json", ai_context)
-    validation = build_validation_report(run_dir=writer.run_dir, ai_context=ai_context, findings=findings)
+    validation = build_validation_report(run_dir=writer.run_dir, ai_context=ai_context, findings=findings,
+                                         _fresh_index_proof=fresh_index_proof[0])
     writer.write_json_artifact("validation.json", validation)
     writer.log_event(
         "contract.validation.passed" if validation.get("valid") else "contract.validation.failed",

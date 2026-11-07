@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import sysconfig
 
 import pytest
 
@@ -34,7 +35,7 @@ with GuardContext() as context:
 def _env() -> dict[str, str]:
     env = os.environ.copy()
     source = str(Path(__file__).resolve().parents[1] / "src")
-    env["PYTHONPATH"] = os.pathsep.join((source, env.get("PYTHONPATH", "")))
+    env["PYTHONPATH"] = os.pathsep.join((source, sysconfig.get_paths()["purelib"], env.get("PYTHONPATH", "")))
     return env
 
 

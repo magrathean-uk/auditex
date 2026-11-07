@@ -267,8 +267,10 @@ Read-only index inspection streams guarded descriptors into a private `0700`
 temporary directory under `TMPDIR`, with files created as `0600`, then opens
 the snapshot. A failed or incoherent copy is refused, with no in-place SQLite
 fallback. The temporary directory must be proved to be on encrypted internal
-storage; unproved or external storage is refused. Index and supported sidecar
-copies have no size cap, so available temporary space and copy time matter.
+storage; unproved or external storage is refused. The encrypted-internal proof
+is implemented for macOS Data volumes; other platforms refuse index snapshot
+reads. Index and supported sidecar copies have no size cap, so available
+temporary space and copy time matter.
 
 ## Evidence and customer packs
 

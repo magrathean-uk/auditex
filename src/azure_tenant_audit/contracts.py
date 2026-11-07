@@ -11,7 +11,7 @@ from typing import Any
 
 from .bundle_integrity import evidence_index_is_hashed
 from .collection_gaps import list_truncations, section_gap_records
-from .evidence_db import open_private_run_index
+from .evidence_db import _FreshIndexProof, _verify_fresh_index, open_private_run_index
 from .evidence_refs import ARTIFACT_REASONS, EvidenceIndex
 from .provider_registry import provider_collectors
 from .resources import list_resource_files, resolve_resource_path
@@ -536,7 +536,10 @@ def _validate_sensitive_contract_artifacts(run_dir: Path, issues: list[dict[str,
             issues.append(_issue("unsafe_contract_artifact", path=relative, details=hits[:25]))
 
 
-def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_only: bool = False) -> dict[str, Any]:
+def _validate_evidence_db(
+    run_dir: Path, issues: list[dict[str, Any]], *, read_only: bool = False,
+    _fresh_index_proof: _FreshIndexProof | None = None,
+) -> dict[str, Any]:
     db_path = run_dir / "index" / "evidence.sqlite"
     if not db_path.exists():
         issues.append(_issue("missing_required_artifact", path="index/evidence.sqlite"))
@@ -555,7 +558,15 @@ def _validate_evidence_db(run_dir: Path, issues: list[dict[str, Any]], *, read_o
             metadata = decode_identity_metadata(dict(conn.execute("SELECT key, value FROM run_meta")))
 
     try:
-        # SQLite sees only a protected snapshot, even during finalisation.
+        # A writer may validate the exact bytes it just produced using the
+        # schema and metadata captured while its private build was open.
+        if not read_only and _fresh_index_proof is not None:
+            _verify_fresh_index(run_dir, _fresh_index_proof)
+            missing = sorted({"run_meta", "section_stats", "normalized_records"} - _fresh_index_proof.tables)
+            if missing:
+                issues.append(_issue("invalid_evidence_sqlite_schema", path="index/evidence.sqlite", details=missing))
+            return decode_identity_metadata(_fresh_index_proof.metadata)
+        # SQLite consumers see only a protected snapshot.
         # Hashed indices must not replay sidecars that the manifest did not cover.
         suffixes = ("",) if evidence_index_is_hashed(run_dir) else ("", "-wal", "-shm", "-journal")
         has_sidecars = any(
@@ -935,18 +946,21 @@ def build_validation_report(
     findings: list[dict[str, Any]] | None = None,
     required_artifacts: tuple[str, ...] = ROOT_REQUIRED_ARTIFACTS,
     read_only: bool = False,
+    _fresh_index_proof: _FreshIndexProof | None = None,
 ) -> dict[str, Any]:
     if not read_only:
         with unbounded_writer_reads():
             return _build_validation_report(run_dir=run_dir, ai_context=ai_context, findings=findings,
-                                            required_artifacts=required_artifacts, read_only=read_only)
+                                            required_artifacts=required_artifacts, read_only=read_only,
+                                            _fresh_index_proof=_fresh_index_proof)
     return _build_validation_report(run_dir=run_dir, ai_context=ai_context, findings=findings,
-                                    required_artifacts=required_artifacts, read_only=read_only)
+                                    required_artifacts=required_artifacts, read_only=read_only,
+                                    _fresh_index_proof=_fresh_index_proof)
 
 
 def _build_validation_report(
     *, run_dir: str | Path, ai_context: dict[str, Any] | None, findings: list[dict[str, Any]] | None,
-    required_artifacts: tuple[str, ...], read_only: bool,
+    required_artifacts: tuple[str, ...], read_only: bool, _fresh_index_proof: _FreshIndexProof | None,
 ) -> dict[str, Any]:
     run_path = Path(run_dir)
     issues: list[dict[str, Any]] = []
@@ -1001,7 +1015,8 @@ def _build_validation_report(
     _validate_finding_framework_mappings(loaded_findings, issues)
     _validate_ai_safe(run_path, issues)
     _validate_sensitive_contract_artifacts(run_path, issues)
-    indexed_identity = _validate_evidence_db(run_path, issues, read_only=read_only)
+    indexed_identity = _validate_evidence_db(run_path, issues, read_only=read_only,
+                                             _fresh_index_proof=_fresh_index_proof)
     manifest = _validate_manifest_artifact_paths(run_path, issues)
     _validate_collection_gaps(run_path, manifest, issues)
     _validate_data_handling(run_path, manifest, issues)

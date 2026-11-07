@@ -74,19 +74,19 @@ def _read_bounded(fd: int, limit: int) -> bytes:
     return b"".join(parts)
 
 
-def _parts(path: str | Path) -> tuple[bool, tuple[str, ...]]:
+def _parts(path: str | Path, *, allow_empty: bool = False) -> tuple[bool, tuple[str, ...]]:
     value = os.fspath(path)
     if not isinstance(value, str) or not value or "\0" in value:
         raise ValueError("invalid path")
     value = os.path.expanduser(value)
     parsed = Path(value)
     parts = parsed.parts[1:] if parsed.is_absolute() else parsed.parts
-    if not parts:
+    if not parts and not allow_empty:
         raise ValueError("empty path")
     # Darwin's virtual /.vol inode paths can resolve as a whole while their
     # intermediate components cannot be opened with openat. Refuse that
     # namespace because component-by-component confinement cannot be proved.
-    if parsed.is_absolute() and parts[0].casefold() == ".vol":
+    if parsed.is_absolute() and parts and parts[0].casefold() == ".vol":
         raise ValueError("virtual volume path")
     return parsed.is_absolute(), tuple(part for part in parts if part not in ("", "."))
 
@@ -148,7 +148,7 @@ class GuardContext:
         self._root_fd = self._cwd_fd = None
 
     def _directory(self, path: str | Path) -> int:
-        absolute, parts = _parts(path)
+        absolute, parts = _parts(path, allow_empty=True)
         anchor = self._root_fd if absolute else self._cwd_fd
         if anchor is None:
             raise OSError("guard context is closed")
@@ -322,23 +322,62 @@ class GuardContext:
         """Bind a run containing a selected path when its private directory is identifiable."""
         expanded = os.path.expanduser(os.fspath(path))
         absolute = Path(expanded) if os.path.isabs(expanded) else Path(self._cwd_path) / expanded
+
+        def optional_lstat(candidate: Path) -> os.stat_result | None:
+            failed = False
+            try:
+                return candidate.lstat()
+            except FileNotFoundError:
+                return None
+            except OSError:
+                failed = True
+            if failed:
+                raise UnsafeRunFileError("run") from None
+            return None
+
+        def private_pair_present(directory: Path) -> bool:
+            failed = False
+            descriptor = None
+            found = False
+            try:
+                descriptor = self._directory(directory)
+                for name in ("sensitive-users.txt", "sensitive-users.key"):
+                    try:
+                        os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+                        found = True
+                    except FileNotFoundError:
+                        pass
+            except OSError:
+                failed = True
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
+            if failed:
+                raise UnsafeRunFileError("run") from None
+            return found
+
         for parent in absolute.parents:
             private = parent / "operator-inputs"
             manifest = parent / "run-manifest.json"
-            try:
-                private.lstat()
-            except FileNotFoundError:
+            private_info = optional_lstat(private)
+            if private_info is None:
+                # A nested run or pack source manifest is a boundary; do not
+                # misclassify it from an unrelated higher ancestor's marker.
+                if optional_lstat(manifest) is not None:
+                    return
                 continue
-            except OSError:
-                raise UnsafeRunFileError("run") from None
-            try:
-                manifest.lstat()
-            except FileNotFoundError:
-                if private in absolute.parents:
+            if optional_lstat(manifest) is None:
+                if private_pair_present(private):
                     raise UnsafeRunFileError("run") from None
+                # The filesystem can resolve a case or Unicode variant to the
+                # same directory even when the path spellings are unequal.
+                for ancestor in absolute.parents:
+                    if ancestor == parent:
+                        break
+                    info = optional_lstat(ancestor)
+                    if info is not None and _identity(info) == _identity(private_info):
+                        raise UnsafeRunFileError("run") from None
                 continue
-            except OSError:
-                raise UnsafeRunFileError("run") from None
             self.bind_run(parent)
             return
 
@@ -624,7 +663,8 @@ def open_private_output(path: str | Path, *, field: str, context: GuardContext,
             parent, name = context._parent(path)
             if not _safe_directory(os.fstat(parent)):
                 raise UnsafeRunFileError(field, reason="owner")
-            flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            flags = (os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_CLOEXEC", 0))
             if append:
                 flags |= os.O_APPEND
             if exclusive:

@@ -80,7 +80,8 @@ def _write_private(path: str | Path, emit: Callable[[int], None]) -> Path:
                 if not _safe_directory(os.fstat(parent)) or temporary.parent != target.parent:
                     raise UnsafeRunFileError("output")
                 temp_name = temporary.name
-                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+                flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+                         | getattr(os, "O_CLOEXEC", 0))
                 fd = os.open(temp_name, flags, PRIVATE_FILE_MODE, dir_fd=parent)
                 created = True
                 context._check_file(os.fstat(fd), "output", None)

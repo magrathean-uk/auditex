@@ -373,6 +373,38 @@ def test_partial_or_unverified_pair_fails_closed(private_run: Path, damage: str)
         context.bind_run(private_run)
 
 
+def test_case_variant_private_directory_without_manifest_fails_closed(private_run: Path) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    alias = private_run / "Operator-Inputs/sensitive-users.key"
+    if not alias.exists():
+        pytest.skip("case-sensitive filesystem has no such alias")
+    (private_run / "run-manifest.json").unlink()
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        with open_guarded_file(alias, field="input", context=context):
+            pytest.fail("unverified private key was admitted")
+
+
+def test_any_selected_file_in_run_with_unmanifested_pair_is_refused(private_run: Path) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+
+    (private_run / "run-manifest.json").unlink()
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        with open_guarded_file(private_run / "summary.json", field="input", context=context):
+            pytest.fail("file in an unverified run was admitted")
+
+
+def test_unrelated_operator_inputs_ancestor_does_not_capture_a_nested_run(tmp_path: Path) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, open_guarded_file
+
+    parent = tmp_path / "operator-inputs"
+    parent.mkdir()
+    run = RunBundleBuilder(parent, name="unrelated-run").summary_md().build()
+    with GuardContext() as context:
+        with open_guarded_file(run / "summary.md", field="input", context=context) as descriptor:
+            assert os.read(descriptor, 64) == b"# Audit Summary"
+
+
 def test_non_posix_without_descriptor_relative_open_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from azure_tenant_audit.run_files import GuardContext, UnsafeRunFileError, open_guarded_file
 
@@ -429,3 +461,10 @@ def test_atomic_writer_creates_a_new_private_file(tmp_path: Path) -> None:
     write_private_bytes(target, b"ordinary")
     assert target.read_bytes() == b"ordinary"
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_output_descriptor_is_not_inheritable(tmp_path: Path) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, open_private_output
+
+    with GuardContext() as context, open_private_output(tmp_path / "output", field="output", context=context) as fd:
+        assert not os.get_inheritable(fd)

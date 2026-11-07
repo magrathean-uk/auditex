@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import plistlib
@@ -9,12 +10,13 @@ import sys
 import tempfile
 from collections.abc import Iterable, Mapping
 from contextlib import ExitStack, closing, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
-from .guarded_io import current_context, guarded_operation
+from .guarded_io import _DIR_FLAGS, _FILE_FLAGS, _safe_directory, current_context, guarded_operation
 from .perf_runtime import sqlite_bulk_pragmas
 from .run_files import UnsafeRunFileError, open_run_file
 from .tenant_identity import decode_identity_metadata
@@ -48,6 +50,14 @@ _INDEXES = (
     "CREATE INDEX idx_normalized_records_collector ON normalized_records(collector)",
     "CREATE INDEX idx_normalized_records_section ON normalized_records(section_name)",
 )
+
+
+@dataclass(frozen=True)
+class _FreshIndexProof:
+    state: tuple[int, int, int, int, int]
+    digest: str
+    tables: frozenset[str]
+    metadata: dict[str, str]
 
 
 def _read_json(path: Path, fallback: Any) -> Any:
@@ -160,8 +170,52 @@ def _insert_records(
     )
 
 
+@contextmanager
+def _private_index_build_directory(parent: Path, context):
+    """Create a private temporary directory relative to the admitted index parent."""
+    parent_fd = context._directory(parent)
+    directory_fd = None
+    created = False
+    name = ".auditex-index-build-" + os.urandom(12).hex()
+    try:
+        if not _safe_directory(os.fstat(parent_fd)):
+            raise UnsafeRunFileError("evidence index")
+        os.mkdir(name, 0o700, dir_fd=parent_fd)
+        created = True
+        directory_fd = os.open(name, _DIR_FLAGS, dir_fd=parent_fd)
+        if not _safe_directory(os.fstat(directory_fd)):
+            raise UnsafeRunFileError("evidence index")
+        yield directory_fd, parent / name
+    finally:
+        cleanup_failed = False
+        try:
+            if directory_fd is not None:
+                allowed = {"evidence.sqlite", "evidence.sqlite-wal", "evidence.sqlite-shm", "evidence.sqlite-journal"}
+                for entry in os.listdir(directory_fd):
+                    if entry not in allowed:
+                        raise UnsafeRunFileError("evidence index")
+                    descriptor = os.open(entry, _FILE_FLAGS, dir_fd=directory_fd)
+                    try:
+                        context._check_file(os.fstat(descriptor), "evidence index", None)
+                    finally:
+                        os.close(descriptor)
+                    os.unlink(entry, dir_fd=directory_fd)
+            if created:
+                os.rmdir(name, dir_fd=parent_fd)
+        except OSError:
+            cleanup_failed = True
+        finally:
+            if directory_fd is not None:
+                os.close(directory_fd)
+            os.close(parent_fd)
+        if cleanup_failed:
+            raise UnsafeRunFileError("evidence index") from None
+
+
 @guarded_operation
-def build_run_evidence_index(run_dir: str | Path, db_path: str | Path | None = None) -> Path:
+def build_run_evidence_index(
+    run_dir: str | Path, db_path: str | Path | None = None, *, _proof_out: list[_FreshIndexProof] | None = None,
+) -> Path:
     run_path = Path(run_dir)
     if os.path.lexists(run_path / "run-manifest.json") or os.path.lexists(run_path / "operator-inputs"):
         current_context().bind_run(run_path)
@@ -177,19 +231,14 @@ def build_run_evidence_index(run_dir: str | Path, db_path: str | Path | None = N
     manifest = manifest if isinstance(manifest, Mapping) else {}
     summary = summary if isinstance(summary, Mapping) else {}
 
-    # SQLite writes only inside a protected snapshot directory. Publish the
-    # completed database through an admitted destination descriptor.
-    from .guarded_io import open_guarded_file
+    # SQLite writes inside a private directory on the run's own volume. Publish
+    # the completed database through an admitted destination descriptor.
     failed = False
     try:
-        temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
-        if not _encrypted_internal_storage(temporary_root):
-            raise UnsafeRunFileError("evidence index")
-        with tempfile.TemporaryDirectory(prefix="auditex-index-build-", dir=temporary_root) as directory:
-            os.chmod(directory, 0o700)
-            snapshot = Path(directory) / "evidence.sqlite"
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(snapshot, flags, 0o600)
+        with guard_session() as context, _private_index_build_directory(target.parent, context) as (directory_fd, directory):
+            snapshot = directory / "evidence.sqlite"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+            descriptor = os.open("evidence.sqlite", flags, 0o600, dir_fd=directory_fd)
             os.close(descriptor)
             with closing(sqlite3.connect(snapshot)) as conn:
                 for pragma in sqlite_bulk_pragmas():
@@ -202,19 +251,52 @@ def build_run_evidence_index(run_dir: str | Path, db_path: str | Path | None = N
                     _insert_records(conn, run_path, section_name, path, records, run_id=run_id, tenant_name=tenant_name)
                 _create_indexes(conn)
                 conn.commit()
-            with guard_session() as context, open_guarded_file(snapshot, field="index", context=context) as source:
+                if _proof_out is not None:
+                    tables = frozenset(row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"))
+                    metadata = dict(conn.execute("SELECT key, value FROM run_meta"))
+            source = os.open("evidence.sqlite", _FILE_FLAGS, dir_fd=directory_fd)
+            try:
+                context._check_file(os.fstat(source), "evidence index", None)
                 with open_private_output(target, field="index", context=context, append=True) as destination:
                     for suffix in ("-wal", "-shm", "-journal"):
                         remove_guarded_output(target.with_name(target.name + suffix))
                     os.ftruncate(destination, 0)
+                    digest = hashlib.sha256()
                     while data := os.read(source, 1024 * 1024):
                         _write_all(destination, data)
+                        digest.update(data)
+                    if _proof_out is not None:
+                        proof = _FreshIndexProof(_file_state(os.fstat(destination)), digest.hexdigest(), tables, metadata)
+            finally:
+                os.close(source)
     except (OSError, sqlite3.DatabaseError, ValueError):
         failed = True
     if failed:
         raise UnsafeRunFileError("evidence index") from None
 
+    if _proof_out is not None:
+        _proof_out.append(proof)
+
     return target
+
+
+def _verify_fresh_index(run_dir: Path, proof: _FreshIndexProof) -> None:
+    """Validate the bytes just published by this process without reopening SQLite."""
+    relative = "index/evidence.sqlite"
+    with open_run_file(run_dir, relative, max_bytes=None) as descriptor:
+        if _file_state(os.fstat(descriptor)) != proof.state:
+            raise UnsafeRunFileError("evidence index") from None
+        digest = hashlib.sha256()
+        while data := os.read(descriptor, 1024 * 1024):
+            digest.update(data)
+        if _file_state(os.fstat(descriptor)) != proof.state or digest.hexdigest() != proof.digest:
+            raise UnsafeRunFileError("evidence index") from None
+    for suffix in ("-wal", "-shm", "-journal"):
+        try:
+            with open_run_file(run_dir, relative + suffix, max_bytes=None):
+                raise UnsafeRunFileError("evidence index") from None
+        except FileNotFoundError:
+            pass
 
 
 def _read_only_uri(db_path: str | Path, *, immutable: bool) -> str:
@@ -296,7 +378,7 @@ def _file_state(info: os.stat_result) -> tuple[int, int, int, int, int]:
 
 
 def _copy_index_descriptor(descriptor: int, destination: Path) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     output = os.open(destination, flags, 0o600)
     try:
         os.fchmod(output, 0o600)
