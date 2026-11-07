@@ -103,7 +103,7 @@ def _deep_carrier():
 
 SAMPLE_LAYOUTS = {
     "counterexample-2": lambda: deepcopy(COUNTEREXAMPLE_2),
-    "legacy-keyless-encoded-array": lambda: {"exchange_policy": {"legacyAntiPhish": {
+    "legacy-keyless-encoded-array": lambda: {"exchange_policy": {"legacyAntiPhishExport": {
         "stdout": json.dumps([UNCONF_EMAIL, UNCONF_DOMAIN, CONFIGURED[0]]), "stderr": f"WARNING: {UNCONF_NAME}",
         "message": MALFORMED, "error_class": "command_error"}}},
     "bare-row-list-with-scalar-row": lambda: {"exchange_policy": {"antiPhishPolicies": [
