@@ -7,7 +7,7 @@ from typing import Any
 
 from .assurance import build_live_readiness_summary
 from .capability_gate import INTUNE_COLLECTORS, enrich_capability_row, intune_license_state
-from .collection_gaps import sample_only
+from .collection_gaps import NON_FATAL_COLLECTORS, collector_gap_reason, sample_only
 from .config import CollectorConfig, RunConfig
 from .ai_context import build_privacy_block
 from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
@@ -26,6 +26,7 @@ class LiveRunPlan:
     permission_hints: dict[str, dict[str, Any]]
     collector_config: CollectorConfig
     profile: AuditProfile
+    selection_notices: tuple[str, ...] = ()
 
 
 def collector_execution_order(selected: list[str]) -> list[str]:
@@ -48,8 +49,10 @@ def build_live_run_plan(
     collector_presets: dict[str, object] | None = None,
 ) -> LiveRunPlan:
     profile = profile or get_profile(args.auditor_profile)
+    auth_mode = ("interactive" if args.interactive else "azure_cli" if args.use_azure_cli_token
+                 else "access_token" if args.access_token else "app")
     selected_collector_names = parse_csv_list(args.collectors)
-    exclude_collector_names = parse_csv_list(args.exclude)
+    exclude_collector_names = parse_csv_list(args.exclude) or []
     run_cfg = RunConfig(
         tenant_name=args.tenant_name,
         output_dir=output_dir,
@@ -76,6 +79,7 @@ def build_live_run_plan(
         explicit_collectors=selected_collector_names,
         excluded_collectors=exclude_collector_names,
         include_exchange=args.include_exchange,
+        auth_mode=auth_mode,
     )
     if run_cfg.plane not in profile.supported_planes:
         raise ValueError(f"Audit profile '{run_cfg.auditor_profile}' does not support plane '{run_cfg.plane}'.")
@@ -87,6 +91,22 @@ def build_live_run_plan(
     if args.interactive and not auth_scopes:
         auth_scopes = ["User.Read"]
 
+    selection_notices: tuple[str, ...] = ()
+    if auth_mode != "app" and not selected_collector_names:
+        app_selected = select_collectors(
+            available=available, profile_default_collectors=profile.default_collectors,
+            preset_name=args.collector_preset, presets=collector_presets or {},
+            excluded_collectors=exclude_collector_names, include_exchange=args.include_exchange,
+            auth_mode="app",
+        )
+        omitted = [name for name in ("exchange_policy", "dns_posture") if name in app_selected and name not in selected]
+        if omitted:
+            selection_notices = (
+                f"Defaults/preset did not select {', '.join(omitted)}: these defaults are app-mode only; "
+                "--include-exchange selects the Microsoft 365 CLI exchange collector in this mode. "
+                "Only --collectors explicitly selects Exchange policy or DNS posture outside app mode.",
+            )
+
     return LiveRunPlan(
         run_config=run_cfg,
         selected_collectors=selected,
@@ -95,6 +115,7 @@ def build_live_run_plan(
         permission_hints=permission_hints,
         collector_config=collector_config,
         profile=profile,
+        selection_notices=selection_notices,
     )
 
 
@@ -267,6 +288,14 @@ def build_coverage_ledger(
         else:
             coverage_status = "failed_runtime"
             coverage_reason = "collector_failed_runtime"
+        message = result.get("message")
+        if collector in NON_FATAL_COLLECTORS and actual_status and actual_status != "ok":
+            issues = diagnostics_by_collector.get(collector, [])
+            reasons = list(dict.fromkeys(
+                collector_gap_reason(collector, item.get("error_class"), item.get("error"))
+                for item in issues or [result]
+            ))
+            message = " ".join(reason for reason in reasons if reason)
         ledger.append(
             {
                 "collector": collector,
@@ -276,7 +305,7 @@ def build_coverage_ledger(
                 "coverage_status": coverage_status,
                 "coverage_reason": coverage_reason,
                 "item_count": result.get("item_count", 0),
-                "message": result.get("message"),
+                "message": message,
                 "diagnostic_count": len(diagnostics_by_collector.get(collector, [])),
                 "diagnostics": diagnostics_by_collector.get(collector, []),
             }
@@ -333,6 +362,14 @@ def run_preflight_probe(
                     "error": "unknown collector",
                 }
             )
+            continue
+
+        if name in NON_FATAL_COLLECTORS:
+            # These collectors perform expensive session/public-network reads. Run them once,
+            # during collection, where their real coverage and non-fatal failures are recorded.
+            runnable.append(name)
+            rows.append({"collector": name, "decision": "run", "reason": "deferred_to_collection",
+                         "status": "pending", "item_count": 0})
             continue
 
         writer.log_event("preflight.collector.started", "Preflight collector started", {"collector": name})

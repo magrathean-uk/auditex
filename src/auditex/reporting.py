@@ -229,6 +229,7 @@ def _safety_lines(safety: Mapping[str, Any]) -> list[str]:
         f"- Read-only: {_flag_text(safety.get('read_only'), basis, safety)}",
         f"- No content reads: {_flag_text(safety.get('no_content_reads'), basis, safety)}",
         f"- Observation basis: {_basis_text(basis, safety)}",
+        *[f"- {notice}" for notice in safety.get("collection_notices") or []],
     ]
 
 
@@ -1194,6 +1195,7 @@ def enterprise_handoff(run_dir: str | Path) -> dict[str, Any]:
         "integrity": integrity,
         "validation_summary": validation_summary,
         "safety": {
+            "collection_notices": data_handling.get("collection_notices") or [],
             "read_only": read_only,
             "no_content_reads": no_content_reads,
             "write_actions": write_actions,

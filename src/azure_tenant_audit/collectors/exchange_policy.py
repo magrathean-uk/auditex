@@ -25,7 +25,8 @@ Detection-coverage commands (all read-only ``Get-*`` cmdlets):
   no account names are kept.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-mailboxauditbypassassociation
 * ``Get-ProtectionAlert`` -> alert policy names, state, severity, category. Security & Compliance
-  PowerShell only (``Connect-IPPSSession``); without that session the row is a coverage gap.
+  PowerShell only (``Connect-IPPSSession``); Auditex never opens that session or invokes
+  the cmdlet, and records the ``ipps_session_not_opened`` section skip.
   https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/get-protectionalert
 
 Mail protection commands (Cyber Essentials malware protection and secure configuration; all read-only
@@ -70,7 +71,10 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from ..adapters import get_adapter
-from ..collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
+from ..collection_gaps import (
+    IPPS_SKIP_TEXT, REASON_IPPS_SESSION_NOT_OPENED, SECTION_SCOPED,
+    REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS,
+)
 from .base import Collector, CollectorResult
 from .exchange_defender_commands import DEFENDER_COMMANDS, minimise_recipients, reclassify_licence_refusals
 
@@ -80,10 +84,10 @@ EXCHANGE_ONLINE_SCOPE = "https://outlook.office365.com/.default"
 # Forwarding mailboxes kept per run. The command asks for LIMIT + 1 rows so that a longer list is detected, not guessed.
 FORWARDING_MAILBOX_LIMIT = 500
 MAILBOX_FORWARDING_COMMAND = (
-    f"Get-EXOMailbox -ResultSize {FORWARDING_MAILBOX_LIMIT + 1} "
+    f",@(Get-EXOMailbox -ResultSize {FORWARDING_MAILBOX_LIMIT + 1} "
     "-Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward "
     "-Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null' "
-    "| Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward"
+    "| Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward)"
 )
 
 
@@ -115,10 +119,11 @@ class ExchangePolicyCollector(Collector):
     command_collectors = [
         (
             "transportRules",
-            "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject",
+            ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)",
         ),
-        ("inboundConnectors", "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType"),
-        ("outboundConnectors", "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType"),
+        ("inboundConnectors", ",@(Get-InboundConnector | Select-Object Name,Enabled,ConnectorType)"),
+        ("outboundConnectors", ",@(Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType)"),
+        # These domain/default-policy reads always have an answer. Do not mask missing output as an empty list.
         ("acceptedDomains", "Get-AcceptedDomain | Select-Object Name,DomainName,DomainType,Default,IsCoexistenceDomain"),
         (
             "remoteDomains",
@@ -137,7 +142,7 @@ class ExchangePolicyCollector(Collector):
             "mailboxAuditBypass",
             "Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Measure-Object | Select-Object Count",
         ),
-        ("protectionAlerts", "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"),
+        ("protectionAlerts", ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)"),
         ("malwareFilterPolicy", "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"),
         ("transportConfig", "Get-TransportConfig | Select-Object Name,SmtpClientAuthenticationDisabled"),
         # An aggregate, so the answer is never empty (an empty output is read as a failed command) and no mailbox is named.
@@ -158,9 +163,15 @@ class ExchangePolicyCollector(Collector):
 
         exchange_session = _exchange_session(context.get("client"), log_event)
         for name, command in self.command_collectors:
-            # Get-ProtectionAlert lives in Security & Compliance PowerShell, which needs its own session.
-            session = {"kind": "security_compliance"} if name == "protectionAlerts" else exchange_session
-            response = adapter.run(command, log_event=log_event, session=session)
+            # Auditex deliberately opens no IPPS session. Never invoke this cmdlet.
+            if name == "protectionAlerts":
+                payload[name] = {
+                    "command": command, "value": [], "status": "skipped",
+                    "reason": REASON_IPPS_SESSION_NOT_OPENED,
+                    "error_class": REASON_IPPS_SESSION_NOT_OPENED, "error": IPPS_SKIP_TEXT,
+                }
+                continue
+            response = adapter.run(command, log_event=log_event, session=exchange_session)
             response.setdefault("command", command)
             minimise_recipients(name, response)
             payload[name] = response
@@ -191,6 +202,8 @@ class ExchangePolicyCollector(Collector):
                 "error_class": response.get("error_class"),
                 "error": response.get("error"),
             }
+            if response.get("status") == "skipped":
+                row.update(status="skipped", section_scoped=True, reason=REASON_IPPS_SESSION_NOT_OPENED)
             if cut:
                 # More forwarding mailboxes exist than were kept: a coverage gap, so the rule never reads this list as clean.
                 row.update(
@@ -210,7 +223,7 @@ class ExchangePolicyCollector(Collector):
                 )
             coverage.append(row)
 
-        partial = any(item.get("status") != "ok" for item in coverage)
+        partial = any(item.get("status") != "ok" and not item.get(SECTION_SCOPED) for item in coverage)
         return CollectorResult(
             name=self.name,
             status="partial" if partial else "ok",

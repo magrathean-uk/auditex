@@ -11,6 +11,7 @@
     "tenant_identity": { "type": "object" },
     "run_id": { "type": "string" },
     "overall_status": { "type": ["string", "null"] },
+    "partial_workload_notice": { "type": "string" },
     "duration_seconds": { "type": ["number", "integer", "null"] },
     "collectors": {
       "type": "array",

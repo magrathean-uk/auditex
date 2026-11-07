@@ -1,5 +1,7 @@
 # Auditex Product Manual
 
+See [default Exchange and public DNS collection](setup-guide.md#default-exchange-and-public-dns-collection) for app-mode selection, external requests, deselection and failure semantics.
+
 Auditex is an audit-only evidence collection and reporting toolkit for Microsoft 365 and Google Workspace. It gathers read-only posture evidence, records exactly what was attempted, normalizes the evidence into a stable bundle, and produces a customer review pack with finding-to-evidence references and recorded coverage gaps.
 
 ## What Auditex Does

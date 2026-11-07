@@ -1156,3 +1156,67 @@ def test_run_live_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch, resum
     if include_other:
         # This collector runs after Exchange, so an unconditional hand-off would leak the envelope here.
         assert "exchange_accepted_domains" not in contexts["identity"]
+
+
+@pytest.mark.parametrize("collector,operation,error_class,expected_rc", [
+    ("exchange_policy", "transportConfig", "session_not_connected", 0),
+    ("dns_posture", "spf_records", "dns_resolver_error", 0),
+    ("identity", "users", "unauthenticated", 1),
+])
+def test_offline_failure_preserves_partial_status_and_workload_exit_rule(tmp_path, collector, operation, error_class, expected_rc):
+    sample = tmp_path / "constructed.json"
+    sample.write_text(json.dumps({collector: {operation: {
+        "value": [], "error_class": error_class, "error": "constructed read failure",
+    }}}))
+    assert cli.run_offline(sample, tmp_path, "constructed", "failure") == expected_rc
+    manifest = json.loads((tmp_path / "constructed-failure" / "run-manifest.json").read_text())
+    assert manifest["overall_status"] == "partial"
+
+
+@pytest.mark.parametrize("mode_args", [["--interactive"], ["--use-azure-cli-token"], ["--access-token", "constructed"]])
+def test_non_app_default_run_omits_workloads_and_prints_one_selection_notice(tmp_path, monkeypatch, caplog, mode_args):
+    from azure_tenant_audit.config import CollectorConfig
+
+    class Healthy:
+        def __init__(self, name):
+            self.name = name
+
+        def run(self, context):
+            return CollectorResult(name=self.name, status="ok", payload={}, item_count=0)
+
+    config = CollectorConfig.from_path(Path("configs/collector-definitions.json"))
+    monkeypatch.setattr(cli, "REGISTRY", {name: Healthy(name) for name in config.default_order})
+    monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "_capture_signed_in_context", lambda *args, **kwargs: {})
+    monkeypatch.setattr(cli, "_acquire_azure_cli_access_token", lambda *args, **kwargs: "constructed")
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    caplog.set_level("INFO", logger="azure_tenant_audit")
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "constructed", "--client-id", "constructed",
+        "--out", str(tmp_path), "--run-name", "default", *mode_args,
+    ])
+    assert cli.run_live(args) == 0
+    manifest = json.loads((tmp_path / "acme-default/run-manifest.json").read_text())
+    assert {"exchange_policy", "dns_posture"}.isdisjoint(manifest["selected_collectors"])
+    assert manifest["overall_status"] == "ok"
+    notices = [row.message for row in caplog.records if "Defaults/preset did not select" in row.message]
+    assert len(notices) == 1
+    assert "exchange_policy, dns_posture" in notices[0] and "app-mode only" in notices[0]
+
+
+def test_required_preflight_skipped_licensing_keeps_existing_selected_contract(tmp_path, monkeypatch):
+    from graph_fakes import FakeGraph, run_collectors, load
+
+    class BlockedLicensing:
+        def run(self, context):
+            return CollectorResult(name="licensing", status="failed", payload={}, item_count=0,
+                                   coverage=[{"collector": "licensing", "name": "subscribedSkus", "status": "failed",
+                                              "error_class": "insufficient_permissions", "error": "constructed refusal"}])
+
+    monkeypatch.setitem(cli.REGISTRY, "licensing", BlockedLicensing())
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, FakeGraph(), "identity,licensing", "--probe-first")
+    assert rc == 1
+    manifest = load(run_dir, "run-manifest.json")
+    assert manifest["selected_collectors"] == ["identity"]
+    assert manifest["overall_status"] == "partial"

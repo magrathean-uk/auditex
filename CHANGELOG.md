@@ -12,11 +12,46 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Guard MCP bundle artefacts and customer-pack source reads against unsafe types and links, including shareable normalised report sections; bound data reads, stream bundle hashing without a size cap, and inspect SQLite indexes in private temporary copies while preserving legacy WAL reads.
 
 - Let SS 2.1 decide from verified SensitiveUsers operator input in its private in-memory rule view, including offline bundle replay; retain existing not-assessed outcomes for missing or unusable input. Addresses never enter model views or assessment outputs. Current collection still excludes `TargetedUsersToProtect`, so proving met from target membership needs a separate collector/privacy change. SS 2.3 still needs PartnerDomains; the ScubaGear export path is unchanged.
+- Retain exit-0 JSON evidence with stderr warnings in the shared PowerShell adapter.
+  Every adapter command uses `$ErrorActionPreference = 'Stop'`, including
+  Microsoft365DSC and lab-only response actions; empty stdout with stderr remains
+  `command_error`. Only legitimately empty Exchange lists are array-wrapped;
+  default-bearing configuration requires an answer and empty accepted-domain
+  evidence falls back to Graph for DNS. Proxy-function error propagation remains
+  unverified without PowerShell.
+- Preserve explicitly named and profile-selected Microsoft 365 CLI `exchange`
+  collection in guided app flows. Keep Windows 365 in generated probes, disclose
+  explicit app-only names omitted from delegated setup commands, and print session
+  and resolver notices before standalone probe reads. Clarify the permission
+  catalogue's `ipps_session_not_opened` skip.
 
 - Remove the dead internal row-level scope post-check; the envelope caveat and historical validation stay unchanged, with no output change.
 - Add `--sensitive-users` and its environment fallback for local confidential operator input, with private bundle storage, sanitised validation and output exclusions; record `hmac_sha256` with a per-run private `operator-inputs/sensitive-users.key` and list the private files under the `redacted_operator_input` exclusion in `bundle-hashes.json`. SS 2.1 private rule-view integration is described above.
 
 - Skip the Teams reads and say so when no Teams certificate token is available, instead of failing the run; record teams_token_unavailable as a collector error class; with a token, messaging and app setup are skipped as teams_powershell_not_supported.
+
+- App-mode `auto`/`global-reader` defaults and the `full` preset include read-only
+  Exchange policy sessions and public DNS posture through Cloudflare DoH. Profile
+  defaults (including `exchange-reader` and `app-readonly-full`) and presets omit
+  both for delegated, interactive and access-token modes, even with `--include-exchange`;
+  that flag retains the Microsoft 365 CLI `exchange` collector. Only explicit
+  `--collectors` overrides this boundary. Guided `app-audit` keeps both defaults. Use the
+  existing `--exclude exchange_policy`, `--exclude dns_posture` or both to deselect.
+  Disclose the resolver, domain scope and Exchange permission/reader-role blast radius.
+- Preserve legitimately empty Exchange policy lists as successful reads; keep real
+  command failures partial. Resolve generated setup commands and requirements per
+  authentication mode, including app disclosures in the default delegated guide.
+  Name skipped sections in explorer rows even when other policy rows were collected.
+- Record the unopened IPPS alert-policy session as a named by-design section skip:
+  healthy Exchange collection and the run stay `ok`, with a passing coverage gate
+  and visible limitations. Real Exchange/DNS failures leave policies not assessed
+  and the run `partial`, with collection exit 0 when they are the only failures;
+  coverage gates still block partial runs unless `--allow-partial` is supplied.
+  Live runs and offline replays print one stderr line naming the incomplete
+  collectors and put the same notice in the run summary, without error details.
+- Include Exchange/DNS in app-mode probe surfaces and avoid a duplicate full pass
+  for these collectors during `--probe-first`; redact collector crash diagnostics.
+
 - Preserve `unsupported_environment` in assessment collector diagnostics when Teams policy collection is unavailable for the environment.
 - Use complete same-run Exchange accepted domains for SPF, DKIM and DMARC TXT records, excluding coexistence domains and preserving first-seen spelling; fall back to Graph-verified mail domains when evidence is unusable. HTTPS reads remain limited to Graph-verified domains.
 - Move the value-rule catalogue and loader from the v3.9 content to spec v3.9.1 content with addenda A1 and A2. The shipped

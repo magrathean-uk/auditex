@@ -515,7 +515,7 @@ def test_accepted_domains_define_records_but_not_verified_domain_posture():
 
 
 @pytest.mark.parametrize('envelope', [
-    None, {}, {'value': None}, {'value': 'not rows'},
+    None, {}, {'value': None}, {'value': 'not rows'}, {'value': []}, {'value': [], 'status': 'ok'},
     {'value': [], 'error': 'refused'}, {'value': [], 'error_class': 'command_error'},
     {'value': [], 'status': 'failed'}, {'value': [], 'status': 'partial'},
     {'value': [], 'collection_truncated': True},
@@ -541,7 +541,7 @@ def test_unusable_accepted_domains_preserve_graph_fallback_exactly(envelope):
         assert next(c for c in result.coverage if c['name'] == operation)['domain_universe'] == 'graph_email_service'
 
 
-@pytest.mark.parametrize('rows', [[], [{'DomainName': 'coexist.invalid', 'IsCoexistenceDomain': True}]])
+@pytest.mark.parametrize('rows', [[{'DomainName': 'coexist.invalid', 'IsCoexistenceDomain': True}]])
 def test_complete_empty_accepted_universe_does_not_fall_back(rows):
     result = run(Resolver(), exchange_accepted_domains={'value': rows, 'status': 'ok'})
     for operation in OPERATIONS:

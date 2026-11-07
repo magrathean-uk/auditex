@@ -244,3 +244,29 @@ def test_selected_exchange_result_is_reused_by_dns_in_the_same_run():
         payloads[name] = output.result.payload
     assert [r['domain'] for r in payloads['dns_posture']['spf_records']['value']] == ['accepted.invalid']
     assert [r['domain'] for r in payloads['dns_posture']['domainPosture']['value']] == ['graph-only.invalid']
+
+
+def test_optional_collector_crashes_keep_raw_and_coverage_gaps():
+    for name in ("exchange_policy", "dns_posture"):
+        writer = _FakeWriter()
+        output = CollectorRunner(writer).run(_CrashingCollector(), {}, name=name)
+        assert output.crashed and output.result.status == "failed"
+        assert output.coverage_rows[0]["collector"] == name
+        assert output.coverage_rows[0]["status"] == "failed"
+        assert "Not assessed:" in output.result_row["message"]
+        assert writer.raw[0][1]["error_class"] == "unknown"
+        assert writer.coverage and writer.checkpoints
+
+
+def test_optional_crash_diagnostics_are_redacted_on_every_surface():
+    import json
+
+    class Crash:
+        def run(self, context):
+            raise RuntimeError("client_secret=constructed-secret operator@example.com")
+
+    writer = _FakeWriter()
+    output = CollectorRunner(writer).run(Crash(), {"audit_logger": writer.log_event}, name="exchange_policy")
+    text = json.dumps([writer.raw, writer.coverage, writer.checkpoints, writer.events, output.result_row])
+    assert "constructed-secret" not in text and "operator@" not in text
+    assert "redacted" in text

@@ -165,3 +165,14 @@ def test_live_readiness_summary_distinguishes_trusted_blocked_and_unverified() -
     gates = {row["collector"]: row for row in summary["evidence_gates"]}
     assert gates["google_reports"]["blocker_kind"] == "auth_scope"
     assert gates["google_gmail_settings"]["status"] == "unverified"
+
+
+def test_required_collector_gap_groups_operation_errors_under_owner():
+    collectors = [{"name": "identity", "status": "partial"}]
+    coverage = [{"collector": "identity", "name": "users", "status": "failed", "error_class": "unauthenticated"}]
+    gaps = assurance.build_coverage_gap_summary(
+        surface_coverage=build_surface_coverage_map(collector_rows=collectors),
+        collector_rows=collectors, coverage_rows=coverage,
+    )
+    assert gaps[0]["collectors"] == ["identity"]
+    assert gaps[0]["error_classes"] == ["unauthenticated"]

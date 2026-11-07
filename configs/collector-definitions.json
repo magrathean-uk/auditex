@@ -706,21 +706,21 @@
           "name": "transportRules",
           "category": "policy",
           "commands": [
-            "Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject"
+            ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)"
           ]
         },
         {
           "name": "inboundConnectors",
           "category": "policy",
           "commands": [
-            "Get-InboundConnector | Select-Object Name,Enabled,ConnectorType"
+            ",@(Get-InboundConnector | Select-Object Name,Enabled,ConnectorType)"
           ]
         },
         {
           "name": "outboundConnectors",
           "category": "policy",
           "commands": [
-            "Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType"
+            ",@(Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType)"
           ]
         },
         {
@@ -748,7 +748,7 @@
           "name": "mailboxForwarding",
           "category": "policy",
           "commands": [
-            "Get-EXOMailbox -ResultSize 501 -Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward -Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null' | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward"
+            ",@(Get-EXOMailbox -ResultSize 501 -Properties ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward -Filter 'ForwardingSmtpAddress -ne $null -or ForwardingAddress -ne $null' | Select-Object DisplayName,PrimarySmtpAddress,ForwardingSmtpAddress,ForwardingAddress,DeliverToMailboxAndForward)"
           ]
         },
         {
@@ -776,7 +776,7 @@
           "name": "protectionAlerts",
           "category": "detection",
           "commands": [
-            "Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule"
+            ",@(Get-ProtectionAlert | Select-Object Name,Disabled,Severity,Category,IsSystemRule)"
           ]
         },
         {
@@ -832,7 +832,7 @@
           "name": "atpPolicyForO365",
           "category": "policy",
           "commands": [
-            ",@(Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB)"
+            "Get-AtpPolicyForO365 | Select-Object Identity,EnableATPForSPOTeamsODB"
           ]
         },
         {
@@ -860,7 +860,7 @@
           "name": "antiPhishPolicies",
           "category": "policy",
           "commands": [
-            ",@(Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender)"
+            "Get-AntiPhishPolicy | Select-Object Identity,Name,IsDefault,Enabled,EnableTargetedUserProtection,TargetedUserProtectionAction,EnableOrganizationDomainsProtection,TargetedDomainProtectionAction,EnableTargetedDomainsProtection,TargetedDomainsToProtect,EnableFirstContactSafetyTips,EnableSimilarUsersSafetyTips,EnableSimilarDomainsSafetyTips,EnableUnusualCharactersSafetyTips,EnableViaTag,EnableUnauthenticatedSender"
           ]
         },
         {
@@ -874,7 +874,7 @@
           "name": "hostedContentFilterPolicies",
           "category": "policy",
           "commands": [
-            ",@(Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains)"
+            "Get-HostedContentFilterPolicy | Select-Object Identity,IsDefault,RecommendedPolicyType,SpamAction,HighConfidenceSpamAction,PhishSpamAction,HighConfidencePhishAction,AllowedSenderDomains"
           ]
         },
         {
@@ -902,7 +902,7 @@
           "name": "hostedConnectionFilterPolicy",
           "category": "policy",
           "commands": [
-            ",@(Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList)"
+            "Get-HostedConnectionFilterPolicy | Select-Object Name,IPAllowList,EnableSafeList"
           ]
         }
       ]

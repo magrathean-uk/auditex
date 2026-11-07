@@ -24,6 +24,8 @@ from .collectors.base import normalize_collection_limit
 from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
 from .config import AuthConfig, CollectorConfig
 from .data_minimisation import minimise_user_text
+from .data_handling import collector_activity_notices
+from .collection_gaps import NON_FATAL_COLLECTORS
 from .diagnostics import build_diagnostics as _build_diagnostics, load_permission_hints as _load_permission_hints
 from .endpoint_posture import STALE_SYNC_DAYS_MAX
 from .findings import build_findings
@@ -49,6 +51,14 @@ LOG = logging.getLogger("azure_tenant_audit")
 
 PLANE_CHOICES = ("inventory", "full", "export")
 _OFFLINE_SAMPLE_METADATA_KEYS = frozenset({"_fixture_provenance"})
+
+
+def _partial_workload_notice(collectors: Collection[str]) -> str | None:
+    """Describe non-fatal gaps using only the fixed collector names, never diagnostic text."""
+    names = sorted(NON_FATAL_COLLECTORS.intersection(collectors))
+    if not names:
+        return None
+    return f"Partial: {', '.join(names)} did not finish; run status partial, exit 0; see diagnostics"
 
 
 def _merged_fixture_provenance(
@@ -161,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="safe",
         help="Graph pacing mode used to reduce bursts and retry more carefully.",
     )
-    parser.add_argument("--probe-first", dest="probe_first", action="store_true", default=False, help="Run a low-volume preflight before full collection.")
+    parser.add_argument("--probe-first", dest="probe_first", action="store_true", default=False, help="Run a low-volume preflight; Exchange policy and DNS reads run once during collection.")
     parser.add_argument("--no-probe-first", dest="probe_first", action="store_false", help="Skip the low-volume preflight step.")
     parser.add_argument("--include-blocked", action="store_true", help="Run collectors even if preflight marks them as known blocked.")
     parser.add_argument("--run-name", default=None, help="Optional run subfolder identifier.")
@@ -350,6 +360,10 @@ def run_offline(
         evidence_paths.append("blockers/blockers.json")
     evidence_paths.extend(f"normalized/{name}.json" for name in ["capability_matrix", "coverage_ledger", *normalized_snapshot.keys()])
     privacy = build_privacy_block(safe_for_external_llm=False)
+    exit_code = 1 if any(row.get("collector") not in NON_FATAL_COLLECTORS for row in diagnostics) else 0
+    partial_notice = _partial_workload_notice([row.get("collector") for row in diagnostics]) if not exit_code else None
+    if partial_notice:
+        writer.summary["partial_workload_notice"] = partial_notice
     write_provider_bundle(
         writer=writer,
         plan=ProviderFinalizePlan(
@@ -384,7 +398,9 @@ def run_offline(
         ),
     )
     LOG.info("Offline sample written to %s", writer.run_dir)
-    return 1 if diagnostics else 0
+    if partial_notice:
+        print(partial_notice, file=sys.stderr)
+    return exit_code
 
 
 # A collector the preflight probe skipped as known blocked is not a collector that finished: it is recorded
@@ -501,6 +517,11 @@ def run_live(
         return 2
     run_cfg = plan.run_config
     selected = plan.selected_collectors
+    for notice in [*plan.selection_notices, *collector_activity_notices(selected, "live")]:
+        LOG.info("%s", notice)
+    if NON_FATAL_COLLECTORS.intersection(selected):
+        LOG.info("Exchange/DNS failures leave overall status partial, process exit 0 when these are the only failures; "
+                 "coverage gates reject partial runs unless --allow-partial is supplied.")
     execution_plane = plan.execution_plane
     auth_scopes = plan.auth_scopes
 
@@ -654,7 +675,7 @@ def run_live(
             include_blocked=args.include_blocked,
             registry=REGISTRY,
         )
-        if not selected:
+        if not selected and set(selected_before_preflight).difference(NON_FATAL_COLLECTORS):
             writer.log_event(
                 "run.aborted",
                 "No runnable collectors remained after preflight.",
@@ -704,6 +725,8 @@ def run_live(
     start = time.time()
     result_rows: list[dict[str, object]] = []
     failures = 0
+    required_failures = 0
+    incomplete_collectors: set[str] = set()
     summary_rows: list[dict[str, object]] = []
     coverage_rows: list[dict[str, Any]] = list(writer.coverage) if resume_from else []
     collector_payloads: dict[str, dict[str, Any]] = {}
@@ -804,6 +827,9 @@ def run_live(
         writer.write_checkpoint(name, {**output.result_row, "since": run_cfg.since, "until": run_cfg.until})
         if output.result.status != "ok":
             failures += 1
+            incomplete_collectors.add(name)
+            if name not in NON_FATAL_COLLECTORS:
+                required_failures += 1
         if output.result.error:
             LOG.warning("%s collector error: %s", name, output.result.error)
         collector_payloads[name] = output.result.payload
@@ -914,6 +940,19 @@ def run_live(
     overall_status = (
         "partial" if failures or preflight_skipped or resumed_incomplete or normalization_diagnostics else "ok"
     )
+    # Optional Exchange/DNS gaps remain partial and visible to gates, but do not fail collection.
+    required_gaps = (
+        required_failures
+        or set(preflight_skipped).difference(NON_FATAL_COLLECTORS)
+        or set(resumed_incomplete).difference(NON_FATAL_COLLECTORS)
+        or any(row.get("collector") not in NON_FATAL_COLLECTORS for row in normalization_diagnostics)
+    )
+    exit_code = 1 if required_gaps else 0
+    incomplete_collectors.update(preflight_skipped, resumed_incomplete)
+    incomplete_collectors.update(row["collector"] for row in normalization_diagnostics)
+    partial_notice = _partial_workload_notice(incomplete_collectors) if overall_status == "partial" and not exit_code else None
+    if partial_notice:
+        writer.summary["partial_workload_notice"] = partial_notice
     privacy = build_privacy_block(safe_for_external_llm=False)
     writer.log_event(
         "run.complete",
@@ -961,7 +1000,9 @@ def run_live(
         ),
     )
     LOG.info("Completed in %.2fs. Output in %s", duration, writer.run_dir)
-    return 1 if overall_status == "partial" else 0
+    if partial_notice:
+        print(partial_notice, file=sys.stderr)
+    return exit_code
 
 
 def main(

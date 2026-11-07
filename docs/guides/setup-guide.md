@@ -1,5 +1,87 @@
 # Auditex Setup Guide
 
+## Default Exchange and public DNS collection
+
+App-mode runs with the `auto` or `global-reader` profile select `exchange_policy`
+and `dns_posture` by default, as does the `full` preset. `app-readonly-full` also
+includes both. Profile defaults and presets omit both in interactive, delegated and access-token
+modes; DNS needs no Exchange session but follows this app-mode default boundary.
+Only an explicit `--collectors` list retains these collectors outside app mode.
+In delegated mode `--include-exchange` selects the working Microsoft 365 CLI
+`exchange` collector; it does not select `exchange_policy`.
+`config-only` and `power-platform` retain their existing scopes. Power Platform
+and Power BI remain opt-in.
+
+A default app-mode run opens an Exchange Online PowerShell session for read-only
+`Get-*` policy reads. Interactive, delegated and access-token authentication cannot
+open this session; each fresh PowerShell process cannot inherit an operator's session.
+For app access, install `pwsh` and `ExchangeOnlineManagement`, grant tenant admin
+consent to the **Office 365 Exchange Online** application permission
+`Exchange.ManageAsApp`, and assign **Global Reader only** to the service principal.
+This is a write-capable-named permission used read-only. Its blast radius is
+tenant-wide Exchange policy visibility under Global Reader: read-only Get-* cmdlets
+only; no mutating cmdlet is issued. A write-capable scope does not authorise tenant
+writes. No additional Graph permission is introduced by these defaults.
+
+Auditex opens no Security & Compliance (IPPS) session. Alert policies are **not
+assessed**, with reason `ipps_session_not_opened`: "Not assessed: alert policies
+need a Security & Compliance session, which Auditex does not open". This by-design
+section skip leaves the collector and run **ok** when other reads succeed; the gate
+passes with a named limitation. The gap remains in coverage, collection gaps,
+the handoff, explorer and AI context.
+
+The run sends the tenant's domain names to the public **Cloudflare DNS-over-HTTPS
+resolver**, `https://cloudflare-dns.com/dns-query`. Only domain names, no user data,
+are sent to that resolver. SPF/DKIM/DMARC TXT lookups cover the tenant's Exchange
+accepted domains (coexistence excluded) when the same run collected them, else
+Graph verified domains with the Email service. Posture checks and MTA-STS and
+public Entra OpenID discovery HTTPS reads stay on Graph-verified domains. No
+message bodies or user file content are read. Offline replay performs none of
+these requests or sessions. The console, `data-handling.json` and handoff disclose
+selected collection activity, without claiming each attempted read succeeded.
+
+Use the existing `--exclude` option to omit either collector or both:
+
+```bash
+auditex run --exclude exchange_policy
+auditex run --exclude dns_posture
+auditex run --exclude exchange_policy,dns_posture
+```
+
+Add the usual tenant/auth/output arguments. These flags also work on
+`azure-tenant-audit` and `auditex setup-guide m365`. An explicit allowlist such as
+`--collectors identity,conditional_access` replaces defaults;
+`--collector-preset config-only` omits both. Exclusions apply after profile, preset or explicit selection.
+In the guided `gr-audit` flow, answering No to Exchange excludes both Exchange collectors.
+Answering Yes selects the Microsoft 365 CLI `exchange` collector in delegated mode.
+Guided `app-audit` keeps both default policy collectors and honours an explicitly
+named or profile-selected Microsoft 365 CLI `exchange` collector. Outside a
+`gr-audit` No answer, guided flows add no Exchange exclusion. Generated setup plans derive
+the delegated selection from the app selection; each command has its own permissions, tooling
+and collection notices, including app requirements in the default delegated guide. An empty
+delegated selection is omitted from an app guide with a note.
+If an explicit Exchange policy or DNS posture name is removed from a generated
+delegated command, its setup steps explain the app-mode-only restriction.
+Generated app and delegated probes also retain the probe-only `windows365` surface.
+
+Real Exchange/DNS failures leave dependent policies **not assessed**, with a clear
+reason. DNS lookup failures mean unknown records, never absent records. If these
+are the only failures, the run is **partial**, collection exits **0**, and the gate
+blocks unless `--allow-partial` is supplied. Required collector/authentication
+failures retain their non-zero exit behaviour. Missing tooling, consent and real
+Exchange session failures retain the tooling or app-consent remediation.
+The CLI writes a collector-only notice to stderr and records it as `partial_workload_notice` in the summary.
+
+App-mode `auditex probe live --surface all` includes Exchange policy and DNS posture.
+The standalone probe prints the Exchange session and Cloudflare resolver notices
+before its reads; use `--surface` to limit probe surfaces.
+`--probe-first` defers these two collectors to the collection phase, so it does not
+repeat their PowerShell sessions or public lookups. A standalone app probe performs
+the reads and a subsequent run repeats them. Added runtime depends on tenant size,
+PowerShell connection time and public DNS/HTTPS latency; it has not been measured
+in this offline validation. Allow time for a session per Exchange command and DNS
+and HTTPS reads per domain rather than assuming Graph-only runtime.
+
 Run this before a live audit:
 
 ```bash

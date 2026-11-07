@@ -456,6 +456,7 @@ def test_the_json_conversion_asks_for_enumerations_as_strings_where_powershell_c
     assert result["value"] == [{"DomainType": "Authoritative"}]
     # The switch exists from PowerShell 7.3; the same script falls back to plain ConvertTo-Json where it does not.
     assert prepared == (
+        "$ErrorActionPreference = 'Stop'; "
         "if ((Get-Command ConvertTo-Json).Parameters.ContainsKey('EnumsAsStrings')) "
         f"{{ {command} | ConvertTo-Json -Depth 20 -Compress -EnumsAsStrings }} else {{ {command} | ConvertTo-Json -Depth 20 -Compress }}"
     )

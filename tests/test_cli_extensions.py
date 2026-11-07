@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from auditex import cli as auditex_cli
 from auditex import guided
 from auditex.guided import build_guided_parser
@@ -763,3 +765,79 @@ def test_guided_run_reuses_saved_local_app_state(monkeypatch, tmp_path) -> None:
     assert "AUDITEX_TENANT_ID=contoso.onmicrosoft.com" in rendered
     assert "AUDITEX_M365_CONNECTION_NAME=saved-conn" in rendered
     assert "--include-exchange" in seen["argv"]
+
+
+def test_guided_no_exchange_excludes_policy_even_from_explicit_list(monkeypatch, tmp_path):
+    from azure_tenant_audit import cli as tenant_cli
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.run import build_live_run_plan
+    from pathlib import Path
+
+    seen = []
+    monkeypatch.setattr(guided, "_saved_value", lambda *args: None)
+    monkeypatch.setattr(guided, "_confirm", lambda *args, **kwargs: False)
+    monkeypatch.setattr(guided, "_persist_local_defaults", lambda **kwargs: None)
+    monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
+        "system": {"os": "Darwin", "machine": "arm64"},
+        "readiness": {"core_ready": True, "exchange_ready": True}, "auth": {},
+    })
+    monkeypatch.setattr(guided.tenant_cli, "main", lambda argv, **kwargs: seen.append(argv) or 0)
+    args = build_guided_parser().parse_args([
+        "--flow", "gr-audit", "--tenant-id", "constructed", "--tenant-name", "acme",
+        "--out", str(tmp_path), "--local-mode", "--skip-login-check", "--skip-tool-check",
+        "--collectors", "identity,exchange,exchange_policy",
+    ])
+    assert guided.run_guided(args) == 0
+    run_args = tenant_cli.build_parser().parse_args(seen[0])
+    plan = build_live_run_plan(run_args, output_dir=tmp_path,
+                               collector_config=CollectorConfig.from_path(Path("configs/collector-definitions.json")),
+                               permission_hints={})
+    assert plan.selected_collectors == ["identity"]
+    assert run_args.exclude == "exchange,exchange_policy"
+
+
+@pytest.mark.parametrize('flow,include_exchange', [('app-audit', False), ('gr-audit', True), ('gr-audit', False)])
+@pytest.mark.parametrize('non_interactive', [False, True])
+@pytest.mark.parametrize('selection', [[], ['--auditor-profile', 'app-readonly-full'],
+                                      ['--collectors', 'identity,exchange']])
+def test_guided_auth_mode_selection(monkeypatch, tmp_path, flow, include_exchange, non_interactive, selection):
+    from pathlib import Path
+    from azure_tenant_audit import cli as tenant_cli
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.run import build_live_run_plan
+    seen = []
+    monkeypatch.setattr(guided, '_current_m365_state', lambda: {})
+    monkeypatch.setattr(guided, '_saved_value', lambda *args: None)
+    monkeypatch.setattr(guided, '_confirm', lambda *args, **kwargs: True)
+    monkeypatch.setattr(guided, '_persist_local_defaults', lambda **kwargs: None)
+    monkeypatch.setattr(guided, '_ensure_exchange_module', lambda **kwargs: 0)
+    monkeypatch.setattr(guided, '_ensure_m365_login', lambda *args, **kwargs: 0)
+    monkeypatch.setattr(guided, 'build_doctor_report', lambda **kwargs: {
+        'system': {'os': 'Darwin', 'machine': 'arm64'},
+        'readiness': {'core_ready': True, 'exchange_ready': True}, 'auth': {},
+    })
+    monkeypatch.setattr(guided.tenant_cli, 'main', lambda argv, **kwargs: seen.append(argv) or 0)
+    argv = ['--flow', flow, '--tenant-id', 'constructed', '--tenant-name', 'acme',
+            '--out', str(tmp_path), '--local-mode', '--skip-login-check', '--skip-tool-check']
+    if flow == 'app-audit':
+        argv += ['--client-id', 'constructed-app', '--client-secret', 'constructed-secret']
+    if include_exchange:
+        argv += ['--include-exchange']
+    if non_interactive:
+        argv += ['--non-interactive']
+    argv += selection
+    assert guided.run_guided(build_guided_parser().parse_args(argv)) == 0
+    args = tenant_cli.build_parser().parse_args(seen[0])
+    plan = build_live_run_plan(args, output_dir=tmp_path,
+        collector_config=CollectorConfig.from_path(Path('configs/collector-definitions.json')), permission_hints={})
+    if flow == 'app-audit':
+        assert not args.exclude
+        if '--collectors' in selection:
+            assert plan.selected_collectors == ['identity', 'exchange']
+        else:
+            assert {'exchange_policy', 'dns_posture'} <= set(plan.selected_collectors)
+            if '--auditor-profile' in selection:
+                assert 'exchange' in plan.selected_collectors
+    else:
+        assert {'exchange_policy', 'dns_posture'}.isdisjoint(plan.selected_collectors)
+        assert ('exchange' in plan.selected_collectors) == (include_exchange or not non_interactive)

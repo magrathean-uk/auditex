@@ -131,7 +131,7 @@ def test_optional_setup_commands_preserve_resolved_selection(selection) -> None:
     run = tenant_cli.build_parser().parse_args(shlex.split(commands["app_run"])[2:])
 
     assert probe.mode == "app"
-    assert probe.surface.split(",") == payload["selected_collectors"]
+    assert probe.surface.split(",") == [*payload["selected_collectors"], "windows365"]
     assert run.collectors.split(",") == payload["selected_collectors"]
     assert run.collector_preset == selection.get("collector_preset")
     assert run.plane == "inventory"
@@ -144,17 +144,15 @@ def test_optional_setup_commands_preserve_resolved_selection(selection) -> None:
     {"collectors": ["identity", "licensing"]},
     {"collector_preset": "power-platform", "exclude": ["power_platform", "power_bi"]},
 ])
-def test_setup_commands_without_optional_collectors_are_unchanged(selection) -> None:
+def test_setup_commands_without_power_collectors_preserve_requested_scope(selection) -> None:
     payload = build_setup_guide(provider="m365", **selection)
-    assert payload["commands"]["app_probe"] == (
-        "auditex probe live --tenant-name CLIENT --tenant-id <tenant-id-or-domain> "
-        "--auditor-profile global-reader --mode app --client-id <app-id> --client-secret <client-secret>"
-    )
-    assert payload["commands"]["app_run"] == (
-        "auditex run --tenant-name CLIENT --tenant-id <tenant-id-or-domain> "
-        "--auditor-profile global-reader --plane full --client-id <app-id> --client-secret <client-secret> "
-        "--probe-first --throttle-mode safe"
-    )
+    probe = auditex_cli._build_probe_parser().parse_args(shlex.split(payload["commands"]["app_probe"])[2:])
+    run = tenant_cli.build_parser().parse_args(shlex.split(payload["commands"]["app_run"])[2:])
+    assert run.auditor_profile == probe.auditor_profile == "global-reader"
+    assert run.plane == "full" and probe.mode == "app"
+    assert run.collectors.split(",") == payload["authentication_plans"]["app"]["selected_collectors"]
+    assert probe.surface.split(",") == [*run.collectors.split(","), "windows365"]
+    assert {"power_platform", "power_bi"}.isdisjoint(payload["selected_collectors"])
 
 
 def test_documented_optional_run_and_probe_examples_parse() -> None:
@@ -170,3 +168,125 @@ def test_documented_optional_run_and_probe_examples_parse() -> None:
     assert run.plane == "inventory"
     assert probe.mode == "app"
     assert probe.surface == "identity,licensing,power_platform,power_bi"
+
+
+def test_default_app_setup_discloses_sessions_public_resolver_and_failures():
+    guide = build_setup_guide(provider="m365", mode="app")
+    text = render_setup_guide_markdown(guide)
+    for phrase in ("Exchange Online PowerShell session", "Exchange.ManageAsApp", "Global Reader",
+                   "cannot open this session", "Cloudflare", "https://cloudflare-dns.com/dns-query",
+                   "Only domain names, no user data", "MTA-STS", "OpenID discovery", "verified domains",
+                   "--exclude exchange_policy,dns_posture", "not assessed", "partial",
+                   "Exchange accepted domains", "coexistence excluded", "Email service"):
+        assert phrase in text
+    assert "Exchange.ManageAsApp" not in guide["graph_permissions"]
+    assert guide["exchange_application_permissions"] == ["Exchange.ManageAsApp"]
+    assert {"pwsh", "ExchangeOnlineManagement"} <= set(guide["tool_requirements"])
+    warning = next(row for row in guide["scope_warnings"] if row["permission"] == "Exchange.ManageAsApp")
+    assert warning["risk"] == "write_capable"
+    for phrase in ("read-only Get-*", "no mutating cmdlet", "Global Reader only"):
+        assert phrase in warning["note"]
+
+
+def test_default_delegated_setup_omits_app_mode_workloads():
+    guide = build_setup_guide(provider="m365", mode="delegated")
+    assert {"exchange_policy", "dns_posture"}.isdisjoint(guide["selected_collectors"])
+    assert guide["exchange_application_permissions"] == ["Exchange.ManageAsApp"]
+    assert "pwsh" in guide["tool_requirements"]
+    delegated = guide["authentication_plans"]["delegated"]
+    assert not delegated["exchange_application_permissions"]
+    assert "pwsh" not in delegated["tool_requirements"]
+    app = guide["authentication_plans"]["app"]
+    assert {"exchange_policy", "dns_posture"} <= set(app["selected_collectors"])
+    text = render_setup_guide_markdown(guide)
+    assert "Cloudflare" in text and "Exchange Online PowerShell session" in text
+    assert "app-mode only" in render_setup_guide_markdown(guide)
+
+
+@pytest.mark.parametrize("exclude", ["exchange_policy", "dns_posture", "exchange_policy,dns_posture"])
+def test_setup_guide_deselection_survives_generated_run_commands(tmp_path, exclude):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.run import build_live_run_plan
+
+    guide = build_setup_guide(provider="m365", mode="app", exclude=exclude)
+    assert set(exclude.split(",")).isdisjoint(guide["selected_collectors"])
+    for key in ("app_probe", "delegated_probe"):
+        args = auditex_cli._build_probe_parser().parse_args(shlex.split(guide["commands"][key])[2:])
+        assert args.surface.split(",") == [*guide["authentication_plans"][key.split("_")[0]]["selected_collectors"], "windows365"]
+    for key in ("app_run", "delegated_run"):
+        args = tenant_cli.build_parser().parse_args(shlex.split(guide["commands"][key])[2:])
+        plan = build_live_run_plan(args, output_dir=tmp_path,
+                                   collector_config=CollectorConfig.from_path(Path("configs/collector-definitions.json")),
+                                   permission_hints={}, collector_presets=load_collector_presets())
+        assert plan.selected_collectors == guide["authentication_plans"][key.split("_")[0]]["selected_collectors"]
+        if key.startswith("delegated"):
+            assert {"exchange_policy", "dns_posture"}.isdisjoint(plan.selected_collectors)
+
+
+@pytest.mark.parametrize("collectors", ["exchange_policy", "dns_posture", "exchange_policy,dns_posture"])
+def test_setup_explicit_app_only_scope_does_not_emit_empty_delegated_commands(collectors):
+    guide = build_setup_guide(provider="m365", mode="app", collectors=collectors)
+    assert not any(key.startswith("delegated_") for key in guide["commands"])
+    assert "delegated" not in guide["authentication_plans"]
+    assert "delegated" not in guide["alternate_setup_steps"]
+    assert f"--collectors {collectors}" in guide["commands"]["app_run"]
+    assert "Delegated setup omitted" in render_setup_guide_markdown(guide)
+
+
+def test_app_exchange_reader_with_only_app_collectors_omits_delegated_guide(tmp_path):
+    from azure_tenant_audit.config import CollectorConfig
+    from azure_tenant_audit.presets import load_collector_presets
+    from azure_tenant_audit.run import build_live_run_plan
+
+    guide = build_setup_guide(
+        provider="m365", mode="app", auditor_profile="exchange-reader", exclude="exchange,security,identity"
+    )
+    assert guide["selected_collectors"] == ["exchange_policy"]
+    args = tenant_cli.build_parser().parse_args(shlex.split(guide["commands"]["app_run"])[2:])
+    plan = build_live_run_plan(args, output_dir=tmp_path,
+                               collector_config=CollectorConfig.from_path(Path("configs/collector-definitions.json")),
+                               permission_hints={}, collector_presets=load_collector_presets())
+    assert plan.selected_collectors == guide["selected_collectors"]
+    assert "delegated" not in guide["authentication_plans"]
+    assert "delegated" not in guide["alternate_setup_steps"]
+    assert not any(key.startswith("delegated_") for key in guide["commands"])
+    notice = "Delegated setup omitted: no selected collectors support generated delegated commands."
+    assert guide["setup_notices"] == [notice]
+    markdown = render_setup_guide_markdown(guide)
+    assert markdown.count(notice) == 1
+    assert "## Delegated command requirements" not in markdown
+    assert "### delegated_" not in markdown
+
+
+@pytest.mark.parametrize("selection", [
+    {"mode": "delegated", "auditor_profile": "exchange-reader", "exclude": "exchange,security,identity"},
+    {"mode": "delegated", "collectors": "exchange_policy"},
+    {"mode": "app", "collectors": "identity", "exclude": "identity"},
+    {"mode": "delegated", "collectors": "identity", "exclude": "identity"},
+])
+def test_setup_guide_rejects_empty_requested_mode(selection):
+    with pytest.raises(ValueError, match="No collectors selected"):
+        build_setup_guide(provider="m365", **selection)
+
+
+def test_exchange_tooling_follows_explicit_selection_in_other_profiles():
+    guide = build_setup_guide(provider='m365', mode='app', auditor_profile='security-reader', collectors='exchange_policy')
+    assert {'pwsh', 'ExchangeOnlineManagement'} <= set(guide['authentication_plans']['app']['tool_requirements'])
+
+
+@pytest.mark.parametrize('collectors', ['identity,exchange_policy', 'identity,dns_posture',
+                                        'identity,exchange_policy,dns_posture'])
+@pytest.mark.parametrize('mode', ['app', 'delegated'])
+def test_setup_discloses_explicit_names_filtered_from_delegated_commands(collectors, mode):
+    guide = build_setup_guide(provider='m365', mode=mode, collectors=collectors)
+    steps = guide['authentication_plans']['delegated']['setup_steps']
+    assert sum('app-mode only' in step for step in steps) == 1
+    assert any('including explicitly selected names' in step for step in steps)
+    if 'identity' in collectors:
+        for key in ('app_probe', 'delegated_probe'):
+            args = auditex_cli._build_probe_parser().parse_args(shlex.split(guide['commands'][key])[2:])
+            assert args.surface.split(',')[-1] == 'windows365'
+        args = tenant_cli.build_parser().parse_args(shlex.split(guide['commands']['delegated_run'])[2:])
+        assert args.collectors == 'identity'
+    assert 'app-mode only' in render_setup_guide_markdown(guide)

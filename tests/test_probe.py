@@ -4,6 +4,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from azure_tenant_audit.collectors.base import CollectorResult
 from azure_tenant_audit.probe import ProbeConfig, _build_probe_snapshot, run_live_probe
 
@@ -331,3 +333,33 @@ def test_probe_dns_accepted_domain_handoff(tmp_path: Path, monkeypatch) -> None:
     assert contexts["dns_posture"]["exchange_accepted_domains"] == envelope
     assert "exchange_accepted_domains" not in contexts["exchange_policy"]
     assert "exchange_accepted_domains" not in contexts["identity"]
+
+
+def test_app_probe_all_includes_default_workloads_but_delegated_does_not():
+    from azure_tenant_audit.probe import _resolve_requested_surfaces
+
+    assert {"exchange_policy", "dns_posture"} <= set(_resolve_requested_surfaces("all", "app"))
+    assert {"exchange_policy", "dns_posture"}.isdisjoint(_resolve_requested_surfaces("all", "delegated"))
+
+
+@pytest.mark.parametrize('surface,expected', [
+    ('all', ('Exchange Online PowerShell session', 'Cloudflare')),
+    ('exchange_policy', ('Exchange Online PowerShell session',)),
+    ('dns_posture', ('Cloudflare',)),
+    ('identity', ()),
+])
+def test_probe_prints_selected_activity_before_toolchain_or_tenant_reads(tmp_path, monkeypatch, capsys, surface, expected):
+    def toolchains(**kwargs):
+        text = capsys.readouterr().out
+        for phrase in ('Exchange Online PowerShell session', 'Cloudflare'):
+            assert (phrase in text) == (phrase in expected)
+        assert text.count('Collection notice:') == len(expected)
+        assert '--exclude' not in text  # Probes select with --surface.
+        return []
+
+    monkeypatch.setattr('azure_tenant_audit.probe._probe_toolchain_statuses', toolchains)
+    monkeypatch.setattr('azure_tenant_audit.probe.GraphClient', lambda *args, **kwargs: pytest.fail('No tenant reads'))
+    assert run_live_probe(ProbeConfig(
+        tenant_name='constructed', tenant_id='constructed', output_dir=tmp_path,
+        mode='app', surface=surface, use_azure_cli_token=False,
+    )) == 1  # Missing credentials stop the probe after its notices.

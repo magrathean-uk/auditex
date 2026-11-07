@@ -832,7 +832,19 @@ A rule reads `not_assessed` with a reason, never `pass`, when an input it judges
 
 `--resume-from` carries earlier collectors forward with the status they finished with and never reads an incomplete one as complete. A collector the checkpoint holds as `ok`, with its raw payload still on disk, is not run again and keeps `ok` (message `Resumed from checkpoint (ok)`); a collector the checkpoint holds as `skipped` because the tenant cannot have the data keeps `skipped` and reads `not_applicable`. A `partial` or `failed` collector, a collector the preflight skipped as blocked (checkpoint `error_class` `preflight_blocked`) and an `ok` collector whose raw payload is gone are run again, and the new observation replaces the earlier summary and coverage rows of that collector. Every collector that finished in an earlier session is part of the resumed run whether or not this session selects it: it is carried, added to `selected_collectors`, normalized and judged with the rest, so the report, `findings/findings.json`, the blockers and the normalized sections describe the whole run folder and not only what was selected (a resume with `--collectors licensing` after a run of four collectors still reports on all four). A checkpointed collector that is not part of the resumed session and was not carried (it did not finish, was skipped by the preflight, lost its raw payload or was read over another time window) keeps the run `partial` (event `run.resume.incomplete`). A resumed run rewrites `diagnostics.json`, `blockers/blockers.json` and `findings/findings.json` from what the whole run now holds and removes each (and its manifest fields) when nothing is left to report, as a fresh run that has none never writes them, so a collector that succeeds on resume no longer leaves the blocker an earlier session wrote; it removes `normalized/<section>.json` files the resumed run no longer produces. The writer seeds its coverage from `coverage.json` and from `index/coverage.jsonl` (the newest row of an endpoint wins), so a session that was interrupted before finalization keeps its collectors' coverage rows, and a carried collector with no summary row is added to `summary.json`. A collector checkpoint records the `since` and `until` it was read over; a time-windowed collector (`security`, `defender`) whose recorded window differs from the resumed session's is run again (a checkpoint with no recorded window is accepted only by a session with no window of its own). The event `run.resume` lists `completed_collectors` and `rerun_collectors`; a carried collector logs `collector.resumed`.
 
-`--offline` replay (and `auditex demo`, the MCP `auditex_run_offline_validation` tool and `make contract-smoke`) honours the markers a sample section carries. A section with an `error` or `error_class`, or one flagged `collection_truncated` (or, in an older sample, `collection_limit_reached`), becomes a coverage row (`type` `offline_sample`: `status`, `error_class`, `error`, `item_count`, `collection_truncated`, `truncation_reason`, `result_limit`) written to `coverage.json`, and its collector is `partial`: the ledger reads `partial_success` (or `blocked_permission` for a permission error), the blocker is raised as in a live run, the manifest gaps and `normalized/collection_gaps.json` name the cut list, the run is `partial` (exit status 1) and the rules that read the collector are `not_assessed`. A section with no marker needs no row and the collector stays `ok` and `complete_offline_sample`. A collector the sample holds but that holds nothing (`{}`, `null`, a list) delivered none of its sections: every section its live run records (`query_plan` in `configs/collector-definitions.json`; the Google Workspace sections in `auditex.google_workspace.collectors.COLLECTOR_SECTIONS`) is written as a failed row with `error_class` `section_absent`, the collector is `partial` and the replay exits 1. A collector that holds any key is not second-guessed section by section: minimal fixtures omit sections on purpose and the plan is not a schema (a flat `{"value": [...]}` sample is such a delivery). A domain posture record that carries a `resolver_error` is written as a failed `posture:<domain>` row with `error_class` `dns_resolver_error`, as a live run does. The Google Workspace replay does the same, and its capability rows read `offline_sample`, so a clean replay is `complete_offline_sample` in the ledger, never `complete_exact_scope`. A replay records what it was replayed from in `run-manifest.json` as `replay_source` (`file`, the sample's file name and never its directory, and `sha256`), and its audit log's `run.started` event carries `mode: "offline"`; reports use both to say the evidence was replayed and that no tenant was contacted (see "Bundle hash manifest").
+`exchange_policy` and `dns_posture` are non-fatal default workload collectors.
+A failed or partial read keeps its actual status, diagnostics,
+coverage gap and customer reason; policies depending on unavailable evidence stay
+`not_assessed`. When these are the only incomplete collectors, the overall run
+status remains `partial`, but collection exits **0**, in live collection and offline
+replay. One stderr line names the incomplete non-fatal collectors, says the run is
+partial and directs the operator to diagnostics; the same line is in `summary.md`
+and `summary.json` as `partial_workload_notice`. It includes no tenant data or error
+text. Failures of required collectors and their authentication retain their
+existing non-zero exits. No `ok_with_gaps` status is introduced. Coverage gates
+continue to reject partial runs unless `--allow-partial` is supplied.
+
+`--offline` replay (and `auditex demo`, the MCP `auditex_run_offline_validation` tool and `make contract-smoke`) honours the markers a sample section carries. A section with an `error` or `error_class`, or one flagged `collection_truncated` (or, in an older sample, `collection_limit_reached`), becomes a coverage row (`type` `offline_sample`: `status`, `error_class`, `error`, `item_count`, `collection_truncated`, `truncation_reason`, `result_limit`) written to `coverage.json`, and its collector is `partial`: the ledger reads `partial_success` (or `blocked_permission` for a permission error), the blocker is raised as in a live run, the manifest gaps and `normalized/collection_gaps.json` name the cut list, the run is `partial` (exit status 1, except for the non-fatal workload collectors above) and the rules that read the collector are `not_assessed`. A section with no marker needs no row and the collector stays `ok` and `complete_offline_sample`. A collector the sample holds but that holds nothing (`{}`, `null`, a list) delivered none of its sections: every section its live run records (`query_plan` in `configs/collector-definitions.json`; the Google Workspace sections in `auditex.google_workspace.collectors.COLLECTOR_SECTIONS`) is written as a failed row with `error_class` `section_absent`, the collector is `partial` and the replay exits 1, with the same non-fatal workload exception. A collector that holds any key is not second-guessed section by section: minimal fixtures omit sections on purpose and the plan is not a schema (a flat `{"value": [...]}` sample is such a delivery). A domain posture record that carries a `resolver_error` is written as a failed `posture:<domain>` row with `error_class` `dns_resolver_error`, as a live run does. The Google Workspace replay does the same, and its capability rows read `offline_sample`, so a clean replay is `complete_offline_sample` in the ledger, never `complete_exact_scope`. A replay records what it was replayed from in `run-manifest.json` as `replay_source` (`file`, the sample's file name and never its directory, and `sha256`), and its audit log's `run.started` event carries `mode: "offline"`; reports use both to say the evidence was replayed and that no tenant was contacted (see "Bundle hash manifest").
 
 ### SARIF and OSCAL exports
 
@@ -1253,7 +1265,7 @@ for at most 100 Windows devices; a larger fleet leaves a `fanout_limit` entry in
 | `exchange.smtp_auth_enabled_tenant_wide` | `SmtpClientAuthenticationDisabled` is false for the tenant, or the tenant default is true and `casMailboxSmtpAuth` counts mailboxes that switch it back on for themselves (finding `exchange_policy:cas_mailbox:smtp_auth_enabled`, once per run, with the count and no address) | medium | `Get-TransportConfig` was not read or omitted the setting, or the per-mailbox count (`Get-CASMailbox`, an aggregate `Measure-Object \| Select-Object Count`, so the answer is never empty and no mailbox is named) was not read in full |
 | `exchange.dkim_signing_disabled` | DKIM signing is off for an authoritative accepted domain other than `*.onmicrosoft.com`. One finding per domain. `DomainType` and `DomainName` are read whether Exchange returns names, integers or objects | medium | `Get-DkimSigningConfig` or `Get-AcceptedDomain` was not read, there is no custom domain, a domain has no signing row, or `dns_posture.dkim_missing` already reports the disabled domain (`reported_by:dns_posture.dkim_missing`) |
 
-**Mail protection rules are judged on their own command rows.** The three Exchange rules do not wait for the whole `exchange_policy` collector: it runs multiple independent commands and is `partial` whenever one is unavailable (`Get-ProtectionAlert` needs a Security & Compliance session that app-only runs never open). Each rule reads `not_assessed` unless its own command rows were read in full (`malwareFilterPolicy`, `transportConfig` with `casMailboxSmtpAuth`, `dkimSigningConfig` with `acceptedDomains`), and `auditex compare` reassesses a vanished finding on the same rows. CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` now need `exchange.dkim_signing_disabled` as well as `dns_posture.dkim_missing`: selectors published in DNS no longer make them `pass` on their own. Exchange Online returns enumerations as integers in some builds, so the adapter asks for names (`ConvertTo-Json -EnumsAsStrings` where PowerShell has it) and the normalizer reads either form.
+**Mail protection rules are judged on their own command rows.** The three Exchange rules do not wait for the whole `exchange_policy` collector: it runs multiple independent commands and is `partial` when a command genuinely fails. `Get-ProtectionAlert` is a by-design section skip because Auditex does not open a Security & Compliance session; that skip alone does not make Exchange partial. Each rule reads `not_assessed` unless its own command rows were read in full (`malwareFilterPolicy`, `transportConfig` with `casMailboxSmtpAuth`, `dkimSigningConfig` with `acceptedDomains`), and `auditex compare` reassesses a vanished finding on the same rows. CIS `2.1.9` and ScubaGear `MS.EXO.3.1v1` now need `exchange.dkim_signing_disabled` as well as `dns_posture.dkim_missing`: selectors published in DNS no longer make them `pass` on their own. Exchange Online returns enumerations as integers in some builds, so the adapter asks for names (`ConvertTo-Json -EnumsAsStrings` where PowerShell has it) and the normalizer reads either form.
 
 **End-of-life table.** `configs/os-end-of-life.json` is read from disk and never from the network. It records
 `verified_on`, and for each Windows build (10 and 11, General Availability Channel) and each macOS, iOS, iPadOS and
@@ -1326,6 +1338,43 @@ Both tools are read-only and make no tenant or inference calls. See
 [external assessment comparison](../guides/external-assessments.md).
 
 `auditex_summarize_run` returns the same contract status and evidence index path exposed by CLI output. `auditex_api_inventory` exposes the API call ledger, `auditex_permissions_ledger` exposes required and missing scopes, `auditex_proof_table` exposes finding-to-evidence rows, `auditex_enterprise_handoff` exposes the customer handoff index for review, and `auditex_verify_customer_pack` verifies generated customer pack integrity. `auditex_contract_schema_manifest` lists shipped schema files and the active contract version so MCP clients can detect drift before interpreting a bundle.
+
+### Default Exchange/DNS coverage
+
+`exchange_policy` and `dns_posture` bypass preflight reads and run once in the
+collection phase. Required collectors retain the existing runnable-selection
+semantics, including preflight-skipped licensing.
+Coverage gap `error_classes` group operation rows by their owning `collector`,
+including required collectors, rather than by operation `name`.
+
+The by-design `exchange_policy.protectionAlerts` IPPS skip has coverage status
+`skipped`, `section_scoped: true` and reason/error class `ipps_session_not_opened`.
+It leaves collector/run status `ok` when other reads succeed, while section gaps,
+collection gaps, handoff, explorer and AI context retain the limitation. Offline
+replay preserves explicit skips; historical session failures remain failures.
+Real Exchange/DNS failures remain partial, with collection exit 0 when these are
+the only failures; partial runs still block coverage gates by default.
+
+Explicitly array-wrapped Exchange policy list reads serialise zero rows as `[]`.
+Only lists that can legitimately be empty use this wrapper: transport rules,
+inbound/outbound connectors, forwarding mailboxes, Defender assignment/preset
+rules and optional Safe Attachments/Safe Links policies. The unused protection-alert
+command remains wrapped but is never invoked. Accepted/remote domains, default
+sharing and malware policies, DKIM signing configuration, default anti-phish,
+hosted content/connection filter policies and the ATP organisation setting stay
+unwrapped; missing output is a failure, as it is for scalar and count reads.
+An empty accepted-domain envelope is unusable and DNS falls back to Graph-verified
+domains with the Email service. A non-empty accepted-domain list containing only
+coexistence domains still legitimately produces an empty DNS record universe.
+
+Every command through the shared PowerShell adapter starts with
+`$ErrorActionPreference = 'Stop'`, including Microsoft365DSC and lab-only response
+actions. PowerShell errors should therefore terminate with a non-zero exit;
+non-zero exits and recognised authentication/command failures remain failures.
+Exit-0 JSON evidence is retained when stderr contains a warning. The empty-output
+success branch requires both an explicitly array-wrapped read and empty stderr;
+empty stdout with stderr is `command_error`. Error-preference propagation into
+Exchange module proxy functions has not been verified with PowerShell.
 
 ## Explainer (planned output)
 

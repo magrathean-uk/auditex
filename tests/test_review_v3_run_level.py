@@ -114,7 +114,7 @@ def test_teams_token_runs_five_rest_reads_and_skips_commands_without_partial_run
 
     explorer_rows = {row["collector"]: row for row in _collector_rows(run_dir, manifest, {})}
     assert explorer_rows["teams_policy"]["status"] == "verified"
-    assert explorer_rows["teams_policy"]["reason"] == "Collected"
+    assert explorer_rows["teams_policy"]["reason"] == "Collected; not collected: Teams PowerShell sessions are not supported"
 
 
 def _section_gaps(run_dir: Path) -> dict[tuple[str, str], dict[str, Any]]:
@@ -335,3 +335,246 @@ def test_a_tenant_with_more_than_ten_profiles_keeps_its_update_ring_rules(monkey
     assert all(status == "not_assessed" for status, _reason in statuses["intune_depth.policies_without_assignments"])
     gap = _section_gaps(run_dir)[("intune_depth", "deviceConfigurationAssignments")]
     assert gap["reason"] == "fanout_limit"
+
+
+@pytest.mark.parametrize("error_class,reason", [
+    ("command_not_found", "pwsh"),
+    ("module_not_found", "ExchangeOnlineManagement"),
+    ("session_not_connected", "session failed"),
+    ("command_not_authenticated", "admin consent"),
+    ("command_error", "Global Reader"),
+])
+@pytest.mark.parametrize("preflight", [False, True])
+def test_default_exchange_failure_is_partial_exit_zero_with_unassessed_policies(
+    monkeypatch, tmp_path, caplog, error_class, reason, preflight
+):
+    from azure_tenant_audit import cli
+    from auditex.reporting import render_enterprise_handoff_markdown
+    from auditex.scuba_projection import project_run
+
+    class RefusedAdapter:
+        def run(self, command, **kwargs):
+            return {"error": "constructed Exchange refusal", "error_class": error_class}
+
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _: RefusedAdapter())
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    caplog.set_level("INFO", logger="azure_tenant_audit")
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, FakeGraph(), "exchange_policy", *(["--probe-first"] if preflight else []))
+
+    assert rc == 0
+    assert load(run_dir, "run-manifest.json")["overall_status"] == "partial"
+    ledger = load(run_dir, "normalized/coverage_ledger.json")["records"]
+    assert not ledger[0]["coverage_status"].startswith("complete")
+    assert reason in ledger[0]["message"]
+    assert any(reason in row["customer_reason"] for row in load(run_dir, "diagnostics.json"))
+    statuses = rule_statuses(run_dir)
+    assert statuses["detection.unified_audit_log_disabled"] == {("not_assessed", "collector_not_complete:exchange_policy")}
+    projection = project_run(run_dir)
+    assert projection.report["sections"]["transport_config"]["status"] == "not_collected"
+    handoff = enterprise_handoff(run_dir)
+    assert any(reason in row["message"] for row in handoff["limitations"])
+    assert "Exchange Online PowerShell session" in render_enterprise_handoff_markdown(handoff)
+    assert "Selected Exchange policy collection" in caplog.text
+    assert load(run_dir, "validation.json")["valid"] is True
+    assert gate_findings(run_dir=str(run_dir), fail_on="critical")["status"] != "pass"
+
+
+def test_default_dns_unreachable_is_partial_exit_zero_with_unknown_records(monkeypatch, tmp_path, caplog):
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.dns_lookup import DohError
+    from auditex.reporting import render_enterprise_handoff_markdown
+    from auditex.scuba_projection import project_run
+
+    class UnreachableResolver:
+        def query(self, name, kind):
+            raise DohError("constructed DoH unreachable")
+
+    monkeypatch.setattr("azure_tenant_audit.collectors.dns_posture.DohClient", lambda **_: UnreachableResolver())
+    # Never instantiate a real HTTP fetcher; the DNS failure does not advertise MTA-STS.
+    monkeypatch.setattr("azure_tenant_audit.collectors.dns_posture.RequestsHttpsFetcher", lambda: None)
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    caplog.set_level("INFO", logger="azure_tenant_audit")
+    fake = FakeGraph(lists={"/domains": [{"id": "constructed.example", "isVerified": True, "supportedServices": ["Email"]}]})
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, fake, "dns_posture")
+
+    assert rc == 0
+    assert load(run_dir, "run-manifest.json")["overall_status"] == "partial"
+    assert "Cloudflare" in load(run_dir, "normalized/coverage_ledger.json")["records"][0]["message"]
+    assert all(row["spf"]["present"] is None for row in load(run_dir, "raw/dns_posture.json")["domainPosture"]["value"])
+    for section in ("spf_records", "dkim_records", "dmarc_records"):
+        diagnostic = project_run(run_dir).report["sections"][section]
+        assert diagnostic["status"] == "not_collected" and diagnostic["reason"] == "collector_error"
+    assert any(status == "not_assessed" for status, _ in rule_statuses(run_dir)["dns_posture.spf_missing"])
+    records = load(run_dir, "normalized/collection_gaps.json")["records"]
+    assert any("Cloudflare" in row.get("customer_reason", "") for row in records)
+    text = render_enterprise_handoff_markdown(enterprise_handoff(run_dir))
+    for phrase in ("Cloudflare", "https://cloudflare-dns.com/dns-query", "Only domain names, no user data", "MTA-STS", "OpenID discovery"):
+        assert phrase in text and phrase in caplog.text
+    assert load(run_dir, "validation.json")["valid"] is True
+
+
+@pytest.mark.parametrize("collectors,expected_rc", [
+    ("exchange_policy", 0), ("dns_posture", 0),
+    ("exchange_policy,dns_posture", 0), ("identity", 1),
+    ("identity,exchange_policy,dns_posture", 1),
+])
+def test_optional_collector_crashes_do_not_mask_required_collector_failure(monkeypatch, tmp_path, collectors, expected_rc):
+    from azure_tenant_audit import cli
+
+    class Crashed:
+        def run(self, context):
+            raise RuntimeError("constructed collector failure")
+
+    for name in collectors.split(","):
+        monkeypatch.setitem(cli.REGISTRY, name, Crashed())
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, FakeGraph(), collectors)
+    assert rc == expected_rc
+    assert load(run_dir, "run-manifest.json")["overall_status"] == "partial"
+    if expected_rc == 0:
+        assert load(run_dir, "coverage.json")
+        assert all("Not assessed:" in row["message"] for row in load(run_dir, "normalized/coverage_ledger.json")["records"])
+
+
+def test_offline_disclosure_does_not_claim_network_activity(tmp_path):
+    from azure_tenant_audit.data_handling import build_data_handling_summary
+
+    payload = build_data_handling_summary(platform="m365", mode="offline", plane="inventory", collectors=["exchange_policy", "dns_posture"])
+    assert payload["collection_notices"] == ["Offline replay: no Exchange Online PowerShell session or public DNS/HTTPS requests are made."]
+
+
+def test_required_graph_authentication_failure_still_exits_one(monkeypatch, tmp_path):
+    from azure_tenant_audit import cli
+
+    class Crashed:
+        def run(self, context):
+            raise RuntimeError("constructed optional session failure")
+
+    for name in ("exchange_policy", "dns_posture"):
+        monkeypatch.setitem(cli.REGISTRY, name, Crashed())
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, FakeGraph(errors={"/users": (401, "Unauthenticated")}),
+                                 "identity,exchange_policy,dns_posture")
+    assert rc == 1
+    assert load(run_dir, "run-manifest.json")["overall_status"] == "partial"
+    assert any(row.get("collector") == "identity" and row.get("error_class") == "unauthenticated"
+               for row in load(run_dir, "diagnostics.json"))
+
+
+@pytest.mark.parametrize("preflight", [False, True])
+def test_dns_domain_read_refusal_is_a_named_non_fatal_gap(monkeypatch, tmp_path, preflight):
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.collectors.dns_posture import DnsPostureCollector
+
+    class NoNetworkDns(DnsPostureCollector):
+        def run(self, context):
+            return super().run({**context, "public_lookups": False})
+
+    monkeypatch.setitem(cli.REGISTRY, "dns_posture", NoNetworkDns())
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    rc, run_dir = run_collectors(monkeypatch, tmp_path, FakeGraph(errors={"/domains": (403, "Forbidden")}),
+                                 "dns_posture", *(["--probe-first"] if preflight else []))
+    assert rc == 0
+    assert load(run_dir, "run-manifest.json")["overall_status"] == "partial"
+    assert load(run_dir, "normalized/collection_gaps.json")["records"]
+    assert "Graph verified domains" in load(run_dir, "normalized/coverage_ledger.json")["records"][0]["message"]
+
+
+@pytest.mark.parametrize("preflight", [False, True])
+@pytest.mark.parametrize("healthy", [True, False])
+def test_ipps_skip_keeps_healthy_app_run_ok_and_real_exchange_failure_partial(monkeypatch, tmp_path, preflight, healthy):
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.collection_gaps import IPPS_SKIP_TEXT
+    from auditex.explorer import _collector_rows
+    from auditex.reporting import render_enterprise_handoff_markdown
+
+    fake = FakeGraph(lists={"/domains": [{"id": "constructed.onmicrosoft.com", "isInitial": True}]})
+    fake.app_token_for = lambda scope: "constructed-token"
+    calls = []
+
+    class Adapter:
+        def run(self, command, *, session, **kwargs):
+            assert session["kind"] == "exchange_online"
+            assert "Get-ProtectionAlert" not in command
+            calls.append(command)
+            if not healthy:
+                return {"error": "constructed real Exchange session failure", "error_class": "session_not_connected"}
+            return {"value": [{"Name": "constructed policy"}], "command": command}
+
+    monkeypatch.setattr("azure_tenant_audit.collectors.exchange_policy.get_adapter", lambda _: Adapter())
+    monkeypatch.setattr(cli, "GraphClient", lambda *args, **kwargs: fake)
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "acme", "--tenant-id", "constructed", "--client-id", "constructed-app",
+        "--client-secret", "constructed-secret", "--collectors", "licensing,exchange_policy",
+        "--out", str(tmp_path), "--run-name", "ipps", *(["--probe-first"] if preflight else []),
+    ])
+    assert cli.run_live(args) == 0
+    run_dir = tmp_path / "acme-ipps"
+    manifest = load(run_dir, "run-manifest.json")
+    assert manifest["overall_status"] == ("ok" if healthy else "partial")
+    summary = {row["name"]: row for row in load(run_dir, "summary.json")["collectors"]}
+    assert summary["exchange_policy"]["status"] == ("ok" if healthy else "partial")
+    from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
+    assert len(calls) == len(ExchangePolicyCollector.command_collectors) - 1
+    row = next(row for row in load(run_dir, "coverage.json") if row["name"] == "protectionAlerts")
+    assert row["status"] == "skipped" and row["section_scoped"] is True
+    assert row["reason"] == row["error_class"] == "ipps_session_not_opened"
+    assert _section_gaps(run_dir)[("exchange_policy", "protectionAlerts")]["status"] == "skipped"
+    records = load(run_dir, "normalized/collection_gaps.json")["records"]
+    assert any(row["source"] == "exchange_policy.protectionAlerts" and row["reason"] == "ipps_session_not_opened" for row in records)
+    assert IPPS_SKIP_TEXT in render_enterprise_handoff_markdown(enterprise_handoff(run_dir))
+    summary_gaps = load(run_dir, "reports/report-pack.json")["summary"]["coverage_gaps"]
+    assert sum(gap["message"].count(IPPS_SKIP_TEXT) for gap in summary_gaps) == 1
+    assert "exchange_policy" in load(run_dir, "ai_context.json")["known_limitations"]
+    explorer = next(row for row in _collector_rows(run_dir, manifest, {}) if row["collector"] == "exchange_policy")
+    assert explorer["status"] == ("verified" if healthy else "not_verified")
+    if healthy:
+        assert IPPS_SKIP_TEXT in explorer["reason"]
+        assert gate_findings(run_dir=str(run_dir), fail_on="critical")["status"] == "pass"
+        assert not load(run_dir, "diagnostics.json")
+    else:
+        assert "Exchange.ManageAsApp admin consent" in explorer["reason"]
+        assert gate_findings(run_dir=str(run_dir), fail_on="critical")["status"] == "blocked"
+        ledger = load(run_dir, "normalized/coverage_ledger.json")["records"]
+        assert "Exchange.ManageAsApp admin consent" in next(row for row in ledger if row["collector"] == "exchange_policy")["message"]
+    assert load(run_dir, "validation.json")["valid"] is True
+
+
+def test_offline_notice_only_when_selected_and_no_console_exit_text_in_artifacts():
+    from azure_tenant_audit.data_handling import collector_activity_notices
+    from azure_tenant_audit.dns_lookup import DEFAULT_DOH_ENDPOINT
+
+    assert not collector_activity_notices(["identity"], "offline")
+    text = " ".join(collector_activity_notices(["exchange_policy", "dns_posture"], "app"))
+    assert "Will collect" not in text and "process exit" not in text
+    # Pin the named resolver to its shipped endpoint, so a constant change cannot silently mislabel it.
+    assert DEFAULT_DOH_ENDPOINT == "https://cloudflare-dns.com/dns-query"
+    assert "Cloudflare" in text and DEFAULT_DOH_ENDPOINT in text
+
+
+def test_explicit_delegated_exchange_is_selected_and_reports_auth_mode_reason(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from azure_tenant_audit import cli
+    from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
+
+    monkeypatch.setattr(cli, 'GraphClient', lambda *args, **kwargs: FakeGraph())
+    monkeypatch.setattr(cli, '_acquire_azure_cli_access_token', lambda *args, **kwargs: 'constructed')
+    monkeypatch.setattr(cli, '_capture_signed_in_context', lambda *args, **kwargs: {})
+    monkeypatch.setattr(cli.run_core, 'collector_pause_seconds', lambda _: 0)
+    monkeypatch.setattr('azure_tenant_audit.collectors.exchange_policy.get_adapter', lambda _: PowerShellGraphAdapter())
+    monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.shutil.which', lambda _: '/usr/bin/pwsh')
+    monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.subprocess.run', lambda *args, **kwargs:
+        SimpleNamespace(returncode=1, stdout='', stderr='The term Get-Read is not recognized'))
+    args = cli.build_parser().parse_args([
+        '--tenant-name', 'acme', '--tenant-id', 'constructed', '--use-azure-cli-token',
+        '--collectors', 'exchange_policy', '--out', str(tmp_path), '--run-name', 'explicit',
+    ])
+    assert cli.run_live(args) == 0
+    run_dir = tmp_path / 'acme-explicit'
+    manifest = load(run_dir, 'run-manifest.json')
+    assert manifest['selected_collectors'] == ['exchange_policy']
+    assert manifest['overall_status'] == 'partial'
+    ledger = load(run_dir, 'normalized/coverage_ledger.json')['records']
+    assert 'cannot open an Exchange Online policy session' in ledger[0]['message']
+    assert gate_findings(run_dir=str(run_dir), fail_on='critical')['status'] == 'blocked'
