@@ -214,15 +214,48 @@ def test_missing_chunk_finalizes_partial_bundle_with_resolvable_blocker(tmp_path
     assert not (run / "normalized/users.json").exists()
 
 
-def test_portable_chunk_reader_still_rejects_symlink_escape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("azure_tenant_audit.chunk_reader.os.supports_dir_fd", set())
-    section = _endpoint(tmp_path, "users", [{"id": "u-1"}])
-    assert list(iter_endpoint_records(section, tmp_path)) == [{"id": "u-1"}]
-    (tmp_path / "alias").symlink_to(tmp_path.parent, target_is_directory=True)
-    section["chunk_files"] = ["alias/outside.jsonl"]
-    with pytest.raises(EndpointEvidenceError) as exc:
-        list(iter_endpoint_records(section, tmp_path))
-    assert exc.value.issue["code"] == "unsafe_chunk_path"
+def test_chunk_reader_without_descriptor_opens_fails_closed_without_a_pathname_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contract: guarded chunk reads need POSIX descriptor-relative no-follow opens.
+
+    Without ``dir_fd`` support the guard cannot pin a run, its private inputs or
+    a chunk's identity, and a pathname fallback (the pre-guard Windows branch)
+    would reopen the race and alias holes the guard closes. So a platform without
+    it reports every chunk as ``unreadable_chunk``, a runtime condition rather
+    than an unsafe verdict, reads nothing and yields no row, valid or escaping.
+    """
+    import builtins
+    import os
+
+    root = tmp_path / "run"
+    section = _endpoint(root, "users", [{"id": "u-1"}])
+    assert list(iter_endpoint_records(section, root)) == [{"id": "u-1"}]
+    (tmp_path / "outside.jsonl").write_text('{"id":"outside-row"}\n', encoding="utf-8")
+    (root / "alias").symlink_to(tmp_path, target_is_directory=True)
+    escape = dict(section, chunk_files=["alias/outside.jsonl"], chunk_count=1)
+
+    opened: list[object] = []
+    real_open, real_os_open = builtins.open, os.open
+    results: list[tuple[str, list[dict[str, Any]], list[dict[str, Any]]]] = []
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "supports_dir_fd", set())
+        patch.setattr(builtins, "open", lambda *args, **kwargs: opened.append(args[:1]) or real_open(*args, **kwargs))
+        patch.setattr(os, "open", lambda *args, **kwargs: opened.append(args[:1]) or real_os_open(*args, **kwargs))
+        for candidate in (section, escape):
+            try:
+                list(iter_endpoint_records(candidate, root))
+                raised = "nothing"
+            except EndpointEvidenceError as exc:
+                raised = exc.issue["code"]
+            issues: list[dict[str, Any]] = []
+            results.append((raised, list(iter_endpoint_records(candidate, root, issues=issues)), issues))
+    assert opened == []
+    for raised, rows, issues in results:
+        assert raised == "unreadable_chunk"
+        assert rows == []
+        assert issues[0] == {"code": "unreadable_chunk", "chunk_index": 0}
+        assert "outside" not in json.dumps(issues)
 
 
 @pytest.mark.parametrize("case,code", [
@@ -236,7 +269,9 @@ def test_portable_chunk_reader_still_rejects_symlink_escape(tmp_path: Path, monk
     ("directory_symlink", "unsafe_chunk_path"),
     ("directory", "invalid_chunk_file"),
     ("duplicate", "duplicate_chunk"),
-    ("hardlink", "duplicate_chunk"),
+    # A multiply-linked chunk may alias a file outside the run or a private input.
+    # The guard refuses every alias before reading, so neither copy is counted.
+    ("hardlink", "unsafe_chunk_path"),
     ("bad_path", "invalid_chunk_path"),
     ("bad_manifest", "invalid_chunk_manifest"),
     ("count_high", "item_count_mismatch"),
@@ -299,8 +334,12 @@ def test_invalid_chunk_evidence_is_explicit_and_never_falls_back_to_sample(tmp_p
     assert all(row["id"] not in {"inline-only", "outside-row"} for row in rows)
     if case == "corrupt":
         assert [row["id"] for row in rows] == ["chunk-row", "later-row"]
-    if case in {"duplicate", "hardlink"}:
+    if case == "duplicate":
         assert len(rows) == 1
+    if case in {"parent", "absolute", "file_symlink", "directory_symlink", "directory", "hardlink"}:
+        assert rows == []
+        refused = next(issue for issue in issues if issue["code"] == code)
+        assert set(refused) == {"code", "chunk_index"}
 
     snapshot = _snapshot(root, {"identity": {"users": section}})
     assert snapshot["snapshot"]["normalization_complete"] is False
