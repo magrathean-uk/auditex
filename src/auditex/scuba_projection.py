@@ -1124,7 +1124,7 @@ def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
 #   MS.EXO.1.1v2       null: no allowed forwarding domains, ScubaGear's default.
 #   MS.TEAMS.*         {"M365Environment": <environment>}.
 #   MS.SECURITYSUITE.* model views remain not collected (``operator_input_required``). Verified SensitiveUsers are
-#                      supplied to SS 2.1's private rule view only; SS 2.3 still requires a PartnerDomains input.
+#                      supplied to SS 2.1's private rule view; independently verified PartnerDomains feed SS 2.3.
 # Each model view passes the collected-section shape gate. Private operator views never enter that gate.
 SCUBA_CAP_EXCLUSION_POLICIES = frozenset({
     "MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1", "MS.AAD.3.7v1",

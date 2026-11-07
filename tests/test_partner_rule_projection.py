@@ -384,19 +384,22 @@ def test_ss23_end_to_end_keeps_model_shape_and_canaries_private(tmp_path, monkey
     with_inputs = bundle(tmp_path / "with", users=())
     without = bundle(tmp_path / "without", users=(), domains=())
     for root in (with_inputs, without):
-        write_policy(root)
+        # Collected domains may remain public; these differ from the private operator canaries.
+        write_policy(root, TargetedDomainsToProtect=["collected-only.example.invalid"])
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
     a, b = module.project_run(with_inputs), module.project_run(without)
     # Model-facing case material is byte-identical; only the in-memory rule view differs.
-    for part in ("views", "report", "rule_sections"):
+    for part in ("views", "rule_sections"):
         assert _json.dumps(getattr(a, part), sort_keys=True) == _json.dumps(getattr(b, part), sort_keys=True)
     assert dict(a) == dict(b)
+    assert a.report["sections"]["scuba_config"]["synthesis"]["policies"][SS23] == "projected"
+    assert b.report["sections"]["scuba_config"]["synthesis"]["policies"][SS23] == "operator_input_required"
     assert module.policy_section(a, SS23, "scuba_config") == NOT_COLLECTED
     result = assess_run(with_inputs, policies=[SS23])
     validate_assessment(result)
     dry = assess_run(with_inputs, policies=[SS23], dry_run=True)
     captured = capsys.readouterr()
-    # The synthetic Exchange envelope legitimately holds the targets; nothing derived may.
+    # Only the operator input holds these canaries; collected domains remain a separate control.
     assert not any(value in captured.out + captured.err + caplog.text for value in DOMAINS)
     assert not any(value in _json.dumps([a, a.views, a.report, result, dry]) for value in DOMAINS)
     exempt = {with_inputs / EXCHANGE, without / EXCHANGE, with_inputs / PARTNER_PATH, with_inputs / PARTNER_KEY_PATH}

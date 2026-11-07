@@ -54,7 +54,8 @@ SS 2.1 remains not assessed without a verified sensitive-user list. A verified
 list reaches its private in-memory rule view; a decision also needs usable
 policy evidence. The current collector does not select `TargetedUsersToProtect`,
 so target membership cannot yet establish a met verdict. SS 2.3 uses the separate
-`PartnerDomains` input; integrating it into the rule view is a product change.
+`PartnerDomains` input in its own private rule view, independently of
+SensitiveUsers. Neither input enters model views or prompts.
 
 ### Local partner domains for SS 2.3
 
