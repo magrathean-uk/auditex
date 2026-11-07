@@ -280,6 +280,43 @@ def is_admitted(response: object, *, target_key: str | None = TARGET_KEY, observ
     return admit_response(response, target_key=target_key, observed=observed) is ADMITTED
 
 
+def subtree_healthy(value: object) -> bool:
+    """Whether a generic pseudo-operation keeps the projection's recursive health meaning.
+
+    Unlike a recognised anti-phish policy row, this has no exempt target-value slot. Only the root mapping's
+    ``status`` is envelope metadata; statuses below it are record data. Unsupported types, keys or walk bounds
+    refuse without calling into an input object or returning any of its text.
+    """
+    try:
+        nodes = 1
+        stack: list[tuple[object, int, bool]] = [(value, 1, True)]
+        while stack:
+            item, depth, metadata = stack.pop()
+            kind = type(item)
+            if kind is dict:
+                if (depth > MAX_DEPTH or any(type(key) is not str for key in item)
+                        or not _mapping_healthy(item)):
+                    return False
+                if metadata and "status" in item and not _status(item["status"]):
+                    return False
+                nodes += len(item)
+                if nodes > MAX_NODES:
+                    return False
+                stack.extend((child, depth + 1, False) for child in item.values())
+            elif kind is list:
+                if depth > MAX_DEPTH:
+                    return False
+                nodes += len(item)
+                if nodes > MAX_NODES:
+                    return False
+                stack.extend((child, depth + 1, False) for child in item)
+            elif not _scalar(item):
+                return False
+        return True
+    except Exception:  # noqa: BLE001 - generic admission never exposes input text or invokes an unsupported value
+        return False
+
+
 def scan_admitted(envelope: object) -> bool:
     """Whether an operation envelope's scan/count/chunk metadata is supported inline.
 

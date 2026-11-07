@@ -102,7 +102,6 @@ def test_legacy_refusal_survives_the_entire_offline_projection(tmp_path, capsys,
 
 @pytest.mark.parametrize("collector,name,payload,policy", CASES)
 def test_cleaned_legacy_failure_stays_visible_without_target_values(collector, name, payload, policy):
-    from azure_tenant_audit.collectors.anti_phish_admission import admit_response, FAILED, REFUSED
     sample = _identity() if collector == "identity" else _exchange()
     sample[collector][name] = payload()
     before = deepcopy(sample)

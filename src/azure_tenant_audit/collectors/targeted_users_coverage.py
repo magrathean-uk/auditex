@@ -26,7 +26,7 @@ from ..value_rules.defender_targeted_users import (
     COVERAGE_KEY, MAX_INPUT_COUNT, SensitiveUsersBinding, membership, minimal_coverage, validate_coverage_shape,
 )
 from .exchange_defender_commands import ANTI_PHISH_POLICY_FIELDS
-from .anti_phish_admission import ADMITTED, FAILED, admit_response
+from .anti_phish_admission import ADMITTED, FAILED, admit_response, subtree_healthy
 
 COLLECTOR = "exchange_policy"
 OPERATION = "antiPhishPolicies"
@@ -555,6 +555,29 @@ def _own_slot(name: Any) -> bool:
     return name in _COMPONENT_KEYS or name in _ROW_KEYS or _key_names_target(name)
 
 
+_OPERATION_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+
+
+def _preserve_collector_health(original: Mapping[Any, Any], cleaned: dict[str, Any]) -> dict[str, Any]:
+    """Keep the global refusal of list-valued or invalid-name pseudo-operations through reduction or omission.
+
+    Projection ignores a failed unrelated named operation mapping, but a failing list or invalid operation name
+    withholds the collector. Lift that meaning to a fixed failing list; if the key itself must disappear, lift it
+    to fixed collector metadata instead. The generic scan includes target values, unlike actual policy admission.
+    """
+    for name, item in original.items():
+        if type(name) is str and not isinstance(item, list) and _OPERATION_NAME.fullmatch(name):
+            continue
+        if subtree_healthy(item):
+            continue
+        failure = {"error": PARSE_ERROR, "error_class": PARSE_ERROR_CLASS}
+        if type(name) is not str or _key_names_target(name) or _mentions_target(name):
+            cleaned.update(failure)
+        else:
+            cleaned[name] = [failure]
+    return cleaned
+
+
 def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
     """A sample-root collector section, routed by its position in the sample and never by the types of its values.
 
@@ -573,7 +596,7 @@ def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
         bearing = True
     if not bearing:
         try:
-            return _clean(section, _Walk(), 1)
+            return _preserve_collector_health(section, _clean(section, _Walk(), 1))
         except Exception:  # noqa: BLE001 - the copy passed the bounds: route key by key instead
             pass
     out: dict[str, Any] = {}
@@ -599,7 +622,7 @@ def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
                 continue
         elif item is None or type(item) in (bool, int, float):
             out[name] = item
-    return out
+    return _preserve_collector_health(section, out)
 
 
 @lru_cache(maxsize=1)
@@ -646,7 +669,7 @@ def _section(
         except Exception:  # noqa: BLE001 - past the bounds or unexpected: omit, never copy and never raise text
             if name == OPERATION:
                 out[name] = _parse_error({})
-    return out
+    return _preserve_collector_health(section, out)
 
 
 def strip_targets(value: Any) -> Any:
