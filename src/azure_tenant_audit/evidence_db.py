@@ -453,6 +453,8 @@ def open_private_run_index(run_dir: str | Path, *, hashed: bool):
                 target = root / relative if copied is None else copied
                 try:
                     connection = open_index_read_only(target, immutable=True)
+                except UnsafeRunFileError:
+                    raise
                 except (sqlite3.Error, OSError):
                     untrusted = True
                 else:
@@ -473,6 +475,10 @@ def open_private_run_index(run_dir: str | Path, *, hashed: bool):
         if failed:
             raise UnsafeRunFileError("evidence index") from None
         if untrusted:
+            # SQLite may fail before yielding a connection. A changed admitted source still refuses;
+            # only an unchanged source may enter ordinary invalid-index compatibility handling.
+            if main_state is not None and _descriptor_changed(main_descriptor, main_state):
+                raise UnsafeRunFileError("evidence index", reason="changed") from None
             raise UntrustedIndexError("evidence index is not authoritative") from None
         # The admitted source descriptor stays open on both routes and is rechecked at completion however
         # the consumer ends: a source rewritten during the read is refused even when the consumer's query

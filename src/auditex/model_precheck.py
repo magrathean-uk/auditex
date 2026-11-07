@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from azure_tenant_audit.explainer import explain as render_explanation
+from azure_tenant_audit.guarded_io import UnsafeRunFileError
 from azure_tenant_audit.model_assessment import validate_explainer, value_rule_verdict
 from azure_tenant_audit.output_redaction import PROFILE_EXPLAINER, RedactionContext, redact_output
 from azure_tenant_audit.scuba_precheck import optional_collection_entry, precheck_policy, precheck_response
@@ -48,7 +49,7 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
             candidate = precheck_policy(case["policy_id"], rule_input, rule_sections,
                                         skip_absent_sections=skip_absent_sections, value_rules=True,
                                         absent_fields=absent_fields, empty_lists=empty_lists)
-        except MemoryError:
+        except (UnsafeRunFileError, MemoryError):
             raise
         except Exception as exc:
             # Log the rule id and the exception class name only: the message and repr can hold tenant evidence.
@@ -88,7 +89,7 @@ def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
             safe = redact_output(explanation, profile=PROFILE_EXPLAINER, context=redaction_context)
             validate_explainer(record, safe)
             record["explainer"] = safe
-        except MemoryError:
+        except (UnsafeRunFileError, MemoryError):
             raise
         except Exception as exc:
             LOG.debug("Explainer %s failed (%s)", case["policy_id"], type(exc).__name__)

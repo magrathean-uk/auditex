@@ -6,6 +6,8 @@ fail closed. Cross-field accounting is checked after the structural contract.
 """
 from __future__ import annotations
 
+from .guarded_io import UnsafeRunFileError
+
 import json
 import math
 import re
@@ -230,7 +232,7 @@ def derive_explainer(row: dict[str, Any]) -> dict[str, Any] | None:
                   "reason_code": detail["reason_code"], "reason_text": detail["reason_text"],
                   "cited_sections": list(detail["section"])}
         return explain(public, sections, order)
-    except MemoryError:
+    except (UnsafeRunFileError, MemoryError):
         raise
     except Exception:
         return None

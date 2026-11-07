@@ -484,7 +484,7 @@ def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, polici
     if not dry_run:
         try:
             explainer_context = context_for_run(root)
-        except MemoryError:
+        except (UnsafeRunFileError, MemoryError):
             raise
         except Exception as exc:
             explainer_context_error = type(exc).__name__

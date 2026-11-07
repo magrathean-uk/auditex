@@ -621,17 +621,29 @@ def open_guarded_file(path: str | Path, *, field: str, context: GuardContext,
     except (OSError, ValueError, TypeError, UnicodeError):
         failed = True
     if parent is not None:
-        os.close(parent)
+        try:
+            os.close(parent)
+        except OSError:
+            failed = True
     if missing or failed:
         if fd is not None:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass  # Cleanup cannot replace the primary admission failure or its reason.
         if missing:
             raise FileNotFoundError("Input is absent.") from None
         raise UnsafeRunFileError(field, reason=reason) from None
     try:
         assert fd is not None
         yield fd
-    finally:
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass  # Preserve the consumer's primary failure, including an unsafe-input refusal.
+        raise
+    else:
         os.close(fd)
 
 
