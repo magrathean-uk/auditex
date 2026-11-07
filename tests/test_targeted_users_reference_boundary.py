@@ -12,6 +12,13 @@ from test_scubagear_export import PROVIDER
 @pytest.mark.parametrize("state", ["known", "unusable", "not_collected"])
 def test_provider_literal_rows_ignore_run_only_summary_fields(tmp_path, state):
     raw = json.loads(PROVIDER.read_text())
+    raw["anti_phish_policies"] = [{
+        "Identity": "literal-policy",
+        "EnableTargetedUserProtection": True,
+        "TargetedUsersToProtect": ["Literal Person;literal@example.test", "Other;other@example.test"],
+    }]
+    raw["securitysuite_successful_commands"] = ["Get-AntiPhishPolicy"]
+    raw["securitysuite_unsuccessful_commands"] = []
     baseline = deepcopy(raw["anti_phish_policies"])
     for row in raw["anti_phish_policies"]:
         row["TargetedUsersCoverage"] = {"version": 1, "state": state}
