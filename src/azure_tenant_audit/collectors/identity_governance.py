@@ -128,8 +128,41 @@ class IdentityGovernanceCollector(Collector):
         """
         started = time.perf_counter()
         rows, issues, failed_input, cut = input_rows(payload.get(POLICY_ASSIGNMENTS), run_dir)
-        if failed_input or issues:
+        if failed_input and not issues:
             return None, []
+        if issues:
+            # A refused or unreadable assignment chunk: no policy is expanded and the collector is partial. Only the
+            # constant-code issues are kept, never a path, a row or the inline sample.
+            fanout = {
+                "fanout_scope": "directory_role_policies",
+                "fanout_limit": POLICY_RULES_FANOUT_LIMIT,
+                "input_record_count": len(rows),
+                "input_complete": False,
+                "input_unreadable": True,
+                "input_issues": issues,
+                "input_collection_limited": cut,
+                "fanout_total": 0,
+                "fanout_target_count": 0,
+                "fanout_omitted_count": 0,
+                "failed_operation_count": 0,
+                "malformed_rule_count": 0,
+                "collection_truncated": False,
+                "fanout_complete": False,
+            }
+            return {"value": [], "fanout": fanout, "collection_truncated": False}, [
+                {
+                    "collector": self.name,
+                    "type": "derived",
+                    "name": POLICY_RULES_FANOUT,
+                    "status": "partial",
+                    "item_count": 0,
+                    "rows_collected": 0,
+                    "error_class": "incomplete_evidence",
+                    "error": f"{POLICY_RULES}: the policy assignment list could not be read in full.",
+                    "truncation_reason": None,
+                    **fanout,
+                }
+            ]
         policy_ids = list(dict.fromkeys(str(row["policyId"]) for row in rows if row.get("policyId")))
         targets = policy_ids[:POLICY_RULES_FANOUT_LIMIT]
         # The id is a path segment: encode every reserved character (a ``/`` included) so it cannot change the request.
