@@ -564,8 +564,8 @@ def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
     independent operation with its own walking budget, copied unless it bears the target (then reduced) or passes the
     bounds (then omitted), so one carrier never costs its siblings their evidence or health markers. Scalar metadata
     beside them keeps numbers, booleans and null; free text in a bearing section goes, as at the sample root. A key
-    naming the field in another form is omitted, and the section's own slots past the bounds are omitted as an
-    operation would be.
+    naming the field in another form is omitted. Own data past the bounds is omitted while its fixed collector
+    refusal metadata survives.
     """
     try:
         bearing = _bears(section, _Walk(), 1)
@@ -579,6 +579,8 @@ def _collector_section(section: Mapping[Any, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     own = {name: item for name, item in section.items() if _own_slot(name)}
     if own:
+        # Fixed collector refusal metadata remains authoritative even if its accompanying data exceeds walk bounds.
+        out.update(_envelope_metadata(own))
         try:
             out.update(_reduce(own, _Walk(), 1, strict_rows=False))
         except Exception:  # noqa: BLE001 - past the bounds or unexpected: omit, never copy and never raise text
