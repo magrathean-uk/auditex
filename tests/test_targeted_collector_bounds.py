@@ -61,8 +61,10 @@ def test_healthy_domain_control_is_met(tmp_path):
 def test_bounded_minimisation_cannot_promote_a_failed_identity_collector(tmp_path, capsys, caplog, refusal):
     run = _replay(tmp_path, _sample(refusal), "failed")
     assert _verdict(run) == "not_assessed"
-    raw = json.loads((run / "raw/identity.json").read_text())
-    assert raw.get(refusal) and raw["domains"] == DOMAINS
+    # Offline replay publishes no per-collector raw file; the sanitised replay input is the identity evidence the
+    # projection reads. It keeps the collector's refusal and the independent domains read.
+    replayed = json.loads((run / "raw/sample_input.json").read_text())["identity"]
+    assert replayed.get(refusal) and replayed["domains"] == DOMAINS
     assert all(CANARY.encode() not in p.read_bytes() for p in run.rglob("*") if p.is_file())
     captured = capsys.readouterr()
     assert CANARY not in captured.out + captured.err + caplog.text

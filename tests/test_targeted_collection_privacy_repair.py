@@ -392,13 +392,29 @@ CANONICAL = [("error_class", value) for value in sorted(KNOWN_CLASSES - {None})]
 ]
 
 
+# The closed admission accepts a canonical token only in the envelope the adapter itself writes around it: a success
+# (``status: ok``, ``error_class: None``) exits 0 and, on replay of an empty list, states its health; a failure-only
+# token (``status: failed``, ``state: over_limit``) travels with the fixed class beside it, as in the adapter's
+# failure and over-limit returns. Every other canonical token is already an explicit failure class.
+CANONICAL_ENVELOPE = {
+    ("status", "ok"): {"return_code": 0},
+    ("error_class", None): {"return_code": 0, "status": "ok"},
+    ("status", "failed"): {"error_class": "command_error"},
+    ("state", "over_limit"): {"error": "command_output_over_limit", "error_class": "command_error"},
+}
+
+
 @pytest.mark.parametrize(("slot", "value"), CANONICAL)
 def test_canonical_classes_keep_their_behaviour(slot, value):
-    good = {**_clean_response(), slot: value, "return_code": 1, "duration_ms": 3.5, "complete": True}
+    envelope = {"return_code": 1, **CANONICAL_ENVELOPE.get((slot, value), {})}
+    good = {**_clean_response(), slot: value, "duration_ms": 3.5, "complete": True, **envelope}
     enforced = tuc.enforce_response(deepcopy(good), command="cmd")
-    assert enforced[slot] == value and enforced["return_code"] == 1 and enforced["complete"] is True
-    replayed = tuc.sanitise_response({"value": [], slot: value, "return_code": 1}, None, None, observed=False)
+    assert enforced[slot] == value and enforced["return_code"] == envelope["return_code"]
+    assert enforced["complete"] is True
+    assert {key: enforced[key] for key in envelope} == envelope, "the companion class is kept, never upgraded"
+    replayed = tuc.sanitise_response({"value": [], slot: value, **envelope}, None, None, observed=False)
     assert replayed[slot] == value, "a canonical source value is kept as it was"
+    assert {key: replayed[key] for key in envelope} == envelope
 
 
 @pytest.mark.parametrize("slot", TEXT_SLOTS)

@@ -60,7 +60,10 @@ SETTINGS = {
 }
 HEALTHY = {name: {"status": "ok", "value": []} for name in (
     "acceptedDomains", "eopProtectionPolicyRules", "atpProtectionPolicyRules", "atpPolicyForO365")}
-RULES = {"status": "ok", "value": [{"Name": "Ordinary rule", "Comments": "Ordinary unrelated text", "Priority": 0}]}
+# A real Get-AntiPhishRule row always carries State (exactly Enabled or Disabled, D47); without it every SS 2.x
+# rule is rule_state_unusable before the policy is read. Disabled: it scopes nothing, so Default stays the policy.
+RULES = {"status": "ok", "value": [{"Name": "Ordinary rule", "State": "Disabled", "Comments": "Ordinary unrelated text",
+                                    "Priority": 0}]}
 TRANSPORT = {"command": OTHER, "status": "ok", "value": [{"Identity": "T", "SmtpClientAuthenticationDisabled": True}]}
 UNRELATED = {"users": {"status": "ok", "value": [{"id": "u-1", "displayName": "Ordinary Person", "enabled": True}]}}
 
