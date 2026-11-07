@@ -592,7 +592,10 @@ frozen v7 convention; dry-run exports prompts locally without a model call.
 
 Projection reads inline `raw/<collector>.json`, offline `raw/sample_input.json`,
 or export-only `raw/<collector>/<operation>/summary.json`. Non-empty `chunk_files`
-are authoritative; all chunks and counts must validate. Duplicate JSON keys and
+are authoritative; all chunks and counts must validate. Guard-refused chunks
+produce a constant evidence-issue code and `chunk_index`, never the refused path
+or rows from that file. Dependent collector fan-out stops with incomplete-evidence
+coverage; inline samples do not replace refused chunks. Duplicate JSON keys and
 non-finite constants are rejected in both JSON and JSONL. Chunk iteration stops
 at a scan bound: cumulative bytes, including whitespace, at `scan_max_bytes`, rows
 at `scan_max_rows` and chunk files at `scan_max_chunks`; the projection budget is

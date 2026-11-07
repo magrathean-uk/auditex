@@ -90,8 +90,8 @@ def parse_accounts(value: str | Iterable[str] | None) -> list[str]:
 def load_accounts_argument(value: str | Sequence[str] | None) -> list[str]:
     """The ``--break-glass-accounts`` value: a list, or ``@path`` for a file with one entry per line.
 
-    Raises ``OSError`` for a file that cannot be read and ``UnicodeError`` for one that is not UTF-8
-    text, so a run can stop before any tenant call.
+    Raises ``OSError`` for a file that cannot be admitted or read. Invalid UTF-8 is a fixed,
+    path-free ``UnsafeRunFileError``, so a run stops before any tenant call.
     """
     if value is None:
         return []

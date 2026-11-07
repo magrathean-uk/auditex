@@ -7,6 +7,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+- Preserve blocked JSON for gate input refusals and constant-code incomplete-evidence issues for refused chunks, without reading refused bytes or falling back to inline samples. Keep owned bundle directories private without changing existing caller-owned parent permissions.
 - Refuse unsafe sensitive-user and partner-domain pair aliases in guarded run reads
   and retain admitted descriptors across selected inputs. SQLite index inspection
   uses a protected temporary copy when available and otherwise reads the admitted

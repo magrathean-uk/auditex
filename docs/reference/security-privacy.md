@@ -284,12 +284,13 @@ is empty, consumers use the manifest and report metadata, and validation records
 `invalid_evidence_sqlite`. An empty `-wal` or any `-shm` is ignored. This is
 deliberately conservative, even when the WAL frames were already checkpointed.
 
-After an in-place read the held main descriptor is checked again, and a file that
-changed during the read is refused. Read-only consumers never create, append to or
+The held main descriptor is checked again after SQLite inspection and before
+fallback from a failed SQLite open. A change refuses the read, including when a
+query fails. Read-only consumers never create, append to or
 change anything in a bundle they inspect. A process that is producing a run appends
 one constant info line (no path or value, never the console) to that run's debug log
 the first time it reads the index in place, when the existing guarded log accepts an
-append; an unwritable or unsafe log gets no line and the read still succeeds. A resume
+append without creating a log or changing its permissions; an unwritable or unsafe log gets no line and the read still succeeds. A resume
 is a new producing invocation and logs its own line. A writer running as the same user
 can still alter or exchange the file around these checks. Index copies have no size
 cap, so copy time and available temporary space matter.
