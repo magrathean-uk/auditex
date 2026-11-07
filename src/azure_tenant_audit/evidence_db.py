@@ -389,8 +389,10 @@ def _note_in_place(root: Path) -> None:
 
 
 @contextmanager
-def open_private_run_index(run_dir: str | Path, *, hashed: bool):
+def open_private_run_index(run_dir: str | Path, *, hashed: bool, record_notice: bool = True):
     """Inspect a protected copy of the admitted index, or the admitted index in place, always immutably.
+
+    Explicit read-only validation disables the producer notice without consuming it. The switch never changes admission.
 
     Sidecars are admitted but never copied or replayed. A hashed index is authoritative as hashed (the hash
     check reports any sidecar). An unhashed index with a non-empty ``-wal`` or ``-journal`` is untrusted.
@@ -465,7 +467,8 @@ def open_private_run_index(run_dir: str | Path, *, hashed: bool):
                             current_info = os.fstat(current)
                             if (current_info.st_dev, current_info.st_ino) != (original_info.st_dev, original_info.st_ino):
                                 raise UnsafeRunFileError("evidence index")
-                        _note_in_place(root)
+                        if record_notice:
+                            _note_in_place(root)
         except _MissingIndex:
             missing = True
         except (OSError, RuntimeError, ValueError):
