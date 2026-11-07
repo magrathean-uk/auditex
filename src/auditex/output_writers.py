@@ -109,6 +109,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("auditex.bootstrap:print_doctor_report", "private", "operator terminal: toolchain status; diagnostics masked by the command-output boundary"),
     SinkEntry("auditex.cli:_emit_assessment", "private", "operator-supplied assessment re-emitted to the operator; not run evidence"),
     SinkEntry("auditex.cli:_emit_gate_result", "private", "operator terminal and the operator's own CI log: gate verdict and ids (open item for product)"),
+    SinkEntry("auditex.cli:_gate_run_refusal", "private", "operator terminal and CI: fixed blocked gate JSON, with no refused paths or values"),
     SinkEntry("auditex.cli:main", "private", "operator terminal: summarize, blockers, diff, compare, probe, auth, models, rules, verify-pack and customer-pack results (pack path); report commands go through _emit_report_payload, notifications through send_notification"),
     SinkEntry("auditex.demo:*", "private", "demo tenant script output (synthetic data)"),
     SinkEntry("auditex.explorer:write_explorer", "private", "operator's local interactive run explorer"),

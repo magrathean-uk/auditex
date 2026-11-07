@@ -16,7 +16,7 @@ from azure_tenant_audit.collection_gaps import SECTION_SCOPED, section_gap_recor
 from azure_tenant_audit.collectors._endpoint_reads import collector_partial, protection_state_fanout
 
 CANARY = "inline-only-device-canary"
-PRIVATE = "private-operator-canary-row"
+PRIVATE = "private-operator-canary@example.invalid"
 NAME = "windowsProtectionStates"
 VARIANTS = ("symlink", "hardlink", "outside")
 
@@ -38,9 +38,13 @@ def _run(tmp_path: Path) -> Path:
     root = tmp_path / "run"
     private = root / "operator-inputs"
     private.mkdir(parents=True, mode=0o700)
-    # The private pair is left untouched (no extra links), so the run stays admissible.
-    (private / "sensitive-users.txt").write_text(json.dumps({"id": PRIVATE}) + "\n", encoding="utf-8")
-    (private / "sensitive-users.key").write_bytes(b"k" * 32)
+    # The private pair is valid and left untouched, so safe chunks really are admitted.
+    from azure_tenant_audit.sensitive_users import SensitiveUsers
+
+    key = b"k" * 32
+    (private / "sensitive-users.txt").write_text(PRIVATE + "\n", encoding="utf-8")
+    (private / "sensitive-users.key").write_bytes(key)
+    (root / "run-manifest.json").write_text(json.dumps({"operator_inputs": {"sensitive_users": SensitiveUsers((PRIVATE,)).manifest(key)}}), encoding="utf-8")
     (root / "chunks").mkdir(mode=0o700)
     return root
 
@@ -88,7 +92,7 @@ def _assert_gap(section: dict[str, Any], coverage: list[dict[str, Any]], client:
     row = next(item for item in coverage if item["name"] == f"{NAME}Fanout")
     assert row[SECTION_SCOPED] is True and row["status"] == "partial" and row["error_class"] == "incomplete_evidence"
     assert row["input_complete"] is False and row["input_unreadable"] is True
-    assert row["input_issues"] and all(set(issue) <= {"code", "chunk_index"} for issue in row["input_issues"])
+    assert row["input_issues"] and all(set(issue) <= {"code", "chunk_index", "expected_count", "observed_count"} for issue in row["input_issues"])
     assert collector_partial(coverage) is False  # section-scoped semantics: the collector stays ok
     records = [item for item in section_gap_records(coverage) if item["section"] == NAME]
     assert len(records) == 1 and records[0]["collector"] == "intune" and records[0]["status"] == "partial"

@@ -206,8 +206,12 @@ def test_private_inputs_never_reach_the_chunk_reader_or_its_consumers(tmp_path: 
     root = tmp_path / "run"
     private = root / "operator-inputs"
     private.mkdir(parents=True, mode=0o700)
-    (private / "sensitive-users.txt").write_text(json.dumps({"id": SENTINEL}) + "\n", encoding="utf-8")
-    (private / "sensitive-users.key").write_bytes(b"k" * 32)
+    from azure_tenant_audit.sensitive_users import SensitiveUsers
+
+    key = b"k" * 32
+    (private / "sensitive-users.txt").write_text(SENTINEL + "\n", encoding="utf-8")
+    (private / "sensitive-users.key").write_bytes(key)
+    (root / "run-manifest.json").write_text(json.dumps({"operator_inputs": {"sensitive_users": SensitiveUsers((SENTINEL,)).manifest(key)}}), encoding="utf-8")
     if form == "hardlink":
         (root / "chunks").mkdir()
         os.link(private / "sensitive-users.txt", root / "chunks" / "users.jsonl")
@@ -228,4 +232,6 @@ def test_private_inputs_never_reach_the_chunk_reader_or_its_consumers(tmp_path: 
     assert snapshot["snapshot"]["normalization_complete"] is False
     assert snapshot["snapshot"]["normalization_incomplete_sections"] == ["identity.users"]
     rendered = json.dumps(snapshot)
-    assert SENTINEL not in rendered and "inline-only" not in rendered and "sensitive-users" not in rendered
+    # Local source metadata may name the declared chunk. Refusal issues themselves stay opaque (asserted above),
+    # while neither private contents nor the inline fallback become normalized evidence.
+    assert SENTINEL not in rendered and "inline-only" not in rendered

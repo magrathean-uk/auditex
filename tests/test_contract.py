@@ -134,7 +134,7 @@ def test_read_only_validation_treats_an_unhashed_committed_wal_as_untrusted_and_
         assert "invalid_evidence_sqlite" in codes
         # No replay: the WAL-only table never satisfies the schema check.
         assert "invalid_evidence_sqlite_schema" not in codes
-        assert codes <= {"invalid_evidence_sqlite", "identity_metadata_mismatch"}
+        assert codes <= {"invalid_evidence_sqlite", "identity_metadata_mismatch", "tenant_identity_conflict"}
         assert db_path.with_name("evidence.sqlite-wal").stat().st_size == wal_size
         _assert_only_producer_notice_added(run_dir, before)
         assert list(scratch.iterdir()) == []

@@ -25,9 +25,10 @@ def demo_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return parent / "ci-demo"
 
 
+@pytest.mark.parametrize("encrypted_proof", (False, True))
 @pytest.mark.parametrize("layout", ("run_in_tmp", "cli_out_tmp", "run_job", "tmp_is_run", "tmp_in_run"))
 def test_demo_index_in_common_tmp_layouts(
-    demo_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str,
+    demo_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str, encrypted_proof: bool,
 ) -> None:
     from auditex import mcp_server
     from auditex.reporting import verify_enterprise_handoff_pack, write_enterprise_handoff_pack
@@ -53,16 +54,23 @@ def test_demo_index_in_common_tmp_layouts(
     scratch.mkdir(exist_ok=True)
     monkeypatch.setenv("TMPDIR", str(scratch))
 
+    # Exercise both routes for each layout. Real host proof is qualified separately without this stub.
+    monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda _path: encrypted_proof)
     original = evidence_db.open_index_read_only
+    opened: list[Path] = []
     copies: list[Path] = []
 
     def inspect_copy(path: Path, *, immutable: bool = True) -> sqlite3.Connection:
         path = Path(path)
-        assert path.parent.parent == scratch
-        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        if encrypted_proof:
+            assert path.parent.parent == scratch
+            assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+            copies.append(path)
+        else:
+            assert path == run / "index" / "evidence.sqlite"
         assert immutable
-        copies.append(path)
+        opened.append(path)
         return original(path, immutable=immutable)
 
     monkeypatch.setattr(evidence_db, "open_index_read_only", inspect_copy)
@@ -76,5 +84,9 @@ def test_demo_index_in_common_tmp_layouts(
     pack = tmp_path / "pack"
     write_enterprise_handoff_pack(run, pack)
     assert verify_enterprise_handoff_pack(pack)["valid"]
-    assert copies and all(not copy.exists() for copy in copies)
+    assert opened
+    if encrypted_proof:
+        assert copies and all(not copy.exists() for copy in copies)
+    else:
+        assert not copies and (run / "index" / "evidence.sqlite").is_file()
     assert not list(scratch.glob("auditex-index-*"))
