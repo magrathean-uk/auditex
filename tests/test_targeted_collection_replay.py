@@ -8,6 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 
 import pytest
 
@@ -21,6 +22,8 @@ UNCONFIGURED = ("Zebulon Quarkwright", "zq-canary@unlisted-canary.invalid", "can
 FRAGMENTS = ("Zebulon", "Quarkwright", "zq-canary", "unlisted-canary", "canary-domain-x", "canary-malformed",
              "configured-canary", "Configured Person")
 OLD_DIGEST = "ab" * 32
+# A target list as a JSON key in any case; select-field lists that merely name the field are not evidence.
+TARGET_KEY = re.compile(rb'"targeteduserstoprotect"\s*:', re.IGNORECASE)
 SETTINGS = {"Identity": "Default", "Name": "Default", "IsDefault": True, "Enabled": True,
             "EnableTargetedUserProtection": True, "TargetedUserProtectionAction": "Quarantine"}
 TARGETS = [f"Configured Person;{CONFIGURED[0]}", CONFIGURED[1].upper(), *UNCONFIGURED]
@@ -77,7 +80,7 @@ def _scan(root: Path, *, allowed_configured: tuple[str, ...] = ("operator-inputs
             configured = fragment in ("configured-canary",)
             if fragment.encode() in data and not (configured and any(relative.endswith(a) for a in allowed_configured)):
                 leaks.append((relative, fragment))
-        if b"TargetedUsersToProtect\"" in data or b"targetedUsersToProtect\"" in data:
+        if TARGET_KEY.search(data):
             leaks.append((relative, "target key"))
     return leaks
 
