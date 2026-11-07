@@ -40,12 +40,18 @@ SS 2.3 uses the separate `--partner-domains <file>` input (or
 private in-memory view, independently of SensitiveUsers.
 The ScubaGear export configuration path is unchanged.
 
-Current collection does not select `TargetedUsersToProtect`, and the bundle
-adapter does not retain that field. Supplying SensitiveUsers therefore enables
-not-met decisions for explicit non-compliant protection flags or actions, but
-cannot prove met from collected target membership. Otherwise the rule reports
-unusable policy evidence. Full met coverage needs a separate collector/privacy
-change; a supplied list alone does not establish compliance.
+Collection replaces the transient `TargetedUsersToProtect` list with a bound
+`TargetedUsersCoverage` summary before saving evidence or diagnostics. SS 2.1
+can establish met from usable membership and the remaining policy conditions.
+Invalid, absent or mismatched summaries never fall back to literal targets;
+explicit non-compliant flags or actions can still establish not met.
+Missing verified private input reports `section_not_collected`.
+`config_list_empty` applies only to a direct ScubaGear configuration with no
+usable SensitiveUsers entries. A supplied list alone does not establish
+compliance. The summary, binding and operator count/HMAC stay out of assessment
+outputs, prompts, shareable exports and customer packs. See
+[TargetedUsersCoverage v1](../reference/output-contract.md#targeteduserscoverage-v1)
+for limits, replay and resume behaviour.
 
 ## Run and read the result
 
