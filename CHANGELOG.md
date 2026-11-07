@@ -24,6 +24,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 - Keep all `AUDITEX_*` variables and operator-input flags out of MCP offline validation sample runs, and close child stdin; real audits retain their environment.
 
 - Let SS 2.1 decide from verified SensitiveUsers and a bound `TargetedUsersCoverage` summary. Collection compares protected-user targets transiently, applies raw-entry, UTF-8 byte and streamed stdout bounds, and removes target strings before evidence or diagnostics are saved. Offline replay recomputes fresh membership and resume checks the original summary against the current input binding. Missing input remains not assessed and invalid private pairs are refused. SS 2.3 independently consumes verified PartnerDomains in its own private rule view; the ScubaGear export path keeps literal comparison.
+- Reduce unsupported target-bearing replay layouts to safe settings and closed diagnostics. Failed Exchange re-runs after an input-binding change preserve safe earlier settings without retaining or rebinding membership proof.
 - Add the strict `targeted_users_coverage` schema and local normalised/index retention. Shareable, customer-pack and explainer outputs drop the whole summary and private binding, and retain at most boolean `supplied` from sensitive-user manifest metadata. Counts and HMAC stay local; customer-pack seals cover the transformed manifest.
 - Retain exit-0 JSON evidence with stderr warnings in the shared PowerShell adapter.
   Every adapter command uses `$ErrorActionPreference = 'Stop'`, including
