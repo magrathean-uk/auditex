@@ -50,6 +50,19 @@ release-check:
 	$(MAKE) lint
 	$(MAKE) test
 	$(MAKE) contract-smoke
+	@set -eu; \
+		dir=$$(mktemp -d "$$TMPDIR/auditex-archive.XXXXXX"); \
+		trap 'rm -rf "$$dir"' 0; \
+		trap 'exit 1' HUP INT TERM; \
+		git archive HEAD > "$$dir/source.tar"; \
+		tar -tf "$$dir/source.tar" > "$$dir/files"; \
+		if grep -E '(^build/|(^|/)[^/]*[.]egg-info/)' "$$dir/files"; then \
+			echo "Archive contains build or egg-info directory" >&2; exit 1; \
+		fi; \
+		mkdir "$$dir/source" "$$dir/wheel"; \
+		tar -xf "$$dir/source.tar" -C "$$dir/source"; \
+		$(PYTHON) -m pip wheel --no-deps --no-build-isolation --no-index --wheel-dir "$$dir/wheel" "$$dir/source"; \
+		$(PYTHON) scripts/check-archive-wheel.py "$$dir/source/src" "$$dir"/wheel/*.whl
 	$(PYTHON) scripts/generate-rule-packs.py --check
 	./scripts/oss-taint-scan.sh
 	gitleaks dir . --no-banner --redact

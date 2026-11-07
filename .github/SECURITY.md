@@ -19,8 +19,8 @@ or deployment.
 
 | Version | Security fixes |
 | --- | --- |
-| 1.1.x | Yes |
-| Earlier than 1.1.0 | No; upgrade to the latest 1.1.x release |
+| 1.2.x | Yes |
+| Earlier than 1.2.0 | No; upgrade to the latest 1.2.x release |
 
 Only the latest minor release is supported.
 
