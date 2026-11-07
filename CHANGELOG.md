@@ -7,16 +7,17 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
-- Refuse unsafe sensitive-user pair aliases in guarded run reads, retain admitted
-  descriptors across selected inputs, and refuse SQLite index inspection when a
-  protected copy cannot be made. Hard-linked backups require an independent copy;
-  the boundary and its exclusions are described in the privacy reference.
+- Refuse unsafe sensitive-user and partner-domain pair aliases in guarded run reads
+  and retain admitted descriptors across selected inputs. SQLite index inspection
+  uses a protected temporary copy when available and otherwise reads the admitted
+  file in place with SQLite immutable mode. Hard-linked backups require an
+  independent copy; the boundary and its exclusions are in the privacy reference.
 - Discover enclosing runs from the selected file when callers supply a nested
   root, prevent private-directory manifests from becoming trust roots, and guard
   optional training-pack file reads and hashes.
 - Apply the D3 redaction profile to shareable reports, built-in exports, MCP payloads, notifications and customer packs. GUIDs and the free-text keys `owner`, `justification`, `comment`, `comments` and `notes` are redacted; domains, group names and role names remain. Local reports retain their data. Incomplete or unstable normalised evidence refuses shareable output. URL userinfo passwords are recognised for schemes of up to 32 characters; known immutable IDs in narrative need at least four characters and word-character boundaries.
 - Raise the shareable identity-discovery limits to 64 MiB per normalised file and 256 MiB per run. Synthetic 25,000- and 90,000-user runs fit; their HTML previews used about 0.5 GiB and 1.5 GiB peak resident memory on the test machine. The scan limits are not memory ceilings. Over-limit output is refused without naming files.
-- Guard MCP bundle artefacts and customer-pack source reads against unsafe types and links, including shareable normalised report sections; bound data reads, stream bundle hashing without a size cap, and inspect SQLite indexes in private temporary copies while preserving legacy WAL reads.
+- Guard MCP bundle artefacts and customer-pack source reads against unsafe types and links, including shareable normalised report sections; bound data reads, stream bundle hashing without a size cap, and preserve legacy WAL reads when protected index copies are available.
 - Keep all `AUDITEX_*` variables and operator-input flags out of MCP offline validation sample runs, and close child stdin; real audits retain their environment.
 
 - Let SS 2.1 decide from verified SensitiveUsers operator input in its private in-memory rule view, including offline bundle replay; missing input remains not assessed and invalid private pairs are refused. Addresses never enter model views or assessment outputs. Current collection still excludes `TargetedUsersToProtect`, so proving met from target membership needs a separate collector/privacy change. SS 2.3 still needs PartnerDomains in its rule view; the ScubaGear export path is unchanged.

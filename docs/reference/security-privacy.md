@@ -241,8 +241,8 @@ its `operator-inputs` directory must be owned by the effective user and must not
 be group- or world-writable. It refuses where descriptor-relative, no-follow
 opens or the required identity and permission checks are unavailable.
 
-The context for an operation verifies a run's sensitive-user pair against its
-manifest and keeps the pair's file identities open while admitting inputs. A
+The context for an operation verifies a run's sensitive-user and partner-domain
+pairs against its manifest and keeps their file identities open while admitting inputs. A
 missing, partial or invalid claimed pair is refused. Independently copied runs
 are verified and registered separately. Discovery starts at the selected file's
 parent even when a caller supplies a nested root. `operator-inputs` and any
@@ -266,14 +266,19 @@ links. Recover with an independent `cp` copy owned by the operator, not hard
 links, and restore safe directory permissions. Each copy's private pair is
 verified on admission.
 
-Read-only index inspection streams guarded descriptors into a private `0700`
-temporary directory under `TMPDIR`, with files created as `0600`, then opens
-the snapshot. A failed or incoherent copy is refused, with no in-place SQLite
-fallback. The temporary directory must be proved to be on encrypted internal
-storage; unproved or external storage is refused. The encrypted-internal proof
-is implemented for macOS Data volumes; other platforms refuse index snapshot
-reads. Index and supported sidecar copies have no size cap, so available
-temporary space and copy time matter.
+Read-only index inspection copies guarded descriptors into a private `0700`
+temporary directory, with files created as `0600`, only after that directory is
+proved to be on encrypted internal storage. The proof is implemented for macOS
+Data volumes. No evidence index is copied to unproved temporary storage. When
+the proof is unavailable or a protected copy cannot be made, SQLite reads the
+index in place through a read-only `immutable=1` URI, after guarded descriptor
+admission and a device/inode re-check following the SQLite open. A swapped file
+is refused. The in-place route records one info line in the run's debug log when
+the log is writable, without printing it to the console. A writer running as the
+same user can still alter or exchange the file around these checks. Immutable
+reads ignore WAL and other sidecars, so uncheckpointed legacy WAL data is visible
+only when a protected copy can be made. Index and supported sidecar copies have
+no size cap, so copy time and available temporary space matter.
 A killed or interrupted index build can leave a private staging directory beside the index.
 
 ## Evidence and customer packs

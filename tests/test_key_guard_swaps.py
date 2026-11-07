@@ -218,21 +218,22 @@ def test_sqlite_copy_failure_never_reopens_source_after_swap(
     assert "sqlite-swap-canary" not in "".join(traceback.format_exception(error.value))
 
 
-def test_sqlite_refuses_unproved_temporary_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sqlite_uses_in_place_read_for_unproved_temporary_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from azure_tenant_audit import evidence_db
 
     run = tmp_path / "run"
     index = run / "index" / "evidence.sqlite"
     index.parent.mkdir(parents=True)
-    index.write_bytes(b"ordinary")
+    with sqlite3.connect(index) as conn:
+        conn.execute("CREATE TABLE example (value INTEGER)")
+        conn.execute("INSERT INTO example VALUES (7)")
     monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: False)
     monkeypatch.setattr(evidence_db, "_copy_index_descriptor", lambda *args: pytest.fail("unsafe snapshot copied"))
-    with pytest.raises(OSError, match="Refusing evidence index: unsafe input"):
-        with evidence_db.open_private_run_index(run, include_sidecars=False):
-            pytest.fail("unsafe snapshot opened")
+    with evidence_db.open_private_run_index(run, include_sidecars=False) as conn:
+        assert conn.execute("SELECT value FROM example").fetchone() == (7,)
 
 
-def test_sqlite_real_unproved_storage_refuses_read_without_changing_index(tmp_path: Path) -> None:
+def test_sqlite_real_unproved_storage_reads_without_changing_index(tmp_path: Path) -> None:
     from azure_tenant_audit import evidence_db
 
     temporary_root = Path(os.environ.get("TMPDIR", ""))
@@ -245,9 +246,9 @@ def test_sqlite_real_unproved_storage_refuses_read_without_changing_index(tmp_pa
     evidence_db.build_run_evidence_index(run)
     original = index.read_bytes()
     assert original.startswith(b"SQLite format 3\0")
-    with pytest.raises(evidence_db.UnsafeRunFileError):
-        with evidence_db.open_private_run_index(run, include_sidecars=False):
-            pytest.fail("unproved storage was used")
+    with evidence_db.open_private_run_index(run, include_sidecars=False) as conn:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"run_meta", "section_stats", "normalized_records"} <= tables
     assert index.read_bytes() == original
 
 
@@ -277,7 +278,7 @@ def test_sqlite_builder_does_not_reopen_admitted_output_by_path(
 
 
 @pytest.mark.parametrize("change", ["none", "contents", "replace", "sidecar"])
-def test_fresh_index_validation_does_not_read_sqlite_from_unproved_storage(
+def test_fresh_index_proof_and_in_place_read_are_separate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
 ) -> None:
     from azure_tenant_audit import contracts, evidence_db
@@ -301,8 +302,9 @@ def test_fresh_index_validation_does_not_read_sqlite_from_unproved_storage(
     else:
         with pytest.raises(evidence_db.UnsafeRunFileError):
             contracts._validate_evidence_db(run, issues, _fresh_index_proof=proof[0])
-    with pytest.raises(evidence_db.UnsafeRunFileError):
-        contracts._validate_evidence_db(run, [], read_only=True, _fresh_index_proof=proof[0])
+    read_only_issues: list = []
+    contracts._validate_evidence_db(run, read_only_issues, read_only=True, _fresh_index_proof=proof[0])
+    assert bool(read_only_issues) == (change == "contents")
 
 
 @pytest.mark.parametrize("failure", ["busy-checkpoint", "remaining-wal"])
