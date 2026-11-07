@@ -84,8 +84,8 @@ Do not share either file. The manifest field `operator_inputs.partner_domains`
 holds only `supplied` and, when supplied, unique `count` and `hmac_sha256`.
 No list is uploaded or included in logs, evidence, AI context, reports, exports
 or customer packs; the source path is redacted from command arguments. Demos
-ignore the operator environment. Projection integration is a separate product
-change, and any rule view must remain in memory only.
+ignore the operator environment. Assessment uses the verified snapshot only in
+SS 2.3's private in-memory rule view.
 
 Resume replaces this input while keeping its key; omit the input to clear its
 list and key. The sibling input is preserved. An existing HMAC with an unusable

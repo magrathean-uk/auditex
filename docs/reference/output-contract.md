@@ -140,7 +140,7 @@ logs, reports, built-in exports or customer packs; the flag's path is redacted
 in command lines, including command-runner, response and Google redactors.
 Packs may carry relative exclusion paths and manifest metadata, never the private
 files. No list is uploaded. Rule views containing these domains must stay in
-memory; projection integration is a separate product change.
+memory. Assessment consumes only the verified private snapshot for SS 2.3.
 
 Resume replaces the list using the same private key and recomputes the HMAC.
 No supplied input clears only this channel's list, key and metadata; the other
