@@ -581,6 +581,12 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                             _user_entries(value)
                         except Unavailable:
                             users_ok = False
+                    # A provider export is literal evidence, never a producer of run-bound membership proofs.
+                    # Ignore reserved run-only keys without mutating the loaded source rows.
+                    if section == "anti_phish_policies" and isinstance(value, list):
+                        value = [{key: item for key, item in row.items()
+                                  if key not in {"TargetedUsersCoverage", "TargetedUsersCoverageBinding"}}
+                                 if isinstance(row, dict) else row for row in value]
                     # Serving copies a policy's read set; only privileged users need
                     # a capture copy because model redaction rewrites them in place.
                     if users_ok:
