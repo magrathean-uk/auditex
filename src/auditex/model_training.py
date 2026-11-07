@@ -16,6 +16,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 
+from azure_tenant_audit.evidence_refs import file_sha256
 from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 
@@ -302,7 +303,11 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 
 
 def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return file_sha256(path)
+
+
+def _read_training_text(directory: Path, name: str) -> str:
+    return read_guarded_bytes(directory / name, field="input").decode("utf-8")
 
 
 def _outside_audit_runs(path: Path) -> None:
@@ -496,10 +501,11 @@ def prepare_training_pack(
     return manifest
 
 
+@guarded_operation
 def validate_training_pack(pack_dir: str | Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """Fail before runtime imports if preparation, approval or hashes are stale."""
     root = Path(pack_dir)
-    manifest = _parse_json((root / "manifest.json").read_text(encoding="utf-8"))
+    manifest = _parse_json(_read_training_text(root, "manifest.json"))
     if not isinstance(manifest, dict):
         raise ValueError("training pack manifest must be an object")
     if manifest.get("schema_version") != SCHEMA_VERSION or manifest.get("job_ready") is not True:
@@ -511,7 +517,7 @@ def validate_training_pack(pack_dir: str | Path) -> tuple[dict[str, Any], dict[s
     for name, digest in files.items():
         if _digest(root / name) != digest:
             raise ValueError(f"training pack hash mismatch: {name}")
-    config = _parse_json((root / "training-config.json").read_text(encoding="utf-8"))
+    config = _parse_json(_read_training_text(root, "training-config.json"))
     if not isinstance(config, dict):
         raise ValueError("training config must be an object")
     revision = config.get("revision")
@@ -531,7 +537,7 @@ def validate_training_pack(pack_dir: str | Path) -> tuple[dict[str, Any], dict[s
         selected = [case for case in cases if case["split"] == split]
         if not selected or len(selected) != manifest["counts"][split]:
             raise ValueError(f"approved {split} cases missing or count mismatch")
-        records = [_parse_json(line) for line in (root / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()]
+        records = [_parse_json(line) for line in _read_training_text(root, f"{split}.jsonl").splitlines()]
         expected = selected if split == "test" else [_trl_record(case) for case in distinct_cases(selected)[0]]
         if records != expected:
             raise ValueError(f"{split} export conflicts with approved cases")
@@ -540,7 +546,7 @@ def validate_training_pack(pack_dir: str | Path) -> tuple[dict[str, Any], dict[s
 
 def _load_tokenizer(snapshot: str, *, transformers: Any) -> tuple[Any, dict[str, bool]]:
     """Load the pinned local tokenizer with the same family fix in every runtime path."""
-    config = _parse_json((Path(snapshot) / "config.json").read_text(encoding="utf-8"))
+    config = _parse_json(_read_training_text(Path(snapshot), "config.json"))
     fix_mistral_regex = config["model_type"] == "mistral3"
     settings = {"local_files_only": True, "trust_remote_code": False}
     if fix_mistral_regex:
@@ -614,7 +620,7 @@ def _validate_resume_input(output: Path, checkpoint: Path, input_record: dict[st
         record = directory / "auditex-training-input.json"
         if not record.is_file():
             raise ValueError("resume requires input identity in both the output and selected checkpoint")
-        if _parse_json(record.read_text(encoding="utf-8")) != input_record:
+        if _parse_json(_read_training_text(directory, record.name)) != input_record:
             raise ValueError("resume checkpoint belongs to another base model or data pack")
 
 

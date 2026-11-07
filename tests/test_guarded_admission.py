@@ -418,6 +418,225 @@ def test_nested_manifest_never_hides_enclosing_private_pair(
                 pytest.fail("nested marker hid the enclosing private pair")
 
 
+@pytest.mark.parametrize("outer_manifest", [True, False])
+@pytest.mark.parametrize("decoy_private_dir", [True, False])
+@pytest.mark.parametrize("private_name", ["sensitive-users.key", "sensitive-users.txt"])
+@pytest.mark.parametrize("consumer", ["read", "hash", "copy"])
+@pytest.mark.parametrize("root_scope", ["private", "run", "parent"])
+def test_run_file_root_inside_private_directory_never_admits_pair(
+    private_run: Path, outer_manifest: bool, decoy_private_dir: bool, private_name: str, consumer: str,
+    root_scope: str,
+) -> None:
+    from io import BytesIO
+
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError
+    from azure_tenant_audit.run_files import copy_run_file, hash_run_file, read_run_file
+
+    private = private_run / "operator-inputs"
+    (private / "run-manifest.json").write_text("{}", encoding="utf-8")
+    if decoy_private_dir:
+        (private / "operator-inputs").mkdir(mode=0o700)
+    if not outer_manifest:
+        (private_run / "run-manifest.json").unlink()
+    root = {"private": private, "run": private_run, "parent": private_run.parent}[root_scope]
+    relative = (private / private_name).relative_to(root)
+    destination = BytesIO()
+    with pytest.raises(UnsafeRunFileError):
+        if consumer == "read":
+            read_run_file(root, relative)
+        elif consumer == "hash":
+            hash_run_file(root, relative)
+        else:
+            copy_run_file(root, relative, destination)
+    assert destination.getvalue() == b""
+
+
+@pytest.mark.parametrize("outer_manifest", [True, False])
+@pytest.mark.parametrize("decoy_private_dir", [True, False])
+@pytest.mark.parametrize("selected", ["all", "sensitive-users.key", "sensitive-users.txt"])
+@pytest.mark.parametrize("root_scope", ["private", "parent"])
+def test_bundle_hash_root_inside_private_directory_never_exposes_pair(
+    private_run: Path, outer_manifest: bool, decoy_private_dir: bool, selected: str,
+    root_scope: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit import bundle_integrity
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError
+
+    private = private_run / "operator-inputs"
+    (private / "run-manifest.json").write_text("{}", encoding="utf-8")
+    if decoy_private_dir:
+        (private / "operator-inputs").mkdir(mode=0o700)
+    if not outer_manifest:
+        (private_run / "run-manifest.json").unlink()
+    root = private if root_scope == "private" else private_run.parent
+    if selected != "all":
+        relative = (private / selected).relative_to(root).as_posix()
+        monkeypatch.setattr(bundle_integrity, "_bundle_files", lambda _root: [relative])
+    with pytest.raises(UnsafeRunFileError):
+        bundle_integrity.build_bundle_hash_manifest(root)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("consumer", ["run", "standalone"])
+def test_manifest_below_private_directory_is_not_a_trust_root(
+    private_run: Path, nested: bool, consumer: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import read_run_file
+
+    private = private_run / "operator-inputs"
+    root = private / "nested" if nested else private
+    root.mkdir(mode=0o700, exist_ok=True)
+    (root / "run-manifest.json").write_text("{}", encoding="utf-8")
+    decoy = root / "operator-inputs"
+    decoy.mkdir(mode=0o700)
+    (decoy / "sensitive-users.key").write_bytes(b"invalid partial pair")
+    (root / "ordinary.txt").write_bytes(b"public")
+    attempted: list[Path] = []
+    original_bind = GuardContext.bind_run
+
+    def record_bind(context: GuardContext, run_dir: str | Path, **kwargs: object) -> int:
+        attempted.append(Path(context._absolute(run_dir)))
+        return original_bind(context, run_dir, **kwargs)
+
+    monkeypatch.setattr(GuardContext, "bind_run", record_bind)
+    try:
+        if consumer == "run":
+            assert read_run_file(root, "ordinary.txt") == b"public"
+        else:
+            with GuardContext() as context:
+                with open_guarded_file(root / "ordinary.txt", field="input", context=context) as fd:
+                    assert os.read(fd, 6) == b"public"
+    except UnsafeRunFileError:
+        pass  # Refusing an unclassifiable nested pair is also safe.
+    assert root not in attempted
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_explicit_bind_refuses_manifest_below_private_directory(private_run: Path, nested: bool) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError
+
+    root = private_run / "operator-inputs"
+    if nested:
+        root /= "nested"
+        root.mkdir(mode=0o700)
+    (root / "run-manifest.json").write_text("{}", encoding="utf-8")
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        context.bind_run(root)
+
+
+@pytest.mark.parametrize("private_name", ["sensitive-users.key", "sensitive-users.txt"])
+@pytest.mark.parametrize("consumer", ["open", "file-hash", "read", "hash", "bundle"])
+def test_pair_under_ineligible_nested_run_is_never_admitted(
+    private_run: Path, private_name: str, consumer: str,
+) -> None:
+    from azure_tenant_audit.bundle_integrity import build_bundle_hash_manifest
+    from azure_tenant_audit.evidence_refs import file_sha256
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import hash_run_file, read_run_file
+
+    nested = RunBundleBuilder(private_run / "operator-inputs", name="nested").manifest(
+        operator_inputs={"sensitive_users": SensitiveUsers((ADDRESS,)).manifest(KEY)},
+    ).build()
+    private = nested / "operator-inputs"
+    private.mkdir(mode=0o700)
+    (private / "sensitive-users.key").write_bytes(KEY)
+    (private / "sensitive-users.txt").write_text(ADDRESS + "\n", encoding="utf-8")
+    with pytest.raises(UnsafeRunFileError):
+        if consumer == "open":
+            with GuardContext() as context, open_guarded_file(private / private_name, field="input", context=context):
+                pytest.fail("nested private pair was admitted")
+        elif consumer == "file-hash":
+            file_sha256(private / private_name)
+        elif consumer == "read":
+            read_run_file(private, private_name)
+        elif consumer == "hash":
+            hash_run_file(private, private_name)
+        else:
+            build_bundle_hash_manifest(private)
+
+
+@pytest.mark.parametrize("root_scope", ["run", "parent"])
+def test_discovered_manifest_limit_is_checked_before_read(
+    private_run: Path, root_scope: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError
+    from azure_tenant_audit.run_files import read_run_file
+
+    manifest = private_run / "run-manifest.json"
+    manifest_info = manifest.stat()
+    original_read = os.read
+    reads: list[int] = []
+
+    def track_read(fd: int, count: int) -> bytes:
+        info = os.fstat(fd)
+        if (info.st_dev, info.st_ino) == (manifest_info.st_dev, manifest_info.st_ino):
+            reads.append(count)
+        return original_read(fd, count)
+
+    monkeypatch.setattr(os, "read", track_read)
+    root = private_run if root_scope == "run" else private_run.parent
+    with pytest.raises(UnsafeRunFileError) as error:
+        read_run_file(root, manifest.relative_to(root), max_bytes=2)
+    assert error.value.reason == "oversize"
+    assert not reads
+
+
+@pytest.mark.parametrize("private_name", ["sensitive-users.key", "sensitive-users.txt"])
+def test_enclosing_pair_is_registered_before_selected_file_open(
+    private_run: Path, private_name: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError
+    from azure_tenant_audit.run_files import read_run_file
+
+    private = private_run / "operator-inputs"
+    (private / "run-manifest.json").write_text("{}", encoding="utf-8")
+    private_info = private.stat()
+    pair_ids = {(info.st_dev, info.st_ino) for info in (
+        (private / "sensitive-users.key").stat(), (private / "sensitive-users.txt").stat(),
+    )}
+    original_open = os.open
+    admitted_at_open: list[set[tuple[int, int]]] = []
+    with GuardContext() as context:
+        def track_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+            parent_fd = kwargs.get("dir_fd")
+            if path == private_name and isinstance(parent_fd, int):
+                parent_info = os.fstat(parent_fd)
+                if (parent_info.st_dev, parent_info.st_ino) == (private_info.st_dev, private_info.st_ino):
+                    admitted_at_open.append(set(context._identities))
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", track_open)
+        with pytest.raises(UnsafeRunFileError):
+            read_run_file(private, private_name)
+    assert len(admitted_at_open) >= 2
+    assert pair_ids <= admitted_at_open[-1]
+
+
+@pytest.mark.parametrize("private_name", ["sensitive-users.key", "sensitive-users.txt"])
+@pytest.mark.parametrize("consumer", ["digest", "pack", "tokenizer", "resume"])
+def test_training_helpers_do_not_read_private_pair_from_caller_root(
+    private_run: Path, private_name: str, consumer: str,
+) -> None:
+    from auditex import model_training
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError
+
+    private = private_run / "operator-inputs"
+    (private / "run-manifest.json").write_text("{}", encoding="utf-8")
+    names = {"pack": "manifest.json", "tokenizer": "config.json", "resume": "auditex-training-input.json"}
+    if consumer != "digest":
+        (private / names[consumer]).symlink_to(private / private_name)
+    with pytest.raises(UnsafeRunFileError):
+        if consumer == "digest":
+            model_training._digest(private / private_name)
+        elif consumer == "pack":
+            model_training.validate_training_pack(private)
+        elif consumer == "tokenizer":
+            model_training._load_tokenizer(str(private), transformers=object())
+        else:
+            model_training._validate_resume_input(private, private, {})
+
+
 def test_unrelated_operator_inputs_ancestor_does_not_capture_a_nested_run(tmp_path: Path) -> None:
     from azure_tenant_audit.guarded_io import GuardContext, open_guarded_file
 

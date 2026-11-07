@@ -49,7 +49,11 @@ def open_run_file(run_dir: str | Path, relative: str | Path, *, max_bytes: int |
         try:
             root_path = context._absolute(run_dir)
             root = Path(root_path)
-            is_run = root_path in context._runs or os.path.lexists(root / "operator-inputs") or os.path.lexists(root / "run-manifest.json")
+            context.discover_run(root / path, manifest_max_bytes=max_bytes)
+            is_run = context._eligible_run_root(root) and (
+                root_path in context._runs or os.path.lexists(root / "operator-inputs")
+                or os.path.lexists(root / "run-manifest.json")
+            )
             if is_run:
                 manifest_limit = max_bytes if path == Path("run-manifest.json") else None
                 parent = os.dup(context.bind_run(run_dir, manifest_max_bytes=manifest_limit))

@@ -244,7 +244,10 @@ opens or the required identity and permission checks are unavailable.
 The context for an operation verifies a run's sensitive-user pair against its
 manifest and keeps the pair's file identities open while admitting inputs. A
 missing, partial or invalid claimed pair is refused. Independently copied runs
-are verified and registered separately. A standalone copy without a run marker
+are verified and registered separately. Discovery starts at the selected file's
+parent even when a caller supplies a nested root. `operator-inputs` and any
+directory below it cannot be run roots, and a manifest there cannot hide an
+enclosing pair. A standalone copy without a run marker
 and with an unseen file identity cannot be recognised as a private pair. There
 is no global registry of private files.
 
@@ -271,7 +274,7 @@ storage; unproved or external storage is refused. The encrypted-internal proof
 is implemented for macOS Data volumes; other platforms refuse index snapshot
 reads. Index and supported sidecar copies have no size cap, so available
 temporary space and copy time matter.
-An interrupted index build can leave a private staging directory beside the index.
+A killed or interrupted index build can leave a private staging directory beside the index.
 
 ## Evidence and customer packs
 

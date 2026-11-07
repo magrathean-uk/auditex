@@ -169,6 +169,10 @@ class GuardContext:
         value = os.path.expanduser(os.fspath(path))
         return os.path.normpath(value if os.path.isabs(value) else os.path.join(self._cwd_path, value))
 
+    def _eligible_run_root(self, path: str | Path) -> bool:
+        # A marker inside a private directory is data, never a new trust root.
+        return all(part.casefold() != "operator-inputs" for part in Path(self._absolute(path)).parts)
+
     def _parent(self, path: str | Path) -> tuple[int, str]:
         absolute, parts = _parts(path)
         if not parts or parts[-1] in (".", ".."):
@@ -211,6 +215,8 @@ class GuardContext:
         try:
             with self._lock:
                 path = self._absolute(run_dir)
+                if not self._eligible_run_root(path):
+                    raise UnsafeRunFileError("run")
                 if path in self._runs:
                     return self._runs[path]
                 root = self._directory(run_dir)
@@ -318,10 +324,9 @@ class GuardContext:
             self._private_keys.pop(path, None)
             self.bind_run(run_dir)
 
-    def discover_run(self, path: str | Path) -> None:
+    def discover_run(self, path: str | Path, *, manifest_max_bytes: int | None = None) -> None:
         """Bind a run containing a selected path when its private directory is identifiable."""
-        expanded = os.path.expanduser(os.fspath(path))
-        absolute = Path(expanded) if os.path.isabs(expanded) else Path(self._cwd_path) / expanded
+        absolute = Path(self._absolute(path))
 
         def optional_lstat(candidate: Path) -> os.stat_result | None:
             failed = False
@@ -358,6 +363,17 @@ class GuardContext:
 
         nested_manifest = False
         for parent in absolute.parents:
+            if not self._eligible_run_root(parent):
+                # A pair below an ineligible root cannot be verified as a run.
+                # Refuse instead of letting that unregistered pair be read.
+                nested_private = parent / "operator-inputs"
+                if optional_lstat(nested_private) is not None and private_pair_present(nested_private):
+                    raise UnsafeRunFileError("run") from None
+                # A marker here is not a root. It only distinguishes an unrelated
+                # tree below an empty, unmanifested operator-inputs directory.
+                if optional_lstat(parent / "run-manifest.json") is not None:
+                    nested_manifest = True
+                continue
             private = parent / "operator-inputs"
             manifest = parent / "run-manifest.json"
             private_info = optional_lstat(private)
@@ -379,7 +395,8 @@ class GuardContext:
                     if info is not None and _identity(info) == _identity(private_info):
                         raise UnsafeRunFileError("run") from None
                 continue
-            self.bind_run(parent)
+            limit = manifest_max_bytes if absolute == manifest else None
+            self.bind_run(parent, manifest_max_bytes=limit)
             # A nested marker cannot hide an enclosing run's private pair.
 
 
