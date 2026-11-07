@@ -278,6 +278,8 @@ def test_bad_chunk_inputs_retain_raw_evidence_and_produce_coverage_gap(tmp_path:
     assert fanout["error_class"] == "incomplete_evidence"
     assert fanout["input_complete"] is False
     assert code in {issue["code"] for issue in fanout["input_issues"]}
+    # A refused chunk is named by position only; its path never enters the coverage record.
+    assert "outside.jsonl" not in json.dumps(fanout)
 
 
 @pytest.mark.parametrize("identity_enabled,consent_enabled,expected", [(False, True, False), (True, False, True), (None, False, False)])

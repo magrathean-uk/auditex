@@ -15,7 +15,7 @@ from .guided import build_guided_parser, run_guided
 from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
-from azure_tenant_audit.cli_guard import guarded_cli, parse_guarded
+from azure_tenant_audit.cli_guard import RunArgumentRefusal, guarded_cli, parse_guarded
 from azure_tenant_audit.guarded_io import guard_session, open_private_output, read_guarded_bytes
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.output_redaction import (
@@ -828,6 +828,31 @@ def _emit_gate_result(command: str, result: dict[str, object]) -> int:
     return 0 if result["pass"] else 2
 
 
+_GATE_RUN_LABELS = {"run-dir": "run", "baseline": "baseline run", "current": "current run"}
+_GATE_RUN_CONDITIONS = {
+    "absent": ("run_dir_missing", "{label} directory not found"),
+    "no_manifest": ("missing_manifest", "{label} has no run-manifest.json"),
+    "malformed_manifest": ("unreadable_manifest", "{label} run-manifest.json is unreadable or not a valid JSON object"),
+}
+
+
+def _gate_run_refusal(command: str, refusal: RunArgumentRefusal) -> int:
+    """The gate's blocked JSON for a run argument the guard refused before the gate ran.
+
+    The reason is fixed text naming only the side (no path, no file content).
+    An ordinary condition keeps the gate's stable code; anything else is
+    ``unsafe_input`` and keeps the guard's fixed refusal line on stderr.
+    """
+    label = _GATE_RUN_LABELS.get(refusal.argument, "run")
+    ordinary = _GATE_RUN_CONDITIONS.get(refusal.condition or "")
+    if ordinary is None:
+        print(str(refusal), file=sys.stderr)
+        code, reason = "unsafe_input", "{label} could not be admitted safely"
+    else:
+        code, reason = ordinary
+    return _emit_gate_result(command, {"pass": False, "status": "blocked", "code": code, "reason": reason.format(label=label)})
+
+
 def _build_gate_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(allow_abbrev=False, prog="auditex gate", description="Severity-threshold gate for CI / GitHub Action integration.")
     parser.add_argument("run_dir", help="Completed run directory.")
@@ -1340,7 +1365,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if argv[0] == "gate":
         parser = _build_gate_parser()
-        args = parse_guarded(parser, argv[1:])
+        try:
+            args = parse_guarded(parser, argv[1:])
+        except RunArgumentRefusal as refusal:
+            return _gate_run_refusal("gate", refusal)
         expected = _parse_expected_digests(parser, args.expect_manifest_sha256, [args.run_dir])
         return _emit_gate_result(
             "gate",
@@ -1353,7 +1381,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     if argv[0] == "gate-drift":
         parser = _build_gate_drift_parser()
-        args = parse_guarded(parser, argv[1:])
+        try:
+            args = parse_guarded(parser, argv[1:])
+        except RunArgumentRefusal as refusal:
+            return _gate_run_refusal("gate-drift", refusal)
         expected = _parse_expected_digests(parser, args.expect_manifest_sha256, [args.baseline, args.current])
         return _emit_gate_result(
             "gate-drift",

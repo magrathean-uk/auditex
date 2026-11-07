@@ -11,7 +11,6 @@ import errno
 import json
 import os
 from pathlib import Path
-import stat
 from typing import Any, BinaryIO
 
 from .run_files import UnsafeRunFileError
@@ -23,6 +22,25 @@ class EndpointEvidenceError(ValueError):
     def __init__(self, issue: dict[str, Any]) -> None:
         self.issue = issue
         super().__init__(f"Incomplete endpoint evidence: {issue['code']}")
+
+
+# Guard refusal reasons that describe the chunk file itself rather than where it is.
+_FILE_REFUSALS = frozenset({"type", "oversize"})
+
+
+def _refusal_code(exc: UnsafeRunFileError) -> str:
+    """A constant issue code for a chunk the descriptor guard did not admit.
+
+    Nothing was read from a refused file. The guard refuses with field ``input``
+    only when it cannot start (no descriptor-relative no-follow opens on this
+    platform, or no working directory): a runtime condition, not a verdict on
+    the chunk, so it is reported as unreadable. Every other refusal (outside
+    the run, link, alias, owner, private input, change, or an unclassified
+    failure to prove the chunk safe) is an unsafe path or an invalid file.
+    """
+    if exc.field == "input":
+        return "unreadable_chunk"
+    return "invalid_chunk_file" if exc.reason in _FILE_REFUSALS else "unsafe_chunk_path"
 
 
 def _issue(issues: list[dict[str, Any]] | None, code: str, **details: Any) -> None:
@@ -55,8 +73,12 @@ def iter_endpoint_records(
     inline/offline payloads retain their existing behavior. A truncated inline
     sample without chunks is usable partial evidence, with an explicit issue.
 
-    By default an invalid manifest, missing/unreadable/invalid chunk, duplicate
-    chunk or count mismatch raises :class:`EndpointEvidenceError`. Pass an
+    By default an invalid manifest, missing/unreadable/invalid chunk, a chunk
+    the descriptor guard refuses (outside the run, a link, a multiply-linked or
+    private file, a special file), duplicate chunk or count mismatch raises
+    :class:`EndpointEvidenceError`. Guarded reads need descriptor-relative
+    no-follow opens; without them every chunk is ``unreadable_chunk`` and no
+    pathname read is attempted. Pass an
     ``issues`` list to retain readable rows and collect structured issues
     instead. Consume the iterator fully to validate final counts. No exception
     message or issue contains raw row contents. Collection limits are metadata,
@@ -85,7 +107,7 @@ def iter_endpoint_records(
             return
         root = Path(run_dir)
         seen_files: set[tuple[int, int]] = set()
-        for relative in chunk_files:
+        for index, relative in enumerate(chunk_files):
             if not isinstance(relative, str):
                 _issue(issues, "invalid_chunk_path")
                 continue
@@ -110,8 +132,10 @@ def iter_endpoint_records(
                             continue
                         observed_count += 1
                         yield row
-            except UnsafeRunFileError:
-                raise
+            except UnsafeRunFileError as exc:
+                # Refused before any byte was read. The issue names the manifest
+                # position, never the refused path, and no fallback is tried.
+                _issue(issues, _refusal_code(exc), chunk_index=index)
             except EndpointEvidenceError as exc:
                 if issues is None:
                     raise
