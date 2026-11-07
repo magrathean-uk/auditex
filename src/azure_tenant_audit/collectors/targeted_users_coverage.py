@@ -20,6 +20,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from ..collection_gaps import REASON_UNKNOWN, TRUNCATION_REASONS
 from ..sensitive_users import SensitiveUsers
 from ..value_rules.defender_targeted_users import (
     COVERAGE_KEY, MAX_INPUT_COUNT, SensitiveUsersBinding, membership, minimal_coverage, validate_coverage_shape,
@@ -54,13 +55,21 @@ _ERRORS = ERROR_CLASSES | {"command_empty", "command_not_found:pwsh", PARSE_ERRO
 _FAILED_EXIT = re.compile(r"command_failed:-?[0-9]{1,10}")
 _TEXT_VOCAB: dict[str, frozenset[str]] = {
     "error_class": ERROR_CLASSES,
-    "status": frozenset({"ok", "failed", "partial", "skipped"}),
+    # ``ok``, ``success``, ``collected`` and ``complete`` are the values the projection reads as healthy.
+    "status": frozenset({"ok", "success", "collected", "complete", "failed", "partial", "skipped"}),
     "reason": frozenset({"not_found", "rate_limit", "server_error", "dependency_unavailable", "offline_bundle",
                          "preflight_exception"}),
     "state": frozenset({"over_limit"}),
-    "truncation_reason": frozenset(),
+    "truncation_reason": frozenset(TRUNCATION_REASONS),
     "collection_status": frozenset({"collected", "failed", "not_collected"}),
+    "read_state": frozenset({"collected", "failed", "not_collected"}),
 }
+# Health keys whose unknown value becomes a fixed refusal token instead of being dropped, so a refusal never reads as
+# success. The projection (``auditex.scuba_projection._healthy``) and the resume publisher refuse a present ``status``,
+# ``collection_status`` or ``read_state`` outside their healthy values, whatever it holds, and any truthy
+# ``truncation_reason``. ``reason`` and ``state`` carry no health meaning there, so an unknown one is only dropped.
+_PRESENT_REFUSAL = {"status": "failed", "collection_status": "failed", "read_state": "failed"}
+_TRUTHY_REFUSAL = {"truncation_reason": REASON_UNKNOWN}
 # Structural bounds for retained values and for sample, resume and unrecognised layouts. Text longer than
 # MAX_SCAN_CHARS, nesting deeper than MAX_DEPTH or more than MAX_NODES walked items is never copied.
 MAX_FIELD_CHARS = 4096
@@ -73,10 +82,20 @@ _NON_ALNUM = re.compile(r"[^0-9a-z]+")
 _TARGET_ALNUM = "targeteduserstoprotect"
 _FIELDS_FOLDED = frozenset(field.casefold() for field in ANTI_PHISH_POLICY_FIELDS)
 _COMMAND = re.compile(r"(,@\()?get-antiphishpolicy (?:\||'\|') select-object ([a-z]+(?:,[a-z]+)*)(\))?")
-_ENVELOPE_TEXT = ("error", "error_class", "status", "reason", "state", "truncation_reason", "collection_status")
+_ENVELOPE_TEXT = ("error", "error_class", "status", "reason", "state", "truncation_reason", "collection_status",
+                  "read_state")
 _ENVELOPE_NUMBERS = ("return_code", "duration_ms", "stdout_bytes", "stderr_bytes", "item_count", "result_limit")
 _ENVELOPE_FLAGS = ("licence_inferred", "collection_truncated", "complete")
-_ENVELOPE_KEYS = frozenset({"value", "command", *_ENVELOPE_TEXT, *_ENVELOPE_NUMBERS, *_ENVELOPE_FLAGS})
+# Refusal markers the projection, the resume publisher or offline replay read by truthiness alone. Their values (a
+# URL, resolver text, anything) are never copied: a truthy one becomes ``True`` and a falsy one is dropped.
+_ENVELOPE_MARKERS = ("bounded_sample", "incomplete", "partial", "collection_limit_reached", "resolver_error",
+                     "@odata.nextLink")
+_ENVELOPE_KEYS = frozenset({"value", "command", *_ENVELOPE_TEXT, *_ENVELOPE_NUMBERS, *_ENVELOPE_FLAGS,
+                            *_ENVELOPE_MARKERS})
+# Keys that make a sample-root mapping an operation envelope (or a diagnostic carrier), never a collector section of
+# independent operations: the envelope keys plus the diagnostic text slots adapters and older samples write.
+_COMPONENT_KEYS = frozenset({*_ENVELOPE_KEYS, "message", "stdout", "stderr", "stdout_sample", "stderr_sample",
+                             "details", "exception", "traceback", "warning", "warnings"})
 _ROW_KEYS = frozenset({*RETAINED_FIELDS, COVERAGE_KEY})
 _TARGET_FOLD = TARGET_KEY.casefold()
 
@@ -278,13 +297,32 @@ def _number(value: object) -> bool:
     return type(value) is int or (type(value) is float and math.isfinite(value))
 
 
+def _truthy(value: object) -> bool:
+    """JSON truthiness without calling into an unknown object; anything else counts as a present marker."""
+    if value is None or type(value) in (bool, int, float, str, list, dict):
+        return bool(value)
+    return True
+
+
 def _envelope_metadata(response: Mapping[str, object]) -> dict[str, object]:
-    """Closed-vocabulary classes, numbers and flags of an envelope; free text (stdout, stderr, samples, messages,
-    unknown tokens) is dropped, and an unknown error or class becomes the fixed fallback so a failure stays one."""
+    """Closed-vocabulary classes, numbers, flags and refusal markers of an envelope; free text (stdout, stderr,
+    samples, messages, unknown tokens, URLs) is dropped.
+
+    No refusal turns into apparent success: an unknown error or class becomes the fixed fallback, an unknown health
+    value the fixed refusal token of its key, a non-boolean ``complete`` ``False``, a truthy non-boolean
+    ``collection_truncated`` or marker ``True``. Only falsy unknown values, which refuse nothing, are dropped.
+    """
     out: dict[str, object] = {}
     for key in _ENVELOPE_TEXT:
-        if key in response and _known_text(key, response[key]):
-            out[key] = response[key]
+        if key not in response:
+            continue
+        value = response[key]
+        if _known_text(key, value):
+            out[key] = value
+        elif key in _PRESENT_REFUSAL:
+            out[key] = _PRESENT_REFUSAL[key]
+        elif key in _TRUTHY_REFUSAL and _truthy(value):
+            out[key] = _TRUTHY_REFUSAL[key]
     if "error_class" in response and "error_class" not in out:
         out["error_class"] = FALLBACK_ERROR
     if "error" in response and "error" not in out:
@@ -293,8 +331,18 @@ def _envelope_metadata(response: Mapping[str, object]) -> dict[str, object]:
         if key in response and _number(response[key]):
             out[key] = response[key]
     for key in _ENVELOPE_FLAGS:
-        if key in response and type(response[key]) is bool:
-            out[key] = response[key]
+        if key not in response:
+            continue
+        value = response[key]
+        if type(value) is bool:
+            out[key] = value
+        elif key == "complete":
+            out[key] = False  # only an exact ``True`` is complete
+        elif key == "collection_truncated" and _truthy(value):
+            out[key] = True
+    for key in _ENVELOPE_MARKERS:
+        if key in response and _truthy(response[key]):
+            out[key] = True
     return out
 
 
@@ -355,7 +403,7 @@ def enforce_response(response: object, *, command: str) -> dict[str, object]:
     for key in _ENVELOPE_NUMBERS:
         if key in response and not _number(response[key]):
             raise BoundaryError("anti-phish response number")
-    for key in _ENVELOPE_FLAGS:
+    for key in (*_ENVELOPE_FLAGS, *_ENVELOPE_MARKERS):
         if key in response and type(response[key]) is not bool:
             raise BoundaryError("anti-phish response flag")
     if "value" not in response and response.get("error") is None and response.get("error_class") is None:
@@ -377,10 +425,12 @@ class _Unsafe(Exception):
 
 
 class _Walk:
-    __slots__ = ("nodes",)
+    __slots__ = ("nodes", "bearing")
 
     def __init__(self) -> None:
         self.nodes = 0
+        # id -> (container, verdict); the container is held so its id cannot be reused while the walk lives.
+        self.bearing: dict[int, tuple[Any, bool]] = {}
 
     def step(self, depth: int) -> None:
         self.nodes += 1
@@ -388,42 +438,56 @@ class _Walk:
             raise _Unsafe
 
 
-def _carries_target(mapping: Mapping[Any, Any], walk: _Walk, depth: int) -> bool:
-    """Whether a mapping is a target-bearing component: a key naming the field, a command reading anti-phish
-    policies, or text naming the field in a value it holds directly or through lists. Mappings below are their own
-    components and are judged when reached."""
-    for key, item in mapping.items():
-        walk.step(depth)
-        if type(key) is not str or _key_names_target(key) or _mentions_target(key):
-            return True
-        if key == "command" and type(item) is str:
-            if is_sensitive_command(item):
-                return True
-            continue
-        stack = [(item, depth + 1)]
-        while stack:
-            value, level = stack.pop()
-            walk.step(level)
-            if type(value) is str:
-                if _mentions_target(value):
-                    return True
-            elif type(value) is list:
-                stack.extend((child, level + 1) for child in value)
-    return False
+def _bears(value: Any, walk: _Walk, depth: int) -> bool:
+    """Whether ``value`` is target-bearing anywhere below it: a key naming the field (or not text), a command reading
+    anti-phish policies or naming the field, or text naming it, through any mix of mappings, lists and encoded text.
+
+    Structure only, never a value match. Each container is judged once per walk and its verdict reused, so judging a
+    parent and then each of its children stays linear; past the walking bounds ``_Unsafe`` is raised.
+    """
+    if isinstance(value, (Mapping, list)):
+        seen = walk.bearing.get(id(value))
+        if seen is not None and seen[0] is value:
+            return seen[1]
+    walk.step(depth)
+    found = False
+    if type(value) is str:
+        return _mentions_target(value)
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if type(key) is not str or _key_names_target(key) or _mentions_target(key):
+                found = True
+            elif key == "command" and type(item) is str:
+                walk.step(depth + 1)
+                found = is_sensitive_command(item) or _mentions_target(item)
+            else:
+                found = _bears(item, walk, depth + 1)
+            if found:
+                break
+    elif isinstance(value, list):
+        for item in value:
+            if _bears(item, walk, depth + 1):
+                found = True
+                break
+    else:
+        return False
+    walk.bearing[id(value)] = (value, found)
+    return found
 
 
 def _reduce(mapping: Mapping[Any, Any], walk: _Walk, depth: int, *, strict_rows: bool) -> dict[str, Any]:
-    """A target-bearing or unrecognised component: closed metadata, the adapter's own command, safe retained
-    fields and its ``value`` rows; every other key, and with it any value-bearing diagnostic, is discarded.
+    """A target-bearing or unrecognised component: closed metadata (refusals kept as fixed tokens), the adapter's own
+    command and its ``value`` rows; a component without ``value`` (a policy-like row) also keeps its safe retained
+    fields. Every other key, and with it any value-bearing diagnostic or nested carrier, is discarded.
 
     ``strict_rows`` (an unrecognised operation) keeps only each row's safe retained fields; otherwise rows are
-    walked as components of their own. A policy-like mapping, or one that named the field or held a summary, is
-    marked ``not_collected``."""
+    walked as components of their own, so a row with no target stays as it was. A policy-like mapping, or one that
+    named the field or held a summary, is marked ``not_collected``."""
     walk.step(depth)
     out: dict[str, Any] = _envelope_metadata(mapping)
     if _controlled_command(mapping.get("command")):
         out["command"] = mapping["command"]
-    retained = _retained(mapping)
+    retained = {} if "value" in mapping else _retained(mapping)
     out.update(retained)
     rows = mapping.get("value")
     if type(rows) is list:
@@ -431,17 +495,21 @@ def _reduce(mapping: Mapping[Any, Any], walk: _Walk, depth: int, *, strict_rows:
             _reduce(row, walk, depth + 2, strict_rows=True) if strict_rows else _clean(row, walk, depth + 2)
             for row in rows if isinstance(row, Mapping)
         ]
+    elif isinstance(rows, Mapping):
+        out["value"] = (_reduce(rows, walk, depth + 1, strict_rows=True) if strict_rows
+                        else _clean(rows, walk, depth + 1))
     if retained or any(key == COVERAGE_KEY or _key_names_target(key) for key in mapping):
         out[COVERAGE_KEY] = minimal_coverage("not_collected")
     return out
 
 
 def _clean(value: Any, walk: _Walk, depth: int) -> Any:
-    """A copy of an unrecognised value: a clean mapping or list is kept, a target-bearing mapping is reduced, a
-    supplied summary is replaced by ``not_collected`` and text naming the field is dropped."""
+    """A copy of an unrecognised value: a mapping with nothing target-bearing below it is kept, a target-bearing one
+    (at any depth, through mappings, lists or encoded text) is reduced, a supplied summary is replaced by
+    ``not_collected`` and text naming the field is dropped."""
     walk.step(depth)
     if isinstance(value, Mapping):
-        if _carries_target(value, walk, depth):
+        if _bears(value, walk, depth):
             return _reduce(value, walk, depth, strict_rows=False)
         out: dict[Any, Any] = {}
         marked = False
@@ -459,6 +527,29 @@ def _clean(value: Any, walk: _Walk, depth: int) -> Any:
     if type(value) is str and _mentions_target(value):
         return None
     return value
+
+
+def _is_container(mapping: Mapping[Any, Any]) -> bool:
+    """A sample-root mapping that holds only operations: every value a mapping or list, no envelope or diagnostic key."""
+    return all(isinstance(item, (Mapping, list)) and key not in _COMPONENT_KEYS for key, item in mapping.items())
+
+
+def _container(mapping: Mapping[Any, Any]) -> dict[str, Any]:
+    """A sample-root collector section: each operation is its own component with its own walking budget, so one
+    target-bearing operation never costs its siblings their evidence. A key naming the field is omitted, a supplied
+    summary becomes ``not_collected`` and an operation past the bounds is omitted."""
+    out: dict[str, Any] = {}
+    for name, item in mapping.items():
+        if name == COVERAGE_KEY:
+            out[name] = minimal_coverage("not_collected")
+            continue
+        if type(name) is not str or _key_names_target(name) or _mentions_target(name):
+            continue
+        try:
+            out[name] = _clean(item, _Walk(), 2)
+        except Exception:  # noqa: BLE001 - past the bounds or unexpected: omit, never copy and never raise text
+            continue
+    return out
 
 
 @lru_cache(maxsize=1)
@@ -539,13 +630,16 @@ def sanitise_sample(
 
     ``exchange_policy.antiPhishPolicies`` rows are rebuilt as in a live read, under this run's binding (fresh literals
     are summarised; a supplied summary alone becomes ``not_collected``). Every other location, including flat,
-    legacy, nested, error and encoded layouts, loses each target-bearing component's target subtree, encoded text
-    and value-bearing diagnostics; unknown exchange_policy operations keep only closed metadata and safe retained
-    fields. A top-level key naming the field is omitted, and when the top level itself names the field its free
-    text goes too. A section past the bounds is replaced by an empty mapping. The source mapping is not modified.
+    legacy, nested, error and encoded layouts, reduces each component that is target-bearing anywhere below it
+    (a row, a nested object, a list or encoded text) to closed metadata, refusal markers as fixed tokens, the
+    adapter's own command and its rows, so no ancestor keeps diagnostic text; unknown exchange_policy operations keep
+    only closed metadata and safe retained fields. A collector section of operations keeps every operation that
+    bears nothing as it was. A top-level key naming the field is omitted, and when anything in the sample bears the
+    target the top level's own free text goes too. A section past the bounds is replaced by an empty mapping (an
+    operation past them, inside a section of operations, is omitted). The source mapping is not modified.
     """
     try:
-        top_bearing = _carries_target(sample, _Walk(), 0)
+        top_bearing = _bears(sample, _Walk(), 0)
     except Exception:  # noqa: BLE001 - unexaminable: treat as bearing
         top_bearing = True
     out: dict[str, Any] = {}
@@ -555,6 +649,8 @@ def sanitise_sample(
         try:
             if key == COLLECTOR:
                 out[key] = _section(value, sensitive_users, binding)
+            elif isinstance(value, Mapping) and _is_container(value):
+                out[key] = _container(value)
             elif isinstance(value, (Mapping, list)):
                 out[key] = _clean(value, _Walk(), 1)
             elif type(value) is str:
