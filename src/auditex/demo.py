@@ -408,10 +408,12 @@ def run_demo(options: DemoOptions) -> int:
         console.line(f"Demo sample not found: {sample_path}")
         return 2
     sample = _load_json(sample_path)
-    from azure_tenant_audit.collectors.targeted_users_coverage import strip_targets
+    from azure_tenant_audit.collectors.targeted_users_coverage import sanitise_sample
 
-    # The header is a sink before offline replay begins, so it uses the same minimised metadata as the bundle.
-    provenance = strip_targets(sample.get("_fixture_provenance") or {})
+    # Console labels precede offline replay. Use a minimised copy for every label; run_offline still reads the
+    # original file and applies its own fresh binding before writing evidence.
+    display_sample = sanitise_sample(sample, None, None)
+    provenance = display_sample.get("_fixture_provenance") or {}
     if not isinstance(provenance, dict):
         provenance = {}
     out_dir = options.out_dir
@@ -422,7 +424,7 @@ def run_demo(options: DemoOptions) -> int:
     make_private_dirs(out_dir)
 
     console.line(console.style("Auditex demo", "1"))
-    console.line(f"Tenant: {_company_name(sample)}  ·  fixture {provenance.get('fixture_id', sample_path.name)}")
+    console.line(f"Tenant: {_company_name(display_sample)}  ·  fixture {provenance.get('fixture_id', sample_path.name)}")
     console.line(console.style("All data is fictional and replayed offline. No Microsoft 365 tenant is contacted.", "33"))
     console.pause()
 
@@ -431,7 +433,7 @@ def run_demo(options: DemoOptions) -> int:
         as_of = DEMO_AS_OF
         console.line(f"Devices are judged as of {as_of:%-d %B %Y}, when the fictional snapshot was taken, so the demo reads the same on every run.")
     _step_plan(console)
-    run_dir = _step_run(console, sample_path, sample, out_dir, as_of)
+    run_dir = _step_run(console, sample_path, display_sample, out_dir, as_of)
     if run_dir is None:
         return 1
     report_pack = _load_json(run_dir / "reports" / "report-pack.json")
