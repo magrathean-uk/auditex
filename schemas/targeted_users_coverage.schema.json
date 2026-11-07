@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://magrathean.uk/solutions/auditex/schemas/targeted_users_coverage.schema.json",
+  "title": "Auditex TargetedUsersCoverage v1",
+  "description": "Local-only SS 2.1 membership summary of one anti-phish policy, bound to the run's verified SensitiveUsers copy. Cross-field invariants (missing_count <= input_count; protected_nonempty false implies missing_count == input_count; count and HMAC equal the verified binding) and exact non-boolean integers are enforced in Python by azure_tenant_audit.value_rules.defender_targeted_users.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "state"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "state": {"enum": ["known", "unusable", "not_collected", "over_limit"]},
+    "input_hmac_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "input_count": {"type": "integer", "minimum": 1, "maximum": 10000},
+    "protected_nonempty": {"type": "boolean"},
+    "missing_count": {"type": "integer", "minimum": 0, "maximum": 10000}
+  },
+  "if": {"properties": {"state": {"const": "known"}}, "required": ["state"]},
+  "then": {
+    "required": ["input_hmac_sha256", "input_count", "protected_nonempty", "missing_count"]
+  },
+  "else": {
+    "properties": {
+      "input_hmac_sha256": false,
+      "input_count": false,
+      "protected_nonempty": false,
+      "missing_count": false
+    }
+  }
+}

@@ -338,6 +338,22 @@ class GuardContext:
         path = self._absolute(run_dir)
         return self._verified[path]
 
+    def verified_sensitive_users_binding(self, run_dir: str | Path) -> tuple[tuple[str, ...], int, str] | None:
+        """The admitted SensitiveUsers tuple with its count and manifest HMAC, or ``None`` when none was supplied.
+
+        Derived from the state ``bind_run`` captured and verified: nothing is reread and the raw key never leaves
+        this context (only its HMAC of the captured tuple, which equals the verified manifest digest).
+        """
+        self.bind_run(run_dir)
+        with self._lock:
+            path = self._absolute(run_dir)
+            entries = self._verified.get(path)
+            key = self._private_keys.get(path)
+            if not entries or key is None:
+                return None
+            from .sensitive_users import sensitive_users_digest
+            return entries, len(entries), sensitive_users_digest(entries, key)
+
     def verified_partner_domains(self, run_dir: str | Path) -> tuple[str, ...] | None:
         self.bind_run(run_dir)
         return self._verified_partner[self._absolute(run_dir)]

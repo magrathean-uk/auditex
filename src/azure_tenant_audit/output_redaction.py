@@ -1060,6 +1060,53 @@ def _dump_like(original: str, parsed: Any, redacted: Any) -> str:
     return _dump(redacted, original.isascii(), None, (", ", ": "))
 
 
+# Local-only SS 2.1 proof (TargetedUsersCoverage v1). Every redacting profile drops the whole summary and its private
+# binding wherever they occur (keys compared with ``_norm``, nested or in embedded JSON), and keeps only ``supplied`` of
+# ``operator_inputs.sensitive_users``: its count and HMAC stay in the local manifest. Other ``count`` fields are kept.
+_LOCAL_PROOF_NORMS = frozenset({"targeteduserscoverage", "targeteduserscoveragebinding"})
+_OPERATOR_INPUTS_NORM = "operatorinputs"
+_SENSITIVE_USERS_NORM = "sensitiveusers"
+_SENSITIVE_USERS_SHAREABLE_NORMS = frozenset({"supplied"})
+
+
+def _structured_rewrite(value: Any, rewrite: Callable[[Mapping[Any, Any]], Any]) -> Any:
+    """``rewrite`` applied to a mapping, or to the mapping a JSON-object string holds (written back in its layout)."""
+    if isinstance(value, Mapping):
+        return rewrite(value)
+    if isinstance(value, str):
+        try:
+            parsed = _maybe_json(value)
+        except _EmbeddedLimitError:
+            raise ContextIncompleteError((("<output value>", REASON_LIMIT),)) from None
+        if isinstance(parsed, Mapping):
+            stripped = value.strip()
+            lead, trail = value[: len(value) - len(value.lstrip())], value[len(value.rstrip()):]
+            return lead + _dump_like(stripped, parsed, rewrite(parsed)) + trail
+    return value
+
+
+def _shareable_sensitive_users(record: Mapping[Any, Any]) -> dict[Any, Any]:
+    return {key: item for key, item in record.items() if _norm(key) in _SENSITIVE_USERS_SHAREABLE_NORMS}
+
+
+def _shareable_operator_inputs(record: Mapping[Any, Any]) -> dict[Any, Any]:
+    return {key: (_structured_rewrite(item, _shareable_sensitive_users) if _norm(key) == _SENSITIVE_USERS_NORM else item)
+            for key, item in record.items()}
+
+
+def _without_local_proof(record: Mapping[Any, Any]) -> Mapping[Any, Any]:
+    """``record`` without the local-only SS 2.1 proof fields (see ``_LOCAL_PROOF_NORMS``)."""
+    norms = [_norm(key) for key in record]
+    if not any(norm in _LOCAL_PROOF_NORMS or norm == _OPERATOR_INPUTS_NORM for norm in norms):
+        return record
+    out: dict[Any, Any] = {}
+    for norm, (key, item) in zip(norms, record.items()):
+        if norm in _LOCAL_PROOF_NORMS:
+            continue
+        out[key] = _structured_rewrite(item, _shareable_operator_inputs) if norm == _OPERATOR_INPUTS_NORM else item
+    return out
+
+
 class _Redactor:
     def __init__(self, context: RedactionContext, value: Any, markup: bool) -> None:
         self.markup = markup
@@ -1215,6 +1262,7 @@ class _Redactor:
             self.depth -= 1
 
     def mapping(self, record: Mapping[Any, Any], controlled: bool = False) -> dict[Any, Any]:
+        record = _without_local_proof(record)
         user = _is_privileged_user(record)
         group = _is_group(record)
         rows: list[tuple[Any, Any, Any]] = []

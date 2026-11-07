@@ -37,6 +37,7 @@ from .effective_admins import (
     build_effective_admin_set,
 )
 from .friendly_names import build_friendly_name_catalog
+from .value_rules.defender_targeted_users import shaped_coverage
 from .identity_controls import (
     EVIDENCE_ABSENT,
     EVIDENCE_BLOCKED,
@@ -2117,6 +2118,20 @@ def build_normalized_snapshot(
                     **exchange_protection.protection_fields(source_name, item),
                 )
             )
+    # Anti-phish policies keep identity/source metadata and the shape-validated TargetedUsersCoverage only, for local
+    # inspection (the rule reads raw evidence). No row spread: the literal target list and every other field stay out.
+    for item in _values(collector_payloads.get("exchange_policy", {}), "antiPhishPolicies"):
+        object_id = str(item.get("Identity") or item.get("Name") or "antiPhishPolicies")
+        exchange_policy_objects.append(
+            _record(
+                "exchange_policy_object",
+                "exchange_policy.antiPhishPolicies",
+                object_id,
+                source_name="antiPhishPolicies",
+                display_name=item.get("Name") or item.get("Identity"),
+                TargetedUsersCoverage=shaped_coverage(item),
+            )
+        )
     governance_objects: list[dict[str, Any]] = []
     for source_name, kind in (
         ("accessReviews", "access_review"),
