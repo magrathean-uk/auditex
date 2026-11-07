@@ -104,7 +104,7 @@ def evaluate_precheck(cases_path: str, responses_path: str | None = None, *,
     ``absent_fields`` and ``empty_lists`` score the field-level and empty-list classes as serving emits them (off here
     by default for comparability).
     """
-    cases = _load_cases(cases_path)
+    cases, _cases_digest = _load_cases(cases_path)
     classes = {name: {"rule_answered": 0, "correct": 0} for name in ("closed_gate", "absent_section", "absent_field",
                                                                              "empty_required_list")}
     left = Counter()
