@@ -27,7 +27,11 @@ from typing import Any
 
 from azure_tenant_audit.private_io import write_private_text
 from azure_tenant_audit.collection_gaps import SECTION_GAP_REASON_TEXT
+from azure_tenant_audit.evidence_gates import collectors_with_successful_reads
 from azure_tenant_audit.resources import load_json_resource, resolve_resource_path
+from azure_tenant_audit.run_files import read_run_file
+
+from .run_bundle import RunBundle
 
 FORMAT_VERSION = 2
 _EVIDENCE_LIMIT = 500
@@ -331,6 +335,14 @@ def _collector_rows(run_dir: Path, manifest: dict[str, Any], data_handling: dict
     coverage = {_text(row.get("collector")): row for row in _records(_read_json(run_dir / "normalized" / "coverage_ledger.json", {}))}
     capability = {_text(row.get("collector")): row for row in _records(_read_json(run_dir / "normalized" / "capability_matrix.json", {}))}
     offline = _text(manifest.get("mode")) == "offline"
+    _, readiness = RunBundle(run_dir).live_readiness()
+    untrusted_rows = readiness.get("cannot_trust") if isinstance(readiness, dict) else []
+    untrusted = {_text(name) for name in untrusted_rows} if isinstance(untrusted_rows, list) else set()
+    try:
+        read_coverage = json.loads(read_run_file(run_dir, "coverage.json"))
+    except (OSError, ValueError):
+        read_coverage = []
+    successful_reads = collectors_with_successful_reads(read_coverage)
     section_gaps: dict[str, list[dict[str, Any]]] = {}
     for gap in manifest.get("coverage_gaps") or []:
         for section in gap.get("section_gaps") or []:
@@ -343,10 +355,14 @@ def _collector_rows(run_dir: Path, manifest: dict[str, Any], data_handling: dict
             status, reason = "not_selected", f'Not in preset "{preset}"' if preset else "Not selected for this run"
         elif (not ledger.get("item_count") and section_gaps.get(name)
               and all(gap.get("status") == "skipped" for gap in section_gaps[name])):
-            status = "not_verified"
+            status = ("verified" if not offline and name in successful_reads
+                      and _text(ledger.get("coverage_status")).startswith("complete") else "not_verified")
             reason = ""
-            if not _text(ledger.get("coverage_status")).startswith("complete"):
+            if status == "not_verified" and not _text(ledger.get("coverage_status")).startswith("complete"):
                 reason = _text(ledger.get("message")) or _collector_reason(name, ledger, capability.get(name, {}))
+        elif (not offline and name in untrusted and name not in successful_reads
+              and _text(ledger.get("coverage_status")).startswith("complete")):
+            status, reason = "not_verified", "Not live-verified"
         elif _text(ledger.get("coverage_status")).startswith("complete"):
             status, reason = "verified", "Replayed from the offline sample" if offline else "Collected"
         else:

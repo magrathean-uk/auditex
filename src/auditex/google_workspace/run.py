@@ -245,11 +245,15 @@ def _capability_rows(
     )
 
 
-def build_google_live_readiness(selected: list[str], capability_rows: list[dict[str, Any]], *, dependency_available: bool = True) -> dict[str, Any]:
+def build_google_live_readiness(
+    selected: list[str], capability_rows: list[dict[str, Any]], *, dependency_available: bool = True,
+    coverage_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return build_live_readiness_summary(
         selected_collectors=selected,
         capability_rows=capability_rows,
         dependency_available=dependency_available,
+        coverage_rows=coverage_rows,
     )
 
 
@@ -749,6 +753,7 @@ def _write_google_probe_bundle(
             selected,
             capability_rows,
             dependency_available=bool(dependency_status.get("available")),
+            coverage_rows=preflight_rows,
         )
         payload["live_readiness"] = live_readiness
 
@@ -921,6 +926,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             selected,
             payload["capability_matrix"],
             dependency_available=bool(dependency_status.get("available")),
+            coverage_rows=preflight_rows,
         )
     except Exception as exc:  # noqa: BLE001
         error_class, message = classify_google_error(exc)
@@ -947,6 +953,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             selected,
             payload["capability_matrix"],
             dependency_available=bool(dependency_status.get("available")),
+            coverage_rows=payload["preflight"],
         )
         _write_google_probe_bundle(
             writer=writer,

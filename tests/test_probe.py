@@ -96,6 +96,30 @@ def test_probe_live_writes_capability_and_toolchain_artifacts(tmp_path: Path, mo
     assert (run_dir / "index" / "evidence.sqlite").exists()
 
 
+def test_windows365_probe_carries_successful_empty_read_into_trust(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("azure_tenant_audit.probe.GraphClient", _FakeClient)
+    monkeypatch.setattr("azure_tenant_audit.probe._capture_signed_in_context", lambda *_, **__: {})
+    monkeypatch.setattr("azure_tenant_audit.probe._probe_toolchain_statuses", lambda **_: [])
+
+    def windows_probe(_cfg, *, client, writer):
+        row = {"collector": "windows365", "type": "graph", "name": "cloudPCs", "status": "ok", "item_count": 0}
+        return {"name": "windows365", "status": "ok", "item_count": 0, "coverage_rows": 1}, [row], {}
+
+    monkeypatch.setattr("azure_tenant_audit.probe._run_windows365_probe", windows_probe)
+    rc = run_live_probe(ProbeConfig(
+        tenant_name="contoso", output_dir=tmp_path, tenant_id="constructed", mode="delegated",
+        surface="windows365", run_name="windows", access_token="constructed", use_azure_cli_token=False,
+    ))
+
+    assert rc == 0
+    run_dir = tmp_path / "contoso-windows"
+    readiness = json.loads((run_dir / "live-readiness.json").read_text())
+    plan = json.loads((run_dir / "audit-plan.json").read_text())
+    assert readiness["trust_level"] == "live_verified"
+    assert readiness["trusted_collectors"] == ["windows365"]
+    assert plan["evidence_gates"] == readiness["evidence_gates"]
+
+
 def test_repeated_probe_labels_and_per_object_endpoints_have_distinct_indexed_keys(tmp_path: Path, monkeypatch) -> None:
     class _RepeatedCollector:
         def __init__(self, name, endpoints):

@@ -495,6 +495,7 @@ def finalize_probe_run(
     auth_path: str,
     session_context: dict[str, Any],
     lab_guard_state: str,
+    coverage_rows: list[dict[str, Any]] | None = None,
 ) -> int:
     for name, payload in normalized_snapshot.items():
         writer.write_normalized(name, payload)
@@ -502,6 +503,7 @@ def finalize_probe_run(
     live_readiness = build_live_readiness_summary(
         selected_collectors=requested_surfaces,
         capability_rows=capability_matrix,
+        coverage_rows=coverage_rows,
     )
     live_readiness_path = writer.write_json_artifact("live-readiness.json", live_readiness)
 
@@ -541,6 +543,7 @@ def finalize_probe_run(
             evidence_paths=evidence_paths,
             normalized_snapshot=normalized_snapshot,
             capability_rows=capability_matrix,
+            trust_coverage_rows=coverage_rows,
             coverage_ledger=[],
             privacy=privacy,
             bundle_metadata={

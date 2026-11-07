@@ -307,6 +307,167 @@ def test_run_live_writes_auth_context_and_capability_artifacts(tmp_path: Path, m
     assert (output_dir / "index" / "evidence.sqlite").exists()
 
 
+def test_live_run_does_not_trust_teams_when_every_read_is_skipped(tmp_path: Path, monkeypatch) -> None:
+    from auditex.gate import gate_findings
+    from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
+
+    class Identity:
+        name = "identity"
+
+        def run(self, _context):
+            return CollectorResult(
+                name=self.name, status="ok", item_count=1, message="ok",
+                payload={"users": {"value": [{"id": "1"}]}},
+                coverage=[{"collector": "identity", "type": "graph", "name": "users", "status": "ok", "item_count": 1}],
+            )
+
+    def no_adapter(_name):
+        raise AssertionError("Teams adapter should not run without a certificate token")
+
+    monkeypatch.setattr(cli, "GraphClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": Identity(), "teams_policy": TeamsPolicyCollector()})
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    monkeypatch.setattr("azure_tenant_audit.collectors.teams_policy.get_adapter", no_adapter)
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--collectors", "identity,teams_policy", "--out", str(tmp_path), "--run-name", "skipped",
+    ])
+
+    assert cli.run_live(args) == 0
+    run_dir = tmp_path / "fixture-skipped"
+    summary = json.loads((run_dir / "summary.json").read_text())
+    coverage = json.loads((run_dir / "coverage.json").read_text())
+    readiness = json.loads((run_dir / "live-readiness.json").read_text())
+    plan = json.loads((run_dir / "audit-plan.json").read_text())
+    teams_rows = [row for row in coverage if row["collector"] == "teams_policy"]
+
+    assert len(teams_rows) == 7
+    assert all(row["status"] == "skipped" and row["error_class"] == "teams_token_unavailable" for row in teams_rows)
+    assert next(row for row in summary["collectors"] if row["name"] == "teams_policy")["status"] == "ok"
+    assert summary["overall_status"] == "ok"
+    assert gate_findings(run_dir=str(run_dir), fail_on="critical")["status"] == "pass"
+    assert readiness["trust_level"] == "partial"
+    assert readiness["trusted_collectors"] == ["identity"]
+    assert readiness["unverified_collectors"] == ["teams_policy"]
+    assert readiness["cannot_trust"] == ["teams_policy"]
+    assert readiness["statement"] != "Live evidence is verified for all selected collectors."
+    assert plan["quality_gate"]["trusted_gate_count"] == 1
+    assert plan["quality_gate"]["status"] == "partial"
+    assert readiness["evidence_gates"] == plan["evidence_gates"]
+    manifest = json.loads((run_dir / "run-manifest.json").read_text())
+    assert plan["quality_gate"]["reasons"] == ["coverage gap: " + manifest["coverage_gaps"][0]["message"]]
+
+    from auditex.exporters import run_exporter
+    from auditex.mcp_server import summarize_run
+    from auditex.notify import send_notification
+    from auditex.reporting import enterprise_handoff, permissions_ledger
+
+    assert enterprise_handoff(run_dir)["quality"]["live_readiness"] == "partial"
+    permissions = {row["collector"]: row for row in permissions_ledger(run_dir)["collectors"]}
+    assert permissions["teams_policy"]["status"] == "unverified"
+    assert summarize_run(str(run_dir))["live_readiness"]["cannot_trust"] == ["teams_policy"]
+    notification = send_notification(run_dir=str(run_dir), sink="teams", dry_run=True)
+    assert notification["payload"]["live_readiness"]["trust_level"] == "partial"
+    export_path = tmp_path / "report.json"
+    run_exporter(name="json", run_dir=str(run_dir), include_sections=["summary"], output_path=str(export_path))
+    assert json.loads(export_path.read_text())["sections"]["summary"]["live_readiness"]["cannot_trust"] == ["teams_policy"]
+
+
+def test_explorer_marks_unscoped_all_skipped_reads_unverified(tmp_path: Path, monkeypatch) -> None:
+    from auditex.explorer import _collector_rows
+
+    class Skipped:
+        name = "identity"
+
+        def run(self, _context):
+            return CollectorResult(
+                name=self.name, status="ok", item_count=0, payload={},
+                coverage=[{"collector": self.name, "type": "graph", "name": "users", "status": "skipped",
+                           "item_count": 0, "error_class": "not_applicable"}],
+            )
+
+    monkeypatch.setattr(cli, "GraphClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": Skipped()})
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--collectors", "identity", "--out", str(tmp_path), "--run-name", "unscoped",
+    ])
+    assert cli.run_live(args) == 0
+    run_dir = tmp_path / "fixture-unscoped"
+    manifest = json.loads((run_dir / "run-manifest.json").read_text())
+    readiness = json.loads((run_dir / "live-readiness.json").read_text())
+    plan = json.loads((run_dir / "audit-plan.json").read_text())
+    assert readiness["trust_level"] == "setup_only"
+    assert readiness["unverified_collectors"] == ["identity"]
+    assert plan["quality_gate"]["status"] == "complete"
+    assert plan["quality_gate"]["reasons"] == []
+    assert _collector_rows(run_dir, manifest, {})[0]["status"] == "not_verified"
+
+
+def test_explorer_recognises_successful_empty_read_with_a_skipped_section(tmp_path: Path, monkeypatch) -> None:
+    from auditex.explorer import _collector_rows
+    from azure_tenant_audit.collection_gaps import IPPS_SKIP_TEXT
+
+    class EmptyRead:
+        name = "identity"
+
+        def run(self, _context):
+            return CollectorResult(name=self.name, status="ok", item_count=0, payload={}, coverage=[
+                {"collector": self.name, "type": "graph", "name": "users", "status": "ok", "item_count": 0},
+                {"collector": self.name, "type": "command", "name": "optional", "status": "skipped", "item_count": 0,
+                 "section_scoped": True, "reason": "ipps_session_not_opened", "error_class": "ipps_session_not_opened"},
+            ])
+
+    monkeypatch.setattr(cli, "GraphClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": EmptyRead()})
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    args = cli.build_parser().parse_args([
+        "--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+        "--collectors", "identity", "--out", str(tmp_path), "--run-name", "empty-mixed",
+    ])
+    assert cli.run_live(args) == 0
+    run_dir = tmp_path / "fixture-empty-mixed"
+    manifest = json.loads((run_dir / "run-manifest.json").read_text())
+    readiness = json.loads((run_dir / "live-readiness.json").read_text())
+    assert readiness["trust_level"] == "live_verified"
+    row = _collector_rows(run_dir, manifest, {})[0]
+    assert row["status"] == "verified"
+    assert row["reason"] == IPPS_SKIP_TEXT
+
+
+def test_resume_does_not_trust_stale_success_after_all_reads_are_skipped(tmp_path: Path, monkeypatch) -> None:
+    class Rerun:
+        name = "identity"
+        calls = 0
+
+        def run(self, _context):
+            self.calls += 1
+            if self.calls == 1:
+                rows = [
+                    {"collector": self.name, "type": "graph", "name": "users", "status": "ok", "item_count": 1},
+                    {"collector": self.name, "type": "graph", "name": "groups", "status": "failed", "item_count": 0},
+                ]
+                return CollectorResult(name=self.name, status="partial", item_count=1, payload={}, coverage=rows)
+            rows = [{"collector": self.name, "type": "graph", "name": "users", "status": "skipped", "item_count": 0}]
+            return CollectorResult(name=self.name, status="ok", item_count=0, payload={}, coverage=rows)
+
+    monkeypatch.setattr(cli, "GraphClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(cli, "REGISTRY", {"identity": Rerun()})
+    monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
+    argv = ["--tenant-name", "fixture", "--tenant-id", "constructed", "--access-token", "constructed",
+            "--collectors", "identity", "--out", str(tmp_path), "--run-name", "resume-trust"]
+    run_dir = tmp_path / "fixture-resume-trust"
+
+    assert cli.run_live(cli.build_parser().parse_args(argv)) == 1
+    assert cli.run_live(cli.build_parser().parse_args([*argv, "--resume-from", str(run_dir)])) == 0
+    readiness = json.loads((run_dir / "live-readiness.json").read_text())
+    coverage = json.loads((run_dir / "coverage.json").read_text())
+    assert readiness["trust_level"] == "setup_only"
+    assert readiness["unverified_collectors"] == ["identity"]
+    assert [row["status"] for row in coverage] == ["skipped"]
+
+
 def test_run_live_app_mode_uses_client_token_claims(tmp_path: Path, monkeypatch) -> None:
     class _FakeCollector:
         name = "identity"
@@ -1220,3 +1381,9 @@ def test_required_preflight_skipped_licensing_keeps_existing_selected_contract(t
     manifest = load(run_dir, "run-manifest.json")
     assert manifest["selected_collectors"] == ["identity"]
     assert manifest["overall_status"] == "partial"
+    readiness = load(run_dir, "live-readiness.json")
+    assert "licensing" not in readiness["trusted_collectors"]
+    assert "licensing" in readiness["cannot_trust"]
+    assert readiness["trust_level"] == "partial"
+    assert readiness["statement"] != "Live evidence is verified for all selected collectors."
+    assert load(run_dir, "audit-plan.json")["evidence_gates"] == readiness["evidence_gates"]

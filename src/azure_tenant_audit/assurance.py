@@ -180,11 +180,13 @@ def build_live_readiness_summary(
     selected_collectors: list[str],
     capability_rows: list[dict[str, Any]],
     dependency_available: bool = True,
+    coverage_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return build_evidence_gate_summary(
         selected_collectors=selected_collectors,
         capability_rows=capability_rows,
         dependency_available=dependency_available,
+        coverage_rows=coverage_rows,
     )
 
 
