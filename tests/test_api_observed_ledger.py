@@ -664,13 +664,29 @@ def test_skipped_teams_reads_do_not_claim_transport_attempts(monkeypatch, tmp_pa
 def test_every_shipped_powershell_command_logged_by_the_adapter_is_read_only_in_the_ledger(monkeypatch) -> None:
     """The logged text is quoted by the redaction; the cross-check must still accept what the adapters really log."""
     import subprocess
+    from types import SimpleNamespace
 
+    from azure_tenant_audit.adapters import powershell_graph
     from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
     from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
     from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
 
     monkeypatch.setattr("subprocess.run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr=""))
     monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/usr/bin/{name}")
+    bounded_calls = []
+    native_calls = []
+
+    def bounded_command(*args, **kwargs):
+        bounded_calls.append(True)
+        return SimpleNamespace(returncode=0, stdout=b"[]", stderr="", stdout_total=2, stderr_total=0,
+                               overflow=False, timed_out=False, duration_ms=0, pid=0)
+
+    def forbidden_native_process(*args, **kwargs):
+        native_calls.append(True)
+        raise AssertionError("This ledger fixture must not start a native process")
+
+    monkeypatch.setattr(powershell_graph, "_run_bounded", bounded_command)
+    monkeypatch.setattr(powershell_graph.subprocess, "Popen", forbidden_native_process)
     events: list[dict[str, Any]] = []
     adapter = PowerShellGraphAdapter()
     commands = [command for _, command in (*ExchangePolicyCollector.command_collectors, *TeamsPolicyCollector.command_collectors)]
@@ -683,3 +699,5 @@ def test_every_shipped_powershell_command_logged_by_the_adapter_is_read_only_in_
     assert all(row["read_only"] for row in inventory["observed_ledger"]["commands"]["executed"])
     assert inventory["counts"]["observed_commands"] == len(commands)
     assert inventory["safety"]["read_only"] is True
+    assert bounded_calls == [True]
+    assert native_calls == []
