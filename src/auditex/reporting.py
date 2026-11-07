@@ -26,6 +26,7 @@ from azure_tenant_audit.output_redaction import (
     PROFILE_LOCAL,
     PROFILE_SHAREABLE,
     PROFILES,
+    PUBLIC_ADDRESSES,
     REASON_CHANGED,
     ContextIncompleteError,
     RedactionContext,
@@ -2762,10 +2763,20 @@ def _markdown_value(value: Any) -> str:
     return _markdown_cell(value)
 
 
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+.!|~\-])")
+_PUBLIC_ADDRESS_TEXT = re.compile(
+    r"(?<![A-Za-z0-9._%+\-])(" + "|".join(re.escape(item) for item in sorted(PUBLIC_ADDRESSES)) + r")(?![A-Za-z0-9\-]|\.[A-Za-z0-9])",
+    re.IGNORECASE)
+
+
 def _markdown_plain(value: Any) -> str:
     """Escape HTML and Markdown control characters in untrusted explainer text."""
     escaped = html.escape(_text(value).replace("\n", " ").replace("\r", " "), quote=False)
-    return re.sub(r"([\\`*_{}\[\]()#+.!|~\-])", r"\\\1", escaped)
+    parts = _PUBLIC_ADDRESS_TEXT.split(escaped)
+    # Odd items are exact public addresses (kept verbatim so the final redaction pass still recognises
+    # them); everything around them is escaped.
+    return "".join(part if index % 2 else _MARKDOWN_SPECIAL.sub(r"\\\1", part)
+                   for index, part in enumerate(parts))
 
 
 def _append_policy_explanations_markdown(lines: list[str], rows: list[dict[str, Any]]) -> None:

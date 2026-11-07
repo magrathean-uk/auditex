@@ -541,3 +541,99 @@ def test_memory_and_recursion_errors_in_explainer(monkeypatch):
     monkeypatch.setattr(model_precheck, "render_explanation", broken)
     with pytest.raises(MemoryError):
         precheck_case(case_for("not_met"), value_rules=True, explain=True)
+
+
+SUPPORT = "contact+auditex@magrathean.uk"
+PERSONAL = "someone.else@magrathean.uk"
+
+
+def fault_row(monkeypatch):
+    def boom(*args, **kwargs):
+        raise ValueError("x")
+    with monkeypatch.context() as patch:
+        patch.setattr(model_precheck, "precheck_policy", boom)
+        return precheck_case(case_for("not_met"), value_rules=True, explain=True, redaction_context=RedactionContext())
+
+
+def write_report_run(tmp_path, template, row, tenant_name=None):
+    root = tmp_path / "report"
+    root.mkdir()
+    (root / "run-manifest.json").write_text('{"run_id":"wire-test"}')
+    if tenant_name:
+        (root / "summary.json").write_text(json.dumps({"tenant_name": tenant_name}))
+    payload = deepcopy(template)
+    row["comparison"] = model_serving._comparison(row["policy_id"], row, {})
+    payload["policies"] = [row]
+    payload["totals"] = model_serving._totals([row])
+    validate_assessment(payload)
+    (root / "model_assessment.json").write_text(json.dumps(payload))
+    return root, payload
+
+
+@pytest.mark.parametrize("profile", ["shareable", "customer_pack"])
+def test_fault_report_markdown_keeps_support_address_and_masks_personal_one(tmp_path, assessment, monkeypatch, profile):
+    row = fault_row(monkeypatch)
+    root, _ = write_report_run(tmp_path, assessment, row, tenant_name=f"Contoso, owner {PERSONAL}")
+    text = preview_report(run_dir=str(root), format_name="md", profile=profile)["content"]
+    assert "Report this fault to the product team at " + SUPPORT in text
+    assert "\\+auditex" not in text and "***@" not in text.split("Policy explanations", 1)[1]
+    assert PERSONAL not in text and PERSONAL.replace(".", "\\.") not in text
+    assert "someone" not in text
+    assert PERSONAL in preview_report(run_dir=str(root), format_name="md", profile="local")["content"]
+
+
+def test_markdown_plain_keeps_only_exact_public_addresses():
+    from auditex.reporting import _markdown_plain
+    assert _markdown_plain(f"Write to {SUPPORT}. Or {SUPPORT.upper()}, thanks") == (
+        f"Write to {SUPPORT}\\. Or {SUPPORT.upper()}, thanks")
+    for near in (f"x{SUPPORT}", f"my.{SUPPORT}", f"{SUPPORT}.evil.example", f"{SUPPORT}m", "contact@magrathean.uk",
+                 "contact+other@magrathean.uk", PERSONAL, f"{SUPPORT}-x"):
+        out = _markdown_plain(near)
+        assert out != near and SUPPORT not in out, near
+    mixed = _markdown_plain(f"<{SUPPORT}> & '{SUPPORT}' {PERSONAL}")
+    assert mixed.startswith(f"&lt;{SUPPORT}&gt; &amp; '{SUPPORT}' ") and "<" not in mixed
+    assert PERSONAL not in mixed
+
+
+@pytest.mark.parametrize("kind", ["met", "not_met", "not_assessed", "not_applicable", "section_not_collected", "fault"])
+def test_end_to_end_rederivation_preserves_each_verdict_and_fault(tmp_path, assessment, monkeypatch, kind):
+    if kind == "fault":
+        row = fault_row(monkeypatch)
+    elif kind == "section_not_collected":
+        case = case_for("not_met")
+        case["evidence"][1]["observed"] = {"collection_status": "not_collected"}
+        row = precheck_case(case, value_rules=True, explain=True, redaction_context=RedactionContext())
+        assert row["rule_precheck"]["cell"] == "section_not_collected"
+        assert value_rule_verdict(row) == "not_assessed"
+    else:
+        row = explained(kind)
+    stored = deepcopy(row["explainer"])
+    root, _ = write_report_run(tmp_path, assessment, row)
+    for profile in ("customer_pack", "shareable", "local"):
+        rows = json.loads(preview_report(run_dir=str(root), format_name="json", profile=profile)["content"]
+                          )["sections"]["policy_explanations"]
+        assert len(rows) == 1 and rows[0]["explainer"] == stored
+        assert rows[0]["verdict"] == value_rule_verdict(row)
+
+
+@pytest.mark.parametrize("mismatch", ["cell", "reason_text", "verdict"])
+def test_mismatched_public_fields_never_reach_the_report(tmp_path, assessment, mismatch):
+    row = explained("not_met")
+    detail = row["rule_precheck"]
+    if mismatch == "cell":
+        detail["cell"] = "section_not_collected"
+    elif mismatch == "reason_text":
+        detail["reason_text"] = "Planted-by-attacker reason."
+    else:
+        detail["cell"] = explained("met")["rule_precheck"]["cell"]
+    root = tmp_path / "report"
+    root.mkdir()
+    (root / "run-manifest.json").write_text('{"run_id":"wire-test"}')
+    payload = deepcopy(assessment)
+    payload["policies"] = [row]
+    payload["totals"] = model_serving._totals([row])
+    (root / "model_assessment.json").write_text(json.dumps(payload))
+    for profile in ("customer_pack", "shareable", "local"):
+        output = preview_report(run_dir=str(root), format_name="md", profile=profile)
+        assert "Planted-by-attacker" not in output["content"]
+        assert "policy_explanations" not in output["sections"]
