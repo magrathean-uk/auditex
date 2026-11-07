@@ -249,3 +249,158 @@ def test_assessment_and_dry_run_outputs_keep_partner_domains_private(tmp_path, m
         if artifact.is_file() and artifact not in exempt:
             data = artifact.read_bytes().lower()
             assert not any(value.encode() in data for value in DOMAINS), artifact
+
+
+# End-to-end deterministic SS 2.3 (phish_exists, need partner_domains) over real collector envelopes.
+# The Defender adapter keeps TargetedDomainsToProtect, so no projection injection is needed here.
+POLICY = {"Identity": "Default", "Name": "Default", "Enabled": True, "IsDefault": True,
+          "EnableTargetedDomainsProtection": True, "TargetedDomainProtectionAction": "Quarantine",
+          "TargetedDomainsToProtect": list(DOMAINS)}
+OPERATIONS = ("acceptedDomains", "antiPhishRules", "eopProtectionPolicyRules",
+              "atpProtectionPolicyRules", "atpPolicyForO365")
+EXCHANGE = "raw/exchange_policy.json"
+
+
+def write_policy(root, **changes):
+    """Constructed Exchange envelopes: one Default anti-phish policy, edited per case."""
+    policy = {**POLICY, **changes}
+    policy = {key: value for key, value in policy.items() if value is not ...}
+    operations = {name: [] for name in OPERATIONS}
+    operations["antiPhishPolicies"] = [policy]
+    (root / "raw").mkdir(exist_ok=True)
+    (root / EXCHANGE).write_text(json.dumps({
+        name: {"value": rows, "status": "ok"} for name, rows in operations.items()}))
+
+
+def direct_record(projection):
+    from copy import deepcopy
+    from azure_tenant_audit.value_rules import assess
+
+    sections = deepcopy(projection.rule_sections)
+    sections["scuba_config"] = rule_view(projection, SS23)
+    return assess(SS23, sections)
+
+
+CASES = [
+    pytest.param({}, "default_qualifies", "met", id="met-every-target"),
+    pytest.param({"TargetedDomainsToProtect": [DOMAINS[1].upper() + " ", DOMAINS[0], "extra.example.invalid"]},
+                 "default_qualifies", "met", id="met-case-space-and-extra-target"),
+    pytest.param({"TargetedDomainsToProtect": [DOMAINS[0]]}, "no_qualifying_policy", "not_met",
+                 id="missing-one-target"),
+    pytest.param({"TargetedDomainProtectionAction": "NoAction"}, "no_qualifying_policy", "not_met",
+                 id="constant-unacceptable-action"),
+    pytest.param({"EnableTargetedDomainsProtection": False}, "no_qualifying_policy", "not_met",
+                 id="protection-disabled"),
+    pytest.param({"EnableTargetedDomainsProtection": ...}, "policy_field_unusable", "not_assessed",
+                 id="flag-absent"),
+    pytest.param({"TargetedDomainProtectionAction": ...}, "policy_field_unusable", "not_assessed",
+                 id="action-absent"),
+    pytest.param({"TargetedDomainProtectionAction": "UnrecognisedAction"}, "policy_field_unusable",
+                 "not_assessed", id="action-unrecognised"),
+    pytest.param({"TargetedDomainsToProtect": ...}, "policy_field_unusable", "not_assessed",
+                 id="target-list-absent"),
+]
+
+
+@pytest.mark.parametrize("changes,cell,verdict", CASES)
+def test_verified_partner_domains_without_sensitive_users_decide_ss23(tmp_path, monkeypatch, changes, cell, verdict):
+    """Fail-first on the base: with no PartnerDomains consumer every case is section_not_collected."""
+    from auditex.model_serving import ModelClient, assess_run
+    from auditex.scuba_projection import project_run
+    from azure_tenant_audit.model_assessment import validate_assessment
+
+    root = bundle(tmp_path, users=())
+    write_policy(root, **changes)
+    projection = project_run(root)
+    assert rule_view(projection, SS21) == NOT_COLLECTED
+    record = direct_record(projection)
+    assert (record["cell"], record["verdict"]) == (cell, verdict)
+    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
+    result = assess_run(root, policies=[SS23])
+    validate_assessment(result)
+    assert result["policies"][0]["rule_precheck"]["cell"] == cell
+
+
+def test_ss23_decides_independently_beside_sensitive_users(tmp_path):
+    from auditex.scuba_projection import project_run
+
+    root = bundle(tmp_path)
+    write_policy(root)
+    projection = project_run(root)
+    assert direct_record(projection)["cell"] == "default_qualifies"
+    assert rule_view(projection, SS21) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(USERS)}}}
+
+
+def test_absent_partner_domains_keep_ss23_not_collected(tmp_path, monkeypatch):
+    from auditex.model_serving import ModelClient, assess_run
+    from auditex.scuba_projection import project_run
+
+    for name, users in (("none", ()), ("users", USERS)):
+        (tmp_path / name).mkdir()
+        root = bundle(tmp_path / name, users=users, domains=())
+        write_policy(root)
+        assert rule_view(project_run(root), SS23) == NOT_COLLECTED
+        monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
+        result = assess_run(root, policies=[SS23])
+        assert result["policies"][0]["rule_precheck"]["cell"] == "section_not_collected"
+
+
+def test_resume_and_offline_replay_reach_the_same_ss23_cells(tmp_path):
+    import shutil
+    from auditex.model_serving import assess_run
+    from auditex.scuba_projection import project_run
+    from azure_tenant_audit.output import AuditWriter
+
+    (tmp_path / "run").mkdir()
+    root = bundle(tmp_path / "run")
+    write_policy(root)
+    first = assess_run(root, policies=[SS23])
+    replay = tmp_path / "offline-replay"
+    shutil.copytree(root, replay)
+    assert assess_run(replay, policies=[SS23])["policies"] == first["policies"]
+    # Resume with the existing writer and an identical list: same cell. Narrow the list: the target is missing.
+    resumed = AuditWriter(tmp_path / "run", "mocktenant", "partner-rules", run_dir=root)
+    resumed.write_partner_domains(PartnerDomains(DOMAINS))
+    resumed.write_bundle({"collectors": [], "overall_status": "ok"})
+    assert assess_run(root, policies=[SS23])["policies"] == first["policies"]
+    assert first["policies"][0]["rule_precheck"]["cell"] == "default_qualifies"
+    resumed.write_partner_domains(PartnerDomains(DOMAINS + ("added-partner.example.invalid",)))
+    resumed.write_bundle({"collectors": [], "overall_status": "ok"})
+    assert direct_record(project_run(root))["cell"] == "no_qualifying_policy"
+    resumed.write_partner_domains(PartnerDomains())
+    resumed.write_bundle({"collectors": [], "overall_status": "ok"})
+    assert assess_run(root, policies=[SS23])["policies"][0]["rule_precheck"]["cell"] == "section_not_collected"
+
+
+def test_ss23_end_to_end_keeps_model_shape_and_canaries_private(tmp_path, monkeypatch, capsys, caplog):
+    import json as _json
+    from auditex import scuba_projection as module
+    from auditex.model_serving import ModelClient, assess_run
+    from azure_tenant_audit.model_assessment import validate_assessment
+
+    caplog.set_level("DEBUG")
+    for name in ("with", "without"):
+        (tmp_path / name).mkdir()
+    with_inputs = bundle(tmp_path / "with", users=())
+    without = bundle(tmp_path / "without", users=(), domains=())
+    for root in (with_inputs, without):
+        write_policy(root)
+    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
+    a, b = module.project_run(with_inputs), module.project_run(without)
+    # Model-facing case material is byte-identical; only the in-memory rule view differs.
+    for part in ("views", "report", "rule_sections"):
+        assert _json.dumps(getattr(a, part), sort_keys=True) == _json.dumps(getattr(b, part), sort_keys=True)
+    assert dict(a) == dict(b)
+    assert module.policy_section(a, SS23, "scuba_config") == NOT_COLLECTED
+    result = assess_run(with_inputs, policies=[SS23])
+    validate_assessment(result)
+    dry = assess_run(with_inputs, policies=[SS23], dry_run=True)
+    captured = capsys.readouterr()
+    # The synthetic Exchange envelope legitimately holds the targets; nothing derived may.
+    assert not any(value in captured.out + captured.err + caplog.text for value in DOMAINS)
+    assert not any(value in _json.dumps([a, a.views, a.report, result, dry]) for value in DOMAINS)
+    exempt = {with_inputs / EXCHANGE, without / EXCHANGE, with_inputs / PARTNER_PATH, with_inputs / PARTNER_KEY_PATH}
+    for artifact in tmp_path.rglob("*"):
+        if artifact.is_file() and artifact not in exempt:
+            data = artifact.read_bytes().lower()
+            assert not any(value.encode() in data for value in DOMAINS), artifact
