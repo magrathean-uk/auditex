@@ -7,7 +7,8 @@ scores, reports, exports or customer packs. No model client or endpoint is calle
 ## What decides each answer
 
 All 102 catalogue policies have value rules across Entra ID, Exchange Online, Power BI, Power Platform,
-Defender, SharePoint and Teams. A catalogue policy without a rule (none today) reports not assessed with
+Defender, SharePoint and Teams. Rule availability does not guarantee a verdict: available evidence, the adapter
+and permissions determine whether a policy can be assessed. A catalogue policy without a rule reports not assessed with
 `reason: "rule_not_implemented"` and the constant text:
 
 > Not assessed: Auditex has no rule for this policy yet.

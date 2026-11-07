@@ -420,13 +420,14 @@ for supported exports, synthetic rehearsal files and control-mapping limits.
 
 ## AI assessment
 
-For an optional rule-only SCuBA assessment, `auditex model assess <run-dir>` applies
-value rules to all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
-SharePoint and Teams. A policy without a rule (none today) reports not assessed
+For an optional rule-only SCuBA assessment, `auditex model assess <run-dir>` has
+value rules for all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
+SharePoint and Teams. Rule availability does not guarantee a verdict: available evidence, the adapter and
+permissions determine whether a policy can be assessed. A policy without a rule reports not assessed
 (`rule_not_implemented`): "Not assessed: Auditex has no rule for this policy yet."
 The model layer is parked and never called by assessment; no endpoint or model name is required.
 An optional explainer for rule results remains planned and unimplemented. Findings are unchanged.
-See [AI assessment](ai-assessment.md) for coverage and output.
+Each policy's status is in the run's `model_assessment.json`; see [AI assessment](ai-assessment.md#run-and-read-the-result) for coverage and output.
 `auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` remain available for
 [offline model development](model-development.md).
 
