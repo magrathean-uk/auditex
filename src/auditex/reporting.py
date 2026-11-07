@@ -2036,7 +2036,7 @@ def _prepare_pack_directory(target_dir: Path) -> None:
         return
     previous = _mapping(_read_json(target_dir / "pack-manifest.json", {}))
     if previous.get("kind") != _PACK_KIND:
-        raise UnsafeRunFileError("output-dir")
+        raise PackOutputError("refusing to write a customer pack: destination holds other files; use a new directory")
     stale = target_dir / "source-artifacts"
     if stale.is_symlink():
         raise UnsafeRunFileError("output-dir")

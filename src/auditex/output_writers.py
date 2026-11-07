@@ -130,7 +130,7 @@ SINK_INVENTORY: tuple[SinkEntry, ...] = (
     SinkEntry("azure_tenant_audit.exposure_lookup:*", "private", "public HTTPS fetch of the audited domain's own policy files"),
     SinkEntry("azure_tenant_audit.graph:*", "private", "read-only Microsoft Graph requests and token exchange (credentials stay in the request)"),
     SinkEntry("azure_tenant_audit.guarded_io:_stdin_text_buffer_is_empty", "private", "local pipe containing only a fixed buffer-probe value"),
-    SinkEntry("azure_tenant_audit.guarded_io:open_private_output", "private", "admitted 0600 private output descriptors"),
+    SinkEntry("azure_tenant_audit.guarded_io:open_private_output", "private", "admitted private output descriptors; producer notice appends preserve an existing log mode"),
     SinkEntry("azure_tenant_audit.output:*", "private", "run bundle working files and the private audit log"),
     SinkEntry("azure_tenant_audit.perf_runtime:*", "private", "local timing metrics, no tenant evidence"),
     SinkEntry("azure_tenant_audit.power_bi:*", "private", "read-only Power BI requests"),

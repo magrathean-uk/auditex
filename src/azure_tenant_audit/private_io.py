@@ -12,8 +12,8 @@ PRIVATE_DIR_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
 
 
-def make_private_dirs(path: str | Path) -> Path:
-    """Create missing output directories without following symlinks."""
+def make_private_dirs(path: str | Path, *, mode: int = PRIVATE_DIR_MODE) -> Path:
+    """Create missing directories without following symlinks; leave existing modes unchanged."""
     target = Path(path)
     failed = False
     with guard_session() as context:
@@ -33,7 +33,7 @@ def make_private_dirs(path: str | Path) -> Path:
                     child = os.open(part, _DIR_FLAGS, dir_fd=current)
                 except FileNotFoundError:
                     try:
-                        os.mkdir(part, PRIVATE_DIR_MODE, dir_fd=current)
+                        os.mkdir(part, mode, dir_fd=current)
                     except FileExistsError:
                         pass
                     child = os.open(part, _DIR_FLAGS, dir_fd=current)

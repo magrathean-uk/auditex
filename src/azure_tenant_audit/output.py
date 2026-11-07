@@ -164,7 +164,7 @@ class AuditWriter:
                 self.run_id = normalized[len(prefix) :] if len(normalized) > len(prefix) else f"run_{ts}"
             else:
                 self.run_id = normalized
-        make_private_dirs(self.run_dir.parent)
+        make_private_dirs(self.run_dir.parent, mode=0o777)
         self._mkdir_private(self.run_dir)
 
         self.resume_from_path = None
@@ -228,8 +228,26 @@ class AuditWriter:
                 self._manifest["tenant_name"] = existing_manifest["tenant_name"]
 
     def _mkdir_private(self, path: Path) -> None:
-        """Create ``path`` and every missing directory between the run directory and it as 0700."""
+        """Create and tighten owned run directories through admitted, no-follow descriptors."""
+        from .guarded_io import UnsafeRunFileError, _safe_directory, guard_session
+
         make_private_dirs(path)
+        failed = False
+        try:
+            with guard_session() as context:
+                descriptor = context._directory(path)
+                try:
+                    info = os.fstat(descriptor)
+                    if not _safe_directory(info):
+                        raise UnsafeRunFileError("output-dir")
+                    if stat.S_IMODE(info.st_mode) != BUNDLE_DIR_MODE:
+                        os.fchmod(descriptor, BUNDLE_DIR_MODE)
+                finally:
+                    os.close(descriptor)
+        except (OSError, ValueError, TypeError):
+            failed = True
+        if failed:
+            raise UnsafeRunFileError("output-dir") from None
 
     def harden(self) -> None:
         """Restrict the whole bundle to 0700 directories and 0600 files (see harden_bundle)."""
