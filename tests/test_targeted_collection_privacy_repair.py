@@ -343,6 +343,23 @@ def test_resume_never_carries_encoded_or_diagnostic_target_text(mode):
     assert minimised.get("transportConfig") == TRANSPORT
 
 
+# The composed Opus review's F2 shape verbatim: a dict under Name, through the sample and resume copies.
+REVIEW_F2 = {"antiPhishPolicies": {"value": [{"Identity": "Default",
+                                              "Name": {"TargetedUsersToProtect": ["Zebulon Quarkwright"]}}]}}
+
+
+@pytest.mark.parametrize("mode", sorted(MODES))
+def test_review_f2_shape_leaves_the_sample_and_resume_copies_clean(mode):
+    users, binding = MODES[mode]
+    out = tuc.sanitise_sample({"exchange_policy": deepcopy(REVIEW_F2)}, users, binding)
+    assert _leaks(out) == []
+    assert out["exchange_policy"]["antiPhishPolicies"]["value"][0]["Identity"] == "Default"
+    payload = deepcopy(REVIEW_F2)
+    minimised, reusable = tuc.resume_payload(payload, users, binding)
+    assert _leaks(minimised) == [] and reusable is False
+    assert payload == REVIEW_F2
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Finding 3: closed diagnostic vocabulary, from envelopes and from a callback.
 
@@ -531,3 +548,12 @@ def test_ss21_to_ss24_records_match_a_carrier_free_control(tmp_path):
     assert records(repaired) == records(control)
     assert records(control)["MS.SECURITYSUITE.2.1v1"][0] == "met"
     assert rows(repaired) == rows(control)
+
+
+@pytest.mark.parametrize("transform", [lambda response: {}, lambda response: {"status": "ok"},
+                                       lambda response: {"complete": True, "return_code": 0}])
+def test_callback_success_without_rows_is_refused(live, transform):
+    live(json.dumps([{**SETTINGS, "TargetedUsersToProtect": TARGETS}]))
+    response, events = _run(response_transform=transform)
+    assert _leaks(response, events) == []
+    assert response.get("error_class") in KNOWN_CLASSES - {None}, "an empty success never stands for a read"

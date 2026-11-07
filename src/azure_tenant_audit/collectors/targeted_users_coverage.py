@@ -323,7 +323,7 @@ def sanitise_response(
         out["command"] = command
     elif _controlled_command(response.get("command")):
         out["command"] = response["command"]
-    failed = "error" in out or "error_class" in out and out["error_class"] is not None
+    failed = "error" in out or ("error_class" in out and out["error_class"] is not None)
     if "value" in response:
         rows = response["value"]
         if type(rows) is not list or any(not isinstance(row, Mapping) for row in rows):
@@ -344,7 +344,8 @@ def enforce_response(response: object, *, command: str) -> dict[str, object]:
     """Check a transform's output against the boundary's closed shape; raise ``BoundaryError`` otherwise.
 
     The adapter stays the boundary even when a callback is wrong: only allowlisted envelope keys, closed-vocabulary
-    text, finite numbers and booleans, and rows of retained fields holding safe values with a shape-valid summary.
+    text, finite numbers and booleans, a ``value`` list unless the envelope is a failure, and rows of retained
+    fields holding safe values with a shape-valid summary.
     """
     if type(response) is not dict or not set(response) <= _ENVELOPE_KEYS:
         raise BoundaryError("anti-phish response shape")
@@ -357,6 +358,8 @@ def enforce_response(response: object, *, command: str) -> dict[str, object]:
     for key in _ENVELOPE_FLAGS:
         if key in response and type(response[key]) is not bool:
             raise BoundaryError("anti-phish response flag")
+    if "value" not in response and response.get("error") is None and response.get("error_class") is None:
+        raise BoundaryError("anti-phish response rows")  # a success always carries its rows
     if "value" in response:
         rows = response["value"]
         if type(rows) is not list:
