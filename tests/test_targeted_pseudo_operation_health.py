@@ -121,3 +121,51 @@ def test_a_known_policy_target_value_only_invalidates_membership_not_safety_tips
     run = _replay(tmp_path, sample, "supported")
     assert _verdict(run, "MS.SECURITYSUITE.2.4v1") == "met"
     assert all(CANARY.encode() not in path.read_bytes() for path in run.rglob("*") if path.is_file())
+
+
+@pytest.mark.parametrize("operation", ["atpPolicyForO365", "atpProtectionPolicyRules"])
+def test_non_policy_target_marker_cannot_promote_the_defender_licence_gate(tmp_path, capsys, caplog, operation):
+    sample = _exchange()
+    sample["exchange_policy"][operation] = _success([
+        {"Identity": "Default", "TargetedUsersToProtect": [{"error": CANARY}]},
+    ])
+    run = _replay(tmp_path, sample, "non-policy")
+    assert _verdict(run, "MS.SECURITYSUITE.2.4v1") == "not_assessed"
+    assert all(CANARY.encode() not in path.read_bytes() for path in run.rglob("*") if path.is_file())
+    captured = capsys.readouterr()
+    assert CANARY not in captured.out + captured.err + caplog.text
+
+
+@pytest.mark.parametrize("collector,name", [
+    ("exchange_policy", "atpPolicyForO365"), ("exchange_policy", "legacyRead"), ("identity", "users"),
+])
+def test_non_policy_admission_has_no_exempt_target_subtree(collector, name):
+    sample = {collector: {name: _success([
+        {"Identity": "Default", "TargetedUsersToProtect": [{"error": CANARY}]},
+    ])}}
+    original = deepcopy(sample)
+    cleaned = sanitise_sample(sample, None, None)[collector][name]
+    assert cleaned.get("error") == "command_output_parse_error"
+    assert cleaned.get("error_class") == "command_parse_error"
+    assert CANARY not in json.dumps(cleaned)
+    assert sample == original
+
+
+def test_non_policy_failure_keeps_the_unrelated_mapping_isolation(tmp_path):
+    sample = _exchange()
+    sample["exchange_policy"]["legacyRead"] = _success([
+        {"TargetedUsersToProtect": [{"error": CANARY}]},
+    ])
+    run = _replay(tmp_path, sample, "unrelated")
+    assert _verdict(run, "MS.SECURITYSUITE.2.4v1") == "met"
+    assert all(CANARY.encode() not in path.read_bytes() for path in run.rglob("*") if path.is_file())
+
+
+@pytest.mark.parametrize("collector,policy", [("identity", "MS.AAD.7.1v1"),
+    ("exchange_policy", "MS.SECURITYSUITE.2.4v1")])
+def test_own_value_target_marker_still_withholds_the_collector(tmp_path, collector, policy):
+    sample = _identity() if collector == "identity" else _exchange()
+    sample[collector]["value"] = [{"TargetedUsersToProtect": [{"error": CANARY}]}]
+    run = _replay(tmp_path, sample, "own-target")
+    assert _verdict(run, policy) == "not_assessed"
+    assert all(CANARY.encode() not in path.read_bytes() for path in run.rglob("*") if path.is_file())
