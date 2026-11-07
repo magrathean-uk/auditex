@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .citations import build_citation_summary, dedupe_citations
+from .guarded_io import UnsafeRunFileError
 from .run_files import read_run_file
 from .waivers import accepted_risk_summary, is_accepted_status
 
@@ -13,6 +14,8 @@ from .waivers import accepted_risk_summary, is_accepted_status
 def _load_json(run_dir: Path, relative: str) -> dict[str, Any]:
     try:
         payload = json.loads(read_run_file(run_dir, relative).decode("utf-8"))
+    except UnsafeRunFileError:
+        raise
     except (json.JSONDecodeError, OSError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
