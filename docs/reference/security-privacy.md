@@ -67,8 +67,13 @@ Defender for Office 365 / EOP rule scope lists (`SentTo`, `SentToMemberOf`,
 values stay unchanged. Domain scopes are retained for comparison with accepted
 domains. For rule errors, payload `stdout` is replaced with its length in
 `stdout_bytes`; `stderr` is retained.
-`TargetedUsersToProtect` is not collected. The adapter records the audit log's
-`stdout_sample` before this payload minimisation; the shared diagnostic boundary
+For `Get-AntiPhishPolicy`, `TargetedUsersToProtect` is read only transiently and
+replaced inside the adapter with a count/HMAC-bound `TargetedUsersCoverage`
+summary. No literal target list, stdout, stderr or sample text leaves that
+operation's adapter boundary, including successful warnings and errors. Raw
+offline samples are sanitised before they are saved or used by collectors.
+Other operations record the audit log's `stdout_sample` before payload
+minimisation; their shared diagnostic boundary
 masks e-mail/UPN local parts and dashed GUIDs and clips the sample to 500 characters,
 as described below. Treat that log as confidential tenant evidence too.
 
@@ -319,19 +324,33 @@ prompts, assessment records, sidecars, logs, AI context, reports, exports or
 packs. Absent input stays not collected; a present but invalid private pair is
 refused during run admission. SS 2.3 consumes its separate verified
 PartnerDomains input in a private rule view, independently of SensitiveUsers.
-Current collection still excludes
-`TargetedUsersToProtect`; enabling met from collected target membership needs a
-separate privacy review. Offline copies use the same verification and private
-view; the ScubaGear export path is unchanged.
+The collector's bounded, transient target-list comparison produces only
+`TargetedUsersCoverage`. A verified binding and usable policy evidence can
+establish membership without retaining target strings. The full summary stays
+local in raw evidence, normalised records and SQLite; its private binding stays
+in the rule view. Shareable, customer-pack and explainer outputs drop both
+whole subtrees, including embedded JSON. Offline copies use the same
+verification and private view; the ScubaGear export path keeps its literal
+comparison and ignores reserved run-summary fields.
 
 This lets the operator who holds the run directory prove which list was used;
 a holder of only a customer pack cannot test guesses without the key. The count
-and HMAC may be shared. This is a consistency check, not an authenticity
+and HMAC stay local; redacted manifest derivatives retain at most boolean
+`supplied`. This is a consistency check, not an authenticity
 guarantee against someone able to rewrite all three inputs. Support can call
 `azure_tenant_audit.sensitive_users.verify_sensitive_users(run_dir)`, which uses
 `hmac.compare_digest`. Resume retains one key while replacing the list, removes
 both when no list is supplied, and refuses to replace a missing or invalid key
 for an existing HMAC.
+
+Target-list limits are 10,000 raw entries and 262,144 compact-JSON UTF-8 bytes
+per policy, measured before filtering or de-duplication. A streamed 64 MiB
+stdout bound terminates and reaps an over-limit child. Unknown shapes, malformed
+fields and failed transforms never persist the original target material.
+Fresh offline replay cannot reuse an old summary without fresh literals;
+resume cannot reuse known membership after the verified input binding changes.
+Live Exchange wire-shape validation remains unverified; unexpected shapes are
+unusable evidence.
 
 Evidence is written locally under the selected output directory. Auditex does
 not send raw evidence to an external service. Customer handoff packs copy

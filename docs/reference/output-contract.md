@@ -39,18 +39,20 @@ integrity exclusion. **REDACTED** means this local personal
 data and the key must not be disclosed: their contents are excluded from the evidence index,
 AI context, logs, reports, built-in exports and customer packs. Customer packs
 may carry their relative paths and exclusion reasons, but never the files or
-their checksums or byte lengths; the manifest HMAC remains present. The key never leaves
+their checksums or byte lengths. Shareable, customer-pack and explainer derivatives
+retain at most the boolean `supplied`; the operator count and HMAC stay local.
+The key never leaves
 the private area, including through run-copy helpers. The source path
 is redacted from recorded command arguments. No list is uploaded.
 
 The copy is loaded only into the in-memory rule view of `MS.SECURITYSUITE.2.1v1`,
 under `SecuritySuite["MS.SECURITYSUITE.2.1v1"].SensitiveUsers`. A supplied,
 verified list allows that rule to decide when the remaining evidence is usable.
-The current collector does not select `TargetedUsersToProtect`, and the adapter
-does not retain it: explicit non-compliant flags/actions can decide not met,
-but met cannot yet be established from collected target membership. Unusable
-policy evidence retains its existing cell; full met coverage needs a separate
-collector/privacy change.
+The Exchange collector selects `TargetedUsersToProtect` transiently and replaces
+it with the bound `TargetedUsersCoverage` summary described below before any
+payload or diagnostic leaves the adapter. A valid summary can establish target
+membership; flags, actions, policy scope, licensing and precedence still have to
+satisfy the existing rule. Literal target strings are never saved in the run.
 `MS.SECURITYSUITE.2.3v1` receives the separate verified PartnerDomains input
 in its own private rule view; neither input enables the other policy.
 Offline assessment of a copied bundle uses the same checks and rule view.
@@ -64,7 +66,11 @@ HMAC over the captured list, key and manifest. Verification does not reopen
 those files. The existing closed synthesis outcome `operator_input_required` means
 that a verified required input is unavailable, including absent, false, malformed,
 unreadable or tampered inputs; `oversize` identifies a list byte or entry bound.
-The rule still reports `section_not_collected` in those cases. Additional files
+The rule still reports `section_not_collected` in those cases.
+`config_list_empty` applies only when a direct ScubaGear rule configuration has
+no usable SensitiveUsers entries, including absent, null, empty, blank-only or
+non-string-only lists. It does not describe a missing verified private input
+in a run bundle. Additional files
 in `operator-inputs` are never loaded by projection and retain their normal bundle
 integrity accounting; they do not invalidate an otherwise verified list.
 
@@ -86,6 +92,66 @@ inputs. This proves consistency, not authenticity against an operator who can
 rewrite the manifest and both private files.
 
 The definition is `properties.operator_inputs.properties.sensitive_users` in `schemas/run_manifest.schema.json`.
+
+### TargetedUsersCoverage v1
+
+Each usable anti-phish policy row in `raw/exchange_policy.json` carries a
+`TargetedUsersCoverage` object instead of `TargetedUsersToProtect`. Known
+membership has exactly these fields:
+
+```json
+{"version": 1, "state": "known", "input_hmac_sha256": "<64 lower-case hexadecimal characters>", "input_count": 2, "protected_nonempty": true, "missing_count": 0}
+```
+
+The input count and HMAC refer to the run's verified private SensitiveUsers
+list, not the policy's protected-user list. `protected_nonempty` records whether
+the literal comparison found any non-empty protected value; `missing_count`
+counts configured addresses absent from that set. Membership is true only for
+a non-empty protected set with no missing configured address. The private rule
+view validates the closed shape, exact types, count invariants and matching
+count/HMAC against the same captured private snapshot used for configuration.
+Invalid or unbound summaries supply unknown membership, without a literal-list
+fallback. An explicit false protection flag or action remains decisive.
+
+Other states are exactly `{"version": 1, "state": "unusable"}`,
+`{"version": 1, "state": "not_collected"}` or
+`{"version": 1, "state": "over_limit"}`, without counts or HMAC.
+The runtime validator and `schemas/targeted_users_coverage.schema.json` define
+the shape; Python also checks cross-field and input-binding invariants.
+
+Collection counts all raw list entries before filtering or de-duplication and
+permits at most 10,000. The compact JSON list, including brackets, separators
+and escapes, must occupy at most 262,144 strict UTF-8 bytes. The adapter reads
+stdout in bounded chunks and terminates and reaps a child that exceeds 64 MiB
+before decoding. Limits produce `over_limit`; below-limit invalid fields
+produce `unusable`. These are Auditex bounds. Unexpected live wire shapes
+remain unverified and are treated as unusable evidence.
+
+For this sensitive operation, events and error results omit stdout, stderr
+and sample text on every path, including successful warnings and helper
+exceptions. Only controlled outcomes and numeric command metadata remain.
+Other selected policy settings stay available to SS 2.2-2.4. Unknown row fields
+are discarded, and no target list reaches raw samples, logs or returned rows.
+
+The validated summary is retained locally in normalised anti-phish records and
+the evidence index. Its private binding is used only in SS 2.1's rule view.
+Every shareable, customer-pack and explainer boundary drops the entire
+`TargetedUsersCoverage` and `TargetedUsersCoverageBinding` subtree, including
+embedded JSON. Sensitive-user manifest derivatives retain at most boolean
+`supplied`; malformed private metadata is withheld. Other counts are retained.
+Local evidence is unchanged. Customer-pack derivative hashes and seals cover
+the transformed bytes; a customer pack is not a privately reassessable bundle.
+
+Offline replay sanitises the sample before saving it or running collectors.
+Fresh literals are summarised against the new run's binding; an imported
+summary without fresh literals cannot be rebound to that run. Resume reuses a
+known summary only when its shape, count and HMAC match the current verified
+input and retained key. A changed or cleared list invalidates Exchange reuse;
+the collector reruns when available, otherwise no usable membership proof is
+carried forward. It never replaces an old summary's HMAC to make it match.
+Reassessment of an unchanged original bundle uses that bundle's own verified
+private files. The independent ScubaGear export path keeps literal comparison
+and ignores reserved run-summary fields.
 
 ## Local partner-domain operator input (additive)
 

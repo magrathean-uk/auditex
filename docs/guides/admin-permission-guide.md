@@ -45,6 +45,8 @@ newline: HMAC-SHA256 with a per-run 32-byte key held only in
 Both files are excluded from those outputs and listed only by path and the
 `redacted_operator_input` exclusion reason in `bundle-hashes.json`, without
 hashes or byte lengths. Without input the manifest records `supplied: false`.
+The count and HMAC stay in the local manifest; shareable reports, exports,
+explainer outputs and customer packs retain at most boolean `supplied`.
 Resuming retains the key when the list is supplied again and removes both files
 otherwise; support can call
 `azure_tenant_audit.sensitive_users.verify_sensitive_users(run_dir)` to check
@@ -52,8 +54,14 @@ the private files against the manifest.
 
 SS 2.1 remains not assessed without a verified sensitive-user list. A verified
 list reaches its private in-memory rule view; a decision also needs usable
-policy evidence. The current collector does not select `TargetedUsersToProtect`,
-so target membership cannot yet establish a met verdict. SS 2.3 uses the separate
+policy evidence. The collector reads protected-user targets transiently and
+replaces them with a bound summary before saving evidence or diagnostics.
+Usable membership can establish met when all other rule conditions hold.
+Unknown or over-limit membership stays unusable. Missing verified private
+input gives `section_not_collected`; `config_list_empty` describes only a
+direct ScubaGear configuration with no usable SensitiveUsers entries.
+Changing or clearing the list on resume invalidates old membership reuse.
+SS 2.3 uses the separate
 `PartnerDomains` input in its own private rule view, independently of
 SensitiveUsers. Neither input enters model views or prompts.
 
