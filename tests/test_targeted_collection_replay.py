@@ -149,7 +149,8 @@ def test_each_fresh_replay_binds_to_its_own_key(tmp_path):
 
 
 def test_replayed_summary_reaches_the_rule_and_stays_out_of_every_shareable_output(tmp_path):
-    from auditex.cli import render_report, write_customer_pack
+    from auditex.cli import write_customer_pack
+    from auditex.reporting import render_report
     from auditex.model_serving import assess_run
     from auditex.reporting import FORMAT_EXTENSIONS
     from auditex.scuba_projection import project_run, rule_policy_section
@@ -167,7 +168,7 @@ def test_replayed_summary_reaches_the_rule_and_stays_out_of_every_shareable_outp
     assess_run(run_dir, policies=[SS21], dry_run=True)
     rendered = 0
     for format_name in sorted(FORMAT_EXTENSIONS):
-        render_report(run_dir=str(run_dir), format_name=format_name,
+        render_report(run_dir=str(run_dir), format_name=format_name, profile="shareable",
                       output_path=str(tmp_path / f"report-{format_name}{FORMAT_EXTENSIONS[format_name]}"))
         rendered += 1
     assert rendered >= 3
