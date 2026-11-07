@@ -367,7 +367,11 @@ def register_run_log(run_dir: str | Path) -> None:
 
 
 def _note_in_place(root: Path) -> None:
-    """Append the constant notice once for a run this process produces; never touch any other bundle."""
+    """Append the constant notice once for a run this process produces; never touch any other bundle.
+
+    Only the producer's existing, admitted log is appended to: it is never created, truncated or re-moded,
+    and a missing, unwritable or unsafe log gets no line without failing the admitted read.
+    """
     key = _run_key(root)
     with _NOTICE_LOCK:
         if key is None or key not in _OWNED_RUNS or key in _NOTED_RUNS:
@@ -376,7 +380,8 @@ def _note_in_place(root: Path) -> None:
     try:
         from .private_io import _write_all
         with guard_session() as context:
-            with open_private_output(root / "audit-debug.log", field="output", context=context, append=True) as descriptor:
+            with open_private_output(root / "audit-debug.log", field="output", context=context, append=True,
+                                     existing_only=True) as descriptor:
                 _write_all(descriptor, _IN_PLACE_NOTICE + b"\n")
     except OSError:
         # A read must succeed even if the log cannot accept a line.
@@ -395,10 +400,8 @@ def open_private_run_index(run_dir: str | Path, *, hashed: bool):
     suffixes = ("", "-wal", "-shm", "-journal")
     failed = False
     missing = False
-    changed = False
     untrusted = False
     with ExitStack() as stack:
-        in_place = False
         main_state = None
         main_descriptor = -1
         try:
@@ -455,7 +458,6 @@ def open_private_run_index(run_dir: str | Path, *, hashed: bool):
                 else:
                     conn = stack.enter_context(closing(connection))
                     if copied is None:
-                        in_place = True
                         with open_run_file(root, relative, max_bytes=None) as current:
                             original_info = os.fstat(main_descriptor)
                             current_info = os.fstat(current)
@@ -472,14 +474,25 @@ def open_private_run_index(run_dir: str | Path, *, hashed: bool):
             raise UnsafeRunFileError("evidence index") from None
         if untrusted:
             raise UntrustedIndexError("evidence index is not authoritative") from None
-        yield conn
-        if in_place:
-            try:
-                changed = _file_state(os.fstat(main_descriptor)) != main_state
-            except OSError:
-                changed = True
-        if changed:
+        # The admitted source descriptor stays open on both routes and is rechecked at completion however
+        # the consumer ends: a source rewritten during the read is refused even when the consumer's query
+        # then fails, so a torn read never falls back as ordinary corruption. An unchanged source keeps
+        # the consumer's own exception; interpreter exits (KeyboardInterrupt, GeneratorExit) pass unchanged.
+        try:
+            yield conn
+        except Exception:
+            if _descriptor_changed(main_descriptor, main_state):
+                raise UnsafeRunFileError("evidence index", reason="changed") from None
+            raise
+        if _descriptor_changed(main_descriptor, main_state):
             raise UnsafeRunFileError("evidence index", reason="changed") from None
+
+
+def _descriptor_changed(descriptor: int, state: tuple[int, int, int, int, int] | None) -> bool:
+    try:
+        return _file_state(os.fstat(descriptor)) != state
+    except OSError:
+        return True
 
 
 def _file_state(info: os.stat_result) -> tuple[int, int, int, int, int]:

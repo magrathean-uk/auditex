@@ -977,6 +977,9 @@ def _build_validation_report(
             run_manifest = _read_json(run_path / "run-manifest.json", {}, run_dir=run_path)
             if not isinstance(run_manifest, Mapping) or assessment["run_id"] != run_manifest.get("run_id"):
                 raise ValueError("Model assessment run_id mismatch")
+        except UnsafeRunFileError:
+            # An optional artifact is still guarded: a FIFO, link or alias is a fixed refusal, not a warning.
+            raise
         except (OSError, ValueError, TypeError, KeyError, RecursionError):
             issues.append(_issue("invalid_model_assessment", path=MODEL_ASSESSMENT_PATH, severity="warning"))
     loaded_findings = _load_findings(run_path, findings)

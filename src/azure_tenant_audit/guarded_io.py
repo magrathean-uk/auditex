@@ -465,27 +465,43 @@ def _text_buffer_is_empty(stream: io.TextIOWrapper) -> bool:
 
 
 def _stdin_text_buffer_is_empty() -> bool:
-    """Prove CPython's standard text wrapper has no decoded characters buffered."""
-    if (sys.implementation.name != "cpython" or sys.version_info[:2] not in {(3, 11), (3, 12), (3, 13), (3, 14)}
+    """Prove CPython's standard text wrapper has no decoded characters buffered.
+
+    No interpreter version is trusted by number. A probe wrapper of the same types and configuration as
+    stdin must read as empty when fresh and as non-empty with decoded characters pending, after both a
+    character read and a line read. An unknown layout that hides pending text, or exposes other strings,
+    fails this run-time proof, and admission then refuses stdin rather than guess.
+    """
+    if (sys.implementation.name != "cpython" or sys.version_info < (3, 11)
             or not _text_buffer_is_empty(sys.stdin)):
         return False
-    read_fd, write_fd = os.pipe()
-    try:
-        os.write(write_fd, b"xy")
-        os.close(write_fd)
-        write_fd = -1
-        with io.TextIOWrapper(io.BufferedReader(io.FileIO(read_fd, "rb", closefd=True)),
-                              encoding=sys.stdin.encoding, errors=sys.stdin.errors, newline="\n") as probe:
-            read_fd = -1
-            if not _text_buffer_is_empty(probe):
-                return False
-            probe.read(1)
-            return not _text_buffer_is_empty(probe)
-    finally:
-        if read_fd >= 0:
-            os.close(read_fd)
-        if write_fd >= 0:
+    for payload, by_line in ((b"xy", False), (b"a\nb", True)):
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, payload)
             os.close(write_fd)
+            write_fd = -1
+            with io.TextIOWrapper(io.BufferedReader(io.FileIO(read_fd, "rb", closefd=True)),
+                                  encoding=sys.stdin.encoding, errors=sys.stdin.errors, newline="\n",
+                                  line_buffering=sys.stdin.line_buffering,
+                                  write_through=sys.stdin.write_through) as probe:
+                read_fd = -1
+                if not _text_buffer_is_empty(probe):
+                    return False
+                if by_line:
+                    probe.readline()
+                else:
+                    probe.read(1)
+                if _text_buffer_is_empty(probe):
+                    return False
+        except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
+            return False
+        finally:
+            if read_fd >= 0:
+                os.close(read_fd)
+            if write_fd >= 0:
+                os.close(write_fd)
+    return True
 
 
 def _prime_stdin_binary_buffer() -> bool:
@@ -699,8 +715,12 @@ def open_pinned_binary(path: str | Path, *, field: str, context: GuardContext,
 
 @contextmanager
 def open_private_output(path: str | Path, *, field: str, context: GuardContext,
-                        append: bool = False, exclusive: bool = False) -> Iterator[int]:
-    """Admit an existing destination before truncation, or create one exclusively."""
+                        append: bool = False, exclusive: bool = False, existing_only: bool = False) -> Iterator[int]:
+    """Admit an existing destination before truncation, or create one exclusively.
+
+    ``existing_only`` serves producer-owned logs: it appends to an existing, admitted file and never creates,
+    truncates or changes the mode of it. Every other caller keeps the private 0600 destination.
+    """
     parent = None
     fd = None
     failed = False
@@ -713,17 +733,22 @@ def open_private_output(path: str | Path, *, field: str, context: GuardContext,
                 raise UnsafeRunFileError(field, reason="owner")
             flags = (os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                      | getattr(os, "O_CLOEXEC", 0))
+            if existing_only and (not append or exclusive):
+                raise ValueError("an existing-only destination is append-only")
             if append:
                 flags |= os.O_APPEND
             if exclusive:
                 fd = os.open(name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent)
+            elif existing_only:
+                fd = os.open(name, flags, dir_fd=parent)
             else:
                 try:
                     fd = os.open(name, flags, dir_fd=parent)
                 except FileNotFoundError:
                     fd = os.open(name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent)
             context._check_file(os.fstat(fd), field, None)
-            os.fchmod(fd, 0o600)
+            if not existing_only:
+                os.fchmod(fd, 0o600)
             if not append:
                 os.ftruncate(fd, 0)
             context._pinned.pop(context._absolute(path), None)
