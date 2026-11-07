@@ -408,7 +408,12 @@ def run_demo(options: DemoOptions) -> int:
         console.line(f"Demo sample not found: {sample_path}")
         return 2
     sample = _load_json(sample_path)
-    provenance = sample.get("_fixture_provenance") or {}
+    from azure_tenant_audit.collectors.targeted_users_coverage import strip_targets
+
+    # The header is a sink before offline replay begins, so it uses the same minimised metadata as the bundle.
+    provenance = strip_targets(sample.get("_fixture_provenance") or {})
+    if not isinstance(provenance, dict):
+        provenance = {}
     out_dir = options.out_dir
     from azure_tenant_audit.guarded_io import UnsafeRunFileError
     from azure_tenant_audit.private_io import make_private_dirs
