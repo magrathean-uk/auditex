@@ -78,6 +78,12 @@ def _values(value: Any) -> list[str]:
     return []
 
 
+def _inode_alias(path: str) -> bool:
+    """Whether a path names a file by inode or descriptor, which must be admitted even when it does not stat."""
+    collapsed = "/" + path.lstrip("/")
+    return collapsed.lower().startswith(("/.vol/", "/dev/fd/", "/dev/stdin", "/proc/"))
+
+
 def _bind(context, path: str, field: str) -> None:
     failed = False
     try:
@@ -192,8 +198,10 @@ def parse_guarded(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.
         for action in actions:
             if "--expect-manifest-sha256" in action.option_strings and "--expect-manifest-sha256" in explicit:
                 for item in _values(getattr(args, action.dest, None)):
-                    if "=" in item:
-                        _bind(context, item.rsplit("=", 1)[0], "expect-manifest-sha256")
+                    # A missing selector path is a usage error for argparse's caller to report, not a refusal.
+                    path = item.rsplit("=", 1)[0] if "=" in item else None
+                    if path is not None and (_inode_alias(path) or os.path.lexists(path)):
+                        _bind(context, path, "expect-manifest-sha256")
         # Explicit positional run roots are known before any file arguments are read.
         for action in actions:
             if not action.option_strings and action.dest in {"run_dir", "run_a", "run_b"}:

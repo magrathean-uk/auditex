@@ -68,10 +68,10 @@ def test_safe_dash_prefixed_sample_is_accepted_as_a_filename(
 _FILE_FLAGS = [
     "--input", "--assessment", "--baseline", "--break-glass-accounts", "--cases", "--compare",
     "--config", "--current", "--env", "--expect-manifest-sha256", "--manifest", "--out", "--output",
-    "--output-dir", "--permission-hints", "--responses", "--resume-from", "--run-dir", "--sample",
+    "--output-dir", "--partner-domains", "--permission-hints", "--responses", "--resume-from", "--run-dir", "--sample",
     "--sensitive-users", "--training-overrides", "--waiver-file",
 ]
-_ENGINE_FLAGS = {"--break-glass-accounts", "--config", "--env", "--out", "--permission-hints",
+_ENGINE_FLAGS = {"--break-glass-accounts", "--config", "--env", "--out", "--partner-domains", "--permission-hints",
                  "--resume-from", "--sample", "--sensitive-users", "--waiver-file"}
 
 
