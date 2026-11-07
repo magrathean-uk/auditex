@@ -35,7 +35,9 @@ count and HMAC before passing bare lower-case addresses to that rule in memory.
 With the other required evidence, SS 2.1 can now decide; an absent or unusable
 list retains the existing not-assessed outcome. A copied bundle replays the
 same way. Addresses never enter assessment outputs or model prompts.
-SS 2.3 still needs a separate PartnerDomains input, which is not available yet.
+SS 2.3 uses the separate `--partner-domains <file>` input (or
+`AUDITEX_PARTNER_DOMAINS_FILE`); its verified snapshot reaches only that rule's
+private in-memory view, independently of SensitiveUsers.
 The ScubaGear export configuration path is unchanged.
 
 Current collection does not select `TargetedUsersToProtect`, and the bundle

@@ -54,7 +54,8 @@ SS 2.1 remains not assessed without a verified sensitive-user list. A verified
 list reaches its private in-memory rule view; a decision also needs usable
 policy evidence. The current collector does not select `TargetedUsersToProtect`,
 so target membership cannot yet establish a met verdict. SS 2.3 uses the separate
-`PartnerDomains` input; integrating it into the rule view is a product change.
+`PartnerDomains` input in its own private rule view, independently of
+SensitiveUsers. Neither input enters model views or prompts.
 
 ### Local partner domains for SS 2.3
 
@@ -83,8 +84,8 @@ Do not share either file. The manifest field `operator_inputs.partner_domains`
 holds only `supplied` and, when supplied, unique `count` and `hmac_sha256`.
 No list is uploaded or included in logs, evidence, AI context, reports, exports
 or customer packs; the source path is redacted from command arguments. Demos
-ignore the operator environment. Projection integration is a separate product
-change, and any rule view must remain in memory only.
+ignore the operator environment. Assessment uses the verified snapshot only in
+SS 2.3's private in-memory rule view.
 
 Resume replaces this input while keeping its key; omit the input to clear its
 list and key. The sibling input is preserved. An existing HMAC with an unusable

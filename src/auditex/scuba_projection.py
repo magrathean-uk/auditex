@@ -1124,7 +1124,7 @@ def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
 #   MS.EXO.1.1v2       null: no allowed forwarding domains, ScubaGear's default.
 #   MS.TEAMS.*         {"M365Environment": <environment>}.
 #   MS.SECURITYSUITE.* model views remain not collected (``operator_input_required``). Verified SensitiveUsers are
-#                      supplied to SS 2.1's private rule view only; SS 2.3 still requires a PartnerDomains input.
+#                      supplied to SS 2.1's private rule view; independently verified PartnerDomains feed SS 2.3.
 # Each model view passes the collected-section shape gate. Private operator views never enter that gate.
 SCUBA_CAP_EXCLUSION_POLICIES = frozenset({
     "MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1", "MS.AAD.3.7v1",
@@ -1259,8 +1259,8 @@ def _operator_config_views(*, sensitive_users: tuple[str, ...] | None = None,
                            partner_domains: tuple[str, ...] | None = None) -> dict[str, Any]:
     """Private rule configuration; neither list may enter model views or the shape gate.
 
-    PartnerDomains has no bundle loader yet. Keep its independent input slot so
-    supplying SensitiveUsers cannot accidentally enable SS 2.3 (or SS 3.2).
+    SensitiveUsers (SS 2.1) and PartnerDomains (SS 2.3) are separate slots, each fed
+    by its own verified snapshot, so supplying one never enables the other (or SS 3.2).
     """
     return {policy: {"SecuritySuite": {policy: {key: list(values)}}}
             for policy, key, values in (
@@ -1268,21 +1268,30 @@ def _operator_config_views(*, sensitive_users: tuple[str, ...] | None = None,
                 ("MS.SECURITYSUITE.2.3v1", "PartnerDomains", partner_domains)) if values}
 
 
-def _sensitive_users_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
+def _private_list_for_rules(root: Path, kind: str) -> tuple[str, ...]:
     """Use the private pair captured and verified by the current admission context."""
     from azure_tenant_audit.guarded_io import UnsafeRunFileError, guard_session
 
     reason = "operator_input_required"
     try:
         with guard_session() as context:
-            addresses = context.verified_sensitive_users(root)
+            values = (context.verified_sensitive_users(root) if kind == "sensitive_users"
+                      else context.verified_partner_domains(root))
     except UnsafeRunFileError as exc:
         if exc.reason == "oversize":
             reason = "oversize"
-        addresses = None
-    if not addresses:
+        values = None
+    if not values:
         raise Unavailable(reason) from None
-    return addresses
+    return values
+
+
+def _sensitive_users_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
+    return _private_list_for_rules(root, "sensitive_users")
+
+
+def _partner_domains_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
+    return _private_list_for_rules(root, "partner_domains")
 
 
 def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str, Any],
@@ -1333,13 +1342,16 @@ def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str,
             views[policy_id] = view
             outcomes[policy_id] = "projected"
     rule_views = dict(views)
-    try:
-        private = _operator_config_views(sensitive_users=_sensitive_users_for_rules(bundle.root, manifest))
-    except Unavailable as exc:
-        outcomes["MS.SECURITYSUITE.2.1v1"] = exc.reason
-    else:
-        rule_views.update(private)
-        outcomes.update({policy: "projected" for policy in private})
+    loaded: dict[str, tuple[str, ...]] = {}
+    for key, policy, loader in (("sensitive_users", "MS.SECURITYSUITE.2.1v1", _sensitive_users_for_rules),
+                                ("partner_domains", "MS.SECURITYSUITE.2.3v1", _partner_domains_for_rules)):
+        try:
+            loaded[key] = loader(bundle.root, manifest)
+        except Unavailable as exc:
+            outcomes[policy] = exc.reason
+    private = _operator_config_views(**loaded)
+    rule_views.update(private)
+    outcomes.update({policy: "projected" for policy in private})
     synthesis = {"source": SCUBA_CONFIG_SOURCE, "basis": "scubagear_default_config",
                  "m365_environment": {"value": environment, "basis": environment_basis},
                  "break_glass": break_glass_summary, "policies": outcomes}
