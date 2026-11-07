@@ -99,6 +99,7 @@ def build_evidence_gate_summary(
         for collector in selected:
             row = rows_by_collector.get(collector)
             status = capability_status(row)
+            original_status = status
             missing = _strings(row.get("missing_permissions")) if row else []
             no_live_read = (
                 collector not in read_collectors
@@ -116,15 +117,29 @@ def build_evidence_gate_summary(
                 unverified.append(collector)
             if missing:
                 missing_permissions[collector] = missing
-            not_live_verified = no_live_read and status == "unverified"
-            blocker = classify_capability_blocker(None if not_live_verified else row)
+            blocker = classify_capability_blocker(row)
+            raw_status = str(row.get("status") or "") if row else ""
+            specific = bool(row) and (
+                bool(missing)
+                or raw_status == "not_applicable"
+                or blocker["blocker_kind"] not in {"none", "unverified"}
+                or (original_status == "unverified" and (
+                    raw_status not in {"", "unknown", "unverified"}
+                    or any(row.get(key) for key in ("reason", "error_class", "error", "message", "endpoint_statuses"))
+                ))
+            )
+            # A successful capability check is not a live read. Keep any existing
+            # blocker or inapplicability reason when the collector has one.
+            generic_unverified = no_live_read and status == "unverified" and not specific
+            if generic_unverified:
+                blocker = classify_capability_blocker(None)
             evidence_gates.append(
                 {
                     "collector": collector,
                     "status": status,
                     "required_permissions": _strings(row.get("required_permissions")) if row else [],
                     "missing_permissions": missing,
-                    "reason": "not live-verified" if not_live_verified or not row else str(row.get("reason") or ""),
+                    "reason": "not live-verified" if generic_unverified or not row else str(row.get("reason") or ""),
                     "blocker_kind": blocker["blocker_kind"],
                     "blocker_reason": blocker["blocker_reason"],
                     "next_step": blocker["next_step"],

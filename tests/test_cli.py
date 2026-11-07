@@ -401,6 +401,8 @@ def test_explorer_marks_unscoped_all_skipped_reads_unverified(tmp_path: Path, mo
     assert readiness["trust_level"] == "setup_only"
     assert readiness["unverified_collectors"] == ["identity"]
     assert plan["quality_gate"]["status"] == "complete"
+    assert plan["quality_gate"]["human_reviewer_required"] is False
+    assert plan["quality_gate"]["trusted_gate_count"] == 0
     assert plan["quality_gate"]["reasons"] == []
     assert _collector_rows(run_dir, manifest, {})[0]["status"] == "not_verified"
 
@@ -1367,12 +1369,13 @@ def test_non_app_default_run_omits_workloads_and_prints_one_selection_notice(tmp
 
 def test_required_preflight_skipped_licensing_keeps_existing_selected_contract(tmp_path, monkeypatch):
     from graph_fakes import FakeGraph, run_collectors, load
+    from azure_tenant_audit.collectors.licensing import LicensingCollector
 
-    class BlockedLicensing:
+    refused = FakeGraph(errors={path: (403, "Forbidden") for path in ("/subscribedSkus", "/users", "/groups")})
+
+    class BlockedLicensing(LicensingCollector):
         def run(self, context):
-            return CollectorResult(name="licensing", status="failed", payload={}, item_count=0,
-                                   coverage=[{"collector": "licensing", "name": "subscribedSkus", "status": "failed",
-                                              "error_class": "insufficient_permissions", "error": "constructed refusal"}])
+            return super().run({**context, "client": refused})
 
     monkeypatch.setitem(cli.REGISTRY, "licensing", BlockedLicensing())
     monkeypatch.setattr(cli.run_core, "collector_pause_seconds", lambda _: 0)
@@ -1381,9 +1384,21 @@ def test_required_preflight_skipped_licensing_keeps_existing_selected_contract(t
     manifest = load(run_dir, "run-manifest.json")
     assert manifest["selected_collectors"] == ["identity"]
     assert manifest["overall_status"] == "partial"
+    preflight = load(run_dir, "preflight-plan.json")
+    licensing_probe = next(row for row in preflight["collectors"] if row["collector"] == "licensing")
+    assert licensing_probe["cause_error_class"] == "insufficient_permissions"
     readiness = load(run_dir, "live-readiness.json")
+    assert readiness["selected_collectors"] == ["identity", "licensing"]
     assert "licensing" not in readiness["trusted_collectors"]
     assert "licensing" in readiness["cannot_trust"]
     assert readiness["trust_level"] == "partial"
     assert readiness["statement"] != "Live evidence is verified for all selected collectors."
-    assert load(run_dir, "audit-plan.json")["evidence_gates"] == readiness["evidence_gates"]
+    licensing = next(row for row in readiness["evidence_gates"] if row["collector"] == "licensing")
+    assert licensing["status"] == "unverified"
+    assert licensing["missing_permissions"]
+    assert licensing["reason"] == "missing_required_permissions"
+    assert licensing["blocker_kind"] == "auth_scope"
+    assert licensing["next_step"] == "Grant the listed read permissions or scopes, then rerun doctor/probe."
+    plan = load(run_dir, "audit-plan.json")
+    assert plan["selected_collectors"] == ["identity"]
+    assert plan["evidence_gates"] == readiness["evidence_gates"]

@@ -47,6 +47,84 @@ def test_evidence_gate_summary_marks_dependency_unavailable_as_local_tool() -> N
         assert row["blocker_kind"] == "local_tool"
 
 
+@pytest.mark.parametrize("status", ["not_applicable", "supported_exact_scope"])
+def test_no_live_read_preserves_missing_permission_blocker(status: str) -> None:
+    summary = build_evidence_gate_summary(
+        selected_collectors=["licensing"],
+        capability_rows=[{
+            "collector": "licensing",
+            "status": status,
+            "reason": "missing_required_permissions",
+            "missing_permissions": ["Organization.Read.All"],
+        }],
+        coverage_rows=[{"collector": "licensing", "status": "failed", "error_class": "insufficient_permissions"}],
+    )
+
+    gate = summary["evidence_gates"][0]
+    assert gate["status"] == "unverified"
+    assert gate["reason"] == "missing_required_permissions"
+    assert gate["blocker_kind"] == "auth_scope"
+    assert gate["blocker_reason"] == "missing_required_permissions"
+    assert gate["next_step"] == "Grant the listed read permissions or scopes, then rerun doctor/probe."
+    assert summary["blocker_summary"]["counts"] == {"auth_scope": 1}
+
+
+def test_no_live_read_preserves_not_applicable_reason() -> None:
+    summary = build_evidence_gate_summary(
+        selected_collectors=["service"],
+        capability_rows=[{"collector": "service", "status": "not_applicable", "reason": "workload_not_present"}],
+        coverage_rows=[{"collector": "service", "status": "skipped", "error_class": "not_applicable"}],
+    )
+
+    gate = summary["evidence_gates"][0]
+    assert gate["status"] == "unverified"
+    assert gate["reason"] == "workload_not_present"
+    assert gate["blocker_kind"] == "none"
+    assert gate["next_step"] == ""
+
+
+@pytest.mark.parametrize(
+    ("reason", "blocker_kind", "next_step"),
+    [
+        ("license_required", "license", "Confirm service licensing and mark the surface out of scope if unavailable."),
+        ("preflight_blocked", "unverified", "Inspect endpoint errors and rerun the affected collector after the runtime issue is fixed."),
+    ],
+)
+def test_no_live_read_preserves_specific_unverified_reason(reason: str, blocker_kind: str, next_step: str) -> None:
+    summary = build_evidence_gate_summary(
+        selected_collectors=["service"],
+        capability_rows=[{"collector": "service", "status": "unverified", "reason": reason}],
+        coverage_rows=[],
+    )
+
+    gate = summary["evidence_gates"][0]
+    assert gate["status"] == "unverified"
+    assert gate["reason"] == gate["blocker_reason"] == reason
+    assert gate["blocker_kind"] == blocker_kind
+    assert gate["next_step"] == next_step
+
+
+def test_all_skipped_teams_reads_get_generic_unverified_advice() -> None:
+    summary = build_evidence_gate_summary(
+        selected_collectors=["teams_policy"],
+        capability_rows=[{
+            "collector": "teams_policy", "status": "supported_effective_role", "reason": "command_toolchain_required",
+        }],
+        coverage_rows=[
+            {"collector": "teams_policy", "type": "command", "status": "skipped", "error_class": "teams_token_unavailable"}
+            for _ in range(7)
+        ],
+    )
+
+    gate = summary["evidence_gates"][0]
+    assert summary["trust_level"] == "setup_only"
+    assert summary["unverified_collectors"] == ["teams_policy"]
+    assert gate["status"] == "unverified"
+    assert gate["reason"] == "not live-verified"
+    assert gate["blocker_kind"] == "unverified"
+    assert gate["next_step"] == "Run a probe or live audit for this collector."
+
+
 @pytest.mark.parametrize("reason", ["not_applicable", "teams_token_unavailable", "license_required", "preflight_blocked"])
 def test_skips_and_derived_rows_do_not_verify_a_collector(reason: str) -> None:
     summary = build_evidence_gate_summary(
