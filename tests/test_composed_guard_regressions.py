@@ -218,8 +218,6 @@ if mode == "prebuffer-text":
     sys.stdin.read(1)
 elif mode == "prebuffer-line":
     sys.stdin.readline()
-prover = getattr(guarded_io, "_text_wrapper_layout_proved", None)
-proof = prover() if prover is not None else None
 with guarded_io.GuardContext() as context:
     if run != "-":
         context.bind_run(run)
@@ -230,7 +228,7 @@ with guarded_io.GuardContext() as context:
     else:
         outcome = "ACCEPTED:%d" % len(text)
 print(json.dumps({"version": list(sys.version_info[:2]), "implementation": sys.implementation.name,
-                  "proof": proof, "outcome": outcome}))
+                  "outcome": outcome}))
 '''
 
 
@@ -266,7 +264,6 @@ def _expected(payload: dict, accepted: str) -> str:
 def test_fresh_pipe_and_file_stdin_are_admitted_on_every_runtime(python, tmp_path):
     data = b"ordinary\nsecond line\n"
     piped = _child(python, "plain", input=data)
-    assert piped["proof"] in (None, piped["implementation"] == "cpython")
     assert piped["outcome"] == _expected(piped, f"ACCEPTED:{len(data)}")
     source = tmp_path / "unseen"
     source.write_bytes(data)

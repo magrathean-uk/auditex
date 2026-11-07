@@ -372,9 +372,7 @@ def test_an_owned_run_logs_one_notice_whatever_the_thread_count(tmp_path, monkey
     _proof(monkeypatch, tmp_path, False)
     _register(run)
     barrier = threading.Barrier(8)
-    # The notice now opens only an existing log for append; older readers used the private-output opener.
-    opener = "open_existing_append" if hasattr(evidence_db, "open_existing_append") else "open_private_output"
-    original = getattr(evidence_db, opener)
+    original = evidence_db.open_private_output
 
     def held_open(*args, **kwargs):
         try:
@@ -383,7 +381,7 @@ def test_an_owned_run_logs_one_notice_whatever_the_thread_count(tmp_path, monkey
             pass
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(evidence_db, opener, held_open)
+    monkeypatch.setattr(evidence_db, "open_private_output", held_open)
     errors = []
 
     def work():

@@ -18,8 +18,7 @@ from urllib.parse import quote
 
 from .bundle_integrity import evidence_index_is_hashed, evidence_sidecars
 from .guarded_io import (
-    _DIR_FLAGS, _FILE_FLAGS, _safe_directory, current_context, guard_session, guarded_operation, open_existing_append,
-    open_private_output,
+    _DIR_FLAGS, _FILE_FLAGS, _safe_directory, current_context, guard_session, guarded_operation, open_private_output,
 )
 from .perf_runtime import sqlite_bulk_pragmas
 from .run_files import UnsafeRunFileError, open_run_file
@@ -381,7 +380,8 @@ def _note_in_place(root: Path) -> None:
     try:
         from .private_io import _write_all
         with guard_session() as context:
-            with open_existing_append(root / "audit-debug.log", field="output", context=context) as descriptor:
+            with open_private_output(root / "audit-debug.log", field="output", context=context, append=True,
+                                     existing_only=True) as descriptor:
                 _write_all(descriptor, _IN_PLACE_NOTICE + b"\n")
     except OSError:
         # A read must succeed even if the log cannot accept a line.
