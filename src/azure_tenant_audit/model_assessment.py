@@ -230,6 +230,8 @@ def derive_explainer(row: dict[str, Any]) -> dict[str, Any] | None:
                   "reason_code": detail["reason_code"], "reason_text": detail["reason_text"],
                   "cited_sections": list(detail["section"])}
         return explain(public, sections, order)
+    except MemoryError:
+        raise
     except Exception:
         return None
 

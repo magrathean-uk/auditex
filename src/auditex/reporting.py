@@ -601,7 +601,7 @@ def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> li
                                  "explainer": safe_derived})
             assert_snapshot_stable(run_path, context.snapshot)
             return rows
-    except UnsafeRunFileError:
+    except (UnsafeRunFileError, MemoryError):
         raise
     except Exception:
         # Missing, invalid or unredactable optional content is omitted; unsafe admission always refuses.
