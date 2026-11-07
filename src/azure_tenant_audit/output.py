@@ -164,7 +164,7 @@ class AuditWriter:
                 self.run_id = normalized[len(prefix) :] if len(normalized) > len(prefix) else f"run_{ts}"
             else:
                 self.run_id = normalized
-        make_private_dirs(self.run_dir.parent, mode=0o777)
+        make_private_dirs(self.run_dir.parent, mode=0o755)
         self._mkdir_private(self.run_dir)
 
         self.resume_from_path = None

@@ -555,6 +555,8 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     it was read is ``changed during scan``, never partial content. ``cap`` is what the caller can still afford of
     the aggregate budget (reading past it is a ``limit``), charged against what was really read, not what was listed.
     """
+    from .guarded_io import UnsafeRunFileError, current_context
+
     try:
         descriptor = os.open(name, _FILE_MODE, dir_fd=parent_fd)
     except FileNotFoundError as exc:
@@ -567,7 +569,6 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     read_failed = False
     try:
         info = os.fstat(descriptor)
-        from .guarded_io import current_context
         context = current_context()
         if context is not None:
             context._check_file(info, "run-file", _MAX_FILE_BYTES)
@@ -597,6 +598,10 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
         read_failed = True
         exc.bytes_read += total
         raise
+    except UnsafeRunFileError as exc:
+        read_failed = True
+        reason = REASON_OVERSIZE if exc.reason == "oversize" else REASON_UNREADABLE
+        raise _Unsafe(reason, total) from None
     except OSError as exc:
         read_failed = True
         raise _Unsafe(REASON_UNREADABLE, total) from exc

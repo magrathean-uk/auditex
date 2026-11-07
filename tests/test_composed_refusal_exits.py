@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import stat
 
 import pytest
 
@@ -153,3 +154,21 @@ def test_file_close_error_does_not_replace_primary_refusal(tmp_path, monkeypatch
     assert caught.value.reason == "oversize"
     if not during_admission:
         assert caught.value is failure
+
+
+@pytest.mark.parametrize("mask", [0o000, 0o002, 0o022, 0o077])
+def test_writer_owns_private_run_modes_without_changing_ancestors(tmp_path, mask):
+    from azure_tenant_audit.output import AuditWriter
+
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    existing.chmod(0o755)
+    previous = os.umask(mask)
+    try:
+        writer = AuditWriter(existing / "new-parent", "synthetic", "private")
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(existing.stat().st_mode) == 0o755
+    assert not stat.S_IMODE(writer.run_dir.parent.stat().st_mode) & 0o022
+    assert stat.S_IMODE(writer.run_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(writer.raw_dir.stat().st_mode) == 0o700
