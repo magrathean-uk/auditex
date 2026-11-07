@@ -538,8 +538,11 @@ def _clean(value: Any, walk: _Walk, depth: int) -> Any:
             out[COVERAGE_KEY] = minimal_coverage("not_collected")
         return out
     if isinstance(value, list):
+        bearing = _bears(value, walk, depth)
+        # Scalar text in an affected unsupported list can be a diagnostic for the target-bearing row beside it.
+        # Keep independent record containers and numeric metadata; a non-bearing list keeps its original strings.
         return [_clean(item, walk, depth + 1) for item in value
-                if not (type(item) is str and _mentions_target(item))]
+                if not (type(item) is str and (bearing or _mentions_target(item)))]
     if type(value) is str and _mentions_target(value):
         return None
     return value
