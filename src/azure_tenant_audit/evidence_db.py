@@ -387,7 +387,7 @@ def open_private_run_index(run_dir: str | Path, *, include_sidecars: bool):
                 sources[suffix] = (descriptor, _file_state(os.fstat(descriptor)))
             try:
                 temporary_root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()).resolve()
-                proved = _encrypted_internal_storage(temporary_root)
+                proved = _safe_directory(os.stat(temporary_root)) and _encrypted_internal_storage(temporary_root)
                 if include_sidecars and temporary_root.is_relative_to(root.resolve().parent):
                     proved = False
             except (OSError, RuntimeError, ValueError):

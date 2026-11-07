@@ -122,6 +122,22 @@ def test_copy_requires_proof_for_created_private_directory(tmp_path, monkeypatch
     assert list(scratch.iterdir()) == []
 
 
+def test_copy_does_not_use_a_writable_temporary_parent(tmp_path, monkeypatch):
+    run, index = _run_with_index(tmp_path)
+    scratch = tmp_path / "index-scratch"
+    scratch.mkdir(mode=0o700)
+    scratch.chmod(0o777)
+    monkeypatch.setenv("TMPDIR", str(scratch))
+    monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: True)
+    monkeypatch.setattr(evidence_db, "_copy_index_descriptor", lambda *args: pytest.fail("unsafe parent used"))
+    try:
+        with evidence_db.open_private_run_index(run, include_sidecars=False) as conn:
+            assert conn.execute("SELECT value FROM items").fetchone() == ("ordinary",)
+        assert index.is_file() and list(scratch.iterdir()) == []
+    finally:
+        scratch.chmod(0o700)
+
+
 @pytest.mark.parametrize("simulated", [False, True])
 def test_no_input_demo_and_mocktenant_on_unproved_storage(tmp_path, monkeypatch, capsys, simulated):
     from auditex.cli import main as auditex_main

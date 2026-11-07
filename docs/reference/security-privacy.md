@@ -267,7 +267,8 @@ links, and restore safe directory permissions. Each copy's private pair is
 verified on admission.
 
 Read-only index inspection copies guarded descriptors into a private `0700`
-temporary directory, with files created as `0600`, only after that directory is
+temporary directory under an operator-owned parent that is not group- or
+world-writable, with files created as `0600`, only after that directory is
 proved to be on encrypted internal storage. The proof is implemented for macOS
 Data volumes. No evidence index is copied to unproved temporary storage. When
 the proof is unavailable or a protected copy cannot be made, SQLite reads the
