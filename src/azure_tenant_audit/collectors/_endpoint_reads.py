@@ -306,10 +306,19 @@ def protection_state_fanout(
     selected = [row for row in rows if isinstance(row.get("id"), str) and row["id"] and windows_only(row)]
     if failed_input or issues:
         # The device list itself is unreadable, so an empty result here would read as "no Windows devices".
-        return (
-            {"error": "The managed device list could not be read in full, so Defender state was not requested.", "error_class": "incomplete_evidence"},
-            [],
+        error_section = {
+            "error": "The managed device list could not be read in full, so Defender state was not requested.",
+            "error_class": "incomplete_evidence",
+        }
+        if not issues:
+            return error_section, []
+        # A refused or unreadable chunk: a section-scoped derived row carries the constant-code issues so the gap reaches
+        # the section-gap records. The collector status follows the section-scoped rule; nothing is requested.
+        summary = _fanout_summary(
+            scope="windows_managed_devices", limit=limit, input_count=len(selected), selected=0, expanded=0,
+            issues=issues, failed_input=failed_input, cut=cut, failed_reads=0,
         )
+        return error_section, [_derived_row(collector, name, summary, omitted=0)]
     targets = selected[:limit]
     results = read_endpoints(
         client, [f"/deviceManagement/managedDevices/{row['id']}/windowsProtectionState" for row in targets], rows=False
