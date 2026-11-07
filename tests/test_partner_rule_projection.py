@@ -364,7 +364,7 @@ def test_resume_and_offline_replay_reach_the_same_ss23_cells(tmp_path):
     resumed.write_bundle({"collectors": [], "overall_status": "ok"})
     assert assess_run(root, policies=[SS23])["policies"] == first["policies"]
     assert first["policies"][0]["rule_precheck"]["cell"] == "default_qualifies"
-    resumed.write_partner_domains(PartnerDomains(DOMAINS + ("added-partner.example.invalid",)))
+    resumed.write_partner_domains(PartnerDomains(tuple(sorted(DOMAINS + ("added-partner.example.invalid",)))))
     resumed.write_bundle({"collectors": [], "overall_status": "ok"})
     assert direct_record(project_run(root))["cell"] == "no_qualifying_policy"
     resumed.write_partner_domains(PartnerDomains())
