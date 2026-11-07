@@ -366,3 +366,23 @@ def test_non_json_keys_are_refused_before_their_equality_can_run():
         calls.clear()
         assert adm.admit_response(envelope) is REFUSED
         assert calls == []
+
+
+def test_scan_helper_and_target_parameter_refuse_non_json_keys_without_equality():
+    calls = []
+    class Key:
+        def __init__(self, symbol):
+            self.symbol = symbol
+        def __hash__(self):
+            return hash(self.symbol)
+        def __eq__(self, other):
+            calls.append("equality")
+            return False
+    for symbol in ("chunk_files", "chunk_count", "sample_truncated", "item_count"):
+        envelope = {Key(symbol): None, "value": [{}]}
+        calls.clear()
+        assert adm.scan_admitted(envelope) is False
+        assert calls == []
+    calls.clear()
+    assert adm.admit_response({"value": [{"Extra": "unchanged"}]}, target_key=Key("Extra")) is REFUSED
+    assert calls == []
