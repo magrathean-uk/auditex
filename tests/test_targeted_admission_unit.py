@@ -352,3 +352,17 @@ def test_observed_empty_live_read_is_supported_without_replay_health_metadata():
     assert adm.admit_response({"value": [], "complete": False}, observed=True) is REFUSED
     assert adm.admit_response({}, observed=True) is REFUSED
     assert adm.admit_response({"value": []}, observed="yes") is REFUSED
+
+
+def test_non_json_keys_are_refused_before_their_equality_can_run():
+    calls = []
+    class Key:
+        def __hash__(self):
+            return hash("error")
+        def __eq__(self, other):
+            calls.append("equality")
+            return False
+    for envelope in ({Key(): None, "value": [{}]}, {"value": [{Key(): None}]}):
+        calls.clear()
+        assert adm.admit_response(envelope) is REFUSED
+        assert calls == []
