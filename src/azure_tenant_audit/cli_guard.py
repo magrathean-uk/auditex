@@ -13,7 +13,7 @@ from .secret_hygiene import SENSITIVE_ARG_FLAGS, _sensitive_option, collect_sens
 
 _INPUT_FLAGS = frozenset({
     "--assessment", "--break-glass-accounts", "--cases", "--config", "--env", "--input",
-    "--manifest", "--permission-hints", "--responses", "--sample", "--sensitive-users",
+    "--manifest", "--partner-domains", "--permission-hints", "--responses", "--sample", "--sensitive-users",
     "--training-overrides", "--waiver-file",
 })
 _RUN_FLAGS = frozenset({"--run-dir", "--resume-from", "--baseline", "--current", "--compare"})
@@ -208,6 +208,14 @@ def parse_guarded(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.
         for action in actions:
             if "--sensitive-users" in action.option_strings:
                 admit_sensitive_env(context, getattr(args, action.dest, None))
+                break
+        for action in actions:
+            if "--partner-domains" in action.option_strings:
+                selected = getattr(args, action.dest, None)
+                if selected is None:
+                    selected = os.environ.get("AUDITEX_PARTNER_DOMAINS_FILE")
+                if selected:
+                    _pin(context, selected, "partner-domains")
                 break
         for action in actions:
             selected = set(action.option_strings) & explicit & _INPUT_FLAGS

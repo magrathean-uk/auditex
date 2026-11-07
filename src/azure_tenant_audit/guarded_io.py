@@ -24,7 +24,7 @@ _ORIGINAL_OPEN = os.open
 _CURRENT: ContextVar[GuardContext | None] = ContextVar("auditex_guard_context", default=None)
 _FIELDS = frozenset({
     "input", "run", "run-file", "manifest", "out", "output", "output-dir", "stdin", "evidence index",
-    "sample", "config", "env", "permission-hints", "sensitive-users", "waiver-file",
+    "sample", "config", "env", "permission-hints", "sensitive-users", "partner-domains", "waiver-file",
     "break-glass-accounts", "assessment", "baseline", "cases", "compare", "current", "responses",
     "training-overrides", "run-dir", "resume-from", "expect-manifest-sha256", "source",
     "summary_path", "summary_md_path", "auth_context_path", "coverage_path", "report_pack_path",
@@ -102,6 +102,8 @@ class GuardContext:
         self._manifests: dict[str, int] = {}
         self._verified: dict[str, tuple[str, ...] | None] = {}
         self._private_keys: dict[str, bytes] = {}
+        self._verified_partner: dict[str, tuple[str, ...] | None] = {}
+        self._partner_private_keys: dict[str, bytes] = {}
         self._pinned: dict[str, tuple[int, tuple[int, int, int, int, int]]] = {}
         self._token: Token | None = None
         self._cwd_path = os.getcwd()
@@ -143,6 +145,8 @@ class GuardContext:
         self._manifests.clear()
         self._verified.clear()
         self._private_keys.clear()
+        self._verified_partner.clear()
+        self._partner_private_keys.clear()
         self._pinned.clear()
         self._identities.clear()
         self._root_fd = self._cwd_fd = None
@@ -232,27 +236,33 @@ class GuardContext:
                     owned.append(private_dir)
                     if not _safe_directory(os.fstat(private_dir)):
                         raise UnsafeRunFileError("private input", reason="owner")
-                pair: list[int | None] = []
-                for name in ("sensitive-users.txt", "sensitive-users.key"):
-                    fd = None
-                    if private_dir is not None:
-                        try:
-                            fd = os.open(name, _FILE_FLAGS, dir_fd=private_dir)
-                        except FileNotFoundError:
-                            pass
-                    if fd is not None:
-                        owned.append(fd)
-                        self._check_file(os.fstat(fd), "private input", 32 if name.endswith(".key") else _MAX_LIST,
-                                         private_verifier=True)
-                    pair.append(fd)
-                if (pair[0] is None) != (pair[1] is None):
-                    raise UnsafeRunFileError("private input")
+                pairs: dict[str, list[int | None]] = {}
+                for kind, names in (
+                    ("sensitive_users", ("sensitive-users.txt", "sensitive-users.key")),
+                    ("partner_domains", ("partner-domains.txt", "partner-domains.key")),
+                ):
+                    pair: list[int | None] = []
+                    for name in names:
+                        fd = None
+                        if private_dir is not None:
+                            try:
+                                fd = os.open(name, _FILE_FLAGS, dir_fd=private_dir)
+                            except FileNotFoundError:
+                                pass
+                        if fd is not None:
+                            owned.append(fd)
+                            self._check_file(os.fstat(fd), "private input", 32 if name.endswith(".key") else _MAX_LIST,
+                                             private_verifier=True)
+                        pair.append(fd)
+                    if (pair[0] is None) != (pair[1] is None):
+                        raise UnsafeRunFileError("private input")
+                    pairs[kind] = pair
                 manifest = os.open("run-manifest.json", _FILE_FLAGS, dir_fd=root)
                 owned.append(manifest)
                 manifest_info = os.fstat(manifest)
                 manifest_limit = min(_MAX_MANIFEST, manifest_max_bytes) if manifest_max_bytes is not None else _MAX_MANIFEST
                 self._check_file(manifest_info, "manifest", manifest_limit)
-                pair_ids = {_identity(os.fstat(fd)) for fd in pair if fd is not None}
+                pair_ids = {_identity(os.fstat(fd)) for pair in pairs.values() for fd in pair if fd is not None}
                 if _identity(manifest_info) in pair_ids:
                     raise UnsafeRunFileError("manifest", reason="private")
                 payload = json.loads(_read_bounded(manifest, manifest_limit).decode("utf-8"))
@@ -261,38 +271,52 @@ class GuardContext:
                 operator = payload.get("operator_inputs", {})
                 if not isinstance(operator, dict):
                     raise UnsafeRunFileError("manifest")
-                meta = operator.get("sensitive_users", {})
-                if not isinstance(meta, dict):
-                    raise UnsafeRunFileError("manifest")
-                if pair[0] is None:
-                    if meta not in ({}, {"supplied": False}):
-                        raise UnsafeRunFileError("private input")
-                    addresses = None
-                    key = None
-                else:
-                    from .sensitive_users import parse_sensitive_users, sensitive_users_digest
+                from .partner_domains import parse_partner_domains, partner_domains_digest
+                from .sensitive_users import parse_sensitive_users, sensitive_users_digest
+                verified: dict[str, tuple[str, ...] | None] = {}
+                keys: dict[str, bytes | None] = {}
+                for kind, pair in pairs.items():
+                    meta = operator.get(kind, {})
+                    if not isinstance(meta, dict):
+                        raise UnsafeRunFileError("manifest")
+                    if pair[0] is None:
+                        if meta not in ({}, {"supplied": False}):
+                            raise UnsafeRunFileError("private input")
+                        verified[kind] = None
+                        keys[kind] = None
+                        continue
+                    assert pair[1] is not None
                     data = _read_bounded(pair[0], _MAX_LIST)
                     key = _read_bounded(pair[1], 32)
-                    supplied = parse_sensitive_users(data)
-                    canonical = ("\n".join(supplied.addresses) + "\n").encode("utf-8")
+                    if kind == "sensitive_users":
+                        entries = parse_sensitive_users(data).addresses
+                        expected_digest = sensitive_users_digest(entries, key)
+                    else:
+                        entries = parse_partner_domains(data).domains
+                        expected_digest = partner_domains_digest(entries, key)
+                    canonical = ("\n".join(entries) + "\n").encode("utf-8")
                     digest = meta.get("hmac_sha256")
                     if (len(key) != 32 or data != canonical or meta.get("supplied") is not True
                             or set(meta) != {"supplied", "count", "hmac_sha256"}
-                            or type(meta.get("count")) is not int or meta.get("count") != len(supplied.addresses)
+                            or type(meta.get("count")) is not int or meta.get("count") != len(entries)
                             or not isinstance(digest, str) or len(digest) != 64
-                            or not hmac.compare_digest(sensitive_users_digest(supplied.addresses, key), digest)):
+                            or not hmac.compare_digest(expected_digest, digest)):
                         raise UnsafeRunFileError("private input")
-                    addresses = supplied.addresses
-                    self._identities.update(pair_ids)
+                    verified[kind] = entries
+                    keys[kind] = key
+                self._identities.update(pair_ids)
                 self._fds.extend(owned)
                 owned.clear()
                 self._runs[path] = root
                 self._manifests[path] = manifest
-                self._verified[path] = addresses
-                if key is not None:
-                    self._private_keys[path] = key
-                else:
-                    self._private_keys.pop(path, None)
+                self._verified[path] = verified["sensitive_users"]
+                self._verified_partner[path] = verified["partner_domains"]
+                for kind, registry in (("sensitive_users", self._private_keys),
+                                       ("partner_domains", self._partner_private_keys)):
+                    if keys[kind] is not None:
+                        registry[path] = keys[kind]
+                    else:
+                        registry.pop(path, None)
                 result = root
         except UnsafeRunFileError as exc:
             failed = True
@@ -314,6 +338,10 @@ class GuardContext:
         path = self._absolute(run_dir)
         return self._verified[path]
 
+    def verified_partner_domains(self, run_dir: str | Path) -> tuple[str, ...] | None:
+        self.bind_run(run_dir)
+        return self._verified_partner[self._absolute(run_dir)]
+
     def refresh_run(self, run_dir: str | Path) -> None:
         """Rebind a manifest published by the internal writer under the admission lock."""
         path = self._absolute(run_dir)
@@ -322,6 +350,8 @@ class GuardContext:
             self._manifests.pop(path, None)
             self._verified.pop(path, None)
             self._private_keys.pop(path, None)
+            self._verified_partner.pop(path, None)
+            self._partner_private_keys.pop(path, None)
             self.bind_run(run_dir)
 
     def discover_run(self, path: str | Path, *, manifest_max_bytes: int | None = None) -> None:
@@ -346,7 +376,7 @@ class GuardContext:
             found = False
             try:
                 descriptor = self._directory(directory)
-                for name in ("sensitive-users.txt", "sensitive-users.key"):
+                for name in ("sensitive-users.txt", "sensitive-users.key", "partner-domains.txt", "partner-domains.key"):
                     try:
                         os.stat(name, dir_fd=descriptor, follow_symlinks=False)
                         found = True

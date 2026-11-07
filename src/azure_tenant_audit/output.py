@@ -18,10 +18,10 @@ from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
 from .findings import apply_coverage_gaps_to_report_pack
 from .tenant_identity import IDENTITY_FIELDS
-from .private_io import make_private_dirs, write_private_bytes, write_private_text
+from .private_io import make_private_dirs, write_private_text
 from .partner_domains import (
     BUNDLE_PATH as PARTNER_DOMAINS_PATH, KEY_PATH as PARTNER_DOMAINS_KEY_PATH,
-    PartnerDomains, PartnerDomainsError, read_partner_domains_key,
+    PartnerDomains, PartnerDomainsError,
 )
 from .sensitive_users import (
     BUNDLE_PATH as SENSITIVE_USERS_PATH, KEY_PATH as SENSITIVE_USERS_KEY_PATH,
@@ -342,11 +342,18 @@ class AuditWriter:
         self._record_artifact(target)
 
     def write_sensitive_users(self, supplied: SensitiveUsers) -> None:
-        """Publish the sole private pair and register its identities before rename."""
+        self._write_operator_pair("sensitive-users", supplied.addresses, supplied)
+
+    def write_partner_domains(self, supplied: PartnerDomains) -> None:
+        self._write_operator_pair("partner-domains", supplied.domains, supplied)
+
+    def _write_operator_pair(self, stem: str, entries: tuple[str, ...], supplied: SensitiveUsers | PartnerDomains) -> None:
+        """Publish an operator pair and register its identities before rename."""
         from .guarded_io import _safe_directory, guard_session
         from .private_io import _write_all
 
-        private_paths = (SENSITIVE_USERS_PATH, SENSITIVE_USERS_KEY_PATH)
+        private_paths = ((SENSITIVE_USERS_PATH, SENSITIVE_USERS_KEY_PATH) if stem == "sensitive-users"
+                         else (PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH))
         private_dir = self.run_dir / "operator-inputs"
         failed = False
         keep_ignore = False
@@ -358,7 +365,7 @@ class AuditWriter:
                 with context._lock:
                     root_key = context._absolute(self.run_dir)
                     manifest_exists = os.path.lexists(self.run_dir / "run-manifest.json")
-                    if not manifest_exists and supplied.addresses:
+                    if not manifest_exists and entries:
                         # Establish an empty run before publishing its private
                         # pair, then replace this manifest under the same lock.
                         # The guarded write refuses a pre-existing unmarked pair.
@@ -366,18 +373,18 @@ class AuditWriter:
                         manifest_exists = True
                     if manifest_exists:
                         context.bind_run(self.run_dir)
-                    if supplied.addresses:
+                    if entries:
                         make_private_dirs(private_dir)
                     try:
                         descriptor = context._directory(private_dir)
                     except FileNotFoundError:
-                        if supplied.addresses:
+                        if entries:
                             raise
                     if descriptor is not None:
                         if not _safe_directory(os.fstat(descriptor)):
                             raise OSError("unsafe private directory")
                         existing = {}
-                        for name in ("sensitive-users.key", "sensitive-users.txt", ".gitignore"):
+                        for name in (stem + ".key", stem + ".txt", ".gitignore"):
                             try:
                                 fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
                                              | getattr(os, "O_CLOEXEC", 0), dir_fd=descriptor)
@@ -391,10 +398,11 @@ class AuditWriter:
                                 existing[name] = (info.st_dev, info.st_ino)
                             finally:
                                 os.close(fd)
-                        if supplied.addresses:
-                            key = context._private_keys.get(root_key) or secrets.token_bytes(32)
-                            values = {".gitignore": b"*\n", "sensitive-users.key": key,
-                                      "sensitive-users.txt": ("\n".join(supplied.addresses) + "\n").encode("utf-8")}
+                        if entries:
+                            registry = context._private_keys if stem == "sensitive-users" else context._partner_private_keys
+                            key = registry.get(root_key) or secrets.token_bytes(32)
+                            values = {".gitignore": b"*\n", stem + ".key": key,
+                                      stem + ".txt": ("\n".join(entries) + "\n").encode("utf-8")}
                             prepared: list[tuple[str, str, int]] = []
                             for name, data in values.items():
                                 temporary = "." + name + "." + os.urandom(12).hex() + ".tmp"
@@ -421,24 +429,24 @@ class AuditWriter:
                                 os.replace(temporary, name, src_dir_fd=descriptor, dst_dir_fd=descriptor)
                                 temporaries.remove(temporary)
                         else:
-                            for name in ("sensitive-users.txt", "sensitive-users.key"):
+                            for name in (stem + ".txt", stem + ".key"):
                                 if name in existing:
                                     os.unlink(name, dir_fd=descriptor)
                             keep_ignore = any(name != ".gitignore" for name in os.listdir(descriptor))
                             if not keep_ignore and ".gitignore" in existing:
                                 os.unlink(".gitignore", dir_fd=descriptor)
-                    if supplied.addresses:
-                        removed = private_paths if keep_ignore else (*private_paths, "operator-inputs/.gitignore")
-                        for relative in removed:
+                    if entries:
+                        for relative in (*private_paths, "operator-inputs/.gitignore"):
                             self._record_artifact(self.run_dir / relative)
                     else:
-                        for relative in (*private_paths, "operator-inputs/.gitignore"):
+                        removed = private_paths if keep_ignore else (*private_paths, "operator-inputs/.gitignore")
+                        for relative in removed:
                             self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != relative]
                     self._manifest["operator_inputs"] = {
-                        **self._manifest.get("operator_inputs", {}), "sensitive_users": supplied.manifest(key),
+                        **self._manifest.get("operator_inputs", {}), stem.replace("-", "_"): supplied.manifest(key),
                     }
                     redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
-                    self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if supplied.addresses else [])
+                    self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if entries else [])
                     if manifest_exists:
                         write_private_text(self.run_dir / "run-manifest.json", json.dumps(self._manifest, indent=2))
             except (OSError, ValueError, TypeError):
@@ -452,50 +460,8 @@ class AuditWriter:
                             pass
                     os.close(descriptor)
         if failed:
-            raise SensitiveUsersError("Unable to write the private sensitive-users bundle artefact.") from None
-
-    def write_partner_domains(self, supplied: PartnerDomains) -> None:
-        """The sole private copy, outside evidence and report inputs. Replace or clear on resume."""
-        target = self.run_dir / PARTNER_DOMAINS_PATH
-        key_path = self.run_dir / PARTNER_DOMAINS_KEY_PATH
-        private_paths = (PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH)
-        key = b""
-        try:
-            if target.parent.is_symlink():
-                raise OSError("linked operator-input directory")
-            if supplied.domains:
-                self._mkdir_private(target.parent)
-                if key_path.exists() or key_path.is_symlink():
-                    key = read_partner_domains_key(self.run_dir)
-                elif "hmac_sha256" in self._manifest.get("operator_inputs", {}).get("partner_domains", {}):
-                    # Never silently invalidate the previous run's verification key.
-                    raise PartnerDomainsError("The private partner-domains key is missing; unable to resume.")
-                else:
-                    key = secrets.token_bytes(32)
-                write_private_bytes(key_path, key)
-                self._record_artifact(key_path)
-                ignore = target.parent / ".gitignore"
-                write_private_text(ignore, "*\n")
-                self._record_artifact(ignore)
-                write_private_text(target, "\n".join(supplied.domains) + "\n")
-                self._record_artifact(target)
-            else:
-                for relative in private_paths:
-                    (self.run_dir / relative).unlink(missing_ok=True)
-                    self.clear_result_file(relative)
-                if not any(
-                    item.startswith("operator-inputs/") and item not in private_paths
-                    for item in self._manifest.get("redacted_artifacts", [])
-                ):
-                    (target.parent / ".gitignore").unlink(missing_ok=True)
-                    self.clear_result_file("operator-inputs/.gitignore")
-        except OSError:
-            raise PartnerDomainsError("Unable to write the private partner-domains bundle artefact.") from None
-        self._manifest["operator_inputs"] = {
-            **self._manifest.get("operator_inputs", {}), "partner_domains": supplied.manifest(key),
-        }
-        redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
-        self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if supplied.domains else [])
+            error = SensitiveUsersError if stem == "sensitive-users" else PartnerDomainsError
+            raise error(f"Unable to write the private {stem} bundle artefact.") from None
 
     def artifact_paths(self) -> list[str]:
         return list(self._manifest.get("artifacts", []))
