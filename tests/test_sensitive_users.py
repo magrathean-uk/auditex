@@ -706,6 +706,13 @@ def private_config(projection):
     return rule_policy_section(projection, SS21, "scuba_config")
 
 
+def expected_private_config(root, addresses):
+    """SensitiveUsers plus the binding of the same verified snapshot (TargetedUsersCoverageBinding)."""
+    meta = json.loads((root / "run-manifest.json").read_text())["operator_inputs"]["sensitive_users"]
+    return {"SecuritySuite": {SS21: {"SensitiveUsers": list(addresses), "TargetedUsersCoverageBinding": {
+        "input_count": meta["count"], "input_hmac_sha256": meta["hmac_sha256"]}}}}
+
+
 @pytest.mark.parametrize("damage", [
     "missing", "tampered", "count", "bool-count", "hmac", "false", "absent", "bad-shape",
     "bad-metadata", "extra-metadata", "missing-key", "short-key", "directory", "symlink", "parent-symlink",
@@ -879,7 +886,7 @@ def test_rule_input_reads_valid_private_files_once(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "open", capture_open)
     projection = project_run(root)
-    assert private_config(projection) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(CANARIES)}}}
+    assert private_config(projection) == expected_private_config(root, CANARIES)
     assert private_file_opens == ["sensitive-users.txt", "sensitive-users.key"]
 
 
@@ -901,7 +908,7 @@ def test_rule_input_private_capture_ignores_model_budgets_and_never_enters_gate(
         # Avoid raw tenant-policy canaries: this check isolates the operator copy.
         (root / "raw/exchange_policy.json").unlink(missing_ok=True)
         projection = module.project_run(root, redact=redact, max_items=1, max_chars=10)
-        assert private_config(projection) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(addresses)}}}
+        assert private_config(projection) == expected_private_config(root, addresses)
         assert module.policy_section(projection, SS21, "scuba_config") == NOT_COLLECTED
         public = json.dumps([projection, projection.views, projection.report, projection.rule_sections])
         assert all(address not in public for address in addresses)
@@ -1054,16 +1061,20 @@ def test_rule_input_verified_configuration_reaches_every_compatible_vector_cell(
 
 
 def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path, monkeypatch, capsys, caplog):
-    """Test the downstream privacy boundary without pretending collection supplies targets."""
+    """A bound TargetedUsersCoverage establishes met; injected literal targets are ignored and never published."""
     from auditex.model_serving import assess_run
     from auditex.scuba_projection import project_run
     from azure_tenant_audit.model_assessment import validate_assessment
 
     root = rule_input_bundle(tmp_path)
     projection = project_run(root)
-    # Only this constructed rule evidence has targets. The production adapter
-    # deliberately omits them; the separate replay test pins that limitation.
-    projection.rule_sections["anti_phish_policies"][0]["TargetedUsersToProtect"] = list(CANARIES)
+    # The run path never projects literal targets; membership comes from the bound summary collection supplies.
+    meta = json.loads((root / "run-manifest.json").read_text())["operator_inputs"]["sensitive_users"]
+    row = projection.rule_sections["anti_phish_policies"][0]
+    assert row["TargetedUsersCoverage"] == {"version": 1, "state": "not_collected"}
+    row["TargetedUsersToProtect"] = list(CANARIES)
+    row["TargetedUsersCoverage"] = {"version": 1, "state": "known", "input_hmac_sha256": meta["hmac_sha256"],
+                                    "input_count": meta["count"], "protected_nonempty": True, "missing_count": 0}
     monkeypatch.setattr("auditex.model_serving.project_run", lambda *args, **kwargs: projection)
     result = assess_run(root, policies=[SS21])
     validate_assessment(result)
@@ -1073,6 +1084,7 @@ def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path
     public = json.dumps([result, dry, projection, projection.views, projection.report])
     public += captured.out + captured.err + caplog.text
     assert all(address not in public for address in CANARIES)
+    assert meta["hmac_sha256"] not in public and "TargetedUsersCoverage" not in public
     for artifact in root.rglob("*"):
         if artifact.is_file() and artifact.relative_to(root).as_posix() not in {
             BUNDLE_PATH, KEY_PATH, "raw/exchange_policy.json"}:

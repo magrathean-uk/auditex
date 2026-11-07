@@ -47,6 +47,14 @@ CONTRACT = {
     "admin_audit_log_config": ("adminAuditLogConfig", ("Identity", "UnifiedAuditLogIngestionEnabled")),
 }
 LIST_SECTIONS = tuple(CONTRACT)
+UNOBSERVED = {"version": 1, "state": "not_collected"}
+
+
+def rule_rows(section, rows):
+    """Projected rule rows: anti-phish rows also carry a private TargetedUsersCoverage (absent: not_collected)."""
+    if section != "anti_phish_policies":
+        return rows
+    return [{**row, "TargetedUsersCoverage": UNOBSERVED} for row in rows]
 RULE_SECTIONS = tuple(section for section, (_, keys) in CONTRACT.items() if "ExceptIfSentTo" in keys)
 ATP_SECTIONS = ("atp_policy_for_o365", "atp_policy_rules")
 
@@ -168,7 +176,7 @@ def test_round_trip_preserves_rule_rows_and_withholds_model_view(bundle, cases, 
     name, keys = CONTRACT[section]
     rows = cases[name]["good"]
     p = project_run(bundle, redact=False)
-    assert p.rule_sections[section] == [{key: row[key] for key in keys if key in row} for row in rows]
+    assert p.rule_sections[section] == rule_rows(section, [{key: row[key] for key in keys if key in row} for row in rows])
     assert p[section] == NOT_COLLECTED
     assert p.report["sections"][section]["reason"] == "incomplete_shape"
 
@@ -179,10 +187,10 @@ def test_absent_keys_stay_absent_and_null_stays_null(bundle, cases, section):
     absent = deepcopy(cases[name]["absent_exceptif"])
     assert "ExceptIfSentTo" not in absent[0]
     operation(bundle, name, absent)
-    assert project_run(bundle, redact=False).rule_sections[section] == absent
+    assert project_run(bundle, redact=False).rule_sections[section] == rule_rows(section, absent)
     null_row = {key: None for key in keys}
     operation(bundle, name, [null_row])
-    assert project_run(bundle, redact=False).rule_sections[section] == [null_row]
+    assert project_run(bundle, redact=False).rule_sections[section] == rule_rows(section, [null_row])
 
 
 @pytest.mark.parametrize("section", LIST_SECTIONS)
@@ -192,8 +200,8 @@ def test_values_are_not_defaulted_coerced_trimmed_sorted_or_filtered(bundle, sec
     rows = [{key: deepcopy(values[index % len(values)]) for index, key in enumerate(keys)}, {}]
     operation(bundle, name, rows)
     p = project_run(bundle, redact=False)
-    assert p.rule_sections[section] == rows
-    assert canonical(p.rule_sections[section]) == canonical(rows)  # Includes JSON boolean versus number types.
+    assert p.rule_sections[section] == rule_rows(section, rows)
+    assert canonical(p.rule_sections[section]) == canonical(rule_rows(section, rows))  # Includes JSON boolean versus number types.
 
 
 @pytest.mark.parametrize("section", [s for s in LIST_SECTIONS if "State" in CONTRACT[s][1]])
@@ -385,3 +393,34 @@ def test_adapter_copies_nested_values_and_drops_unselected_fields(tmp_path, monk
     assert rows[0]["FileTypes"] == ["exe", "cmd"]
     assert set(projected[0]) == {"Identity", "FileTypes"}
     assert bundle.ignored_fields == {"FreeField"}
+
+
+def test_anti_phish_adapter_keeps_settings_binds_the_summary_and_never_the_target_list(tmp_path, monkeypatch):
+    from auditex.scuba_projection import PrivateSnapshot
+    from azure_tenant_audit.value_rules.defender_targeted_users import COVERAGE_KEY, SensitiveUsersBinding
+
+    leak = "target-leak@example.invalid"
+    digest = "ab" * 32
+    known = {"version": 1, "state": "known", "input_hmac_sha256": digest, "input_count": 2,
+             "protected_nonempty": True, "missing_count": 0}
+    rows = [{"Identity": "Default", "IsDefault": True, "EnableTargetedDomainsProtection": True,
+             "TargetedDomainsToProtect": ["partner.invalid"], "TargetedUsersToProtect": [leak],
+             COVERAGE_KEY: {"version": 1, "state": "unusable", "echo": leak}},
+            {"Identity": "Second", "IsDefault": False, COVERAGE_KEY: known}]
+    bundle = Bundle(tmp_path, 100, 10000, 10)
+    monkeypatch.setattr(bundle, "operation", lambda collector, name: rows)
+    projected = ADAPTERS["anti_phish_policies"](bundle)
+    # SS 2.2-2.4 keep their settings; SS 2.1 gets a minimal unusable proof, never the offending value.
+    assert projected[0] == {"Identity": "Default", "IsDefault": True, "EnableTargetedDomainsProtection": True,
+                            "TargetedDomainsToProtect": ["partner.invalid"], COVERAGE_KEY: {"version": 1, "state": "unusable"}}
+    assert projected[1][COVERAGE_KEY] == {"version": 1, "state": "unusable"}      # nothing verified: unbound
+    assert leak not in repr(projected)
+    assert bundle.ignored_fields == {"TargetedUsersToProtect"}
+    projected[0]["TargetedDomainsToProtect"].append("x")
+    assert rows[0]["TargetedDomainsToProtect"] == ["partner.invalid"]
+    bundle.sensitive_users = PrivateSnapshot(("a@example.invalid", "b@example.invalid"), SensitiveUsersBinding(2, digest), None)
+    bundle.reset()
+    bound = ADAPTERS["anti_phish_policies"](bundle)[1][COVERAGE_KEY]
+    assert bound == known and bound is not known
+    bundle.sensitive_users = PrivateSnapshot(("a@example.invalid", "b@example.invalid"), SensitiveUsersBinding(2, "cd" * 32), None)
+    assert ADAPTERS["anti_phish_policies"](bundle)[1][COVERAGE_KEY] == {"version": 1, "state": "unusable"}
