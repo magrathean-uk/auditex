@@ -233,7 +233,8 @@ def _rows_healthy(rows: list, target_key: str | None) -> bool:
 
 
 def _admit(response: object, target_key: str | None, observed: bool) -> str:
-    if type(response) is not dict or type(observed) is not bool:
+    if (type(response) is not dict or type(observed) is not bool
+            or target_key is not None and type(target_key) is not str):
         return REFUSED
     if any(type(key) is not str for key in response):
         return REFUSED
@@ -288,7 +289,7 @@ def scan_admitted(envelope: object) -> bool:
     other keys are not judged here.
     """
     try:
-        if type(envelope) is not dict:
+        if type(envelope) is not dict or any(type(key) is not str for key in envelope):
             return False
         if any(key in envelope for key in _CHUNK_KEYS):
             return False
