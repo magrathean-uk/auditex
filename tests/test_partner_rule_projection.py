@@ -40,6 +40,16 @@ def bundle(tmp_path, *, users=USERS, domains=DOMAINS, name="partner-rules"):
     return writer.run_dir
 
 
+
+def without_binding(view, root):
+    """SS 2.1's private view also carries the same snapshot's TargetedUsersCoverageBinding (SS 2.1 product)."""
+    block = dict(view["SecuritySuite"][SS21])
+    binding = block.pop("TargetedUsersCoverageBinding")
+    metadata = json.loads((root / "run-manifest.json").read_text())["operator_inputs"]["sensitive_users"]
+    assert binding == {"input_count": metadata["count"], "input_hmac_sha256": metadata["hmac_sha256"]}
+    assert binding["input_count"] == len(USERS)
+    return {"SecuritySuite": {SS21: block}}
+
 def rule_view(projection, policy):
     from auditex.scuba_projection import rule_policy_section
 
@@ -58,8 +68,9 @@ def test_partner_domains_reach_only_the_ss23_rule_view(tmp_path):
 def test_both_inputs_fill_independent_slots(tmp_path):
     from auditex.scuba_projection import project_run
 
-    projection = project_run(bundle(tmp_path))
-    assert rule_view(projection, SS21) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(USERS)}}}
+    root = bundle(tmp_path)
+    projection = project_run(root)
+    assert without_binding(rule_view(projection, SS21), root) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(USERS)}}}
     assert rule_view(projection, SS23) == {"SecuritySuite": {SS23: {"PartnerDomains": list(DOMAINS)}}}
     assert rule_view(projection, SS32) == NOT_COLLECTED
 
@@ -67,8 +78,9 @@ def test_both_inputs_fill_independent_slots(tmp_path):
 def test_absent_partner_domains_leave_ss21_and_ss23_unprojected(tmp_path):
     from auditex.scuba_projection import project_run
 
-    projection = project_run(bundle(tmp_path, domains=()))
-    assert rule_view(projection, SS21) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(USERS)}}}
+    root = bundle(tmp_path, domains=())
+    projection = project_run(root)
+    assert without_binding(rule_view(projection, SS21), root) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(USERS)}}}
     assert rule_view(projection, SS23) == NOT_COLLECTED
 
 
@@ -328,7 +340,7 @@ def test_ss23_decides_independently_beside_sensitive_users(tmp_path):
     write_policy(root)
     projection = project_run(root)
     assert direct_record(projection)["cell"] == "default_qualifies"
-    assert rule_view(projection, SS21) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(USERS)}}}
+    assert without_binding(rule_view(projection, SS21), root) == {"SecuritySuite": {SS21: {"SensitiveUsers": list(USERS)}}}
 
 
 def test_absent_partner_domains_keep_ss23_not_collected(tmp_path, monkeypatch):
