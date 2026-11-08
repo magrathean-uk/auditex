@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DIST_DIR="${1:-${REPO_ROOT}/dist}"
-SMOKE_ROOT="${2:-/tmp/auditex-release-smoke}"
+SMOKE_PARENT="${2:-${TMPDIR:?TMPDIR must be set}/auditex-release-smoke}"
 
 WHEEL_PATH="$(printf '%s\n' "${DIST_DIR}"/*.whl | head -n 1)"
 if [[ ! -f "${WHEEL_PATH}" ]]; then
@@ -13,16 +13,13 @@ if [[ ! -f "${WHEEL_PATH}" ]]; then
   exit 2
 fi
 
-python - "${SMOKE_ROOT}" <<'PY'
-from pathlib import Path
-import shutil
-import sys
-
-root = Path(sys.argv[1])
-if root.exists():
-    shutil.rmtree(root)
-root.mkdir(parents=True, exist_ok=True)
-PY
+SDIST_PATH="$(printf '%s\n' "${DIST_DIR}"/*.tar.gz | head -n 1)"
+if [[ ! -f "${SDIST_PATH}" ]]; then
+  echo "sdist not found under ${DIST_DIR}" >&2
+  exit 2
+fi
+mkdir -p "${SMOKE_PARENT}"
+SMOKE_ROOT="$(mktemp -d "${SMOKE_PARENT}/run.XXXXXX")"
 
 create_venv() {
   local name="$1"
@@ -37,18 +34,20 @@ deactivate_venv() {
   deactivate >/dev/null 2>&1 || true
 }
 
-create_venv base
-python -m pip install "${WHEEL_PATH}" >/dev/null
+for kind in wheel sdist; do
+if [[ "${kind}" == wheel ]]; then artifact="${WHEEL_PATH}"; else artifact="${SDIST_PATH}"; fi
+create_venv "${kind}-base"
+python -m pip install "${artifact}" >/dev/null
 auditex --help >/dev/null
 auditex run --offline \
   --sample "${REPO_ROOT}/examples/sample_audit_bundle/sample_result.json" \
   --tenant-name ci \
   --run-name release-smoke \
-  --out "${SMOKE_ROOT}/base-output" >/dev/null
+  --out "${SMOKE_ROOT}/${kind}-base-output" >/dev/null
 deactivate_venv
 
-create_venv google
-python -m pip install "${WHEEL_PATH}[google]" >/dev/null
+create_venv "${kind}-google"
+python -m pip install "${artifact}[google]" >/dev/null
 python - <<'PY'
 import json
 import subprocess
@@ -63,13 +62,15 @@ assert payload["dependencies"]["available"] is True, payload
 PY
 deactivate_venv
 
-create_venv mcp
-python -m pip install "${WHEEL_PATH}[mcp]" >/dev/null
+create_venv "${kind}-mcp"
+python -m pip install "${artifact}[mcp]" >/dev/null
 python - <<'PY'
 from mcp.server.fastmcp import FastMCP
 
 assert FastMCP is not None
 PY
 deactivate_venv
+
+done
 
 echo "release smoke ok"

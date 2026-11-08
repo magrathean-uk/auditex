@@ -269,9 +269,11 @@ def test_release_smoke_script_covers_base_google_and_mcp_matrix() -> None:
     source = Path("scripts/release-smoke.sh").read_text(encoding="utf-8")
 
     assert "auditex run --offline" in source
-    assert "\"${WHEEL_PATH}[google]\"" in source
+    assert "\"${artifact}[google]\"" in source
     assert "\"auditex\", \"google\", \"doctor\", \"--json\"" in source
-    assert "\"${WHEEL_PATH}[mcp]\"" in source
+    assert "\"${artifact}[mcp]\"" in source
+    assert "for kind in wheel sdist" in source
+    assert "SDIST_PATH" in source
     assert "from mcp.server.fastmcp import FastMCP" in source
 
 
