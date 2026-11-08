@@ -4,7 +4,8 @@
   "enabled": true,
   "heavy": false,
   "buildDirs": [
-    "build"
+    "build",
+    "dist"
   ],
   "depDirs": [
     ".venv"

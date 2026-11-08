@@ -50,8 +50,15 @@ release-check:
 	$(MAKE) lint
 	$(MAKE) test
 	$(MAKE) contract-smoke
+	$(MAKE) release-archive
+	$(PYTHON) scripts/generate-rule-packs.py --check
+	./scripts/oss-taint-scan.sh
+	gitleaks dir . --no-banner --redact
+
+.PHONY: release-archive
+release-archive:
 	@set -eu; \
-		dir=$$(mktemp -d "$$TMPDIR/auditex-archive.XXXXXX"); \
+		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-archive.XXXXXX"); \
 		trap 'rm -rf "$$dir"' 0; \
 		trap 'exit 1' HUP INT TERM; \
 		git archive HEAD > "$$dir/source.tar"; \
@@ -63,9 +70,23 @@ release-check:
 		tar -xf "$$dir/source.tar" -C "$$dir/source"; \
 		$(PYTHON) -m pip wheel --no-deps --no-build-isolation --no-index --wheel-dir "$$dir/wheel" "$$dir/source"; \
 		$(PYTHON) scripts/check-archive-wheel.py "$$dir/source/src" "$$dir"/wheel/*.whl
-	$(PYTHON) scripts/generate-rule-packs.py --check
-	./scripts/oss-taint-scan.sh
-	gitleaks dir . --no-banner --redact
+
+.PHONY: dist
+dist:
+	@set -eu; \
+		dir=$$(mktemp -d "$${TMPDIR:-/tmp}/auditex-dist.XXXXXX"); \
+		trap 'rm -rf "$$dir"' 0; \
+		trap 'exit 1' HUP INT TERM; \
+		git archive HEAD > "$$dir/source.tar"; \
+		mkdir "$$dir/source" "$$dir/artifacts"; \
+		tar -xf "$$dir/source.tar" -C "$$dir/source"; \
+		cd "$$dir/source"; \
+		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_sdist(sys.argv[1])' "$$dir/artifacts"; \
+		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_wheel(sys.argv[1])' "$$dir/artifacts"; \
+		set -- "$$dir"/artifacts/*.whl; test -f "$$1"; \
+		set -- "$$dir"/artifacts/*.tar.gz; test -f "$$1"; \
+		mkdir -p "$(CURDIR)/dist"; \
+		cp "$$dir"/artifacts/*.whl "$$dir"/artifacts/*.tar.gz "$(CURDIR)/dist/"
 
 .PHONY: contract-smoke
 contract-smoke:

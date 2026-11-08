@@ -6,6 +6,7 @@ audit-output/
 operator-inputs/
 outputs/
 build/
+dist/
 .secrets/
 *.tar.gz
 tenant-bootstrap/runs/
