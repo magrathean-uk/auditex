@@ -1,0 +1,9 @@
+## RESULT M01-T10
+status: done
+summary: Review item 1 (P2) fixed: `minimising_chunk_writer` now returns a callable wrapper class that strips `payload` and passes the writer's other attributes through, so `discard` reaches the real writer. A plain callback still has no `discard`.
+Added a regression test through both collectors using the real `AuditWriter` and its rollback, with an `IncompleteEvidence` stop on page 2. It checks no deviceConfigurations chunk files or manifest entries are left. It fails with the old closure and passes with the fix. Also added a unit test for the `discard` pass-through.
+Criteria, all met: G10 dependency; minimiser called from both collectors, with the unused `payloadName` and `payloadFileName` dropped; sentinel absent from raw, normalised and bundle output, and Intune rule results unchanged on the fixtures; `_TEXT_EXPOSURES` row G10 says "discarded after receipt" and names the minimiser; the read itself is unchanged.
+changes: src/azure_tenant_audit/data_minimisation.py, tests/test_data_minimisation.py, tests/test_intune_endpoint_collector.py (commit 8ca7e71 on task/M01-T10-strip-intune-payload; earlier commits 9cd1c8a and e53797b also touch intune.py, intune_depth.py and test_read_boundaries.py)
+verification: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_data_minimisation.py tests/test_intune_endpoint_collector.py tests/test_collection_coverage_fixes.py` PASS (exit 0); `make contract-smoke` PASS (exit 0, bundle seal verified); new rollback test run against the old closure FAIL as expected; `git status --porcelain` empty
+risks: The collector test imports the private `collector_runner._ChunkRecordWriter` so it exercises real rollback; renaming that class will break the test. The wrapper hands every public attribute through to the wrapped writer, so any attribute a future writer adds will also show through the wrapper.
+questions_for_g: none

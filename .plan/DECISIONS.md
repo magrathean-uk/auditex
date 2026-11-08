@@ -108,3 +108,12 @@
 - why: request-level exclusion is the stricter boundary and the derived lengths are informational.
 - consequences: a small change to Google live evidence fields, to be listed in the 1.3.0 release notes.
 - approver: auto
+
+## DEC-013 Gate-run failure fix added to M00
+- date: 2026-11-08
+- status: approved
+- decision: M00-T06 (sol) diagnoses and fixes `tests/test_explainer_integration.py::test_installed_wheel_resources_offline`, the single failure in the first full gate run (23,183 passed). M00-T01 reruns the gate chain after the remaining M01 merges.
+- options: fix now | defer to the release gate
+- why: it may hide a wheel-packaging defect in 1.3.0 and it blocks the release-check DoD item.
+- consequences: no weight or DoD change.
+- approver: auto

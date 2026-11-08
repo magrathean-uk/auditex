@@ -89,3 +89,29 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T15:24:18Z	M01-T08	terra	claude-4	claude-sonnet-5-5	low	branch	0	47	0.2329	done	task/M01-T08-drop-disclaimer-text
 2026-11-08T15:24:43Z	M01-T11	terra	claude-1	claude-sonnet-5-5	low	branch	1	72	0.2796	partial	task/M01-T11-drop-gmail-sharing-scope
 2026-11-08T15:24:48Z	M01-T12	codex	codex	gpt-6.1-terra	medium	branch	0	77		done	task/M01-T12-guard-content-cmdlets
+2026-11-08T15:26:29Z	M01-T07	codex	codex2	gpt-6.1-terra	low	branch	2	31		blocked	task/M01-T07-gmail-fields-masks
+2026-11-08T15:26:34Z	M01-T11	terra	claude-4	claude-sonnet-5-5	low	branch	0	36	0.1631	done	task/M01-T11-drop-gmail-sharing-scope
+2026-11-08T15:26:42Z	REV-M01-T12	terra	claude-5	claude-sonnet-5-5	high	readonly	0	44	0.2852	done	task/M01-T12-guard-content-cmdlets
+2026-11-08T15:27:22Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	83	0.0217	partial	e99d2d4
+2026-11-08T15:27:57Z	REV-M01-T08	codex	codex	gpt-6.1-sol	high	readonly	0	119		done	task/M01-T08-drop-disclaimer-text
+2026-11-08T15:29:58Z	M01-T10	terra	claude-1	claude-sonnet-5-5	low	branch	0	240	0.3749	done	task/M01-T10-strip-intune-payload
+2026-11-08T15:32:31Z	M01-T12	codex	codex2	gpt-6.1-terra	medium	branch	1	76		partial	task/M01-T12-guard-content-cmdlets
+2026-11-08T15:32:40Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	86	0.0222	partial	dfd169b
+2026-11-08T15:32:47Z	REV-M01-T11	codex	codex	gpt-6.1-sol	high	readonly	0	93		done	task/M01-T11-drop-gmail-sharing-scope
+2026-11-08T15:33:44Z	M01-T07	terra	claude-4	claude-sonnet-5-5	low	branch	0	150	0.4604	done	task/M01-T07-gmail-fields-masks
+2026-11-08T15:34:04Z	REV-M01-T10	codex	codex2	gpt-6.1-sol	high	readonly	0	170		done	task/M01-T10-strip-intune-payload
+2026-11-08T15:36:10Z	REV-M01-T12	terra	claude-1	claude-sonnet-5-5	high	readonly	0	70	0.3195	done	task/M01-T12-guard-content-cmdlets
+2026-11-08T15:36:23Z	M01-T10	terra	claude-4	claude-sonnet-5-5	low	branch	0	83	0.3187	done	task/M01-T10-strip-intune-payload
+2026-11-08T15:36:26Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	86	0.0234	partial	0a73759
+2026-11-08T15:37:08Z	REV-M01-T07	codex	codex2	gpt-6.1-sol	high	readonly	0	128		done	task/M01-T07-gmail-fields-masks
+2026-11-08T15:38:20Z	M01-T07	terra	claude-4	claude-sonnet-5-5	low	branch	0	48	0.1820	done	task/M01-T07-gmail-fields-masks
+2026-11-08T15:38:26Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	53	0.0149	partial	0a73759
+2026-11-08T15:39:25Z	REV-M01-T10	codex	codex2	gpt-6.1-sol	high	readonly	0	112		done	task/M01-T10-strip-intune-payload
+2026-11-08T15:50:40Z	M01-T12	sol	claude-1	claude-opus-5-5	high	branch	0	787	0.9569	done	task/M01-T12-guard-content-cmdlets
+2026-11-08T15:52:40Z	M01-T10	sol	claude-4	claude-opus-5-5	high	branch	0	90	0.6759	done	task/M01-T10-strip-intune-payload
+2026-11-08T15:52:47Z	REV-M01-T07	codex	codex2	gpt-6.1-sol	high	readonly	0	97		done	task/M01-T07-gmail-fields-masks
+2026-11-08T15:52:48Z	REV-M01-T12	codex	codex	gpt-6.1-sol	high	readonly	0	98		done	task/M01-T12-guard-content-cmdlets
+2026-11-08T16:26:59Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	2149	0.0201	partial	0a73759
+2026-11-08T16:29:35Z	M01-T09	terra	claude-4	claude-sonnet-5-5	low	branch	0	53	0.2503	done	task/M01-T09-alerts-groups-masks
+2026-11-08T16:30:13Z	REV-M01-T10	codex	codex2	gpt-6.1-sol	high	readonly	0	91		done	task/M01-T10-strip-intune-payload
+2026-11-08T16:30:15Z	M00-T06	sol	claude-1	claude-opus-5-5	high	branch	0	93	0.6249	done	task/M00-T06-wheel-resources-test

@@ -31,6 +31,7 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 | M00-T03 | Add a dependency audit over the base install and every extra | codex | M | - | done |
 | M00-T04 | Triage unmerged wt branches for 1.3.0 content | luna | M | - | done |
 | M00-T05 | Extend the release smoke to the sdist and add a reproducible-build check | codex | M | - | done |
+| M00-T06 | Fix the failing installed-wheel resources test | sol | S | debug | todo |
 
 ## Acceptance criteria
 ### M00-T01 Re-run the gate suite on main after the foundation merges
@@ -71,3 +72,10 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 - `scripts/check-reproducible-build.py` exports the current commit twice with `git archive` into fresh directories under `$TMPDIR`, builds each with `SOURCE_DATE_EPOCH` set to the commit time, and passes only when the two wheels are byte-identical (same sha256) and the two sdists hold the same sorted member list with the same sha256 per member; it prints the artefact names and hashes.
 - verify: `make dist && bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke" && .venv/bin/python scripts/check-reproducible-build.py`
 - files: `scripts/release-smoke.sh`, `scripts/check-reproducible-build.py`, `tests/test_check_reproducible_build.py`
+
+### M00-T06 Fix the failing installed-wheel resources test
+- `tests/test_explainer_integration.py::test_installed_wheel_resources_offline` failed in the M00-T01 gate run on 0a73759 (23,183 passed, 1 failed; log `.plan/work/M00-T01/gate-1-release-check/log.txt` near line 409): one resource adapter did not resolve as "installed".
+- Diagnose whether the cause is a packaging defect (a resource missing from the wheel, or the loader preferring the source tree) or the gate environment (worktree, linked .venv, PYTHONPATH). Fix a packaging defect at its source; for an environment cause, make the test robust to it without weakening what it proves, and record the cause in notes.
+- The whole test file passes and no other test changes behaviour.
+- verify: `.venv/bin/python -m pytest tests/test_explainer_integration.py`
+- files: `tests/test_explainer_integration.py`, `pyproject.toml`, `src/auditex/shipped_content.py`, and the resource loader module the diagnosis names (listed under changes)

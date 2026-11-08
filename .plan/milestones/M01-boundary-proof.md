@@ -29,11 +29,11 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 | M01-T05 | Align MCP and privacy docs with the registry | terra | S | - | done |
 | M01-T06 | Classify shipped model-development example rows | luna | S | - | done |
 | M01-T07 | Add Gmail settings fields masks (G1, G2, G5) | codex | S | tier-a | todo |
-| M01-T08 | Stop collecting ApplyHtmlDisclaimerText (G6) | terra | S | tier-a | todo |
+| M01-T08 | Stop collecting ApplyHtmlDisclaimerText (G6) | terra | S | tier-a | done |
 | M01-T09 | Add fields masks to alerts.list and groups.get (G8, G9) | codex | S | tier-a | todo |
-| M01-T10 | Strip the Intune custom-profile payload after receipt (G10) | terra | S | tier-a | todo |
-| M01-T11 | Drop the unused gmail.settings.sharing scope | terra | S | tier-a | todo |
-| M01-T12 | Make the runtime read guard refuse content cmdlets | codex | M | tier-a | todo |
+| M01-T10 | Strip the Intune custom-profile payload after receipt (G10) | terra | S | tier-a | done |
+| M01-T11 | Drop the unused gmail.settings.sharing scope | terra | S | tier-a | done |
+| M01-T12 | Make the runtime read guard refuse content cmdlets | codex | M | tier-a | done |
 
 ## Acceptance criteria
 ### M01-T01 Close secret-flag redaction gaps across all parsers
@@ -91,7 +91,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 - The normalised Gmail output (including the derived `...Length` and `has...` flags) is byte-identical to before on the existing fixtures.
 - Amended by DEC-012: excluded text no longer feeds live output, so the length fields derived from it are dropped; presence stays only where a non-text field reports it; offline fixtures and the contract are updated to match; if a value rule reads a dropped field, stop and report under questions_for_g.
 - verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_google_workspace.py tests/test_google_collection_gaps.py tests/test_data_minimisation.py tests/test_google_parity.py`
-- files: `src/auditex/google_workspace/client.py`, `tests/test_google_workspace.py`, `tests/test_read_boundaries.py`
+- files: `src/auditex/google_workspace/client.py`, `tests/test_google_workspace.py`, `tests/test_read_boundaries.py`, `src/azure_tenant_audit/data_minimisation.py`, the affected offline fixtures and tests, `docs/reference/output-contract.md` (DEC-012 consequences only)
 
 ### M01-T08 Stop collecting ApplyHtmlDisclaimerText (G6)
 - Dependencies: M01-T04 merged.
