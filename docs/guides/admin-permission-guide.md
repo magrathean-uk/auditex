@@ -367,9 +367,10 @@ this opt-in. Missing optional sections on a run with a known collector selection
 `optional_collection_not_enabled`; unknown selection and selected-collector failures retain their
 existing reasons. The [output contract](../reference/output-contract.md) defines the exact conditions.
 
-Prerequisite reference: ScubaGear revision `2446ad723b7f55031cc02c8aca244d731d468cba`,
-`docs/prerequisites/noninteractive.md` (Power BI tenant setting and Power Platform
-registration) and `interactive.md` (operator roles, licences and prior portal sign-in).
+Prerequisite reference: ScubaGear revision `2446ad723b7f55031cc02c8aca244d731d468cba`.
+The Power BI tenant setting and Power Platform registration it requires for app-only runs
+are described in [Power Platform and Power BI (optional)](#power-platform-and-power-bi-optional);
+operator roles, licences and prior portal sign-in are described there too.
 
 ### Teams policy reads in app-only runs
 

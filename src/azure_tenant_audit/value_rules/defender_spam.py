@@ -3,7 +3,7 @@
 Strict, Standard, custom and Default tiers are judged until a covering tier
 shields those below it. Custom precedence that cannot be established remains
 not assessed; list order does not stand in for missing Priority.
-These kinds are registered but their policy rows are held until P4 lands.
+The policy rows for these kinds are enabled in configs/scuba-value-rules.json.
 """
 from __future__ import annotations
 
