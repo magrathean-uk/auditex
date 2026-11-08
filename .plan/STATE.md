@@ -1,15 +1,15 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 78% (was 70%)
-milestone: M03-release-1-3-0 27%
+overall: 84% (was 78%)
+milestone: M03-release-1-3-0 45%
 plan_version: v2
 release_scope: 1.3.0 from the accepted line (main contains origin/main 82d7ca5) - reproducible local gates, test-proven transport, read and secret boundaries, accurate docs, release notes with the D6 limit, signed v1.3.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: d9f050f 2026-11-08T17:19:49Z
+last_checkpoint: 94889e5 2026-11-08T20:59:55Z
 
 ## Next tasks
 - M03-T02 Run the acceptance suites on the release commit (luna)
-- M03-T03 Build, smoke-test and hash the release artefacts (luna)
 - M03-T04 Pre-publication release gate validation (astra)
+- M03-T05 Tag and publish 1.3.0 after G's yes (orchestrator)
 
 ## Blockers
 - none
@@ -23,12 +23,12 @@ last_checkpoint: d9f050f 2026-11-08T17:19:49Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 84% orchestrator
-claude-1 64% ok
-claude-2 5% shared
+claude 85% orchestrator
+claude-1 67% ok
+claude-2 8% shared
 claude-3 - unknown:collector
-claude-4 51% ok
-claude-5 63% ok
-codex 56% ok
-codex2 10% ok
+claude-4 54% ok
+claude-5 66% ok
+codex 60% ok
+codex2 12% ok
 <!-- quota:end -->

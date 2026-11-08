@@ -135,3 +135,12 @@
 - why: a removal after release breaks consumers who parse the bundle; the version is how they detect it.
 - consequences: contract-smoke and the contract tests must pass under the new version; compare and drift across versions must still work.
 - approver: auto
+
+## DEC-016 Release gates may run alongside other projects' heavy jobs
+- date: 2026-11-08
+- status: approved
+- decision: Auditex's 1.3.0 release gates (M03-T02, M03-T03 and their reruns) start even while another project's heavy jobs run (WGEX's tart VM and builds at load about 20). Auditex still runs only one heavy job of its own at a time and stops nothing it did not start.
+- options: run alongside | wait for WGEX to go idle | G pauses WGEX for a window
+- why: the release was blocked on another project's continuous load; results stay valid, only slower, and a timing-sensitive flake is re-run.
+- consequences: gate timing is slower; any failure is checked for load sensitivity before it counts.
+- approver: G

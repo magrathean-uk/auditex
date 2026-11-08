@@ -135,3 +135,8 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T17:17:42Z	REV-M03-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	103		done	task/M03-T01-release-notes
 2026-11-08T17:18:28Z	M03-T01	terra	claude-4	claude-sonnet-5-5	low	branch	0	22	0.1506	done	task/M03-T01-release-notes
 2026-11-08T17:18:53Z	REV-M03-T01	codex	codex2	gpt-6.1-sol	low	readonly	0	24		done	task/M03-T01-release-notes
+2026-11-08T17:20:14Z	M03-T02	luna	claude-2	claude-haiku-5-5	medium	readonly	2	21	0.0071	blocked	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
+2026-11-08T17:20:39Z	M03-T03	luna	claude-2	claude-haiku-5-5	medium	readonly	2	23	0.0081	blocked	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
+2026-11-08T20:47:34Z	M03-T02	luna	claude-2	claude-haiku-5-5	medium	readonly	0	1204	0.0273	done	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
+2026-11-08T20:48:58Z	M03-T03	luna	claude-2	claude-haiku-5-5	medium	readonly	0	83	0.0160	done	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
+2026-11-08T20:58:37Z	M03-T02	luna	claude-2	claude-haiku-5-5	medium	readonly	2	551	0.0172	blocked	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
