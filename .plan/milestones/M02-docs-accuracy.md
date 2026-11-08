@@ -13,8 +13,8 @@ The README, guides, reference docs and runbook describe 1.3.0 exactly as the cod
 ## Definition of Done
 - [ ] No first-party public doc (every tracked `*.md` outside `tenant-bootstrap/vendor/`, `tests/` and `.plan/`) names a repository path or relative link that does not exist, and the only exemption left in the test is the reasoned `tests/providers/m365` entry: `.venv/bin/python -m pytest tests/test_docs_paths.py && ! grep -n 'third-party-notices' tests/test_docs_paths.py`
 - [ ] Review: G approved the exact text of the `docs/legal/third-party-notices.md` path correction drafted in M02-T06 (DEC-003) and M02-T07 merged it verbatim, so the notice names the tracked vendored path `grep -n 'tenant-bootstrap/vendor/microsoft-skills/skills/mcp-builder/scripts/requirements.txt' docs/legal/third-party-notices.md && ! grep -n -E '(^|[^/])skills/mcp-builder/scripts/requirements.txt' docs/legal/third-party-notices.md`
-- [ ] Review: terra read-through confirms every explainer mention describes the template explainer as shipped and the model explainer as parked `git grep -n -i explainer -- README.md docs/guides docs/reference`
-- [ ] Review: the README carries the current coverage split from `wt/docs-rules-and-scan-limits` (fe78ee1), reconciled with the merged behaviour, with no unsupported coverage figure `git show fe78ee1 -- README.md`
+- [x] Review: terra read-through confirms every explainer mention describes the template explainer as shipped and the model explainer as parked `git grep -n -i explainer -- README.md docs/guides docs/reference` (evidence: M02-T03 terra read-through and grep, squash 340552f; REV-M02-T03 codex approve at 1990223)
+- [x] Review: the README carries the current coverage split from `wt/docs-rules-and-scan-limits` (fe78ee1), reconciled with the merged behaviour, with no unsupported coverage figure `git show fe78ee1 -- README.md` (evidence: M02-T02 terra found nothing in fe78ee1 that the criteria allow; REV-M02-T02 codex approve at 27759ed)
 - [ ] Review: the runbook lists every `release-check` step, the `release-archive`, `dist`, `audit-deps` targets, the sdist smoke and reproducible-build check, the planned publication steps, and links the internal ScubaGear export adapter doc `grep -n -e release-archive -e audit-deps -e 'make dist' -e check-reproducible-build -e 'gh release' -e scubagear-export-adapter docs/development/runbook.md`
 - [x] No doc claims SCuBA Google Workspace baseline coverage: `! git grep -q -i -E 'MS\.GWS|GWS\.[A-Z]+\.[0-9]|scuba (gws|google)' -- README.md docs` (evidence: that command passed at 3122ac5, .plan/work/PLAN-v2/evidence.md)
 - [x] Review: Power BI and Power Platform collection is documented as extended scope, off by default, with the write-capable roles used read-only and their blast radius `grep -n -e 'off by default' -e 'write-capable admin role used read-only' docs/guides/admin-permission-guide.md` (evidence: docs/guides/admin-permission-guide.md:284 and :320 at 3122ac5)
@@ -24,10 +24,10 @@ The README, guides, reference docs and runbook describe 1.3.0 exactly as the cod
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M02-T01 | Fix the dead admin-guide reference and stale status comments | terra | S | mechanical | done |
-| M02-T02 | Reconcile the coverage-split README branch | terra | S | - | todo |
-| M02-T03 | Describe the shipped template explainer consistently | terra | M | - | todo |
+| M02-T02 | Reconcile the coverage-split README branch | terra | S | - | done |
+| M02-T03 | Describe the shipped template explainer consistently | terra | M | - | done |
 | M02-T04 | Bring the runbook in line with the gates and publication | terra | S | - | todo |
-| M02-T05 | Add a public-doc path test | codex | S | - | todo |
+| M02-T05 | Add a public-doc path test | codex | S | - | done |
 | M02-T06 | Draft the third-party notice path correction for G | terra | S | - | todo |
 | M02-T07 | Apply G's approved notice text and drop its test exemption | terra | S | mechanical | todo |
 

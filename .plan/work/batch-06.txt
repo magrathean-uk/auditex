@@ -1,0 +1,4 @@
+--task REV-M01-T02 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M01-T02/request-3.md --readonly --tags debug
+--task M00-T03 --role terra --template terra-implement --branch --slug audit-deps --var TITLE="Add a dependency audit over the base install and every extra" --var MILESTONE=.plan/milestones/M00-foundation.md --var FILES="Makefile, pyproject.toml, .gitignore, .clean-development.json, scripts/audit-deps-ignore.json (only if an advisory is accepted; kept out of configs/ so shipped content is unchanged)"
+--task REV-M00-T05 --role terra --template sol-review --readonly --sha task/M00-T05-sdist-repro --tags debug --var TASK=M00-T05 --var MILESTONE=.plan/milestones/M00-foundation.md --var BRANCH=task/M00-T05-sdist-repro --var BASE=main
+--task M02-T07 --role terra --brief .plan/work/M02-T07/request.md --branch --slug legal-notice --tags size:S,mechanical

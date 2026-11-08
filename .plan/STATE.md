@@ -1,15 +1,15 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 19% (was 9%)
-milestone: M00-foundation 27%
+overall: 30% (was 19%)
+milestone: M00-foundation 36%
 plan_version: v2
 release_scope: 1.3.0 from the accepted line (main contains origin/main 82d7ca5) - reproducible local gates, test-proven transport, read and secret boundaries, accurate docs, release notes with the D6 limit, signed v1.3.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 27759ed 2026-11-08T11:44:01Z
+last_checkpoint: ec7c3a9 2026-11-08T11:50:19Z
 
 ## Next tasks
 - M00-T01 Re-run the gate suite on main after the foundation merges (luna)
-- M00-T02 Make the release archive and dist build TMPDIR-safe make targets (codex)
 - M00-T03 Add a dependency audit over the base install and every extra (codex)
+- M00-T05 Extend the release smoke to the sdist and add a reproducible-build check (codex)
 
 ## Blockers
 - none
@@ -25,10 +25,10 @@ last_checkpoint: 27759ed 2026-11-08T11:44:01Z
 <!-- quota:begin -->
 claude 84% orchestrator
 claude-1 58% ok
-claude-2 0% shared
+claude-2 2% shared
 claude-3 69% ok
 claude-4 44% ok
-claude-5 60% ok
-codex 50% ok
+claude-5 61% ok
+codex 51% ok
 codex2 7% ok
 <!-- quota:end -->

@@ -41,3 +41,15 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T11:40:01Z	REV-M02-T01	codex	codex	gpt-6.1-sol	high	readonly	0	75		done	task/M02-T01-admin-guide-ref
 2026-11-08T11:40:07Z	M01-T02	terra	claude-4	claude-sonnet-5-5	medium	readonly	0	81	0.3444	done	dd55f15
 2026-11-08T11:42:04Z	REV-M01-T01	sol	claude-1	claude-opus-5-5	high	readonly	0	198	1.2138	done	task/M01-T01-secret-flag-redaction
+2026-11-08T11:44:32Z	REV-M02-T03	codex	codex2	gpt-6.1-sol	high	readonly	0	57		done	task/M02-T03-explainer-docs
+2026-11-08T11:44:36Z	REV-M00-T02	terra	claude-4	claude-sonnet-5-5	high	readonly	0	61	0.2560	done	task/M00-T02-tmpdir-safe-make
+2026-11-08T11:44:58Z	REV-M02-T02	codex	codex	gpt-6.1-sol	high	readonly	0	83		done	27759ed
+2026-11-08T11:44:58Z	REV-M01-T05	codex	codex	gpt-6.1-sol	high	readonly	0	83		done	task/M01-T05-mcp-privacy-docs
+2026-11-08T11:45:37Z	M02-T05	codex	codex2	gpt-6.1-terra	low	branch	1	79		partial	task/M02-T05-docs-path-test
+2026-11-08T11:46:16Z	REV-M01-T02	codex	codex2	gpt-6.1-sol	high	readonly	0	161		done	27759ed
+2026-11-08T11:46:59Z	REV-M02-T05	terra	claude-4	claude-sonnet-5-5	high	readonly	0	67	0.2023	done	task/M02-T05-docs-path-test
+2026-11-08T11:47:50Z	M02-T05	codex	codex2	gpt-6.1-terra	low	branch	1	34		partial	task/M02-T05-docs-path-test
+2026-11-08T11:47:54Z	M00-T03	codex	codex2	gpt-6.1-terra	medium	branch	1	35		partial	task/M00-T03-audit-deps
+2026-11-08T11:48:35Z	M00-T05	codex	codex	gpt-6.1-terra	medium	branch	1	76		partial	task/M00-T05-sdist-repro
+2026-11-08T11:48:43Z	REV-M02-T05	terra	claude-4	claude-sonnet-5-5	high	readonly	0	41	0.1741	done	task/M02-T05-docs-path-test
+2026-11-08T11:48:50Z	M01-T02	sol	claude-4	claude-opus-5-5	high	readonly	0	92	0.6827	done	340552f
