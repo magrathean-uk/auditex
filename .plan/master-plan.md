@@ -69,8 +69,8 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 <!-- milestones:begin -->
 | id | name | weight | % | status |
 |---|---|---|---|---|
-| M00 | foundation | 20 | 36 | active |
-| M01 | boundary-proof | 30 | 43 | planned |
+| M00 | foundation | 20 | 45 | active |
+| M01 | boundary-proof | 30 | 57 | planned |
 | M02 | docs-accuracy | 20 | 75 | planned |
 | M03 | release-1-3-0 | 30 | 0 | planned |
 <!-- milestones:end -->

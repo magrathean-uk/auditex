@@ -1,38 +1,36 @@
 ## RESULT REV-M00-T05
 status: done
 summary:
-verdict: changes-required
-reviewed: 1d80d94bddd7f2d29ba4267473efdf9ab411f00b
-The smoke script now covers wheel and sdist, and the reproducible-build check passes. The change breaks `tests/test_architecture_modules.py::test_release_smoke_script_covers_base_google_and_mcp_matrix`, and the smoke run itself was not run.
-changes: none (evidence at .plan/work/REV-M00-T05/evidence.md)
+verdict: approve
+reviewed: 00afb73c95e7a1d18065c67a7372fc59dc90cd92
+Both criteria met. Round 1's test regression is fixed at tests/test_architecture_modules.py:272-276. Repro check passes on two clean builds (wheel sha256 identical, sdist members identical). Focused tests pass (36). The release smoke could not run under the brief (needs network), so it relies on the author's green run.
+changes: .plan/work/REV-M00-T05/evidence.md (round 2 section appended)
 verification:
-- `.venv/bin/python scripts/check-reproducible-build.py`: pass. The two wheels are byte-identical and the two sdists have equal member lists and per-member hashes.
-- `pytest tests/test_check_reproducible_build.py tests/test_architecture_modules.py`: FAIL, 1 failure (details below). The new test passes.
-- `bash -n` and `shellcheck` on `scripts/release-smoke.sh`: pass (shellcheck raised only the SC1091 info note).
-- `make dist && bash scripts/release-smoke.sh ...`: not run. The smoke script creates venvs and pip-installs, which needs network.
+- `pytest tests/test_check_reproducible_build.py tests/test_architecture_modules.py`: pass, 36 passed
+- `<main .venv python> scripts/check-reproducible-build.py`: pass, "reproducible build ok", wheel e062f926...92a3 both builds
+- `bash -n scripts/release-smoke.sh`: pass
+- `make dist`: not run, because it writes dist/ into the read-only worktree, which has no .venv. The repro script exercises the same build_meta path.
+- `bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke"`: not runnable here, because the venvs pip-install pip and the extras from the index (network). The author reports it green for wheel and sdist.
 risks:
-- The smoke script is unexecuted: the sdist `${artifact}[extra]` installs and the six-install matrix are untested, so `merge.sh --verify` is the real gate.
-- The author's result.md reports status partial and says verification failed at `make dist`.
+- Release smoke not run independently. `merge.sh --verify` is the gate for it.
+- scripts/check-reproducible-build.py:41 uses `extractall(filter='data')`, which needs Python 3.11.4 or later; the project floor is 3.11.
+- Every smoke run leaves a run.XXXXXX directory under the smoke parent. docs/development/runbook.md:101 still shows the fixed /tmp path.
 questions_for_g: none
-
 ### Findings
 Criteria:
-1. Smoke script installs wheel and sdist for base, google and mcp, with the existing checks on each. Met on reading, but not runnable here. `scripts/release-smoke.sh:37-73`.
-2. Smoke default root is under `$TMPDIR`, not a fixed `/tmp`. Met. `scripts/release-smoke.sh:8`, with `mktemp -d` at line 22.
-3. Reproducible-build check: two `git archive` exports under `$TMPDIR`, `SOURCE_DATE_EPOCH` set to the commit time, wheel sha256 compared, sdist member list and per-member hashes compared, names and hashes printed. Met. `scripts/check-reproducible-build.py:37-70`, and it ran green.
-4. Verify command: the reproducible-build part passes; the smoke and `make dist` parts are not runnable (see risks).
-5. Files line: all three changed paths match (`release-smoke.sh`, `check-reproducible-build.py`, `test_check_reproducible_build.py`). No scope creep.
-6. DoD item "Wheel and sdist each pass the base, Google and MCP release smoke, and two clean builds ...": not yet closable. The smoke part is unverified.
-
-Required changes:
-1. `scripts/release-smoke.sh:55,69` (and the base install at line 39): the existing test `tests/test_architecture_modules.py:272,274` asserts the literal strings `"${WHEEL_PATH}[google]"` and `"${WHEEL_PATH}[mcp]"`. The script now writes `"${artifact}[google]"` and `"${artifact}[mcp]"`, so that test fails; it passes on main.
-   - Fix: update `tests/test_architecture_modules.py:269-275` to assert the `${artifact}` forms plus a wheel and sdist loop. Add that file to the task's files line, or amend the brief, since it is currently outside scope.
-   - Alternative: keep the literal `${WHEEL_PATH}[...]` strings in the script.
-2. Re-run the full verify command, including the smoke script, in an environment with network. Record the result in result.md.
-
-Suggestions (non-blocking):
-- `docs/development/runbook.md:101` still shows `/tmp/auditex-release-smoke`. The second argument is now a parent directory, and each run leaves an uncleaned `run.XXXXXX` subdirectory.
-- `scripts/check-reproducible-build.py:55`: `os.environ['TMPDIR']` raises KeyError when `TMPDIR` is unset. Fall back to `tempfile.gettempdir()`.
-- `scripts/check-reproducible-build.py:41`: `tar.extractall(filter='data')` needs Python 3.11.4 or later, and the project floor is 3.11.
-- `scripts/release-smoke.sh:37-76`: the loop body is not indented. Moving the per-install steps into a function would be cleaner.
-- `tests/test_check_reproducible_build.py` only covers `sdist_members`, not the wheel comparison.
+- Wheel, plus sdist in separate fresh venvs, each for base, google and mcp, running the existing checks: met. See scripts/release-smoke.sh:16-22 and 37-74 (separate `${kind}-base/-google/-mcp` venvs, outputs per kind).
+- Default smoke root under $TMPDIR, no fixed /tmp: met, scripts/release-smoke.sh:8 (`${TMPDIR:?}` then mktemp at :22).
+- `git archive` of HEAD twice into fresh directories under $TMPDIR: met, scripts/check-reproducible-build.py:37-41 and :55-59.
+- SOURCE_DATE_EPOCH set to the commit time: met, scripts/check-reproducible-build.py:54 and :45.
+- Wheels byte-identical, sdists compared by sorted members with sha256 per member: met, scripts/check-reproducible-build.py:18-30 and :63-64.
+- Prints artefact names and hashes: met, scripts/check-reproducible-build.py:61-62.
+- DoD item "Wheel and sdist each pass the base, Google and MCP release smoke...": the repro half was verified here. The smoke half is untestable here (network), so tick it after `merge.sh --verify`.
+- Security: no shell interpolation (list argv). The tar extraction uses the data filter. No new dependencies, no secrets. The new script's mode is 755. Clean.
+- Scope: tests/test_architecture_modules.py is outside the files line. The change is the minimum needed to keep the existing smoke-matrix test passing, and round 1 asked for it. Explained, so accepted.
+Required changes: none.
+Non-blocking suggestions:
+1. docs/development/runbook.md:101: change /tmp to $TMPDIR and note that the second argument is a parent directory (that file is owned by docs-content).
+2. scripts/check-reproducible-build.py:41: guard `filter=` for Python below 3.11.4, or raise the floor.
+3. scripts/release-smoke.sh:37-74: indent the loop body.
+4. tests/test_check_reproducible_build.py: add a test for the wheel-mismatch path in main().
+Full evidence: .plan/work/REV-M00-T05/evidence.md (Round 2)

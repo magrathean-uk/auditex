@@ -54,3 +54,12 @@
 - why: every call site needs exactly one class; SMTP is an operator-configured notify sink of the kind G approved in DEC-002.
 - consequences: M01-T03 may start. The inventory's remaining items (one destination-wording error, section G completeness) are fixed and re-reviewed before M01-T04, which owns the content-read boundary.
 - approver: auto
+
+## DEC-007 Inventory closed; content-exposure list moves to M01-T04
+- date: 2026-11-08
+- status: approved
+- decision: M01-T02 closes after four review rounds. Transport classification is complete and section E (the frozen allow-list, DEC-006) is confirmed complete and minimal. Completing section G (reads that receive user- or admin-written text) becomes part of M01-T04, which owns the content-read boundary and must accept or remove each exposure.
+- options: a fifth inventory round | move section G into M01-T04
+- why: AGENTS.md sets two repair rounds, then re-scope; each round found only new section G rows, which is M01-T04's subject.
+- consequences: M01-T04 starts from the inventory and REV-M01-T02 round 4. An exposure that cannot be excluded at request level goes to G as a product question.
+- approver: auto

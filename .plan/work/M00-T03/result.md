@@ -1,9 +1,16 @@
 ## RESULT M00-T03
 status: done
-summary: `make audit-deps` resolves the base install and the `mcp`, `test`, `google`, `model_train` and `dev` extras with `uv pip compile` (metadata only, no install into `.venv`). It resolves `model_train` a second time for Linux aarch64. `pip-audit --no-deps --disable-pip` then audits all 7 lists and the target exits non-zero if any list fails.
-summary: `pip-audit` sits in the new `dev` extra and runs from a tool venv under `build/audit-deps/`. That directory is already git-ignored and listed in `.clean-development.json` through `build`, so neither file needed a change.
-summary: Findings: none across all 7 lists, so there is no `pyproject.toml` pin change and no `scripts/audit-deps-ignore.json`. The target reads that file if it appears, and each entry needs id, package, reason and decision.
-changes: Makefile, pyproject.toml (commit 6280844 on task/M00-T03-audit-deps)
-verification: `make audit-deps` pass, exit 0, "No known vulnerabilities found" for all 7 lists, run twice; `git status --porcelain` empty. I did not test the failure path with a known-vulnerable pin, and I did not run `make test` or the module's `make release-check`.
-risks: `uv` is now a prerequisite for `audit-deps`; the target exits 2 with an install hint if it is missing. The ignore-file path and the non-zero exit on a vulnerable list are untested. Resolution uses the host Python from `select-python.sh`, so a different host Python could resolve different versions.
+summary: Review item 1 is fixed. `uv pip compile` now runs with `--no-build`, so resolution never builds a source distribution. On failure the target prints a clear message naming the extra and exits 1. The non-blocking comment mismatch is fixed too: stale lists are removed before each run and the comment now says so. All criteria are met, and `make audit-deps` reports no known vulnerabilities across all 7 lists (base, mcp, test, google, model_train, dev, model_train for Linux aarch64). No ignore file is needed.
+changes: Makefile
+verification:
+- `make audit-deps` on head 0722e93: pass, exit 0, no known vulnerabilities in any list
+- `git status --porcelain`: empty
+risks:
+- The pip-audit warning about unhashed pins is printed on every list and is harmless here.
+- Full test suite and `make release-check` were not run; the change touches only a make target.
 questions_for_g: none
+
+### Findings
+- Review item 1 (`Makefile:62`, `--no-build`): fixed.
+- Non-blocking comment mismatch (`Makefile:54`): fixed.
+- Findings for `result.md`: none, so no `pyproject.toml` version changes and no ignore entries.
