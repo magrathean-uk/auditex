@@ -63,3 +63,21 @@
 - why: AGENTS.md sets two repair rounds, then re-scope; each round found only new section G rows, which is M01-T04's subject.
 - consequences: M01-T04 starts from the inventory and REV-M01-T02 round 4. An exposure that cannot be excluded at request level goes to G as a product question.
 - approver: auto
+
+## DEC-008 Read-boundary exceptions ruled
+- date: 2026-11-08
+- status: approved
+- decision: Graph automatic-reply bodies (G3) and inbox-rule keywords (G4) stay as read-and-discard: the text is stripped right after receipt and never stored or reported. The Exchange transport-rule PrependSubject text (G7) is kept because MS.EXO.7.1 judges it. Intune custom profiles stay read and their `payload` is stripped after receipt (G10, M01-T10).
+- options: keep read-and-discard or drop the reads | keep the prefix text or reduce it to set/not-set | keep and strip the payload or stop reading custom profiles
+- why: the checks keep working while user- and admin-written text never reaches evidence or reports.
+- consequences: M01-T10 is unblocked; the tests in M01-T04 prove each discard.
+- approver: G
+
+## DEC-009 Six read-boundary follow-ups added to M01
+- date: 2026-11-08
+- status: approved
+- decision: M01-T07 to M01-T12 (Gmail fields masks, ApplyHtmlDisclaimerText removal, alerts and groups fields masks, Intune payload strip, gmail.settings.sharing scope removal, runtime content-cmdlet refusal) join M01. They implement M01's existing DoD item on content reads; no weight or DoD change.
+- options: add the tasks | accept the exposures
+- why: M01-T04 found exposures (G8 is real message text) and a runtime guard that accepts any Get-* cmdlet; the DoD cannot be met without them.
+- consequences: they depend on M01-T04 merging and merge one at a time because they share tests/test_read_boundaries.py.
+- approver: auto

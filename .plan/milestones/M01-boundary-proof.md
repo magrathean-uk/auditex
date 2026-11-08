@@ -28,6 +28,12 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 | M01-T04 | Prove the content-read, cmdlet and Google read boundaries | codex | M | - | todo |
 | M01-T05 | Align MCP and privacy docs with the registry | terra | S | - | done |
 | M01-T06 | Classify shipped model-development example rows | luna | S | - | done |
+| M01-T07 | Add Gmail settings fields masks (G1, G2, G5) | codex | S | tier-a | todo |
+| M01-T08 | Stop collecting ApplyHtmlDisclaimerText (G6) | terra | S | tier-a | todo |
+| M01-T09 | Add fields masks to alerts.list and groups.get (G8, G9) | codex | S | tier-a | todo |
+| M01-T10 | Strip the Intune custom-profile payload after receipt (G10) | terra | S | tier-a | todo |
+| M01-T11 | Drop the unused gmail.settings.sharing scope | terra | S | tier-a | todo |
+| M01-T12 | Make the runtime read guard refuse content cmdlets | codex | M | tier-a | todo |
 
 ## Acceptance criteria
 ### M01-T01 Close secret-flag redaction gaps across all parsers
@@ -75,3 +81,56 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 - Changes nothing; any removal goes to G through the deletion gate and a CLEANUP entry.
 - verify: `git diff --quiet -- examples/model_development && test -s .plan/work/M01-T06/result.md`
 - files: `.plan/work/M01-T06/result.md` (read-only)
+
+### M01-T07 Add Gmail settings fields masks (G1, G2, G5)
+- Dependencies: M01-T04 merged.
+- `settings.getVacation` (`client.py:300`) requests a `fields` mask that excludes `responseSubject`, `responseBodyPlainText` and `responseBodyHtml`; `settings.sendAs.list` (`:297`) requests `sendAs(...)` without `signature`; `settings.filters.list` (`:290`) requests `filter(id,action,criteria(...))` without `criteria.query`, `negatedQuery` and `subject`. Each mask lists only fields that `google_workspace/normalize.py` or `findings.py` read.
+- A test calls each method through a fake service and asserts the `fields` argument is present and contains none of the excluded names, so a reverted mask fails.
+- `minimise_gmail_settings` and `minimise_user_text` stay as defence in depth; `test_discarded_gmail_text_never_leaves_the_collector` still passes.
+- `_TEXT_EXPOSURES` rows G1, G2 and G5 in `tests/test_read_boundaries.py` change to "removed at request level".
+- The normalised Gmail output (including the derived `...Length` and `has...` flags) is byte-identical to before on the existing fixtures.
+- verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_google_workspace.py tests/test_google_collection_gaps.py tests/test_data_minimisation.py tests/test_google_parity.py`
+- files: `src/auditex/google_workspace/client.py`, `tests/test_google_workspace.py`, `tests/test_read_boundaries.py`
+
+### M01-T08 Stop collecting ApplyHtmlDisclaimerText (G6)
+- Dependencies: M01-T04 merged.
+- `ApplyHtmlDisclaimerText` is removed from the `Get-TransportRule | Select-Object` list in both `collectors/exchange_policy.py:126` and `configs/collector-definitions.json` (same text in both), from `normalize.py:2107` (`apply_html_disclaimer_text`), from the field set in `scuba_adapters_exchange.py:38`, and from `docs/reference/api-call-catalog.md:172`; `PrependSubject` is kept (G7).
+- No SCuBA verdict changes: rule and vector tests, `scripts/generate-rule-packs.py` and the rule-pack drift test show no diff.
+- Existing fixtures that carry the field (`tests/test_scuba_adapters_exchange.py:225`, `tests/test_enterprise_depth_collectors.py:758`, `tests/test_exchange_policy_scuba_inputs.py:20`, `examples/demo_tenant/*.json`) are updated, and a test asserts the shipped command text no longer contains `ApplyHtmlDisclaimerText`.
+- `_TEXT_EXPOSURES` row G6 changes to "removed at request level"; G7 is unchanged.
+- verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_exchange_policy_scuba_inputs.py tests/test_scuba_adapters_exchange.py tests/test_enterprise_depth_collectors.py tests/test_exchange_collector.py tests/test_read_guard.py && .venv/bin/python scripts/generate-rule-packs.py && git diff --quiet -- configs/scuba-value-rules.json && make contract-smoke`
+- files: `src/azure_tenant_audit/collectors/exchange_policy.py`, `configs/collector-definitions.json`, `src/azure_tenant_audit/normalize.py`, `src/auditex/scuba_adapters_exchange.py`, `docs/reference/api-call-catalog.md`, `examples/demo_tenant/demo_tenant.json`, `examples/demo_tenant/demo_tenant_remediated.json`, `tests/test_exchange_policy_scuba_inputs.py`, `tests/test_scuba_adapters_exchange.py`, `tests/test_enterprise_depth_collectors.py`, `tests/test_read_boundaries.py`
+
+### M01-T09 Add fields masks to alerts.list and groups.get (G8, G9)
+- Dependencies: M01-T04 merged; M01-T07 merged first (same `client.py`, same owner).
+- `alerts.list` (`client.py:260`) requests `fields=nextPageToken,alerts(alertId,type,source,createTime,startTime,endTime,deleted,customerId,metadata)`, so `data.messages[].messageBodySnippet` and `subjectText` are never received; the mask keeps every field normalisation reads (id, type, severity, status, createTime), and a test with a fake alert carrying a message snippet shows the snippet is absent from the stored raw record.
+- Groups Settings `groups.get` (`client.py:340`) requests `fields=` exactly the seven settings read at `normalize.py:571-590`, so `customFooterText` and `defaultMessageDenyNotificationText` are never received; a test asserts the `fields` argument and that every setting the normaliser reads is in it.
+- `_TEXT_EXPOSURES` rows G8 and G9 change to "removed at request level".
+- Normalised alert and group outputs are unchanged on the existing fixtures.
+- verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_google_workspace.py tests/test_google_collection_gaps.py tests/test_google_parity.py`
+- files: `src/auditex/google_workspace/client.py`, `tests/test_google_workspace.py`, `tests/test_read_boundaries.py`
+
+### M01-T10 Strip the Intune custom-profile payload after receipt (G10)
+- Dependencies: M01-T04 merged; G's answer on G10 (recommendation: yes, keep the read and discard `payload` after receipt). Do not dispatch before that answer is recorded in DECISIONS.md; if G says no, close the task as rejected.
+- A new minimiser in `data_minimisation.py` removes `payload` (base64 `.mobileconfig` bytes) from every record of `/deviceManagement/deviceConfigurations` before raw evidence is written, called from `collectors/intune.py:42` and `collectors/intune_depth.py:58`; `payloadName` and `payloadFileName` are kept only if an Intune rule or finding reads them.
+- A test feeds an iOS and a macOS custom-profile record carrying a sentinel `payload` through both collectors and asserts the sentinel is absent from raw evidence, normalised output and the written bundle files; the existing Intune rules give identical results on the fixtures.
+- `_TEXT_EXPOSURES` row G10 states "discarded after receipt" and names the new minimiser; the read itself stays unchanged (no `$select`, because the collection is polymorphic).
+- verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_data_minimisation.py tests/test_intune_endpoint_collector.py tests/test_collection_coverage_fixes.py && make contract-smoke`
+- files: `src/azure_tenant_audit/data_minimisation.py`, `src/azure_tenant_audit/collectors/intune.py`, `src/azure_tenant_audit/collectors/intune_depth.py`, `tests/test_data_minimisation.py`, `tests/test_intune_endpoint_collector.py`, `tests/test_read_boundaries.py`
+
+### M01-T11 Drop the unused gmail.settings.sharing scope
+- Dependencies: M01-T04 merged.
+- `https://www.googleapis.com/auth/gmail.settings.sharing` is removed from `google_workspace/auth.py` (lines 25 and 37), `google_workspace/collectors.py:406`, `azure_tenant_audit/scope_catalog.py:25` and `_ACCEPTED_WRITE_CAPABLE_SCOPES` in `tests/test_read_boundaries.py`; the `gmail.settings.sharing` mention in the high-risk scope terms at `google_workspace/findings.py:1415` stays, because an operator-granted scope must still be flagged.
+- Every Gmail settings read the collector makes (`delegates.list`, `forwardingAddresses.list` and the rest) is shown to be covered by `gmail.settings.basic`, with the Google reference page or method scope list cited in the test or a comment.
+- The scope-catalog, setup-guide and troubleshooting docs no longer instruct operators to grant the scope (`docs/guides/admin-permission-guide.md`, `docs/guides/troubleshooting.md`), and a test asserts the scope appears in no requested-scope list under `src/`.
+- verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_google_workspace.py tests/test_scope_catalog.py tests/test_setup_guide.py tests/test_google_parity.py`
+- files: `src/auditex/google_workspace/auth.py`, `src/auditex/google_workspace/collectors.py`, `src/azure_tenant_audit/scope_catalog.py`, `docs/guides/admin-permission-guide.md`, `docs/guides/troubleshooting.md`, `tests/test_scope_catalog.py`, `tests/test_setup_guide.py`, `tests/test_read_boundaries.py`
+
+### M01-T12 Make the runtime read guard refuse content cmdlets
+- Dependencies: M01-T04 merged; independent of M01-T03 (disjoint files).
+- Decision for the implementer: the code is a verb allow-list (`read_guard._allowed_word` accepts every `Get-<noun>`, and `words_are_read` shares it), and the shipped commands use some 50 distinct `Get-*` cmdlets across Exchange, Teams, Microsoft Graph, `Get-Module` and `Get-Command`. A full allow-list would make every new collector edit the guard, so implement an explicit content deny-list in `read_guard.py` applied inside `_allowed_word`, so `check_command`, `words_are_read` and `classify_command` all refuse alike.
+- The deny-list refuses at least: `Get-MgUserMessage`, `Get-MgUserMailFolderMessage`, any `Get-Mg*Attachment*`, `Get-MgUserEvent`, `Get-MgDriveItemContent`, `Get-MgUserDriveItemContent`, and the Exchange cmdlets that return message or file content; names are matched case-insensitively and also when written with a module prefix (`Microsoft.Graph.Mail\Get-MgUserMessage`).
+- A new `tests/test_read_guard_content_cmdlets.py` asserts each denied cmdlet is refused standalone, after a pipe and inside a wrapper script, that `words_are_read` is false for it, and that every shipped PowerShell command (collected as in `tests/test_read_guard.py::_shipped_powershell_commands`) and `Get-Module`, `Get-Command`, `Get-MessageTrace` and `Get-EXOMailbox` still pass.
+- The `read_guard.py` module docstring names the deny-list; `tests/test_read_boundaries.py` is not edited.
+- verify: `.venv/bin/python -m pytest tests/test_read_guard_content_cmdlets.py tests/test_read_guard.py tests/test_graph_read_only.py tests/test_api_observed_ledger.py tests/test_exchange_protection.py`
+- files: `src/azure_tenant_audit/adapters/read_guard.py`, `tests/test_read_guard_content_cmdlets.py`
