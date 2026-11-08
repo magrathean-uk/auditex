@@ -797,6 +797,31 @@ def test_google_normalized_snapshot_marks_top_limited_sections() -> None:
     assert snapshot["truncated_sections"] == ["google_directory.users"]
 
 
+def test_google_alert_severity_and_status_read_metadata_with_legacy_fallback() -> None:
+    from auditex.google_workspace.normalize import build_google_normalized_snapshot
+
+    result = build_google_normalized_snapshot(
+        tenant_name="Example",
+        run_id="run1",
+        collector_payloads={
+            "google_alert_center": {
+                "alerts": {
+                    "value": [
+                        {"alertId": "a-meta", "type": "T", "createTime": "2026-01-01T00:00:00Z",
+                         "metadata": {"severity": "HIGH", "status": "NOT_STARTED"}},
+                        {"alertId": "a-legacy", "type": "T", "severity": "LOW", "status": "CLOSED"},
+                    ]
+                }
+            }
+        },
+        domain="example.com",
+        customer_id="C123",
+    )
+    rows = {r["id"]: r for r in result["google_alerts"]["records"]}
+    assert (rows["a-meta"]["severity"], rows["a-meta"]["status"]) == ("HIGH", "NOT_STARTED")
+    assert (rows["a-legacy"]["severity"], rows["a-legacy"]["status"]) == ("LOW", "CLOSED")
+
+
 def test_google_drive_and_group_settings_findings_from_sample() -> None:
     from auditex.google_workspace.findings import build_google_findings
     from auditex.google_workspace.normalize import build_google_normalized_snapshot

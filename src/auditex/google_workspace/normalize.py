@@ -23,6 +23,11 @@ def _values(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
 
 
+def _alert_metadata(item: dict[str, Any]) -> dict[str, Any]:
+    metadata = item.get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
 def _compact(record: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in record.items() if value not in (None, [], {}, "")}
 
@@ -470,8 +475,8 @@ def build_google_normalized_snapshot(
             "google_alert_center.alerts",
             str(item.get("alertId") or item.get("id")),
             alert_type=item.get("type"),
-            severity=item.get("severity"),
-            status=item.get("status"),
+            severity=_alert_metadata(item).get("severity") or item.get("severity"),
+            status=_alert_metadata(item).get("status") or item.get("status"),
             create_time=item.get("createTime"),
         )
         for item in _values(collector_payloads.get("google_alert_center", {}), "alerts")

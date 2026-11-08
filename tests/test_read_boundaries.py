@@ -190,11 +190,13 @@ _TEXT_EXPOSURES: tuple[dict[str, Any], ...] = (
     {"id": "G7", "file": "src/azure_tenant_audit/collectors/exchange_policy.py", "needle": "PrependSubject",
      "fields": ("PrependSubject",), "disposition": "accepted"},
     {"id": "G8", "file": "src/auditex/google_workspace/client.py",
-     "needle": "service.alerts().list(pageSize=page_size, pageToken=page_token)",
-     "fields": ("data.messages[].messageBodySnippet", "data.messages[].subjectText"), "disposition": "follow_up"},
+     "needle": "fields=ALERT_FIELDS",
+     "fields": ("data.messages[].messageBodySnippet", "data.messages[].subjectText"),
+     "disposition": "removed_at_request"},
     {"id": "G9", "file": "src/auditex/google_workspace/client.py",
-     "needle": "service.groups().get(groupUniqueId=group_email).execute()",
-     "fields": ("customFooterText", "defaultMessageDenyNotificationText"), "disposition": "follow_up"},
+     "needle": "fields=GROUP_SETTING_FIELDS",
+     "fields": ("customFooterText", "defaultMessageDenyNotificationText"),
+     "disposition": "removed_at_request"},
     {"id": "G10", "file": "src/azure_tenant_audit/collectors/intune.py",
      "needle": "\"endpoint\": \"/deviceManagement/deviceConfigurations\",\n                \"params\": {},",
      "fields": ("payload",), "disposition": "discarded"},  # discarded after receipt by minimise_device_configurations
@@ -1753,3 +1755,75 @@ def test_discarded_graph_mailbox_text_never_leaves_the_collector() -> None:
     written = minimise_user_text({"value": [rule], "settings": settings})
     assert marker not in json.dumps(written)
     assert written["value"][0]["conditions"]["fromAddresses"] == rule["conditions"]["fromAddresses"]
+
+
+# ---------------------------------------------------------------------------------------------------------
+# G8, G9: Google text fields removed at request level (M01-T09)
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _masked(rows: list[dict[str, Any]], mask: str) -> list[dict[str, Any]]:
+    inner = mask.split("alerts(", 1)[1].rstrip(")").split(",")
+    return [{k: v for k, v in row.items() if k in inner} for row in rows]
+
+
+def test_alert_mask_drops_message_text_and_keeps_normalised_fields() -> None:
+    from types import SimpleNamespace
+
+    from auditex.google_workspace.client import ALERT_FIELDS, GoogleWorkspaceClient
+
+    marker = "MESSAGE-SNIPPET-SENTINEL"
+    alert = {"alertId": "a1", "type": "Suspicious login", "createTime": "2026-01-01T00:00:00Z",
+             "metadata": {"severity": "HIGH", "status": "NOT_STARTED"},
+             "data": {"messages": [{"messageBodySnippet": marker, "subjectText": marker}]}}
+    seen: dict[str, Any] = {}
+
+    class _Req:
+        def execute(self) -> dict[str, Any]:
+            return {"alerts": _masked([alert], seen["fields"])}
+
+    def _list(**kwargs: Any) -> _Req:
+        seen.update(kwargs)
+        return _Req()
+
+    client = GoogleWorkspaceClient(credentials=None)
+    client._services[("alertcenter", "v1beta1")] = SimpleNamespace(alerts=lambda: SimpleNamespace(list=_list))
+    rows = client.list_alerts()
+    assert seen["fields"] == ALERT_FIELDS
+    assert marker not in json.dumps(rows)
+    for kept in ("alertId", "type", "createTime", "metadata"):
+        assert kept in rows[0]
+
+    from auditex.google_workspace.collectors import GoogleAlertCenterCollector
+
+    result = GoogleAlertCenterCollector().run({"client": client})
+    stored = json.dumps(result.payload, default=str)
+    assert marker not in stored
+    stored_alert = result.payload["alerts"]["value"][0]
+    assert stored_alert["metadata"] == {"severity": "HIGH", "status": "NOT_STARTED"}
+    assert "data" not in stored_alert
+
+
+def test_group_settings_fields_cover_every_setting_the_normaliser_reads() -> None:
+    from types import SimpleNamespace
+
+    from auditex.google_workspace.client import GROUP_SETTING_FIELDS, GoogleWorkspaceClient
+
+    source = (REPO_ROOT / "src/auditex/google_workspace/normalize.py").read_text(encoding="utf-8")
+    block = source.split('"google_groups_settings.groupSettings"', 1)[1].split("for item in _values", 1)[0]
+    read = set(re.findall(r'item\.get\("(\w+)"\)', block))
+    assert len(read) == 7
+    requested = set(GROUP_SETTING_FIELDS.split(","))
+    assert read == requested
+    assert not requested & {"customFooterText", "defaultMessageDenyNotificationText"}
+
+    seen: dict[str, Any] = {}
+
+    def _get(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return SimpleNamespace(execute=lambda: {"email": kwargs["groupUniqueId"]})
+
+    client = GoogleWorkspaceClient(credentials=None)
+    client._services[("groupssettings", "v1")] = SimpleNamespace(groups=lambda: SimpleNamespace(get=_get))
+    client.get_group_settings("g@example.test")
+    assert seen["fields"] == GROUP_SETTING_FIELDS

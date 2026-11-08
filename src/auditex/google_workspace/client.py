@@ -40,6 +40,15 @@ GMAIL_FILTERS_FIELDS = (
     "filter(id,action(forward,addLabelIds,removeLabelIds),criteria(from,to,hasAttachment,excludeChats,size,sizeComparison))"
 )
 
+
+# Field masks: the payload `data` (message snippets, subjects) and the free-text group settings are never received.
+ALERT_FIELDS = "nextPageToken,alerts(alertId,type,source,createTime,startTime,endTime,deleted,customerId,metadata)"
+GROUP_SETTING_FIELDS = (
+    "email,allowExternalMembers,whoCanJoin,whoCanPostMessage,messageModerationLevel,"
+    "whoCanViewMembership,whoCanViewGroup"
+)
+
+
 class GoogleWorkspaceError(RuntimeError):
     def __init__(self, message: str, *, surface: str | None = None) -> None:
         super().__init__(message)
@@ -266,7 +275,7 @@ class GoogleWorkspaceClient:
         service = self._service("alertcenter", "v1beta1")
         page_size = min(self.page_size, top or self.page_size)
         return self._collect_pages(
-            lambda page_token: service.alerts().list(pageSize=page_size, pageToken=page_token),
+            lambda page_token: service.alerts().list(pageSize=page_size, pageToken=page_token, fields=ALERT_FIELDS),
             "alerts",
             limit=top,
         )
@@ -347,7 +356,7 @@ class GoogleWorkspaceClient:
 
     def get_group_settings(self, group_email: str) -> dict[str, Any]:
         service = self._service("groupssettings", "v1")
-        return service.groups().get(groupUniqueId=group_email).execute()
+        return service.groups().get(groupUniqueId=group_email, fields=GROUP_SETTING_FIELDS).execute()
 
     def list_calendar_resources(self, *, top: int | None = None) -> list[dict[str, Any]]:
         service = self._service("admin", "directory_v1")
