@@ -522,7 +522,7 @@ def test_a_current_contract_bundle_without_its_hash_manifest_is_missing_and_unus
 
     assert integrity["status"] == "invalid" and integrity["manifest_missing"] is True
     assert integrity["manifest_missing_reason"] == "required_by_contract"
-    assert "bundle-hashes.json is missing" in integrity["message"] and "2026-10-22" in integrity["message"]
+    assert "bundle-hashes.json is missing" in integrity["message"] and "2026-11-08" in integrity["message"]
     assert handoff["handoff_status"] == "unusable" and handoff["status_reasons"] == ["bundle_integrity_invalid"]
     assert handoff["integrity"]["manifest_missing"] is True
     assert "finalized before one was written" not in handoff["integrity"]["summary"]

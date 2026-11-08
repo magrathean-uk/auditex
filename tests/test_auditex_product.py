@@ -182,7 +182,7 @@ def test_root_cli_can_show_lab_response_when_enabled(monkeypatch: pytest.MonkeyP
 def test_contract_schema_manifest_lists_shipped_schemas() -> None:
     manifest = contract_schema_manifest("schemas")
 
-    assert manifest["contract_version"] == "2026-10-22"
+    assert manifest["contract_version"] == "2026-11-08"
     assert "run_manifest.schema.json" in manifest["schemas"]
     assert "validation.schema.json" in manifest["schemas"]
 
@@ -279,7 +279,7 @@ def test_list_profiles_helper_returns_citations() -> None:
 def test_contract_schema_inventory_returns_citations() -> None:
     result = contract_schema_inventory("schemas")
 
-    assert result["contract_version"] == "2026-10-22"
+    assert result["contract_version"] == "2026-11-08"
     assert any(row["artifact_path"] == "src/azure_tenant_audit/contracts.py" for row in result["citations"])
     assert any(row["artifact_path"] == "schemas" for row in result["citations"])
     assert result["evidence_missing"] == []

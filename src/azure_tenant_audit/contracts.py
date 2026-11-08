@@ -19,7 +19,7 @@ from .run_files import UnsafeRunFileError, read_run_file, unbounded_writer_reads
 from .tenant_identity import IDENTITY_FIELDS, decode_identity_metadata, reconcile_tenant_identity
 from .waivers import has_matching_waiver, is_accepted_status
 
-CONTRACT_VERSION = "2026-10-22"
+CONTRACT_VERSION = "2026-11-08"
 # The contract version from which every evidence reference must resolve. It is fixed: a bundle finalized
 # under 2026-10-22 must keep failing on an unresolved reference after later contract bumps, so the legacy
 # cut-off is tied to the version a bundle was finalized under and never to the current CONTRACT_VERSION.

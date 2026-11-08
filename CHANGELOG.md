@@ -7,6 +7,53 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-08
+
+Highlights, ordered by user impact. The detailed entries follow.
+
+### Security and privacy
+
+- **Secret flags are redacted on every parser.** Abbreviated and rejected arguments no longer leak a secret into
+  logs, diagnostics or command history records; the vendored bootstrap CLI rejects abbreviations as well.
+- **Shareable output applies the D3 redaction profile.** Reports, built-in exports, MCP payloads, notifications and
+  customer packs mask GUIDs and the free-text keys `owner`, `justification`, `comment`, `comments` and `notes`.
+  Limit: person names in free text and identifiers are not masked, and domains, group names and role names remain.
+  Local reports keep their data; incomplete or unstable evidence refuses shareable output.
+- **Content cmdlets are refused at runtime.** The PowerShell read guard now rejects Exchange and other cmdlets that
+  can return message or file content, instead of accepting any `Get-*` cmdlet.
+- **Google Workspace text is excluded at the request.** Gmail settings (vacation, send-as and filter text), Alert
+  Center and group-settings text is no longer requested, so it never reaches the collector. Live Gmail output
+  drops the text-derived length and presence fields (for example vacation message and signature lengths); no value
+  rule read them. Offline fixtures and the contract follow.
+- **Google Alert Center severity and status are read from alert metadata.** Alert severity and status now come from
+  the `metadata` object the field mask keeps, so alerts whose metadata is HIGH or CRITICAL are rated high; they were
+  previously read from absent top-level fields and rated medium.
+- **The `gmail.settings.sharing` scope is removed.** Nothing used it. The remaining write-capable Google scopes
+  (`admin.directory.user.security`, `apps.alerts`, `gmail.settings.basic`, `apps.groups.settings`) have no
+  read-only form; they stay on by default for list and get calls only, with their blast radius documented.
+- **Exchange transport-rule disclaimer text is no longer collected** (`ApplyHtmlDisclaimerText`). The
+  `PrependSubject` text stays because MS.EXO.7.1 judges it.
+- **Intune custom-profile payloads are stripped on receipt.** The profiles are still read; the payload never reaches
+  evidence or reports.
+
+### Bundle contract
+
+- **`CONTRACT_VERSION` is now `2026-11-08`** (was `2026-10-22`). The fields new since 1.2.4 (Teams skip reasons and the PIM role policy artefact, records, rows and gap reasons) and the removal of the Google text-derived length and presence fields (see Security and privacy) are listed under "Contract history" in `docs/reference/output-contract.md`. Consumers that read a removed field must stop; bundles finalized under `2026-10-22` stay readable and compare and drift across the two versions still work. The legacy-reference cut-off stays `2026-10-22`.
+
+### Assessment
+
+- **SCuBA answers come from value rules only.** All 102 policies have rules (spec v3.9.1); the model is never
+  called and the model layer is parked. Explainer wiring is shipped: supported assessment rows and the JSON,
+  Markdown and HTML reports carry a redacted deterministic explanation.
+
+### Collection and trust
+
+- Collector trust needs a successful live read; readiness, audit plans and reports reflect it.
+- Sensitive-user and partner-domain operator inputs feed SS 2.1 and SS 2.3 privately.
+- Exchange policy and DNS posture join app-mode defaults; Teams reads skip cleanly without a certificate token.
+
+### Detail
+
 - Preserve blocked JSON for gate input refusals and constant-code incomplete-evidence issues for refused chunks, without reading refused bytes or falling back to inline samples. Keep owned bundle directories private without changing existing caller-owned parent permissions.
 - Refuse unsafe sensitive-user and partner-domain pair aliases in guarded run reads
   and retain admitted descriptors across selected inputs. SQLite index inspection
@@ -87,7 +134,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   test it: the test set, base pairs, mutants (19,354 harmful, 2,522 benign) and canary twins are generated in memory from the
   value-rule vector fixtures, which hold only constructed rows and pack train/validation rows, and a small manifest pins counts and
   stream digests; the red-team candidates are re-bound to allowed bases at test time. Fixtures stay under 1 MB and a test refuses test-split, pilot,
-  sealed or diagnostic rows, machine paths and large files. Report wiring is not part of this change.
+  sealed or diagnostic rows, machine paths and large files. Report wiring landed in the explanation entry above.
 
 - Explain unassessed Power BI / Power Platform policies when optional collection was not enabled; preserve generic reasons for unknown selection and existing failures for selected collectors.
 
@@ -95,7 +142,7 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 Model-development tooling (round 2 of the specialist-model programme) and an internal
 engine/product boundary rework, plus the deterministic value-rule route and collection changes below.
-`CONTRACT_VERSION` stays `2026-10-22`; report, export and MCP tool contracts are unchanged; command-response diagnostics are masked as described below.
+`CONTRACT_VERSION` stayed `2026-10-22` for that work (1.3.0 moves it to `2026-11-08`); report, export and MCP tool contracts are unchanged; command-response diagnostics are masked as described below.
 The `identity_governance` collector also gains two GET-only PIM role-policy reads and
 the bundle gains the `privileged_roles` artefact, both additive.
 
@@ -112,7 +159,7 @@ the bundle gains the `privileged_roles` artefact, both additive.
   ignored and warned once without echoing values; they cannot change answers.
 - **`--no-redaction` can no longer unmask anything.** It used to leave e-mail local parts in the Conditional Access
   policy names listed under `scope_post_check` when the endpoint was a loopback host; redaction now always stays on.
-  Model client, configuration and offline tooling remain available for development. Report and CLI wiring for the optional explainer remains planned.
+  Model client, configuration and offline tooling remain available for development. Explainer report wiring is shipped (see the explanation entry above).
 
 ### Command-output privacy
 
@@ -178,7 +225,7 @@ the bundle gains the `privileged_roles` artefact, both additive.
   withholding and before pruning, shape gates, model budgets and redaction; it is never persisted. Teams applicability
   gates are recorded as `value_rule` / `closed_gate`.
   Rules are always enabled in product assessment; legacy `AUDITEX_DISABLE_VALUE_RULES` is ignored. Offline
-  `evaluate_precheck` scoring leaves them off. An optional explainer remains planned.
+  `evaluate_precheck` scoring leaves them off. The deterministic explainer is wired into assessment rows and reports.
 - **A value rule that fails on collected evidence has its own answer.** It was answered as "section not collected"; it now
   answers the catalogued `rule_evaluation_failed` reason ("Not assessed: Auditex could not evaluate this policy on the collected
   evidence. This is a product fault, not a tenant setting.") with no limitation and the new recommendation `report_product_fault`
@@ -1407,7 +1454,9 @@ Earlier work in the same cycle, listed by headline only; the git history has the
 
 Tagged as `v1.0.0`. The tag predates the work listed under 1.1.0, which is not itemised here.
 
-[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/magrathean-uk/auditex/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/magrathean-uk/auditex/compare/v1.2.4...v1.3.0
+[1.2.4]: https://github.com/magrathean-uk/auditex/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/magrathean-uk/auditex/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/magrathean-uk/auditex/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/magrathean-uk/auditex/compare/v1.2.0...v1.2.1

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auditex"
-version = "1.3.0.dev0"
+version = "1.3.0"
 description = "Portable AI-first Microsoft 365 and Google Workspace audit toolkit for evidence collection"
 readme = "README.md"
 requires-python = ">=3.11"

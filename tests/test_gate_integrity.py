@@ -469,7 +469,7 @@ def test_an_unresolved_reference_in_a_2026_10_22_bundle_stays_an_error_after_a_c
     row["evidence_refs"][0]["record_key"] = "no-such-key"
     row["evidence_refs"][0].pop("json_pointer", None)
     write_findings(run_dir, [row])
-    assert read_json(run_dir / "run-manifest.json")["schema_contract_version"] == "2026-10-22"
+    assert read_json(run_dir / "run-manifest.json")["schema_contract_version"] == contracts.CONTRACT_VERSION
     monkeypatch.setattr(contracts, "CONTRACT_VERSION", "2026-11-15")
 
     report = contracts.build_validation_report(run_dir=run_dir, read_only=True)
