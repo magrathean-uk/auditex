@@ -53,3 +53,7 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T11:48:35Z	M00-T05	codex	codex	gpt-6.1-terra	medium	branch	1	76		partial	task/M00-T05-sdist-repro
 2026-11-08T11:48:43Z	REV-M02-T05	terra	claude-4	claude-sonnet-5-5	high	readonly	0	41	0.1741	done	task/M02-T05-docs-path-test
 2026-11-08T11:48:50Z	M01-T02	sol	claude-4	claude-opus-5-5	high	readonly	0	92	0.6827	done	340552f
+2026-11-08T11:50:42Z	M02-T07	terra	claude-5	claude-sonnet-5-5	low	branch	0	20	0.1315	done	task/M02-T07-legal-notice
+2026-11-08T11:51:20Z	REV-M00-T05	terra	claude-1	claude-sonnet-5-5	high	readonly	0	59	0.2114	done	task/M00-T05-sdist-repro
+2026-11-08T11:51:41Z	M00-T03	terra	claude-4	claude-sonnet-5-5	medium	branch	0	79	0.2713	done	task/M00-T03-audit-deps
+2026-11-08T11:53:32Z	REV-M01-T02	codex	codex2	gpt-6.1-sol	high	readonly	0	191		done	479f33b

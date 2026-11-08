@@ -45,3 +45,12 @@
 - why: the only change is the vendored path prefix; the version floors were checked against the tracked file.
 - consequences: M02-T07 is unblocked once its dependency lands; no other edit to `docs/legal/` is authorised.
 - approver: G
+
+## DEC-006 Transport classes clarified and HTTP allow-list frozen
+- date: 2026-11-08
+- status: approved
+- decision: transport class 1 covers the Google Workspace read APIs; class 5 covers operator-configured outbound sinks including SMTP mail, on the same opt-in, redacted, never-the-tenant terms as DEC-002. The frozen non-GET allow-list for M01-T03 is section E of `.plan/work/M01-T02/transport-inventory.md` as reviewed at 479f33b (REV-M01-T02 round 3: complete and minimal), and nothing wider.
+- options: amend the class text | keep the interpretations only inside the inventory
+- why: every call site needs exactly one class; SMTP is an operator-configured notify sink of the kind G approved in DEC-002.
+- consequences: M01-T03 may start. The inventory's remaining items (one destination-wording error, section G completeness) are fixed and re-reviewed before M01-T04, which owns the content-read boundary.
+- approver: auto

@@ -4,7 +4,7 @@ overall: 30% (was 19%)
 milestone: M00-foundation 36%
 plan_version: v2
 release_scope: 1.3.0 from the accepted line (main contains origin/main 82d7ca5) - reproducible local gates, test-proven transport, read and secret boundaries, accurate docs, release notes with the D6 limit, signed v1.3.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: ec7c3a9 2026-11-08T11:50:19Z
+last_checkpoint: 479f33b 2026-11-08T11:54:59Z
 
 ## Next tasks
 - M00-T01 Re-run the gate suite on main after the foundation merges (luna)
