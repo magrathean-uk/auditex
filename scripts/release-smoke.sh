@@ -18,16 +18,24 @@ if [[ ! -f "${SDIST_PATH}" ]]; then
   echo "sdist not found under ${DIST_DIR}" >&2
   exit 2
 fi
+if [[ -n "${PYTHON:-}" ]]; then
+  BASE_PYTHON="${PYTHON}"
+elif [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+  BASE_PYTHON="${REPO_ROOT}/.venv/bin/python"
+else
+  BASE_PYTHON="python3"
+fi
 mkdir -p "${SMOKE_PARENT}"
 SMOKE_ROOT="$(mktemp -d "${SMOKE_PARENT}/run.XXXXXX")"
 
 create_venv() {
   local name="$1"
   local venv_path="${SMOKE_ROOT}/${name}-venv"
-  python -m venv "${venv_path}"
+  "${BASE_PYTHON}" -m venv "${venv_path}"
   # shellcheck disable=SC1090
   . "${venv_path}/bin/activate"
-  python -m pip install --upgrade pip >/dev/null
+  VPY="${venv_path}/bin/python"
+  "${VPY}" -m pip install --upgrade pip >/dev/null
 }
 
 deactivate_venv() {
@@ -37,7 +45,7 @@ deactivate_venv() {
 for kind in wheel sdist; do
 if [[ "${kind}" == wheel ]]; then artifact="${WHEEL_PATH}"; else artifact="${SDIST_PATH}"; fi
 create_venv "${kind}-base"
-python -m pip install "${artifact}" >/dev/null
+"${VPY}" -m pip install "${artifact}" >/dev/null
 auditex --help >/dev/null
 auditex run --offline \
   --sample "${REPO_ROOT}/examples/sample_audit_bundle/sample_result.json" \
@@ -47,8 +55,8 @@ auditex run --offline \
 deactivate_venv
 
 create_venv "${kind}-google"
-python -m pip install "${artifact}[google]" >/dev/null
-python - <<'PY'
+"${VPY}" -m pip install "${artifact}[google]" >/dev/null
+"${VPY}" - <<'PY'
 import json
 import subprocess
 
@@ -63,8 +71,8 @@ PY
 deactivate_venv
 
 create_venv "${kind}-mcp"
-python -m pip install "${artifact}[mcp]" >/dev/null
-python - <<'PY'
+"${VPY}" -m pip install "${artifact}[mcp]" >/dev/null
+"${VPY}" - <<'PY'
 from mcp.server.fastmcp import FastMCP
 
 assert FastMCP is not None
