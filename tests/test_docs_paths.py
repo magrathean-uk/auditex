@@ -11,7 +11,6 @@ ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED = ("tenant-bootstrap/vendor/", "tests/", ".plan/")
 EXEMPTIONS = {
     ("docs/guides/model-development.md", "tests/providers/m365"): "upstream sparse-checkout path",
-    ("docs/legal/third-party-notices.md", "skills/mcp-builder/scripts/requirements.txt"): "pending G-approved correction (DEC-003, M02-T07)",
 }
 
 

@@ -14,7 +14,7 @@ component that remains in or is declared by this repository.
 - Status: curated vendored subset retained
 - Notice: the upstream MIT license is copied at `tenant-bootstrap/vendor/microsoft-skills/LICENSE`.
 - Retained scope: 11 selected `SKILL.md` files plus required reference files, catalog, and manifest. The full upstream repository is not included in this package.
-- Modifications: MAGRATHEAN UK LTD modified one retained file. `skills/mcp-builder/scripts/requirements.txt` raises the declared minimum versions to `anthropic>=1.8.0,<2` and `mcp>=1.30.0,<2` (upstream: `anthropic>=0.39.0`, `mcp>=1.1.0`) and carries a comment marking the change. Every other retained skill file matches upstream commit `33b598366fd91350f032be9b385389ff14876dcc`.
+- Modifications: MAGRATHEAN UK LTD modified one retained file. `tenant-bootstrap/vendor/microsoft-skills/skills/mcp-builder/scripts/requirements.txt` raises the declared minimum versions to `anthropic>=1.8.0,<2` and `mcp>=1.30.0,<2` (upstream: `anthropic>=0.39.0`, `mcp>=1.1.0`) and carries a comment marking the change. Every other retained skill file matches upstream commit `33b598366fd91350f032be9b385389ff14876dcc`.
 
 ## Bundled run-explorer assets
 
