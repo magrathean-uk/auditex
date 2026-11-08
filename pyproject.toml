@@ -43,6 +43,12 @@ model_train = [
     "datasets==5.1.0",
 ]
 
+# Development tooling; never a runtime dependency. `make audit-deps` resolves and installs it
+# into a build-directory tool environment, not into .venv.
+dev = [
+    "pip-audit>=2.9,<3",
+]
+
 [project.scripts]
 azure-tenant-audit = "azure_tenant_audit.cli:main"
 auditex = "auditex.cli:main"

@@ -45,6 +45,35 @@ doctor:
 	@auditex doctor
 
 
+AUDIT_DEPS_DIR ?= build/audit-deps
+AUDIT_DEPS_IGNORE ?= scripts/audit-deps-ignore.json
+
+# Resolves the base install and every extra to a pinned list with uv (metadata only: --no-build
+# forbids source distribution builds; no install into $(VENV)), resolves model_train again for Linux aarch64, then audits each list with
+# pip-audit --no-deps --disable-pip. pip-audit lives in the dev extra and runs from a tool
+# environment under $(AUDIT_DEPS_DIR), never from $(VENV). Stale lists are removed first
+# so earlier pins never steer resolution; ignore entries need id, package, reason and decision (a DECISIONS.md id).
+.PHONY: audit-deps
+audit-deps:
+	@set -eu; \
+		command -v uv >/dev/null 2>&1 || { echo "uv is required for audit-deps (brew install uv)" >&2; exit 2; }; \
+		out="$(AUDIT_DEPS_DIR)"; \
+		mkdir -p "$$out"; \
+		rm -f "$$out"/*.txt; \
+		resolve() { name=$$1; shift; uv pip compile --quiet --no-build --no-header --no-annotate --python "$(PYTHON)" "$$@" pyproject.toml -o "$$out/$$name.txt" || { echo "audit-deps: metadata-only resolution of $$name failed (--no-build forbids source builds; a dependency without a wheel needs a pin change)" >&2; exit 1; }; }; \
+		resolve base; \
+		for extra in mcp test google model_train dev; do resolve "$$extra" --extra "$$extra"; done; \
+		resolve model_train-linux-aarch64 --extra model_train --python-platform aarch64-unknown-linux-gnu; \
+		test -x "$$out/tool/bin/python" || uv venv --quiet --python "$(PYTHON)" "$$out/tool"; \
+		uv pip install --quiet --python "$$out/tool/bin/python" -r "$$out/dev.txt"; \
+		ignores=$$($(PYTHON) -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); rows = json.loads(p.read_text(encoding="utf-8")) if p.exists() else []; [sys.exit("ignore entry needs id, package, reason, decision: %r" % r) for r in rows if not all(r.get(k) for k in ("id", "package", "reason", "decision"))]; print(" ".join("--ignore-vuln " + r["id"] for r in rows))' "$(AUDIT_DEPS_IGNORE)"); \
+		status=0; \
+		for list in "$$out"/*.txt; do \
+			echo "== pip-audit $$(basename $$list)"; \
+			"$$out/tool/bin/pip-audit" --no-deps --disable-pip --progress-spinner off $$ignores -r "$$list" || status=1; \
+		done; \
+		exit $$status
+
 .PHONY: release-check
 release-check:
 	$(MAKE) lint
