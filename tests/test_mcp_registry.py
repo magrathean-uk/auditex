@@ -57,3 +57,18 @@ def test_registry_registers_fake_fastmcp_from_handlers() -> None:
     register_fastmcp_tools(_FakeFastMCP(), {"auditex_list_profiles": _handler})
 
     assert registered == [("auditex_list_profiles", "auditex_list_profiles", True)]
+
+
+def test_doc_lists_exactly_the_non_read_only_tools() -> None:
+    import re
+    from pathlib import Path
+
+    doc = (Path(__file__).resolve().parents[1] / "docs/reference/security-privacy.md").read_text(
+        encoding="utf-8"
+    )
+    section = doc.split("MCP tools with `read_only_hint` false", 1)[1].split("\n\n", 2)[1]
+    listed = set(re.findall(r"^- `(auditex_\w+)`", section, re.M))
+    actual = {
+        item["name"] for item in iter_tool_specs(include_response=True) if not item["readOnlyHint"]
+    }
+    assert listed == actual

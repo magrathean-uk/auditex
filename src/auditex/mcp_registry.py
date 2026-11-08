@@ -17,8 +17,10 @@ class McpToolEntry:
     ``path_args`` name filesystem arguments that are confined to the MCP root (``mcp_paths``);
     ``resource_args`` name inputs whose default is a shipped read-only file and which are confined
     when the caller supplies another value; ``name_args`` name tenant and run names, which become
-    part of a run directory name and must not contain a path separator or ``..``. No tool takes a bearer token or client secret: auth
-    comes from the local auth context and the server's environment only.
+    part of a run directory name and must not contain a path separator or ``..``. No tool takes a bearer token or client secret value: Microsoft
+    auth comes from the local auth context and the server's environment, and the Google tools take
+    confined paths to credential files (``service_account_key``, ``oauth_client``,
+    ``token_cache``), never secret values.
     """
 
     name: str
