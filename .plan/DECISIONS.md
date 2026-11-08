@@ -144,3 +144,12 @@
 - why: the release was blocked on another project's continuous load; results stay valid, only slower, and a timing-sensitive flake is re-run.
 - consequences: gate timing is slower; any failure is checked for load sensitivity before it counts.
 - approver: G
+
+## DEC-017 1.3.0 ships without the full v3.9.1 vector replay
+- date: 2026-11-08
+- status: approved
+- decision: the full v3.9.1 value-rule replay (vectors.jsonl, 26,898 rows, sha256 3515b6fa..., with its a2 companions) is skipped for 1.3.0 because the kit is not on this Mac. The acceptance DoD item counts as met with that recorded exception: on release commit d9f050f the acceptance markers passed 6 with only the replay skipped, and make release-check passed 23,714 tests with 0 failures.
+- options: accept the skip | regenerate the kit before release | locate the kit
+- why: the kit cannot be found and regenerating it would delay the release without reproducing the frozen kit.
+- consequences: restoring the kit and a scheduled replay is a BACKLOG next item; the 1.3.0 release notes need no change.
+- approver: G
