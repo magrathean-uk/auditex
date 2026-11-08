@@ -12,7 +12,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 
 ## Definition of Done
 - [x] Review: terra's M01-T02 inventory assigns every outbound call site under `src/` (HTTP, SDK and subprocess) to one transport class in ARCHITECTURE.md, with no unclassified row: `test -s .plan/work/M01-T02/transport-inventory.md && ! grep -n '| unclassified |' .plan/work/M01-T02/transport-inventory.md` (evidence: REV-M01-T02 round 4, Codex: every classification finding fixed, section E complete and minimal, no unclassified row; section G completeness moved to M01-T04 by DEC-007)
-- [ ] A test fails when any module under `src/` issues a non-GET HTTP request outside the allow-list frozen from that inventory: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py tests/test_read_guard.py tests/test_graph_read_only.py tests/test_transport_hygiene.py`
+- [x] A test fails when any module under `src/` issues a non-GET HTTP request outside the allow-list frozen from that inventory: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py tests/test_read_guard.py tests/test_graph_read_only.py tests/test_transport_hygiene.py` (evidence: merge.sh verify for M01-T03 passed, squash 49c2b75; REV-M01-T03 Codex approve at 798a49c after the DEC-011 bounded round)
 - [ ] Tests prove that no collector requests message or file content, every PowerShell cmdlet and Microsoft 365 CLI command that an executable command site in `src/` or `configs/` can issue is on a read allow-list (wrapper verbs only at their known wrapper sites), and every Google API call is a read method under read-only scopes: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_api_observed_ledger.py tests/test_exchange_protection.py tests/test_pack_integrity_and_permissions.py`
 - [x] Every parser flag that can carry a secret is in its redaction set and has an abbreviation and a redaction test: `.venv/bin/python -m pytest tests/test_secret_cli_matrix.py tests/test_cli_abbreviations.py tests/test_vendored_cli_abbreviations.py` (evidence: merge.sh verify passed for M01-T01, squash 27759ed; REV-M01-T01 approve at f6ffc78, sol for a Codex author)
 - [x] MCP read-only annotations and credential wording in docs match the registry: `.venv/bin/python -m pytest tests/test_mcp_registry.py` (evidence: merge.sh verify for M01-T05 passed, squash c02a0d1; REV-M01-T05 codex approve at 1e25c95)
@@ -24,7 +24,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 |---|---|---|---|---|---|
 | M01-T01 | Close secret-flag redaction gaps across all parsers | codex | M | cross-cutting | done |
 | M01-T02 | Inventory and classify every outbound call site in src | terra | M | - | done |
-| M01-T03 | Enforce the frozen HTTP allow-list with a test | codex | M | - | todo |
+| M01-T03 | Enforce the frozen HTTP allow-list with a test | codex | M | - | done |
 | M01-T04 | Prove the content-read, cmdlet and Google read boundaries | codex | M | - | todo |
 | M01-T05 | Align MCP and privacy docs with the registry | terra | S | - | done |
 | M01-T06 | Classify shipped model-development example rows | luna | S | - | done |

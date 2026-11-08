@@ -80,3 +80,6 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T14:54:22Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	76	0.0197	partial	9f7b391
 2026-11-08T14:55:05Z	M01-T03	sol	claude-4	claude-opus-5-5	high	branch	0	119	0.7143	done	task/M01-T03-http-allowlist
 2026-11-08T14:56:28Z	REV-M01-T04	codex	codex2	gpt-6.1-sol	high	readonly	0	202		done	task/M01-T04-read-boundaries
+2026-11-08T15:13:50Z	RETRO-M02	luna	claude-2	claude-haiku-5-5	medium	inplace	0	94	0.0265	done	main
+2026-11-08T15:14:51Z	REV-M01-T03	codex	codex2	gpt-6.1-sol	high	readonly	0	155		done	task/M01-T03-http-allowlist
+2026-11-08T15:19:13Z	M01-T04	sol	claude-4	claude-opus-5-5	high	branch	0	417	1.3894	done	task/M01-T04-read-boundaries

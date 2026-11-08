@@ -5,6 +5,7 @@
 - none
 
 ## Next
+- Static boundary-scanner limits (DEC-011): the HTTP scanner misses openers passed as untyped parameters or held in containers (M01-T03 notes); the read-boundary scanner misses non-subprocess launchers, dynamic callee lookup, requests held in containers or fetched via getattr, and relies on per-module handle naming (M01-T04 notes, L1-L4). Untraceable sites fail closed only where the scanners can see them.
 - Retire the parked model layer after 1.3.0 (`model-layer-parked` module, `scripts/*oracle*`, `examples/model_development/`, `configs/model-sources.json`, the `model` CLI wiring) - approved by G (DEC-004); the removal list still goes through the deletion gate; nothing changes in 1.3.0.
 - D5-v2 person-name masking beyond the typed D3 fields: a new design from current `main` (not a merge of `wt/redact-person-names` 3e495d6), bounded per-record matching, 90k HTML peak within current `main` plus 15 percent, both-provider privacy review (D6).
 - Dead-code candidates for a CLEANUP round after 1.3.0, each re-checked first: `benchmarks/fake_graph_benchmark.py`, `scripts/tenant-audit-flow`, `src/azure_tenant_audit/catalog.py`, `assets/auditex-logo.png`, `requirements.txt`, `tenant-bootstrap/requirements.txt`, `scripts/build-value-rule-fixture.py`.
