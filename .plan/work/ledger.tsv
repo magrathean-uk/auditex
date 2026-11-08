@@ -83,3 +83,9 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T15:13:50Z	RETRO-M02	luna	claude-2	claude-haiku-5-5	medium	inplace	0	94	0.0265	done	main
 2026-11-08T15:14:51Z	REV-M01-T03	codex	codex2	gpt-6.1-sol	high	readonly	0	155		done	task/M01-T03-http-allowlist
 2026-11-08T15:19:13Z	M01-T04	sol	claude-4	claude-opus-5-5	high	branch	0	417	1.3894	done	task/M01-T04-read-boundaries
+2026-11-08T15:21:55Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	81	0.0217	partial	726feed
+2026-11-08T15:21:59Z	REV-M01-T04	codex	codex2	gpt-6.1-sol	high	readonly	0	85		done	task/M01-T04-read-boundaries
+2026-11-08T15:23:53Z	M01-T07	codex	codex2	gpt-6.1-terra	low	branch	2	22		blocked	task/M01-T07-gmail-fields-masks
+2026-11-08T15:24:18Z	M01-T08	terra	claude-4	claude-sonnet-5-5	low	branch	0	47	0.2329	done	task/M01-T08-drop-disclaimer-text
+2026-11-08T15:24:43Z	M01-T11	terra	claude-1	claude-sonnet-5-5	low	branch	1	72	0.2796	partial	task/M01-T11-drop-gmail-sharing-scope
+2026-11-08T15:24:48Z	M01-T12	codex	codex	gpt-6.1-terra	medium	branch	0	77		done	task/M01-T12-guard-content-cmdlets

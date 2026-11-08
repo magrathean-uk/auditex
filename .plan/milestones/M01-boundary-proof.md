@@ -25,7 +25,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 | M01-T01 | Close secret-flag redaction gaps across all parsers | codex | M | cross-cutting | done |
 | M01-T02 | Inventory and classify every outbound call site in src | terra | M | - | done |
 | M01-T03 | Enforce the frozen HTTP allow-list with a test | codex | M | - | done |
-| M01-T04 | Prove the content-read, cmdlet and Google read boundaries | codex | M | - | todo |
+| M01-T04 | Prove the content-read, cmdlet and Google read boundaries | codex | M | - | done |
 | M01-T05 | Align MCP and privacy docs with the registry | terra | S | - | done |
 | M01-T06 | Classify shipped model-development example rows | luna | S | - | done |
 | M01-T07 | Add Gmail settings fields masks (G1, G2, G5) | codex | S | tier-a | todo |
@@ -89,6 +89,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 - `minimise_gmail_settings` and `minimise_user_text` stay as defence in depth; `test_discarded_gmail_text_never_leaves_the_collector` still passes.
 - `_TEXT_EXPOSURES` rows G1, G2 and G5 in `tests/test_read_boundaries.py` change to "removed at request level".
 - The normalised Gmail output (including the derived `...Length` and `has...` flags) is byte-identical to before on the existing fixtures.
+- Amended by DEC-012: excluded text no longer feeds live output, so the length fields derived from it are dropped; presence stays only where a non-text field reports it; offline fixtures and the contract are updated to match; if a value rule reads a dropped field, stop and report under questions_for_g.
 - verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_google_workspace.py tests/test_google_collection_gaps.py tests/test_data_minimisation.py tests/test_google_parity.py`
 - files: `src/auditex/google_workspace/client.py`, `tests/test_google_workspace.py`, `tests/test_read_boundaries.py`
 
@@ -124,7 +125,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 - Every Gmail settings read the collector makes (`delegates.list`, `forwardingAddresses.list` and the rest) is shown to be covered by `gmail.settings.basic`, with the Google reference page or method scope list cited in the test or a comment.
 - The scope-catalog, setup-guide and troubleshooting docs no longer instruct operators to grant the scope (`docs/guides/admin-permission-guide.md`, `docs/guides/troubleshooting.md`), and a test asserts the scope appears in no requested-scope list under `src/`.
 - verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_google_workspace.py tests/test_scope_catalog.py tests/test_setup_guide.py tests/test_google_parity.py`
-- files: `src/auditex/google_workspace/auth.py`, `src/auditex/google_workspace/collectors.py`, `src/azure_tenant_audit/scope_catalog.py`, `docs/guides/admin-permission-guide.md`, `docs/guides/troubleshooting.md`, `tests/test_scope_catalog.py`, `tests/test_setup_guide.py`, `tests/test_read_boundaries.py`
+- files: `src/auditex/google_workspace/auth.py`, `src/auditex/google_workspace/collectors.py`, `src/azure_tenant_audit/scope_catalog.py`, `docs/guides/admin-permission-guide.md`, `docs/guides/troubleshooting.md`, `tests/test_scope_catalog.py`, `tests/test_setup_guide.py`, `tests/test_read_boundaries.py`, `tests/test_google_workspace.py`, `tests/test_google_parity.py` (retired-scope assertions only, DEC-012)
 
 ### M01-T12 Make the runtime read guard refuse content cmdlets
 - Dependencies: M01-T04 merged; independent of M01-T03 (disjoint files).

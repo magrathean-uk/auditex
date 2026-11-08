@@ -1,39 +1,50 @@
 ## RESULT M00-T01
 status: partial
-summary: Gate chain not executed because of the load rule (uptime 14:53, load 12.52/13.99/12.20 on 12 cores; porn, wgex and teslatlas run-jobs live). Worktree HEAD 9f7b391 equals main; T02, T03 and T05 are on main, so the precondition holds. Inventory done by reading and cheap commands only; no pass/fail counts exist yet.
-changes: none tracked. Created git-ignored symlink .venv -> .venv in the worktree (per brief, no install). Wrote .plan/work/M00-T01/notes.md.
-verification: none run. Shell commands used: clean-development doctor (FAIL on cleanup locks); uptime/pgrep/ps (load and heavy jobs); git log/status/worktree list; rg and sed on Makefile, pyproject.toml, .gitignore, .clean-development.json; ls; reads of scripts/check-reproducible-build.py and scripts/release-smoke.sh.
+summary:
+- Gate suite not run. The load rule blocked it: 15:20 GMT load 13.43 on 12 cores (15:21: 13.23), and another project's `cargo test --lib terrain_cache` (pid 29063) is running. Per the brief I reported partial without running, and did not poll.
+- Precondition holds: T02 bb50c0a, T03 b702d8a and T05 f0ae2a7 are ancestors of main 726feed, which is the worktree HEAD.
+- Inventory done by reading only. No gate has pass, fail or pytest counts.
+- Re-run once load is below 12 and no other heavy job is running. The gate chain is listed in notes.md.
+changes: none tracked; appended a "Run 2" section to `.plan/work/M00-T01/notes.md` (the earlier HEAD 9f7b391 section is kept).
+verification:
+- `uptime`, `sysctl -n hw.ncpu`, anchored `pgrep`: load evidence, pass.
+- `git merge-base --is-ancestor` for bb50c0a, b702d8a, f0ae2a7, 82d7ca5 against HEAD: all pass.
+- `command -v uv gitleaks`: both present (uv 0.13.7, gitleaks 8.30.1).
+- Not run (load rule): `make release-check`, `make audit-deps`, `make dist`, `scripts/release-smoke.sh`, `scripts/check-reproducible-build.py`.
+- Not run (brief): `clean-development doctor`.
 risks:
-- clean-development doctor FAIL "cleanup locks: lifecycle: dead/unverifiable owner; explicit recovery required". Needs G's recovery decision; I did not touch it.
-- release-smoke.sh and audit-deps fetch packages from the network; download size not measured.
-- Gate chain will be a full test suite (make release-check) plus installs (audit-deps, release-smoke), which conflicts with the Task's "no installs, no full test suites" constraint.
+- The gate chain is unverified on 726feed; no evidence either way that it passes.
+- `release-check` (Makefile:78-85) does not include dist, audit-deps, release-smoke or the reproducible-build check; the milestone verify line (.plan/milestones/M00-foundation.md:40) runs all of them.
+- The SessionStart hook reports clean-development lifecycle registration/cleanup failed. The brief forbids `doctor`, so I did not run it; G to decide.
+questions_for_g:
+- none
+
 ### Findings
 1. exists
-- Makefile:48-49 AUDIT_DEPS_DIR=build/audit-deps, AUDIT_DEPS_IGNORE=scripts/audit-deps-ignore.json
-- Makefile:57-76 audit-deps; Makefile:78-85 release-check; Makefile:88-102 release-archive; Makefile:104-118 dist
-- pyproject.toml:46-49 dev extra with pip-audit>=2.9,<3
-- scripts/release-smoke.sh (77 lines); scripts/check-reproducible-build.py (73 lines)
-- .gitignore:8 build/, .gitignore:9 dist/; .clean-development.json:6-9 buildDirs ["build","dist"], depDirs [".venv"]
-- tests/test_check_reproducible_build.py, tests/test_architecture_modules.py, docs/development/runbook.md (rg -l references)
+- Makefile:48-49 `AUDIT_DEPS_DIR`, `AUDIT_DEPS_IGNORE`; Makefile:57-75 `audit-deps`.
+- Makefile:78-85 `release-check` (lint, test, contract-smoke, release-archive, `generate-rule-packs.py --check`, `oss-taint-scan.sh`, gitleaks).
+- Makefile:88-101 `release-archive`, TMPDIR-safe via `${TMPDIR:-/tmp}`; Makefile:104-118 `dist`.
+- scripts/release-smoke.sh (76 lines by Read); scripts/check-reproducible-build.py (72 lines by Read).
+- pyproject.toml:18-49 extras `mcp` (22), `test` (27), `google` (31), `model_train` (37), `dev` (48); pip-audit at pyproject.toml:49.
+- .clean-development.json:6-12 (buildDirs build, dist; depDirs .venv); .gitignore:8-9 (build/, dist/).
+- docs/development/runbook.md:98-102 documents the targets and scripts.
 2. works
-- main has T02 (bb50c0a), T03 (b702d8a), T05 (f0ae2a7): `git log --oneline main`
-- release-check order matches the Makefile:78-85 list (lint, test, contract-smoke, release-archive, rule-pack drift, oss-taint-scan, gitleaks): read
-- dist copies wheel and sdist into dist/ after git archive HEAD (Makefile:104-118, esp. 117-118): read
-- check-reproducible-build.py matches the T05 criteria on reading (lines 36, 44, 55, 63-67): read
-- release-smoke.sh covers wheel and sdist across base, google and mcp venvs, with default parent under TMPDIR (lines 8, 37-74): read
+- Precondition commits are ancestors of HEAD (command in verification).
+- release-check step order in Makefile:78-85 matches runbook.md:102 (read).
+- release-smoke.sh and check-reproducible-build.py match the T05 description on reading: wheel and sdist in base, google and mcp venvs (release-smoke.sh:37-74); two builds with SOURCE_DATE_EPOCH, compared by wheel sha256 and sorted sdist members (check-reproducible-build.py:44, 55, 63-67).
+- Extras declared (pyproject.toml, Grep of `name = [` lines) are exactly the five that Makefile:65 loops over, plus aarch64 at Makefile:66.
+- uv and gitleaks are on PATH (command check above).
+- Not verified by execution: any gate target.
 3. broken
-- none confirmed; nothing executed
-- release-smoke.sh:27-40 uses bare python and python -m pip after venv activation; relies on PATH (inferred, unverified)
+- none confirmed (nothing executed).
+- Referenced but absent: scripts/audit-deps-ignore.json (named at Makefile:49). Makefile:69 tolerates absence, and the milestone only requires it if an advisory is accepted (.plan/milestones/M00-foundation.md:57). Benign by design.
 4. dead candidates
-- none assessed (out of scope for a gate run)
+- none identified. No repo-wide rg was run (brief limit). Slice scripts are referenced from Makefile and runbook.md:98-101.
 5. contradictions
-- none found on reading. AGENTS.md "Checks by changed surface" lists only make release-check for releases; audit-deps and dist are not mentioned (documentation gap)
+- none between runbook.md:98-102 and the Makefile.
+- Scope gap, not a text contradiction: AGENTS.md's checks table says a release change needs `make release-check` (AGENTS.md, "Checks by changed surface"), while the milestone DoD lists dist, audit-deps, release-smoke and reproducible build separately (.plan/milestones/M00-foundation.md:18-22).
 6. open questions
-- Does make audit-deps pass on current pins? Needs network for the advisory DB. Settled by running step 2.
-- Are gitleaks and uv on PATH? `command -v gitleaks uv` not run. Settled by steps 1 and 2.
-- Does .venv (symlink to a symlink) resolve in the worktree? Settled by step 5 or `.venv/bin/python -c 'import sys'`.
-- Neighbouring area: doctor reports 6 repos without .clean-development.json (infra, pentest-local, pentest-local-public-staging, wattex, wgex, wgex-plan). Outside M00-T01.
-questions_for_g:
-- Approve the recovery for the doctor cleanup-lock FAIL, or should a worker handle it?
-- Confirm the gate run may go ahead despite the Task's "no installs, no full test suites" line. The brief's gate list needs both. I have not run it.
-- Re-dispatch M00-T01 when load is below 12 and no other project's heavy job is running? Recommendation: yes, run the five steps in order under run-job.
+- Does the gate chain pass on 726feed? Settled by running it once load is below 12 and no other heavy job runs: `uptime`, then the five commands in order (lines 3-7 of notes.md).
+- Does `make dist` need setuptools in the Makefile's `$(PYTHON)`? Settled by running `make dist` (Makefile:113-114 import setuptools.build_meta).
+- Does release-smoke.sh find the right `python` on PATH? It calls bare `python` (release-smoke.sh:27, 30, 40). Settled by running the smoke script.
+- Neighbouring area: the earlier notes section (HEAD 9f7b391) and other `.plan/work/M00-T01/` files (`job`, `job-1..3`, `raw.json`, `stderr.txt`) are from a previous attempt; not inspected further.

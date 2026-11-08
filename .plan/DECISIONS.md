@@ -99,3 +99,12 @@
 - why: each review round found new static-analysis corner cases without any real call site breaching the boundary; the tests fail closed on untraceable sites.
 - consequences: the boundary proof ships with named limitations in the backlog.
 - approver: auto
+
+## DEC-012 Gmail masks drop text-derived fields; M01-T11 file set widened
+- date: 2026-11-08
+- status: approved
+- decision: where Gmail settings text can be excluded at request level (M01-T07), it is excluded and live output drops the length fields derived from it; presence stays only where a non-text field reports it, and offline fixtures and the contract follow. If any value rule reads a dropped field, the task stops and asks G. Read-and-discard (DEC-008) stays reserved for text that cannot be excluded. M01-T11 may update the two existing test assertions that still name the retired gmail.settings.sharing scope.
+- options: drop the derived fields | read and discard to keep them
+- why: request-level exclusion is the stricter boundary and the derived lengths are informational.
+- consequences: a small change to Google live evidence fields, to be listed in the 1.3.0 release notes.
+- approver: auto

@@ -1,0 +1,7 @@
+## RESULT M01-T08
+status: done
+summary: `ApplyHtmlDisclaimerText` is gone from the `Get-TransportRule` command in `exchange_policy.py` and `collector-definitions.json`, from `normalize.py`, from the adapter field set, from the API catalogue and from both demo tenants. `PrependSubject` is kept. G6 now reads `removed_at_request`. A new test asserts the shipped files no longer contain the field. The rule pack was regenerated with no diff in `configs/scuba-value-rules.json`.
+changes: src/azure_tenant_audit/collectors/exchange_policy.py, configs/collector-definitions.json, src/azure_tenant_audit/normalize.py, src/auditex/scuba_adapters_exchange.py, docs/reference/api-call-catalog.md, examples/demo_tenant/demo_tenant.json, examples/demo_tenant/demo_tenant_remediated.json, tests/test_exchange_policy_scuba_inputs.py, tests/test_scuba_adapters_exchange.py, tests/test_enterprise_depth_collectors.py, tests/test_read_boundaries.py (commit 40260b0)
+verification: the pytest set from the criteria block passed; `scripts/generate-rule-packs.py` left `configs/scuba-value-rules.json` with no diff; `make contract-smoke` passed; `git status --porcelain` is empty after the commit
+risks: the G6 rows in `_TEXT_EXPOSURES` now use the needle `Get-TransportRule | Select-Object`, with a new `removed_at_request` disposition added to the allowed set; this is a test-table choice, not a spec change; `.venv` in the worktree is a symlink to the main checkout (git-ignored)
+questions_for_g: none
