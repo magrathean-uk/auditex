@@ -41,3 +41,9 @@ CLI parsers use `allow_abbrev=False`; every secret-carrying flag sits in its red
 Feature flags are environment variables read in `src/auditex/features.py` (`AUDITEX_ENABLE_RESPONSE` lab only; hidden `AUDITEX_DISABLE_VALUE_RULES` accepted and ignored).
 Shipped content changes update `pyproject.toml` data-files and `shipped_content.py` together; rule changes rerun `scripts/generate-rule-packs.py`.
 Commits signed, gitleaks-clean, one coherent change each, staged by pathspec; no workstation paths, credentials or live evidence in the public repo.
+
+## Recorded boundary exceptions (1.3.0)
+- Transport: Google Workspace reads are class 1 and operator-configured SMTP is class 5; the frozen non-GET allow-list is section E of `.plan/work/M01-T02/transport-inventory.md` (DEC-006).
+- Content reads: Gmail settings, Alert Center and group-settings text is excluded at request level (DEC-012, M01-T07, M01-T09); Graph automatic-reply bodies and inbox-rule keywords are read and discarded on receipt; transport-rule PrependSubject is kept for MS.EXO.7.1; Intune custom-profile payloads are stripped on receipt (DEC-008).
+- Scopes: admin.directory.user.security, apps.alerts, gmail.settings.basic and apps.groups.settings are write-capable scopes used only for list and get calls, with blast radius recorded (DEC-010).
+- Proof limits: the static HTTP and read-boundary scanners have bounded coverage; their known blind spots are BACKLOG items (DEC-011).

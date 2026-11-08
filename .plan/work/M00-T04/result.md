@@ -90,6 +90,7 @@ questions_for_g: Confirm the D5 chain (35 rows) is a post-1.3.0 deferral, not a 
 | wt/release-1.2.4-final | fa99bad | 5 | superseded | none | same release |
 | wt/release-1.2.4-r2 | c9edea5 | 5 | superseded | none | same release |
 | wt/ss21-composed-20261107 | ef8679d | 130 | post-1.3.0 (D5) | none; DEC-001 | consumer fixture reports; D5 file set (inferred) |
+| wt/github-build-tags-20261108 | 6ded82a | 1 | post-1.3.0 | deferred: created by another session at 18:43 after this triage; adds a workflow that tags default-branch commits, outside plan v2 where hosted CI and release automation are non-goals (DEC-001) | git log origin/main..wt/github-build-tags-20261108 |
 
 Full evidence (commands, file reads, class rules): .plan/work/M00-T04/notes.md
 

@@ -8,7 +8,7 @@ status: done
 Tier A milestone: M01-T01, M01-T03 and M01-T04 each get an independent review from the other provider at a frozen head. The parked model layer is classified here, never developed or removed.
 
 ## Goal
-The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: every outbound call site is classified against the transport policy in ARCHITECTURE.md, no request outside that policy can reach a tenant or a third party, no collector reads message or file content, PowerShell and Google calls are read-only, no secret appears in argv, logs or diagnostics, MCP annotations and credential wording match the registry, and no forbidden evaluation rows ship.
+The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: every outbound call site is classified against the transport policy in ARCHITECTURE.md, no request outside that policy can reach a tenant or a third party, no collector reads message or file content, PowerShell and Google calls are read-only, no secret appears in argv, logs or diagnostics, MCP annotations and credential wording match the registry, and no forbidden evaluation rows ship. Recorded exceptions and limits: DEC-006, DEC-008, DEC-010, DEC-011 and DEC-012.
 
 ## Definition of Done
 - [x] Review: terra's M01-T02 inventory assigns every outbound call site under `src/` (HTTP, SDK and subprocess) to one transport class in ARCHITECTURE.md, with no unclassified row: `test -s .plan/work/M01-T02/transport-inventory.md && ! grep -n '| unclassified |' .plan/work/M01-T02/transport-inventory.md` (evidence: REV-M01-T02 round 4, Codex: every classification finding fixed, section E complete and minimal, no unclassified row; section G completeness moved to M01-T04 by DEC-007)

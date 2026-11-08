@@ -17,11 +17,11 @@ who need defensible, reproducible evidence without write access (wording confirm
 
 ## Success criteria
 - `make release-check` and `make test` exit 0 on the release commit.
-- The full acceptance suites (`value_rule_acceptance`, `explainer_acceptance`) pass once on the release commit.
+- The full acceptance suites (`value_rule_acceptance`, `explainer_acceptance`) pass once on the release commit. The full v3.9.1 vector replay is waived for 1.3.0 (DEC-017); every other acceptance test passes.
 - Every outbound call site under `src/` (HTTP, SDK, subprocess) is classified against the transport policy in
   ARCHITECTURE.md, and a test fails on any non-GET HTTP request outside the allow-list frozen from it.
 - Tests prove that no collector requests message or file content, every PowerShell cmdlet and Microsoft 365 CLI command at an executable command site (docstrings, comments and documentation strings excluded) is on a read
-  allow-list, with the three wrapper verbs accepted only at their known wrapper sites, and every Google API call is a read method under read-only scopes.
+  allow-list, with the three wrapper verbs accepted only at their known wrapper sites, and every Google API call is a read method under read-only scopes. Recorded exceptions: request-level masks or read-and-discard for settings text (DEC-008, DEC-012), four write-capable Google scopes used only for reads (DEC-010), transport class interpretations (DEC-006) and bounded scanner coverage (DEC-011, limits in BACKLOG).
 - Every parser flag that can carry a secret is in its redaction list and has an abbreviation and redaction test.
 - `make audit-deps` exits 0 over the base install and every declared extra, `model_train` included; any
   accepted advisory carries a G-approved DECISIONS.md entry.
