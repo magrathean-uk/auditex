@@ -94,11 +94,24 @@ Install the test dependencies for development: `python -m pip install -e '.[test
 | `./scripts/oss-taint-scan.sh` | Checks forbidden research/derived paths and taint markers. |
 | `python3 scripts/generate-rule-packs.py --check` | Fails when `configs/rule-packs.json` differs from the packs generated from the rule templates and mappings; without `--check` it rewrites the file. |
 | `gitleaks dir .` | Secret scan of the working tree. `.gitleaks.toml` skips the git-ignored local and generated directories (`.venv`, `.secrets`, `outputs` and similar). |
-| `make release-check` | Runs `lint`, `test`, `contract-smoke`, the rule-pack drift check, the taint scan and the gitleaks scan in that order and stops at the first failure. Needs `gitleaks` on `PATH`. |
+| `make release-archive` | Builds a wheel from `git archive HEAD` with no build isolation and no index, rejects `build/` and `egg-info` entries, and runs `scripts/check-archive-wheel.py` against the archived source. |
+| `make dist` | Builds the sdist and wheel from `git archive HEAD` in a temporary folder and copies them to `dist/`. |
+| `make audit-deps` | Resolves the base install and every extra from `pyproject.toml` with `uv` (metadata only, no source builds) and audits the result. Needs `uv`. |
+| `bash scripts/release-smoke.sh dist <work-dir>` | Wheel and sdist smoke: installs the artefacts in `dist/` into isolated environments for base, Google and MCP checks. |
+| `python3 scripts/check-reproducible-build.py` | Builds the current commit twice and compares the sdist members and digests. |
+| `make release-check` | Runs `lint`, `test`, `contract-smoke`, `release-archive`, the rule-pack drift check, the taint scan and the gitleaks scan in that order and stops at the first failure. Needs `gitleaks` on `PATH`. |
 
 `.pre-commit-config.yaml` runs Ruff, the trailing-whitespace and final-newline checks, a staged-file gitleaks scan and the generic file checks on every commit once the hook is installed with `pre-commit install`. The typos, shellcheck and shfmt hooks stay manual: run one with `pre-commit run --hook-stage manual <hook-id> --all-files`. Use focused tests for changed behavior. Contract changes need contract smoke. See [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) for contribution scope and check reporting.
 
-There is no hosted CI; the repository is stored on Git and checks run locally. Before tagging a release, install the Google and MCP extras, run `make release-check`, build the wheel and source distribution, and run `bash scripts/release-smoke.sh dist /tmp/auditex-release-smoke`, which creates isolated environments for base, Google, and MCP package checks. The release tag must be `v` followed by the packaged version, which is the `version` in `pyproject.toml` and is listed with its date in [CHANGELOG.md](../../CHANGELOG.md). Update the changelog for every release, and bump `CONTRACT_VERSION` in `src/azure_tenant_audit/contracts.py` and the date in the [output contract](../reference/output-contract.md) when the bundle shape changes. The `mcp` extra is capped below 2 in `pyproject.toml` because the MCP server is only tested against a stand-in for `FastMCP`; raise the cap only together with a test that starts the real server and checks every tool's read-only annotations.
+There is no hosted CI; the repository is stored on Git and checks run locally. Before tagging a release, install the Google and MCP extras, run `make release-check`, run `make dist` to build the wheel and source distribution, then `make audit-deps`, `python3 scripts/check-reproducible-build.py` and `bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke"`, which creates isolated environments for base, Google, and MCP package checks. The release tag must be `v` followed by the packaged version, which is the `version` in `pyproject.toml` and is listed with its date in [CHANGELOG.md](../../CHANGELOG.md). Update the changelog for every release, and bump `CONTRACT_VERSION` in `src/azure_tenant_audit/contracts.py` and the date in the [output contract](../reference/output-contract.md) when the bundle shape changes. The `mcp` extra is capped below 2 in `pyproject.toml` because the MCP server is only tested against a stand-in for `FastMCP`; raise the cap only together with a test that starts the real server and checks every tool's read-only annotations.
+
+### Publication
+
+Publication for 1.3.0 is the one G approved in DEC-001: a signed `v1.3.0` tag plus a GitHub release carrying the wheel and sdist from `make dist` (`gh release create v1.3.0 dist/*.whl dist/*.tar.gz`). There is no PyPI upload. Tagging and the release wait for G's explicit yes naming the version; a green `make release-check` is not approval.
+
+### Internal tools
+
+[`scubagear-export-adapter.md`](scubagear-export-adapter.md) describes an internal, experimental tool for assessing ScubaGear exports. It is not a supported product surface.
 
 ## Lab tools
 
