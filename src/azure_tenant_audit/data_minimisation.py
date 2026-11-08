@@ -3,13 +3,14 @@
 Gmail vacation-responder text, Gmail send-as signatures and Microsoft Graph automatic-reply
 message bodies are written by the mailbox owner and are mailbox content in all but name. The
 findings read only the booleans around them, so only whether a field is set and how long it is
-leave the collectors: each dropped field ``f`` becomes ``fLength`` (an integer) and ``hasF`` (a
-boolean).
+leave the collectors for the Graph reply bodies: each dropped field ``f`` becomes ``fLength`` (an integer)
+and ``hasF`` (a boolean). The Gmail fields are excluded at request level (DEC-012, ``fields`` masks in
+``google_workspace/client.py``) and these functions only drop them, leaving no length or flag behind.
 
 The words an owner chose for an inbox rule (``subjectContains``, ``bodyContains`` and the like) or a
 Gmail filter (``query``, ``negatedQuery``, ``subject``) say what the owner expects to find in mail
-bodies and subjects. No rule reads them (broadness is decided where the rule is read), so each list
-becomes ``fCount`` and ``hasF``, each string ``fLength`` and ``hasF``. Address lists such as
+bodies and subjects. No rule reads them. Graph word lists become ``fCount`` and ``hasF``; Gmail filter
+terms are dropped outright. Address lists such as
 ``fromAddresses`` stay: forwarding classification needs them. A responder who needs the keywords of
 a suspect rule goes back to the tenant for them.
 
@@ -45,16 +46,19 @@ DEVICE_CONFIGURATION_LABEL_FIELDS = ("payloadName", "payloadFileName")
 DEVICE_CONFIGURATION_SECTION_KEYS = ("deviceConfigurations", "deviceConfigurationProfiles")
 
 
-def strip_text_fields(item: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
-    """Copy of ``item`` with each text field replaced by ``<field>Length`` and ``has<Field>``.
+def strip_text_fields(item: dict[str, Any], fields: tuple[str, ...], *, keep_presence: bool = True) -> dict[str, Any]:
+    """Copy of ``item`` with each text field removed.
 
-    A field that is already gone (or never present) leaves any existing length untouched.
+    With ``keep_presence`` each is replaced by ``<field>Length`` and ``has<Field>``; without it nothing is
+    left in its place (Gmail, DEC-012). A field that is already gone leaves any existing length untouched.
     """
     result = dict(item)
     for name in fields:
         if name not in result:
             continue
         value = result.pop(name)
+        if not keep_presence:
+            continue
         length = len(value) if isinstance(value, str) else 0
         result.setdefault(f"{name}Length", length)
         result.setdefault(f"has{name[0].upper()}{name[1:]}", length > 0)
@@ -115,11 +119,11 @@ def minimise_gmail_settings(payload: dict[str, Any]) -> dict[str, Any]:
     result = dict(payload)
     vacation = result.get("vacation")
     if isinstance(vacation, dict):
-        result["vacation"] = strip_text_fields(vacation, VACATION_TEXT_FIELDS)
+        result["vacation"] = strip_text_fields(vacation, VACATION_TEXT_FIELDS, keep_presence=False)
     send_as = result.get("sendAs")
     if isinstance(send_as, list):
         result["sendAs"] = [
-            strip_text_fields(item, SEND_AS_TEXT_FIELDS) if isinstance(item, dict) else item for item in send_as
+            strip_text_fields(item, SEND_AS_TEXT_FIELDS, keep_presence=False) if isinstance(item, dict) else item for item in send_as
         ]
     return result
 
@@ -146,11 +150,11 @@ def minimise_user_text(value: Any) -> Any:
         return value
     result = {key: minimise_user_text(item) for key, item in value.items()}
     if "enableAutoReply" in result:
-        result = strip_text_fields(result, VACATION_TEXT_FIELDS)
+        result = strip_text_fields(result, VACATION_TEXT_FIELDS, keep_presence=False)
     if isinstance(result.get("vacation"), dict):
-        result["vacation"] = strip_text_fields(result["vacation"], VACATION_TEXT_FIELDS)
+        result["vacation"] = strip_text_fields(result["vacation"], VACATION_TEXT_FIELDS, keep_presence=False)
     if "sendAsEmail" in result:
-        result = strip_text_fields(result, SEND_AS_TEXT_FIELDS)
+        result = strip_text_fields(result, SEND_AS_TEXT_FIELDS, keep_presence=False)
     if any(name in result for name in AUTO_REPLY_TEXT_FIELDS):
         result = strip_text_fields(result, AUTO_REPLY_TEXT_FIELDS)
     if _is_custom_profile(result):
@@ -163,7 +167,7 @@ def minimise_user_text(value: Any) -> Any:
         result["conditions"] = strip_word_lists(result["conditions"], RULE_CONDITION_WORD_FIELDS)
     if isinstance(result.get("criteria"), dict) and isinstance(result.get("action"), dict):
         # A Gmail filter: its search terms are the owner's; the forward target and labels are what is judged.
-        result["criteria"] = strip_text_fields(result["criteria"], GMAIL_FILTER_TEXT_FIELDS)
+        result["criteria"] = strip_text_fields(result["criteria"], GMAIL_FILTER_TEXT_FIELDS, keep_presence=False)
     return result
 
 

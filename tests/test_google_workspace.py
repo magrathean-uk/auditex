@@ -2368,3 +2368,81 @@ def test_google_rules_have_framework_mapping_floor() -> None:
         assert mapping is not None, f"{rule_id} missing framework mapping"
         assert mapping.get("google_workspace_baseline"), f"{rule_id} missing Google baseline mapping"
         assert mapping.get("nist_800_53") or mapping.get("iso_27001"), f"{rule_id} missing NIST or ISO mapping"
+
+
+def test_gmail_settings_requests_carry_fields_masks_without_owner_text() -> None:
+    from auditex.google_workspace.client import GoogleWorkspaceClient
+    from azure_tenant_audit.data_minimisation import GMAIL_FILTER_TEXT_FIELDS, SEND_AS_TEXT_FIELDS, VACATION_TEXT_FIELDS
+
+    calls: dict[str, dict] = {}
+
+    class _Request:
+        def __init__(self, name: str, kwargs: dict) -> None:
+            calls[name] = kwargs
+
+        def execute(self) -> dict:
+            return {}
+
+    class _Collection:
+        def __init__(self, prefix: str) -> None:
+            self.prefix = prefix
+
+        def list(self, **kwargs):  # noqa: A003
+            return _Request(self.prefix, kwargs)
+
+    class _Settings:
+        def getAutoForwarding(self, **kwargs):  # noqa: N802
+            return _Request("autoForwarding", kwargs)
+
+        def getImap(self, **kwargs):  # noqa: N802
+            return _Request("imap", kwargs)
+
+        def getPop(self, **kwargs):  # noqa: N802
+            return _Request("pop", kwargs)
+
+        def getVacation(self, **kwargs):  # noqa: N802
+            return _Request("vacation", kwargs)
+
+        def filters(self):
+            return _Collection("filters")
+
+        def sendAs(self):  # noqa: N802
+            return _Collection("sendAs")
+
+        def forwardingAddresses(self):  # noqa: N802
+            return _Collection("forwardingAddresses")
+
+        def delegates(self):
+            return _Collection("delegates")
+
+    class _Users:
+        def settings(self):
+            return _Settings()
+
+    class _Service:
+        def users(self):
+            return _Users()
+
+    client = GoogleWorkspaceClient(credentials=object())
+    assert client._services is not None
+    client._services[("gmail", "v1")] = _Service()
+    client.get_gmail_settings_for_user("me")
+
+    for name, excluded in (
+        ("vacation", VACATION_TEXT_FIELDS),
+        ("sendAs", SEND_AS_TEXT_FIELDS),
+        ("filters", GMAIL_FILTER_TEXT_FIELDS),
+    ):
+        mask = calls[name].get("fields")
+        assert mask, f"{name} must request a fields mask"
+        for field in excluded:
+            assert field not in mask, f"{name} mask names {field}"
+
+    from auditex.google_workspace.client import GMAIL_SEND_AS_FIELDS
+
+    assert GMAIL_SEND_AS_FIELDS == (
+        "sendAs(sendAsEmail,displayName,replyToAddress,isPrimary,isDefault,treatAsAlias,smtpMsa,verificationStatus)"
+    )
+    for name in ("vacation", "sendAs", "filters"):
+        assert "*" not in calls[name]["fields"]
+    assert "isPrimary" in calls["sendAs"]["fields"] and "displayName" in calls["sendAs"]["fields"]

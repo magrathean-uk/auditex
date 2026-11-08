@@ -31,6 +31,15 @@ _CHROMEOS_DEVICE_FIELDS = (
 )
 
 
+# Gmail settings `fields` masks: only what normalize.py and findings.py read; no vacation text, signature or filter text.
+GMAIL_VACATION_FIELDS = "enableAutoReply,restrictToContacts,restrictToDomain,startTime,endTime"
+GMAIL_SEND_AS_FIELDS = (
+    "sendAs(sendAsEmail,displayName,replyToAddress,isPrimary,isDefault,treatAsAlias,smtpMsa,verificationStatus)"
+)
+GMAIL_FILTERS_FIELDS = (
+    "filter(id,action(forward,addLabelIds,removeLabelIds),criteria(from,to,hasAttachment,excludeChats,size,sizeComparison))"
+)
+
 class GoogleWorkspaceError(RuntimeError):
     def __init__(self, message: str, *, surface: str | None = None) -> None:
         super().__init__(message)
@@ -274,6 +283,7 @@ class GoogleWorkspaceClient:
             service = self._service("gmail", "v1")
         settings = service.users().settings()
         payload: dict[str, Any] = {"userEmail": user_email}
+        # Request-level masks (DEC-012): owner-written text is never requested, so it never reaches the collector.
 
         def _capture(name: str, getter: Callable[[], Any], *, list_key: str | None = None, default: Any = None) -> None:
             try:
@@ -287,17 +297,17 @@ class GoogleWorkspaceClient:
                 payload[f"{name}_error"] = {"error_class": error_class, "error": error}
 
         _capture("autoForwarding", lambda: settings.getAutoForwarding(userId=user_email).execute(), default={})
-        _capture("filters", lambda: settings.filters().list(userId=user_email).execute(), list_key="filter", default=[])
+        _capture("filters", lambda: settings.filters().list(userId=user_email, fields=GMAIL_FILTERS_FIELDS).execute(), list_key="filter", default=[])
         _capture(
             "forwardingAddresses",
             lambda: settings.forwardingAddresses().list(userId=user_email).execute(),
             list_key="forwardingAddresses",
             default=[],
         )
-        _capture("sendAs", lambda: settings.sendAs().list(userId=user_email).execute(), list_key="sendAs", default=[])
+        _capture("sendAs", lambda: settings.sendAs().list(userId=user_email, fields=GMAIL_SEND_AS_FIELDS).execute(), list_key="sendAs", default=[])
         _capture("imap", lambda: settings.getImap(userId=user_email).execute(), default={})
         _capture("pop", lambda: settings.getPop(userId=user_email).execute(), default={})
-        _capture("vacation", lambda: settings.getVacation(userId=user_email).execute(), default={})
+        _capture("vacation", lambda: settings.getVacation(userId=user_email, fields=GMAIL_VACATION_FIELDS).execute(), default={})
         _capture("delegates", lambda: settings.delegates().list(userId=user_email).execute(), list_key="delegates", default=[])
         return minimise_gmail_settings(payload)
 

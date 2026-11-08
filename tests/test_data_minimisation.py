@@ -100,7 +100,7 @@ def _assert_no_user_text(rendered: str) -> None:
         assert secret not in rendered, secret
 
 
-def test_gmail_client_drops_vacation_and_signature_text_but_keeps_booleans_and_lengths() -> None:
+def test_gmail_client_drops_vacation_and_signature_text_and_leaves_no_length_or_flag() -> None:
     payload = _client().get_gmail_settings_for_user("dana@acme.test")
 
     _assert_no_user_text(json.dumps(payload))
@@ -109,14 +109,11 @@ def test_gmail_client_drops_vacation_and_signature_text_but_keeps_booleans_and_l
     assert vacation["restrictToDomain"] is False
     assert vacation["restrictToContacts"] is False
     assert vacation["startTime"] == "1760000000000"
-    assert vacation["responseBodyPlainTextLength"] == len(VACATION_BODY)
-    assert vacation["responseBodyHtmlLength"] == len(VACATION_HTML)
-    assert vacation["responseSubjectLength"] == len(VACATION_SUBJECT)
-    assert vacation["hasResponseBodyPlainText"] is True and vacation["hasResponseSubject"] is True
+    assert not [key for key in vacation if key.endswith("Length") or key.startswith("hasResponse")]
     primary, alias = payload["sendAs"]
     assert primary["sendAsEmail"] == "dana@acme.test" and primary["isPrimary"] is True
-    assert primary["signatureLength"] == len(SIGNATURE) and primary["hasSignature"] is True
-    assert alias["signatureLength"] == 0 and alias["hasSignature"] is False
+    assert "signature" not in primary and "signatureLength" not in primary and "hasSignature" not in primary
+    assert "signatureLength" not in alias and "hasSignature" not in alias
 
 
 def test_minimise_gmail_settings_is_idempotent_and_does_not_mutate_its_input() -> None:
@@ -258,9 +255,9 @@ def test_minimise_user_text_strips_every_shape_wherever_it_appears() -> None:
     assert json.dumps(nested, sort_keys=True) == before  # the input is not mutated
     rendered = json.dumps(result)
     _assert_no_user_text(rendered)
-    assert result["a"][0]["vacation"]["hasResponseBodyHtml"] is True
-    assert result["b"]["enableAutoReply"] is False and result["b"]["responseSubjectLength"] == len(VACATION_SUBJECT)
-    assert result["c"][0]["signatureLength"] == len(SIGNATURE) and result["c"][0]["sendAsEmail"] == "x@y.test"
+    assert "hasResponseBodyHtml" not in result["a"][0]["vacation"]
+    assert result["b"]["enableAutoReply"] is False and "responseSubjectLength" not in result["b"]
+    assert "signatureLength" not in result["c"][0] and result["c"][0]["sendAsEmail"] == "x@y.test"
     assert result["d"]["settings"]["automaticRepliesSetting"]["status"] == "scheduled"
     assert result["e"]["hasExternalReplyMessage"] is True
     assert result["keep"]["signature"].startswith("a signature key")
@@ -302,12 +299,12 @@ def test_google_offline_replay_drops_vacation_and_signature_text_from_raw_and_no
     _assert_no_user_text(_all_text(run_dir))
     raw = json.loads((run_dir / "raw" / "google_gmail_settings.json").read_text(encoding="utf-8"))
     row = raw["mailboxSettings"]["value"][0]
-    assert row["vacation"]["enableAutoReply"] is True and row["vacation"]["responseBodyHtmlLength"] == len(VACATION_HTML)
-    assert row["sendAs"][0]["hasSignature"] is True
+    assert row["vacation"]["enableAutoReply"] is True and "responseBodyHtmlLength" not in row["vacation"]
+    assert "hasSignature" not in row["sendAs"][0]
     normalized = json.loads((run_dir / "normalized" / "google_mailbox_settings.json").read_text(encoding="utf-8"))
     vacation = normalized["records"][0]["vacation"]
     assert vacation["enableAutoReply"] is True and vacation["restrictToDomain"] is False
-    assert vacation["hasResponseBodyPlainText"] is True
+    assert "hasResponseBodyPlainText" not in vacation
 
 
 def test_m365_offline_replay_drops_auto_reply_bodies_from_raw_and_normalized(tmp_path: Path) -> None:

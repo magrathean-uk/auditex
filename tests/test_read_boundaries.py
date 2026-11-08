@@ -169,20 +169,20 @@ _RETIRED_SCOPE = "https://www.googleapis.com/auth/gmail.settings.sharing"
 _METADATA_ONLY_SCOPE = re.compile(r"\.metadata(?:\.readonly)?$")
 
 # Section G of the M01-T02 transport inventory: reads that receive user- or admin-written text.
-# disposition: discarded (stripped after receipt, proved below), accepted (kept as the value a rule judges),
-# removed_at_request (no longer requested; proved below),
+# disposition: removed at request level (a `fields` mask never asks for it), discarded (stripped after receipt, proved below),
+# accepted (kept as the value a rule judges), removed_at_request (no longer requested; proved below),
 # follow_up (retained today; removal at request level or a post-receipt discard is a separate task).
 _TEXT_EXPOSURES: tuple[dict[str, Any], ...] = (
     {"id": "G1", "file": "src/auditex/google_workspace/client.py", "needle": "settings.getVacation(",
-     "fields": VACATION_TEXT_FIELDS, "disposition": "discarded"},
+     "fields": VACATION_TEXT_FIELDS, "disposition": "removed at request level"},
     {"id": "G2", "file": "src/auditex/google_workspace/client.py", "needle": "settings.sendAs().list(",
-     "fields": SEND_AS_TEXT_FIELDS, "disposition": "discarded"},
+     "fields": SEND_AS_TEXT_FIELDS, "disposition": "removed at request level"},
     {"id": "G3", "file": "src/azure_tenant_audit/collectors/mailbox_forwarding.py", "needle": "/mailboxSettings\"",
      "fields": AUTO_REPLY_TEXT_FIELDS, "disposition": "discarded"},
     {"id": "G4", "file": "src/azure_tenant_audit/collectors/mailbox_forwarding.py",
      "needle": "/mailFolders/inbox/messageRules\"", "fields": RULE_CONDITION_WORD_FIELDS, "disposition": "discarded"},
     {"id": "G5", "file": "src/auditex/google_workspace/client.py", "needle": "settings.filters().list(",
-     "fields": GMAIL_FILTER_TEXT_FIELDS, "disposition": "discarded"},
+     "fields": GMAIL_FILTER_TEXT_FIELDS, "disposition": "removed at request level"},
     {"id": "G6", "file": "configs/collector-definitions.json", "needle": "Get-TransportRule | Select-Object",
      "fields": ("ApplyHtmlDisclaimerText",), "disposition": "removed_at_request"},
     {"id": "G6", "file": "src/azure_tenant_audit/collectors/exchange_policy.py", "needle": "Get-TransportRule | Select-Object",
@@ -1696,11 +1696,18 @@ def test_google_scope_rule_and_exception_table_hold() -> None:
 # ---------------------------------------------------------------------------------------------------------
 
 
+def _gmail_call_line(needle: str) -> str:
+    source = (REPO_ROOT / "src/auditex/google_workspace/client.py").read_text(encoding="utf-8")
+    return next(line for line in source.splitlines() if needle in line)
+
+
 @pytest.mark.parametrize("row", _TEXT_EXPOSURES, ids=lambda row: f"{row['id']}-{Path(row['file']).name}")
 def test_text_exposure_table_matches_the_source(row: dict[str, Any]) -> None:
     """A row whose read changed (removed at request level, or moved) must be re-decided, not left stale."""
-    assert row["disposition"] in {"discarded", "accepted", "follow_up", "removed_at_request"}
+    assert row["disposition"] in {"removed at request level", "discarded", "accepted", "follow_up", "removed_at_request"}
     assert row["needle"] in (REPO_ROOT / row["file"]).read_text(encoding="utf-8")
+    if row["disposition"] == "removed at request level":
+        assert "fields=GMAIL_" in row["needle"] or "fields=GMAIL_" in _gmail_call_line(row["needle"])
 
 
 def test_removed_at_request_fields_are_absent_from_shipped_command_text() -> None:

@@ -840,7 +840,7 @@ def test_onedrive_sites_kept_whole_are_unchanged(tmp_path: Path) -> None:
 # ---- #48 the words an owner chose for an inbox rule or Gmail filter are not kept ------------------------------------
 
 
-def test_inbox_rule_and_gmail_filter_keywords_become_counts_and_booleans() -> None:
+def test_inbox_rule_keywords_become_counts_and_gmail_filter_terms_are_dropped() -> None:
     from azure_tenant_audit.data_minimisation import minimise_user_text
 
     rule = {
@@ -862,7 +862,7 @@ def test_inbox_rule_and_gmail_filter_keywords_become_counts_and_booleans() -> No
     assert conditions["fromAddresses"][0]["emailAddress"]["address"] == "cfo@example.com"
     assert minimised["messageRules"][0]["actions"]["forwardTo"][0]["emailAddress"]["address"] == "x@example.net"
     criteria = minimised["filters"][0]["criteria"]
-    assert criteria["queryLength"] == len("payroll Acme") and criteria["hasQuery"] is True and criteria["from"] == "boss@example.com"
+    assert "queryLength" not in criteria and "hasQuery" not in criteria and criteria["from"] == "boss@example.com"
     assert minimised["filters"][0]["action"] == {"forward": "x@example.net"}
     # Idempotent, and the input is untouched.
     assert minimise_user_text(minimised) == minimised
