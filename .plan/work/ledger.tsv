@@ -23,3 +23,21 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T11:21:45Z	REV-PLAN-v2	codex	codex2	gpt-6.1-sol	high	readonly	0	102		done	task/PLAN-v2-plan-v2
 2026-11-08T11:22:57Z	PLAN-v2	terra	claude-4	claude-sonnet-5-5	medium	branch	0	17	0.1422	done	task/PLAN-v2-plan-v2
 2026-11-08T11:23:23Z	REV-PLAN-v2	codex	codex2	gpt-6.1-sol	high	readonly	0	25		done	task/PLAN-v2-plan-v2
+2026-11-08T11:25:31Z	M02-T06	terra	claude-1	claude-sonnet-5-5	low	readonly	0	28	0.2126	done	dd55f15
+2026-11-08T11:26:09Z	M00-T02	codex	codex2	gpt-6.1-terra	low	branch	1	66		partial	task/M00-T02-tmpdir-safe-make
+2026-11-08T11:27:09Z	M01-T02	terra	claude-4	claude-sonnet-5-5	medium	readonly	0	126	0.6347	done	dd55f15
+2026-11-08T11:28:26Z	M00-T04	luna	claude-2	claude-haiku-5-5	medium	readonly	0	203	0.0791	done	dd55f15
+2026-11-08T11:31:16Z	M02-T02	terra	claude-3	claude-sonnet-5-5	low	branch	0	27	0.1721	done	task/M02-T02-readme-coverage-split
+2026-11-08T11:31:17Z	M02-T01	terra	claude-5	claude-sonnet-5-5	low	branch	0	28	0.1711	done	task/M02-T01-admin-guide-ref
+2026-11-08T11:31:22Z	M00-T04-check	terra	claude-1	claude-sonnet-5-5	medium	readonly	0	33	0.1543	done	dd55f15
+2026-11-08T11:31:52Z	M01-T06	luna	claude-2	claude-haiku-5-5	medium	readonly	0	63	0.0178	done	dd55f15
+2026-11-08T11:32:44Z	REV-M00-T02	terra	claude-4	claude-sonnet-5-5	high	readonly	0	115	0.3439	done	task/M00-T02-tmpdir-safe-make
+2026-11-08T11:33:49Z	REV-M01-T02	codex	codex2	gpt-6.1-sol	high	readonly	0	180		done	dd55f15
+2026-11-08T11:37:06Z	M01-T01	codex	codex	gpt-6.1-sol	high	branch	1	376		partial	task/M01-T01-secret-flag-redaction
+2026-11-08T11:39:10Z	M01-T06-check	terra	claude-5	claude-sonnet-5-5	medium	readonly	0	24	0.1270	done	dd55f15
+2026-11-08T11:39:20Z	M02-T03	terra	claude-4	claude-sonnet-5-5	medium	branch	0	34	0.1813	done	task/M02-T03-explainer-docs
+2026-11-08T11:39:36Z	M01-T05	terra	claude-3	claude-sonnet-5-5	low	branch	0	50	0.2548	done	task/M01-T05-mcp-privacy-docs
+2026-11-08T11:39:48Z	M00-T02	codex	codex2	gpt-6.1-terra	medium	branch	1	61		partial	task/M00-T02-tmpdir-safe-make
+2026-11-08T11:40:01Z	REV-M02-T01	codex	codex	gpt-6.1-sol	high	readonly	0	75		done	task/M02-T01-admin-guide-ref
+2026-11-08T11:40:07Z	M01-T02	terra	claude-4	claude-sonnet-5-5	medium	readonly	0	81	0.3444	done	dd55f15
+2026-11-08T11:42:04Z	REV-M01-T01	sol	claude-1	claude-opus-5-5	high	readonly	0	198	1.2138	done	task/M01-T01-secret-flag-redaction

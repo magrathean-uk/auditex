@@ -1,0 +1,5 @@
+--task REV-M00-T02 --role terra --template sol-review --readonly --sha task/M00-T02-tmpdir-safe-make --tags debug --var TASK=M00-T02 --var MILESTONE=.plan/milestones/M00-foundation.md --var BRANCH=task/M00-T02-tmpdir-safe-make --var BASE=main
+--task REV-M01-T02 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M01-T02/request-2.md --readonly --tags debug
+--task REV-M01-T05 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M01-T05-mcp-privacy-docs --tags debug --var TASK=M01-T05 --var MILESTONE=.plan/milestones/M01-boundary-proof.md --var BRANCH=task/M01-T05-mcp-privacy-docs --var BASE=main
+--task REV-M02-T03 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M02-T03-explainer-docs --tags debug --var TASK=M02-T03 --var MILESTONE=.plan/milestones/M02-docs-accuracy.md --var BRANCH=task/M02-T03-explainer-docs --var BASE=main
+--task REV-M02-T02 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M02-T02/request.md --readonly --tags debug

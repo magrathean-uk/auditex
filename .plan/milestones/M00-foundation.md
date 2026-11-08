@@ -21,7 +21,7 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 - [ ] Dependency audit over the base install and every declared extra (`mcp`, `test`, `google`, `model_train` and any development extra) exits 0, and every ignored advisory has a G-approved `.plan/DECISIONS.md` entry: `make audit-deps`
 - [ ] Wheel and sdist each pass the base, Google and MCP release smoke, and two clean builds of the same commit give a byte-identical wheel and a member-identical sdist: `make dist && bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke" && .venv/bin/python scripts/check-reproducible-build.py`
 - [x] Review: sol confirms the ARCHITECTURE.md ownership map matches the repository (every tracked non-test path in exactly one module) `git ls-tree -r --name-only HEAD` (evidence: .plan/work/PLAN-v2/evidence.md, ownership map re-run at 3122ac5 after the revision: 0 unmatched, 0 in two modules)
-- [ ] Review: terra has spot-checked the M00-T04 branch triage, and every `needed-for-1.3.0` row carries a disposition (a landed task id, or a deferral with its DECISIONS.md id): `grep -q '^spot-check: pass' .plan/work/M00-T04/result.md && ! grep -n -E '\| needed-for-1\.3\.0 \| open \|' .plan/work/M00-T04/result.md`
+- [x] Review: terra has spot-checked the M00-T04 branch triage, and every `needed-for-1.3.0` row carries a disposition (a landed task id, or a deferral with its DECISIONS.md id): `grep -q '^spot-check: pass' .plan/work/M00-T04/result.md && ! grep -n -E '\| needed-for-1\.3\.0 \| open \|' .plan/work/M00-T04/result.md` (evidence: M00-T04-check spot-check pass; wt/docs-rules-and-scan-limits disposition M02-T02; command passed 8 Nov 2026)
 
 ## Tasks
 | id | title | owner | size | tags | status |
@@ -29,7 +29,7 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 | M00-T01 | Re-run the gate suite on main after the foundation merges | luna | S | - | todo |
 | M00-T02 | Make the release archive and dist build TMPDIR-safe make targets | codex | S | mechanical | todo |
 | M00-T03 | Add a dependency audit over the base install and every extra | codex | M | - | todo |
-| M00-T04 | Triage unmerged wt branches for 1.3.0 content | luna | M | - | todo |
+| M00-T04 | Triage unmerged wt branches for 1.3.0 content | luna | M | - | done |
 | M00-T05 | Extend the release smoke to the sdist and add a reproducible-build check | codex | M | - | todo |
 
 ## Acceptance criteria

@@ -36,3 +36,12 @@
 - why: the explainer is a deterministic template and every verdict comes from value rules, so the layer carries cost and no product value.
 - consequences: the removal list goes through the deletion gate in a post-1.3.0 round; 1.3.0 scope and weights are unchanged.
 - approver: G
+
+## DEC-005 Legal-notice text approved
+- date: 2026-11-08
+- status: approved
+- decision: the line-17 replacement for `docs/legal/third-party-notices.md` in `.plan/work/M02-T06/proposal.md` is approved verbatim; M02-T07 applies it unchanged.
+- options: approve the exact text | record an exception (DEC-003)
+- why: the only change is the vendored path prefix; the version floors were checked against the tracked file.
+- consequences: M02-T07 is unblocked once its dependency lands; no other edit to `docs/legal/` is authorised.
+- approver: G

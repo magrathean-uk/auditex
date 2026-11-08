@@ -14,20 +14,20 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 - [ ] Review: terra's M01-T02 inventory assigns every outbound call site under `src/` (HTTP, SDK and subprocess) to one transport class in ARCHITECTURE.md, with no unclassified row: `test -s .plan/work/M01-T02/transport-inventory.md && ! grep -n '| unclassified |' .plan/work/M01-T02/transport-inventory.md`
 - [ ] A test fails when any module under `src/` issues a non-GET HTTP request outside the allow-list frozen from that inventory: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py tests/test_read_guard.py tests/test_graph_read_only.py tests/test_transport_hygiene.py`
 - [ ] Tests prove that no collector requests message or file content, every PowerShell cmdlet and Microsoft 365 CLI command that an executable command site in `src/` or `configs/` can issue is on a read allow-list (wrapper verbs only at their known wrapper sites), and every Google API call is a read method under read-only scopes: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_api_observed_ledger.py tests/test_exchange_protection.py tests/test_pack_integrity_and_permissions.py`
-- [ ] Every parser flag that can carry a secret is in its redaction set and has an abbreviation and a redaction test: `.venv/bin/python -m pytest tests/test_secret_cli_matrix.py tests/test_cli_abbreviations.py tests/test_vendored_cli_abbreviations.py`
+- [x] Every parser flag that can carry a secret is in its redaction set and has an abbreviation and a redaction test: `.venv/bin/python -m pytest tests/test_secret_cli_matrix.py tests/test_cli_abbreviations.py tests/test_vendored_cli_abbreviations.py` (evidence: merge.sh verify passed for M01-T01, squash 27759ed; REV-M01-T01 approve at f6ffc78, sol for a Codex author)
 - [ ] MCP read-only annotations and credential wording in docs match the registry: `.venv/bin/python -m pytest tests/test_mcp_registry.py`
-- [ ] Review: shipped `examples/model_development/` rows are classified and none is a held-out or sealed evaluation row, or G has ruled on them `test -s .plan/work/M01-T06/result.md`
+- [x] Review: shipped `examples/model_development/` rows are classified and none is a held-out or sealed evaluation row, or G has ruled on them `test -s .plan/work/M01-T06/result.md` (evidence: M01-T06 luna classification, 48 synthetic rows, none held-out; M01-T06-check terra pass incl. build-model-examples.py --check)
 - [ ] Review: for each of M01-T01, M01-T03 and M01-T04 the review says `verdict: approve`, ran on the other vendor from the author (launcher in each `dispatch.txt`), and the squash commit on `main` carries `Plan-Review: REV-<id> approve <reviewed sha>`, so the approval binds to the reviewed head, not the squash commit: `for t in M01-T01 M01-T03 M01-T04; do r=.plan/work/REV-$t; s=$(sed -n 's/^reviewed: *\([0-9a-f]\{12\}\).*/\1/p' $r/result.md | head -1); grep -qx 'verdict: approve' $r/result.md && [ "$(sed -n 's/^launcher: \([a-z]*\).*/\1/p' $r/dispatch.txt)" != "$(sed -n 's/^launcher: \([a-z]*\).*/\1/p' .plan/work/$t/dispatch.txt)" ] && git log main --format=%B --grep="Plan-Task: $t" | grep -q "Plan-Review: REV-$t approve $s" || { echo "$t"; exit 1; }; done`
 
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M01-T01 | Close secret-flag redaction gaps across all parsers | codex | M | cross-cutting | todo |
+| M01-T01 | Close secret-flag redaction gaps across all parsers | codex | M | cross-cutting | done |
 | M01-T02 | Inventory and classify every outbound call site in src | terra | M | - | todo |
 | M01-T03 | Enforce the frozen HTTP allow-list with a test | codex | M | - | todo |
 | M01-T04 | Prove the content-read, cmdlet and Google read boundaries | codex | M | - | todo |
 | M01-T05 | Align MCP and privacy docs with the registry | terra | S | - | todo |
-| M01-T06 | Classify shipped model-development example rows | luna | S | - | todo |
+| M01-T06 | Classify shipped model-development example rows | luna | S | - | done |
 
 ## Acceptance criteria
 ### M01-T01 Close secret-flag redaction gaps across all parsers

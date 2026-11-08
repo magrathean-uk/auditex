@@ -23,13 +23,13 @@ The README, guides, reference docs and runbook describe 1.3.0 exactly as the cod
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M02-T01 | Fix the dead admin-guide reference and stale status comments | terra | S | mechanical | todo |
+| M02-T01 | Fix the dead admin-guide reference and stale status comments | terra | S | mechanical | done |
 | M02-T02 | Reconcile the coverage-split README branch | terra | S | - | todo |
 | M02-T03 | Describe the shipped template explainer consistently | terra | M | - | todo |
 | M02-T04 | Bring the runbook in line with the gates and publication | terra | S | - | todo |
 | M02-T05 | Add a public-doc path test | codex | S | - | todo |
 | M02-T06 | Draft the third-party notice path correction for G | terra | S | - | todo |
-| M02-T07 | Apply G's approved notice text and drop its test exemption | orchestrator | S | mechanical | todo |
+| M02-T07 | Apply G's approved notice text and drop its test exemption | terra | S | mechanical | todo |
 
 ## Acceptance criteria
 ### M02-T01 Fix the dead admin-guide reference and stale status comments
