@@ -439,3 +439,118 @@ def test_a_failed_base_list_still_makes_the_collector_partial() -> None:
     assert result.status == "partial", "a base read that failed is still an incomplete collector"
     _snapshot, rules = _pipeline(result)
     assert rules["intune.device_noncompliant"]["reason"] == "collector_not_complete:intune"
+
+
+# G10: the custom-profile `payload` (base64 .mobileconfig) is discarded after receipt.
+_SENTINEL = "U0VOVElORUwtUEFZTE9BRC1NT0JJTEVDT05GSUc="
+
+
+def _custom_profiles() -> list[dict[str, Any]]:
+    return [
+        {"id": "cp-ios", "displayName": "iOS custom", "@odata.type": "#microsoft.graph.iosCustomConfiguration",
+         "payloadName": "ios.mobileconfig", "payloadFileName": "ios.mobileconfig", "payload": _SENTINEL},
+        {"id": "cp-bare", "displayName": "bare", "payload": _SENTINEL},
+        {"id": "cp-mac", "displayName": "macOS custom", "@odata.type": "#microsoft.graph.macOSCustomConfiguration",
+         "payloadName": "mac.mobileconfig", "payloadFileName": "mac.mobileconfig", "payload": _SENTINEL},
+        {"id": "wuf", "displayName": "Ring", "@odata.type": "#microsoft.graph.windowsUpdateForBusinessConfiguration"},
+    ]
+
+
+class _ProfileClient(_Client):
+    def get_all(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        if path == "/deviceManagement/deviceConfigurations":
+            self.requests.append((path, dict(params or {})))
+            return _custom_profiles()
+        if path.startswith("/deviceManagement/") or path.startswith("/deviceAppManagement/"):
+            if path != "/deviceManagement/managedDevices" and path != "/deviceManagement/deviceCompliancePolicies":
+                self.requests.append((path, dict(params or {})))
+                return []
+        return super().get_all(path, params)
+
+
+def test_custom_profile_payload_is_stripped_from_both_collectors_and_every_output(tmp_path: Path) -> None:
+    from azure_tenant_audit.collectors.intune_depth import IntuneDepthCollector
+    from azure_tenant_audit.output import AuditWriter
+
+    client = _ProfileClient([_device(1)])
+    intune = IntuneCollector().run({"client": client, "top": None, "audit_logger": None})
+    depth = IntuneDepthCollector().run({"client": client, "top": None, "audit_logger": None})
+    payloads = {"intune": intune.payload, "intune_depth": depth.payload}
+    assert _SENTINEL not in json.dumps(payloads)
+    rows = intune.payload["deviceConfigurationProfiles"]["value"]
+    assert rows[0]["hasPayload"] is True and "payloadFileName" not in rows[0] and "payloadName" not in rows[0]
+    assert "payload" not in rows[1] and rows[2]["hasPayload"] is True and "payload" not in rows[2]
+    # The read itself is unchanged: no $select on the polymorphic collection.
+    assert all(not params for path, params in client.requests if path == "/deviceManagement/deviceConfigurations")
+    snapshot = build_normalized_snapshot(tenant_name="t", run_id="r", collector_payloads=payloads)
+    assert _SENTINEL not in json.dumps(snapshot, default=str)
+    writer = AuditWriter(tmp_path, "t")
+    writer.write_raw("intune", intune.payload)
+    writer.write_raw("intune_depth", depth.payload)
+    for path in writer.run_dir.rglob("*"):
+        if path.is_file():
+            assert _SENTINEL not in path.read_text(encoding="utf-8", errors="ignore"), path
+
+
+def test_custom_profile_payload_is_stripped_on_paged_collection_before_chunks_and_bundle(tmp_path: Path) -> None:
+    from azure_tenant_audit.collectors.intune_depth import IntuneDepthCollector
+    from azure_tenant_audit.output import AuditWriter
+
+    class _Paged(_ProfileClient):
+        def iter_pages(self, path: str, params: dict[str, Any] | None = None):  # noqa: ANN001
+            rows = _custom_profiles() if path == "/deviceManagement/deviceConfigurations" else []
+            for start in range(0, len(rows), 2):
+                yield {"value": rows[start : start + 2]}
+
+    received: list[Any] = []
+
+    def writer(collector: str, name: str, page: int, records: list[dict[str, Any]], _meta: Any) -> str:
+        received.append(json.dumps(records))
+        target = tmp_path / "chunks" / f"{collector}-{name}-{page}.jsonl"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("".join(json.dumps(row) + "\n" for row in records), encoding="utf-8")
+        return str(target)
+
+    client = _Paged([_device(1)])
+    context = {"client": client, "top": None, "audit_logger": None, "chunk_writer": writer}
+    intune = IntuneCollector().run(context)
+    depth = IntuneDepthCollector().run(context)
+    assert received and all(_SENTINEL not in text for text in received)
+    payloads = {"intune": intune.payload, "intune_depth": depth.payload}
+    assert _SENTINEL not in json.dumps(payloads)
+    snapshot = build_normalized_snapshot(tenant_name="t", run_id="r", collector_payloads=payloads)
+    assert _SENTINEL not in json.dumps(snapshot, default=str)
+    bundle = AuditWriter(tmp_path / "bundle", "t")
+    bundle.write_raw("intune", intune.payload)
+    bundle.write_raw("intune_depth", depth.payload)
+    for root in (tmp_path / "chunks", bundle.run_dir):
+        for path in root.rglob("*"):
+            if path.is_file():
+                assert _SENTINEL not in path.read_text(encoding="utf-8", errors="ignore"), path
+
+
+def test_a_later_page_safety_stop_rolls_back_stored_configuration_chunks_through_both_collectors(tmp_path: Path) -> None:
+    from azure_tenant_audit.collector_runner import _ChunkRecordWriter
+    from azure_tenant_audit.collectors.intune_depth import IntuneDepthCollector
+    from azure_tenant_audit.graph import INCOMPLETE_EVIDENCE
+    from azure_tenant_audit.output import AuditWriter
+
+    class _StopsOnPageTwo(_ProfileClient):
+        def iter_pages(self, path: str, params: dict[str, Any] | None = None):  # noqa: ANN001
+            if path != "/deviceManagement/deviceConfigurations":
+                yield {"value": []}
+                return
+            yield {"value": _custom_profiles()[:2]}
+            raise GraphError("repeated page", request=path, error_code=INCOMPLETE_EVIDENCE)
+
+    writer = AuditWriter(tmp_path, "t")
+    chunk_writer = _ChunkRecordWriter(writer)
+    context = {"client": _StopsOnPageTwo([_device(1)]), "top": None, "audit_logger": None, "chunk_writer": chunk_writer}
+    for collector, section in ((IntuneCollector(), "deviceConfigurationProfiles"), (IntuneDepthCollector(), "deviceConfigurations")):
+        result = collector.run(context)
+        withheld = result.payload[section]
+        assert withheld.get("error_class") == "incomplete_evidence" and not withheld.get("value")
+        assert not withheld.get("chunk_files")
+    leftovers = [path for path in (writer.run_dir / "chunks").rglob("*") if path.is_file() and "eviceConfiguration" in path.name]
+    assert leftovers == []
+    assert not [name for name in writer._manifest["artifacts"] if "eviceConfiguration" in name]

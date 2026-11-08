@@ -10,6 +10,7 @@ from ..collection_gaps import (
     fanout_gap_row,
     section_total,
 )
+from ..data_minimisation import minimise_device_configurations, minimising_chunk_writer
 from ..endpoint_posture import UPDATE_RING_FIELDS, is_update_ring, project
 from ..graph import GraphClient, GraphError
 from ._endpoint_reads import assignment_fanout, collector_partial, input_rows, mark_section_scoped, scoped_gap_message
@@ -91,10 +92,13 @@ class IntuneDepthCollector(Collector):
             },
             top=top,
             page_size=page_size,
-            chunk_writer=context.get("chunk_writer"),
+            chunk_writer=minimising_chunk_writer(context.get("chunk_writer"), "deviceConfigurations"),
             log_event=context.get("audit_logger"),
         )
 
+        # Custom-profile `payload` (base64 .mobileconfig) is discarded after receipt (G10).
+        if "deviceConfigurations" in payload:
+            payload["deviceConfigurations"] = minimise_device_configurations(payload["deviceConfigurations"])
         configuration_rows = payload.get("deviceConfigurations", {}).get("value", [])
         if not isinstance(configuration_rows, list):
             configuration_rows = []

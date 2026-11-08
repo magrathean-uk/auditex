@@ -197,10 +197,10 @@ _TEXT_EXPOSURES: tuple[dict[str, Any], ...] = (
      "fields": ("customFooterText", "defaultMessageDenyNotificationText"), "disposition": "follow_up"},
     {"id": "G10", "file": "src/azure_tenant_audit/collectors/intune.py",
      "needle": "\"endpoint\": \"/deviceManagement/deviceConfigurations\",\n                \"params\": {},",
-     "fields": ("payload",), "disposition": "follow_up"},
+     "fields": ("payload",), "disposition": "discarded"},  # discarded after receipt by minimise_device_configurations
     {"id": "G10", "file": "src/azure_tenant_audit/collectors/intune_depth.py",
      "needle": "\"endpoint\": \"/deviceManagement/deviceConfigurations\",\n                    \"params\": {},",
-     "fields": ("payload",), "disposition": "follow_up"},
+     "fields": ("payload",), "disposition": "discarded"},  # discarded after receipt by minimise_device_configurations
 )
 
 

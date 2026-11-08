@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..data_minimisation import minimise_device_configurations, minimising_chunk_writer
 from ..graph import GraphClient
 from ..os_lifecycle import FAMILY_WINDOWS, os_family
 from ._endpoint_reads import assignment_fanout, collector_partial, protection_state_fanout, scoped_gap_message
@@ -49,9 +50,12 @@ class IntuneCollector(Collector):
             endpoints,
             top=top,
             page_size=page_size,
-            chunk_writer=context.get("chunk_writer"),
+            chunk_writer=minimising_chunk_writer(context.get("chunk_writer"), "deviceConfigurationProfiles"),
             log_event=context.get("audit_logger"),
         )
+        # Custom-profile `payload` (base64 .mobileconfig) is discarded after receipt (G10).
+        if "deviceConfigurationProfiles" in payload:
+            payload["deviceConfigurationProfiles"] = minimise_device_configurations(payload["deviceConfigurationProfiles"])
         run_dir = context.get("run_dir")
 
         # Which compliance policies exist is not enough: a policy assigned to nobody enforces nothing.

@@ -382,3 +382,52 @@ def test_writer_strips_the_text_from_every_data_file_it_writes(tmp_path: Path) -
 
     _assert_no_user_text(_all_text(writer.run_dir))
     assert json.loads((writer.raw_dir / "x.json").read_text(encoding="utf-8"))["mailboxSettings"]["value"][0]["vacation"]["enableAutoReply"] is True
+
+
+def test_custom_profile_payload_is_stripped_wherever_it_is_written() -> None:
+    from azure_tenant_audit.data_minimisation import minimise_device_configurations, minimise_user_text
+
+    record = {"id": "cp", "@odata.type": "#microsoft.graph.macOSCustomConfiguration", "payloadFileName": "a.mobileconfig", "payload": "c2VjcmV0"}
+    for result in (minimise_device_configurations({"value": [record]})["value"][0], minimise_user_text({"value": [record]})["value"][0]):
+        assert "payload" not in result and result["payloadLength"] == 8 and result["hasPayload"] is True
+        assert "payloadFileName" not in result and "payloadName" not in result
+    again = minimise_device_configurations({"value": [minimise_device_configurations(record)]})
+    assert again["value"][0]["payloadLength"] == 8
+    assert minimise_user_text({"payload": "x", "id": "other"}) == {"payload": "x", "id": "other"}
+    # No optional hints: inside the deviceConfigurations boundary the payload still goes.
+    bare = {"id": "cp", "payload": "c2VjcmV0"}
+    assert minimise_device_configurations({"value": [bare]})["value"][0] == {"id": "cp", "payloadLength": 8, "hasPayload": True}
+    for section in ("deviceConfigurations", "deviceConfigurationProfiles"):
+        written = minimise_user_text({section: {"value": [bare]}})[section]["value"][0]
+        assert "payload" not in written and written["hasPayload"] is True
+
+
+def test_minimising_chunk_writer_sanitises_rows_before_the_callback() -> None:
+    from azure_tenant_audit.data_minimisation import minimising_chunk_writer
+
+    seen: list[Any] = []
+    wrapped = minimising_chunk_writer(lambda c, k, n, rows, m: seen.append((k, rows)) or "p", "deviceConfigurations")
+    wrapped("intune", "deviceConfigurations", 1, [{"id": "a", "payload": "x"}], {})
+    wrapped("intune", "other", 1, [{"id": "b", "payload": "y"}], {})
+    assert seen[0][1] == [{"id": "a", "payloadLength": 1, "hasPayload": True}]
+    assert seen[1][1] == [{"id": "b", "payload": "y"}]
+    assert minimising_chunk_writer(None, "x") is None
+
+
+def test_minimising_chunk_writer_forwards_rollback_to_the_wrapped_writer() -> None:
+    from azure_tenant_audit.data_minimisation import minimising_chunk_writer
+
+    discarded: list[list[str]] = []
+
+    class _Writer:
+        def __call__(self, *_args: Any) -> str:
+            return "chunk"
+
+        def discard(self, chunk_files: list[str]) -> None:
+            discarded.append(list(chunk_files))
+
+    wrapped = minimising_chunk_writer(_Writer(), "deviceConfigurations")
+    wrapped.discard(["a.jsonl"])
+    assert discarded == [["a.jsonl"]]
+    # A plain callback has no rollback, and the wrapper does not invent one.
+    assert getattr(minimising_chunk_writer(lambda *_a: "p", "deviceConfigurations"), "discard", None) is None
