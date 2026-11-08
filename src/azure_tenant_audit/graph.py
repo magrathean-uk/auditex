@@ -43,7 +43,14 @@ _DOWNLOAD_HOST_SUFFIXES = (
     ".azureedge.net",
     ".windows.net",
 )
-# The only methods the audit plane may send: GET, and POST solely to /$batch with GET-only inner requests.
+# The Graph read guard (read_only_violation, via _enforce_read_only first in _request) allows only:
+#   GET, body-free, to https://graph.microsoft.com (class 1 tenant read); redirect hops are GET-only
+#   to the allowed download hosts (_follow_redirects);
+#   POST only to /v1.0/$batch or /beta/$batch, every sub-request a body-free, relative GET
+#   (class 3 Graph $batch).
+# The only other non-GET calls in this module are token POSTs to the Entra authority (class 2:
+# app_token_for, _app_token, and msal in _interactive_token), which never pass through _request.
+# tests/test_http_verb_allowlist.py holds the frozen allow-list; a new non-GET site fails it.
 READ_ONLY_METHODS = frozenset({"GET"})
 _BATCH_ENVELOPE_KEYS = frozenset({"requests"})
 _BATCH_INNER_KEYS = frozenset({"id", "method", "url", "headers", "dependsOn"})

@@ -470,3 +470,65 @@ def test_m365_adapter_refuses_a_stray_word_before_execution(monkeypatch) -> None
 
     assert started == []
     assert result["error_class"] == "command_refused"
+
+
+class _GraphWire:
+    """Fake requests.Session for GraphClient: anything that reaches it would have hit the network."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    def request(self, method: str, url: str, **kwargs: Any):  # noqa: ARG002
+        self.sent.append((method, url))
+        raise AssertionError("a refused Graph request reached the wire")
+
+    def post(self, url: str, **kwargs: Any):  # noqa: ARG002
+        self.sent.append(("POST", url))
+        raise AssertionError("a refused Graph request asked for a token")
+
+
+def _graph_client(wire: _GraphWire):
+    from support import graph_auth
+
+    from azure_tenant_audit.graph import GraphClient
+
+    return GraphClient(graph_auth(), session=wire)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_the_graph_read_guard_refuses_a_non_get_request_at_run_time(method: str) -> None:
+    from azure_tenant_audit.graph import GRAPH_ROOT, READ_ONLY_VIOLATION, GraphError
+
+    wire = _GraphWire()
+    with pytest.raises(GraphError) as caught:
+        _graph_client(wire)._request(method, f"{GRAPH_ROOT}/users/u1", json={"accountEnabled": False})
+
+    assert caught.value.error_code == READ_ONLY_VIOLATION
+    assert wire.sent == []
+
+
+@pytest.mark.parametrize("inner_method", ["POST", "PATCH", "DELETE", "put"])
+def test_the_graph_read_guard_refuses_a_batch_carrying_a_non_get_sub_request(inner_method: str) -> None:
+    from azure_tenant_audit.graph import GRAPH_BETA_ROOT, GRAPH_ROOT, READ_ONLY_VIOLATION, GraphError
+
+    batch = {
+        "requests": [
+            {"id": "0", "method": "GET", "url": "/users/u1"},
+            {"id": "1", "method": inner_method, "url": "/users/u1"},
+        ]
+    }
+    for root in (GRAPH_ROOT, GRAPH_BETA_ROOT):
+        wire = _GraphWire()
+        with pytest.raises(GraphError) as caught:
+            _graph_client(wire)._request("POST", f"{root}/$batch", json=batch)
+        assert caught.value.error_code == READ_ONLY_VIOLATION
+        assert wire.sent == []
+
+
+def test_the_graph_batch_helper_refuses_a_non_get_spec_before_the_wire() -> None:
+    from azure_tenant_audit.graph import GraphError
+
+    wire = _GraphWire()
+    with pytest.raises(GraphError):
+        _graph_client(wire).get_batch([{"id": "0", "method": "DELETE", "url": "/users/u1"}])
+    assert wire.sent == []
