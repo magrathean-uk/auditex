@@ -13,3 +13,13 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T09:38:00Z	INV-tests	luna	claude-1	claude-haiku-5-5	medium	readonly	0	254	0.0373	done	8b3a334
 2026-11-08T09:41:11Z	INV-dead	luna	claude-2	claude-haiku-5-5	medium	readonly	0	168	0.0574	done	8b3a334
 2026-11-08T09:42:51Z	ASSESS-v2	terra	claude-4	claude-sonnet-5-5	medium	inplace	0	85	0.4499	done	main
+2026-11-08T09:45:05Z	CLEAN-01-verify	terra	claude-4	claude-sonnet-5-5	medium	readonly	0	31	0.1785	done	de3a25d
+2026-11-08T10:14:22Z	PLAN-v2	sol	claude-4	claude-opus-5-5	xhigh	branch	124	1800		timeout	task/PLAN-v2-plan-v2
+2026-11-08T10:18:57Z	PLAN-v2	sol	claude-4	claude-opus-5-5	xhigh	branch	0	244	1.7498	done	task/PLAN-v2-plan-v2
+2026-11-08T10:26:48Z	VAL-v2	astra	codex2	gpt-6-astra	xhigh	readonly	0	370		done	task/PLAN-v2-plan-v2
+2026-11-08T10:37:05Z	PLAN-v2	sol	claude-4	claude-opus-5-5	xhigh	branch	0	556	3.0592	done	task/PLAN-v2-plan-v2
+2026-11-08T10:42:15Z	REV-PLAN-v2	codex	codex2	gpt-6.1-sol	high	readonly	0	170		done	task/PLAN-v2-plan-v2
+2026-11-08T11:19:55Z	PLAN-v2	sol	claude-4	claude-opus-5-5	high	branch	0	141	0.9570	done	task/PLAN-v2-plan-v2
+2026-11-08T11:21:45Z	REV-PLAN-v2	codex	codex2	gpt-6.1-sol	high	readonly	0	102		done	task/PLAN-v2-plan-v2
+2026-11-08T11:22:57Z	PLAN-v2	terra	claude-4	claude-sonnet-5-5	medium	branch	0	17	0.1422	done	task/PLAN-v2-plan-v2
+2026-11-08T11:23:23Z	REV-PLAN-v2	codex	codex2	gpt-6.1-sol	high	readonly	0	25		done	task/PLAN-v2-plan-v2

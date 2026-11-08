@@ -4,13 +4,12 @@ overall: 9%
 milestone: M00-foundation 18%
 plan_version: v2
 release_scope: 1.3.0 from the accepted line (main contains origin/main 82d7ca5) - reproducible local gates, test-proven transport, read and secret boundaries, accurate docs, release notes with the D6 limit, signed v1.3.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: none
+last_checkpoint: ba4fade 2026-11-08T11:23:47Z
 
 ## Next tasks
+- M00-T01 Re-run the gate suite on main after the foundation merges (luna)
 - M00-T02 Make the release archive and dist build TMPDIR-safe make targets (codex)
-- M00-T04 Triage unmerged wt branches for 1.3.0 content (luna, terra spot-check)
-- M01-T02 Inventory and classify every outbound call site in src (terra, read-only)
-- M02-T06 Draft the third-party notice path correction for G (terra, read-only)
+- M00-T03 Add a dependency audit over the base install and every extra (codex)
 
 ## Blockers
 - none
@@ -24,5 +23,12 @@ last_checkpoint: none
 
 ## Quota snapshot
 <!-- quota:begin -->
-not yet recorded
+claude 84% orchestrator
+claude-1 58% ok
+claude-2 0% shared
+claude-3 69% ok
+claude-4 42% ok
+claude-5 59% ok
+codex 50% ok
+codex2 6% ok
 <!-- quota:end -->
