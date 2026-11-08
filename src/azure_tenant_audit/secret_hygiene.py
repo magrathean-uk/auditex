@@ -26,6 +26,8 @@ SENSITIVE_ARG_FLAGS = frozenset(
         "--service-account-key",
         "--token-cache",
         "--token-file",
+        "--env",
+        "--break-glass-accounts",
     }
 )
 

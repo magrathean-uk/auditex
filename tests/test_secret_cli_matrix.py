@@ -13,6 +13,125 @@ import pytest
 
 CANARY = "constructed-canary-r2-" * 18
 
+# Explicit inventories, rather than deriving expectations from the production sets:
+# dropping a flag from a set must fail its regression case.
+_ENGINE_FLAGS = (
+    "--client-secret", "--access-token", "--sensitive-users", "--partner-domains",
+    "--env", "--break-glass-accounts",
+)
+_GOOGLE_FLAGS = (
+    "--service-account-key", "--oauth-client", "--token-cache",
+    "--sensitive-users", "--partner-domains",
+)
+_PRODUCT_FLAGS = (
+    *_ENGINE_FLAGS, "--token", "--token-file", "--command-override", "--adapter-override",
+    "--service-account-key", "--oauth-client", "--token-cache",
+)
+_GENERIC_FLAGS = (*_PRODUCT_FLAGS, "--secret", "--password")
+_REDACTION_CASES = [
+    (name, flag)
+    for name, flags in (
+        ("generic", _GENERIC_FLAGS), ("engine", _ENGINE_FLAGS),
+        ("product", _PRODUCT_FLAGS), ("google", _GOOGLE_FLAGS),
+    )
+    for flag in flags
+]
+
+
+@pytest.mark.parametrize("redactor,flag", _REDACTION_CASES)
+@pytest.mark.parametrize("abbreviated", [False, True], ids=["full", "abbreviation"])
+@pytest.mark.parametrize("inline", [False, True], ids=["separate", "equals"])
+def test_sensitive_flag_inventory_is_redacted(redactor: str, flag: str, abbreviated: bool, inline: bool) -> None:
+    from auditex.command_runner import SENSITIVE_ARGS, redact_command
+    from auditex.google_workspace.run import _SENSITIVE_COMMAND_FLAGS, scrub_google_command_line
+    from azure_tenant_audit.auth_runtime import SENSITIVE_CLI_ARGS, scrub_command_line
+    from azure_tenant_audit.secret_hygiene import SENSITIVE_ARG_FLAGS, collect_sensitive_argv_values, redact_argv
+
+    flags, scrub = {
+        "generic": (SENSITIVE_ARG_FLAGS, redact_argv),
+        "engine": (SENSITIVE_CLI_ARGS, scrub_command_line),
+        "product": (SENSITIVE_ARGS, redact_command),
+        "google": (_SENSITIVE_COMMAND_FLAGS, scrub_google_command_line),
+    }[redactor]
+    assert flag in flags
+    option = flag[:-1] if abbreviated else flag
+    argument = [f"{option}={CANARY}"] if inline else [option, CANARY]
+    argv = ["auditex", *argument, "--tenant-name", "constructed-tenant"]
+    expected = [f"{option}=***redacted***"] if inline else [option, "***redacted***"]
+    assert scrub(argv) == ["auditex", *expected, "--tenant-name", "constructed-tenant"]
+    assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == {CANARY}
+
+
+@pytest.mark.parametrize("flag", _PRODUCT_FLAGS)
+@pytest.mark.parametrize("inline", [False, True])
+def test_command_runner_redacts_secret_values_echoed_by_child(flag: str, inline: bool, monkeypatch) -> None:
+    from auditex.command_runner import run_cli_command
+
+    command = ["auditex", f"{flag}={CANARY}"] if inline else ["auditex", flag, CANARY]
+
+    def echo(argv, **kwargs):
+        assert argv == command  # Execution still receives the original credential/path.
+        return subprocess.CompletedProcess(argv, 0, stdout=CANARY, stderr=CANARY)
+
+    monkeypatch.setattr("auditex.command_runner.subprocess.run", echo)
+    result = run_cli_command(command)
+    assert result["returncode"] == 0
+    assert CANARY not in str(result)
+    assert result["stdout"] == result["stderr"] == "***redacted***"
+
+
+@pytest.mark.parametrize("secret_source", ["argument", "environment"])
+def test_guided_app_flow_keeps_secret_out_of_console_and_written_files(
+    secret_source: str, tmp_path: Path, monkeypatch, capsys, caplog,
+) -> None:
+    from auditex import guided
+    from azure_tenant_audit import cli as engine_cli
+    from azure_tenant_audit.collectors.base import CollectorResult
+
+    # Exercise the real guided flow, engine parser, event log and bundle writer.
+    # Only the machine doctor and tenant transport/collector are replaced.
+    monkeypatch.setattr(guided, "build_doctor_report", lambda **kwargs: {
+        "system": {"os": "test", "machine": "test"}, "readiness": {"core_ready": True},
+    })
+    auth_env = tmp_path / "local-auth.env"
+    monkeypatch.setenv("AUDITEX_LOCAL_AUTH_ENV", str(auth_env))
+    monkeypatch.setenv("AUDITEX_AUTH_CONTEXTS_PATH", str(tmp_path / "auth-contexts.json"))
+    monkeypatch.setenv("AUDITEX_M365_HOME", str(tmp_path / "m365-home"))
+    if secret_source == "environment":
+        monkeypatch.setenv("AZURE_CLIENT_SECRET", CANARY)
+
+    def client(auth, **kwargs):
+        assert auth.auth_mode == "app" and auth.client_secret == CANARY
+        return object()
+
+    class Collector:
+        name = "identity"
+
+        def run(self, context):
+            return CollectorResult(name=self.name, status="ok", item_count=0, message="ok", payload={"value": []})
+
+    monkeypatch.setattr(engine_cli, "GraphClient", client)
+    monkeypatch.setattr(engine_cli, "REGISTRY", {"identity": Collector()})
+    argv = [
+        "--flow", "app-audit", "--tenant-id", "constructed.example", "--tenant-name", "CONSTRUCTED",
+        "--client-id", "constructed-app", "--out", str(tmp_path / "runs"), "--run-name", "redaction",
+        "--collectors", "identity", "--throttle-mode", "fast", "--no-probe-first",
+        "--non-interactive", "--skip-login-check", "--skip-tool-check",
+    ]
+    if secret_source == "argument":
+        argv.extend(["--client-secret", CANARY])
+    assert guided.run_guided(guided.build_guided_parser().parse_args(argv)) == 0
+    output = capsys.readouterr()
+    assert CANARY not in output.out + output.err + caplog.text
+    run_dir = tmp_path / "runs" / "CONSTRUCTED-redaction"
+    manifest = (run_dir / "run-manifest.json").read_text(encoding="utf-8")
+    assert "--client-secret" in manifest and "***redacted***" in manifest
+    assert (run_dir / "audit-log.jsonl").is_file()
+    assert auth_env.is_file()
+    for path in tmp_path.rglob("*"):
+        if path.is_file():
+            assert CANARY.encode() not in path.read_bytes(), path.relative_to(tmp_path)
+
 
 def _pythons() -> list[str]:
     candidates = [sys.executable, *(shutil.which(f"python3.{minor}") for minor in (11, 12, 13))]

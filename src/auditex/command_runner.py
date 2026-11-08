@@ -18,6 +18,12 @@ SENSITIVE_ARGS = {
     "--token",
     "--command-override",
     "--adapter-override",
+    "--service-account-key",
+    "--oauth-client",
+    "--token-cache",
+    "--token-file",
+    "--env",
+    "--break-glass-accounts",
 }
 OPERATOR_ARGS = {
     "--tenant-name", "--tenant-id", "--out", "--run-name",

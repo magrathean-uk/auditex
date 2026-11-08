@@ -453,7 +453,8 @@ def test_build_probe_command_uses_mode_surface_and_lab_guard(monkeypatch: pytest
     assert "--until" in command
 
 
-def test_build_probe_command_never_carries_a_client_secret() -> None:
+def test_mcp_probe_command_rejects_secret_and_token_arguments() -> None:
+    """The MCP wrapper accepts no secret values; the local CLI builder can."""
     command = build_probe_command(
         tenant_name="ACME",
         out_dir="outputs/probes",
@@ -468,6 +469,18 @@ def test_build_probe_command_never_carries_a_client_secret() -> None:
         build_probe_command(tenant_name="ACME", out_dir="o", mode="app", client_secret="app-secret")  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         build_probe_command(tenant_name="ACME", out_dir="o", access_token="eyJ")  # type: ignore[call-arg]
+
+
+def test_local_probe_command_preserves_auth_and_redacts_its_display() -> None:
+    from auditex.command_builders import ProbeCommandSpec, build_probe_command as build_local_probe_command
+    from auditex.command_runner import redact_command
+
+    secret = "constructed-probe-secret-canary"
+    command = build_local_probe_command(
+        ProbeCommandSpec(tenant_name="ACME", out_dir="o", mode="app", client_id="app-id", client_secret=secret)
+    )
+    assert command[command.index("--client-secret") + 1] == secret
+    assert secret not in str(redact_command(command))
 
 
 def test_build_google_command_uses_workspace_path() -> None:
