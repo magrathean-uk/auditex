@@ -12,9 +12,9 @@ Three stages in order: the pre-publication gate (DoD items 1-7), G's explicit ye
 
 ## Definition of Done
 - [ ] The full acceptance suites pass on the release commit: `.venv/bin/python -m pytest -m "value_rule_acceptance or explainer_acceptance"`
-- [ ] The packaged version is 1.3.0 and the changelog has its section: `grep -qx 'version = "1.3.0"' pyproject.toml && grep -q '^## \[1.3.0\]' CHANGELOG.md`
-- [ ] Review: the 1.3.0 notes state that shareable output applies the D3 masking and that names in free text and ids are not masked (D6), and carry no stale "planned" explainer line `sed -n '/^## \[1.3.0\]/,/^## \[1.2.4\]/p' CHANGELOG.md`
-- [ ] The security policy supports 1.3.x: `grep -q '| 1.3.x | Yes |' .github/SECURITY.md`
+- [x] The packaged version is 1.3.0 and the changelog has its section: `grep -qx 'version = "1.3.0"' pyproject.toml && grep -q '^## \[1.3.0\]' CHANGELOG.md` (evidence: merge.sh verify for M03-T01 ran this command and passed; release commit d9f050f)
+- [x] Review: the 1.3.0 notes state that shareable output applies the D3 masking and that names in free text and ids are not masked (D6), and carry no stale "planned" explainer line `sed -n '/^## \[1.3.0\]/,/^## \[1.2.4\]/p' CHANGELOG.md` (evidence: REV-M03-T01 Codex approve at 2385009 after two bounded rounds; release commit d9f050f)
+- [x] The security policy supports 1.3.x: `grep -q '| 1.3.x | Yes |' .github/SECURITY.md` (evidence: merge.sh verify for M03-T01 ran this grep and passed; release commit d9f050f)
 - [ ] The 1.3.0 wheel and sdist build reproducibly and pass the base, Google and MCP release smoke on the release commit: `make dist && bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke" && .venv/bin/python scripts/check-reproducible-build.py`
 - [ ] Release check is green on the release commit: `make release-check`
 - [ ] Review: astra's pre-publication release gate returns ready on the release commit, after every M00-M02 DoD item and M03 items 1-6 are ticked `grep -qx 'verdict: ready' .plan/work/M03-T04/result.md`
@@ -26,7 +26,7 @@ Three stages in order: the pre-publication gate (DoD items 1-7), G's explicit ye
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M03-T01 | Write the 1.3.0 release notes and bump the version | terra | M | - | todo |
+| M03-T01 | Write the 1.3.0 release notes and bump the version | terra | M | - | done |
 | M03-T02 | Run the acceptance suites on the release commit | luna | S | - | todo |
 | M03-T03 | Build, smoke-test and hash the release artefacts | luna | S | - | todo |
 | M03-T04 | Pre-publication release gate validation | astra | S | gate | todo |
