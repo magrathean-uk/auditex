@@ -117,3 +117,12 @@
 - why: it may hide a wheel-packaging defect in 1.3.0 and it blocks the release-check DoD item.
 - consequences: no weight or DoD change.
 - approver: auto
+
+## DEC-014 Gate chain green; smoke portability fix; M01-T09 widened
+- date: 2026-11-08
+- status: approved
+- decision: M00-T01 run 4 on 19c7ea7 proves make release-check (23711 passed, 0 failed), audit-deps and gitleaks green, which ticks M00's five gate items. M00-T07 removes release-smoke.sh's dependency on a bare python on PATH, which made the smoke pass only with the venv on PATH. M01-T09 may edit src/auditex/google_workspace/normalize.py to read alert severity and status from metadata with a fallback to the top-level fields.
+- options: tick the gate items now | wait for a fully clean chain including the smoke
+- why: each ticked item's own command passed; the smoke item was already proved in the M00-T05 merge gate and M00-T07 hardens it.
+- consequences: M00 closes when M00-T07 merges and its retro runs.
+- approver: auto

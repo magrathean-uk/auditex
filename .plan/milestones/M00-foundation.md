@@ -2,7 +2,7 @@
 id: M00
 name: foundation
 weight: 20
-status: active
+status: done
 ---
 # M00 foundation
 No feature work before this milestone is green. Read-only inventories and drafts may run alongside it.
@@ -12,11 +12,11 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 
 ## Definition of Done
 - [x] Local `main` contains the accepted `origin/main` commit 82d7ca5: `git merge-base --is-ancestor 82d7ca5 main` (evidence: `git merge-base --is-ancestor 82d7ca5 main` passed with main at cd6b134, .plan/work/PLAN-v2/evidence.md)
-- [ ] Lint passes: `make lint`
-- [ ] Test harness runs locally and is green: `make test`
-- [ ] Contract smoke is green: `make contract-smoke`
-- [ ] Secrets scan passes: `gitleaks dir . --no-banner --redact`
-- [ ] Release check passes end to end, including archive and wheel check, rule-pack drift and taint scan: `make release-check`
+- [x] Lint passes: `make lint` (evidence: M00-T01 run 4 on 19c7ea7, .plan/work/M00-T01/result.md: make release-check passed end to end, 23711 passed, 0 failed)
+- [x] Test harness runs locally and is green: `make test` (evidence: M00-T01 run 4 on 19c7ea7, .plan/work/M00-T01/result.md: make release-check passed end to end, 23711 passed, 0 failed)
+- [x] Contract smoke is green: `make contract-smoke` (evidence: M00-T01 run 4 on 19c7ea7, .plan/work/M00-T01/result.md: make release-check passed end to end, 23711 passed, 0 failed)
+- [x] Secrets scan passes: `gitleaks dir . --no-banner --redact` (evidence: M00-T01 run 4 on 19c7ea7: gitleaks dir passed, no leaks)
+- [x] Release check passes end to end, including archive and wheel check, rule-pack drift and taint scan: `make release-check` (evidence: M00-T01 run 4 on 19c7ea7, .plan/work/M00-T01/result.md: make release-check passed end to end, 23711 passed, 0 failed)
 - [x] The release archive and dist steps work with `TMPDIR` unset and set: `env -u TMPDIR make release-archive dist && make release-archive dist` (evidence: merge.sh verify for M00-T02 passed incl. wheel and sdist check, squash bb50c0a; REV-M00-T02 approve at 836261c)
 - [x] Dependency audit over the base install and every declared extra (`mcp`, `test`, `google`, `model_train` and any development extra) exits 0, and every ignored advisory has a G-approved `.plan/DECISIONS.md` entry: `make audit-deps` (evidence: merge.sh verify for M00-T03 ran make audit-deps and passed, no known vulnerabilities, no ignored advisories; REV-M00-T03 Codex approve at 0722e93)
 - [x] Wheel and sdist each pass the base, Google and MCP release smoke, and two clean builds of the same commit give a byte-identical wheel and a member-identical sdist: `make dist && bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke" && .venv/bin/python scripts/check-reproducible-build.py` (evidence: merge.sh verify for M00-T05 ran this command and passed, squash f0ae2a7; REV-M00-T05 sol approve at 00afb73)
@@ -26,12 +26,13 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M00-T01 | Re-run the gate suite on main after the foundation merges | luna | S | - | todo |
+| M00-T01 | Re-run the gate suite on main after the foundation merges | luna | S | - | done |
 | M00-T02 | Make the release archive and dist build TMPDIR-safe make targets | codex | S | mechanical | done |
 | M00-T03 | Add a dependency audit over the base install and every extra | codex | M | - | done |
 | M00-T04 | Triage unmerged wt branches for 1.3.0 content | luna | M | - | done |
 | M00-T05 | Extend the release smoke to the sdist and add a reproducible-build check | codex | M | - | done |
-| M00-T06 | Fix the failing installed-wheel resources test | sol | S | debug | todo |
+| M00-T06 | Fix the failing installed-wheel resources test | sol | S | debug | done |
+| M00-T07 | Make the release smoke independent of a bare python on PATH | terra | S | - | todo |
 
 ## Acceptance criteria
 ### M00-T01 Re-run the gate suite on main after the foundation merges
@@ -79,3 +80,10 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 - The whole test file passes and no other test changes behaviour.
 - verify: `.venv/bin/python -m pytest tests/test_explainer_integration.py`
 - files: `tests/test_explainer_integration.py`, `pyproject.toml`, `src/auditex/shipped_content.py`, and the resource loader module the diagnosis names (listed under changes)
+
+### M00-T07 Make the release smoke independent of a bare python on PATH
+- `scripts/release-smoke.sh` selects its interpreter from `PYTHON` when set, else the repository's `.venv/bin/python`, else `python3`; it never calls a bare `python`.
+- The smoke passes for wheel and sdist across base, google and mcp with a PATH that has no `python` on it.
+- `tests/test_architecture_modules.py` keeps passing (update only the release-smoke assertions if the script's text changes).
+- verify: `make dist && env PATH="/usr/bin:/bin" bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke" && .venv/bin/python -m pytest tests/test_architecture_modules.py`
+- files: `scripts/release-smoke.sh`, `tests/test_architecture_modules.py` (release-smoke assertions only)

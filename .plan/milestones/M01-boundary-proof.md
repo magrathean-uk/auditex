@@ -2,7 +2,7 @@
 id: M01
 name: boundary-proof
 weight: 30
-status: planned
+status: active
 ---
 # M01 boundary-proof
 Tier A milestone: M01-T01, M01-T03 and M01-T04 each get an independent review from the other provider at a frozen head. The parked model layer is classified here, never developed or removed.
@@ -17,7 +17,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 - [x] Every parser flag that can carry a secret is in its redaction set and has an abbreviation and a redaction test: `.venv/bin/python -m pytest tests/test_secret_cli_matrix.py tests/test_cli_abbreviations.py tests/test_vendored_cli_abbreviations.py` (evidence: merge.sh verify passed for M01-T01, squash 27759ed; REV-M01-T01 approve at f6ffc78, sol for a Codex author)
 - [x] MCP read-only annotations and credential wording in docs match the registry: `.venv/bin/python -m pytest tests/test_mcp_registry.py` (evidence: merge.sh verify for M01-T05 passed, squash c02a0d1; REV-M01-T05 codex approve at 1e25c95)
 - [x] Review: shipped `examples/model_development/` rows are classified and none is a held-out or sealed evaluation row, or G has ruled on them `test -s .plan/work/M01-T06/result.md` (evidence: M01-T06 luna classification, 48 synthetic rows, none held-out; M01-T06-check terra pass incl. build-model-examples.py --check)
-- [ ] Review: for each of M01-T01, M01-T03 and M01-T04 the review says `verdict: approve`, ran on the other vendor from the author (launcher in each `dispatch.txt`), and the squash commit on `main` carries `Plan-Review: REV-<id> approve <reviewed sha>`, so the approval binds to the reviewed head, not the squash commit: `for t in M01-T01 M01-T03 M01-T04; do r=.plan/work/REV-$t; s=$(sed -n 's/^reviewed: *\([0-9a-f]\{12\}\).*/\1/p' $r/result.md | head -1); grep -qx 'verdict: approve' $r/result.md && [ "$(sed -n 's/^launcher: \([a-z]*\).*/\1/p' $r/dispatch.txt)" != "$(sed -n 's/^launcher: \([a-z]*\).*/\1/p' .plan/work/$t/dispatch.txt)" ] && git log main --format=%B --grep="Plan-Task: $t" | grep -q "Plan-Review: REV-$t approve $s" || { echo "$t"; exit 1; }; done`
+- [x] Review: for each of M01-T01, M01-T03 and M01-T04 the review says `verdict: approve`, ran on the other vendor from the author (launcher in each `dispatch.txt`), and the squash commit on `main` carries `Plan-Review: REV-<id> approve <reviewed sha>`, so the approval binds to the reviewed head, not the squash commit: `for t in M01-T01 M01-T03 M01-T04; do r=.plan/work/REV-$t; s=$(sed -n 's/^reviewed: *\([0-9a-f]\{12\}\).*/\1/p' $r/result.md | head -1); grep -qx 'verdict: approve' $r/result.md && [ "$(sed -n 's/^launcher: \([a-z]*\).*/\1/p' $r/dispatch.txt)" != "$(sed -n 's/^launcher: \([a-z]*\).*/\1/p' .plan/work/$t/dispatch.txt)" ] && git log main --format=%B --grep="Plan-Task: $t" | grep -q "Plan-Review: REV-$t approve $s" || { echo "$t"; exit 1; }; done` (evidence: squash 27759ed REV-M01-T01 approve f6ffc78, codex author and claude-1 reviewer; 49c2b75 REV-M01-T03 approve 798a49c, claude-4 and codex2; 0e4d69d REV-M01-T04 approve 016718a, claude-4 and codex2)
 
 ## Tasks
 | id | title | owner | size | tags | status |
@@ -28,7 +28,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 | M01-T04 | Prove the content-read, cmdlet and Google read boundaries | codex | M | - | done |
 | M01-T05 | Align MCP and privacy docs with the registry | terra | S | - | done |
 | M01-T06 | Classify shipped model-development example rows | luna | S | - | done |
-| M01-T07 | Add Gmail settings fields masks (G1, G2, G5) | codex | S | tier-a | todo |
+| M01-T07 | Add Gmail settings fields masks (G1, G2, G5) | codex | S | tier-a | done |
 | M01-T08 | Stop collecting ApplyHtmlDisclaimerText (G6) | terra | S | tier-a | done |
 | M01-T09 | Add fields masks to alerts.list and groups.get (G8, G9) | codex | S | tier-a | todo |
 | M01-T10 | Strip the Intune custom-profile payload after receipt (G10) | terra | S | tier-a | done |
@@ -109,7 +109,7 @@ The AGENTS.md boundaries that 1.3.0 promises are proven by tests on `main`: ever
 - `_TEXT_EXPOSURES` rows G8 and G9 change to "removed at request level".
 - Normalised alert and group outputs are unchanged on the existing fixtures.
 - verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_google_workspace.py tests/test_google_collection_gaps.py tests/test_google_parity.py`
-- files: `src/auditex/google_workspace/client.py`, `tests/test_google_workspace.py`, `tests/test_read_boundaries.py`
+- files: `src/auditex/google_workspace/client.py`, `tests/test_google_workspace.py`, `tests/test_read_boundaries.py`, `src/auditex/google_workspace/normalize.py` (alert metadata fields only, DEC-014)
 
 ### M01-T10 Strip the Intune custom-profile payload after receipt (G10)
 - Dependencies: M01-T04 merged; G's answer on G10 (recommendation: yes, keep the read and discard `payload` after receipt). Do not dispatch before that answer is recorded in DECISIONS.md; if G says no, close the task as rejected.

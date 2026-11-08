@@ -115,3 +115,10 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T16:29:35Z	M01-T09	terra	claude-4	claude-sonnet-5-5	low	branch	0	53	0.2503	done	task/M01-T09-alerts-groups-masks
 2026-11-08T16:30:13Z	REV-M01-T10	codex	codex2	gpt-6.1-sol	high	readonly	0	91		done	task/M01-T10-strip-intune-payload
 2026-11-08T16:30:15Z	M00-T06	sol	claude-1	claude-opus-5-5	high	branch	0	93	0.6249	done	task/M00-T06-wheel-resources-test
+2026-11-08T16:32:02Z	M01-T07	terra	claude-4	claude-sonnet-5-5	low	branch	0	39	0.1708	done	task/M01-T07-gmail-fields-masks
+2026-11-08T16:32:28Z	REV-M00-T06	codex	codex	gpt-6.1-sol	high	readonly	0	65		done	task/M00-T06-wheel-resources-test
+2026-11-08T16:33:12Z	REV-M01-T09	codex	codex2	gpt-6.1-sol	high	readonly	0	109		done	task/M01-T09-alerts-groups-masks
+2026-11-08T16:34:30Z	REV-M01-T07	codex	codex2	gpt-6.1-sol	low	readonly	0	44		done	task/M01-T07-gmail-fields-masks
+2026-11-08T16:34:52Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	0	66	0.0199	done	c230a61
+2026-11-08T16:36:26Z	M01-T09	terra	claude-4	claude-sonnet-5-5	low	branch	1	45	0.2024	partial	task/M01-T09-alerts-groups-masks
+2026-11-08T16:56:24Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	3	1243	0.0212	blocked	19c7ea7

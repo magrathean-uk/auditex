@@ -1,14 +1,13 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 52% (was 48%)
-milestone: M00-foundation 55%
+overall: 66% (was 52%)
+milestone: M01-boundary-proof 86%
 plan_version: v2
 release_scope: 1.3.0 from the accepted line (main contains origin/main 82d7ca5) - reproducible local gates, test-proven transport, read and secret boundaries, accurate docs, release notes with the D6 limit, signed v1.3.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 40bab14 2026-11-08T16:31:03Z
+last_checkpoint: 19c7ea7 2026-11-08T16:58:05Z
 
 ## Next tasks
-- M00-T01 Re-run the gate suite on main after the foundation merges (luna)
-- M00-T06 Fix the failing installed-wheel resources test (sol)
+- M01-T09 Add fields masks to alerts.list and groups.get (G8, G9) (codex)
 
 ## Blockers
 - none
@@ -23,11 +22,11 @@ last_checkpoint: 40bab14 2026-11-08T16:31:03Z
 ## Quota snapshot
 <!-- quota:begin -->
 claude 84% orchestrator
-claude-1 62% ok
-claude-2 4% shared
+claude-1 63% ok
+claude-2 5% shared
 claude-3 71% ok
-claude-4 50% ok
+claude-4 51% ok
 claude-5 63% ok
-codex 54% ok
+codex 55% ok
 codex2 10% ok
 <!-- quota:end -->
