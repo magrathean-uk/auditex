@@ -34,6 +34,7 @@ from auditex.reporting import (
 from azure_tenant_audit.api_inventory import with_observed_ledger
 from azure_tenant_audit.bundle_integrity import BUNDLE_HASHES_PATH, verify_bundle_hashes
 from azure_tenant_audit.cli import run_offline
+from azure_tenant_audit.guarded_io import UnsafeRunFileError
 from azure_tenant_audit.data_handling import build_data_handling_summary, classify_auth_scope
 from azure_tenant_audit.private_io import copy_private_file, write_private_text
 
@@ -150,14 +151,18 @@ def test_a_symlink_makes_the_handoff_and_pack_fail_before_reading(bundle: Path, 
     outside.write_text('{"trust_level": "trusted_complete"}', encoding="utf-8")
     (bundle / "live-readiness.json").symlink_to(outside)
 
-    handoff = enterprise_handoff(bundle)
-    assert handoff["handoff_status"] == "unusable"
-    assert handoff["integrity"]["status"] == "mismatch"
-    assert handoff["integrity"]["symlink_paths"] == ["live-readiness.json"]
+    # The linked artifact is a fixed UnsafeRunFileError refusal at admission; it is never read through,
+    # so no "unusable" handoff built from the target's content exists. The integrity check still names it.
+    integrity = verify_bundle_hashes(bundle)
+    assert integrity["status"] == "mismatch" and integrity["symlinks"] == ["live-readiness.json"]
+    with pytest.raises(UnsafeRunFileError):
+        enterprise_handoff(bundle)
     pack = tmp_path / "pack"
-    with pytest.raises(BundleIntegrityError):
+    with pytest.raises((UnsafeRunFileError, BundleIntegrityError)):
         write_enterprise_handoff_pack(bundle, pack)
     assert not pack.exists()
+    assert outside.read_text(encoding="utf-8") == '{"trust_level": "trusted_complete"}'
+    assert (bundle / "live-readiness.json").is_symlink()
 
 
 @pytest.mark.parametrize("relative", ["live-readiness.json", "normalized/injected.json", "findings/extra.json", "blockers/extra.json"])
@@ -663,14 +668,17 @@ def test_the_private_writer_tightens_an_existing_file_and_never_writes_through_a
     link.symlink_to(victim)
 
     write_private_text(loose, "new")
-    write_private_text(link, "through the link?")
+    # A destination that is a link is refused outright: no write through it and no replacement of it.
+    with pytest.raises(UnsafeRunFileError):
+        write_private_text(link, "through the link?")
     source = tmp_path / "source.bin"
     source.write_bytes(b"\x00\x01")
     copy_private_file(source, tmp_path / "deep" / "copy.bin")
 
     assert loose.read_text(encoding="utf-8") == "new" and stat.S_IMODE(loose.stat().st_mode) == 0o600
     assert victim.read_text(encoding="utf-8") == "untouched"
-    assert not link.is_symlink() and link.read_text(encoding="utf-8") == "through the link?"
+    assert link.is_symlink() and link.resolve() == victim.resolve()
+    assert sorted(path.name for path in tmp_path.iterdir() if path.name.startswith("link")) == ["link.txt"]
     assert (tmp_path / "deep" / "copy.bin").read_bytes() == b"\x00\x01"
     assert stat.S_IMODE((tmp_path / "deep").stat().st_mode) == 0o700
     assert stat.S_IMODE((tmp_path / "deep" / "copy.bin").stat().st_mode) == 0o600

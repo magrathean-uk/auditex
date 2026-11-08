@@ -176,6 +176,8 @@ def finalize_bundle_contract(
     coverage_ledger: list[dict[str, Any]],
     blockers: list[dict[str, Any]],
     findings: list[dict[str, Any]],
+    trust_coverage_rows: list[dict[str, Any]] | None = None,
+    trust_selected_collectors: list[str] | None = None,
 ) -> dict[str, Any]:
     """Write the stable post-run contract artifacts through one path.
 
@@ -214,6 +216,7 @@ def finalize_bundle_contract(
     metadata.update(identity_fields)
     run_metadata = {**run_metadata, **identity_fields, "platform": platform}
     selected_collectors = [str(item) for item in run_metadata.get("selected_collectors") or metadata.get("collectors") or [] if str(item)]
+    trust_selected = selected_collectors if trust_selected_collectors is None else trust_selected_collectors
     if not metadata.get("data_handling_path"):
         data_handling_payload = build_data_handling_summary(
             platform=str(metadata.get("platform") or run_metadata.get("platform") or "m365"),
@@ -232,19 +235,21 @@ def finalize_bundle_contract(
         data_handling_payload = writer._safe_load_json(writer.run_dir / str(metadata["data_handling_path"]))
         if not isinstance(data_handling_payload, dict):
             data_handling_payload = {}
+    coverage_rows = [dict(row) for row in writer.coverage if isinstance(row, dict)]
+    trust_coverage = coverage_rows if trust_coverage_rows is None else trust_coverage_rows
     if not metadata.get("live_readiness_path") and capability_rows and metadata.get("mode") != "offline":
         live_readiness_path = writer.write_json_artifact(
             "live-readiness.json",
             build_live_readiness_summary(
-                selected_collectors=selected_collectors,
+                selected_collectors=trust_selected,
                 capability_rows=capability_rows,
                 dependency_available=True,
+                coverage_rows=trust_coverage,
             ),
         )
         metadata["live_readiness_path"] = str(live_readiness_path.relative_to(writer.run_dir))
         _append_report_evidence_path(writer, metadata["live_readiness_path"])
     collector_rows = [dict(row) for row in writer.summary.get("collectors", []) if isinstance(row, dict)]
-    coverage_rows = [dict(row) for row in writer.coverage if isinstance(row, dict)]
     surface_coverage = build_surface_coverage_map(collector_rows=collector_rows, platform=platform, coverage_rows=coverage_rows)
     computed_coverage_gaps = build_coverage_gap_summary(
         surface_coverage=surface_coverage,
@@ -258,6 +263,8 @@ def finalize_bundle_contract(
         coverage_gaps=computed_coverage_gaps,
         blockers=blockers,
         findings=findings,
+        coverage_rows=trust_coverage,
+        trust_selected_collectors=trust_selected,
     )
     audit_plan_path = writer.write_json_artifact("audit-plan.json", audit_plan)
     metadata["audit_plan_path"] = str(audit_plan_path.relative_to(writer.run_dir))
@@ -295,7 +302,8 @@ def finalize_bundle_contract(
         writer.record_artifact(writer.run_dir / relative)
 
     writer.write_bundle({**metadata, "_suppress_completion_log": True})
-    evidence_db_path = build_run_evidence_index(writer.run_dir)
+    fresh_index_proof: list = []
+    evidence_db_path = build_run_evidence_index(writer.run_dir, _proof_out=fresh_index_proof)
     writer.record_artifact(evidence_db_path)
 
     ai_context = build_ai_context(
@@ -308,7 +316,8 @@ def finalize_bundle_contract(
         findings=findings,
     )
     writer.write_json_artifact("ai_context.json", ai_context)
-    validation = build_validation_report(run_dir=writer.run_dir, ai_context=ai_context, findings=findings)
+    validation = build_validation_report(run_dir=writer.run_dir, ai_context=ai_context, findings=findings,
+                                         _fresh_index_proof=fresh_index_proof[0])
     writer.write_json_artifact("validation.json", validation)
     writer.log_event(
         "contract.validation.passed" if validation.get("valid") else "contract.validation.failed",

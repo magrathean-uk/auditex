@@ -333,15 +333,19 @@ def test_there_is_no_limit_on_the_number_of_accounts() -> None:
     assert break_glass.parse_accounts(",".join(entries)) == entries
 
 
-def test_an_accounts_file_that_is_not_text_stops_the_run_before_anything_is_written(tmp_path: Path) -> None:
+def test_an_accounts_file_that_is_not_text_stops_the_run_before_anything_is_written(tmp_path: Path, capsys) -> None:
     from types import SimpleNamespace
 
     from azure_tenant_audit.cli import run_live
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError
 
     binary = tmp_path / "accounts.bin"
     binary.write_bytes(b"\xff\xfe\x00bg1@example.com")
-    with pytest.raises(UnicodeError):
+    # The guarded loader now refuses undecodable bytes with the fixed error, not a raw UnicodeError.
+    with pytest.raises(UnsafeRunFileError) as caught:
         break_glass.load_accounts_argument(f"@{binary}")
+    assert not isinstance(caught.value, UnicodeError)
+    assert "bg1@example.com" not in str(caught.value) and "accounts.bin" not in str(caught.value)
     sample = _sample(tmp_path)
     out = tmp_path / "out"
 
@@ -351,6 +355,8 @@ def test_an_accounts_file_that_is_not_text_stops_the_run_before_anything_is_writ
 
     assert (offline, live, missing) == (2, 2, 2)
     assert not out.exists(), "the run stops before any output directory is made"
+    captured = capsys.readouterr()
+    assert "bg1@example.com" not in captured.out + captured.err
 
 
 def _sample(tmp_path: Path) -> Path:

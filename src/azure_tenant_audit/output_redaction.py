@@ -90,6 +90,7 @@ PUBLIC_ADDRESSES = frozenset(
         "cyberliaison@cisa.dhs.gov",
         "reports@example.com",
         "username@somedomain.com",
+        "contact+auditex@magrathean.uk",
     }
 )
 
@@ -554,6 +555,8 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     it was read is ``changed during scan``, never partial content. ``cap`` is what the caller can still afford of
     the aggregate budget (reading past it is a ``limit``), charged against what was really read, not what was listed.
     """
+    from .guarded_io import UnsafeRunFileError, current_context
+
     try:
         descriptor = os.open(name, _FILE_MODE, dir_fd=parent_fd)
     except FileNotFoundError as exc:
@@ -566,6 +569,9 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
     read_failed = False
     try:
         info = os.fstat(descriptor)
+        context = current_context()
+        if context is not None:
+            context._check_file(info, "run-file", _MAX_FILE_BYTES)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise _Unsafe(REASON_NON_REGULAR)
         if (info.st_dev, info.st_ino) != (expected.st_dev, expected.st_ino):
@@ -592,6 +598,10 @@ def _read_file_at(parent_fd: int, name: str, expected: os.stat_result, cap: int 
         read_failed = True
         exc.bytes_read += total
         raise
+    except UnsafeRunFileError as exc:
+        read_failed = True
+        reason = REASON_OVERSIZE if exc.reason == "oversize" else REASON_UNREADABLE
+        raise _Unsafe(reason, total) from None
     except OSError as exc:
         read_failed = True
         raise _Unsafe(REASON_UNREADABLE, total) from exc
@@ -629,6 +639,14 @@ class _Scan:
             self.problem(parts, REASON_LIMIT)
 
     def take(self, parts: tuple[str, ...], reader: Callable[[int], bytes], info: os.stat_result) -> None:
+        from .guarded_io import UnsafeRunFileError, current_context
+        context = current_context()
+        if context is not None:
+            try:
+                context._check_file(info, "run-file", None)
+            except UnsafeRunFileError:
+                self.problem(parts, REASON_NON_REGULAR)
+                return
         if self.files >= _MAX_SCAN_FILES:
             self.problem(parts, REASON_LIMIT)
             return
@@ -699,10 +717,18 @@ class _Scan:
                         self.problem(here, exc.reason)
                     else:
                         self._enter(frames, child, here, len(frames))
+                elif stat.S_ISLNK(mode):
+                    if name.lower().endswith(".json"):
+                        self.problem(here, REASON_NON_REGULAR)
+                    else:
+                        try:
+                            target = os.stat(name, dir_fd=frame.descriptor, follow_symlinks=True)
+                        except OSError:
+                            continue
+                        if stat.S_ISDIR(target.st_mode):
+                            self.problem(here, REASON_NON_REGULAR)
                 elif not name.lower().endswith(".json"):
                     continue
-                elif stat.S_ISLNK(mode):
-                    self.problem(here, REASON_NON_REGULAR)
                 elif not stat.S_ISREG(mode):
                     self.problem(here, REASON_NON_REGULAR)  # FIFO, socket, device: never opened
                 else:
@@ -722,12 +748,23 @@ class _Frame:
         self.position = 0
 
 
+from .guarded_io import UnsafeRunFileError, current_context, guarded_operation
+
+
+@guarded_operation
 def read_normalized_sections(run_dir: str | Path) -> dict[str, Any]:
     """Read shareable report sections; refuse a failed read even if it later recovers."""
     sections: dict[str, Any] = {}
-    run_real = os.path.realpath(run_dir)
     try:
-        run_fd = os.open(run_real, _DIR_MODE)
+        context = current_context()
+        run_path = Path(run_dir)
+        if (context._absolute(run_path) in context._runs or os.path.lexists(run_path / "run-manifest.json")
+                or os.path.lexists(run_path / "operator-inputs")):
+            run_fd = os.dup(context.bind_run(run_path))
+        else:
+            run_fd = context._directory(run_path)
+    except UnsafeRunFileError:
+        raise
     except OSError:
         raise ContextIncompleteError((("<run>", REASON_UNREADABLE),)) from None
     try:
@@ -794,6 +831,7 @@ class _Discovery:
     snapshot: Snapshot = ()
 
 
+@guarded_operation
 def _scan_run_identities(run_path: Path, *, read: bool = True) -> _Discovery:
     """Privileged-user names, immutable ids, role vocabulary and the files discovery could not use.
 
@@ -808,9 +846,15 @@ def _scan_run_identities(run_path: Path, *, read: bool = True) -> _Discovery:
     read is a ``changed during scan`` problem, and the fingerprints of every file listed are returned as the
     ``snapshot`` the caller can compare later (``read=False`` lists and fingerprints without reading).
     """
-    run_real = os.path.realpath(run_path)
     try:
-        run_fd = os.open(run_real, _DIR_MODE)
+        from .guarded_io import current_context
+        context = current_context()
+        if os.path.lexists(run_path / "run-manifest.json") or os.path.lexists(run_path / "operator-inputs"):
+            run_fd = os.dup(context.bind_run(run_path))
+        else:
+            run_fd = context._directory(run_path)
+    except UnsafeRunFileError:
+        raise
     except OSError:
         return _Discovery(problems=(("<run>", REASON_UNREADABLE),))
     scan = _Scan(read=read)
@@ -1016,6 +1060,54 @@ def _dump_like(original: str, parsed: Any, redacted: Any) -> str:
     return _dump(redacted, original.isascii(), None, (", ", ": "))
 
 
+# Local-only SS 2.1 proof (TargetedUsersCoverage v1). Every redacting profile drops the whole summary and its private
+# binding wherever they occur (keys compared with ``_norm``, nested or in embedded JSON), and keeps only ``supplied`` of
+# ``operator_inputs.sensitive_users``: its count and HMAC stay in the local manifest. Other ``count`` fields are kept.
+_LOCAL_PROOF_NORMS = frozenset({"targeteduserscoverage", "targeteduserscoveragebinding"})
+_OPERATOR_INPUTS_NORM = "operatorinputs"
+_SENSITIVE_USERS_NORM = "sensitiveusers"
+_SENSITIVE_USERS_SHAREABLE_NORMS = frozenset({"supplied"})
+
+
+def _structured_rewrite(value: Any, rewrite: Callable[[Mapping[Any, Any]], Any]) -> Any:
+    """Rewrite valid metadata mappings; withhold malformed containers and scalars."""
+    if isinstance(value, Mapping):
+        return rewrite(value)
+    if isinstance(value, str):
+        try:
+            parsed = _maybe_json(value)
+        except _EmbeddedLimitError:
+            raise ContextIncompleteError((("<output value>", REASON_LIMIT),)) from None
+        if isinstance(parsed, Mapping):
+            stripped = value.strip()
+            lead, trail = value[: len(value) - len(value.lstrip())], value[len(value.rstrip()):]
+            return lead + _dump_like(stripped, parsed, rewrite(parsed)) + trail
+    return {}
+
+
+def _shareable_sensitive_users(record: Mapping[Any, Any]) -> dict[Any, Any]:
+    return {key: item for key, item in record.items()
+            if _norm(key) in _SENSITIVE_USERS_SHAREABLE_NORMS and type(item) is bool}
+
+
+def _shareable_operator_inputs(record: Mapping[Any, Any]) -> dict[Any, Any]:
+    return {key: (_structured_rewrite(item, _shareable_sensitive_users) if _norm(key) == _SENSITIVE_USERS_NORM else item)
+            for key, item in record.items()}
+
+
+def _without_local_proof(record: Mapping[Any, Any]) -> Mapping[Any, Any]:
+    """``record`` without the local-only SS 2.1 proof fields (see ``_LOCAL_PROOF_NORMS``)."""
+    norms = [_norm(key) for key in record]
+    if not any(norm in _LOCAL_PROOF_NORMS or norm == _OPERATOR_INPUTS_NORM for norm in norms):
+        return record
+    out: dict[Any, Any] = {}
+    for norm, (key, item) in zip(norms, record.items()):
+        if norm in _LOCAL_PROOF_NORMS:
+            continue
+        out[key] = _structured_rewrite(item, _shareable_operator_inputs) if norm == _OPERATOR_INPUTS_NORM else item
+    return out
+
+
 class _Redactor:
     def __init__(self, context: RedactionContext, value: Any, markup: bool) -> None:
         self.markup = markup
@@ -1171,6 +1263,7 @@ class _Redactor:
             self.depth -= 1
 
     def mapping(self, record: Mapping[Any, Any], controlled: bool = False) -> dict[Any, Any]:
+        record = _without_local_proof(record)
         user = _is_privileged_user(record)
         group = _is_group(record)
         rows: list[tuple[Any, Any, Any]] = []
@@ -1233,7 +1326,7 @@ def redact_output(
     context: RedactionContext | None = None,
     markup: bool = False,
 ) -> Any:
-    """``value`` with the identifiers ``profile`` protects removed; same shape, deterministic, idempotent.
+    """``value`` with protected identifiers and local-only proof fields removed; deterministic and idempotent.
 
     ``markup=True`` is for text that is already rendered (HTML, CSV, Markdown, serialised JSON): it skips the
     inline ``key=value`` secret pattern, which cannot tell where a value ends in markup. Redact the structure

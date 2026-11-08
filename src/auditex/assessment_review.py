@@ -9,6 +9,7 @@ from collections import defaultdict
 from hashlib import sha256
 from itertools import combinations
 import json
+import os
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -39,16 +40,21 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _read_json(path: Path, *, run_dir: Path | None = None) -> tuple[dict[str, Any], str]:
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError, read_guarded_bytes
+
+    invalid = False
     try:
         if run_dir is not None:
             data = read_run_file(run_dir, path.relative_to(run_dir))
         else:
-            if path.stat().st_size > 64 * 1024 * 1024:
-                raise ValueError(f"Assessment artifact exceeds 64 MiB: {path}")
-            data = path.read_bytes()
+            data = read_guarded_bytes(path, field="assessment", max_bytes=64 * 1024 * 1024)
         payload = json.loads(data, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
-    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
-        raise ValueError(f"Cannot read assessment artifact {path}: {exc}") from exc
+    except UnsafeRunFileError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
+        invalid = True
+    if invalid:
+        raise ValueError("Cannot read assessment artifact.") from None
     if not isinstance(payload, dict):
         raise ValueError(f"Assessment artifact must be a JSON object: {path}")
     return payload, sha256(data).hexdigest()
@@ -253,7 +259,7 @@ def compare_external_assessments(
         raise ValueError("Provide at least one normalized external assessment path")
     if any(not isinstance(path, (str, Path)) or not str(path).strip() for path in assessment_paths):
         raise ValueError("Assessment paths must be nonempty paths")
-    paths = [Path(path).resolve() for path in assessment_paths]
+    paths = [Path(os.path.abspath(path)) for path in assessment_paths]
     if len(set(paths)) != len(paths):
         raise ValueError("Duplicate assessment paths cannot provide independent support")
     assessments = [_external_assessment(path, index) for index, path in enumerate(paths)]
@@ -261,7 +267,7 @@ def compare_external_assessments(
     if len(set(identities)) != len(identities):
         raise ValueError("Duplicate assessment source hashes cannot provide independent support")
     if run_dir is not None:
-        assessments.append(_auditex_assessment(Path(run_dir).resolve()))
+        assessments.append(_auditex_assessment(Path(os.path.abspath(run_dir))))
     if len(assessments) < 2:
         raise ValueError("Comparison needs two assessments or one assessment and an Auditex run")
     tenant_ids = {_tenant_key(assessment["tenant_id"]) for assessment in assessments}

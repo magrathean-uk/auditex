@@ -74,7 +74,13 @@ class _Console:
     def pause(self) -> None:
         if self.pause_enabled:
             try:
-                self.input_fn(self.style("\n  Press Enter to continue… ", "2"))
+                prompt = self.style("\n  Press Enter to continue… ", "2")
+                if self.input_fn is input:
+                    from azure_tenant_audit.guarded_io import read_guarded_stdin
+                    print(prompt, end="", file=self.stream, flush=True)
+                    read_guarded_stdin(line=True)
+                else:
+                    self.input_fn(prompt)
             except EOFError:
                 self.pause_enabled = False
 
@@ -92,7 +98,7 @@ def build_demo_parser() -> argparse.ArgumentParser:
         prog="auditex demo",
         description="Walk through Auditex on a fictional, synthetic tenant. No tenant is contacted.",
     )
-    parser.add_argument("--out", default="outputs/demo", help="Folder for the demo run, pack and explorer (recreated).")
+    parser.add_argument("--out", default="outputs/demo", help="Empty folder for the demo run, pack and explorer.")
     parser.add_argument("--sample", default=None, help="Use another offline sample instead of the demo tenant.")
     parser.add_argument("--no-pause", action="store_true", help="Run every step without waiting for Enter.")
     parser.add_argument("--no-html", action="store_true", help="Skip writing the HTML explorer.")
@@ -100,7 +106,8 @@ def build_demo_parser() -> argparse.ArgumentParser:
 
 
 def _load_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    from azure_tenant_audit.resources import read_selected_resource
+    return json.loads(read_selected_resource(path, default=str(DEMO_SAMPLE), field="input").decode("utf-8"))
 
 
 def _demo_sample(options: DemoOptions) -> Path:
@@ -368,12 +375,14 @@ def _step_handoff(console: _Console, run_dir: Path, out_dir: Path) -> None:
     console.line(f"  verify-pack:  {console.style('valid', '32') if verified.get('valid') else console.style('INVALID', '31')}")
     target = pack_dir / "handoff.md"
     if target.is_file():
-        original = target.read_bytes()
-        target.write_bytes(original + b"\nEdited after handover.\n")
+        from azure_tenant_audit.guarded_io import read_guarded_bytes
+        from azure_tenant_audit.private_io import write_private_bytes
+        original = read_guarded_bytes(target, field="input")
+        write_private_bytes(target, original + b"\nEdited after handover.\n")
         tampered = verify_enterprise_handoff_pack(str(pack_dir))
         codes = sorted({str(issue.get("code")) for issue in tampered.get("issues") or []})
         console.line(f"  Edit one line of handoff.md, verify again: {console.style('INVALID', '31')} ({', '.join(codes)})")
-        target.write_bytes(original)
+        write_private_bytes(target, original)
         restored = verify_enterprise_handoff_pack(str(pack_dir))
         console.line(f"  Restore the file, verify again: {console.style('valid', '32') if restored.get('valid') else 'INVALID'}")
     console.pause()
@@ -399,14 +408,23 @@ def run_demo(options: DemoOptions) -> int:
         console.line(f"Demo sample not found: {sample_path}")
         return 2
     sample = _load_json(sample_path)
-    provenance = sample.get("_fixture_provenance") or {}
+    from azure_tenant_audit.collectors.targeted_users_coverage import sanitise_sample
+
+    # Console labels precede offline replay. Use a minimised copy for every label; run_offline still reads the
+    # original file and applies its own fresh binding before writing evidence.
+    display_sample = sanitise_sample(sample, None, None)
+    provenance = display_sample.get("_fixture_provenance") or {}
+    if not isinstance(provenance, dict):
+        provenance = {}
     out_dir = options.out_dir
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError
+    from azure_tenant_audit.private_io import make_private_dirs
+    if out_dir.is_symlink() or (out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir()))):
+        raise UnsafeRunFileError("out")
+    make_private_dirs(out_dir)
 
     console.line(console.style("Auditex demo", "1"))
-    console.line(f"Tenant: {_company_name(sample)}  ·  fixture {provenance.get('fixture_id', sample_path.name)}")
+    console.line(f"Tenant: {_company_name(display_sample)}  ·  fixture {provenance.get('fixture_id', sample_path.name)}")
     console.line(console.style("All data is fictional and replayed offline. No Microsoft 365 tenant is contacted.", "33"))
     console.pause()
 
@@ -415,7 +433,7 @@ def run_demo(options: DemoOptions) -> int:
         as_of = DEMO_AS_OF
         console.line(f"Devices are judged as of {as_of:%-d %B %Y}, when the fictional snapshot was taken, so the demo reads the same on every run.")
     _step_plan(console)
-    run_dir = _step_run(console, sample_path, sample, out_dir, as_of)
+    run_dir = _step_run(console, sample_path, display_sample, out_dir, as_of)
     if run_dir is None:
         return 1
     report_pack = _load_json(run_dir / "reports" / "report-pack.json")
@@ -437,7 +455,8 @@ def run_demo(options: DemoOptions) -> int:
 
 
 def main(argv: list[str]) -> int:
-    args = build_demo_parser().parse_args(argv)
+    from azure_tenant_audit.cli_guard import parse_guarded
+    args = parse_guarded(build_demo_parser(), argv)
     return run_demo(
         DemoOptions(
             out_dir=Path(args.out),

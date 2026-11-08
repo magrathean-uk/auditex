@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from azure_tenant_audit.guarded_io import UnsafeRunFileError
 from azure_tenant_audit.output import AuditWriter
 
 
@@ -100,6 +101,14 @@ def test_discard_chunk_records_rejects_symlinked_collector_directory(tmp_path: P
     path = outside / "users-00001.jsonl"
     path.write_text('{"id": "constructed-user"}\n', encoding="utf-8")
     (writer.chunks_dir / "constructed").symlink_to(outside, target_is_directory=True)
-    with pytest.raises(ValueError, match="escapes"):
+    artifacts_before = list(writer._manifest["artifacts"])
+    # The guarded remover refuses the linked directory with its fixed error (not a ValueError that echoes
+    # the escape); it neither follows the link nor falls back to an unguarded unlink.
+    with pytest.raises(UnsafeRunFileError) as caught:
         writer.discard_chunk_records(["chunks/constructed/users-00001.jsonl"])
+    assert "constructed-user" not in str(caught.value) and str(outside) not in str(caught.value)
     assert path.exists()
+    assert path.read_text(encoding="utf-8") == '{"id": "constructed-user"}\n'
+    assert sorted(item.name for item in outside.iterdir()) == ["users-00001.jsonl"]
+    assert writer._manifest["artifacts"] == artifacts_before
+    assert (writer.chunks_dir / "constructed").is_symlink()

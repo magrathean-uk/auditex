@@ -22,9 +22,11 @@ from azure_tenant_audit.bundle_integrity import (
 from azure_tenant_audit.citations import build_citation_summary, dedupe_citations
 from azure_tenant_audit.output_redaction import (
     PROFILE_CUSTOMER_PACK,
+    PROFILE_EXPLAINER,
     PROFILE_LOCAL,
     PROFILE_SHAREABLE,
     PROFILES,
+    PUBLIC_ADDRESSES,
     REASON_CHANGED,
     ContextIncompleteError,
     RedactionContext,
@@ -38,6 +40,7 @@ from azure_tenant_audit.output_redaction import (
     snapshot_run,
 )
 from azure_tenant_audit.private_io import harden_tree, make_private_dirs, write_private_bytes, write_private_text
+from azure_tenant_audit.guarded_io import guard_session, open_pinned_binary
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.run_files import UnsafeRunFileError, hash_run_file, read_run_file
 from azure_tenant_audit.waivers import accepted_risk_summary
@@ -94,6 +97,7 @@ _SECTION_ORDER = (
     "attack_paths",
     "control_simulator",
     "baseline_alignment",
+    "policy_explanations",
     "report_qa",
     "findings",
     "proof_table",
@@ -136,12 +140,27 @@ def _read_json(path: Path | None, fallback: Any, *, root: Path | None = None) ->
         return fallback
     base = root if root is not None else path.parent
     try:
-        try:
-            relative = path.relative_to(base)
-        except ValueError as exc:
-            raise UnsafeRunFileError("Bundle file path must stay inside the bundle directory") from exc
-        return json.loads(read_run_file(base, relative).decode("utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError, ValueError):
+        relative = path.relative_to(base)
+    except ValueError:
+        relative = None
+    if relative is None:
+        raise UnsafeRunFileError("run-file", reason="outside") from None
+    try:
+        data = read_run_file(base, relative)
+    except UnsafeRunFileError:
+        raise
+    except (FileNotFoundError, OSError):
+        return fallback
+    invalid = False
+    try:
+        text = data.decode("utf-8")
+    except UnicodeError:
+        invalid = True
+    if invalid:
+        raise UnsafeRunFileError("run-file") from None
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
         return fallback
 
 
@@ -461,6 +480,9 @@ def _preview_section_citations(
         else:
             missing.append("reports/report-pack.json")
 
+    if "policy_explanations" in selected_sections:
+        citations.append(_citation("model_assessment.json", reason="Validated policy explanations used in this preview."))
+
     findings_path, _ = bundle.findings()
     if "findings" in selected_sections:
         if findings_path is not None:
@@ -544,7 +566,47 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
     ):
         if key in report_pack:
             sections[key] = report_pack[key]
+    explanations = _load_policy_explanations(run_path, manifest)
+    if explanations:
+        sections["policy_explanations"] = explanations
     return {"run_dir": str(run_path), "manifest": manifest, "summary_json": fallback_summary, "sections": sections}
+
+
+def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Read the optional assessment through the existing run-file guard and fail closed on damage."""
+    from azure_tenant_audit.model_assessment import (MODEL_ASSESSMENT_PATH, derive_explainer, validate_assessment,
+                                                  value_rule_verdict)
+    from .model_eval import _invalid_constant, _pairs
+
+    try:
+        assessment = json.loads(read_run_file(run_path, MODEL_ASSESSMENT_PATH).decode("utf-8"),
+                                object_pairs_hook=_pairs, parse_constant=_invalid_constant)
+        validate_assessment(assessment)
+        if assessment["run_id"] != manifest.get("run_id"):
+            return []
+        candidates = [row for row in assessment["policies"] if "explainer" in row]
+        if candidates:
+            # Assessment files can be changed after creation, so apply the explainer boundary again even for local reports.
+            context = context_for_run(run_path)
+            rows = []
+            for row in candidates:
+                # The text is a pure function of the template and the public rule answer: re-derive it and keep
+                # a stored explanation only if it matches, so schema-valid tampered text never becomes report content.
+                derived = derive_explainer(row)
+                if derived is None:
+                    continue
+                safe_derived = redact_output(derived, profile=PROFILE_EXPLAINER, context=context)
+                if safe_derived == redact_output(row["explainer"], profile=PROFILE_EXPLAINER, context=context):
+                    rows.append({"policy_id": row["policy_id"], "verdict": value_rule_verdict(row),
+                                 "explainer": safe_derived})
+            assert_snapshot_stable(run_path, context.snapshot)
+            return rows
+    except (UnsafeRunFileError, MemoryError):
+        raise
+    except Exception:
+        # Missing, invalid or unredactable optional content is omitted; unsafe admission always refuses.
+        return []
+    return []
 
 
 def analyze_report(run_dir: str | Path) -> dict[str, Any]:
@@ -779,11 +841,19 @@ def proof_table(run_dir: str | Path) -> dict[str, Any]:
 def _sha256_file(path: Path, *, root: Path | None = None) -> str | None:
     base = root if root is not None else path.parent
     try:
-        try:
-            relative = path.relative_to(base)
-        except ValueError as exc:
-            raise UnsafeRunFileError("Bundle file path must stay inside the bundle directory") from exc
-        return hash_run_file(base, relative)[0]
+        relative = path.relative_to(base)
+    except ValueError:
+        relative = None
+    if relative is None:
+        raise UnsafeRunFileError("run-file", reason="outside") from None
+    try:
+        digest = hashlib.sha256()
+        with guard_session() as context, open_pinned_binary(path, field="run-file", context=context) as stream:
+            while block := stream.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
+    except UnsafeRunFileError:
+        raise
     except OSError:
         return None
 
@@ -796,6 +866,10 @@ def _artifact_row(run_path: Path, relative: str, purpose: str, *, customer_safe:
     except FileNotFoundError:
         digest = None
         present = False
+    except UnsafeRunFileError:
+        digest = None
+        present = False
+        customer_safe = False
     except OSError:
         digest = None
         present = path.exists()
@@ -1662,9 +1736,9 @@ _CUSTOMER_SAFE_SOURCE_ARTIFACTS: tuple[tuple[str, str], ...] = (
 
 def _plain_run_file(run_path: Path, relative: str) -> tuple[Path | None, str | None]:
     """The regular file ``relative`` names in the run, or ``(None, reason)``. A link, or a link anywhere on the path, is refused."""
-    root = Path(os.path.realpath(run_path))
+    root = Path(os.path.abspath(run_path))
     candidate = root / relative
-    if os.path.islink(candidate) or Path(os.path.realpath(candidate)) != candidate:
+    if os.path.islink(candidate):
         return None, "symbolic_link"
     if not candidate.is_file():
         return None, "missing"
@@ -1733,7 +1807,11 @@ def _copy_source_artifact(
     ``bundle-hashes.json`` lists), and ``sha256``, the digest of the copy. The hash manifest is copied verbatim only
     when redaction would not change it, else it is left out (``skipped_reason``).
     """
-    if Path(relative.replace("\\", "/")).as_posix().startswith("operator-inputs/"):
+    relative_path = Path(relative)
+    if (relative_path.is_absolute() or relative_path.drive or ".." in relative_path.parts or "\\" in relative):
+        return {"source_path": "<refused>", "purpose": purpose, "present": False,
+                "customer_safe": False, "skipped_reason": "unsafe_input"}
+    if relative_path.as_posix().startswith("operator-inputs/"):
         return {"source_path": relative, "purpose": purpose, "present": False,
                 "customer_safe": False, "skipped_reason": "redacted_operator_input"}
     source, reason = _plain_run_file(run_path, relative)
@@ -1746,12 +1824,13 @@ def _copy_source_artifact(
     if source is None:
         if reason != "missing":
             row["skipped_reason"] = reason
+            row["customer_safe"] = False
         return row
     if listed is not None and relative != "bundle-hashes.json" and relative not in listed:
         row["skipped_reason"] = "not_in_bundle_hashes"
         return row
     destination = output_root / relative
-    guard_root = Path(os.path.realpath(run_path))
+    guard_root = Path(os.path.abspath(run_path))
     try:
         source_bytes = read_run_file(guard_root, relative)
         payload = json.loads(source_bytes.decode("utf-8"))
@@ -1815,7 +1894,7 @@ def _pack_file_path(pack_dir: Path, manifest_output_dir: Path, value: Any) -> Pa
         try:
             return pack_dir / path.relative_to(manifest_output_dir)
         except ValueError:
-            return path
+            return None
     if ".." in path.parts:
         return None
     if manifest_output_dir.parts:
@@ -1949,7 +2028,7 @@ def _prepare_pack_directory(target_dir: Path) -> None:
     does not stay behind.
     """
     if target_dir.is_symlink() or (target_dir.exists() and not target_dir.is_dir()):
-        raise PackOutputError(f"refusing to write a customer pack to {target_dir}: it is not a directory.")
+        raise UnsafeRunFileError("output-dir")
     if not target_dir.exists():
         make_private_dirs(target_dir)
         return
@@ -1957,20 +2036,23 @@ def _prepare_pack_directory(target_dir: Path) -> None:
         return
     previous = _mapping(_read_json(target_dir / "pack-manifest.json", {}))
     if previous.get("kind") != _PACK_KIND:
-        raise PackOutputError(
-            f"refusing to write a customer pack into {target_dir}: it is not empty and holds no earlier pack "
-            "(no pack-manifest.json). Use a new directory."
-        )
+        raise PackOutputError("refusing to write a customer pack: destination holds other files; use a new directory")
     stale = target_dir / "source-artifacts"
     if stale.is_symlink():
-        stale.unlink()
-    elif stale.is_dir():
-        shutil.rmtree(stale)
+        raise UnsafeRunFileError("output-dir")
+    if stale.is_dir():
+        from azure_tenant_audit.guarded_io import remove_guarded_tree
+        remove_guarded_tree(stale)
 
 
+from azure_tenant_audit.guarded_io import current_context, guarded_operation
+
+
+@guarded_operation
 def write_enterprise_handoff_pack(run_dir: str | Path, output_dir: str | Path) -> dict[str, Any]:
     run_path = Path(run_dir)
     target_dir = Path(output_dir)
+    current_context().bind_run(run_path)
 
     # Validation reads normalised files too, so discovery must run first.
     redaction = context_for_run(run_path)
@@ -2127,6 +2209,7 @@ def _merge_pack_issues(issues: list[dict[str, Any]], pack_path: Path) -> list[di
     return list(merged.values())
 
 
+@guarded_operation
 def verify_enterprise_handoff_pack(
     pack_dir: str | Path,
     *,
@@ -2719,6 +2802,40 @@ def _markdown_value(value: Any) -> str:
     return _markdown_cell(value)
 
 
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+.!|~\-])")
+_PUBLIC_ADDRESS_TEXT = re.compile(
+    r"(?<![A-Za-z0-9._%+\-])(" + "|".join(re.escape(item) for item in sorted(PUBLIC_ADDRESSES)) + r")(?![A-Za-z0-9\-]|\.[A-Za-z0-9])",
+    re.IGNORECASE)
+
+
+def _markdown_plain(value: Any) -> str:
+    """Escape HTML and Markdown control characters in untrusted explainer text."""
+    escaped = html.escape(_text(value).replace("\n", " ").replace("\r", " "), quote=False)
+    parts = _PUBLIC_ADDRESS_TEXT.split(escaped)
+    # Odd items are exact public addresses (kept verbatim so the final redaction pass still recognises
+    # them); everything around them is escaped.
+    return "".join(part if index % 2 else _MARKDOWN_SPECIAL.sub(r"\\\1", part)
+                   for index, part in enumerate(parts))
+
+
+def _append_policy_explanations_markdown(lines: list[str], rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    lines.extend(["", "## Policy explanations", ""])
+    for row in rows:
+        explainer = row["explainer"]
+        verdict = row["verdict"].replace("_", " ").capitalize()
+        lines.extend([f"### {_markdown_plain(row['policy_id'])} - {_markdown_plain(verdict)}", "",
+                      "**What this means**", "", _markdown_plain(explainer["explanation"]), "",
+                      "**What to do**", ""])
+        if explainer["remediation_steps"]:
+            lines.extend(f"{index}. {_markdown_plain(step)}"
+                         for index, step in enumerate(explainer["remediation_steps"], 1))
+        else:
+            lines.append("No actions recorded.")
+        lines.append("")
+
+
 def _append_mapping_markdown(lines: list[str], title: str, payload: Mapping[str, Any]) -> None:
     if not payload:
         return
@@ -2980,6 +3097,7 @@ def _render_markdown(selected_sections: dict[str, Any]) -> str:
     _append_mapping_markdown(lines, "Control Simulator", _mapping(selected_sections.get("control_simulator")))
     if "baseline_alignment" in selected_sections:
         _append_baseline_alignment_markdown(lines, _mapping(selected_sections.get("baseline_alignment")))
+    _append_policy_explanations_markdown(lines, _dict_rows(selected_sections.get("policy_explanations")))
     _append_mapping_markdown(lines, "Report QA", _mapping(selected_sections.get("report_qa")))
     if "detection_coverage" in selected_sections:
         detection = _mapping(selected_sections.get("detection_coverage"))
@@ -3215,6 +3333,19 @@ def _render_json_section(title: str, payload: Any) -> str:
     return f"<section><h2>{_html(title)}</h2><pre>{_html(_json(payload))}</pre></section>"
 
 
+def _render_policy_explanations_html(rows: list[dict[str, Any]]) -> str:
+    parts = ["<section><h2>Policy explanations</h2>"]
+    for row in rows:
+        explainer = row["explainer"]
+        verdict = row["verdict"].replace("_", " ").capitalize()
+        parts.append(f"<h3>{_html(row['policy_id'])} - {_html(verdict)}</h3>")
+        parts.append(f"<h4>What this means</h4><p>{_html(explainer['explanation'])}</p><h4>What to do</h4>")
+        steps = explainer["remediation_steps"]
+        parts.append("<ol>" + "".join(f"<li>{_html(step)}</li>" for step in steps) + "</ol>"
+                     if steps else "<p>No actions recorded.</p>")
+    return "".join(parts) + "</section>"
+
+
 def _render_html(selected_sections: dict[str, Any]) -> str:
     summary = _mapping(selected_sections.get("summary"))
     sections = [
@@ -3244,6 +3375,8 @@ def _render_html(selected_sections: dict[str, Any]) -> str:
         sections.append(_render_json_section("Reviewer Index", selected_sections.get("reviewer_index")))
     if "baseline_alignment" in selected_sections:
         sections.append(_render_json_section("Baseline Alignment", selected_sections.get("baseline_alignment")))
+    if "policy_explanations" in selected_sections:
+        sections.append(_render_policy_explanations_html(_dict_rows(selected_sections["policy_explanations"])))
     if "limitations" in selected_sections:
         sections.append(_render_json_section("Limitations", selected_sections.get("limitations")))
     if "next_actions" in selected_sections:
@@ -3764,6 +3897,8 @@ def preview_report(
 
     bundle = load_report_bundle(run_dir, shareable=profile != PROFILE_LOCAL)
     selected = _select_sections(bundle, include_sections=include_sections, exclude_sections=exclude_sections)
+    if format_name in {"csv", "sarif", "oscal"}:
+        selected.pop("policy_explanations", None)
     run_path = Path(run_dir)
     citations, evidence_missing = _preview_section_citations(
         run_path=run_path,

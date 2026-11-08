@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 import secrets
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -14,16 +16,17 @@ from .api_inventory import API_INVENTORY_ARTIFACT, read_audit_events, with_obser
 from .assurance import build_assurance_summary, build_coverage_gap_summary, build_provider_scorecard, build_surface_coverage_map
 from .collection_gaps import latest_coverage
 from .data_minimisation import minimise_user_text
+from .evidence_db import register_run_log
 from .findings import apply_coverage_gaps_to_report_pack
 from .tenant_identity import IDENTITY_FIELDS
-from .private_io import write_private_bytes, write_private_text
+from .private_io import make_private_dirs, write_private_text
 from .partner_domains import (
     BUNDLE_PATH as PARTNER_DOMAINS_PATH, KEY_PATH as PARTNER_DOMAINS_KEY_PATH,
-    PartnerDomains, PartnerDomainsError, read_partner_domains_key,
+    PartnerDomains, PartnerDomainsError,
 )
 from .sensitive_users import (
     BUNDLE_PATH as SENSITIVE_USERS_PATH, KEY_PATH as SENSITIVE_USERS_KEY_PATH,
-    SensitiveUsers, SensitiveUsersError, read_sensitive_users_key,
+    SensitiveUsers, SensitiveUsersError,
 )
 
 LOG = logging.getLogger("azure_tenant_audit.output")
@@ -53,35 +56,48 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+@contextmanager
 def _open_private(path: Path, mode: str = "w"):
     """Open a bundle file for text writing, created 0600 whatever the umask, and tighten one that already exists."""
-    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if "a" in mode else os.O_TRUNC)
-    fd = os.open(path, flags, BUNDLE_FILE_MODE)
-    try:
-        os.fchmod(fd, BUNDLE_FILE_MODE)
-    except (AttributeError, OSError):
-        pass
-    return os.fdopen(fd, mode, encoding="utf-8")
+    from .guarded_io import guard_session, open_private_output
+    with guard_session() as context, open_private_output(path, field="output", context=context, append="a" in mode) as fd:
+        with os.fdopen(os.dup(fd), mode, encoding="utf-8") as handle:
+            yield handle
 
 
 def harden_bundle(run_dir: Path) -> None:
-    """Set every directory under ``run_dir`` (and ``run_dir``) to 0700 and every file to 0600.
+    """Restrict admitted bundle files without following links or changing a private alias."""
+    from .guarded_io import UnsafeRunFileError, _safe_directory, guard_session, open_guarded_file
 
-    Bundles hold tenant metadata and personal data; they must not depend on the caller's umask.
-    Symbolic links are left alone.
-    """
-    run_dir = Path(run_dir)
-    for root, directories, files in os.walk(run_dir, followlinks=False):
-        for name in (".", *directories, *files):
-            target = Path(root) / name if name != "." else Path(root)
-            try:
+    root = Path(run_dir)
+    with guard_session() as context:
+        if os.path.lexists(root / "run-manifest.json"):
+            context.bind_run(root)
+        for current, directories, files in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            if current_path == root / "operator-inputs" or root / "operator-inputs" in current_path.parents:
+                directories[:] = []
+                continue
+            for name in (".", *directories):
+                target = current_path if name == "." else current_path / name
                 if target.is_symlink():
                     continue
-                wanted = BUNDLE_DIR_MODE if target.is_dir() else BUNDLE_FILE_MODE
-                if (target.stat().st_mode & 0o777) != wanted:
-                    os.chmod(target, wanted)
-            except OSError:
-                LOG.debug("Could not restrict %s", target)
+                descriptor = context._directory(target)
+                try:
+                    if not _safe_directory(os.fstat(descriptor)):
+                        raise UnsafeRunFileError("output-dir")
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != BUNDLE_DIR_MODE:
+                        os.fchmod(descriptor, BUNDLE_DIR_MODE)
+                finally:
+                    os.close(descriptor)
+            for name in files:
+                target = current_path / name
+                if target.is_symlink():
+                    continue
+                with open_guarded_file(target, field="output", context=context) as descriptor:
+                    if stat.S_IMODE(os.fstat(descriptor).st_mode) != BUNDLE_FILE_MODE:
+                        os.fchmod(descriptor, BUNDLE_FILE_MODE)
+                        context._pinned.pop(context._absolute(target), None)
 
 
 class AuditLogger:
@@ -95,7 +111,9 @@ class AuditLogger:
         self.debug_path = run_dir / "audit-debug.log"
         self.listener = listener
         for path in (self.jsonl_path, self.command_log_path, self.debug_path):
-            _open_private(path, "a").close()
+            with _open_private(path, "a"):
+                pass
+        register_run_log(run_dir)
 
     def log(self, event: str, message: str, details: Optional[dict[str, Any]] = None) -> None:
         payload = {
@@ -146,7 +164,7 @@ class AuditWriter:
                 self.run_id = normalized[len(prefix) :] if len(normalized) > len(prefix) else f"run_{ts}"
             else:
                 self.run_id = normalized
-        self.run_dir.parent.mkdir(parents=True, exist_ok=True)
+        make_private_dirs(self.run_dir.parent, mode=0o755)
         self._mkdir_private(self.run_dir)
 
         self.resume_from_path = None
@@ -210,40 +228,48 @@ class AuditWriter:
                 self._manifest["tenant_name"] = existing_manifest["tenant_name"]
 
     def _mkdir_private(self, path: Path) -> None:
-        """Create ``path`` and every missing directory between the run directory and it as 0700."""
-        path = Path(path)
+        """Create and tighten owned run directories through admitted, no-follow descriptors."""
+        from .guarded_io import UnsafeRunFileError, _safe_directory, guard_session
+
+        make_private_dirs(path)
+        failed = False
         try:
-            parts = path.relative_to(self.run_dir).parts
-        except ValueError:
-            path.mkdir(parents=True, exist_ok=True)
-            return
-        current = self.run_dir
-        for part in ("", *parts):
-            current = current / part if part else current
-            current.mkdir(mode=BUNDLE_DIR_MODE, exist_ok=True)
-            try:
-                os.chmod(current, BUNDLE_DIR_MODE)
-            except OSError:
-                LOG.debug("Could not restrict %s", current)
+            with guard_session() as context:
+                descriptor = context._directory(path)
+                try:
+                    info = os.fstat(descriptor)
+                    if not _safe_directory(info):
+                        raise UnsafeRunFileError("output-dir")
+                    if stat.S_IMODE(info.st_mode) != BUNDLE_DIR_MODE:
+                        os.fchmod(descriptor, BUNDLE_DIR_MODE)
+                finally:
+                    os.close(descriptor)
+        except (OSError, ValueError, TypeError):
+            failed = True
+        if failed:
+            raise UnsafeRunFileError("output-dir") from None
 
     def harden(self) -> None:
         """Restrict the whole bundle to 0700 directories and 0600 files (see harden_bundle)."""
         harden_bundle(self.run_dir)
 
     def _safe_load_json(self, path: Path) -> Any:
-        if not path.exists():
-            return None
+        from .run_files import UnsafeRunFileError, read_run_file
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            if os.path.lexists(self.run_dir / "run-manifest.json"):
+                data = read_run_file(self.run_dir, path.relative_to(self.run_dir))
+            else:
+                from .guarded_io import read_guarded_bytes
+                data = read_guarded_bytes(path, field="run-file")
+            return json.loads(data.decode("utf-8"))
+        except UnsafeRunFileError:
+            raise
         except (OSError, json.JSONDecodeError, ValueError):
             return None
 
     def _write_text_atomic(self, path: Path, content: str) -> None:
         self._mkdir_private(path.parent)
-        tmp_path = path.with_name(f".{path.name}.tmp")
-        with _open_private(tmp_path, "w") as handle:
-            handle.write(content)
-        os.replace(tmp_path, path)
+        write_private_text(path, content)
 
     def _write_json_atomic(self, path: Path, payload: Any) -> None:
         self._write_text_atomic(path, json.dumps(payload, indent=2))
@@ -272,7 +298,10 @@ class AuditWriter:
     def _indexed_coverage(self) -> list[dict[str, Any]]:
         """Coverage rows from ``index/coverage.jsonl`` (one JSON object per line); an unreadable line is skipped."""
         try:
-            lines = self.coverage_index_path.read_text(encoding="utf-8").splitlines()
+            from .run_files import UnsafeRunFileError, read_run_file
+            lines = read_run_file(self.run_dir, self.coverage_index_path.relative_to(self.run_dir)).decode("utf-8").splitlines()
+        except UnsafeRunFileError:
+            raise
         except OSError:
             return []
         rows: list[dict[str, Any]] = []
@@ -332,101 +361,150 @@ class AuditWriter:
     def record_artifact(self, target: Path) -> None:
         self._record_artifact(target)
 
-    def write_sensitive_users(self, supplied: SensitiveUsers) -> None:
-        """The sole private copy, outside evidence and report inputs. Replace or clear on resume."""
-        target = self.run_dir / SENSITIVE_USERS_PATH
-        key_path = self.run_dir / SENSITIVE_USERS_KEY_PATH
-        private_paths = (SENSITIVE_USERS_PATH, SENSITIVE_USERS_KEY_PATH)
-        key = b""
-        try:
-            if target.parent.is_symlink():
-                raise OSError("linked operator-input directory")
-            if supplied.addresses:
-                self._mkdir_private(target.parent)
-                if key_path.exists() or key_path.is_symlink():
-                    key = read_sensitive_users_key(self.run_dir)
-                elif "hmac_sha256" in self._manifest.get("operator_inputs", {}).get("sensitive_users", {}):
-                    # Never silently invalidate the previous run's verification key.
-                    raise SensitiveUsersError("The private sensitive-users key is missing; unable to resume.")
-                else:
-                    key = secrets.token_bytes(32)
-                write_private_bytes(key_path, key)
-                self._record_artifact(key_path)
-                ignore = target.parent / ".gitignore"
-                write_private_text(ignore, "*\n")
-                self._record_artifact(ignore)
-                write_private_text(target, "\n".join(supplied.addresses) + "\n")
-                self._record_artifact(target)
-            else:
-                for relative in private_paths:
-                    (self.run_dir / relative).unlink(missing_ok=True)
-                    self.clear_result_file(relative)
-                if not any(
-                    item.startswith("operator-inputs/") and item not in private_paths
-                    for item in self._manifest.get("redacted_artifacts", [])
-                ):
-                    (target.parent / ".gitignore").unlink(missing_ok=True)
-                    self.clear_result_file("operator-inputs/.gitignore")
-        except OSError:
-            raise SensitiveUsersError("Unable to write the private sensitive-users bundle artefact.") from None
-        self._manifest["operator_inputs"] = {
-            **self._manifest.get("operator_inputs", {}), "sensitive_users": supplied.manifest(key),
-        }
-        redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
-        self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if supplied.addresses else [])
+    def write_sensitive_users(self, supplied: SensitiveUsers) -> Any:
+        """Write the private pair and manifest entry; return their ``SensitiveUsersBinding`` (or ``None``).
+
+        The binding is the count and HMAC of the manifest entry this call wrote, computed once from the writer's own
+        key and the captured tuple in memory: no file is reread and the raw key never leaves the writer. ``None``
+        when nothing was supplied or the tuple is not the parser's canonical form, so no summary can be bound.
+        """
+        entry = self._write_operator_pair("sensitive-users", supplied.addresses, supplied)
+        return _sensitive_users_binding(supplied, entry)
 
     def write_partner_domains(self, supplied: PartnerDomains) -> None:
-        """The sole private copy, outside evidence and report inputs. Replace or clear on resume."""
-        target = self.run_dir / PARTNER_DOMAINS_PATH
-        key_path = self.run_dir / PARTNER_DOMAINS_KEY_PATH
-        private_paths = (PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH)
+        self._write_operator_pair("partner-domains", supplied.domains, supplied)
+
+    def _write_operator_pair(
+        self, stem: str, entries: tuple[str, ...], supplied: SensitiveUsers | PartnerDomains,
+    ) -> dict[str, object]:
+        """Publish an operator pair and register its identities before rename; return the manifest entry written."""
+        from .guarded_io import _safe_directory, guard_session
+        from .private_io import _write_all
+
+        private_paths = ((SENSITIVE_USERS_PATH, SENSITIVE_USERS_KEY_PATH) if stem == "sensitive-users"
+                         else (PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH))
+        private_dir = self.run_dir / "operator-inputs"
+        failed = False
+        keep_ignore = False
         key = b""
-        try:
-            if target.parent.is_symlink():
-                raise OSError("linked operator-input directory")
-            if supplied.domains:
-                self._mkdir_private(target.parent)
-                if key_path.exists() or key_path.is_symlink():
-                    key = read_partner_domains_key(self.run_dir)
-                elif "hmac_sha256" in self._manifest.get("operator_inputs", {}).get("partner_domains", {}):
-                    # Never silently invalidate the previous run's verification key.
-                    raise PartnerDomainsError("The private partner-domains key is missing; unable to resume.")
-                else:
-                    key = secrets.token_bytes(32)
-                write_private_bytes(key_path, key)
-                self._record_artifact(key_path)
-                ignore = target.parent / ".gitignore"
-                write_private_text(ignore, "*\n")
-                self._record_artifact(ignore)
-                write_private_text(target, "\n".join(supplied.domains) + "\n")
-                self._record_artifact(target)
-            else:
-                for relative in private_paths:
-                    (self.run_dir / relative).unlink(missing_ok=True)
-                    self.clear_result_file(relative)
-                if not any(
-                    item.startswith("operator-inputs/") and item not in private_paths
-                    for item in self._manifest.get("redacted_artifacts", [])
-                ):
-                    (target.parent / ".gitignore").unlink(missing_ok=True)
-                    self.clear_result_file("operator-inputs/.gitignore")
-        except OSError:
-            raise PartnerDomainsError("Unable to write the private partner-domains bundle artefact.") from None
-        self._manifest["operator_inputs"] = {
-            **self._manifest.get("operator_inputs", {}), "partner_domains": supplied.manifest(key),
-        }
-        redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
-        self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if supplied.domains else [])
+        entry: dict[str, object] = {}
+        with guard_session() as context:
+            descriptor = None
+            temporaries: list[str] = []
+            try:
+                with context._lock:
+                    root_key = context._absolute(self.run_dir)
+                    manifest_exists = os.path.lexists(self.run_dir / "run-manifest.json")
+                    if not manifest_exists and entries:
+                        # Establish an empty run before publishing its private
+                        # pair, then replace this manifest under the same lock.
+                        # The guarded write refuses a pre-existing unmarked pair.
+                        write_private_text(self.run_dir / "run-manifest.json", json.dumps(self._manifest, indent=2))
+                        manifest_exists = True
+                    if manifest_exists:
+                        context.bind_run(self.run_dir)
+                    if entries:
+                        make_private_dirs(private_dir)
+                    try:
+                        descriptor = context._directory(private_dir)
+                    except FileNotFoundError:
+                        if entries:
+                            raise
+                    if descriptor is not None:
+                        if not _safe_directory(os.fstat(descriptor)):
+                            raise OSError("unsafe private directory")
+                        existing = {}
+                        for name in (stem + ".key", stem + ".txt", ".gitignore"):
+                            try:
+                                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                                             | getattr(os, "O_CLOEXEC", 0), dir_fd=descriptor)
+                            except FileNotFoundError:
+                                continue
+                            try:
+                                info = os.fstat(fd)
+                                context._check_file(info, "private input", None, private_verifier=True)
+                                if name != ".gitignore" and (info.st_dev, info.st_ino) not in context._identities:
+                                    raise OSError("unregistered private destination")
+                                existing[name] = (info.st_dev, info.st_ino)
+                            finally:
+                                os.close(fd)
+                        if entries:
+                            registry = context._private_keys if stem == "sensitive-users" else context._partner_private_keys
+                            key = registry.get(root_key) or secrets.token_bytes(32)
+                            values = {".gitignore": b"*\n", stem + ".key": key,
+                                      stem + ".txt": ("\n".join(entries) + "\n").encode("utf-8")}
+                            prepared: list[tuple[str, str, int]] = []
+                            for name, data in values.items():
+                                temporary = "." + name + "." + os.urandom(12).hex() + ".tmp"
+                                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                                             | getattr(os, "O_CLOEXEC", 0),
+                                             BUNDLE_FILE_MODE, dir_fd=descriptor)
+                                temporaries.append(temporary)
+                                try:
+                                    os.fchmod(fd, BUNDLE_FILE_MODE)
+                                    _write_all(fd, data)
+                                finally:
+                                    os.close(fd)
+                                pinned = os.open(temporary, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                                                 | getattr(os, "O_CLOEXEC", 0), dir_fd=descriptor)
+                                context._fds.append(pinned)
+                                info = os.fstat(pinned)
+                                context._check_file(info, "private input", None, private_verifier=True)
+                                prepared.append((temporary, name, pinned))
+                            for _, name, pinned in prepared:
+                                if name != ".gitignore":
+                                    info = os.fstat(pinned)
+                                    context._identities.add((info.st_dev, info.st_ino))
+                            for temporary, name, _ in prepared:
+                                os.replace(temporary, name, src_dir_fd=descriptor, dst_dir_fd=descriptor)
+                                temporaries.remove(temporary)
+                        else:
+                            for name in (stem + ".txt", stem + ".key"):
+                                if name in existing:
+                                    os.unlink(name, dir_fd=descriptor)
+                            keep_ignore = any(name != ".gitignore" for name in os.listdir(descriptor))
+                            if not keep_ignore and ".gitignore" in existing:
+                                os.unlink(".gitignore", dir_fd=descriptor)
+                    if entries:
+                        for relative in (*private_paths, "operator-inputs/.gitignore"):
+                            self._record_artifact(self.run_dir / relative)
+                    else:
+                        removed = private_paths if keep_ignore else (*private_paths, "operator-inputs/.gitignore")
+                        for relative in removed:
+                            self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != relative]
+                    entry = supplied.manifest(key)
+                    self._manifest["operator_inputs"] = {
+                        **self._manifest.get("operator_inputs", {}), stem.replace("-", "_"): entry,
+                    }
+                    redacted = [item for item in self._manifest.get("redacted_artifacts", []) if item not in private_paths]
+                    self._manifest["redacted_artifacts"] = redacted + (list(private_paths) if entries else [])
+                    if manifest_exists:
+                        write_private_text(self.run_dir / "run-manifest.json", json.dumps(self._manifest, indent=2))
+            except (OSError, ValueError, TypeError):
+                failed = True
+            finally:
+                if descriptor is not None:
+                    for temporary in temporaries:
+                        try:
+                            os.unlink(temporary, dir_fd=descriptor)
+                        except OSError:
+                            pass
+                    os.close(descriptor)
+        if failed:
+            error = SensitiveUsersError if stem == "sensitive-users" else PartnerDomainsError
+            raise error(f"Unable to write the private {stem} bundle artefact.") from None
+        return entry
 
     def artifact_paths(self) -> list[str]:
         return list(self._manifest.get("artifacts", []))
 
     def _load_checkpoint_state(self) -> dict[str, dict[str, Any]]:
-        if not self.checkpoint_state_path.exists():
-            return {"collectors": {}, "operations": {}}
+        from .run_files import UnsafeRunFileError, read_run_file
         try:
-            payload = json.loads(self.checkpoint_state_path.read_text(encoding="utf-8"))
+            payload = json.loads(read_run_file(self.run_dir, self.checkpoint_state_path.relative_to(self.run_dir)).decode("utf-8"))
             return self._normalize_checkpoint_payload(payload)
+        except UnsafeRunFileError:
+            raise
         except (OSError, json.JSONDecodeError, ValueError):
             return {"collectors": {}, "operations": {}}
 
@@ -556,10 +634,9 @@ class AuditWriter:
                     or path.suffix != ".jsonl"):
                 raise ValueError("Expected a chunk path beneath chunks/<collector>")
             target = self.run_dir / path
-            if not target.parent.resolve().is_relative_to(self.chunks_dir.resolve()):
-                raise ValueError("Chunk path escapes the chunks directory")
+            from .guarded_io import remove_guarded_output
             for artifact in (target, target.with_suffix(".meta.json")):
-                artifact.unlink(missing_ok=True)
+                remove_guarded_output(artifact)
                 name = str(artifact.relative_to(self.run_dir))
                 self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != name]
 
@@ -633,14 +710,9 @@ class AuditWriter:
         A fresh run that has nothing to report writes no such file, so a resumed run that has nothing left to report
         must not keep the last session's. Returns whether a file was removed.
         """
+        from .guarded_io import remove_guarded_output
         path = self.run_dir / relative
-        removed = False
-        if path.exists():
-            try:
-                path.unlink()
-                removed = True
-            except OSError:
-                LOG.debug("Could not remove stale %s", path)
+        removed = remove_guarded_output(path)
         for key in manifest_keys:
             self._manifest.pop(key, None)
         self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != relative]
@@ -653,15 +725,12 @@ class AuditWriter:
         removed here. Returns the names removed.
         """
         removed: list[str] = []
+        from .guarded_io import remove_guarded_output
         for path in sorted(self.normalized_dir.glob("*.json")):
             if path.stem in keep:
                 continue
-            try:
-                path.unlink()
-            except OSError:
-                LOG.debug("Could not remove stale normalized section %s", path)
-                continue
-            removed.append(path.stem)
+            if remove_guarded_output(path):
+                removed.append(path.stem)
             relative = str(path.relative_to(self.run_dir))
             self._manifest["artifacts"] = [item for item in self._manifest["artifacts"] if item != relative]
         return removed
@@ -868,3 +937,23 @@ class AuditWriter:
                     "contract_issue_count": self._manifest.get("contract_issue_count"),
                 },
             )
+
+
+def _sensitive_users_binding(supplied: SensitiveUsers, entry: object) -> Any:
+    """The SS 2.1 summary binding of a written manifest entry, when the tuple is canonical; never the key."""
+    from .sensitive_users import MAX_ENTRIES, SensitiveUsersError, _normalise
+    from .value_rules.defender_targeted_users import SensitiveUsersBinding
+
+    if type(entry) is not dict or entry.get("supplied") is not True:
+        return None
+    addresses = supplied.addresses
+    if type(addresses) is not tuple or not 1 <= len(addresses) <= MAX_ENTRIES:
+        return None
+    if any(type(address) is not str for address in addresses) or addresses != tuple(sorted(set(addresses))):
+        return None
+    try:
+        if any(_normalise(address, 1) != address for address in addresses):
+            return None
+        return SensitiveUsersBinding(entry["count"], entry["hmac_sha256"])
+    except (SensitiveUsersError, KeyError, ValueError):
+        return None

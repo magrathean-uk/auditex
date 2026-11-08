@@ -241,7 +241,9 @@ def test_json_symlink_is_refused_without_reading_its_target(
 
 
 @pytest.mark.usefixtures("low_limits")
-def test_file_close_failure_preserves_prior_oversize_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("close_fails", [False, True])
+def test_file_close_failure_preserves_prior_oversize_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                          close_fails: bool) -> None:
     root = tmp_path / "run"
     _sparse_run(root, (90,))
     inode = (root / "normalized" / "private-name-0.json").stat().st_ino
@@ -262,7 +264,8 @@ def test_file_close_failure_preserves_prior_oversize_reason(tmp_path: Path, monk
             raise OSError("synthetic close failure")
 
     monkeypatch.setattr(redaction.os, "fstat", grew_before_open)
-    monkeypatch.setattr(redaction.os, "close", fail_file_close)
+    if close_fails:
+        monkeypatch.setattr(redaction.os, "close", fail_file_close)
     context = redaction.context_for_run(root)
     with pytest.raises(redaction.ContextIncompleteError) as error:
         redaction.redact_output({}, context=context)

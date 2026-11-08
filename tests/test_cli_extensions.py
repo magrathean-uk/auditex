@@ -7,6 +7,12 @@ import pytest
 from auditex import cli as auditex_cli
 from auditex import guided
 from auditex.guided import build_guided_parser
+from support import RunBundleBuilder, make_contract_valid
+
+
+def _bundle(base, name: str = "run-a") -> str:
+    """A real, contract-valid synthetic run bundle: the global run-dir guard stays on for dispatch tests."""
+    return str(make_contract_valid(RunBundleBuilder(base, name).manifest(tenant_name="synthetic").build()))
 
 
 def test_root_help_lists_operator_commands(capsys) -> None:
@@ -77,7 +83,8 @@ def test_rules_inventory_cli_accepts_routing_filters(monkeypatch, capsys) -> Non
     assert payload["count"] == 1
 
 
-def test_compare_cli_dispatches(monkeypatch, capsys) -> None:
+def test_compare_cli_dispatches(monkeypatch, capsys, tmp_path) -> None:
+    run_a, run_b = _bundle(tmp_path, "run-a"), _bundle(tmp_path, "run-b")
     monkeypatch.setattr(
         "auditex.cli.compare_runs",
         lambda run_dirs, allow_cross_tenant=False, classic=False: {
@@ -87,14 +94,15 @@ def test_compare_cli_dispatches(monkeypatch, capsys) -> None:
         },
     )
 
-    rc = auditex_cli.main(["compare", "--run-dir", "run-a", "--run-dir", "run-b"])
+    rc = auditex_cli.main(["compare", "--run-dir", run_a, "--run-dir", run_b])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert [row["path"] for row in payload["runs"]] == ["run-a", "run-b"]
+    assert [row["path"] for row in payload["runs"]] == [run_a, run_b]
 
 
-def test_compare_cli_dispatches_classic_flag(monkeypatch, capsys) -> None:
+def test_compare_cli_dispatches_classic_flag(monkeypatch, capsys, tmp_path) -> None:
+    run_a, run_b = _bundle(tmp_path, "run-a"), _bundle(tmp_path, "run-b")
     seen: dict[str, object] = {}
 
     def _fake_compare(run_dirs, allow_cross_tenant=False, classic=False):  # noqa: ANN001
@@ -105,15 +113,17 @@ def test_compare_cli_dispatches_classic_flag(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr("auditex.cli.compare_runs", _fake_compare)
 
-    rc = auditex_cli.main(["compare", "--run-dir", "run-a", "--run-dir", "run-b", "--classic"])
+    rc = auditex_cli.main(["compare", "--run-dir", run_a, "--run-dir", run_b, "--classic"])
 
     assert rc == 0
     assert seen["classic"] is True
+    assert list(seen["run_dirs"]) == [run_a, run_b]
     payload = json.loads(capsys.readouterr().out)
     assert payload["classic"] is True
 
 
-def test_report_render_cli_dispatches(monkeypatch, capsys) -> None:
+def test_report_render_cli_dispatches(monkeypatch, capsys, tmp_path) -> None:
+    run_a = _bundle(tmp_path)
     monkeypatch.setattr(
         "auditex.cli.render_report",
         lambda **kwargs: {
@@ -126,7 +136,7 @@ def test_report_render_cli_dispatches(monkeypatch, capsys) -> None:
         [
             "report",
             "render",
-            "run-a",
+            run_a,
             "--format",
             "html",
             "--include-section",
@@ -148,9 +158,7 @@ def test_report_analyze_cli_dispatches(monkeypatch, capsys, tmp_path) -> None:
         lambda run_dir: {"run_dir": run_dir, "auditor_score": {"grade": "usable"}},
     )
 
-    run = tmp_path / "run-a"
-    run.mkdir()
-    rc = auditex_cli.main(["report", "analyze", str(run)])
+    rc = auditex_cli.main(["report", "analyze", _bundle(tmp_path)])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -171,27 +179,29 @@ def test_export_list_cli_dispatches(monkeypatch, capsys) -> None:
     assert payload["exporters"][0]["name"] == "html"
 
 
-def test_export_run_cli_dispatches(monkeypatch, capsys) -> None:
+def test_export_run_cli_dispatches(monkeypatch, capsys, tmp_path) -> None:
+    run_a = _bundle(tmp_path)
     monkeypatch.setattr(
         "auditex.cli.run_exporter",
         lambda **kwargs: {"exporter": kwargs["name"], "run_dir": kwargs["run_dir"]},
     )
 
-    rc = auditex_cli.main(["export", "run", "html", "run-a"])
+    rc = auditex_cli.main(["export", "run", "html", run_a])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["exporter"] == "html"
-    assert payload["run_dir"] == "run-a"
+    assert payload["run_dir"] == run_a
 
 
-def test_notify_send_cli_dispatches(monkeypatch, capsys) -> None:
+def test_notify_send_cli_dispatches(monkeypatch, capsys, tmp_path) -> None:
+    run_a = _bundle(tmp_path)
     monkeypatch.setattr(
         "auditex.cli.send_notification",
         lambda **kwargs: {"sink": kwargs["sink"], "dry_run": kwargs["dry_run"]},
     )
 
-    rc = auditex_cli.main(["notify", "send", "run-a", "--sink", "teams"])
+    rc = auditex_cli.main(["notify", "send", run_a, "--sink", "teams"])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -218,13 +228,14 @@ def test_guided_parser_accepts_local_mode_flags() -> None:
     assert args.report_format == "sarif"
 
 
-def test_report_render_cli_accepts_security_export_formats(monkeypatch, capsys) -> None:
+def test_report_render_cli_accepts_security_export_formats(monkeypatch, capsys, tmp_path) -> None:
+    run_a = _bundle(tmp_path)
     monkeypatch.setattr(
         "auditex.cli.render_report",
         lambda **kwargs: {"format": kwargs["format_name"], "output_path": "rendered"},
     )
 
-    rc = auditex_cli.main(["report", "render", "run-a", "--format", "oscal"])
+    rc = auditex_cli.main(["report", "render", run_a, "--format", "oscal"])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)

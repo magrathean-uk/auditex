@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import parse_qsl, unquote, urlparse
 
 from .adapters.read_guard import CommandRefused, check_m365_command, m365_command_words, words_are_read
-from .run_files import read_run_file
+from .run_files import UnsafeRunFileError, read_run_file
 
 
 SCHEMA_VERSION = "2026-10-22"
@@ -355,10 +355,13 @@ def read_audit_events(path: str | Path, *, run_dir: str | Path | None = None) ->
     events = AuditEvents()
     try:
         if run_dir is None:
-            handle = Path(path).open(encoding="utf-8")
+            from .guarded_io import read_guarded_bytes
+            handle = TextIOWrapper(BytesIO(read_guarded_bytes(path, field="input")), encoding="utf-8")
         else:
             root = Path(run_dir)
             handle = TextIOWrapper(BytesIO(read_run_file(root, Path(path).relative_to(root))), encoding="utf-8")
+    except UnsafeRunFileError:
+        raise
     except OSError:
         events.readable = False
         return events

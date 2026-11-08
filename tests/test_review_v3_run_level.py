@@ -46,6 +46,10 @@ def test_no_teams_token_leaves_run_ok_and_customer_limitations_visible(monkeypat
     assert rc == 0
     manifest = load(run_dir, "run-manifest.json")
     assert manifest["overall_status"] == "ok"
+    readiness = load(run_dir, "live-readiness.json")
+    assert readiness["trust_level"] == "partial"
+    assert readiness["trusted_collectors"] == ["licensing"]
+    assert readiness["unverified_collectors"] == ["teams_policy"]
     assert load(run_dir, "validation.json")["valid"] is True
     teams_rows = [row for row in load(run_dir, "coverage.json") if row["collector"] == "teams_policy"]
     assert len(teams_rows) == 7 and all(row["status"] == "skipped" for row in teams_rows)
@@ -99,6 +103,9 @@ def test_teams_token_runs_five_rest_reads_and_skips_commands_without_partial_run
     assert len(session.calls) == (10 if probe_first else 5)
     manifest = load(run_dir, "run-manifest.json")
     assert manifest["overall_status"] == "ok"
+    readiness = load(run_dir, "live-readiness.json")
+    assert readiness["trust_level"] == "live_verified"
+    assert readiness["trusted_collectors"] == ["teams_policy"]
     assert load(run_dir, "validation.json")["valid"] is True
     rows = load(run_dir, "coverage.json")
     assert len(rows) == 7
@@ -556,6 +563,7 @@ def test_offline_notice_only_when_selected_and_no_console_exit_text_in_artifacts
 def test_explicit_delegated_exchange_is_selected_and_reports_auth_mode_reason(monkeypatch, tmp_path):
     from types import SimpleNamespace
     from azure_tenant_audit import cli
+    from azure_tenant_audit.adapters import powershell_graph
     from azure_tenant_audit.adapters.powershell_graph import PowerShellGraphAdapter
 
     monkeypatch.setattr(cli, 'GraphClient', lambda *args, **kwargs: FakeGraph())
@@ -566,6 +574,16 @@ def test_explicit_delegated_exchange_is_selected_and_reports_auth_mode_reason(mo
     monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.shutil.which', lambda _: '/usr/bin/pwsh')
     monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.subprocess.run', lambda *args, **kwargs:
         SimpleNamespace(returncode=1, stdout='', stderr='The term Get-Read is not recognized'))
+    native_calls = []
+
+    def forbidden_native_process(*args, **kwargs):
+        native_calls.append(True)
+        raise AssertionError('This delegated fixture must not start a native process')
+
+    monkeypatch.setattr(powershell_graph, '_run_bounded', lambda *args, **kwargs:
+        SimpleNamespace(returncode=1, stdout=b'', stderr='The term Get-Read is not recognized',
+                        stdout_total=0, stderr_total=35, overflow=False, timed_out=False, duration_ms=0, pid=0))
+    monkeypatch.setattr(powershell_graph.subprocess, 'Popen', forbidden_native_process)
     args = cli.build_parser().parse_args([
         '--tenant-name', 'acme', '--tenant-id', 'constructed', '--use-azure-cli-token',
         '--collectors', 'exchange_policy', '--out', str(tmp_path), '--run-name', 'explicit',
@@ -578,3 +596,4 @@ def test_explicit_delegated_exchange_is_selected_and_reports_auth_mode_reason(mo
     ledger = load(run_dir, 'normalized/coverage_ledger.json')['records']
     assert 'cannot open an Exchange Online policy session' in ledger[0]['message']
     assert gate_findings(run_dir=str(run_dir), fail_on='critical')['status'] == 'blocked'
+    assert native_calls == []

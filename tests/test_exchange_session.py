@@ -46,6 +46,16 @@ def _capture_run(monkeypatch, stdout: str = "[]", stderr: str = "", returncode: 
 
     monkeypatch.setattr("azure_tenant_audit.adapters.powershell_graph.shutil.which", lambda name: "/usr/bin/pwsh")
     monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def bounded_run(argv, **kwargs):
+        result = fake_run(argv, **kwargs)
+        encoded = result.stdout.encode("utf-8")
+        return SimpleNamespace(returncode=result.returncode, stdout=encoded, stderr=result.stderr,
+                               stdout_total=len(encoded), stderr_total=len(result.stderr.encode("utf-8")),
+                               overflow=False, timed_out=False, duration_ms=0, pid=0)
+
+    monkeypatch.setattr("azure_tenant_audit.adapters.powershell_graph._run_bounded", bounded_run)
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: pytest.fail("Unexpected native process in session fixture"))
     return calls
 
 
@@ -152,10 +162,21 @@ def test_real_adapter_empty_lists_keep_exchange_collector_ok(monkeypatch, list_s
     def completed(argv, **kwargs):
         calls.append(argv[-1])
         stdout = '{"Count":0}' if any(command in argv[-1] for command in required_commands) else list_stdout
+        if 'Get-AntiPhishPolicy' in argv[-1]:
+            stdout = '[{"Identity":"Default","IsDefault":true,"Enabled":true,"TargetedUsersToProtect":[]}]'
         return SimpleNamespace(returncode=0, stdout=stdout, stderr=stderr)
+
+    def bounded_completed(argv, **kwargs):
+        result = completed(argv, **kwargs)
+        encoded = result.stdout.encode('utf-8')
+        return SimpleNamespace(returncode=result.returncode, stdout=encoded, stderr=result.stderr,
+                               stdout_total=len(encoded), stderr_total=len(result.stderr.encode('utf-8')),
+                               overflow=False, timed_out=False, duration_ms=0, pid=0)
 
     monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph.shutil.which', lambda _: '/usr/bin/pwsh')
     monkeypatch.setattr(subprocess, 'run', completed)
+    monkeypatch.setattr('azure_tenant_audit.adapters.powershell_graph._run_bounded', bounded_completed)
+    monkeypatch.setattr(subprocess, 'Popen', lambda *args, **kwargs: pytest.fail('Unexpected native process in collector fixture'))
     monkeypatch.setattr('azure_tenant_audit.collectors.exchange_policy.get_adapter', lambda _: PowerShellGraphAdapter())
     result = ExchangePolicyCollector().run({'client': _Client(
         'constructed-token', [{'id': 'constructed.onmicrosoft.com', 'isInitial': True}],

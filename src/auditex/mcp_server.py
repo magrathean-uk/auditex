@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from functools import wraps
+import inspect
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,7 @@ from azure_tenant_audit.output_redaction import PROFILE_SHAREABLE, assert_snapsh
 from azure_tenant_audit.response import response_actions
 from azure_tenant_audit.secret_hygiene import build_argument_parser
 from azure_tenant_audit.contracts import contract_schema_manifest
+from azure_tenant_audit.guarded_io import current_context, guard_session, guarded_operation, open_pinned_binary
 from .rules import list_rule_inventory
 from .command_runner import run_cli_command
 from .command_builders import (
@@ -510,9 +513,11 @@ def build_response_command(
     )
 
 
+@guarded_operation
 def summarize_run(run_dir: str) -> dict[str, Any]:
     """The run summary an MCP client receives: the shareable redaction over the complete payload (its citation
     summary re-derived). The operator's own terminal reads ``summarize_run_raw``."""
+    current_context().bind_run(run_dir)
     before = snapshot_run(run_dir)
     result = redact_payload(summarize_run_raw(run_dir), run_dirs=[run_dir], profile=PROFILE_SHAREABLE)
     assert_snapshot_stable(run_dir, before)
@@ -778,7 +783,8 @@ def main(argv: list[str] | None = None) -> int:
         if argv[0] == "--version":
             print(package_version_line("auditex-mcp"))
             return 0
-        _build_mcp_parser().parse_args(argv)
+        from azure_tenant_audit.cli_guard import parse_guarded
+        parse_guarded(_build_mcp_parser(), argv)
 
     try:
         mcp_root()
@@ -796,6 +802,37 @@ def main(argv: list[str] | None = None) -> int:
     register_fastmcp_tools(server, tool_handlers())
     server.run()
     return 0
+
+
+def _guard_tool(handler):
+    signature = inspect.signature(handler)
+
+    @wraps(handler)
+    def guarded(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        with guard_session() as context:
+            for name in ("run_dir", "run_dirs", "run_a", "run_b", "baseline_run_dir", "current_run_dir"):
+                value = bound.arguments.get(name)
+                paths = value if isinstance(value, (list, tuple)) else [value]
+                for path in paths:
+                    if isinstance(path, str) and path:
+                        context.bind_run(path)
+            for name, field in (("input_path", "input"), ("assessment_paths", "assessment"),
+                                ("sample_path", "sample"), ("config_path", "config")):
+                if name not in bound.arguments:
+                    continue
+                value = bound.arguments[name]
+                parameter = signature.parameters[name]
+                if parameter.default is not inspect.Parameter.empty and value == parameter.default:
+                    continue  # shipped resource default
+                paths = value if isinstance(value, (list, tuple)) else [value]
+                for path in paths:
+                    if isinstance(path, str) and path:
+                        with open_pinned_binary(path, field=field, context=context):
+                            pass
+            return handler(*bound.args, **bound.kwargs)
+    return guarded
 
 
 def tool_handlers() -> dict[str, Any]:
@@ -1158,7 +1195,7 @@ def tool_handlers() -> dict[str, Any]:
         )
         return run_cli_command(command)
 
-    return {name: value for name, value in locals().items() if name.startswith("auditex_") and callable(value)}
+    return {name: _guard_tool(value) for name, value in locals().items() if name.startswith("auditex_") and callable(value)}
 
 
 if __name__ == "__main__":

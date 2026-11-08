@@ -67,8 +67,13 @@ Defender for Office 365 / EOP rule scope lists (`SentTo`, `SentToMemberOf`,
 values stay unchanged. Domain scopes are retained for comparison with accepted
 domains. For rule errors, payload `stdout` is replaced with its length in
 `stdout_bytes`; `stderr` is retained.
-`TargetedUsersToProtect` is not collected. The adapter records the audit log's
-`stdout_sample` before this payload minimisation; the shared diagnostic boundary
+For `Get-AntiPhishPolicy`, `TargetedUsersToProtect` is read only transiently and
+replaced inside the adapter with a count/HMAC-bound `TargetedUsersCoverage`
+summary. No literal target list, stdout, stderr or sample text leaves that
+operation's adapter boundary, including successful warnings and errors. Raw
+offline samples are sanitised before they are saved or used by collectors.
+Other operations record the audit log's `stdout_sample` before payload
+minimisation; their shared diagnostic boundary
 masks e-mail/UPN local parts and dashed GUIDs and clips the sample to 500 characters,
 as described below. Treat that log as confidential tenant evidence too.
 
@@ -235,26 +240,66 @@ Bundle hash manifest generation and verification stream without a size cap;
 they still reject unsafe file types and links. Identity discovery has its own
 limits, described below.
 
-The guard rejects paths outside the root, symbolic links, non-regular files
-and files whose hard-link count is not exactly one. On systems with
-descriptor-relative opens, it checks each parent and the opened file without
-following links; the portable fallback checks paths before opening and
-compares file identity afterwards. Hard-linked backup bundles, including those
-made with `rsync --link-dest`, cannot be read until their files are copied
-without hard links. Read-only index inspection streams a guarded copy to a
-private `0700` temporary directory under `TMPDIR`, with files created as `0600`.
-The copy contains run evidence, so `TMPDIR` must be on encrypted storage for
-live tenant data. Closed indexes and legacy SQLite WAL indexes with their
-sidecars are copied without a size cap; available temporary disk space and the
-time needed to copy the index are the practical limits. For a closed index the
-private directory may be inside the run or its parent. If it cannot be created
-or the copy cannot be made, the checked index is opened in place with SQLite's
-read-only immutable mode, which creates no sidecars. For a legacy WAL, if the
-temporary directory is unavailable or inside the run's parent, the checked
-index and sidecars are opened in place with SQLite's read-only mode instead.
-Both fallbacks reopen the checked paths and cannot provide the same protection
-against concurrent path replacement as the temporary-copy path. SQLite may
-also update an existing shared-memory sidecar when reading a legacy WAL in place.
+The guard rejects paths outside the root, symbolic links, non-regular files,
+files owned by another user, and files with more than one hard link. A run and
+its `operator-inputs` directory must be owned by the effective user and must not
+be group- or world-writable. It refuses where descriptor-relative, no-follow
+opens or the required identity and permission checks are unavailable.
+
+The context for an operation verifies a run's sensitive-user and partner-domain
+pairs against its manifest and keeps their file identities open while admitting inputs. A
+missing, partial or invalid claimed pair is refused. Independently copied runs
+are verified and registered separately. Discovery starts at the selected file's
+parent even when a caller supplies a nested root. `operator-inputs` and any
+directory below it cannot be run roots, and a manifest there cannot hide an
+enclosing pair. A standalone copy without a run marker
+and with an unseen file identity cannot be recognised as a private pair. There
+is no global registry of private files.
+
+The guard does not contain a writer running as the same user, an earlier rename,
+replacement or writable ancestors, ACL grants, privilege, or restored modes.
+Shipped resources, including `AUDITEX_RESOURCE_ROOT` and import-time rule
+configuration, remain outside it. So do token files, OAuth and service-account
+files, token caches, `AUDITEX_LOCAL_AUTH_ENV`, `AUDITEX_AUTH_CONTEXTS_PATH`,
+and inherited descriptors other than standard input. Child processes using `AUDITEX_M365_HOME` or
+`XDG_DATA_HOME`, external exporters given run paths, and delegated
+Transformers/Datasets reads are trusted code and are outside this boundary.
+
+Hard-linked backup bundles, including those made with `rsync --link-dest`, are
+refused; the original run is also refused while its files have those extra
+links. Recover with an independent `cp` copy owned by the operator, not hard
+links, and restore safe directory permissions. Each copy's private pair is
+verified on admission.
+
+Index inspection admits the main index file and every sidecar beside it by guarded
+descriptor (no-follow walk, regular file, single link, owner and private-pair identity);
+any failure is the fixed refusal. Only the admitted main file is ever copied, into a
+private `0700` temporary directory (files `0600`) under an operator-owned parent that
+is not group- or world-writable, never under the run's parent directory, and only after
+that directory is proved to be on encrypted internal storage. The proof is implemented
+for macOS Data volumes. No evidence is copied to unproved temporary storage. Every
+SQLite open uses `mode=ro&immutable=1`, on the copy or in place. A missing proof, a
+failed copy or an SQLite error is never an admission refusal: the read falls back to
+the admitted path in place, or the index is reported as invalid.
+
+Sidecars are never copied or replayed, so the verdict does not depend on the host.
+A hashed index is authoritative as hashed; the hash check reports any sidecar. An
+unhashed legacy index with a non-empty `-wal` or `-journal` is untrusted: its summary
+is empty, consumers use the manifest and report metadata, and validation records
+`invalid_evidence_sqlite`. An empty `-wal` or any `-shm` is ignored. This is
+deliberately conservative, even when the WAL frames were already checkpointed.
+
+The held main descriptor is checked again after SQLite inspection and before
+fallback from a failed SQLite open. A change refuses the read, including when a
+query fails. Read-only consumers never create, append to or
+change anything in a bundle they inspect. A process that is producing a run appends
+one constant info line (no path or value, never the console) to that run's debug log
+the first time it reads the index in place, when the existing guarded log accepts an
+append without creating a log or changing its permissions; an unwritable or unsafe log gets no line and the read still succeeds. A resume
+is a new producing invocation and logs its own line. A writer running as the same user
+can still alter or exchange the file around these checks. Index copies have no size
+cap, so copy time and available temporary space matter.
+A killed or interrupted index build can leave a private staging directory beside the index.
 
 ## Evidence and customer packs
 
@@ -276,20 +321,44 @@ supplying bare lower-case addresses to SS 2.1's in-memory rule configuration.
 This configuration bypasses the model shape gate and model budgets, never the
 loader's byte/entry bounds. Addresses never enter public projection views,
 prompts, assessment records, sidecars, logs, AI context, reports, exports or
-packs. Absent or unusable input stays not collected. SS 2.3 still requires a
-separate PartnerDomains input. Current collection still excludes
-`TargetedUsersToProtect`; enabling met from collected target membership needs a
-separate privacy review. Offline copies use the same verification and private
-view; the ScubaGear export path is unchanged.
+packs. Absent input stays not collected; a present but invalid private pair is
+refused during run admission. SS 2.3 consumes its separate verified
+PartnerDomains input in a private rule view, independently of SensitiveUsers.
+The collector's bounded, transient target-list comparison produces only
+`TargetedUsersCoverage`. A verified binding and usable policy evidence can
+establish membership without retaining target strings. The full summary stays
+local in raw evidence, normalised records and SQLite; its private binding stays
+in the rule view. Shareable, customer-pack and explainer outputs drop both
+whole subtrees, including embedded JSON. Offline copies use the same
+verification and private view; the ScubaGear export path keeps its literal
+comparison and ignores reserved run-summary fields.
 
 This lets the operator who holds the run directory prove which list was used;
 a holder of only a customer pack cannot test guesses without the key. The count
-and HMAC may be shared. This is a consistency check, not an authenticity
+and HMAC stay local; redacted manifest derivatives retain at most boolean
+`supplied`. This is a consistency check, not an authenticity
 guarantee against someone able to rewrite all three inputs. Support can call
 `azure_tenant_audit.sensitive_users.verify_sensitive_users(run_dir)`, which uses
 `hmac.compare_digest`. Resume retains one key while replacing the list, removes
 both when no list is supplied, and refuses to replace a missing or invalid key
 for an existing HMAC.
+
+Target-list limits are 10,000 raw entries and 262,144 compact-JSON UTF-8 bytes
+per policy, measured before filtering or de-duplication. A streamed 64 MiB
+stdout bound terminates and reaps an over-limit child. Unknown shapes, malformed
+fields and failed transforms never persist the original target material.
+Retained policy settings accept only scalars or flat bounded lists; a nested
+structure drops that setting alone. Replay reduces unsupported Exchange
+operations and components that name the target field, including JSON-escaped
+text, to safe settings and closed diagnostic classes. Unknown diagnostic text
+is discarded or replaced with a fixed error class.
+Fresh offline replay cannot reuse an old summary without fresh literals;
+resume cannot reuse known membership after the verified input binding changes.
+If the resulting selected Exchange re-run fails, its failed status and coverage
+remain authoritative while safe earlier settings survive without membership
+proof. Healthy fresh operations replace their earlier settings.
+Live Exchange wire-shape validation remains unverified; unexpected shapes are
+unusable evidence.
 
 Evidence is written locally under the selected output directory. Auditex does
 not send raw evidence to an external service. Customer handoff packs copy
@@ -336,7 +405,9 @@ from evidence and its index, AI context, logs, reports, exports and customer pac
 Bundle hashes list exact-path `redacted_operator_input` exclusions without hashes
 or byte lengths, including the shared `.gitignore`; the directory is not blanket
 excluded. Source paths are redacted in command arguments. Nothing is uploaded;
-rule-view use must be memory-only, with projection integration owned by product.
+assessment reads the verified snapshot only into SS 2.3's in-memory private
+rule configuration. Ordinary absence of SensitiveUsers does not disable this
+input, or vice versa; malformed private material still refuses run admission.
 Demos never resolve this input.
 
 Resume retains a valid key while replacing the list; clearing removes this input
@@ -346,7 +417,7 @@ existing HMAC with an unusable key is an error. The local helper
 and HMAC consistency; it cannot establish authenticity against someone able to
 replace the manifest and both private files. Treat the list and key as private
 run material. The manifest schema defines this field; see the output contract for
-its constraints. In-memory rule-view projection integration remains product-owned.
+its constraints. The model projection and shape gate never receive either list.
 
 ## Output redaction boundary
 
@@ -386,6 +457,8 @@ machine, their shareable HTML previews peaked at about 0.5 GiB and 1.5 GiB of
 resident memory respectively. The 2 GiB ceiling used for these tests is not
 enforced by the scanner; memory use also depends on the evidence and output.
 
+On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 4 GiB at the 64 MiB per-file cap. This is an upper bound that ordinary evidence does not reach; the tested sizes remain as listed above.
+
 These are pattern and structure rules, not a guarantee that every personal
 value in arbitrary prose is recognised. URL userinfo passwords are matched
 for schemes of 1 to 32 characters and scheme-relative URLs. Known immutable
@@ -418,7 +491,7 @@ the pack from its transfer channel, rotate the exposed material, regenerate the
 run or pack after correcting the source, verify the pack again, and record the
 incident through the customer's process.
 
-## Deterministic explainer boundary (planned output)
+## Deterministic explainer boundary
 
 The template explainer uses only the rule's cited, already redacted sections.
 Null citations resolve to the fixed policy read set, never all supplied
@@ -443,11 +516,21 @@ GUIDs and strings under the free-text keys `owner`, `justification`, `comment`,
 `comments` and `notes`, as well as the other values listed there. Domains,
 group names and role names remain. This is not full anonymisation.
 
-The profile exists and is tested at the redaction boundary, but no explainer
-producer is wired to it yet. Report and CLI integration must apply the profile
-to the complete explainer output and test it before exposing that output. The
-entry point raises a controlled error on rendering or validation failure;
-callers suppress explanations without changing verdicts.
+Serving passes the public rule answer and redacted model-case sections to the
+explainer, never the private rule view. It redacts the complete result with the
+`explainer` profile before attaching it. For run bundles the context contains
+the run salt, paths and discovered identities; incomplete discovery or any
+rendering or redaction exception suppresses the explanation without changing
+the verdict. Logs contain only the policy id and exception class. An internal
+ScubaGear export has no run context, so its explainer uses an empty context:
+pseudonyms are unsalted and run paths and undiscovered names are not known to
+that context. The same profile still masks recognised identifiers and secrets.
+
+Reports guard and validate the assessment before reading explanations and apply
+the explainer profile again, including for local reports, so modified
+assessment text does not bypass that boundary. If the context or assessment is
+unusable, explanations are omitted. The support address in the fixed fault
+step currently has its local part masked by this profile.
 It has no inference dependency, endpoint or model fallback. Model use is parked;
 if separately authorised later, it must be loopback only, with this same input
 and output boundary and no `--no-redaction` path.

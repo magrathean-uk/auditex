@@ -2,6 +2,8 @@
 
 Keep only the collector contract's fields without interpreting their values.
 The rule engine owns type and scope checks; the model shape gate stays closed.
+Anti-phish policies never carry ``TargetedUsersToProtect``; SS 2.1 membership arrives only as a private,
+binding-checked ``TargetedUsersCoverage`` summary that ``project_run`` keeps out of the model value.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from auditex.scuba_projection import (
     _licence_refused,
     _require,
 )
+from azure_tenant_audit.value_rules.defender_targeted_users import COVERAGE_KEY, bound_coverage
 
 
 def _listing_adapter(operation: str, keys: tuple[str, ...]):
@@ -64,6 +67,27 @@ SECTION_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
 }
 
 
+def _anti_phish_policies(bundle: Bundle) -> list[dict]:
+    """The listing contract plus a private TargetedUsersCoverage on every row, never the literal target list.
+
+    Operation, container and row-shape failures withhold the section as for every listing. A summary is only a
+    field: absent gives ``not_collected``; a malformed one, or a known one that does not match this run's verified
+    SensitiveUsers binding, gives ``unusable`` (never echoed, source not rewritten). Either makes SS 2.1 membership
+    unknown while SS 2.2-2.4 keep the policy's other settings.
+    """
+    operation, keys = SECTION_KEYS["anti_phish_policies"]
+    rows = bundle.operation("exchange_policy", operation)
+    binding = bundle.sensitive_users.binding
+    result = []
+    for row in rows:
+        _fields(row, {})
+        bundle.known_fields(row, set(keys) | {COVERAGE_KEY, "source_name", "key", "kind"})
+        projected = {key: deepcopy(row[key]) for key in keys if key in row}
+        projected[COVERAGE_KEY] = bound_coverage(row, binding)
+        result.append(projected)
+    return result
+
+
 def _defender_license(bundle: Bundle) -> bool:
     payload, _ = bundle._collector_payload("exchange_policy")
     reads = frozenset({"atpPolicyForO365", "atpProtectionPolicyRules"})
@@ -78,6 +102,7 @@ def _defender_license(bundle: Bundle) -> bool:
 
 
 ADAPTERS = {section: _listing_adapter(*SECTION_KEYS[section]) for section in SECTION_KEYS} | {
+    "anti_phish_policies": _anti_phish_policies,
     "defender_license": _defender_license,
 }
 DEFENDER_ADAPTERS = ADAPTERS

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .evidence_gates import build_evidence_gate_summary
+from .evidence_gates import build_evidence_gate_summary, capability_status
 from .evidence_refs import confidence_for, ref_proof_status, refs_checked
 
 
@@ -84,31 +84,43 @@ def build_audit_autopilot_plan(
     coverage_gaps: list[dict[str, Any]] | None = None,
     blockers: list[dict[str, Any]] | None = None,
     findings: list[dict[str, Any]] | None = None,
+    coverage_rows: list[dict[str, Any]] | None = None,
+    trust_selected_collectors: list[str] | None = None,
 ) -> dict[str, Any]:
     platform_key = platform or "m365"
     selected = [str(item) for item in selected_collectors if str(item)]
     gate_summary = build_evidence_gate_summary(
-        selected_collectors=selected_collectors,
+        selected_collectors=selected_collectors if trust_selected_collectors is None else trust_selected_collectors,
         capability_rows=capability_rows,
+        coverage_rows=coverage_rows,
     )
     evidence_gates = [dict(row) for row in _rows(gate_summary.get("evidence_gates"))]
     required_scopes = sorted(
         {
             scope
             for row in evidence_gates
+            if row.get("collector") in selected
             for scope in _strings(row.get("required_permissions"))
         }
     )
+    # Keep the existing quality verdict and its customer reasons based on
+    # capability and coverage gaps. Trust counts and gate rows use real reads.
+    capability_by_collector = {
+        str(row.get("collector") or row.get("name") or ""): row
+        for row in _rows(capability_rows)
+        if row.get("collector") or row.get("name")
+    }
+    capability_statuses = [capability_status(capability_by_collector.get(collector)) for collector in selected]
     reasons: list[str] = []
-    for gate in evidence_gates:
-        status = str(gate.get("status") or "unverified")
+    for collector, status in zip(selected, capability_statuses):
         if status != "complete":
+            row = capability_by_collector.get(collector)
             reasons.append(
                 _gate_reason(
-                    str(gate.get("collector") or "unknown"),
+                    collector,
                     status,
-                    _strings(gate.get("missing_permissions")),
-                    str(gate.get("reason") or ""),
+                    _strings(row.get("missing_permissions")) if row else [],
+                    str(row.get("reason") or "") if row else "not live-verified",
                 )
             )
 
@@ -122,11 +134,11 @@ def build_audit_autopilot_plan(
     for gap in gap_rows:
         message = str(gap.get("message") or gap.get("surface") or "coverage gap")
         reasons.append(f"coverage gap: {message}")
-    if not selected or trusted_count == 0:
+    if not selected or "complete" not in capability_statuses:
         status = "unusable"
         if "No trusted evidence gates completed." not in reasons:
             reasons.insert(0, "No trusted evidence gates completed.")
-    elif blocked_count or any(gate["status"] in {"partial", "unverified"} for gate in evidence_gates) or gap_rows or blocker_rows:
+    elif any(status in {"blocked", "partial", "unverified"} for status in capability_statuses) or gap_rows or blocker_rows:
         status = "partial"
     else:
         status = "complete"

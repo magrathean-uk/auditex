@@ -28,6 +28,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,9 @@ from .partner_domains import BUNDLE_PATH as PARTNER_DOMAINS_PATH, KEY_PATH as PA
 BUNDLE_HASHES_PATH = "bundle-hashes.json"
 BUNDLE_HASHES_SCHEMA_VERSION = "2026-10-22"
 EVIDENCE_DB_PATH = "index/evidence.sqlite"
+PRIVATE_ROW_MESSAGE = (
+    "bundle-hashes.json lists a private operator input with a fingerprint; the manifest is refused."
+)
 
 # Files that change after finalization by design. They are named in the manifest, not hashed.
 _APPEND_ONLY_LOGS = frozenset({"audit-log.jsonl", "audit-command-log.jsonl", "audit-debug.log"})
@@ -50,6 +54,15 @@ _PRIVATE_OPERATOR_INPUTS = frozenset({
     BUNDLE_PATH, KEY_PATH, PARTNER_DOMAINS_PATH, PARTNER_DOMAINS_KEY_PATH, "operator-inputs/.gitignore",
 })
 _LIST_LIMIT = 100
+# Leftover temporary files of the private operator-input writers (a crash can skip their cleanup). They hold
+# list or key bytes, so they are named by path and reason only and never read. Current form
+# ``.<name>.<24 hex>.tmp``; the older private writer used ``.<name>.<pid>.tmp``. A suffix-free ``.<name>.tmp`` is
+# not a private-writer form. Only these exact names (``fullmatch``, so a trailing newline does not qualify)
+# directly under ``operator-inputs`` qualify; any other file there is still hashed or reported unlisted.
+_PRIVATE_TEMPORARY = re.compile(
+    r"\.(?:sensitive-users\.txt|sensitive-users\.key|partner-domains\.txt|partner-domains\.key|\.gitignore)"
+    r"\.(?:[0-9a-f]{24}|[0-9]{1,10})\.tmp"
+)
 
 # Outputs written on request after finalisation, outside the original seal.
 # Optional model assessment JSON is checked by contract validation when present.
@@ -76,8 +89,52 @@ def is_evidence_sidecar(relative: str) -> bool:
     return relative in EVIDENCE_DB_SIDECARS
 
 
-def _excluded_reason(relative: str) -> str | None:
+def _is_alias_of(root: Path, directory: str, name: str, canonical: str) -> bool:
+    """Whether ``directory/name`` is, on this filesystem, the same regular file as ``directory/canonical``.
+
+    Proved by lstat (device and inode), never by a platform guess: on a case-sensitive filesystem an
+    upper-case file is not an alias of anything unless it really is a hard link to the canonical file.
+    A symbolic link on either side proves nothing and is not followed.
+    """
+    try:
+        first = os.lstat(root / directory / name)
+        second = os.lstat(root / directory / canonical)
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(first.st_mode) and stat.S_ISREG(second.st_mode)
+        and (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
+    )
+
+
+def _is_private_temporary(directory: str, name: str, root: Path | None) -> bool:
+    if directory.casefold() != "operator-inputs":
+        return False
+    if _PRIVATE_TEMPORARY.fullmatch(name):
+        return True
+    canonical = name.lower()
+    return root is not None and canonical != name and bool(_PRIVATE_TEMPORARY.fullmatch(canonical)) and _is_alias_of(
+        root, directory, name, canonical
+    )
+
+
+def is_private_operator_input(relative: str, root: str | Path | None = None) -> bool:
+    """Whether ``relative`` names a private operator input or a leftover writer temporary of one.
+
+    ``root`` lets a case-renamed temporary be recognised through the real filesystem (see ``_is_alias_of``).
+    """
+    parts = [part for part in relative.split("/") if part not in ("", ".")]
+    normal = "/".join(parts)
+    if normal in _PRIVATE_OPERATOR_INPUTS:
+        return True
+    return len(parts) == 2 and _is_private_temporary(parts[0], parts[1], Path(root) if root is not None else None)
+
+
+def _excluded_reason(relative: str, root: Path | None = None) -> str | None:
     if relative in _PRIVATE_OPERATOR_INPUTS:
+        return "redacted_operator_input"
+    directory, separator, name = relative.partition("/")
+    if separator and "/" not in name and _is_private_temporary(directory, name, root):
         return "redacted_operator_input"
     # A sidecar is not excluded: the index is closed before it is hashed, so one present at that moment is
     # hashed like any file, and one that appears later is an unlisted file the check refuses.
@@ -202,7 +259,7 @@ def build_bundle_hash_manifest(
     artifacts: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
     for relative in _bundle_files(root):
-        reason = _excluded_reason(relative)
+        reason = _excluded_reason(relative, root)
         if reason is not None:
             if reason != "bundle_hash_manifest":
                 excluded.append({"path": relative, "reason": reason})
@@ -305,6 +362,12 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
         result.update(status="invalid", message=f"bundle-hashes.json cannot be read: {exc}")
         return result
 
+    if any(is_private_operator_input(str(row["path"]), root) for row in rows):
+        # A manifest that lists a private input carries its digest and size: it is refused before any row is
+        # hashed, with a fixed message that names neither the path nor the values.
+        result.update(status="invalid", message=PRIVATE_ROW_MESSAGE)
+        return result
+
     result["created_utc"] = payload.get("created_utc")
     result["run_id"] = payload.get("run_id")
     result["algorithm"] = payload.get("algorithm") or HASH_ALGORITHM
@@ -328,7 +391,7 @@ def verify_bundle_hashes(run_dir: str | Path) -> dict[str, Any]:
     unlisted = [
         relative
         for relative in _bundle_files(root)
-        if relative not in listed and _excluded_reason(relative) is None
+        if relative not in listed and _excluded_reason(relative, root) is None
     ]
     unexpected = [
         relative

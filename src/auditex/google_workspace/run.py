@@ -245,11 +245,15 @@ def _capability_rows(
     )
 
 
-def build_google_live_readiness(selected: list[str], capability_rows: list[dict[str, Any]], *, dependency_available: bool = True) -> dict[str, Any]:
+def build_google_live_readiness(
+    selected: list[str], capability_rows: list[dict[str, Any]], *, dependency_available: bool = True,
+    coverage_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return build_live_readiness_summary(
         selected_collectors=selected,
         capability_rows=capability_rows,
         dependency_available=dependency_available,
+        coverage_rows=coverage_rows,
     )
 
 
@@ -481,9 +485,11 @@ def run_google_offline(
         return 2
     target = resolve_resource_path(sample_path)
     try:
-        sample = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        LOG.error("Unable to load Google sample bundle: %s", exc)
+        from azure_tenant_audit.resources import read_selected_resource
+        sample_bytes = read_selected_resource(sample_path, default="examples/google_workspace_sample.json", field="sample")
+        sample = json.loads(sample_bytes.decode("utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        LOG.error("Unable to load Google sample bundle.")
         return 2
     if not isinstance(sample, dict):
         LOG.error("Google sample bundle must be a JSON object.")
@@ -565,7 +571,7 @@ def run_google_offline(
         mode="offline",
         command_line=[],
         waiver_rows=waiver_rows,
-        replay=replay_source(target),
+        replay=replay_source(target, data=sample_bytes),
     )
 
 
@@ -749,6 +755,7 @@ def _write_google_probe_bundle(
             selected,
             capability_rows,
             dependency_available=bool(dependency_status.get("available")),
+            coverage_rows=preflight_rows,
         )
         payload["live_readiness"] = live_readiness
 
@@ -921,6 +928,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             selected,
             payload["capability_matrix"],
             dependency_available=bool(dependency_status.get("available")),
+            coverage_rows=preflight_rows,
         )
     except Exception as exc:  # noqa: BLE001
         error_class, message = classify_google_error(exc)
@@ -947,6 +955,7 @@ def run_google_probe(config: GoogleRunConfig, *, command_line: list[str] | None 
             selected,
             payload["capability_matrix"],
             dependency_available=bool(dependency_status.get("available")),
+            coverage_rows=payload["preflight"],
         )
         _write_google_probe_bundle(
             writer=writer,

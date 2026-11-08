@@ -21,7 +21,13 @@ from .auth_runtime import (
 )
 from .collectors import REGISTRY
 from .collectors.base import normalize_collection_limit
-from .collector_runner import AuditWriterCollectorAdapter, CollectorRunContext, CollectorRunner
+from .collector_runner import (
+    AuditWriterCollectorAdapter,
+    CollectorRunContext,
+    CollectorRunner,
+    CollectorRunOptions,
+    CollectorRunOutput,
+)
 from .config import AuthConfig, CollectorConfig
 from .data_minimisation import minimise_user_text
 from .data_handling import collector_activity_notices
@@ -42,6 +48,8 @@ from .provider_runtime import ProviderFinalizePlan, write_provider_bundle
 from .resources import resolve_resource_path
 from .rule_parameters import effective_rule_parameters
 from .utils import load_env_file
+from .cli_guard import admit_sensitive_env, guarded_cli, parse_guarded
+from .guarded_io import current_context
 from .versioning import package_version_line
 from .waivers import WaiverFileError, apply_waivers, load_waivers
 from .ai_context import build_privacy_block
@@ -230,27 +238,32 @@ def run_offline(
     """Replay an offline sample. ``as_of`` pins the instant that stale sync and operating-system end of life are judged at."""
     sensitive_users = sensitive_users if sensitive_users is not None else SensitiveUsers()
     partner_domains = partner_domains if partner_domains is not None else PartnerDomains()
+    selected_sample = sample_path
     sample_path = resolve_resource_path(sample_path)
-    if not sample_path.exists():
-        LOG.error("Sample file not found: %s", sample_path)
-        return 2
     try:
-        sample = json.loads(sample_path.read_text(encoding="utf-8"))
-    except (ValueError, OSError) as exc:
-        LOG.error("Unable to load sample bundle: %s", exc)
+        from .resources import read_selected_resource
+        sample_bytes = read_selected_resource(selected_sample, default="examples/sample_audit_bundle/sample_result.json", field="sample")
+        sample = json.loads(sample_bytes.decode("utf-8"))
+    except (ValueError, OSError):
+        LOG.error("Unable to load sample bundle.")
         return 2
-    fixture_provenance = _merged_fixture_provenance(
-        sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
-        fixture_provenance_override,
-    )
-
     writer = AuditWriter(out, tenant_name=tenant_name, run_name=run_name)
     try:
-        writer.write_sensitive_users(sensitive_users)
+        sensitive_binding = writer.write_sensitive_users(sensitive_users)
         writer.write_partner_domains(partner_domains)
     except (SensitiveUsersError, PartnerDomainsError) as exc:
         LOG.error("%s", exc)
         return 2
+    # The anti-phish target lists in the sample are summarised under this run's binding and dropped in memory, before
+    # the replay copy and before any collector replays; nothing later reads the original sample object again.
+    from .collectors.targeted_users_coverage import sanitise_sample, strip_targets
+    sample = sanitise_sample(sample, sensitive_users, sensitive_binding)
+    # Provenance is persisted separately in the manifest and report pack. Derive it only from the sanitised
+    # sample, and give an explicit override the same boundary before it can bypass the replay-copy boundary.
+    fixture_provenance = strip_targets(_merged_fixture_provenance(
+        sample.get("_fixture_provenance") if isinstance(sample.get("_fixture_provenance"), dict) else None,
+        fixture_provenance_override,
+    ))
     writer.log_event(
         "run.started",
         "Offline run started",
@@ -269,10 +282,8 @@ def run_offline(
     # A sample section that carries an error or a cut-list marker replays as the failed or partial read it was.
     coverage_rows: list[dict[str, Any]] = []
     # The replay input is copied into the bundle: mailbox text a live run would have dropped is dropped here too.
-    (writer.raw_dir / "sample_input.json").write_text(
-        json.dumps(minimise_user_text(sample), indent=2),
-        encoding="utf-8",
-    )
+    from .private_io import write_private_text
+    write_private_text(writer.raw_dir / "sample_input.json", json.dumps(minimise_user_text(sample), indent=2))
     writer.record_artifact(writer.raw_dir / "sample_input.json")
     for key, value in sample.items():
         if key in _OFFLINE_SAMPLE_METADATA_KEYS:
@@ -399,7 +410,7 @@ def run_offline(
                 "rule_parameters": effective_rule_parameters(
                     stale_sync_days=stale_sync_days, break_glass_accounts=break_glass_accounts
                 ),
-                "replay_source": replay_source(sample_path),
+                "replay_source": replay_source(sample_path, data=sample_bytes),
             },
         ),
     )
@@ -460,6 +471,87 @@ def _resume_carried_collectors(
         elif status == "skipped" and not _is_preflight_skip(state):
             carried[name] = {}
     return carried
+
+
+def _resume_exchange_binding(
+    carried: dict[str, dict[str, Any]],
+    selected: Collection[str],
+    *,
+    sensitive_users: SensitiveUsers,
+    binding: Any,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Carry ``exchange_policy`` forward only while its SS 2.1 summaries stand for this session's operator input.
+
+    The old raw summaries are compared with the binding the writer just returned for the current canonical tuple
+    under the run's retained key (so case, order, duplicates and ``name;email`` forms that normalise alike still
+    match). A changed, cleared or newly supplied list, a missing, unknown or mismatched summary, or stale literal
+    targets end the carry: the collector re-runs when this session selected it. If it cannot re-run, the rest of its
+    evidence is kept in memory with every anti-phish summary ``not_collected``, so it proves no membership. The
+    stored raw file and its HMAC are never rewritten or rebound, and no replacement key is ever made.
+
+    Returns ``(carried, retained)``. ``retained`` holds that same minimised copy for a collector that re-runs (empty
+    otherwise): the re-run is staged and publishes it for every operation it cannot replace (see _publish_staged_rerun).
+    """
+    from .collectors.targeted_users_coverage import COLLECTOR, resume_payload
+
+    if COLLECTOR not in carried:
+        return carried, {}
+    payload, reusable = resume_payload(carried[COLLECTOR], sensitive_users, binding)
+    carried = dict(carried)
+    if not reusable and COLLECTOR in selected and COLLECTOR in REGISTRY:
+        del carried[COLLECTOR]
+        return carried, {COLLECTOR: payload}
+    carried[COLLECTOR] = payload
+    return carried, {}
+
+
+# The markers a projection refuses an operation section for (auditex.scuba_projection), plus a non-ok ``status``.
+_UNHEALTHY_SECTION_KEYS = (
+    "error", "error_class", "collection_truncated", "bounded_sample", "@odata.nextLink", "truncation_reason",
+    "incomplete", "partial",
+)
+
+
+def _healthy_section(section: Any) -> bool:
+    """Whether an operation envelope is a complete, error-free read."""
+    return (
+        isinstance(section, dict)
+        and not any(section.get(key) for key in _UNHEALTHY_SECTION_KEYS)
+        and section.get("status", "ok") in {"ok", "success", "collected"}
+    )
+
+
+def _publish_staged_rerun(output: CollectorRunOutput, retained: dict[str, Any]) -> dict[str, Any]:
+    """The raw payload a binding-invalidated re-run publishes, given the earlier session's minimised copy.
+
+    A re-run that finished ``ok`` replaces the earlier evidence outright. Any other outcome (a crash, failed or partial
+    operations) is not a replacement: each healthy operation it did read replaces its earlier copy, the earlier
+    minimised copy is kept for every operation it could not read cleanly (anti-phish membership ``not_collected``, no
+    target literal, the old proof neither kept nor rebound), and its own failure envelope or crash marker is kept
+    where nothing healthy is retained. The re-run's status, checkpoint and coverage rows are left as they are, so a
+    retained section sits under failed coverage and is never admitted as a fresh read.
+    """
+    fresh = output.result.payload if isinstance(output.result.payload, dict) else {}
+    if output.result.status == "ok" and not output.crashed:
+        return fresh
+    published = dict(retained)
+    for key, section in fresh.items():
+        if key not in published or _healthy_section(section) or not _healthy_section(published[key]):
+            published[key] = section
+    return published
+
+
+def _collector_extra(
+    name: str, collector_payloads: dict[str, dict[str, Any]], sensitive_users: SensitiveUsers, binding: Any,
+) -> dict[str, Any]:
+    """Run-scoped private context: accepted domains for ``dns_posture``; SensitiveUsers and its opaque writer binding
+    for ``exchange_policy`` only (never the key, a session, an event or a checkpoint)."""
+    if name == "dns_posture":
+        return {"exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains")}
+    if name == "exchange_policy":
+        from .collectors.targeted_users_coverage import CONTEXT_BINDING, CONTEXT_USERS
+        return {CONTEXT_USERS: sensitive_users, CONTEXT_BINDING: binding}
+    return {}
 
 
 def _resumed_row(name: str, state: dict[str, Any], coverage_rows: list[dict[str, Any]]) -> dict[str, object]:
@@ -542,7 +634,7 @@ def run_live(
     )
     completed_state = writer.load_checkpoint_state() if resume_from else {}
     try:
-        writer.write_sensitive_users(sensitive_users)
+        sensitive_binding = writer.write_sensitive_users(sensitive_users)
         writer.write_partner_domains(partner_domains)
     except (SensitiveUsersError, PartnerDomainsError) as exc:
         LOG.error("%s", exc)
@@ -563,6 +655,13 @@ def run_live(
         if resume_from
         else {}
     )
+    # A collector that must re-run because its carried evidence no longer stands: {name: earlier minimised payload}.
+    retained_payloads: dict[str, dict[str, Any]] = {}
+    if resume_from:
+        # After this session's operator input is written: SS 2.1 summaries are carried only under the same binding.
+        carried_payloads, retained_payloads = _resume_exchange_binding(
+            carried_payloads, selected, sensitive_users=sensitive_users, binding=sensitive_binding,
+        )
     completed_collectors = set(carried_payloads)
     if resume_from:
         # Every collector that finished in an earlier session is part of this run's evidence, whatever this session
@@ -810,6 +909,7 @@ def run_live(
             writer.coverage = [row for row in writer.coverage if row.get("collector") != name]
             coverage_rows = [row for row in coverage_rows if row.get("collector") != name]
 
+        staged = name in retained_payloads
         output = collector_runner.run(
             collector,
             CollectorRunContext(
@@ -824,13 +924,18 @@ def run_live(
                 hooks=writer_adapter.hooks(),
                 # Only completed evidence from this run (including a validated resume),
                 # never another tenant read or an arbitrary raw artefact from disk.
-                extra={
-                    "exchange_accepted_domains": collector_payloads.get("exchange_policy", {}).get("acceptedDomains"),
-                } if name == "dns_posture" else {},
+                extra=_collector_extra(name, collector_payloads, sensitive_users, sensitive_binding),
             ),
             name=name,
+            # A staged re-run writes no raw file or checkpoint of its own: its raw evidence is published below once
+            # it is known whether it replaced the earlier session's, and the checkpoint is written after it.
+            options=CollectorRunOptions(write_raw=False, write_checkpoint=False) if staged else None,
         )
         coverage_rows.extend(output.coverage_rows)
+        payload = output.result.payload
+        if staged:
+            payload = _publish_staged_rerun(output, retained_payloads[name])
+            writer_adapter.write_raw(name, payload)
         # The window this collector was read over, so a resume under another window re-runs it (see _window_changed).
         writer.write_checkpoint(name, {**output.result_row, "since": run_cfg.since, "until": run_cfg.until})
         if output.result.status != "ok":
@@ -840,7 +945,7 @@ def run_live(
                 required_failures += 1
         if output.result.error:
             LOG.warning("%s collector error: %s", name, output.result.error)
-        collector_payloads[name] = output.result.payload
+        collector_payloads[name] = payload
         result_rows.append(dict(output.result_row))
         summary_rows.append(result_rows[-1])
 
@@ -986,6 +1091,7 @@ def run_live(
             capability_rows=capability_rows,
             coverage_ledger=coverage_ledger,
             privacy=privacy,
+            trust_selected_collectors=selected_before_preflight,
             bundle_metadata={
                 "collector_preset": args.collector_preset,
                 "waiver_path": args.waiver_file,
@@ -1013,18 +1119,22 @@ def run_live(
     return exit_code
 
 
+@guarded_cli
 def main(
     argv: list[str] | None = None, event_listener: Callable[[dict[str, Any]], None] | None = None,
     *, sensitive_users: SensitiveUsers | None = None, partner_domains: PartnerDomains | None = None,
 ) -> int:
     parser = build_parser()
     parsed_argv = list(argv if argv is not None else sys.argv[1:])
-    args = parser.parse_args(parsed_argv)
+    args = parse_guarded(parser, parsed_argv)
     args._command_line = ["azure-tenant-audit", *parsed_argv]
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
 
     if args.env:
-        load_env_file(Path(args.env))
+        load_env_file(Path(args.env), guarded=True)
+
+    if sensitive_users is None:
+        admit_sensitive_env(current_context(), args.sensitive_users)
 
     try:
         sensitive_users = sensitive_users if sensitive_users is not None else load_sensitive_users(args.sensitive_users)

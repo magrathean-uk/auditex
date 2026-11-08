@@ -63,13 +63,16 @@ def planned_sections(collector: str) -> tuple[str, ...]:
     return _collector_sections().get(collector, ())
 
 
-def replay_source(sample_path: str | Path) -> dict[str, Any]:
+def replay_source(sample_path: str | Path, *, data: bytes | None = None) -> dict[str, Any]:
     """What a replay was run from: the sample's file name (never its directory) and the SHA-256 of its bytes."""
     path = Path(sample_path)
-    try:
-        digest: str | None = hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        digest = None
+    if data is None:
+        from .guarded_io import read_guarded_bytes
+        try:
+            data = read_guarded_bytes(path, field="sample")
+        except FileNotFoundError:
+            data = None
+    digest: str | None = hashlib.sha256(data).hexdigest() if data is not None else None
     return {"file": path.name, "sha256": digest}
 
 

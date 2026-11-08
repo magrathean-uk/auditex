@@ -39,20 +39,22 @@ integrity exclusion. **REDACTED** means this local personal
 data and the key must not be disclosed: their contents are excluded from the evidence index,
 AI context, logs, reports, built-in exports and customer packs. Customer packs
 may carry their relative paths and exclusion reasons, but never the files or
-their checksums or byte lengths; the manifest HMAC remains present. The key never leaves
+their checksums or byte lengths. Shareable, customer-pack and explainer derivatives
+retain at most the boolean `supplied`; the operator count and HMAC stay local.
+The key never leaves
 the private area, including through run-copy helpers. The source path
 is redacted from recorded command arguments. No list is uploaded.
 
 The copy is loaded only into the in-memory rule view of `MS.SECURITYSUITE.2.1v1`,
 under `SecuritySuite["MS.SECURITYSUITE.2.1v1"].SensitiveUsers`. A supplied,
 verified list allows that rule to decide when the remaining evidence is usable.
-The current collector does not select `TargetedUsersToProtect`, and the adapter
-does not retain it: explicit non-compliant flags/actions can decide not met,
-but met cannot yet be established from collected target membership. Unusable
-policy evidence retains its existing cell; full met coverage needs a separate
-collector/privacy change.
-`MS.SECURITYSUITE.2.3v1` still needs the separate PartnerDomains operator input
-in its rule view; no other policy receives SensitiveUsers.
+The Exchange collector selects `TargetedUsersToProtect` transiently and replaces
+it with the bound `TargetedUsersCoverage` summary described below before any
+payload or diagnostic leaves the adapter. A valid summary can establish target
+membership; flags, actions, policy scope, licensing and precedence still have to
+satisfy the existing rule. Literal target strings are never saved in the run.
+`MS.SECURITYSUITE.2.3v1` receives the separate verified PartnerDomains input
+in its own private rule view; neither input enables the other policy.
 Offline assessment of a copied bundle uses the same checks and rule view.
 ScubaGear export assessment retains its existing provider-config path.
 
@@ -64,7 +66,11 @@ HMAC over the captured list, key and manifest. Verification does not reopen
 those files. The existing closed synthesis outcome `operator_input_required` means
 that a verified required input is unavailable, including absent, false, malformed,
 unreadable or tampered inputs; `oversize` identifies a list byte or entry bound.
-The rule still reports `section_not_collected` in those cases. Additional files
+The rule still reports `section_not_collected` in those cases.
+`config_list_empty` applies only when a direct ScubaGear rule configuration has
+no usable SensitiveUsers entries, including absent, null, empty, blank-only or
+non-string-only lists. It does not describe a missing verified private input
+in a run bundle. Additional files
 in `operator-inputs` are never loaded by projection and retain their normal bundle
 integrity accounting; they do not invalidate an otherwise verified list.
 
@@ -86,6 +92,66 @@ inputs. This proves consistency, not authenticity against an operator who can
 rewrite the manifest and both private files.
 
 The definition is `properties.operator_inputs.properties.sensitive_users` in `schemas/run_manifest.schema.json`.
+
+### TargetedUsersCoverage v1
+
+Each usable anti-phish policy row in `raw/exchange_policy.json` carries a
+`TargetedUsersCoverage` object instead of `TargetedUsersToProtect`. Known
+membership has exactly these fields:
+
+```json
+{"version": 1, "state": "known", "input_hmac_sha256": "<64 lower-case hexadecimal characters>", "input_count": 2, "protected_nonempty": true, "missing_count": 0}
+```
+
+The input count and HMAC refer to the run's verified private SensitiveUsers
+list, not the policy's protected-user list. `protected_nonempty` records whether
+the literal comparison found any non-empty protected value; `missing_count`
+counts configured addresses absent from that set. Membership is true only for
+a non-empty protected set with no missing configured address. The private rule
+view validates the closed shape, exact types, count invariants and matching
+count/HMAC against the same captured private snapshot used for configuration.
+Invalid or unbound summaries supply unknown membership, without a literal-list
+fallback. An explicit false protection flag or action remains decisive.
+
+Other states are exactly `{"version": 1, "state": "unusable"}`,
+`{"version": 1, "state": "not_collected"}` or
+`{"version": 1, "state": "over_limit"}`, without counts or HMAC.
+The runtime validator and `schemas/targeted_users_coverage.schema.json` define
+the shape; Python also checks cross-field and input-binding invariants.
+
+Collection counts all raw list entries before filtering or de-duplication and
+permits at most 10,000. The compact JSON list, including brackets, separators
+and escapes, must occupy at most 262,144 strict UTF-8 bytes. The adapter reads
+stdout in bounded chunks and terminates and reaps a child that exceeds 64 MiB
+before decoding. Limits produce `over_limit`; below-limit invalid fields
+produce `unusable`. These are Auditex bounds. Unexpected live wire shapes
+remain unverified and are treated as unusable evidence.
+
+For this sensitive operation, events and error results omit stdout, stderr
+and sample text on every path, including successful warnings and helper
+exceptions. Only controlled outcomes and numeric command metadata remain.
+Other selected policy settings stay available to SS 2.2-2.4. Unknown row fields
+are discarded, and no target list reaches raw samples, logs or returned rows.
+
+The validated summary is retained locally in normalised anti-phish records and
+the evidence index. Its private binding is used only in SS 2.1's rule view.
+Every shareable, customer-pack and explainer boundary drops the entire
+`TargetedUsersCoverage` and `TargetedUsersCoverageBinding` subtree, including
+embedded JSON. Sensitive-user manifest derivatives retain at most boolean
+`supplied`; malformed private metadata is withheld. Other counts are retained.
+Local evidence is unchanged. Customer-pack derivative hashes and seals cover
+the transformed bytes; a customer pack is not a privately reassessable bundle.
+
+Offline replay sanitises the sample before saving it or running collectors.
+Fresh literals are summarised against the new run's binding; an imported
+summary without fresh literals cannot be rebound to that run. Resume reuses a
+known summary only when its shape, count and HMAC match the current verified
+input and retained key. A changed or cleared list invalidates Exchange reuse;
+the collector reruns when available, otherwise no usable membership proof is
+carried forward. It never replaces an old summary's HMAC to make it match.
+Reassessment of an unchanged original bundle uses that bundle's own verified
+private files. The independent ScubaGear export path keeps literal comparison
+and ignores reserved run-summary fields.
 
 ## Local partner-domain operator input (additive)
 
@@ -140,7 +206,7 @@ logs, reports, built-in exports or customer packs; the flag's path is redacted
 in command lines, including command-runner, response and Google redactors.
 Packs may carry relative exclusion paths and manifest metadata, never the private
 files. No list is uploaded. Rule views containing these domains must stay in
-memory; projection integration is a separate product change.
+memory. Assessment consumes only the verified private snapshot for SS 2.3.
 
 Resume replaces the list using the same private key and recomputes the HMAC.
 No supplied input clears only this channel's list, key and metadata; the other
@@ -155,8 +221,12 @@ consistency, not authenticity against someone able to rewrite all three files.
 `schemas/run_manifest.schema.json` defines
 `properties.operator_inputs.properties.partner_domains`, identical to `sensitive_users` (boolean
 `supplied`; when true require positive integer `count` and a lower-case 64-hex
-`hmac_sha256`; when false forbid both; reject other properties). Integration of
-the in-memory rule-view projection remains a separate product change.
+`hmac_sha256`; when false forbid both; reject other properties). Assessment loads
+the verified snapshot only into `SecuritySuite["MS.SECURITYSUITE.2.3v1"].PartnerDomains`
+in that policy's private rule view. SensitiveUsers is loaded independently; ordinary
+absence of either input leaves only its own policy unconfigured. Unsafe or
+inconsistent private material still refuses run admission. Neither list enters
+model views, the shape gate, prompts or assessment/report output.
 
 ## Contract history
 
@@ -285,7 +355,7 @@ baseline has none. That `result` value and the baseline's `not_assessed` status 
 four verdict totals (`answered`, `unknown`, `invalid`, `skipped`) are internal counters and keep their names.
 Rules decide all product answers; every catalogue policy has a value rule, so no current row reports
 `rule_not_implemented`.
-The model never answers a product policy; an optional explainer remains planned and unimplemented.
+The model never answers a product policy; an optional deterministic explainer can describe value-rule answers.
 
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
@@ -592,7 +662,10 @@ frozen v7 convention; dry-run exports prompts locally without a model call.
 
 Projection reads inline `raw/<collector>.json`, offline `raw/sample_input.json`,
 or export-only `raw/<collector>/<operation>/summary.json`. Non-empty `chunk_files`
-are authoritative; all chunks and counts must validate. Duplicate JSON keys and
+are authoritative; all chunks and counts must validate. Guard-refused chunks
+produce a constant evidence-issue code and `chunk_index`, never the refused path
+or rows from that file. Dependent collector fan-out stops with incomplete-evidence
+coverage; inline samples do not replace refused chunks. Duplicate JSON keys and
 non-finite constants are rejected in both JSON and JSONL. Chunk iteration stops
 at a scan bound: cumulative bytes, including whitespace, at `scan_max_bytes`, rows
 at `scan_max_rows` and chunk files at `scan_max_chunks`; the projection budget is
@@ -644,7 +717,7 @@ Graph camelCase is converted recursively for the selected fields.
 | `privileged_roles` | An existing `normalized/privileged_roles.json` with ProviderExport-shaped `records`: `DisplayName`, `RoleTemplateId`, complete assignments (`PrincipalId`, start/end timestamps when present, each null or `/Date(ms)/`) and PIM `Rules` with source metadata and typed expiration, notification or approval settings. The `identity_governance` collector reads the PIM role policies of the directory roles and the normaliser writes this file when every read behind it succeeded in full ("PIM role policy reads" below); a refused, missing or cut read leaves no file, so the section is `missing_artifact`, never an empty list (a refused schedule read, which the section reads itself, is reported first as `collector_error`); so does an artefact the builder withholds although every read succeeded, which is named in `collection_gaps` as `identity_governance.privileged_roles` (reason `artefact_withheld`, see "PIM role policy reads"), and the section lists that gap under `ignored_failures`. Rows may carry the normalized `key`, which is never projected. No frozen v7 rule shape matches an expiration or an approval rule as Graph returns it: every frozen rule that carries `IsExpirationRequired` also carries `NotificationRecipients` and a `Setting` object, every frozen rule with a `Setting` object also carries `IsExpirationRequired`, `MaximumDuration` and `NotificationRecipients`, and the pack has no null or empty form of any of them on those rules. The pack rows are ScubaGear Rego unit-test inputs, not exporter output; the pinned exporter writes the properties Graph returns for each rule type and pads nothing. The normaliser does not pad either: a rule carries exactly the properties Graph returned for its type, so an artefact built from Graph rules matches no frozen whole shape and is withheld as `incomplete_shape` with detail `{field: "$", kind: "unseen_shape"}` until a pack that holds its shape (or real exports) is frozen (`PACK_SHAPE_DIGESTS` changes with the pinned model, never before). No rule defaults are fabricated, and no null or empty value stands in for a property Graph did not return. |
 | `privileged_users` | Complete `normalized/effective_admin_set.json`, no unresolved principals, plus a complete scan of raw `identity.users` (streamed; only the administrators' rows are kept). Every effective user needs `displayName` and an explicitly present nullable `onPremisesImmutableId`; emits `User1..UserN` entries with `DisplayName`, `OnPremisesImmutableId`, `roles`. The identity collector selects the immutable ID on its existing paged user read, including users after the hybrid sample's first 100; this adds no endpoint or per-user reads and needs no new permission. That read requests 100 to 500 rows per page without an operator row limit and stops at 250,000 users. A remaining next link is a `pagination_not_followed` coverage gap, never a complete user inventory. A run of 50 consecutive empty pages that still carry next links is also stopped as a gap, and its coverage message says so. Live collection writes each page to a chunk and retains only a 20-row sample in memory; projection scans at most 250,000 rows, 256 MiB or 10,000 chunks. Older bundles can supply the same property from `domains_hybrid.syncSampleUsers` for users in that sample (conflicting duplicates withhold). An administrator neither read holds withholds the section (`missing_field`). A cut identity user list is a coverage gap and withholds the section (`collector_error`); a projection scan bound withholds it as `oversize` with `kind: scan_bound`. Those withheld sections produce an unknown requirement with `required_evidence_section_not_collected` in the existing model precheck. Without Entra ID P2 the PIM schedule reads are refused with `license_required`; such a refusal with no rows is the no-P2 case, the admin set comes from the directory role assignments (the effective admin set records the schedule sources `not_applicable`) and the refused reads are listed in `ignored_failures`. Any other refusal of a schedule read withholds (`collector_error`). `privileged_roles` has no such variant: every frozen shape carries PIM `Rules`, so a refused schedule read withholds it as `collector_error`. |
 | `tenant_id` | Canonical non-zero Entra UUID from the run identity in `run-manifest.json` or saved raw organisation evidence. Recorded and observed UUIDs must agree; a conflict or domain/authority alias cannot become a tenant ID. Synthetic demo UUIDs remain synthetic, without upgrading the run identity's verification status. |
-| `scuba_config` | **Synthesised, not collected** (ScubaGear's operator configuration file has no tenant source): ScubaGear's default configuration, the tenant's cloud and the run's emergency-access list (`rule_parameters.break_glass_accounts`), shown to each reading policy in the shape its training rows carry. AAD policies see `{"Aad": null, "CapExclusions": <empty lists>, "RoleExclusions": <empty lists>}`, MS.AAD.9.1v1 with `M365Environment`; MS.EXO.1.1v2 sees `null` (no allowed forwarding domains); Teams policies see `{"M365Environment": ...}`; the three SecuritySuite model views stay `not_collected` (`operator_input_required`). Only the private SS 2.1 rule view receives verified SensitiveUsers from the local operator input described above; SS 2.3 still needs PartnerDomains in its rule view, and SS 3.2 no longer reads `scuba_config` in its value rule. `M365Environment`: the public OpenID discovery `dns_posture` saves (`tenant_region_sub_scope` `GCC` is `gcc`; under the US Government scope, `DODCON` is `gcchigh` and `DOD` is `dod`), else licence SKUs sold only in a US Government cloud, else `commercial` (`assumed_default`); disagreeing signals withhold the four environment-gated policies (`environment_ambiguous`). An emergency-access list is resolved as `--break-glass-accounts` is, to object IDs (never the entered names), and placed under the `Aad[...]` entry the policy's Rego reads (for MS.AAD.3.2v2 that is `MS.AAD.3.2v1`, a shape the training data never held, so that policy is withheld as `unseen_shape` whenever an exclusion list exists) for the policies whose Rego honours an exclusion: `CapExclusions` for MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.7v1, 3.8v1, 3.9v1 and `RoleExclusions` for MS.AAD.7.4v1. An unresolved entry, an unreadable user or group list, or a manifest that did not record the list withholds those ten (`break_glass_unresolved`); a view whose whole shape training never held (users and groups together on MS.AAD.3.8v1 or 7.4v1) is withheld for that policy (`unseen_shape`). The section's top-level value is the AAD default; each policy's own view is what its prompt carries. |
+| `scuba_config` | **Synthesised, not collected** (ScubaGear's operator configuration file has no tenant source): ScubaGear's default configuration, the tenant's cloud and the run's emergency-access list (`rule_parameters.break_glass_accounts`), shown to each reading policy in the shape its training rows carry. AAD policies see `{"Aad": null, "CapExclusions": <empty lists>, "RoleExclusions": <empty lists>}`, MS.AAD.9.1v1 with `M365Environment`; MS.EXO.1.1v2 sees `null` (no allowed forwarding domains); Teams policies see `{"M365Environment": ...}`; the three SecuritySuite model views stay `not_collected` (`operator_input_required`). The private SS 2.1 and SS 2.3 rule views receive verified SensitiveUsers and PartnerDomains respectively from their independent local operator inputs described above; neither list enters the model views or shape gate. SS 3.2 no longer reads `scuba_config` in its value rule. `M365Environment`: the public OpenID discovery `dns_posture` saves (`tenant_region_sub_scope` `GCC` is `gcc`; under the US Government scope, `DODCON` is `gcchigh` and `DOD` is `dod`), else licence SKUs sold only in a US Government cloud, else `commercial` (`assumed_default`); disagreeing signals withhold the four environment-gated policies (`environment_ambiguous`). An emergency-access list is resolved as `--break-glass-accounts` is, to object IDs (never the entered names), and placed under the `Aad[...]` entry the policy's Rego reads (for MS.AAD.3.2v2 that is `MS.AAD.3.2v1`, a shape the training data never held, so that policy is withheld as `unseen_shape` whenever an exclusion list exists) for the policies whose Rego honours an exclusion: `CapExclusions` for MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.7v1, 3.8v1, 3.9v1 and `RoleExclusions` for MS.AAD.7.4v1. An unresolved entry, an unreadable user or group list, or a manifest that did not record the list withholds those ten (`break_glass_unresolved`); a view whose whole shape training never held (users and groups together on MS.AAD.3.8v1 or 7.4v1) is withheld for that policy (`unseen_shape`). The section's top-level value is the AAD default; each policy's own view is what its prompt carries. |
 | `dmarc_records` | Saved raw `dns_posture.dmarc_records` with `{domain, rdata[]}` containing complete TXT answers. Parsed posture alone is insufficient. |
 | `spf_records` | Saved raw `dns_posture.spf_records` in a complete observed pack shape, including its `compliant`/`message` fields where present. Only explicit `domain`, historic `doamin`, `rdata`, `compliant` and `message` fields are permitted; missing values or spelling variants are never synthesised. |
 | `dkim_records` | Saved raw `dns_posture.dkim_records` with `{domain, rdata[]}` containing complete TXT answers. |
@@ -781,6 +854,10 @@ Raw evidence remains local-only. `ai_safe/` artifacts are checked for sensitive 
 `data-handling.json` records whether the bundle is read-only, whether body/file content was read, whether write actions ran, provider-specific no-content assertions, and scope risk. Google Workspace audit bundles must assert no Gmail body reads and no Drive file content reads. When a provider requires write-capable OAuth scopes for read-only settings visibility, `scope_risk` and `write_capable_scopes` make that blast radius explicit.
 
 `audit-plan.json` records the autopilot evidence gates, expected collectors, required scopes, and quality gate (`complete`, `partial`, or `unusable`). When optional artifact paths are present in the manifest, validation checks the referenced file and its core semantics.
+
+A collector is trusted in `live-readiness.json` and `audit-plan.json` only with at least one successful non-derived live read; successful empty reads count, while skipped, failed, derived and offline rows do not. Offline audit plans therefore have zero trusted gates. The permissions ledger also exposes gates that are not live-verified.
+
+Quality still follows capabilities, coverage gaps and blockers, so when a sole collector's reads are all skipped without a section-scoped gap or blocker it can be `complete` with `human_reviewer_required: false` and `trusted_gate_count: 0`, while readiness is `setup_only`. After a preflight skip, the manifest and audit plan list the remaining collectors in `selected_collectors`, while readiness includes the original selection.
 
 `live-readiness.json` and `audit-plan.json` classify each blocker as `auth_scope`, `admin_role`, `license`, `service_absent`, `local_tool`, `tenant_policy`, `runtime`, or `unverified`. They now share the same per-collector evidence-gate rows so reviewer wording, blocker kind, and next-step guidance stay aligned across both artifacts. This distinction is required for enterprise handoff because a missing local module, an unlicensed tenant workload, and a missing OAuth scope need different customer actions.
 
@@ -1448,7 +1525,7 @@ success branch requires both an explicitly array-wrapped read and empty stderr;
 empty stdout with stderr is `command_error`. Error-preference propagation into
 Exchange module proxy functions has not been verified with PowerShell.
 
-## Explainer (planned output)
+## Explainer (additive field, schema 2026-11-05)
 
 The deterministic template port provides
 `azure_tenant_audit.explainer.explain(record, redacted_sections, section_order)`.
@@ -1462,10 +1539,29 @@ customer-output fields. The explainer never changes a verdict, claim or evidence
 id. A controlled `ExplainerError` means the caller suppresses the explanation
 and retains the original assessment.
 
-This object is **not yet part of report schema 2026-11-05**. No report or CLI
-output is changed by this port; adding an optional policy-row object requires
-a product schema and output-redaction decision. The expanded `render_full`
-helper is outside the compact schema and is not the integration entry point.
+An optional `explainer` object is part of a `value_rule` policy row in
+`model_assessment.json` schema `2026-11-05`. It must cite `e0` first and only
+ids in the requirement claim. Met and not-applicable rows have no steps;
+not-met rows have at least one. Historical date-named schemas reject the field.
+`rule_not_implemented` has no explainer and the schema rejects one there.
+The expanded `render_full` helper is outside the compact schema and is not the
+integration entry point.
+
+Serving enables the explainer after building the rule answer; offline precheck
+scoring leaves it off. A failure suppresses only the explainer and logs the
+policy id and exception class, without the exception message. The whole fixed
+rule read set must exist in the model case, and a fault explanation also needs
+that set collected. Optional-collection `absent_section` rows are suppressed.
+Ten SECURITYSUITE policies (1.3, 2.1-2.3, 3.1, 3.3, 3.4 and 7.1-7.3) cannot
+be explained because their model cases omit `defender_license`, `atp_policy_rules`
+or `defender_dlp_license`; no evidence is invented to fill those gaps.
+
+Reports read the assessment through the guarded run-file reader, validate it
+and match its run id before adding `policy_explanations`, containing only
+`policy_id`, `verdict` and `explainer`. The section is absent for an invalid,
+unreadable or unredactable assessment, or when no row has an explainer.
+JSON includes the structured section; Markdown and HTML show what each policy
+means and numbered actions. CSV, SARIF and OSCAL do not include the section.
 
 A1 (5 November 2026, 11:25 GMT) governs these shared reasons, dispatched before
 cell lookup. Neither adds a decision cell to the 1,084-cell v3.9.1 inventory:
@@ -1481,8 +1577,10 @@ policy read set. The product now emits exactly this representation, so the adapt
 no longer normalises anything: a shared reason with a non-null cell, including the
 old cell named `rule_evaluation_failed`, is rejected with a clear error. The
 superseded NOTE text is rejected. No-rule routing is still a product
-decision: the entry point conservatively accepts known template policies with
-their complete fixed read set, and does not route or invent policies.
+decision: serving does not attach an explainer to a no-rule row. The entry point
+accepts known template policies with their complete fixed read set, and does
+not route or invent policies. The fault step is redacted before output; the
+exact public support address is preserved, while ordinary personal addresses remain masked.
 
 The product catalogue is v3.9.1 (102 policies, 1,084 cells) and the template is
 generated from it (`scripts/generate-explainer.py`; the catalogue's canonical digest is

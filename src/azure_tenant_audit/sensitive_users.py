@@ -32,20 +32,18 @@ def sensitive_users_digest(addresses: tuple[str, ...], key: bytes) -> str:
 
 def read_sensitive_users_key(run_dir: str | Path) -> bytes:
     """Read the private raw key without following links or opening a special file."""
-    target = Path(run_dir) / KEY_PATH
+    failed = False
+    key = None
     try:
-        if target.parent.is_symlink():
-            raise OSError
-        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        with os.fdopen(os.open(target, flags), "rb") as handle:
-            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                raise OSError
-            key = handle.read(33)
-        if len(key) != 32:
-            raise OSError
-        return key
+        from .guarded_io import guard_session
+        with guard_session() as context:
+            context.bind_run(run_dir)
+            key = context._private_keys.get(context._absolute(run_dir))
     except OSError:
+        failed = True
+    if failed or key is None:
         raise SensitiveUsersError("Unable to read the private sensitive-users key.") from None
+    return key
 
 
 def verify_sensitive_users(run_dir: str | Path) -> bool:
@@ -54,18 +52,10 @@ def verify_sensitive_users(run_dir: str | Path) -> bool:
     This proves consistency with the manifest, not authenticity against a holder
     who can replace the manifest and both private files.
     """
-    run_dir = Path(run_dir)
     try:
-        key = read_sensitive_users_key(run_dir)
-        supplied = load_sensitive_users(run_dir / BUNDLE_PATH)
-        manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
-        metadata = manifest["operator_inputs"]["sensitive_users"]
-        digest = metadata["hmac_sha256"]
-        if (metadata["supplied"] is not True or type(metadata["count"]) is not int
-                or metadata["count"] != len(supplied.addresses)
-                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
-            return False
-        return hmac.compare_digest(sensitive_users_digest(supplied.addresses, key), digest)
+        from .guarded_io import guard_session
+        with guard_session() as context:
+            return context.verified_sensitive_users(run_dir) is not None
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -175,16 +165,13 @@ def load_sensitive_users(path: str | Path | None = None) -> SensitiveUsers:
     selected = path if path is not None else (os.environ.get(ENV_VAR) or None)
     if selected is None:
         return SensitiveUsers()
+    if selected == "":
+        raise _error(1, "unable to read a regular local file")
     try:
-        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(Path(selected).expanduser(), flags)
-        with os.fdopen(fd, "rb") as handle:
-            info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise _error(1, "expected a regular file")
-            if info.st_size > MAX_BYTES:
-                raise _error(1, "file exceeds 256 KiB")
-            data = handle.read(MAX_BYTES + 1)
+        from .guarded_io import UnsafeRunFileError, read_guarded_bytes
+        data = read_guarded_bytes(selected, field="sensitive-users", max_bytes=MAX_BYTES)
+    except UnsafeRunFileError:
+        raise
     except SensitiveUsersError:
         raise
     except (OSError, ValueError, RuntimeError):

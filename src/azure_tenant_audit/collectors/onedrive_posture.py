@@ -57,7 +57,9 @@ class OneDrivePostureCollector(Collector):
         # the OneDrive finding must cover every site that was read, so the rows come from the chunk-aware reader.
         chunked = bool(sites_section.get("chunk_files"))
         sites, read_issues, _failed, _cut = input_rows(sites_section, context.get("run_dir")) if chunked else ([], [], False, False)
-        if not chunked or (read_issues and not sites):
+        if not chunked:
+            # Only a genuinely unchunked list may use its inline rows; a chunked list is authoritative and its refused or
+            # unreadable chunks are never restored from the inline sample.
             sites = sites_section.get("value", [])
         if not isinstance(sites, list):
             sites = []
@@ -95,6 +97,18 @@ class OneDrivePostureCollector(Collector):
                 payload[name].update(
                     {"error": "The site list could not be read in full.", "error_class": "incomplete_evidence"}
                 )
+        if read_issues:
+            coverage.append(
+                {
+                    "collector": self.name,
+                    "type": "derived",
+                    "name": "sitesRead",
+                    "status": "partial",
+                    "item_count": 0,
+                    "error_class": "incomplete_evidence",
+                    "error": "The site list could not be read in full.",
+                }
+            )
         total = sum(item.get("item_count", 0) for item in coverage)
         partial = any(item.get("status") != "ok" for item in coverage)
         return CollectorResult(

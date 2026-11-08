@@ -22,6 +22,10 @@ SENSITIVE_ARG_FLAGS = frozenset(
         "--adapter-override",
         "--sensitive-users",
         "--partner-domains",
+        "--oauth-client",
+        "--service-account-key",
+        "--token-cache",
+        "--token-file",
     }
 )
 

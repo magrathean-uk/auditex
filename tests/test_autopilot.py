@@ -47,6 +47,7 @@ def test_autopilot_plan_marks_partial_with_exact_scope_blockers() -> None:
         ],
         blockers=[],
         findings=[],
+        coverage_rows=[{"collector": "google_directory", "status": "ok", "item_count": 1}],
     )
 
     assert plan["schema_version"] == "2026-04-21"
@@ -85,6 +86,7 @@ def test_autopilot_and_live_readiness_share_evidence_gate_rows() -> None:
     readiness = build_live_readiness_summary(
         selected_collectors=selected,
         capability_rows=capability_rows,
+        coverage_rows=[{"collector": "google_directory", "status": "ok", "item_count": 1}],
     )
     plan = build_audit_autopilot_plan(
         platform="google_workspace",
@@ -93,9 +95,27 @@ def test_autopilot_and_live_readiness_share_evidence_gate_rows() -> None:
         coverage_gaps=[],
         blockers=[],
         findings=[],
+        coverage_rows=[{"collector": "google_directory", "status": "ok", "item_count": 1}],
     )
 
     assert readiness["evidence_gates"] == plan["evidence_gates"]
+
+
+def test_unread_collector_changes_trust_but_not_quality_verdict_or_reasons() -> None:
+    from azure_tenant_audit.autopilot import build_audit_autopilot_plan
+
+    args = {
+        "platform": "m365",
+        "selected_collectors": ["identity"],
+        "capability_rows": [{"collector": "identity", "status": "supported_exact_scope"}],
+    }
+    healthy = build_audit_autopilot_plan(**args, coverage_rows=[{"collector": "identity", "status": "ok"}])
+    skipped = build_audit_autopilot_plan(**args, coverage_rows=[{"collector": "identity", "status": "skipped"}])
+
+    assert healthy["quality_gate"]["status"] == skipped["quality_gate"]["status"] == "complete"
+    assert healthy["quality_gate"]["reasons"] == skipped["quality_gate"]["reasons"] == []
+    assert skipped["quality_gate"]["trusted_gate_count"] == 0
+    assert skipped["evidence_gates"][0]["status"] == "unverified"
 
 
 def test_autopilot_plan_marks_unusable_when_no_trusted_critical_evidence() -> None:

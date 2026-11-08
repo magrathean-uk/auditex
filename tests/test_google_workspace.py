@@ -406,11 +406,70 @@ def test_google_capability_rows_include_live_readiness() -> None:
             },
         ],
     )
-    readiness = build_google_live_readiness(["google_directory", "google_drive_posture"], capability_rows)
+    readiness = build_google_live_readiness(
+        ["google_directory", "google_drive_posture"], capability_rows,
+        coverage_rows=[{"collector": "google_directory", "name": "users", "status": "ok"}],
+    )
 
     assert readiness["trust_level"] == "partial"
     assert readiness["trusted_collectors"] == ["google_directory"]
     assert readiness["blocked_collectors"] == ["google_drive_posture"]
+
+
+def test_google_probe_without_reads_does_not_claim_live_verification(tmp_path: Path, monkeypatch, capsys) -> None:
+    from auditex.google_workspace import run as google_run
+
+    class Collector:
+        name = "google_directory"
+        required_scopes = ("scope://directory.readonly",)
+
+    monkeypatch.setattr(google_run, "REGISTRY", {"google_directory": Collector()})
+    monkeypatch.setattr(google_run, "google_dependency_status", lambda: {"available": True, "missing": [], "install_hint": ""})
+    monkeypatch.setattr(google_run, "build_google_credentials", lambda _config: object())
+    monkeypatch.setattr(google_run, "GoogleWorkspaceClient", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(google_run, "build_google_preflight_rows", lambda *_args, **_kwargs: [])
+    config = google_run.GoogleRunConfig(
+        tenant_name="Example", out=tmp_path, run_name="empty-probe", domain="example.com",
+        customer_id="constructed", subject="admin@example.com", collectors="google_directory",
+    )
+
+    assert google_run.run_google_probe(config) == 0
+    capsys.readouterr()
+    run_dir = tmp_path / "Example-empty-probe"
+    readiness = json.loads((run_dir / "live-readiness.json").read_text())
+    plan = json.loads((run_dir / "audit-plan.json").read_text())
+    assert readiness["trust_level"] == "setup_only"
+    assert readiness["unverified_collectors"] == ["google_directory"]
+    assert plan["quality_gate"]["trusted_gate_count"] == 0
+    assert plan["quality_gate"]["status"] == "complete"
+    assert plan["evidence_gates"] == readiness["evidence_gates"]
+
+
+def test_google_live_without_coverage_is_unverified(tmp_path: Path, monkeypatch) -> None:
+    from auditex.google_workspace import run as google_run
+    from azure_tenant_audit.collectors.base import CollectorResult
+
+    class Collector:
+        name = "google_directory"
+        required_scopes = ("scope://directory.readonly",)
+
+        def run(self, _context):
+            return CollectorResult(name=self.name, status="ok", item_count=0, payload={}, coverage=[])
+
+    monkeypatch.setattr(google_run, "REGISTRY", {"google_directory": Collector()})
+    monkeypatch.setattr(google_run, "google_dependency_status", lambda: {"available": True, "missing": [], "install_hint": ""})
+    monkeypatch.setattr(google_run, "build_google_credentials", lambda _config: object())
+    monkeypatch.setattr(google_run, "GoogleWorkspaceClient", lambda *_args, **_kwargs: object())
+    config = google_run.GoogleRunConfig(
+        tenant_name="Example", out=tmp_path, run_name="no-coverage", domain="example.com",
+        customer_id="constructed", subject="admin@example.com", collectors="google_directory",
+    )
+
+    assert google_run.run_google_live(config) == 0
+    run_dir = tmp_path / "Example-no-coverage"
+    readiness = json.loads((run_dir / "live-readiness.json").read_text())
+    assert readiness["trust_level"] == "setup_only"
+    assert readiness["unverified_collectors"] == ["google_directory"]
 
 
 def test_google_auth_dependency_status_reports_missing_libs(monkeypatch) -> None:

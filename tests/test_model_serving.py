@@ -30,6 +30,7 @@ from azure_tenant_audit.contracts import build_validation_report, contract_schem
 from azure_tenant_audit.model_assessment import validate_assessment
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.resources import shipped_resource_manifest
+from azure_tenant_audit.run_files import UnsafeRunFileError
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = [json.loads(line) for line in (ROOT / "tests/fixtures/model-serving-cases.jsonl").read_text().splitlines()]
@@ -716,12 +717,17 @@ def test_assessment_schema_checker_handles_large_json_integer(tmp_path, monkeypa
     validate_assessment(result)  # Finite integers must not overflow a float conversion.
 
 
-def test_optional_assessment_with_malformed_manifest_reports_issue(demo_bundle, monkeypatch):
+def test_optional_assessment_with_malformed_manifest_is_refused_not_reported(demo_bundle, monkeypatch):
+    """A malformed required manifest is a fixed UnsafeRunFileError refusal, never an optional-artifact issue."""
     monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(missing_answer()))
     assess_run(demo_bundle, ModelConfig(model_name="test-model"), policies=["MS.AAD.1.1v1"])
+    assessment = demo_bundle / "model_assessment.json"
+    before = assessment.read_bytes()
     (demo_bundle / "run-manifest.json").write_text("[]")
-    report = build_validation_report(run_dir=demo_bundle, read_only=True)
-    assert "invalid_model_assessment" in {issue["code"] for issue in report["issues"]}
+    with pytest.raises(UnsafeRunFileError):
+        build_validation_report(run_dir=demo_bundle, read_only=True)
+    assert assessment.read_bytes() == before
+    assert (demo_bundle / "run-manifest.json").read_text() == "[]"
 
 
 def test_v7_prompt_fixture_has_byte_parity_across_all_products():

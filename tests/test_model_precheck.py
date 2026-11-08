@@ -10,6 +10,7 @@ import jsonschema
 import pytest
 
 from auditex.cli import main
+from support import RunBundleBuilder, make_contract_valid
 from auditex.model_precheck import evaluate_precheck, precheck_case
 from auditex.model_serving import ModelClient, ModelConfig, assess_run, build_case, canonical, messages_for
 from azure_tenant_audit.model_assessment import validate_assessment
@@ -400,7 +401,8 @@ def test_shadow_flag_reaches_serving(tmp_path, monkeypatch, capsys):
         seen.update(kwargs)
         return {}
     monkeypatch.setattr("auditex.model_serving.assess_run", assess)
-    assert main(["model", "assess", str(tmp_path), "--model", "test", "--shadow-model-on-precheck"]) == 0
+    run = make_contract_valid(RunBundleBuilder(tmp_path, "run").manifest(tenant_name="synthetic").build())
+    assert main(["model", "assess", str(run), "--model", "test", "--shadow-model-on-precheck"]) == 0
     assert seen["shadow_model_on_precheck"] is True  # accepted for compatibility; assess_run ignores it
 
 

@@ -73,7 +73,7 @@ def test_reader_rejects_hard_link_before_read(tmp_path: Path, monkeypatch: pytes
         monkeypatch.setattr(os, "supports_dir_fd", set())
     with pytest.raises(UnsafeRunFileError) as caught:
         read_run_file(run, "summary.md")
-    assert caught.value.reason == "hardlink"
+    assert caught.value.reason == (None if fallback else "hardlink")
     assert isinstance(caught.value, OSError)
 
 
@@ -206,15 +206,17 @@ def test_customer_pack_manifest_from_relative_run_is_transformed(
     assert str(tmp_path) not in json.dumps(copied)
 
 
-def test_old_oserror_fallback_still_applies(tmp_path: Path) -> None:
+def test_unsafe_oserror_never_falls_back_to_an_empty_summary(tmp_path: Path) -> None:
     from auditex.run_bundle import RunBundle
+    from azure_tenant_audit.run_files import UnsafeRunFileError
 
     outside = tmp_path / "outside"
     outside.write_text('{"secret":"private"}', encoding="utf-8")
     run = tmp_path / "run"
     run.mkdir()
     os.link(outside, run / "summary.json")
-    assert RunBundle(run).summary() == {}
+    with pytest.raises(UnsafeRunFileError):
+        RunBundle(run).summary()
 
 
 @pytest.mark.parametrize("kind", ("fifo", "directory", "symlink", "hardlink"))
@@ -298,6 +300,7 @@ def test_closed_index_uses_private_streamed_copy_and_cleans_it(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     monkeypatch.setenv("TMPDIR", str(scratch))
+    monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: True)
     with closing(sqlite3.connect(index)) as writer:
         writer.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
         writer.execute("CREATE TABLE section_stats (section_name TEXT, item_count INTEGER, source_path TEXT)")
@@ -340,7 +343,7 @@ def test_closed_index_uses_private_streamed_copy_and_cleans_it(
 
 
 @pytest.mark.parametrize("scratch_failure", ("directory", "copy", "destination_missing"))
-def test_closed_index_falls_back_to_guarded_immutable_read(
+def test_closed_index_copy_failure_reads_the_admitted_path_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scratch_failure: str,
 ) -> None:
     from azure_tenant_audit import evidence_db
@@ -356,24 +359,26 @@ def test_closed_index_falls_back_to_guarded_immutable_read(
         writer.execute("CREATE TABLE normalized_records (record TEXT)")
         writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'SYNTHETIC')")
         writer.commit()
-    monkeypatch.setenv("TMPDIR", str(parent))
+    # A proved scratch outside the run parent, so the copy is genuinely attempted and then fails.
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("TMPDIR", str(scratch))
+    monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: True)
 
     def fail(*args: object, **kwargs: object) -> None:
         if scratch_failure == "destination_missing":
-            Path(args[2]).parent.rmdir()
             raise FileNotFoundError("synthetic temporary destination disappeared")
         raise OSError("synthetic scratch failure")
 
     if scratch_failure == "directory":
         monkeypatch.setattr(evidence_db.tempfile, "TemporaryDirectory", fail)
     else:
-        monkeypatch.setattr(evidence_db, "copy_run_file", fail)
+        monkeypatch.setattr(evidence_db, "_copy_index_descriptor", fail)
     original = evidence_db.open_index_read_only
-    seen: list[Path] = []
+    seen: list[tuple[Path, bool]] = []
 
     def inspect(path: Path, *, immutable: bool = True) -> sqlite3.Connection:
-        seen.append(Path(path))
-        assert immutable
+        seen.append((Path(path), immutable))
         return original(path, immutable=immutable)
 
     monkeypatch.setattr(evidence_db, "open_index_read_only", inspect)
@@ -382,8 +387,9 @@ def test_closed_index_falls_back_to_guarded_immutable_read(
     issues: list[dict[str, object]] = []
     _validate_evidence_db(run, issues, read_only=True)
     assert issues == []
-    assert seen == [index, index]
+    assert seen == [(index, True), (index, True)]
     assert index.read_bytes() == before
+    assert list(scratch.iterdir()) == []
     assert sorted(path.name for path in index.parent.iterdir()) == ["evidence.sqlite"]
     assert sorted(path.name for path in parent.iterdir()) == ["run"]
 
@@ -406,7 +412,7 @@ def test_closed_index_fallback_still_refuses_links(
         os.link(outside, index)
     monkeypatch.setenv("TMPDIR", str(tmp_path / "missing"))
     with pytest.raises(UnsafeRunFileError):
-        with evidence_db.open_private_run_index(run, include_sidecars=False):
+        with evidence_db.open_private_run_index(run, hashed=False):
             pytest.fail("opened an unsafe index")
 
 
@@ -436,45 +442,53 @@ def test_closed_index_copy_is_not_subject_to_data_limit(
     assert list(scratch.iterdir()) == []
 
 
+def _legacy_wal_index(index: Path) -> sqlite3.Connection:
+    """An unhashed index whose newest committed row sits only in a non-empty ``-wal`` file (writer left open)."""
+    writer = sqlite3.connect(index)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("PRAGMA wal_autocheckpoint=0")
+    writer.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
+    writer.execute("CREATE TABLE section_stats (section_name TEXT, item_count INTEGER, source_path TEXT)")
+    writer.execute("CREATE TABLE normalized_records (record TEXT)")
+    writer.commit()
+    writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'WALNAME')")
+    writer.commit()
+    return writer
+
+
 @pytest.mark.parametrize("parent_readonly", (True, False))
-@pytest.mark.parametrize("scratch_available", (True, False))
-def test_legacy_wal_copy_uses_private_tmpdir_and_preserves_data(
+@pytest.mark.parametrize("proved", (True, False))
+def test_legacy_wal_is_untrusted_and_never_copied_or_replayed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, small_limits: None,
-    scratch_available: bool, parent_readonly: bool,
+    proved: bool, parent_readonly: bool,
 ) -> None:
     from azure_tenant_audit import evidence_db
     from azure_tenant_audit.contracts import _validate_evidence_db
     from azure_tenant_audit.evidence_db import load_run_index_summary
 
-    # Both the index and committed WAL exceed the lowered read limit. The
-    # private copy is streamed, and the in-place fallback only checks type.
-    monkeypatch.setattr(evidence_db, "MAX_RUN_DATA_BYTES", 256, raising=False)
     parent = tmp_path / "run-parent"
     run = parent / "run"
     index = run / "index" / "evidence.sqlite"
     index.parent.mkdir(parents=True)
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    monkeypatch.setenv("TMPDIR", str(scratch if scratch_available else scratch / "unavailable"))
-    writer = sqlite3.connect(index)
+    monkeypatch.setenv("TMPDIR", str(scratch))
+    monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: proved)
+    monkeypatch.setattr(evidence_db, "_copy_index_descriptor",
+                        lambda *args: pytest.fail("a legacy index was copied"))
+    writer = _legacy_wal_index(index)
     try:
-        writer.execute("PRAGMA journal_mode=WAL")
-        writer.execute("PRAGMA wal_autocheckpoint=0")
-        writer.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
-        writer.execute("CREATE TABLE section_stats (section_name TEXT, item_count INTEGER, source_path TEXT)")
-        writer.execute("CREATE TABLE normalized_records (record TEXT)")
-        writer.commit()
-        writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'WALNAME')")
-        writer.commit()
         if parent_readonly:
             parent.chmod(0o500)
         before = sorted(path.name for path in index.parent.iterdir())
-        assert load_run_index_summary(run)["tenant_name"] == "WALNAME"
+        main_bytes = index.read_bytes()
         issues: list[dict[str, object]] = []
+        assert load_run_index_summary(run) == {}
         _validate_evidence_db(run, issues, read_only=True)
-        assert issues == []
+        assert [issue["code"] for issue in issues] == ["invalid_evidence_sqlite"]
         assert sorted(path.name for path in index.parent.iterdir()) == before
+        assert index.read_bytes() == main_bytes
         assert list(scratch.iterdir()) == []
         assert sorted(path.name for path in tmp_path.iterdir()) == ["run-parent", "scratch"]
         assert sorted(path.name for path in parent.iterdir()) == ["run"]
@@ -484,8 +498,9 @@ def test_legacy_wal_copy_uses_private_tmpdir_and_preserves_data(
 
 
 @pytest.mark.parametrize("nested", (False, True))
-def test_legacy_wal_never_copies_under_run_parent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool,
+@pytest.mark.parametrize("proved", (False, True))
+def test_index_never_copies_under_run_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool, proved: bool,
 ) -> None:
     from azure_tenant_audit import evidence_db
     from azure_tenant_audit.contracts import _validate_evidence_db
@@ -497,34 +512,32 @@ def test_legacy_wal_never_copies_under_run_parent(
     scratch = parent / "scratch" if nested else parent
     scratch.mkdir(exist_ok=True)
     monkeypatch.setenv("TMPDIR", str(scratch))
+    monkeypatch.setattr(evidence_db, "_encrypted_internal_storage", lambda path: proved)
 
     def no_copy(*args: object, **kwargs: object) -> None:
         pytest.fail("attempted a temporary evidence copy under the run parent")
 
-    writer = sqlite3.connect(index)
+    writer = _legacy_wal_index(index)
+    monkeypatch.setattr(evidence_db.tempfile, "TemporaryDirectory", no_copy)
     try:
-        writer.execute("PRAGMA journal_mode=WAL")
-        writer.execute("PRAGMA wal_autocheckpoint=0")
-        writer.execute("CREATE TABLE run_meta (key TEXT, value TEXT)")
-        writer.execute("CREATE TABLE section_stats (section_name TEXT, item_count INTEGER, source_path TEXT)")
-        writer.execute("CREATE TABLE normalized_records (record TEXT)")
-        writer.commit()
-        writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        writer.execute("INSERT INTO run_meta VALUES ('tenant_name', 'WALNAME')")
-        writer.commit()
-        monkeypatch.setattr(evidence_db.tempfile, "TemporaryDirectory", no_copy)
-        assert evidence_db.load_run_index_summary(run)["tenant_name"] == "WALNAME"
+        assert evidence_db.load_run_index_summary(run) == {}
         issues: list[dict[str, object]] = []
         _validate_evidence_db(run, issues, read_only=True)
-        assert issues == []
+        assert [issue["code"] for issue in issues] == ["invalid_evidence_sqlite"]
     finally:
-        writer.close()
+        writer.close()  # a normal close checkpoints and removes the WAL
+    # A clean index is read in place, still without a copy under the run parent.
+    assert evidence_db.load_run_index_summary(run)["tenant_name"] == "WALNAME"
+    issues = []
+    _validate_evidence_db(run, issues, read_only=True)
+    assert issues == []
 
 
 @pytest.mark.parametrize("kind", ("fifo", "directory", "symlink", "hardlink"))
 def test_legacy_wal_sidecars_require_guarded_regular_files(tmp_path: Path, kind: str) -> None:
     from azure_tenant_audit.contracts import _validate_evidence_db
     from azure_tenant_audit.evidence_db import load_run_index_summary
+    from azure_tenant_audit.run_files import UnsafeRunFileError
 
     run = tmp_path / "run"
     index = run / "index/evidence.sqlite"
@@ -548,7 +561,9 @@ def test_legacy_wal_sidecars_require_guarded_regular_files(tmp_path: Path, kind:
             sidecar.symlink_to(outside)
         else:
             os.link(outside, sidecar)
-    assert load_run_index_summary(run) == {}
+    with pytest.raises(UnsafeRunFileError):
+        load_run_index_summary(run)
     issues: list[dict[str, object]] = []
-    _validate_evidence_db(run, issues, read_only=True)
-    assert {item["code"] for item in issues} == {"invalid_evidence_sqlite"}
+    with pytest.raises(UnsafeRunFileError):
+        _validate_evidence_db(run, issues, read_only=True)
+    assert issues == []

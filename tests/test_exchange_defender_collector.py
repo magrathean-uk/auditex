@@ -69,8 +69,10 @@ def test_defender_commands_are_read_only_and_have_explicit_field_selections():
         assert check_command("powershell_graph", command) == (
             command.removeprefix(",@(").split()[0], "Select-Object",
         )
-        for forbidden in ("*", "-ResultSize Unlimited", "Set-", "New-", "Remove-", "TargetedUsersToProtect"):
+        for forbidden in ("*", "-ResultSize Unlimited", "Set-", "New-", "Remove-"):
             assert forbidden not in command
+        # SS 2.1 reads the targeted-user list on the anti-phish policy read only; it is summarised and dropped in memory.
+        assert ("TargetedUsersToProtect" in command) == (name == "antiPhishPolicies")
         if name not in {"malwareFilterPolicy", "adminAuditLogConfig", "atpPolicyForO365",
                         "antiPhishPolicies", "hostedContentFilterPolicies", "hostedConnectionFilterPolicy"}:
             assert command.startswith(",@(") and command.endswith(")")
@@ -80,6 +82,11 @@ def test_defender_commands_are_read_only_and_have_explicit_field_selections():
     assert commands["malwareFilterPolicy"] == "Get-MalwareFilterPolicy | Select-Object Identity,Name,IsDefault,EnableFileFilter,ZapEnabled,FileTypes"
     for name in ("antiPhishRules", "hostedContentFilterRules"):
         assert "Priority" not in commands[name]
+    fields = commands["antiPhishPolicies"].split("Select-Object ", 1)[1].split(",")
+    assert fields.index("TargetedUsersToProtect") == fields.index("TargetedUserProtectionAction") + 1
+    assert fields.count("TargetedUsersToProtect") == 1 and len(fields) == 17
+    assert all("TargetedUsersToProtect" not in command for other, command in ExchangePolicyCollector.command_collectors
+               if other != "antiPhishPolicies")
 
 
 def test_defender_collector_collects_every_new_operation_without_changing_session_routing(monkeypatch):

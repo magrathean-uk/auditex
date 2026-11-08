@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.guarded_io import UnsafeRunFileError, guarded_operation, read_guarded_bytes
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 
 SCHEMA_VERSION = "2026-10-18"
@@ -150,10 +151,11 @@ def validate_model_response(content: str, case: dict[str, Any]) -> dict[str, Any
     return response
 
 
-def _load_cases(path: str | Path) -> list[dict[str, Any]]:
+def _load_cases(path: str | Path) -> tuple[list[dict[str, Any]], str]:
     from .model_training import load_cases
 
-    cases = load_cases([path])
+    sources: list[dict[str, str]] = []
+    cases = load_cases([path], sources_out=sources)
     if not cases:
         raise ValueError("case dataset must not be empty")
     # The shared case loader owns provenance and train/holdout leakage gates.
@@ -166,7 +168,7 @@ def _load_cases(path: str | Path) -> list[dict[str, Any]]:
         _validate_response({key: expected[key] for key in _RESPONSE_FIELDS})
         if any(not set(claim["evidence_ids"]) <= allowed for claim in expected["claims"]):
             raise ValueError(f"expected evidence outside allowlist for case {case['id']}")
-    return cases
+    return cases, sources[0]["sha256"]
 
 
 def _load_responses(paths: list[str | Path]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -176,14 +178,15 @@ def _load_responses(paths: list[str | Path]) -> tuple[list[dict[str, Any]], list
     seen: set[tuple[str, str]] = set()
     for supplied in paths:
         path = Path(supplied)
-        if path.stat().st_size > 64 * 1024 * 1024:
-            raise ValueError("responses file exceeds 64 MiB")
-        data = path.read_bytes()
+        data = read_guarded_bytes(path, field="responses", max_bytes=64 * 1024 * 1024)
         inputs.append({"path": str(path), "sha256": sha256(data).hexdigest()})
+        invalid_text = False
         try:
             lines = data.decode("utf-8-sig").splitlines()
-        except UnicodeError as exc:
-            raise ValueError("responses must be UTF-8 JSONL") from exc
+        except UnicodeError:
+            invalid_text = True
+        if invalid_text:
+            raise UnsafeRunFileError("responses") from None
         if not any(line.strip() for line in lines):
             invalid.append({
                 "path": str(path), "code": "empty_response_file",
@@ -344,15 +347,17 @@ def _evaluate(cases: list[dict[str, Any]], records: list[dict[str, Any]], invali
     }
 
 
+@guarded_operation
 def evaluate_responses(cases_path: str | Path, responses_path: str | Path) -> dict[str, Any]:
     """Score approved benchmark cases against local, recorded JSONL responses."""
-    cases = _load_cases(cases_path)
+    cases, cases_digest = _load_cases(cases_path)
     records, invalid, inputs = _load_responses([responses_path])
     result = _evaluate(cases, records, invalid, inputs)
-    result["cases_input"] = {"path": str(cases_path), "sha256": sha256(Path(cases_path).read_bytes()).hexdigest()}
+    result["cases_input"] = {"path": str(cases_path), "sha256": cases_digest}
     return result
 
 
+@guarded_operation
 def combine_model_responses(cases_path: str | Path, response_paths: list[str | Path]) -> dict[str, Any]:
     """Curate exact-checked, approved train cases; never turn votes into labels.
 
@@ -360,10 +365,10 @@ def combine_model_responses(cases_path: str | Path, response_paths: list[str | P
     pass the reviewed expectations, and at least two distinct model labels are
     required. Unattributable invalid records block all candidate export.
     """
-    cases = _load_cases(cases_path)
+    cases, cases_digest = _load_cases(cases_path)
     records, invalid, inputs = _load_responses(response_paths)
     result = _evaluate(cases, records, invalid, inputs)
-    result["cases_input"] = {"path": str(cases_path), "sha256": sha256(Path(cases_path).read_bytes()).hexdigest()}
+    result["cases_input"] = {"path": str(cases_path), "sha256": cases_digest}
     models = {record["model_id"] for record in records}
     by_case: dict[str, list[dict[str, Any]]] = {}
     for row in result["results"]:

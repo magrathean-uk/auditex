@@ -1,0 +1,285 @@
+{
+  "description": "Constructed TargetedUsersCoverage v1 fixtures from the SS 2.1 interface section 8. Synthetic public test key bytes(range(32)) only, never a run default; no tenant data, no policy target literals.",
+  "addresses": [
+    "alice@example.invalid",
+    "bob@example.invalid"
+  ],
+  "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "fixture_hmac_sha256": "440e979a9184114e5d0376ee777b8c0ff444ca0db3a2242e01937331f494538a",
+  "harness": {
+    "accepted_domains": [],
+    "anti_phish_rules": [],
+    "atp_policy_rules": [],
+    "defender_license": true,
+    "protection_policy_rules": [],
+    "scuba_config": {
+      "SecuritySuite": {
+        "MS.SECURITYSUITE.2.1v1": {
+          "SensitiveUsers": [
+            "alice@example.invalid",
+            "bob@example.invalid"
+          ],
+          "TargetedUsersCoverageBinding": {
+            "input_count": 2,
+            "input_hmac_sha256": "440e979a9184114e5d0376ee777b8c0ff444ca0db3a2242e01937331f494538a"
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "case": "met_path",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "known",
+          "input_hmac_sha256": "440e979a9184114e5d0376ee777b8c0ff444ca0db3a2242e01937331f494538a",
+          "input_count": 2,
+          "protected_nonempty": true,
+          "missing_count": 0
+        }
+      },
+      "expected": {
+        "membership": "t",
+        "verdict": "met",
+        "cell": "default_qualifies"
+      }
+    },
+    {
+      "case": "missing_member",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "known",
+          "input_hmac_sha256": "440e979a9184114e5d0376ee777b8c0ff444ca0db3a2242e01937331f494538a",
+          "input_count": 2,
+          "protected_nonempty": true,
+          "missing_count": 1
+        }
+      },
+      "expected": {
+        "membership": "f",
+        "verdict": "not_met",
+        "cell": "no_qualifying_policy"
+      }
+    },
+    {
+      "case": "empty_list",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "known",
+          "input_hmac_sha256": "440e979a9184114e5d0376ee777b8c0ff444ca0db3a2242e01937331f494538a",
+          "input_count": 2,
+          "protected_nonempty": false,
+          "missing_count": 2
+        }
+      },
+      "expected": {
+        "membership": "f",
+        "verdict": "not_met",
+        "cell": "no_qualifying_policy"
+      }
+    },
+    {
+      "case": "unusable",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "unusable"
+        }
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "over_limit",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "over_limit"
+        }
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "not_collected",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "not_collected"
+        }
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "absent_summary",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine"
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "unknown_shape_nonobject",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": []
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "unknown_shape_version",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 2,
+          "state": "known"
+        }
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "unknown_shape_bad_invariant",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "known",
+          "input_hmac_sha256": "440e979a9184114e5d0376ee777b8c0ff444ca0db3a2242e01937331f494538a",
+          "input_count": 2,
+          "protected_nonempty": false,
+          "missing_count": 0
+        }
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "hmac_mismatch",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": true,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "known",
+          "input_hmac_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "input_count": 2,
+          "protected_nonempty": true,
+          "missing_count": 0
+        }
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_assessed",
+        "cell": "policy_field_unusable"
+      }
+    },
+    {
+      "case": "false_flag_with_unknown_membership",
+      "policy_row": {
+        "Identity": "Default",
+        "Name": "Default",
+        "IsDefault": true,
+        "Enabled": true,
+        "EnableTargetedUserProtection": false,
+        "TargetedUserProtectionAction": "Quarantine",
+        "TargetedUsersCoverage": {
+          "version": 1,
+          "state": "unusable"
+        }
+      },
+      "expected": {
+        "membership": "u",
+        "verdict": "not_met",
+        "cell": "no_qualifying_policy"
+      }
+    }
+  ]
+}

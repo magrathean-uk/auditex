@@ -7,6 +7,7 @@ owned by the dispatch boundary.
 from __future__ import annotations
 
 from .defender_cascade import _cover_custom, _join_key
+from .defender_targeted_users import BINDING_KEY, COVERAGE_KEY, binding_from_config, membership, membership_from_coverage
 from .helpers import PRESET_RE, _accepted, _cite, _cover, _licence_cell, _shape, _state
 from .record import EMPTY_SECTION, _A, _rec
 
@@ -43,20 +44,28 @@ def _all_c(cs):
     return "f" if "f" in cs else ("u" if "u" in cs else "t")
 
 
-def _phish_content(need, pol, cfg):
-    """Content conjuncts of one enabled anti-phish policy (everything except recipient coverage): t, f or u."""
+def _phish_content(need, pol, cfg, binding=None):
+    """Content conjuncts of one enabled anti-phish policy (everything except recipient coverage): t, f or u.
+
+    SS 2.1 membership comes from the policy's TargetedUsersCoverage when it carries one, checked against the private
+    binding (an invalid or unbound summary is u, never a literal fallback); otherwise from the literal list, as a
+    ScubaGear export or reference input supplies it. An explicit false flag or action stays decisive either way.
+    """
     if need == "org_domains":
         return _all_c([_tf(pol.get("EnableOrganizationDomainsProtection")), _action_class(pol.get("TargetedDomainProtectionAction"))])
     if need == "safety_tips":
         return _all_c([_tf(pol.get(k)) for k in SAFETY_TIPS])
     if need == "users":
-        flag, act, lst = _tf(pol.get("EnableTargetedUserProtection")), _action_class(pol.get("TargetedUserProtectionAction")), pol.get("TargetedUsersToProtect")
-        def norm(x):
-            return _email_of(x.strip().lower())
-    else:
-        flag, act, lst = _tf(pol.get("EnableTargetedDomainsProtection")), _action_class(pol.get("TargetedDomainProtectionAction")), pol.get("TargetedDomainsToProtect")
-        def norm(x):
-            return x.strip().lower() or None
+        flag, act = _tf(pol.get("EnableTargetedUserProtection")), _action_class(pol.get("TargetedUserProtectionAction"))
+        if COVERAGE_KEY in pol:
+            inc = membership_from_coverage(pol[COVERAGE_KEY], cfg, binding)
+        else:
+            inc = membership(pol.get("TargetedUsersToProtect"), cfg).value
+        return _all_c([flag, act, inc])
+    flag, act, lst = _tf(pol.get("EnableTargetedDomainsProtection")), _action_class(pol.get("TargetedDomainProtectionAction")), pol.get("TargetedDomainsToProtect")
+
+    def norm(x):
+        return x.strip().lower() or None
     if not isinstance(lst, list) or any(type(x) is not str for x in lst if x is not None):
         inc = "u"
     else:
@@ -101,7 +110,7 @@ def _phish_cfg(policy_id, sp, sections):
     return vals, bad
 
 
-def _phish_core(policy_id, sp, sections, cfg, cfg_bad):
+def _phish_core(policy_id, sp, sections, cfg, cfg_bad, binding=None):
     AD, POL, AR, PP = "accepted_domains", "anti_phish_policies", "anti_phish_rules", "protection_policy_rules"
 
     def A(code, text, cell, cited, **d):
@@ -209,7 +218,7 @@ def _phish_core(policy_id, sp, sections, cfg, cfg_bad):
                 reach = "q" if "q" in cl else ("u" if "u" in cl else ("x" if "x" in cl else "n"))
         if en is not True:
             reach = "u"
-        info.append((tier, p, reach, _phish_content(sp["need"], p, cfg)))
+        info.append((tier, p, reach, _phish_content(sp["need"], p, cfg, binding)))
     if sp["need"] == "safety_tips":
         # Rego (PresetRecipientsCovered): an enabled preset rule that covers all recipients is compliant, the preset policy is not inspected (or even required)
         for tier, rx, other in (("Strict", PRESET_RE[0], PRESET_RE[1]), ("Standard", PRESET_RE[1], PRESET_RE[0])):
@@ -260,7 +269,7 @@ def _phish(policy_id, sp, sections):
     out = _licence_cell(policy_id, sections, "defender_license")
     if out:
         return out
-    cfg, cfg_bad = None, False
+    cfg, cfg_bad, binding = None, False, None
     if sp.get("list_key") is not None:
         c0 = sections["scuba_config"]
         if c0 is not None and not isinstance(c0, dict):
@@ -284,7 +293,10 @@ def _phish(policy_id, sp, sections):
         if not cfg:
             return _A(policy_id, "data_unusable_config_entry", "Data unusable: an entry of the ScubaGear configuration list cannot be read exactly (not a string, an empty or ambiguous "
                       "name;email); the policy was not assessed.", "config_entry_unusable", ["scuba_config"])
-    return _phish_core(policy_id, sp, sections, cfg, cfg_bad)
+        if sp["need"] == "users" and isinstance(blk, dict):
+            # Private run-bundle config only: the verified SensitiveUsers count and manifest HMAC a summary must match.
+            binding = binding_from_config(blk.get(BINDING_KEY))
+    return _phish_core(policy_id, sp, sections, cfg, cfg_bad, binding)
 
 
 def phish_exists(policy_id: str, row: dict, sections: dict) -> dict:

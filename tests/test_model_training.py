@@ -435,7 +435,7 @@ def test_untrusted_membership_fields_raise_value_error(field: str) -> None:
 def test_duplicate_json_keys_are_rejected(tmp_path: Path) -> None:
     source = tmp_path / "bad.jsonl"
     source.write_text('{"id":"first","id":"second"}\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="duplicate JSON key"):
+    with pytest.raises(ValueError, match="invalid case JSON"):
         load_cases(source)
 
 

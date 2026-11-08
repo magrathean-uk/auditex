@@ -99,7 +99,7 @@ def json_size_bytes(value: Any) -> int:
 
 
 def write_metric_snapshot(path: str | Path, metrics: Mapping[str, Any]) -> Path:
+    from .private_io import write_private_text
     target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(dict(metrics), indent=2, default=str), encoding="utf-8")
+    write_private_text(target, json.dumps(dict(metrics), indent=2, default=str))
     return target

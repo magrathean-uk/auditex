@@ -16,6 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from azure_tenant_audit.external_sharing import annotate_enum_names
+from azure_tenant_audit.guarded_io import read_guarded_bytes
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.scuba_scope import ScopeOversize, scope_entries, scope_summary
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
@@ -189,8 +190,7 @@ def _canonical_uuid(value: Any) -> str | None:
 def load_export(path: str | Path) -> LoadedExport:
     """Strictly parse at most 64 MiB; one ScubaGear null-array repair is allowed."""
     try:
-        with Path(path).open("rb") as handle:
-            payload = handle.read(_MAX_EXPORT_BYTES + 1)
+        payload = read_guarded_bytes(path, field="input", max_bytes=_MAX_EXPORT_BYTES)
         if len(payload) > _MAX_EXPORT_BYTES:
             raise ValueError(_INVALID)
         text = payload.decode("utf-8-sig")
@@ -272,8 +272,7 @@ def load_export(path: str | Path) -> LoadedExport:
 def load_results(path: str | Path) -> tuple[Any, str]:
     """Read only the structural verdict fields of an optional local results file."""
     try:
-        with Path(path).open("rb") as handle:
-            payload = handle.read(_MAX_EXPORT_BYTES + 1)
+        payload = read_guarded_bytes(path, field="input", max_bytes=_MAX_EXPORT_BYTES)
         if len(payload) > _MAX_EXPORT_BYTES:
             raise ValueError(_INVALID)
         node = _parse(payload.decode("utf-8-sig"))
@@ -582,6 +581,12 @@ def project_export(loaded: LoadedExport, catalogue: dict[str, Any], *, redact: b
                             _user_entries(value)
                         except Unavailable:
                             users_ok = False
+                    # A provider export is literal evidence, never a producer of run-bound membership proofs.
+                    # Ignore reserved run-only keys without mutating the loaded source rows.
+                    if section == "anti_phish_policies" and isinstance(value, list):
+                        value = [{key: item for key, item in row.items()
+                                  if key not in {"TargetedUsersCoverage", "TargetedUsersCoverageBinding"}}
+                                 if isinstance(row, dict) else row for row in value]
                     # Serving copies a policy's read set; only privileged users need
                     # a capture copy because model redaction rewrites them in place.
                     if users_ok:

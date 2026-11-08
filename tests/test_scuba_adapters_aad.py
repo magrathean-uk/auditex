@@ -15,7 +15,9 @@ import pytest
 from auditex import scuba_adapters_aad as aad
 from auditex import scuba_projection as projection
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS
+from azure_tenant_audit.model_assessment import validate_explainer, value_rule_verdict
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.run_files import UnsafeRunFileError
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/scuba-adapters-aad"
@@ -578,9 +580,15 @@ def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
     assert [r for r in on["policies"] if r["policy_id"] != policy] == [
         r for r in off["policies"] if r["policy_id"] != policy]
     on_row, off_row = (next(r for r in result["policies"] if r["policy_id"] == policy) for result in (on, off))
-    answer_fields = {"claims", "limitations", "recommendations", "rule_precheck", "comparison"}
+    # The explainer is rendered from the rule answer, so it changes with the verdict like the other answer fields.
+    answer_fields = {"claims", "limitations", "recommendations", "rule_precheck", "comparison", "explainer"}
     assert {k: v for k, v in on_row.items() if k not in answer_fields} == {
         k: v for k, v in off_row.items() if k not in answer_fields}
+    assert value_rule_verdict(on_row) == "not_met"
+    assert value_rule_verdict(off_row) == "not_assessed"
+    assert on_row.get("explainer") != off_row.get("explainer")
+    if "explainer" in on_row:
+        validate_explainer(on_row, on_row["explainer"])  # selected explainer matches its changed rule verdict
     on_detail, off_detail = on_row["rule_precheck"], off_row["rule_precheck"]
     assert (on_detail["cell"], on_detail["reason_code"]) == (cell, reason_code)
     assert (off_detail["cell"], off_detail["reason_code"]) == (
@@ -745,6 +753,15 @@ def test_variant_never_bypasses_nonshape_failure(run, monkeypatch, section, reas
         raw[name]["partial" if reason == "qualifier_check" else reason] = True
         write(run, f"raw/{collector}.json", raw)
     monkeypatch.setitem(aad.RULE_VARIANTS, section, lambda b: pytest.fail("nonshape failure retried"))
+    if reason == "manifest_error":
+        # A required run manifest that is not a valid root-trusted document is a fixed refusal, not an
+        # optional omission that would surface as NOT_COLLECTED; the variant is never consulted.
+        with pytest.raises(UnsafeRunFileError):
+            projection.project_run(run)
+        monkeypatch.setattr(aad, "RULE_VARIANTS", {})
+        with pytest.raises(UnsafeRunFileError):
+            projection.project_run(run)
+        return
     enabled = projection.project_run(run)
     monkeypatch.setattr(aad, "RULE_VARIANTS", {})
     disabled = projection.project_run(run)

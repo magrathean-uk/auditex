@@ -9,7 +9,6 @@ import hmac
 import json
 import os
 import re
-import stat
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,20 +35,17 @@ def partner_domains_digest(domains: tuple[str, ...], key: bytes) -> str:
 
 def read_partner_domains_key(run_dir: str | Path) -> bytes:
     """Read the private raw key without following links or opening a special file."""
-    target = Path(run_dir) / KEY_PATH
+    key = None
     try:
-        if target.parent.is_symlink():
-            raise OSError
-        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        with os.fdopen(os.open(target, flags), "rb") as handle:
-            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                raise OSError
-            key = handle.read(33)
-        if len(key) != 32:
-            raise OSError
-        return key
+        from .guarded_io import guard_session
+        with guard_session() as context:
+            context.bind_run(run_dir)
+            key = context._partner_private_keys.get(context._absolute(run_dir))
     except OSError:
+        pass
+    if key is None:
         raise PartnerDomainsError("Unable to read the private partner-domains key.") from None
+    return key
 
 
 def verify_partner_domains(run_dir: str | Path) -> bool:
@@ -58,18 +54,10 @@ def verify_partner_domains(run_dir: str | Path) -> bool:
     This proves consistency with the manifest, not authenticity against a holder
     who can replace the manifest and both private files.
     """
-    run_dir = Path(run_dir)
     try:
-        key = read_partner_domains_key(run_dir)
-        supplied = load_partner_domains(run_dir / BUNDLE_PATH)
-        manifest = json.loads((run_dir / "run-manifest.json").read_text(encoding="utf-8"))
-        metadata = manifest["operator_inputs"]["partner_domains"]
-        digest = metadata["hmac_sha256"]
-        if (metadata["supplied"] is not True or type(metadata["count"]) is not int
-                or metadata["count"] != len(supplied.domains)
-                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
-            return False
-        return hmac.compare_digest(partner_domains_digest(supplied.domains, key), digest)
+        from .guarded_io import guard_session
+        with guard_session() as context:
+            return context.verified_partner_domains(run_dir) is not None
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -152,25 +140,8 @@ def _normalise(entry: str, line: int) -> str:
     return domain
 
 
-def load_partner_domains(path: str | Path | None = None) -> PartnerDomains:
-    """Open once, read only, before collection. An explicit path wins over the environment."""
-    selected = path if path is not None else (os.environ.get(ENV_VAR) or None)
-    if selected is None:
-        return PartnerDomains()
-    try:
-        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(Path(selected).expanduser(), flags)
-        with os.fdopen(fd, "rb") as handle:
-            info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise _error(1, "expected a regular file")
-            if info.st_size > MAX_BYTES:
-                raise _error(1, "file exceeds 256 KiB")
-            data = handle.read(MAX_BYTES + 1)
-    except PartnerDomainsError:
-        raise
-    except (OSError, ValueError, RuntimeError):
-        raise _error(1, "unable to read a regular local file") from None
+def parse_partner_domains(data: bytes) -> PartnerDomains:
+    """Validate captured input bytes without reopening the source."""
     if len(data) > MAX_BYTES:
         raise _error(1, "file exceeds 256 KiB")
     try:
@@ -187,3 +158,23 @@ def load_partner_domains(path: str | Path | None = None) -> PartnerDomains:
     if len(entries) > MAX_ENTRIES:
         raise _error(entries[MAX_ENTRIES][0], "too many entries (maximum 10000)")
     return PartnerDomains(tuple(sorted({_normalise(entry, line) for line, entry in entries})))
+
+
+def load_partner_domains(path: str | Path | None = None) -> PartnerDomains:
+    """Open once, read only, before collection. An explicit path wins over the environment."""
+    selected = path if path is not None else (os.environ.get(ENV_VAR) or None)
+    if selected is None:
+        return PartnerDomains()
+    if selected == "":
+        raise _error(1, "unable to read a regular local file")
+    try:
+        from .guarded_io import UnsafeRunFileError, read_guarded_bytes
+        data = read_guarded_bytes(selected, field="partner-domains", max_bytes=MAX_BYTES)
+    except UnsafeRunFileError as exc:
+        reason = {"type": "expected a regular file", "oversize": "file exceeds 256 KiB"}.get(
+            exc.reason, "unable to read a regular local file"
+        )
+        raise _error(1, reason) from None
+    except (OSError, ValueError, RuntimeError):
+        raise _error(1, "unable to read a regular local file") from None
+    return parse_partner_domains(data)

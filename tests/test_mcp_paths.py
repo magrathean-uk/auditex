@@ -136,10 +136,10 @@ def test_a_symlink_that_leaves_the_root_is_rejected(root: Path, tmp_path: Path) 
         confine_path("link")
 
 
-def test_a_symlink_inside_the_root_is_followed_and_accepted(root: Path) -> None:
+def test_a_symlink_inside_the_root_is_left_for_the_descriptor_guard(root: Path) -> None:
     (root / "real").mkdir()
     (root / "alias").symlink_to(root / "real")
-    assert confine_path("alias/x") == str(root / "real" / "x")
+    assert confine_path("alias/x") == str(root / "alias" / "x")
 
 
 def test_default_root_is_the_working_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

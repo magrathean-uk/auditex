@@ -350,6 +350,7 @@ A gate never reads missing evidence as "nothing found". Every run it reads must 
 | `code` | Meaning |
 | --- | --- |
 | `run_dir_missing`, `missing_manifest`, `unreadable_manifest` | The directory or `run-manifest.json` is missing, empty or not a JSON object. |
+| `unsafe_input` | A run argument cannot be admitted safely. The gate still returns blocked JSON and exit 2; its reason and stderr refusal contain no path or file content. |
 | `contract_invalid` | `validation.json` or the manifest does not record a valid contract, or recomputing it fails. `contract.issue_codes` lists the errors. |
 | `bundle_integrity_mismatch`, `bundle_integrity_invalid`, `bundle_integrity_absent` | An artifact no longer matches `bundle-hashes.json` (or a symbolic link, an unexpected file or a SQLite sidecar beside the evidence index sits in the run), the manifest cannot be read, or a bundle finalized under contract `2026-10-22` or later has none. `integrity` lists the paths. The manifest is unsigned: it stops accidental and naive edits, not someone who can re-hash (use `--expect-manifest-sha256`). |
 | `expected_manifest_sha256_mismatch`, `expected_manifest_sha256_invalid` | `--expect-manifest-sha256` was given and the run's `bundle-hashes.json` has another digest or is missing, or the value is not a SHA-256. `integrity` shows both digests. |
@@ -420,13 +421,14 @@ for supported exports, synthetic rehearsal files and control-mapping limits.
 
 ## AI assessment
 
-For an optional rule-only SCuBA assessment, `auditex model assess <run-dir>` applies
-value rules to all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
-SharePoint and Teams. A policy without a rule (none today) reports not assessed
+For an optional rule-only SCuBA assessment, `auditex model assess <run-dir>` has
+value rules for all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
+SharePoint and Teams. Rule availability does not guarantee a verdict: available evidence, the adapter and
+permissions determine whether a policy can be assessed. A policy without a rule reports not assessed
 (`rule_not_implemented`): "Not assessed: Auditex has no rule for this policy yet."
 The model layer is parked and never called by assessment; no endpoint or model name is required.
-An optional explainer for rule results remains planned and unimplemented. Findings are unchanged.
-See [AI assessment](ai-assessment.md) for coverage and output.
+Assessments can attach deterministic template explanations to supported rule results. JSON, Markdown and HTML reports show them when present; findings are unchanged.
+Each policy's status is in the run's `model_assessment.json`; see [AI assessment](ai-assessment.md#run-and-read-the-result) for coverage and output.
 `auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` remain available for
 [offline model development](model-development.md).
 

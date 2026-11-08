@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from copy import deepcopy
+from dataclasses import dataclass
 from hashlib import sha256
 import hmac
 import json
@@ -17,12 +18,19 @@ import stat
 from typing import Any
 
 from azure_tenant_audit.chunk_reader import _open_chunk
+from azure_tenant_audit.guarded_io import guarded_operation
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
 from azure_tenant_audit.model_assessment import collector_error_class, safe_projection_enum_value
 from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.run_files import MAX_RUN_FILE_BYTES, UnsafeRunFileError, read_run_file
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
+from azure_tenant_audit.value_rules.defender_targeted_users import (
+    BINDING_KEY,
+    COVERAGE_KEY,
+    SensitiveUsersBinding,
+    binding_view,
+)
 
 PROJECTION_VERSION = "2026-10-29"
 # The projection budget: the most items and canonical JSON characters one projected section may hold.
@@ -311,11 +319,50 @@ def _licence_refused(envelope: Any) -> bool:
             and not envelope.get("chunk_files") and envelope.get("item_count", 0) == 0)
 
 
+@dataclass(frozen=True, repr=False, eq=False)
+class PrivateSnapshot:
+    """One ``project_run``'s verified capture of the private SensitiveUsers pair, or why verification failed.
+
+    ``addresses`` and ``binding`` come from the same admitted capture, so SS 2.1's private configuration and the
+    anti-phish coverage check can never disagree. ``reason`` is ``None`` on success, else the closed
+    ``operator_input_required`` or ``oversize``. No repr; never serialised; never in a model view.
+    """
+
+    addresses: tuple[str, ...] = ()
+    binding: SensitiveUsersBinding | None = None
+    reason: str | None = "operator_input_required"
+
+
+def _capture_sensitive_users(root: Path) -> PrivateSnapshot:
+    """Verify once through the current admission context; the original source is never reopened."""
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError, guard_session
+
+    reason = "operator_input_required"
+    captured = None
+    try:
+        with guard_session() as context:
+            captured = context.verified_sensitive_users_binding(root)
+    except UnsafeRunFileError as exc:
+        if exc.reason == "oversize":
+            reason = "oversize"
+        captured = None
+    if not captured:
+        return PrivateSnapshot(reason=reason)
+    addresses, count, digest = captured
+    try:
+        binding = SensitiveUsersBinding(count, digest)
+    except ValueError:
+        return PrivateSnapshot()
+    return PrivateSnapshot(addresses, binding, None)
+
+
 class Bundle:
     def __init__(self, root: Path, scan_max_rows: int, scan_max_bytes: int, scan_max_chunks: int):
         self.root = root
         self.scan_max_rows, self.scan_max_bytes, self.scan_max_chunks = scan_max_rows, scan_max_bytes, scan_max_chunks
         self.manifest: dict[str, Any] = {}
+        # Run-scoped, so ``reset()`` keeps it: until ``project_run`` captures, nothing is verified (fail closed).
+        self.sensitive_users = PrivateSnapshot()
         self.reset()
 
     def reset(self) -> None:
@@ -1123,7 +1170,7 @@ def _tenant(bundle: Bundle, manifest: dict[str, Any]) -> Any:
 #   MS.EXO.1.1v2       null: no allowed forwarding domains, ScubaGear's default.
 #   MS.TEAMS.*         {"M365Environment": <environment>}.
 #   MS.SECURITYSUITE.* model views remain not collected (``operator_input_required``). Verified SensitiveUsers are
-#                      supplied to SS 2.1's private rule view only; SS 2.3 still requires a PartnerDomains input.
+#                      supplied to SS 2.1's private rule view; independently verified PartnerDomains feed SS 2.3.
 # Each model view passes the collected-section shape gate. Private operator views never enter that gate.
 SCUBA_CAP_EXCLUSION_POLICIES = frozenset({
     "MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.AAD.3.2v2", "MS.AAD.3.6v1", "MS.AAD.3.7v1",
@@ -1255,70 +1302,45 @@ def _break_glass(bundle: Bundle, manifest: dict[str, Any]) -> tuple[dict[str, li
 
 
 def _operator_config_views(*, sensitive_users: tuple[str, ...] | None = None,
-                           partner_domains: tuple[str, ...] | None = None) -> dict[str, Any]:
+                           partner_domains: tuple[str, ...] | None = None,
+                           sensitive_users_binding: SensitiveUsersBinding | None = None) -> dict[str, Any]:
     """Private rule configuration; neither list may enter model views or the shape gate.
 
-    PartnerDomains has no bundle loader yet. Keep its independent input slot so
-    supplying SensitiveUsers cannot accidentally enable SS 2.3 (or SS 3.2).
+    SensitiveUsers (SS 2.1) and PartnerDomains (SS 2.3) are separate slots, each fed
+    by its own verified snapshot, so supplying one never enables the other (or SS 3.2).
+    SS 2.1 also carries the same snapshot's binding (``TargetedUsersCoverageBinding``), which a policy's
+    TargetedUsersCoverage must match; it is validation input, not a model field.
     """
-    return {policy: {"SecuritySuite": {policy: {key: list(values)}}}
-            for policy, key, values in (
-                ("MS.SECURITYSUITE.2.1v1", "SensitiveUsers", sensitive_users),
-                ("MS.SECURITYSUITE.2.3v1", "PartnerDomains", partner_domains)) if values}
+    views = {policy: {"SecuritySuite": {policy: {key: list(values)}}}
+             for policy, key, values in (
+                 ("MS.SECURITYSUITE.2.1v1", "SensitiveUsers", sensitive_users),
+                 ("MS.SECURITYSUITE.2.3v1", "PartnerDomains", partner_domains)) if values}
+    if sensitive_users_binding is not None and "MS.SECURITYSUITE.2.1v1" in views:
+        block = views["MS.SECURITYSUITE.2.1v1"]["SecuritySuite"]["MS.SECURITYSUITE.2.1v1"]
+        block[BINDING_KEY] = binding_view(sensitive_users_binding)
+    return views
 
 
-def _sensitive_users_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
-    """Read only the bounded private files; emit only existing closed outcomes.
+def _private_list_for_rules(root: Path, kind: str) -> tuple[str, ...]:
+    """Use the private pair captured and verified by the current admission context."""
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError, guard_session
 
-    Read through a no-follow directory descriptor, then validate the captured
-    bytes against the captured key and manifest. No input text, path, key or
-    digest enters diagnostics.
-    """
-    from azure_tenant_audit.sensitive_users import (
-        MAX_BYTES, MAX_ENTRIES, parse_sensitive_users, sensitive_users_digest,
-    )
-
+    reason = "operator_input_required"
     try:
-        metadata = manifest["operator_inputs"]["sensitive_users"]
-        if (not isinstance(metadata, dict) or set(metadata) != {"supplied", "count", "hmac_sha256"}
-                or metadata.get("supplied") is not True
-                or type(metadata.get("count")) is not int or not 0 < metadata["count"] <= MAX_ENTRIES
-                or not isinstance(metadata.get("hmac_sha256"), str)
-                or not re.fullmatch(r"[0-9a-f]{64}", metadata["hmac_sha256"])):
-            raise Unavailable("operator_input_required")
-        flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
-        directory = os.open(root / "operator-inputs", flags | os.O_DIRECTORY)
-        try:
-            def read(name: str, bound: int) -> bytes:
-                with os.fdopen(os.open(name, flags, dir_fd=directory), "rb") as handle:
-                    info = os.fstat(handle.fileno())
-                    if not stat.S_ISREG(info.st_mode):
-                        raise Unavailable("operator_input_required")
-                    if info.st_size > bound:
-                        raise Unavailable("oversize" if name.endswith(".txt") else "operator_input_required")
-                    data = handle.read(bound + 1)
-                    if len(data) > bound:
-                        raise Unavailable("oversize" if name.endswith(".txt") else "operator_input_required")
-                    return data
+        with guard_session() as context:
+            values = (context.verified_sensitive_users(root) if kind == "sensitive_users"
+                      else context.verified_partner_domains(root))
+    except UnsafeRunFileError as exc:
+        if exc.reason == "oversize":
+            reason = "oversize"
+        values = None
+    if not values:
+        raise Unavailable(reason) from None
+    return values
 
-            data = read("sensitive-users.txt", MAX_BYTES)
-            key = read("sensitive-users.key", 32)
-        finally:
-            os.close(directory)
-        # Count physical lines first to retain the existing oversize outcome.
-        if len(data.decode("utf-8").removesuffix("\n").split("\n")) > MAX_ENTRIES:
-            raise Unavailable("oversize")
-        addresses = parse_sensitive_users(data).addresses
-        # The bundle copy must be exactly the canonical list with a final newline.
-        if (data != ("\n".join(addresses) + "\n").encode("utf-8")
-                or len(addresses) != metadata["count"]
-                or not hmac.compare_digest(sensitive_users_digest(addresses, key), metadata["hmac_sha256"])):
-            raise Unavailable("operator_input_required")
-        return addresses
-    except Unavailable:
-        raise
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
-        raise Unavailable("operator_input_required") from None
+
+def _partner_domains_for_rules(root: Path, manifest: dict[str, Any]) -> tuple[str, ...]:
+    return _private_list_for_rules(root, "partner_domains")
 
 
 def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str, Any],
@@ -1369,13 +1391,20 @@ def _scuba_config(bundle: Bundle, manifest: dict[str, Any], catalogue: dict[str,
             views[policy_id] = view
             outcomes[policy_id] = "projected"
     rule_views = dict(views)
-    try:
-        private = _operator_config_views(sensitive_users=_sensitive_users_for_rules(bundle.root, manifest))
-    except Unavailable as exc:
-        outcomes["MS.SECURITYSUITE.2.1v1"] = exc.reason
+    loaded: dict[str, tuple[str, ...]] = {}
+    # SS 2.1 uses the run's single verified capture (also behind the anti-phish coverage check), never a reread.
+    snapshot = bundle.sensitive_users
+    if snapshot.binding is not None and snapshot.addresses:
+        loaded["sensitive_users"] = snapshot.addresses
     else:
-        rule_views.update(private)
-        outcomes.update({policy: "projected" for policy in private})
+        outcomes["MS.SECURITYSUITE.2.1v1"] = snapshot.reason or "operator_input_required"
+    try:
+        loaded["partner_domains"] = _partner_domains_for_rules(bundle.root, manifest)
+    except Unavailable as exc:
+        outcomes["MS.SECURITYSUITE.2.3v1"] = exc.reason
+    private = _operator_config_views(**loaded, sensitive_users_binding=snapshot.binding)
+    rule_views.update(private)
+    outcomes.update({policy: "projected" for policy in private})
     synthesis = {"source": SCUBA_CONFIG_SOURCE, "basis": "scubagear_default_config",
                  "m365_environment": {"value": environment, "basis": environment_basis},
                  "break_glass": break_glass_summary, "policies": outcomes}
@@ -1532,6 +1561,7 @@ def _redact(projection: Projection, salt: str, enabled: bool) -> dict[str, Any]:
     return {"enabled": enabled, "strategy": "run-salted-sha256-v1", **counts}
 
 
+@guarded_operation
 def project_run(run_dir: str | Path, *, redact: bool = True,
                 max_items: int = DEFAULT_MAX_ITEMS, max_chars: int = DEFAULT_MAX_CHARS,
                 scan_max_rows: int = DEFAULT_SCAN_MAX_ROWS, scan_max_bytes: int = DEFAULT_SCAN_MAX_BYTES,
@@ -1547,7 +1577,7 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
               "scan_max_bytes": scan_max_bytes, "scan_max_chunks": scan_max_chunks}
     if any(type(value) is not int or value < 1 for value in bounds.values()):
         raise ValueError("Projection bounds must be positive integers")
-    bundle = Bundle(Path(run_dir).resolve(), scan_max_rows, scan_max_bytes, scan_max_chunks)
+    bundle = Bundle(Path(os.path.abspath(run_dir)), scan_max_rows, scan_max_bytes, scan_max_chunks)
     manifest_error: Unavailable | None = None
     try:
         manifest = bundle.read("run-manifest.json")
@@ -1610,6 +1640,10 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             raise RuntimeError(f"Area adapter module {name!r} has duplicate adapter keys: {sorted(collisions)}")
         adapters.update(area_adapters)
         registered_sections.update(area_adapters)
+    if manifest_error is None and manifest and manifest.get("platform", "m365") == "m365":
+        # One verified capture per run, before any section adapter, kept across ``Bundle.reset()`` (a failure too),
+        # so SS 2.1's private config and the anti-phish coverage check agree whatever the section order.
+        bundle.sensitive_users = _capture_sensitive_users(bundle.root)
     for section in sections:
         bundle.reset()
         try:
@@ -1650,6 +1684,10 @@ def project_run(run_dir: str | Path, *, redact: bool = True,
             if section == "scuba_config":
                 for policy_id, view in rule_views.items():
                     result.rule_views.setdefault(policy_id, {})[section] = view
+            if section == "anti_phish_policies":
+                # TargetedUsersCoverage is private SS 2.1 rule evidence. The model value is a fresh copy without it,
+                # made before the shape gate, budgets, redaction and cases, so the private row is never aliased.
+                value = [deepcopy({k: v for k, v in row.items() if k != COVERAGE_KEY}) for row in value]
             if section in {"dmarc_records", "spf_records", "dkim_records"}:
                 # Resolver diagnostics are rule-only, as on the export path's pre-prune capture.
                 value = [{k: v for k, v in row.items() if k != "log"} for row in value]

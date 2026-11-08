@@ -122,7 +122,7 @@ def test_regular_file_only_and_read_once(tmp_path, monkeypatch):
     original = os.open
 
     def open_spy(name, flags, *args, **kwargs):
-        if Path(name) == path:
+        if str(name) == path.name and kwargs.get("dir_fd") is not None:
             opened.append(flags)
         return original(name, flags, *args, **kwargs)
 
@@ -461,9 +461,12 @@ def test_canaries_stay_only_in_private_copy(tmp_path, monkeypatch, capsys, caplo
     original = os.open
 
     def spy(name, flags, *args, **kwargs):
-        if Path(name) == path:
+        fd = original(name, flags, *args, **kwargs)
+        info = os.fstat(fd)
+        target = path.stat()
+        if (info.st_dev, info.st_ino) == (target.st_dev, target.st_ino):
             opened.append(flags)
-        return original(name, flags, *args, **kwargs)
+        return fd
 
     monkeypatch.setattr(os, "open", spy)
     argv = ["--offline", "--sample", SAMPLE, "--out", str(tmp_path / "runs"),
@@ -644,6 +647,7 @@ def test_verification_rejects_tamper(tmp_path, tamper):
 
 @pytest.mark.parametrize("damage", ["missing", "short", "symlink", "fifo"])
 def test_resume_never_silently_replaces_unusable_key(tmp_path, damage):
+    from azure_tenant_audit.guarded_io import UnsafeRunFileError
     from azure_tenant_audit.output import AuditWriter
 
     writer = AuditWriter(tmp_path, "test", "resume-key")
@@ -657,8 +661,8 @@ def test_resume_never_silently_replaces_unusable_key(tmp_path, damage):
         key_file.symlink_to(writer.run_dir / BUNDLE_PATH)
     elif damage == "fifo":
         os.mkfifo(key_file)
-    resumed = AuditWriter(tmp_path, "test", run_dir=writer.run_dir)
-    with pytest.raises(PartnerDomainsError):
+    with pytest.raises((UnsafeRunFileError, PartnerDomainsError)):
+        resumed = AuditWriter(tmp_path, "test", run_dir=writer.run_dir)
         resumed.write_partner_domains(PartnerDomains(CANARIES[:1]))
     assert (writer.run_dir / BUNDLE_PATH).read_text() == "\n".join(CANARIES) + "\n"
     assert not verify_partner_domains(writer.run_dir)
@@ -817,6 +821,84 @@ def test_inputs_use_separate_keys_and_clear_independently(tmp_path, clear_first)
     writer.write_sensitive_users(SensitiveUsers())
     writer.write_partner_domains(PartnerDomains())
     assert not (writer.run_dir / "operator-inputs/.gitignore").exists()
+
+
+@pytest.mark.parametrize("member", ["partner-domains.key", "partner-domains.txt"])
+@pytest.mark.parametrize("reader", ["run", "standalone", "selected-alias"])
+def test_partner_pair_identity_is_refused_by_guarded_readers(tmp_path, monkeypatch, member, reader):
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError, open_guarded_file
+    from azure_tenant_audit.run_files import read_run_file
+    from support import RunBundleBuilder
+
+    run = RunBundleBuilder(tmp_path).summary_md().manifest(
+        operator_inputs={"partner_domains": PartnerDomains(CANARIES).manifest(KEY_CANARY)},
+    ).build()
+    private = run / "operator-inputs"
+    private.mkdir(mode=0o700)
+    (private / "partner-domains.key").write_bytes(KEY_CANARY)
+    (private / "partner-domains.txt").write_text("\n".join(CANARIES) + "\n")
+    source = private / member
+    with GuardContext() as context:
+        context.bind_run(run)
+        if reader == "selected-alias":
+            original_open = os.open
+            private_fd = original_open(source, os.O_RDONLY)
+
+            def open_selected(name, flags, *args, **kwargs):
+                if str(name) == "summary.md":
+                    return os.dup(private_fd)
+                return original_open(name, flags, *args, **kwargs)
+
+            monkeypatch.setattr(os, "open", open_selected)
+        try:
+            with pytest.raises(UnsafeRunFileError):
+                if reader == "run":
+                    read_run_file(run, "operator-inputs/" + member)
+                else:
+                    selected = source if reader == "standalone" else run / "summary.md"
+                    with open_guarded_file(selected, field="input", context=context):
+                        pytest.fail("a private partner-domain identity was admitted")
+        finally:
+            if reader == "selected-alias":
+                os.close(private_fd)
+
+
+@pytest.mark.parametrize("damage", ["missing-key", "missing-list", "bad-hmac"])
+def test_partner_pair_must_match_its_manifest_before_admission(tmp_path, damage):
+    from azure_tenant_audit.guarded_io import GuardContext, UnsafeRunFileError
+    from support import RunBundleBuilder
+
+    metadata = PartnerDomains(CANARIES).manifest(KEY_CANARY)
+    if damage == "bad-hmac":
+        metadata["hmac_sha256"] = "0" * 64
+    run = RunBundleBuilder(tmp_path).manifest(operator_inputs={"partner_domains": metadata}).build()
+    private = run / "operator-inputs"
+    private.mkdir(mode=0o700)
+    if damage != "missing-key":
+        (private / "partner-domains.key").write_bytes(KEY_CANARY)
+    if damage != "missing-list":
+        (private / "partner-domains.txt").write_text("\n".join(CANARIES) + "\n")
+    with GuardContext() as context, pytest.raises(UnsafeRunFileError):
+        context.bind_run(run)
+
+
+def test_clearing_users_keeps_partner_files_ignored_by_git(tmp_path):
+    import subprocess
+    from azure_tenant_audit.output import AuditWriter
+    from azure_tenant_audit.sensitive_users import SensitiveUsers
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    writer = AuditWriter(repo, "test", "both")
+    writer.write_sensitive_users(SensitiveUsers(("constructed-user@example.invalid",)))
+    writer.write_partner_domains(PartnerDomains(CANARIES))
+    writer.write_bundle({"collectors": [], "overall_status": "ok"})
+    writer.write_sensitive_users(SensitiveUsers())
+    for path in (BUNDLE_PATH, KEY_PATH):
+        relative = (writer.run_dir / path).relative_to(repo)
+        assert subprocess.run(["git", "check-ignore", "--no-index", "-q", str(relative)], cwd=repo).returncode == 0
+    assert (writer.run_dir / "operator-inputs/.gitignore").read_text() == "*\n"
 
 
 @pytest.fixture

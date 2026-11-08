@@ -818,4 +818,5 @@ def run_live_probe(cfg: ProbeConfig) -> int:
         auth_path=auth_path,
         session_context=session_context,
         lab_guard_state=lab_guard_state,
+        coverage_rows=coverage_rows,
     )

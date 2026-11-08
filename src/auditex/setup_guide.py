@@ -600,8 +600,10 @@ def _google_command(
 
 
 def _load_permission_hints(path: str | Path) -> dict[str, Any]:
+    from azure_tenant_audit.resources import read_selected_resource
+
     try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        payload = json.loads(read_selected_resource(path, default="configs/collector-permissions.json", field="permission-hints"))
     except FileNotFoundError:
         return {}
     if not isinstance(payload, dict):

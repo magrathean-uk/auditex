@@ -109,8 +109,8 @@ Sealed outputs cannot be replaced. Findings and sealed artefacts stay unchanged.
 
 Legacy endpoint, model, redaction and shadow flags, all `AUDITEX_MODEL_*` configuration and
 `AUDITEX_DISABLE_VALUE_RULES` are ignored with one evidence-free warning per invocation. Redaction stays
-enabled and rules stay enabled. All 102 catalogue policies have value rules; a policy without one (none
-today) would return `rule_not_implemented` with the constant text
+enabled and rules stay enabled. All 102 catalogue policies have value rules, but available evidence, the adapter
+and permissions determine whether a policy can be assessed. A policy without a rule would return `rule_not_implemented` with the constant text
 "Not assessed: Auditex has no rule for this policy yet."
 
 The model client/configuration, prompt builders, catalogue and offline tools remain parked for development.

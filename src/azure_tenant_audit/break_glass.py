@@ -90,17 +90,24 @@ def parse_accounts(value: str | Iterable[str] | None) -> list[str]:
 def load_accounts_argument(value: str | Sequence[str] | None) -> list[str]:
     """The ``--break-glass-accounts`` value: a list, or ``@path`` for a file with one entry per line.
 
-    Raises ``OSError`` for a file that cannot be read and ``UnicodeError`` for one that is not UTF-8
-    text, so a run can stop before any tenant call.
+    Raises ``OSError`` for a file that cannot be admitted or read. Invalid UTF-8 is a fixed,
+    path-free ``UnsafeRunFileError``, so a run stops before any tenant call.
     """
     if value is None:
         return []
     if not isinstance(value, str):
         return parse_accounts(list(value))
-    text = value.strip()
-    if text.startswith("@"):
-        return parse_accounts(Path(text[1:]).expanduser().read_text(encoding="utf-8"))
-    return parse_accounts(text)
+    if value.startswith("@"):
+        from .guarded_io import UnsafeRunFileError, read_guarded_bytes
+        invalid = False
+        try:
+            text = read_guarded_bytes(value[1:], field="break-glass-accounts").decode("utf-8")
+        except UnicodeError:
+            invalid = True
+        if invalid:
+            raise UnsafeRunFileError("break-glass-accounts") from None
+        return parse_accounts(text)
+    return parse_accounts(value.strip())
 
 
 def configured_accounts(explicit: Sequence[str] | None = None) -> list[str]:

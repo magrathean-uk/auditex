@@ -110,19 +110,27 @@ def load_waivers(path: Path | None, *, warn: bool = True) -> list[dict[str, Any]
     """
     if path is None:
         return []
+    from .guarded_io import UnsafeRunFileError, read_guarded_bytes
+    missing = invalid = False
     try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise WaiverFileError(f"waiver file not found: {path}") from exc
-    except (OSError, ValueError) as exc:
-        raise WaiverFileError(f"waiver file {path} is unreadable or not valid JSON: {exc}") from exc
+        payload = json.loads(read_guarded_bytes(path, field="waiver-file").decode("utf-8"))
+    except UnsafeRunFileError:
+        raise
+    except FileNotFoundError:
+        missing = True
+    except (OSError, ValueError):
+        invalid = True
+    if missing:
+        raise WaiverFileError("waiver file not found") from None
+    if invalid:
+        raise WaiverFileError("waiver file is unreadable or not valid JSON") from None
 
     rows = payload.get("waivers") if isinstance(payload, Mapping) else payload
     if not isinstance(rows, list):
-        raise WaiverFileError(f"waiver file {path} must be a JSON list or an object with a 'waivers' list")
+        raise WaiverFileError("waiver file must be a JSON list or an object with a 'waivers' list")
     errors = validate_waiver_rows(rows)
     if errors:
-        raise WaiverFileError(f"waiver file {path} is invalid: " + "; ".join(errors))
+        raise WaiverFileError("waiver file is invalid: " + "; ".join(errors))
     loaded = [dict(row) for row in rows]
     if warn:
         for message in waiver_warnings(loaded):

@@ -16,6 +16,17 @@ def _listing(cmdlet: str, props: tuple[str, ...], *, allow_empty: bool = True) -
     return f",@({command})" if allow_empty else command
 
 
+# TargetedUsersToProtect is read for SS 2.1 but never kept: the PowerShell adapter treats this command as sensitive
+# and rebuilds each row from the other fields plus a TargetedUsersCoverage summary before anything is logged or
+# returned (collectors/targeted_users_coverage.py).
+ANTI_PHISH_POLICY_FIELDS = (
+    "Identity", "Name", "IsDefault", "Enabled", "EnableTargetedUserProtection", "TargetedUserProtectionAction",
+    "TargetedUsersToProtect", "EnableOrganizationDomainsProtection", "TargetedDomainProtectionAction",
+    "EnableTargetedDomainsProtection", "TargetedDomainsToProtect", "EnableFirstContactSafetyTips",
+    "EnableSimilarUsersSafetyTips", "EnableSimilarDomainsSafetyTips", "EnableUnusualCharactersSafetyTips",
+    "EnableViaTag", "EnableUnauthenticatedSender",
+)
+
 DEFENDER_COMMANDS: list[tuple[str, str]] = [
     ("eopProtectionPolicyRules", _listing("Get-EOPProtectionPolicyRule", ("Identity", "State", *RULE_SCOPE))),
     ("atpProtectionPolicyRules", _listing("Get-ATPProtectionPolicyRule", ("Identity", "State", *RULE_SCOPE))),
@@ -30,12 +41,7 @@ DEFENDER_COMMANDS: list[tuple[str, str]] = [
     ("safeAttachmentRules", _listing("Get-SafeAttachmentRule", (
         "Identity", "State", "Priority", "SafeAttachmentPolicy", *RULE_SCOPE,
     ))),
-    ("antiPhishPolicies", _listing("Get-AntiPhishPolicy", (
-        "Identity", "Name", "IsDefault", "Enabled", "EnableTargetedUserProtection", "TargetedUserProtectionAction",
-        "EnableOrganizationDomainsProtection", "TargetedDomainProtectionAction", "EnableTargetedDomainsProtection",
-        "TargetedDomainsToProtect", "EnableFirstContactSafetyTips", "EnableSimilarUsersSafetyTips",
-        "EnableSimilarDomainsSafetyTips", "EnableUnusualCharactersSafetyTips", "EnableViaTag", "EnableUnauthenticatedSender",
-    ), allow_empty=False)),
+    ("antiPhishPolicies", _listing("Get-AntiPhishPolicy", ANTI_PHISH_POLICY_FIELDS, allow_empty=False)),
     ("antiPhishRules", _listing("Get-AntiPhishRule", ("Identity", "State", "AntiPhishPolicy", *RULE_SCOPE))),
     ("hostedContentFilterPolicies", _listing("Get-HostedContentFilterPolicy", (
         "Identity", "IsDefault", "RecommendedPolicyType", "SpamAction", "HighConfidenceSpamAction",

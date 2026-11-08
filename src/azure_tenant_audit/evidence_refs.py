@@ -52,8 +52,10 @@ _CHUNK = 1024 * 1024
 
 def file_sha256(path: str | Path) -> str:
     """SHA-256 of a file, streamed. Raises ``OSError`` when the file cannot be read."""
+    from .guarded_io import guard_session, open_pinned_binary
+
     digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
+    with guard_session() as context, open_pinned_binary(path, field="evidence", context=context) as handle:
         for chunk in iter(lambda: handle.read(_CHUNK), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -61,19 +63,19 @@ def file_sha256(path: str | Path) -> str:
 
 def confined_file(run_dir: str | Path, relative: Any) -> tuple[Path | None, str | None]:
     """The regular file ``relative`` names inside ``run_dir``, or ``(None, reason)``."""
-    text = str(relative or "").strip().replace("\\", "/")
+    from .guarded_io import guard_session, open_pinned_binary
+
+    text = relative if isinstance(relative, str) else ""
     if not text:
         return None, REASON_ARTIFACT_MISSING
     candidate = PurePosixPath(text)
-    if candidate.is_absolute() or ".." in candidate.parts:
+    if candidate.is_absolute() or ".." in candidate.parts or "\\" in text:
         return None, REASON_OUTSIDE_RUN
-    root = Path(os.path.realpath(run_dir))
-    path = Path(os.path.realpath(root / candidate.as_posix()))
+    path = Path(run_dir) / candidate.as_posix()
     try:
-        path.relative_to(root)
-    except ValueError:
-        return None, REASON_OUTSIDE_RUN
-    if not path.is_file():
+        with guard_session() as context, open_pinned_binary(path, field="evidence", context=context):
+            pass
+    except FileNotFoundError:
         return None, REASON_ARTIFACT_MISSING
     return path, None
 
@@ -207,9 +209,9 @@ class EvidenceIndex:
     def _resolve_artifact(
         self, artifact: str, items: dict[tuple[str, str, str, int | None], Mapping[str, Any]]
     ) -> None:
-        text = str(artifact or "").strip().replace("\\", "/")
+        text = artifact if isinstance(artifact, str) else ""
         relative = PurePosixPath(text)
-        reason = REASON_ARTIFACT_MISSING if not text else REASON_OUTSIDE_RUN if relative.is_absolute() or ".." in relative.parts else None
+        reason = REASON_ARTIFACT_MISSING if not text else REASON_OUTSIDE_RUN if relative.is_absolute() or ".." in relative.parts or "\\" in text else None
         if reason:
             for signature in items:
                 self._results[signature] = RefResolution(False, reason)

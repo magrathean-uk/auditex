@@ -287,16 +287,18 @@ def import_assessment(source: str, input_path: str | Path, tenant_id: str | None
     if source not in SOURCES:
         raise ValueError(f"unsupported assessment source: {source}")
     path = Path(input_path)
-    if path.stat().st_size > 64 * 1024 * 1024:
-        raise ValueError("external assessment exceeds 64 MiB")
-    raw = path.read_bytes()
+    from azure_tenant_audit.guarded_io import read_guarded_bytes
+    raw = read_guarded_bytes(path, field="input", max_bytes=64 * 1024 * 1024)
     if len(raw) > 64 * 1024 * 1024:
         raise ValueError("external assessment exceeds 64 MiB")
+    invalid = False
     try:
         # json.loads recognizes PowerShell UTF-8/UTF-16 BOMs as well as UTF-8.
         payload = json.loads(raw, object_pairs_hook=_pairs, parse_constant=_invalid_constant)
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
-        raise ValueError("input must be a valid JSON assessment") from exc
+    except (UnicodeError, json.JSONDecodeError, RecursionError):
+        invalid = True
+    if invalid:
+        raise ValueError("input must be a valid JSON assessment") from None
     digest = hashlib.sha256(raw).hexdigest()
     parser = {"maester": _maester, "scubagear": _scubagear, "monkey365": _monkey365}[source]
     checks, identities, version, timestamp = parser(payload, digest)

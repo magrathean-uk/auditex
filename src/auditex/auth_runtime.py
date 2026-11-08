@@ -471,12 +471,8 @@ def summarize_auth_context(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_permission_hints(path: Path) -> dict[str, dict[str, Any]]:
-    path = resolve_resource_path(path)
-    payload = _load_json(path, default={})
-    hints = payload.get("collector_permissions") if isinstance(payload, dict) else {}
-    if not isinstance(hints, dict):
-        return {}
-    return {str(key): dict(value) if isinstance(value, dict) else {} for key, value in hints.items()}
+    from azure_tenant_audit.diagnostics import load_permission_hints as load_hints
+    return load_hints(path)
 
 
 def available_permissions(token_claims: dict[str, Any]) -> set[str]:
