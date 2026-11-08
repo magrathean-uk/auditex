@@ -18,7 +18,7 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 - [ ] Secrets scan passes: `gitleaks dir . --no-banner --redact`
 - [ ] Release check passes end to end, including archive and wheel check, rule-pack drift and taint scan: `make release-check`
 - [x] The release archive and dist steps work with `TMPDIR` unset and set: `env -u TMPDIR make release-archive dist && make release-archive dist` (evidence: merge.sh verify for M00-T02 passed incl. wheel and sdist check, squash bb50c0a; REV-M00-T02 approve at 836261c)
-- [ ] Dependency audit over the base install and every declared extra (`mcp`, `test`, `google`, `model_train` and any development extra) exits 0, and every ignored advisory has a G-approved `.plan/DECISIONS.md` entry: `make audit-deps`
+- [x] Dependency audit over the base install and every declared extra (`mcp`, `test`, `google`, `model_train` and any development extra) exits 0, and every ignored advisory has a G-approved `.plan/DECISIONS.md` entry: `make audit-deps` (evidence: merge.sh verify for M00-T03 ran make audit-deps and passed, no known vulnerabilities, no ignored advisories; REV-M00-T03 Codex approve at 0722e93)
 - [x] Wheel and sdist each pass the base, Google and MCP release smoke, and two clean builds of the same commit give a byte-identical wheel and a member-identical sdist: `make dist && bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke" && .venv/bin/python scripts/check-reproducible-build.py` (evidence: merge.sh verify for M00-T05 ran this command and passed, squash f0ae2a7; REV-M00-T05 sol approve at 00afb73)
 - [x] Review: sol confirms the ARCHITECTURE.md ownership map matches the repository (every tracked non-test path in exactly one module) `git ls-tree -r --name-only HEAD` (evidence: .plan/work/PLAN-v2/evidence.md, ownership map re-run at 3122ac5 after the revision: 0 unmatched, 0 in two modules)
 - [x] Review: terra has spot-checked the M00-T04 branch triage, and every `needed-for-1.3.0` row carries a disposition (a landed task id, or a deferral with its DECISIONS.md id): `grep -q '^spot-check: pass' .plan/work/M00-T04/result.md && ! grep -n -E '\| needed-for-1\.3\.0 \| open \|' .plan/work/M00-T04/result.md` (evidence: M00-T04-check spot-check pass; wt/docs-rules-and-scan-limits disposition M02-T02; command passed 8 Nov 2026)
@@ -28,7 +28,7 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 |---|---|---|---|---|---|
 | M00-T01 | Re-run the gate suite on main after the foundation merges | luna | S | - | todo |
 | M00-T02 | Make the release archive and dist build TMPDIR-safe make targets | codex | S | mechanical | done |
-| M00-T03 | Add a dependency audit over the base install and every extra | codex | M | - | todo |
+| M00-T03 | Add a dependency audit over the base install and every extra | codex | M | - | done |
 | M00-T04 | Triage unmerged wt branches for 1.3.0 content | luna | M | - | done |
 | M00-T05 | Extend the release smoke to the sdist and add a reproducible-build check | codex | M | - | done |
 

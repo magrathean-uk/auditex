@@ -1,0 +1,3 @@
+--task M01-T03 --role sol --template terra-implement --branch --slug http-allowlist --tags debug --var TITLE="Enforce the frozen HTTP allow-list with a test" --var MILESTONE=.plan/milestones/M01-boundary-proof.md --var FILES="tests/test_http_verb_allowlist.py, src/azure_tenant_audit/graph.py (comment only unless a guard gap is found), tests/test_read_guard.py" --var REVIEW=.plan/work/REV-M01-T03/result.md
+--task REV-M01-T04 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M01-T04-read-boundaries --tags debug --var TASK=M01-T04 --var MILESTONE=.plan/milestones/M01-boundary-proof.md --var BRANCH=task/M01-T04-read-boundaries --var BASE=main
+--task M01-FU --role terra --brief .plan/work/M01-FU/request.md --readonly
