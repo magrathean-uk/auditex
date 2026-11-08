@@ -1,13 +1,15 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 66% (was 52%)
-milestone: M01-boundary-proof 86%
+overall: 70% (was 66%)
+milestone: M03-release-1-3-0 0%
 plan_version: v2
 release_scope: 1.3.0 from the accepted line (main contains origin/main 82d7ca5) - reproducible local gates, test-proven transport, read and secret boundaries, accurate docs, release notes with the D6 limit, signed v1.3.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 19c7ea7 2026-11-08T16:58:05Z
+last_checkpoint: 670782c 2026-11-08T17:08:15Z
 
 ## Next tasks
-- M01-T09 Add fields masks to alerts.list and groups.get (G8, G9) (codex)
+- M03-T01 Write the 1.3.0 release notes and bump the version (terra)
+- M03-T02 Run the acceptance suites on the release commit (luna)
+- M03-T03 Build, smoke-test and hash the release artefacts (luna)
 
 ## Blockers
 - none

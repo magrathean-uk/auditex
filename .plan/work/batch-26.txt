@@ -1,0 +1,2 @@
+--task REV-M01-T09 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M01-T09-alerts-groups-masks --tags debug --var TASK=M01-T09 --var MILESTONE=.plan/milestones/M01-boundary-proof.md --var BRANCH=task/M01-T09-alerts-groups-masks --var BASE=main
+--task REV-M00-T07 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M00-T07-smoke-python --tags debug --var TASK=M00-T07 --var MILESTONE=.plan/milestones/M00-foundation.md --var BRANCH=task/M00-T07-smoke-python --var BASE=main

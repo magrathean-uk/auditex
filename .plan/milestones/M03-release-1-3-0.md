@@ -2,7 +2,7 @@
 id: M03
 name: release-1-3-0
 weight: 30
-status: planned
+status: active
 ---
 # M03 release-1-3-0
 Three stages in order: the pre-publication gate (DoD items 1-7), G's explicit yes naming 1.3.0 (item 8, D9), then publication and close-out (items 9-11). Tagging and publishing are reserved actions; the integrator does them, nobody else pushes.

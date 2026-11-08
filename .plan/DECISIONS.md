@@ -126,3 +126,12 @@
 - why: each ticked item's own command passed; the smoke item was already proved in the M00-T05 merge gate and M00-T07 hardens it.
 - consequences: M00 closes when M00-T07 merges and its retro runs.
 - approver: auto
+
+## DEC-015 Bundle contract version bumped for 1.3.0
+- date: 2026-11-08
+- status: approved
+- decision: 1.3.0 ships a new bundle contract version (the 1.3.0 release date) because the shipped 2026-10-22 contract has since lost the Gmail text-derived length fields (DEC-012) besides gaining additive fields. M03-T01 bumps CONTRACT_VERSION, updates docs/reference/output-contract.md (date, the stale "unreleased" sentence, the additive and removed fields) and names the bump in the 1.3.0 notes.
+- options: keep 2026-10-22 | bump the contract version
+- why: a removal after release breaks consumers who parse the bundle; the version is how they detect it.
+- consequences: contract-smoke and the contract tests must pass under the new version; compare and drift across versions must still work.
+- approver: auto

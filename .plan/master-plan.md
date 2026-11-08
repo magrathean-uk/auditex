@@ -70,9 +70,9 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | id | name | weight | % | status |
 |---|---|---|---|---|
 | M00 | foundation | 20 | 100 | done |
-| M01 | boundary-proof | 30 | 86 | active |
+| M01 | boundary-proof | 30 | 100 | done |
 | M02 | docs-accuracy | 20 | 100 | done |
-| M03 | release-1-3-0 | 30 | 0 | planned |
+| M03 | release-1-3-0 | 30 | 0 | active |
 <!-- milestones:end -->
 
 ## Top risks

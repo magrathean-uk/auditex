@@ -32,7 +32,7 @@ Local `main` carries the accepted `origin/main` line, and the local gates (lint,
 | M00-T04 | Triage unmerged wt branches for 1.3.0 content | luna | M | - | done |
 | M00-T05 | Extend the release smoke to the sdist and add a reproducible-build check | codex | M | - | done |
 | M00-T06 | Fix the failing installed-wheel resources test | sol | S | debug | done |
-| M00-T07 | Make the release smoke independent of a bare python on PATH | terra | S | - | todo |
+| M00-T07 | Make the release smoke independent of a bare python on PATH | terra | S | - | done |
 
 ## Acceptance criteria
 ### M00-T01 Re-run the gate suite on main after the foundation merges

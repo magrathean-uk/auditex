@@ -122,3 +122,10 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T16:34:52Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	0	66	0.0199	done	c230a61
 2026-11-08T16:36:26Z	M01-T09	terra	claude-4	claude-sonnet-5-5	low	branch	1	45	0.2024	partial	task/M01-T09-alerts-groups-masks
 2026-11-08T16:56:24Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	3	1243	0.0212	blocked	19c7ea7
+2026-11-08T16:59:14Z	M00-T07	terra	claude-1	claude-sonnet-5-5	low	branch	0	65	0.1568	done	task/M00-T07-smoke-python
+2026-11-08T17:00:02Z	M01-T09	terra	claude-4	claude-sonnet-5-5	low	branch	0	113	0.3122	done	task/M01-T09-alerts-groups-masks
+2026-11-08T17:01:47Z	REV-M00-T07	codex	codex	gpt-6.1-sol	high	readonly	0	75		done	task/M00-T07-smoke-python
+2026-11-08T17:02:10Z	REV-M01-T09	codex	codex2	gpt-6.1-sol	high	readonly	0	98		done	task/M01-T09-alerts-groups-masks
+2026-11-08T17:05:44Z	M03-T01	terra	claude-4	claude-sonnet-5-5	medium	branch	0	50	0.3016	done	task/M03-T01-release-notes
+2026-11-08T17:06:02Z	RETRO-M00	luna	claude-2	claude-haiku-5-5	medium	inplace	0	94	0.0259	done	main
+2026-11-08T17:07:55Z	RETRO-M01	luna	claude-2	claude-haiku-5-5	medium	inplace	0	112	0.0295	done	main
