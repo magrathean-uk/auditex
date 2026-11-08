@@ -22,10 +22,6 @@ GOOGLE_SCOPE_NOTES: dict[str, dict[str, str]] = {
         "risk": "write_capable",
         "note": "Gmail settings scopes can change settings; Auditex only lists filters, forwarding, send-as, and delegates.",
     },
-    "https://www.googleapis.com/auth/gmail.settings.sharing": {
-        "risk": "write_capable",
-        "note": "Required for sensitive Gmail settings such as forwarding and delegates; Auditex only reads settings.",
-    },
     "https://www.googleapis.com/auth/apps.groups.settings": {
         "risk": "write_capable",
         "note": "Groups Settings uses a read/write scope for settings; Auditex only reads group settings.",

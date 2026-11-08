@@ -403,10 +403,7 @@ def test_a_delegated_client_acts_as_each_user_and_a_non_delegated_one_never_does
     for item in fake_discovery:
         assert item["credentials"].scopes == google_auth.GMAIL_SETTINGS_SCOPES
         assert not set(item["credentials"].scopes) & set(shared)
-    assert google_auth.GMAIL_SETTINGS_SCOPES == (
-        "https://www.googleapis.com/auth/gmail.settings.basic",
-        "https://www.googleapis.com/auth/gmail.settings.sharing",
-    )
+    assert google_auth.GMAIL_SETTINGS_SCOPES == ("https://www.googleapis.com/auth/gmail.settings.basic",)
     assert delegated.per_user_delegation is True
 
     fake_discovery.clear()

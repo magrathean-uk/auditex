@@ -21,7 +21,8 @@ def test_google_setup_guide_outputs_dwd_scopes_and_readonly_claims() -> None:
     assert "https://www.googleapis.com/auth/admin.reports.audit.readonly" in payload["required_scopes"]
     assert "https://www.googleapis.com/auth/drive.metadata.readonly" in payload["scopes_csv"]
     assert payload["provider_assertions"]["drive_file_content_reads"] is False
-    assert any(row["scope"] == "https://www.googleapis.com/auth/gmail.settings.sharing" for row in payload["scope_warnings"])
+    assert any(row["scope"] == "https://www.googleapis.com/auth/gmail.settings.basic" for row in payload["scope_warnings"])
+    assert "gmail.settings.sharing" not in payload["scopes_csv"]
     assert "Domain-wide delegation" in " ".join(payload["setup_steps"])
 
 

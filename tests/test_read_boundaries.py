@@ -163,9 +163,9 @@ _ACCEPTED_WRITE_CAPABLE_SCOPES: dict[str, dict[str, Any]] = {
         "calls": frozenset({"groups.get"}),
     },
 }
-# Requested today and outside the rule; M01-T11 drops it (its calls accept gmail.settings.basic). It is not an
-# accepted exception: one named strict expected failure below holds it until the scope leaves the source.
-_SCOPE_PENDING_REMOVAL = ("https://www.googleapis.com/auth/gmail.settings.sharing", "M01-T11")
+# Dropped by M01-T11: every Gmail settings read the collector makes accepts gmail.settings.basic (Gmail API
+# reference, users.settings.* get and list methods). It is not an accepted exception and no source may request it.
+_RETIRED_SCOPE = "https://www.googleapis.com/auth/gmail.settings.sharing"
 _METADATA_ONLY_SCOPE = re.compile(r"\.metadata(?:\.readonly)?$")
 
 # Section G of the M01-T02 transport inventory: reads that receive user- or admin-written text.
@@ -1629,14 +1629,23 @@ def _scope_violations(scopes: set[str]) -> list[str]:
 
 
 def test_requested_google_scopes_are_read_only_metadata_only_or_accepted() -> None:
-    pending, _ = _SCOPE_PENDING_REMOVAL
-    assert _scope_violations(set(_requested_scopes()) - {pending}) == []
+    assert _scope_violations(set(_requested_scopes())) == []
 
 
-@pytest.mark.xfail(strict=True, reason="gmail.settings.sharing is still requested; M01-T11 drops it")
 def test_gmail_settings_sharing_is_no_longer_requested() -> None:
-    pending, task = _SCOPE_PENDING_REMOVAL
-    assert pending not in _requested_scopes(), f"{pending} is write-capable and unneeded; {task} removes it"
+    assert _RETIRED_SCOPE not in _requested_scopes(), f"{_RETIRED_SCOPE} is write-capable and unneeded"
+    for path in (REPO_ROOT / "src").rglob("*.py"):
+        if path.name == "findings.py":  # the high-risk term list still flags an operator-granted scope
+            continue
+        assert _RETIRED_SCOPE not in path.read_text(encoding="utf-8"), path
+
+
+def test_every_gmail_settings_call_is_covered_by_the_basic_scope() -> None:
+    # Gmail API reference, users.settings.{getAutoForwarding,getImap,getPop,getVacation,filters.list,
+    # forwardingAddresses.list,sendAs.list,delegates.list}: each lists gmail.settings.basic among its scopes.
+    from auditex.google_workspace import auth as google_auth
+
+    assert google_auth.GMAIL_SETTINGS_SCOPES == ("https://www.googleapis.com/auth/gmail.settings.basic",)
 
 
 def test_an_unlisted_write_capable_scope_fails_the_rule() -> None:
@@ -1644,7 +1653,7 @@ def test_an_unlisted_write_capable_scope_fails_the_rule() -> None:
         "https://www.googleapis.com/auth/admin.directory.user",
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/drive",
-        _SCOPE_PENDING_REMOVAL[0],
+        _RETIRED_SCOPE,
     ):
         assert _scope_violations({scope}) == [scope]
     assert _scope_violations({"https://www.googleapis.com/auth/gmail.metadata"}) == []
@@ -1671,7 +1680,7 @@ def test_google_scope_rule_and_exception_table_hold() -> None:
 
     # The exception table is exact: still requested, really write-capable, documented, and never the pending one.
     calls = {chain for _, _, chain, _ in _google_api_calls()}
-    assert _SCOPE_PENDING_REMOVAL[0] not in _ACCEPTED_WRITE_CAPABLE_SCOPES
+    assert _RETIRED_SCOPE not in _ACCEPTED_WRITE_CAPABLE_SCOPES
     for scope, row in _ACCEPTED_WRITE_CAPABLE_SCOPES.items():
         assert scope in scopes, f"{scope} is no longer requested; remove it from the exception table"
         assert not _scope_is_read_only(scope)

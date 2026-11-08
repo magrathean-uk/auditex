@@ -133,7 +133,7 @@ def test_google_offline_run_writes_valid_contract_and_findings(tmp_path: Path) -
     assert data_handling["provider_assertions"]["gmail_body_reads"] is False
     assert data_handling["provider_assertions"]["drive_file_content_reads"] is False
     assert data_handling["scope_risk"] == "write_capable_scope_present"
-    assert "https://www.googleapis.com/auth/gmail.settings.sharing" in data_handling["write_capable_scopes"]
+    assert "https://www.googleapis.com/auth/gmail.settings.sharing" not in data_handling["write_capable_scopes"]
     assert data_handling["provider_assertions"]["write_capable_scopes_used_for_read_only_methods"] is True
     assert manifest["contract_status"] == "valid"
     assert validation["valid"] is True, validation["issues"]

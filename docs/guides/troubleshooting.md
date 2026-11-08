@@ -98,7 +98,7 @@ The OAuth client or DWD entry does not allow one or more requested scopes. Compa
 Confirm these scopes are present:
 
 ```text
-https://www.googleapis.com/auth/gmail.settings.basic,https://www.googleapis.com/auth/gmail.settings.sharing,https://www.googleapis.com/auth/admin.directory.user.readonly
+https://www.googleapis.com/auth/gmail.settings.basic,https://www.googleapis.com/auth/admin.directory.user.readonly
 ```
 
 Auditex reads settings only. It does not read Gmail body content.

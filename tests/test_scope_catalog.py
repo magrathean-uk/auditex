@@ -37,12 +37,13 @@ def test_google_scope_catalog_exposes_scope_risk_and_api_enablement() -> None:
     drive = catalog["google_drive_posture"]
 
     assert "Gmail API" in gmail["api_enablement"]
-    assert any(row["scope"] == "https://www.googleapis.com/auth/gmail.settings.sharing" for row in gmail["scope_warnings"])
+    assert any(row["scope"] == "https://www.googleapis.com/auth/gmail.settings.basic" for row in gmail["scope_warnings"])
+    assert not any(row["scope"].endswith("gmail.settings.sharing") for row in gmail["scope_warnings"])
     assert "Google Drive API" in drive["api_enablement"]
     assert any(row["scope"] == "https://www.googleapis.com/auth/drive.readonly" for row in drive["scope_warnings"])
 
     aggregate = aggregate_catalog_rows(catalog, ["google_gmail_settings", "google_drive_posture"])
-    assert "https://www.googleapis.com/auth/gmail.settings.sharing" in aggregate["required_permissions"]
+    assert "https://www.googleapis.com/auth/gmail.settings.basic" in aggregate["required_permissions"]
     assert any(row["scope"] == "https://www.googleapis.com/auth/drive.readonly" for row in aggregate["scope_warnings"])
 
 

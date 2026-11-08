@@ -22,7 +22,6 @@ DEFAULT_GOOGLE_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/admin.reports.usage.readonly",
     "https://www.googleapis.com/auth/apps.alerts",
     "https://www.googleapis.com/auth/gmail.settings.basic",
-    "https://www.googleapis.com/auth/gmail.settings.sharing",
 )
 
 # Cloud Identity Policy API (org 2-step verification policy). It is requested on its own token, never
@@ -30,11 +29,11 @@ DEFAULT_GOOGLE_SCOPES: tuple[str, ...] = (
 # shares the token, so a tenant that has not added this scope loses only the policy read.
 POLICIES_SCOPE = "https://www.googleapis.com/auth/cloud-identity.policies.readonly"
 ISOLATED_GOOGLE_SCOPES: frozenset[str] = frozenset({POLICIES_SCOPE})
-# The per-user Gmail settings reads need only these two scopes. A user-impersonating token is narrowed to
-# them, so it never carries the shared set's other scopes (the Directory security scope among them).
+# The per-user Gmail settings reads need only this scope (every settings get and list the collector makes accepts
+# gmail.settings.basic; see the Gmail API users.settings reference). A user-impersonating token is narrowed to
+# it, so it never carries the shared set's other scopes (the Directory security scope among them).
 GMAIL_SETTINGS_SCOPES: tuple[str, ...] = (
     "https://www.googleapis.com/auth/gmail.settings.basic",
-    "https://www.googleapis.com/auth/gmail.settings.sharing",
 )
 
 _DEPENDENCIES = {

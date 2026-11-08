@@ -403,7 +403,6 @@ class GoogleGmailSettingsCollector:
     )
     required_scopes = (
         "https://www.googleapis.com/auth/gmail.settings.basic",
-        "https://www.googleapis.com/auth/gmail.settings.sharing",
         "https://www.googleapis.com/auth/admin.directory.user.readonly",
     )
 
