@@ -35,7 +35,7 @@ def transport_rule(bundle: Bundle) -> list[dict[str, Any]]:
         item = _fields(row, {'State': _text, 'Mode': _text,
                              'FromScope': _nullable_text, 'PrependSubject': _nullable_text})
         allowed = {'Name', 'State', 'Priority', 'Mode', 'RedirectMessageTo', 'BlindCopyTo', 'CopyTo',
-                   'ApplyHtmlDisclaimerText', 'FromScope', 'PrependSubject', 'source_name', 'key', 'kind'}
+                   'FromScope', 'PrependSubject', 'source_name', 'key', 'kind'}
         bundle.known_fields(row, allowed)
         # Record deliberately dropped collector fields by their fixed names, never their values.
         bundle.ignored_fields.update(row.keys() & (allowed - item.keys()))

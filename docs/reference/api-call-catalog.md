@@ -169,7 +169,7 @@ cmdlets use, with the Global Reader role.
 | `exchange_policy` | `Get-CASMailbox -ResultSize Unlimited \| Where-Object { $_.SmtpClientAuthenticationDisabled -eq $false } \| Measure-Object \| Select-Object Count` | Count of mailboxes that switch SMTP AUTH back on (no address is kept) | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-AcceptedDomain` | `Name`, `DomainName`, `DomainType`, `Default`, `IsCoexistenceDomain`; also supplies the same-run DNS raw-record universe | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-DkimSigningConfig` | `Domain`, `Enabled`, `Status` per domain | Exchange Online, Global Reader |
-| `exchange_policy` | `Get-TransportRule` | `Name`, `State`, `Priority`, `Mode`, `RedirectMessageTo`, `BlindCopyTo`, `CopyTo`, `ApplyHtmlDisclaimerText`, `FromScope`, `PrependSubject` | Exchange Online, Global Reader |
+| `exchange_policy` | `Get-TransportRule` | `Name`, `State`, `Priority`, `Mode`, `RedirectMessageTo`, `BlindCopyTo`, `CopyTo`, `FromScope`, `PrependSubject` | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-SharingPolicy` | `Name`, `Domains` (partner domain names and sharing actions) | Exchange Online; readable with Global Reader, the role ScubaGear's own prerequisites list for this cmdlet |
 | `exchange_policy` | `Get-EOPProtectionPolicyRule` | `Identity`, `State`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |
 | `exchange_policy` | `Get-ATPProtectionPolicyRule` | `Identity`, `State`, `SentTo`, `SentToMemberOf`, `RecipientDomainIs`, `ExceptIfSentTo`, `ExceptIfSentToMemberOf`, `ExceptIfRecipientDomainIs` | Exchange Online, Global Reader |

@@ -755,7 +755,7 @@ def test_onedrive_posture_collector_distinguishes_personal_and_team_sites() -> N
 def test_exchange_policy_collector_collects_command_sections(monkeypatch) -> None:
     transport_command = (
         ",@(Get-TransportRule | Select-Object "
-        "Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)"
+        "Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,FromScope,PrependSubject)"
     )
     adapter = _FakeAdapter(
         {

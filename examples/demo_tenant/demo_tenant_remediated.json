@@ -537,7 +537,7 @@
     },
     "transportRules": {
       "value": [
-        {"Identity": "External sender disclaimer", "Name": "External sender disclaimer", "State": "Enabled", "Mode": "Enforce", "Priority": 1, "FromScope": "NotInOrganization", "ApplyHtmlDisclaimerText": "<p>CAUTION: This email originated outside Halcyon Freight.</p>"},
+        {"Identity": "External sender disclaimer", "Name": "External sender disclaimer", "State": "Enabled", "Mode": "Enforce", "Priority": 1, "FromScope": "NotInOrganization"},
         {"Identity": "Copy customs paperwork to broker (test)", "Name": "Copy customs paperwork to broker (test)", "State": "Disabled", "Mode": "Audit", "Priority": 2, "CopyTo": ["entries@customs-broker.example"]}
       ]
     },

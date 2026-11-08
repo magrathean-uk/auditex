@@ -222,12 +222,12 @@ def test_c2_lower_cases_without_merging_domains(tmp_path):
 def test_transport_ignored_fields_record_names_only(tmp_path, monkeypatch):
     row = {**ROWS['transport_rule'][0], 'Name': 'private-name', 'Priority': 10,
            'RedirectMessageTo': ['private@example.invalid'], 'BlindCopyTo': [], 'CopyTo': [],
-           'ApplyHtmlDisclaimerText': 'private-disclaimer', 'UnexpectedField': 'private-extra'}
+           'UnexpectedField': 'private-extra'}
     make_bundle(tmp_path, {'transport_rule': [row]})
     register_isolated(monkeypatch, 'transport_rule')
     p = projection.project_run(tmp_path)
     ignored = p.report['sections']['transport_rule']['ignored_fields']
-    assert {'Name', 'Priority', 'RedirectMessageTo', 'ApplyHtmlDisclaimerText', 'UnexpectedField'} <= set(ignored)
+    assert {'Name', 'Priority', 'RedirectMessageTo', 'UnexpectedField'} <= set(ignored)
     assert 'private-' not in json.dumps(p.report)
     assert p.rule_sections['transport_rule'] == ROWS['transport_rule']
 

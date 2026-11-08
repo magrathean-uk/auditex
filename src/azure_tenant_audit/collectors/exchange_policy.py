@@ -123,7 +123,7 @@ class ExchangePolicyCollector(Collector):
     command_collectors = [
         (
             "transportRules",
-            ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)",
+            ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,FromScope,PrependSubject)",
         ),
         ("inboundConnectors", ",@(Get-InboundConnector | Select-Object Name,Enabled,ConnectorType)"),
         ("outboundConnectors", ",@(Get-OutboundConnector | Select-Object Name,Enabled,ConnectorType)"),

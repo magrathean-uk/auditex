@@ -2104,7 +2104,6 @@ def build_normalized_snapshot(
                     redirect_message_to=_to_str_list(item.get("RedirectMessageTo")),
                     blind_copy_to=_to_str_list(item.get("BlindCopyTo")),
                     copy_to=_to_str_list(item.get("CopyTo")),
-                    apply_html_disclaimer_text=item.get("ApplyHtmlDisclaimerText"),
                     state=item.get("State"),
                     priority=item.get("Priority"),
                     mode=item.get("Mode"),

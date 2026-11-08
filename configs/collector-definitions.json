@@ -706,7 +706,7 @@
           "name": "transportRules",
           "category": "policy",
           "commands": [
-            ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,ApplyHtmlDisclaimerText,FromScope,PrependSubject)"
+            ",@(Get-TransportRule | Select-Object Name,State,Priority,Mode,RedirectMessageTo,BlindCopyTo,CopyTo,FromScope,PrependSubject)"
           ]
         },
         {

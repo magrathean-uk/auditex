@@ -170,6 +170,7 @@ _METADATA_ONLY_SCOPE = re.compile(r"\.metadata(?:\.readonly)?$")
 
 # Section G of the M01-T02 transport inventory: reads that receive user- or admin-written text.
 # disposition: discarded (stripped after receipt, proved below), accepted (kept as the value a rule judges),
+# removed_at_request (no longer requested; proved below),
 # follow_up (retained today; removal at request level or a post-receipt discard is a separate task).
 _TEXT_EXPOSURES: tuple[dict[str, Any], ...] = (
     {"id": "G1", "file": "src/auditex/google_workspace/client.py", "needle": "settings.getVacation(",
@@ -182,10 +183,10 @@ _TEXT_EXPOSURES: tuple[dict[str, Any], ...] = (
      "needle": "/mailFolders/inbox/messageRules\"", "fields": RULE_CONDITION_WORD_FIELDS, "disposition": "discarded"},
     {"id": "G5", "file": "src/auditex/google_workspace/client.py", "needle": "settings.filters().list(",
      "fields": GMAIL_FILTER_TEXT_FIELDS, "disposition": "discarded"},
-    {"id": "G6", "file": "configs/collector-definitions.json", "needle": "ApplyHtmlDisclaimerText",
-     "fields": ("ApplyHtmlDisclaimerText",), "disposition": "follow_up"},
-    {"id": "G6", "file": "src/azure_tenant_audit/collectors/exchange_policy.py", "needle": "ApplyHtmlDisclaimerText",
-     "fields": ("ApplyHtmlDisclaimerText",), "disposition": "follow_up"},
+    {"id": "G6", "file": "configs/collector-definitions.json", "needle": "Get-TransportRule | Select-Object",
+     "fields": ("ApplyHtmlDisclaimerText",), "disposition": "removed_at_request"},
+    {"id": "G6", "file": "src/azure_tenant_audit/collectors/exchange_policy.py", "needle": "Get-TransportRule | Select-Object",
+     "fields": ("ApplyHtmlDisclaimerText",), "disposition": "removed_at_request"},
     {"id": "G7", "file": "src/azure_tenant_audit/collectors/exchange_policy.py", "needle": "PrependSubject",
      "fields": ("PrependSubject",), "disposition": "accepted"},
     {"id": "G8", "file": "src/auditex/google_workspace/client.py",
@@ -1689,8 +1690,17 @@ def test_google_scope_rule_and_exception_table_hold() -> None:
 @pytest.mark.parametrize("row", _TEXT_EXPOSURES, ids=lambda row: f"{row['id']}-{Path(row['file']).name}")
 def test_text_exposure_table_matches_the_source(row: dict[str, Any]) -> None:
     """A row whose read changed (removed at request level, or moved) must be re-decided, not left stale."""
-    assert row["disposition"] in {"discarded", "accepted", "follow_up"}
+    assert row["disposition"] in {"discarded", "accepted", "follow_up", "removed_at_request"}
     assert row["needle"] in (REPO_ROOT / row["file"]).read_text(encoding="utf-8")
+
+
+def test_removed_at_request_fields_are_absent_from_shipped_command_text() -> None:
+    for row in _TEXT_EXPOSURES:
+        if row["disposition"] != "removed_at_request":
+            continue
+        text = (REPO_ROOT / row["file"]).read_text(encoding="utf-8")
+        for field in row["fields"]:
+            assert field not in text, f"{row['id']}: {field} still in {row['file']}"
 
 
 def test_discarded_gmail_text_never_leaves_the_collector() -> None:
