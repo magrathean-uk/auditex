@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 43% (was 41%)
+overall: 48% (was 43%)
 milestone: M00-foundation 55%
 plan_version: v2
 release_scope: 1.3.0 from the accepted line (main contains origin/main 82d7ca5) - reproducible local gates, test-proven transport, read and secret boundaries, accurate docs, release notes with the D6 limit, signed v1.3.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 82100cd 2026-11-08T14:32:21Z
+last_checkpoint: c7af5ec 2026-11-08T15:11:58Z
 
 ## Next tasks
 - M00-T01 Re-run the gate suite on main after the foundation merges (luna)
@@ -22,11 +22,11 @@ last_checkpoint: 82100cd 2026-11-08T14:32:21Z
 ## Quota snapshot
 <!-- quota:begin -->
 claude 84% orchestrator
-claude-1 60% ok
+claude-1 61% ok
 claude-2 2% shared
-claude-3 69% ok
-claude-4 47% ok
+claude-3 70% ok
+claude-4 49% ok
 claude-5 63% ok
-codex 51% ok
-codex2 8% ok
+codex 52% ok
+codex2 9% ok
 <!-- quota:end -->

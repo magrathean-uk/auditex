@@ -71,7 +71,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 |---|---|---|---|---|
 | M00 | foundation | 20 | 55 | active |
 | M01 | boundary-proof | 30 | 57 | planned |
-| M02 | docs-accuracy | 20 | 75 | planned |
+| M02 | docs-accuracy | 20 | 100 | done |
 | M03 | release-1-3-0 | 30 | 0 | planned |
 <!-- milestones:end -->
 

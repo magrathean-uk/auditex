@@ -72,3 +72,11 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T12:20:42Z	M01-FU	terra	claude-1	claude-sonnet-5-5	medium	readonly	0	74	0.3508	done	82100cd
 2026-11-08T12:22:53Z	REV-M01-T04	codex	codex2	gpt-6.1-sol	high	readonly	0	205		done	task/M01-T04-read-boundaries
 2026-11-08T12:23:35Z	M01-T03	sol	claude-4	claude-opus-5-5	high	branch	0	247	1.2351	done	task/M01-T03-http-allowlist
+2026-11-08T14:32:47Z	M02-T04	terra	claude-1	claude-sonnet-5-5	low	branch	0	22	0.1923	done	task/M02-T04-runbook
+2026-11-08T14:34:24Z	REV-M01-T03	codex	codex2	gpt-6.1-sol	high	readonly	0	119		done	task/M01-T03-http-allowlist
+2026-11-08T14:47:25Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	124	900		timeout	9f7b391
+2026-11-08T14:52:25Z	M01-T04	sol	claude-4	claude-opus-5-5	high	branch	0	1201	4.0699	done	task/M01-T04-read-boundaries
+2026-11-08T14:54:10Z	REV-M02-T04	codex	codex	gpt-6.1-sol	high	readonly	0	64		done	task/M02-T04-runbook
+2026-11-08T14:54:22Z	M00-T01	luna	claude-2	claude-haiku-5-5	medium	readonly	1	76	0.0197	partial	9f7b391
+2026-11-08T14:55:05Z	M01-T03	sol	claude-4	claude-opus-5-5	high	branch	0	119	0.7143	done	task/M01-T03-http-allowlist
+2026-11-08T14:56:28Z	REV-M01-T04	codex	codex2	gpt-6.1-sol	high	readonly	0	202		done	task/M01-T04-read-boundaries

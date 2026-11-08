@@ -1,13 +1,11 @@
 ## RESULT M01-T03
 status: done
-summary: Both REV-M01-T03 items are fixed in `tests/test_http_verb_allowlist.py`; `graph.py` and `test_read_guard.py` are unchanged this round.
-Item 1 fixed: names imported from `requests`, `httpx`, `urllib3`, `aiohttp`, `http.client` or `urllib.request` now resolve to their verb, so `from requests import post` (with or without an alias) and `requests.Request('POST', u)` are caught. Imported transport callables the scanner does not recognise, and every `.send(...)`, now count as variable-method sites and fail until classified. Verb methods taken as values (`post = s.post`) or through `getattr(s, 'delete')` are also caught.
-Item 2 fixed: `GET_ONLY_GUARDED` entries now carry an exact site count. Each guarded site must send the function's own `method` parameter, never reassigned. The function must check that parameter first (A8 and the Graph dispatch), or pass it to a receiver typed `PowerPlatformClient` (A9). Regression tests show that the reviewer's `write_method` case, a reassigned `method`, a second send, a missing guard and an untyped receiver all fail.
-Criteria: allow-list limited to the frozen inventory, met; every HTTP call site under `src/` enumerated and new non-GET sites fail, met (now fail-closed); runtime Graph and `$batch` refusal, met (existing tests run and pass); `graph.py` guard comment, met.
-changes: tests/test_http_verb_allowlist.py (commit 49ae521 on task/M01-T03-http-allowlist)
-verification: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py tests/test_read_guard.py tests/test_graph_read_only.py tests/test_transport_hygiene.py` passed (exit 0); module command `.venv/bin/python -m pytest tests/test_read_guard.py tests/test_graph_read_only.py tests/test_contract.py && make contract-smoke` passed (exit 0, bundle seal verified); `git status --porcelain` is empty.
-risks:
-- Remaining blind spots: `getattr` with a computed name, and Google API client `.execute()` chains, which M01-T04 covers.
-- Fail-closed rule: any future `.send(...)` under `src/`, including on a generator or socket, has to be added to the list. There are none today.
-- The branch is behind `main` on unrelated paths; no rebase was asked for, so merge.sh decides.
+summary: Final review round: both REV-M01-T03 urllib scanner gaps fixed, with regression tests that the old scanner fails.
+Item 1 fixed: urllib Request/urlopen resolve by import origin, so aliased forms (`urlopen as send`, `Request as R`) are sites that fail classification.
+Item 2 fixed: opener provenance tracked (assign/annassign/walrus from build_opener/OpenerDirector, any import form, plus inline build_opener().open); `.open` on them is a VARIABLE site.
+Criteria: static enumeration with allow-list met (gaps closed); runtime guard refusal met (test_read_guard); graph.py comment met (unchanged); allow-list still equals the frozen inventory.
+changes: tests/test_http_verb_allowlist.py (commit 798a49c); notes appended at .plan/work/M01-T03/notes.md
+verification: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py tests/test_read_guard.py tests/test_graph_read_only.py tests/test_transport_hygiene.py` pass (358 passed, exit 0); module `.venv/bin/python -m pytest tests/test_read_guard.py tests/test_graph_read_only.py tests/test_contract.py` pass; `make contract-smoke` pass; old scanner at 49ae521 confirmed to produce zero sites for both review examples; git status clean
+risks: Opener tracking is module-wide and name-based; an opener passed as an untyped parameter or held in a container (`self.openers[0].open`) is still unseen (recorded in notes, not widened per the brief).
+The SessionStart hook reported that clean-development lifecycle registration failed. The reviewer's run of `clean-development doctor` also failed, and G should be told.
 questions_for_g: none

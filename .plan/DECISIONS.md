@@ -81,3 +81,21 @@
 - why: M01-T04 found exposures (G8 is real message text) and a runtime guard that accepts any Get-* cmdlet; the DoD cannot be met without them.
 - consequences: they depend on M01-T04 merging and merge one at a time because they share tests/test_read_boundaries.py.
 - approver: auto
+
+## DEC-010 Write-capable Google scopes accepted as documented exceptions
+- date: 2026-11-08
+- status: approved
+- decision: admin.directory.user.security, apps.alerts, gmail.settings.basic and apps.groups.settings (no read-only form exists) stay on by default for Google audits as documented exceptions: blast radius recorded per scope, used only for list and get calls, proved by tests. gmail.settings.sharing is dropped (M01-T11).
+- options: accept as documented exceptions | gate behind an opt-in | drop the dependent checks
+- why: keeps 2SV, Alert Center, Gmail-settings and group-settings coverage; matches the AGENTS.md rule that a write-capable scope never authorises a mutating call and must record its blast radius.
+- consequences: M01-T04 turns its strict expected failures into an explicit accepted-exception table instead of suppressed failures.
+- approver: G
+
+## DEC-011 Bounded final rounds for the static boundary scanners
+- date: 2026-11-08
+- status: approved
+- decision: M01-T03 and M01-T04 each get one final bounded repair round fixing exactly the open review items; scanner limits found after that go to BACKLOG as documented limitations instead of further rounds.
+- options: escalate to an astra opinion | re-scope per AGENTS.md (two repair rounds, then re-scope)
+- why: each review round found new static-analysis corner cases without any real call site breaching the boundary; the tests fail closed on untraceable sites.
+- consequences: the boundary proof ships with named limitations in the backlog.
+- approver: auto
