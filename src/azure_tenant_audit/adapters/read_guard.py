@@ -17,6 +17,9 @@ Allowed:
   backtick escapes, redirection, here-strings, static member access (``::``), the call operator
   on anything but a script block, subexpressions inside double-quoted strings, and method calls
   other than a few string helpers are refused, because each can hide or run another command.
+  ``CONTENT_CMDLET_DENY`` then refuses the ``Get-*`` cmdlets that return message, chat, event,
+  attachment or file content (Microsoft Graph, Exchange, PnP and the local file system), with two
+  documented Graph pattern rules: any ``Get-Mg*Attachment*`` and any ``Get-Mg*Content``.
 * Microsoft365DSC: the PowerShell rules plus ``Export-M365DSCConfiguration``, the one export
   cmdlet that reads the tenant (it writes only local files).
 
@@ -61,6 +64,95 @@ POWERSHELL_READ_COMMANDS = frozenset(
 )
 DSC_READ_COMMANDS = frozenset({"export-m365dscconfiguration"})
 POWERSHELL_LANGUAGE_WORDS = frozenset({"if", "elseif", "else", "foreach"})
+
+# Cmdlets that return message, chat, event, attachment or file content. The verb allow-list accepts
+# every ``Get-<noun>``, so these are refused by name, case-insensitively and after any module prefix
+# (``Microsoft.Graph.Mail\Get-MgUserMessage``). ``Get-MgBeta*`` names are judged as their v1.0
+# equivalent. Metadata reads stay allowed: message traces, message and inbox rules, service
+# announcement messages, mailbox and drive item properties.
+#
+# Exchange: no Exchange Online ``Get-*`` cmdlet returns a message body; the content cmdlets use other
+# verbs (``Export-``, ``Preview-``, ``Search-Mailbox``, ``New-MailboxExportRequest``) and the verb
+# allow-list already refuses them. They are listed anyway so the intent survives a future verb
+# change. ``Get-QuarantineMessageHeader`` and ``Get-Message`` return raw message headers.
+#
+# Local files: ``Get-Content``, ``Get-Item``, ``Get-ChildItem`` and the item-property cmdlets read the
+# auditor's own file system, registry and environment (``env:``), where credentials live; no
+# shipped collector needs them.
+CONTENT_CMDLET_DENY = frozenset(
+    {
+        # Microsoft Graph mail
+        "get-mgusermessage",
+        "get-mgusermessagedelta",
+        "get-mgusermailfoldermessage",
+        "get-mgusermailfoldermessagedelta",
+        "get-mgusermailfolderchildfoldermessage",
+        "get-mgusermailfolderchildfoldermessagedelta",
+        # Microsoft Graph Teams chats and channels
+        "get-mgchatmessage",
+        "get-mgchatmessagedelta",
+        "get-mgchatmessagereply",
+        "get-mgchatmessagereplydelta",
+        "get-mguserchatmessage",
+        "get-mguserchatmessagedelta",
+        "get-mguserchatmessagereply",
+        "get-mgteamchannelmessage",
+        "get-mgteamchannelmessagedelta",
+        "get-mgteamchannelmessagereply",
+        "get-mgteamchannelmessagereplydelta",
+        "get-mgteamprimarychannelmessage",
+        "get-mgteamprimarychannelmessagereply",
+        "get-mgallchatmessage",
+        "get-mgteamchannelallmessage",
+        # Microsoft Graph group conversations
+        "get-mggroupthread",
+        "get-mggroupthreadpost",
+        "get-mggroupconversation",
+        "get-mggroupconversationthread",
+        "get-mggroupconversationthreadpost",
+        # Microsoft Graph calendars
+        "get-mguserevent",
+        "get-mgusereventdelta",
+        "get-mgusereventinstance",
+        "get-mgusercalendarevent",
+        "get-mgusercalendareventdelta",
+        "get-mgusercalendareventinstance",
+        "get-mgusercalendarview",
+        "get-mgusercalendarcalendarview",
+        "get-mgusercalendargroupcalendarevent",
+        "get-mgusercalendargroupcalendarview",
+        "get-mggroupevent",
+        "get-mggroupeventdelta",
+        "get-mggroupeventinstance",
+        "get-mggroupcalendarevent",
+        "get-mggroupcalendarview",
+        # Microsoft Graph files (``Get-Mg*Content`` also covers the named ones)
+        "get-mgdriveitemcontent",
+        "get-mguserdriveitemcontent",
+        # Exchange Online
+        "get-quarantinemessageheader",
+        "get-message",
+        "export-message",
+        "export-quarantinemessage",
+        "preview-quarantinemessage",
+        "export-mailbox",
+        "search-mailbox",
+        "new-mailboxexportrequest",
+        # PnP PowerShell (SharePoint and OneDrive files and list rows)
+        "get-pnpfile",
+        "get-pnpfilecontent",
+        "get-pnplistitem",
+        "get-pnppage",
+        # Local file system, registry and environment
+        "get-content",
+        "get-item",
+        "get-childitem",
+        "get-itemproperty",
+        "get-itempropertyvalue",
+    }
+)
+_GRAPH_PREFIX = "get-mg"
+_GRAPH_BETA_PREFIX = "get-mgbeta"
 POWERSHELL_READ_METHODS = frozenset(
     {"tostring", "tolower", "toupper", "trim", "contains", "startswith", "endswith"}
 )
@@ -260,8 +352,21 @@ def _string_end(script: str, start: int, adapter: str) -> int:
     raise CommandRefused("unterminated string", adapter=adapter)
 
 
+def _is_content_cmdlet(word: str) -> bool:
+    """Whether ``word`` names a cmdlet on ``CONTENT_CMDLET_DENY`` or matches a Graph content pattern."""
+    cmdlet = word.lower().rsplit("\\", 1)[-1]
+    if cmdlet.startswith(_GRAPH_BETA_PREFIX):
+        cmdlet = _GRAPH_PREFIX + cmdlet[len(_GRAPH_BETA_PREFIX) :]
+    if cmdlet in CONTENT_CMDLET_DENY:
+        return True
+    # Graph pattern rules: every attachment cmdlet, and every ``/content`` download (``*Content``).
+    return cmdlet.startswith(_GRAPH_PREFIX) and ("attachment" in cmdlet or cmdlet.endswith("content"))
+
+
 def _allowed_word(word: str, extra: frozenset[str]) -> bool:
     lowered = word.lower()
+    if _is_content_cmdlet(lowered):
+        return False
     if _NUMBER.fullmatch(lowered):
         return True  # a bare number is an expression, not a command
     if lowered in POWERSHELL_LANGUAGE_WORDS or lowered in POWERSHELL_READ_COMMANDS or lowered in extra:
