@@ -2,7 +2,7 @@
 id: M00
 name: foundation
 weight: 100
-status: planned
+status: active
 ---
 # M00 foundation
 No feature work before this milestone is green.

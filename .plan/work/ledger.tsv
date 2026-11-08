@@ -1,0 +1,15 @@
+utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branch
+2026-11-08T09:34:55Z	INV-product	luna	claude-5	claude-haiku-5-5	medium	readonly	0	69	0.0204	done	8b3a334
+2026-11-08T09:35:11Z	INV-deps	luna	claude-5	claude-haiku-5-5	medium	readonly	0	85	0.0223	done	8b3a334
+2026-11-08T09:35:13Z	INV-security	luna	claude-4	claude-haiku-5-5	medium	readonly	0	87	0.0289	done	8b3a334
+2026-11-08T09:35:13Z	INV-gws	luna	claude-3	claude-haiku-5-5	medium	readonly	0	87	0.0478	done	8b3a334
+2026-11-08T09:35:18Z	INV-mcp	luna	claude-2	claude-haiku-5-5	medium	readonly	0	92	0.0236	done	8b3a334
+2026-11-08T09:35:25Z	INV-dead	luna	claude-2	claude-haiku-5-5	medium	readonly	3	99	0.0187	malformed	8b3a334
+2026-11-08T09:35:35Z	INV-layout	luna	claude-2	claude-haiku-5-5	medium	readonly	0	109	0.0302	done	8b3a334
+2026-11-08T09:35:43Z	INV-docs	luna	claude-3	claude-haiku-5-5	medium	readonly	0	117	0.0541	done	8b3a334
+2026-11-08T09:35:45Z	INV-rules	luna	claude-1	claude-haiku-5-5	medium	readonly	0	119	0.0322	done	8b3a334
+2026-11-08T09:35:52Z	INV-engine	luna	claude-4	claude-haiku-5-5	medium	readonly	0	126	0.0415	done	8b3a334
+2026-11-08T09:35:54Z	INV-history	luna	claude-4	claude-haiku-5-5	medium	readonly	0	128	0.0390	done	8b3a334
+2026-11-08T09:38:00Z	INV-tests	luna	claude-1	claude-haiku-5-5	medium	readonly	0	254	0.0373	done	8b3a334
+2026-11-08T09:41:11Z	INV-dead	luna	claude-2	claude-haiku-5-5	medium	readonly	0	168	0.0574	done	8b3a334
+2026-11-08T09:42:51Z	ASSESS-v2	terra	claude-4	claude-sonnet-5-5	medium	inplace	0	85	0.4499	done	main

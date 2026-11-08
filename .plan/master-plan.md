@@ -23,7 +23,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 <!-- milestones:begin -->
 | id | name | weight | % | status |
 |---|---|---|---|---|
-| M00 | foundation | 100 | 0 | planned |
+| M00 | foundation | 100 | 0 | active |
 <!-- milestones:end -->
 
 ## Top risks

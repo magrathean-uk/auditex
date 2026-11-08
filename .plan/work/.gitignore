@@ -1,3 +1,4 @@
+# auditex is public: brief.md and dispatch.txt carry absolute workstation paths, so they stay local.
 *
 !.gitignore
 !ledger.tsv
@@ -6,5 +7,3 @@
 !*/
 !*/result.md
 !PLAN-*/*.md
-!*/brief.md
-!*/dispatch.txt
