@@ -79,15 +79,15 @@ verdicts can agree or disagree with baseline pass/fail statuses; not-assessed ro
 
 `ModelClient`, `ModelConfig`, the model catalogue, doctor, training, benchmarking and offline evaluation
 remain available for development. They do not feed product assessment. `auditex model doctor` probes a
-development endpoint only when explicitly invoked. An optional explainer that explains rule results is
-planned and unimplemented; the catalogued verdict model has not been evaluated as an explainer.
+development endpoint only when explicitly invoked. A deterministic template explainer ships and is wired into reports; it describes rule results
+and never changes a verdict. The catalogued verdict model is parked and has not been evaluated as an explainer.
 See [model development](model-development.md).
 
 ## Obtain the catalogued model
 
 One model is catalogued: **`auditex-ministral3-8b-scuba-v10`**, Ministral 3 8B Instruct with a LoRA adapter trained on the
-Auditex SCuBA oracle pack v10, merged and quantised to `model-Q5_K_M.gguf` (6,058,747,104 bytes). It was fine-tuned on verdict labels; its planned role is an optional explainer, and it
-has not been evaluated in that role. Its full
+Auditex SCuBA oracle pack v10, merged and quantised to `model-Q5_K_M.gguf` (6,058,747,104 bytes). It was fine-tuned on verdict labels; it is parked, and it
+has not been evaluated as an explainer (the shipped explainer is a deterministic template). Its full
 provenance (base revision, adapter archive and weights hashes, llama.cpp revision, training pack, scores) is the `product_model` entry of
 `auditex model sources`.
 
@@ -127,7 +127,7 @@ llama-server -m ./auditex-model/model-Q5_K_M.gguf --alias auditex-ministral3-8b-
 `-c 8192` is the context the scores were measured at (test prompts are at most about 1,400 tokens; real tenants
 send more). `-ngl 99` offloads every layer to the GPU; leave it out on a CPU-only machine. `--parallel 1` keeps
 one slot, so requests are answered one at a time, as measured. `--jinja` uses the chat template embedded in the
-GGUF, which is identical to training. The parked development client uses the pinned training system prompt. Product assessment makes no requests. No prompt exists yet for the planned explainer.
+GGUF, which is identical to training. The parked development client uses the pinned training system prompt. Product assessment makes no requests. The shipped explainer is a deterministic template and uses no prompt.
 
 **Memory.** Estimated, not measured: the weights take 6.06 GB and the f16 KV cache at 8,192 tokens about 1.1 GB
 (34 layers x 8 KV heads x 128 dimensions x 2 bytes, keys and values, calculated), plus llama.cpp compute and
@@ -145,7 +145,7 @@ been validated against the scores; prefer `llama-server`.
 ## Measured accuracy as an answering model
 
 These are historical verdict-model measurements from before value rules. They do not measure the current
-rule-only assessment or a future explainer. The model is parked and never answers a product policy.
+rule-only assessment or the template explainer. The model is parked and never answers a product policy.
 
 Measured on 30 October 2026 on the frozen test set test-v7: 435 synthetic cases over 12 policies, built from
 ScubaGear's Rego unit-test fixtures and labelled by running that Rego (oracle labels, not human review).
@@ -172,11 +172,11 @@ Known weak classes, to read with care:
 - A missing field inside a collected section: guessed rather than abstained (4/20 correct), unless an
   `absent_field` rule covers it; SharePoint rows without `SharingCapability` are sometimes called not applicable.
 
-These historical verdict scores do not measure the current rule-only assessment or a future explainer.
+These historical verdict scores do not measure the current rule-only assessment or the template explainer.
 
 ## Model lifecycle
 
 The base model is re-chosen in January 2027 against the then-current open models (EU-hosted bases preferred when
 within the noise band), retrained on the same oracle pipeline and re-measured on the frozen test before it replaces
-this one. A replacement for the planned explainer role would also need an explainer evaluation, which does not
-exist yet. A replacement gets a new model id, a new catalogue entry and new scores; this entry stays pinned.
+this one. A replacement would not be used as an explainer without its own explainer evaluation, which does not
+exist; the shipped explainer is a deterministic template. A replacement gets a new model id, a new catalogue entry and new scores; this entry stays pinned.

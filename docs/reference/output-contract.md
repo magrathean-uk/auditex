@@ -355,7 +355,7 @@ baseline has none. That `result` value and the baseline's `not_assessed` status 
 four verdict totals (`answered`, `unknown`, `invalid`, `skipped`) are internal counters and keep their names.
 Rules decide all product answers; every catalogue policy has a value rule, so no current row reports
 `rule_not_implemented`.
-The model never answers a product policy; an optional deterministic explainer can describe value-rule answers.
+The model never answers a product policy; the shipped deterministic template explainer describes value-rule answers and never changes them.
 
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.

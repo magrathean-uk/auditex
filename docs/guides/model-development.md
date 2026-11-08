@@ -116,8 +116,9 @@ and permissions determine whether a policy can be assessed. A policy without a r
 The model client/configuration, prompt builders, catalogue and offline tools remain parked for development.
 `auditex model doctor` still uses explicit endpoint configuration and `GET /models`, exiting 2 on failure.
 Direct client experiments retain request negotiation, transport retry and structured response validation;
-none of these can answer a product policy. Historical model/shadow files remain readable. An optional
-explainer of rule results remains planned and unimplemented.
+none of these can answer a product policy. Historical model/shadow files remain readable. The
+deterministic template explainer of rule results ships and is wired into reports; the parked model
+is not evaluated as an explainer and never decides or rewrites a verdict.
 
 The frozen catalogue retains all 102 training policy items and ordered dependencies; only unknown IDs are
 skipped. Development prompt serialisation and hashes remain pinned. Comparisons use confirmed rule verdicts
