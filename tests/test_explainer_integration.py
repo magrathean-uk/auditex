@@ -134,7 +134,8 @@ def test_installed_wheel_resources_offline(tmp_path):
 import hashlib, json
 from azure_tenant_audit import resources, explainer
 from azure_tenant_audit.explainer.textkit import FAULT
-assert all(a.name == "installed" for a in resources._resource_adapters())
+adapters = resources._resource_adapters()
+assert adapters and all(a.name == "installed" for a in adapters), adapters
 names = ("configs/explainer-baselines.json", "configs/explainer-template.json",
          "configs/explainer-what-to-collect.json", "schemas/explainer.schema.json")
 hashes = {n: hashlib.sha256(resources.open_text_resource(n).encode()).hexdigest() for n in names}
@@ -146,8 +147,14 @@ rec = {"policy_id": pid, **{k: FAULT[k] for k in ("verdict","cell","reason_code"
 assert explainer.explain(rec, {s: [] for s in order}, order)["explanation"] == FAULT["reason_text"]
 print(json.dumps(hashes))
 """
+    # The loader adds a "dev" adapter for any cwd ancestor that looks like a checkout. When pytest's
+    # basetemp sits inside one (a gate run with TMPDIR under the repo), run from the filesystem root
+    # instead, so the subprocess still has no dev or env route and must resolve from the wheel data.
     cwd = tmp_path / "empty"
     cwd.mkdir()
+    if any(resources._looks_like_dev_root(p) for p in (cwd, *cwd.parents)):
+        cwd = Path(cwd.anchor)
+    assert not resources._looks_like_dev_root(cwd), cwd
     import os
     env = dict(os.environ)
     env.pop(resources.RESOURCE_ROOT_ENV, None)
