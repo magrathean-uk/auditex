@@ -98,3 +98,12 @@ away, `rm .venv` and `make install` rebuild it locally.
 
 What behaviour changed; the commit or branch; each check run with its result; checks skipped and
 why; remaining risks or follow-ups. Keep it short; long logs stay in files.
+
+<!-- plan-creator:begin -->
+## Plan Creator workers
+This repository is delivered through the Plan Creator skill. State lives in `.plan/` and belongs to the orchestrator.
+- You are a worker when your prompt is a brief with a task id. Own only the files the brief names. Do not touch other modules, `.plan/` (except paths the brief names) or any branch other than your own.
+- Run the verification command in your brief before reporting. Commit on your branch with a pathspec and a conventional commit message. Never push, never merge, never change branches.
+- Finish with the RESULT block from the brief and nothing after it. Longer material goes to the work directory named in the brief.
+- No time estimates or dates. UK English, hyphens not em-dashes, no emojis.
+<!-- plan-creator:end -->

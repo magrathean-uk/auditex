@@ -1,0 +1,10 @@
+*
+!.gitignore
+!ledger.tsv
+!assessment.md
+!batch-*.txt
+!*/
+!*/result.md
+!PLAN-*/*.md
+!*/brief.md
+!*/dispatch.txt
