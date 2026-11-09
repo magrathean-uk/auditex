@@ -1,0 +1,1 @@
+--task REV-M02-T02b --role codex --model gpt-6.1-sol --brief .plan/work/REV-M02-T02b/request.md --readonly --sha task/M02-T02b-parser-factory --tags debug

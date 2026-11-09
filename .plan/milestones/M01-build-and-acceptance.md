@@ -2,7 +2,7 @@
 id: M01
 name: build-and-acceptance
 weight: 15
-status: planned
+status: done
 ---
 # M01 build-and-acceptance
 Starts after M00. Closes the two release-process gaps 1.3.0 shipped with: v2 DEC-019 (plain `make dist` not byte-reproducible) and v2 DEC-017 (full v3.9.1 replay waived).
@@ -12,9 +12,9 @@ Plain `make dist` is byte-reproducible and `scripts/check-reproducible-build.py`
 
 ## Definition of Done
 - [x] Two plain `make dist` builds of the same clean commit give a byte-identical wheel and a byte-identical sdist, and the check proves both: `.venv/bin/python scripts/check-reproducible-build.py && .venv/bin/python -m pytest tests/test_check_reproducible_build.py`
-- [ ] `make acceptance` runs the full v3.9.1 replay (26,898 vectors, pinned hashes) and the explainer acceptance suite and passes on `main`: `make acceptance`
+- [x] `make acceptance` runs the full v3.9.1 replay (26,898 vectors, pinned hashes) and the explainer acceptance suite and passes on `main`: `make acceptance` (evidence: M01-T04 on b3fc70f, replay 1 passed 0 skipped, explainer 6 passed; .plan/work/M01-T04/result.md)
 - [x] The runbook documents the acceptance run and its kit variable, and no doc names the stale variable: `grep -q 'AUDITEX_TEST_VALUE_RULE_VECTORS_V391' docs/development/runbook.md && ! git grep -q -E 'AUDITEX_TEST_VALUE_RULE_VECTORS([^_]|$)' -- docs README.md`
-- [ ] Review: the runbook build and acceptance sections say exactly what `make dist`, `scripts/check-reproducible-build.py` and `make acceptance` do (terra read-through recorded in `.plan/work/M01-T04/result.md`)
+- [x] Review: the runbook build and acceptance sections say exactly what `make dist`, `scripts/check-reproducible-build.py` and `make acceptance` do (terra read-through recorded in `.plan/work/M01-T04/result.md`) (evidence: M01-T04 read-through verdict exact)
 - [x] Every acceptance run verifies all three pinned kit hashes (vectors, A2 vectors, A2 overrides) and fails on a wrong companion file: `.venv/bin/python -m pytest tests/test_value_rules_replay.py -k kit_hashes`
 - [x] `make acceptance` refuses to run without the kit and names the variable, whether it is unset or points at a missing file: `! env -u AUDITEX_TEST_VALUE_RULE_VECTORS_V391 make acceptance >"$TMPDIR/acc-unset.log" 2>&1 && grep -q AUDITEX_TEST_VALUE_RULE_VECTORS_V391 "$TMPDIR/acc-unset.log" && ! env AUDITEX_TEST_VALUE_RULE_VECTORS_V391="$TMPDIR/no-such-kit/vectors.jsonl" make acceptance >"$TMPDIR/acc-missing.log" 2>&1 && grep -q AUDITEX_TEST_VALUE_RULE_VECTORS_V391 "$TMPDIR/acc-missing.log"`
 - [x] Review: an other-vendor review approves the plan v3 merge of M01-T01 (Tier A: release build) at the exact merged head (ARCHITECTURE.md review binding): `T=M01-T01; c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && grep -q "^reviewed: $s" ".plan/work/REV-$T/result.md" && grep -q '^verdict: approve' ".plan/work/REV-$T/result.md"` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
@@ -25,7 +25,7 @@ Plain `make dist` is byte-reproducible and `scripts/check-reproducible-build.py`
 | M01-T01 | Make plain make dist byte-reproducible and check sdist bytes | codex | M | - | done |
 | M01-T02 | Locate and hash-verify the v3.9.1 replay kit | luna | S | - | done |
 | M01-T03 | Add make acceptance and the runbook acceptance section | terra | S | - | done |
-| M01-T04 | Run the acceptance suites on main | luna | S | - | todo |
+| M01-T04 | Run the acceptance suites on main | luna | S | - | done |
 
 ## Acceptance criteria
 ### M01-T01 Make plain make dist byte-reproducible and check sdist bytes

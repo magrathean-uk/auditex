@@ -1,0 +1,1 @@
+--task M02-T03 --role terra --template terra-implement --branch --slug rehome-helpers --var TITLE="Re-home the shared helpers out of the model modules (repair round 1)" --var MILESTONE=.plan/milestones/M02-model-layer-retirement.md --var FILES="src/azure_tenant_audit/model_assessment.py" --var REVIEW=".plan/work/M02-T03/repair-1.md"

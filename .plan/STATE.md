@@ -1,13 +1,14 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 28% (was 21%)
-milestone: M00-foundation 78%
+overall: 36% (was 28%)
+milestone: M02-model-layer-retirement 10%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 931665d 2026-11-09T13:42:59Z
+last_checkpoint: dceafcd 2026-11-09T16:12:12Z
 
 ## Next tasks
-- none
+- M02-T05 Rewrite the docs for the retired model layer (terra)
+- M02-T06 Record the M02 removals in the cleanup ledger (orchestrator)
 
 ## Blockers
 - none
@@ -18,7 +19,7 @@ last_checkpoint: 931665d 2026-11-09T13:42:59Z
 
 ## Notes
 - Merge order for shared files: DEC-007 (M03-T02 and M05-T03 before M02 to M04 tasks, rebase plus full verify).
-- The M02-T02 digest baseline is pre-D5. If M05-T03 merges before M02-T04, re-run `scripts/compare-run-outputs.py --digests` on main and re-record the baseline (`--write`) before M02-T03 compares.
+- D5 (M05-T03 at 215148d) leaves all 43 contract-smoke digests unchanged (checked 9 Nov), so it can merge before or after M02-T04.
 
 ## Re-baselines
 - from 100% (plan v2, 1.3.0 published at v1.3.0 on d9f050f) to 4% (plan v3 DoD, DEC-001)
@@ -26,11 +27,11 @@ last_checkpoint: 931665d 2026-11-09T13:42:59Z
 ## Quota snapshot
 <!-- quota:begin -->
 claude 89% orchestrator
-claude-1 80% ok
+claude-1 83% ok
 claude-2 28% shared
-claude-3 81% ok
-claude-4 77% ok
-claude-5 11% ok
+claude-3 83% ok
+claude-4 78% ok
+claude-5 13% ok
 codex - unknown:collector
-codex2 36% ok
+codex2 37% ok
 <!-- quota:end -->

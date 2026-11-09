@@ -2,7 +2,7 @@
 id: M02
 name: model-layer-retirement
 weight: 20
-status: planned
+status: active
 ---
 # M02 model-layer-retirement
 Implements v2 DEC-004 (G: retire the parked local-model layer after 1.3.0). Removal goes through the deletion gate: G approves the exact path list before any `git rm`, and the approved paths become `.plan/CLEANUP.md` rows. The deterministic template explainer stays. Writers run after M01-T03 merges (shared `Makefile`, runbook and model guide).
@@ -27,8 +27,8 @@ The parked model layer is gone from code, CLI, packaging, configs, tests and doc
 |---|---|---|---|---|---|
 | M02-T01 | Design the retirement and write the exact removal list | sol | M | - | done |
 | M02-T02 | Record the pre-retirement output digest baseline | codex | M | - | done |
-| M02-T03 | Re-home the shared helpers out of the model modules | codex | M | cross-cutting | doing |
-| M02-T04 | Remove the model layer per the approved list | codex | L | cross-cutting | todo |
+| M02-T03 | Re-home the shared helpers out of the model modules | codex | M | cross-cutting | done |
+| M02-T04 | Remove the model layer per the approved list | codex | L | cross-cutting | doing |
 | M02-T05 | Rewrite the docs for the retired model layer | terra | M | - | todo |
 | M02-T06 | Record the M02 removals in the cleanup ledger | orchestrator | S | mechanical | todo |
 

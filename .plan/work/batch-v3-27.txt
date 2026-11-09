@@ -1,0 +1,1 @@
+--task REV-M02-T03 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M02-T03-rehome-helpers --tags debug --var TASK=M02-T03 --var MILESTONE=.plan/milestones/M02-model-layer-retirement.md --var BRANCH=task/M02-T03-rehome-helpers --var BASE=main

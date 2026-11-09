@@ -2,7 +2,7 @@
 id: M00
 name: foundation
 weight: 10
-status: active
+status: done
 ---
 # M00 foundation
 No feature work before this milestone is green. Read-only inventories and design tasks (M02-T01, M03-T01, M05-T01) may run alongside it.
@@ -12,9 +12,9 @@ Plan v3 starts from a green, lint-enforced `main`: the 1.3.0 gate chain still pa
 
 ## Definition of Done
 - [x] Lint runs the pinned Ruff check over the whole repository and passes: `make lint` (evidence: merge.sh verify for M00-T01 ran make lint && make test on the integrated tree and passed, squash f4ca1c2)
-- [ ] Test harness runs locally and is green: `make test` (M00-T03 at e6531a3: 1 failed, 23679 passed; the M02-T02 script builds a parser outside the factory, fix M02-T02b)
+- [x] Test harness runs locally and is green: `make test` (evidence: merge.sh verify for M02-T02b ran make test on c1d0ce2, pass; M00-T03 at e6531a3 had found the one parser-factory failure it fixed)
 - [x] Contract smoke is green: `make contract-smoke` (evidence: M00-T03 gate run at e6531a3, exit 0)
-- [ ] Release check passes end to end, including archive and wheel check, rule-pack drift, taint scan and gitleaks: `make release-check`
+- [x] Release check passes end to end, including archive and wheel check, rule-pack drift, taint scan and gitleaks: `make release-check` (evidence: merge.sh verify for M02-T03 ran make release-check on the tree merged as dceafcd: 23912 passed, 0 failed; M00-T03 at e6531a3 had lint, contract-smoke and audit-deps green)
 - [x] Secrets scan passes: `gitleaks dir . --no-banner --redact` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
 - [x] Taint scan passes on the tracked tree: `bash scripts/oss-taint-scan.sh` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
 - [x] Dependency audit over the base install and every declared extra exits 0: `make audit-deps` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
@@ -26,7 +26,7 @@ Plan v3 starts from a green, lint-enforced `main`: the 1.3.0 gate chain still pa
 |---|---|---|---|---|---|
 | M00-T01 | Run the pinned Ruff check in make lint and clear its findings | codex | M | cross-cutting | done |
 | M00-T02 | Fix the pytest norecursedirs and taint-scan prune hygiene | codex | S | mechanical | done |
-| M00-T03 | Re-run the gate chain on main after the M00 merges | luna | S | - | doing |
+| M00-T03 | Re-run the gate chain on main after the M00 merges | luna | S | - | done |
 
 ## Acceptance criteria
 ### M00-T01 Run the pinned Ruff check in make lint and clear its findings
