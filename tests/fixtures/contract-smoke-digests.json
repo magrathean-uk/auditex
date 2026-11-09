@@ -1,0 +1,65 @@
+{
+  "commit": "223fbaa5b082bed6f1bccb4740d8038ea6278431",
+  "runs": {
+    "ci-admin-set": {
+      "findings/findings.json": "ad95f9f0a63e1632941c2889d7502334c8ced04763c14f0e1b4162a88f5cb28b",
+      "reports/action-plan.json": "c811e9db2005eb74ba4e494e0a18f5bc5628efcb9f543202ee0be978bc489951",
+      "reports/report-pack.json": "76d2477e041266beab47465a5632cf8cd1bdccc2563b6ba1f961986db81c5391",
+      "summary.json": "37d67c590ddb1c8c6ad2f57634e9033cd407351ebda994697355a7ac5022854b",
+      "summary.md": "50edd27a64b209c198fd3ad2d1a0565f3910f6d0ef825dd08401f9d3fde03c51"
+    },
+    "ci-contract": {
+      "findings/findings.json": "2945b046f8c3c1adefbb266e9874e1ef45d0d6afc68e3437d691c8a3d1ebf6c9",
+      "reports/action-plan.json": "49eb8c39945270153af4909e8afc46cc04ade3b20e458d0fab6f2496cae83c90",
+      "reports/report-pack.json": "f7c9a40a472d27740f9499372b3a41e1cfdcb50577b5611f536a7f0b64e4c2b5",
+      "summary.json": "14e54d40bb78a93fa370439ec822409073862c3c759b2cf68d4120774eb30b63",
+      "summary.md": "c68da6c35089039dc5975d254a00858b57dca3fe57d19f9ed1ab9ed2e3ff82ca"
+    },
+    "ci-endpoint-posture": {
+      "findings/findings.json": "a574e2e26444efc5ee0a9f59e2409a3d224ab66fb77a4e431c1880a8c42f8d35",
+      "reports/action-plan.json": "8eb8dfc91901db7fb0442c59429fa7942c1f1df28cb7696ca8fd7d9ac779c6e8",
+      "reports/report-pack.json": "6848efe3bebaeef97188c6031d36c889e8903693198745ffef9a9a7f0975d6db",
+      "summary.json": "309db63e216f911afd2863432c2838faa2f1c22c9c5532c9c31be466b69597a5",
+      "summary.md": "b60a71a03826d33e066cff124e1efd3a90fd445284bd9acce4553459152411ea"
+    },
+    "ci-google": {
+      "findings/findings.json": "62607bba2fe558da03b3e79bb460662f40ce3ae604ee27b1bc64d92fd7241c38",
+      "reports/action-plan.json": "180a9787bca73e94c4748872212a8cb3dfee75a2b16084db9ff2e997e512b923",
+      "reports/report-pack.json": "ee3cd5e01bb24f0d8ce4a9973120d0173314c3302cdb05143a2689bc207b4378",
+      "summary.json": "d4643df59f34b1ea8728b9b99edd4a053463bc00b41eb76dced39a3e8531a55a",
+      "summary.md": "f1b8bdcd3d88914defa9d30a57eed29eabd337ff93665f31997d188fb5bdaf75"
+    },
+    "ci-identity-controls": {
+      "findings/findings.json": "922a3211f1224776b06cb681658c28f225d65a82b0244e08dfa59f7b02ff30c6",
+      "reports/action-plan.json": "1cfcd46534b9524ae433034dbbb5968e654aac1a220ea9b12f7261dc38606471",
+      "reports/report-pack.json": "fe788770a16a7522eb01d8cd5cc586ead805f279288687239d8dc0026af1b7f1",
+      "summary.json": "9f95583b010ba4c4fea7707d25ae6ac9d87998a5b97e518fba28f3fed72d73e4",
+      "summary.md": "54d75acac7e513456c644383dadf614ef20eb3f0dda874cd94ef8d34adbadd32"
+    },
+    "ci-partial": {
+      "findings/findings.json": "9ac8b2708b01e15d6210ba8be4d4f3df70ab33d75bf3022ac3ba1507043efc4f",
+      "reports/action-plan.json": "a3d3fb378935831b022ebc48d18efc150503e9cac48e086a6cd27cd1a2de6c96",
+      "reports/report-pack.json": "eb3427c32df74b6d1e598388a599873f74e3924e53bbea3cb51a50273a083e63",
+      "summary.json": "81a2c6255f51cf74d13bb7e25d856007d3e4540fea921a3fecdf6dcb8fe74a4e",
+      "summary.md": "a1fed9b5316d46f73004bfc52d28c8e462773a58109f3ef3e8152ce05eaceda3"
+    },
+    "ci-projection-demo": {
+      "explainer:policy_explanations": "0970f78d57a7a4ea474dda116b65ee716ec0c5bb3a080baa169b730a820b9063",
+      "findings/findings.json": "8b77e886c9b5a5860f1913fd8305300648545552943f6eb558a9158732e199b0",
+      "model_assessment.json": "96875f4557ca20aa9416dd72b60646a4466357084b291b4d4235544b858d0454",
+      "projection:project_run.report": "67cd5a443592660b4558726c8b684d42bcc4e7f6b1491c7604e96bd367981295",
+      "reports/action-plan.json": "60d4071dcd547d6ee7de3a24e3ae0b1bf714a6f75a977636480042c9d8b52eae",
+      "reports/report-pack.json": "a8c871d0c1744affe9d83b1c280bc431306512c753eb9dc89458e4411449f8a6",
+      "summary.json": "3437eb8c508ec1af585e8e00b9469063d113708a5d20142b13e584ce3693c3b9",
+      "summary.md": "5daf886e908a60c2c9d69bcc9dd722f0dac20791715fc352790aa8b995cac763"
+    },
+    "ci-update-rings-missing": {
+      "findings/findings.json": "ad1ef34c7185157207a263bb94085c513f0bf276d8efb97c032b9a8fa12cb80b",
+      "reports/action-plan.json": "5a41ef2e586eda1a78e0b0c9bb3b112cc1eca62026bd3f16b952b271a87f8a51",
+      "reports/report-pack.json": "f9bc2abc68f169b018307895858d26121472d1c3588109d934a2d6418a67909e",
+      "summary.json": "0a47f65a7aa26619bad3dc74724705d440d7de5c543f0c9c08e5cc75b5cdd84a",
+      "summary.md": "abb49d1f5f1425a21833388bb52b4b79318747a3d4e4a98c5f0a810abb93df07"
+    }
+  },
+  "schema": 1
+}
