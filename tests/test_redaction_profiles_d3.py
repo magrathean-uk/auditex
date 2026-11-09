@@ -304,15 +304,17 @@ def test_d3_guid_that_matches_old_pseudonym_prefix_is_still_redacted(profile: st
     assert redact_output(output, profile=profile) == output
 
 
-def test_d3_group_and_role_names_survive_inside_lists() -> None:
-    from azure_tenant_audit.output_redaction import RedactionContext, redact_output
+def test_d3_group_and_role_names_mask_a_person_name_inside_lists() -> None:
+    # DEC-003 (D5): a person's full name is masked inside group and role names too; the rest of the name remains.
+    from azure_tenant_audit.output_redaction import RedactionContext, pseudonym, redact_output
 
     group = f"Team {NAME}"
     role = f"Operations {NAME}"
     payload = {"groups": [{"display_name": group, "email": ADDRESS}], "roles": [role]}
     result = redact_output(payload, context=RedactionContext(protected_names=frozenset({NAME})))
-    assert result["groups"][0]["display_name"] == group
-    assert result["roles"] == [role]
+    masked = "User " + pseudonym("", NAME)
+    assert result["groups"][0]["display_name"] == f"Team {masked}"
+    assert result["roles"] == [f"Operations {masked}"]
     assert ADDRESS not in result["groups"][0]["email"]
 
 

@@ -6,8 +6,10 @@ import json
 import os
 import re
 import stat
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+import unicodedata
+from collections import deque
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -260,6 +262,12 @@ class RedactionContext:
     # The state of the run's ``normalized/`` files as discovery read them (see ``snapshot_run``); empty for a context
     # that was not built from one run directory.
     snapshot: tuple[tuple[str, tuple[int, int, int, int, int]], ...] = ()
+    # D5: directory people with at least one recorded name spelling that cannot be masked in free text, as
+    # ``(reason, count)`` pairs in ``D5_REASONS`` order (never a name). Their name fields are still pseudonymised.
+    unmatched_names: tuple[tuple[str, int], ...] = ()
+    # D5: the person-name index (``_NameIndex``), built once per context and shared by every call on it. ``None`` is
+    # built on first use from ``protected_names`` and ``vocabulary``.
+    _index: Any = field(default=None, compare=False, hash=False, repr=False)
 
 
 def pseudonym(salt: str, text: str) -> str:
@@ -313,7 +321,10 @@ def scrub_run_paths(text: str, roots: Iterable[str]) -> str:
 
 
 def _is_privileged_user(record: Mapping[Any, Any]) -> bool:
-    keys = {_norm(k): v for k, v in record.items()}
+    return _privileged_keys({_norm(k): v for k, v in record.items()})
+
+
+def _privileged_keys(keys: Mapping[str, Any]) -> bool:
     if str(keys.get("principaltype", "")).lower() in _NOT_USER_TYPES:
         return False
     if "onpremisesimmutableid" in keys or "immutableid" in keys:
@@ -329,16 +340,87 @@ def _is_group(record: Mapping[Any, Any]) -> bool:
     return str({_norm(k): v for k, v in record.items()}.get("principaltype", "")).lower() == "group"
 
 
+# D5: what marks a mapping as a directory person, and what is read from one (keys compared as ``_norm``).
+_D5_PERSON_KINDS = frozenset({"user", "google_user", "admin#directory#user"})
+_D5_PERSON_ODATA = "#microsoft.graph.user"
+_D5_NAME_FIELDS = ("displayname", "fullname")
+_D5_FAMILY_FIELDS = ("surname", "familyname")
+_D5_NAME_PART_FIELDS = frozenset({"givenname", "surname", "familyname"})
+_D5_ID_FIELDS = (
+    "userprincipalname", "principalname", "primaryemail", "mail", "mailnickname", "onpremisessamaccountname",
+)
+_D5_ADDRESS_FIELDS = ("userprincipalname", "principalname", "primaryemail", "mail")
+# A person's identity for the unmatched count: the directory object id (a role or assignment record names the user in
+# ``principalId``, so that comes before a record's own ``id``) is authoritative; the user principal name identifies a
+# person only for a record without an object id (see ``_unmatched_people``).
+_D5_OBJECT_ID_FIELDS = ("principalid", "userid", "objectid", "id")
+_D5_PRINCIPAL_FIELDS = ("userprincipalname", "principalname", "primaryemail")
+
+# A discovered person record: ``(canonical, name strings, given name, family name, id strings, identity)``. The
+# identity is ``(object id, principal name)``, lower-cased, ``""`` for a missing one (or ``()`` for neither); it decides
+# who is counted unmatched. The pseudonym stays that of the canonical name.
+_Person = tuple[str, tuple[str, ...], str, str, tuple[str, ...], tuple[str, ...]]
+
+
+def _is_directory_person(keys: Mapping[str, Any]) -> bool:
+    """A user record of either normaliser or raw API, a D3 privileged user, or a user reference (an address and a
+    display name, such as an audit initiator). Groups, service principals, applications and devices never are."""
+    if str(keys.get("principaltype", "")).lower() in _NOT_USER_TYPES:
+        return False
+    kind = keys.get("kind")
+    if isinstance(kind, str) and kind.lower() in _D5_PERSON_KINDS:
+        return True
+    if keys.get("odatatype") == _D5_PERSON_ODATA or _privileged_keys(keys):
+        return True
+    address = keys.get("userprincipalname", keys.get("principalname"))
+    shown = keys.get("displayname")
+    return isinstance(address, str) and "@" in address and isinstance(shown, str) and bool(shown)
+
+
+def _usable(value: Any) -> bool:
+    return isinstance(value, str) and bool(value) and not _PSEUDONYM_RE.match(value)
+
+
+def _person(keys: Mapping[str, Any]) -> _Person | None:
+    """The person a directory-person record describes, or ``None`` when it carries no name and no address."""
+    names = [keys[k] for k in _D5_NAME_FIELDS if _usable(keys.get(k))]
+    given = keys.get("givenname")
+    family = next((keys[k] for k in _D5_FAMILY_FIELDS if _usable(keys.get(k))), None)
+    sub = keys.get("name")
+    if isinstance(sub, Mapping):  # Google raw: ``name: {givenName, familyName, fullName}``
+        parts = {_norm(k): v for k, v in sub.items()}
+        names.extend(parts[k] for k in _D5_NAME_FIELDS if _usable(parts.get(k)))
+        given = given if _usable(given) else parts.get("givenname")
+        family = family or next((parts[k] for k in _D5_FAMILY_FIELDS if _usable(parts.get(k))), None)
+    ids = tuple(
+        keys[k] for k in _D5_ID_FIELDS
+        if _usable(keys.get(k)) and _D5_WORD_RE.search(keys[k].split("@", 1)[0])  # ``***@domain`` is no address
+    )
+    addresses = [keys[k] for k in _D5_ADDRESS_FIELDS if keys.get(k) in ids and "@" in keys[k]]
+    canonical = names[0] if names else (addresses[0] if addresses else None)
+    if canonical is None:
+        return None
+    object_id = next((keys[k] for k in _D5_OBJECT_ID_FIELDS if _usable(keys.get(k))), None)
+    principal = next((keys[k] for k in _D5_PRINCIPAL_FIELDS if keys.get(k) in addresses), None)
+    identity = (object_id.lower() if object_id else "", principal.lower() if principal else "")
+    return (
+        canonical, tuple(dict.fromkeys(names)), given if _usable(given) else "", family if _usable(family) else "", ids,
+        identity,
+    )
+
+
 @dataclass
 class _Found:
     names: set[str] = field(default_factory=set)
     ids: set[str] = field(default_factory=set)
     vocabulary: set[str] = field(default_factory=set)
     keys: set[str] = field(default_factory=set)
+    persons: set[_Person] = field(default_factory=set)
     limit_hits: int = 0  # JSON-looking strings above ``_MAX_EMBEDDED_JSON_CHARS`` that were not parsed
 
     def merge(self, other: "_Found") -> None:
         self.names |= other.names
+        self.persons |= other.persons
         self.ids |= other.ids
         self.vocabulary |= other.vocabulary
         self.keys |= other.keys
@@ -412,7 +494,12 @@ def _collect(value: Any, found: _Found, *, names: bool) -> None:
                 continue
             seen[id(item)] = item
             if names:
-                privileged = _is_privileged_user(item)
+                normed = {_norm(k): v for k, v in item.items()}
+                privileged = _privileged_keys(normed)
+                if _is_directory_person(normed):
+                    person = _person(normed)
+                    if person is not None:
+                        found.persons.add(person)
                 for key, member in item.items():
                     norm = _norm(key)
                     if isinstance(key, str) and len(key) <= 64 and "@" not in key:
@@ -826,6 +913,7 @@ class _Discovery:
     vocabulary: frozenset[str] = frozenset()
     problems: tuple[tuple[str, str], ...] = ()
     snapshot: Snapshot = ()
+    persons: frozenset[_Person] = frozenset()
 
 
 @guarded_operation
@@ -889,7 +977,8 @@ def _scan_run_identities(run_path: Path, *, read: bool = True) -> _Discovery:
         labelled.append((f"{label}#{index}" if "<redacted-segment-" in label else label, reason))
     found = scan.found
     return _Discovery(
-        frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary), tuple(labelled), tuple(sorted(scan.fingerprints))
+        frozenset(found.names), frozenset(found.ids), frozenset(found.vocabulary), tuple(labelled), tuple(sorted(scan.fingerprints)),
+        frozenset(found.persons),
     )
 
 
@@ -924,6 +1013,27 @@ def _reason_strings(files: tuple[tuple[str, str], ...], omitted: int) -> tuple[s
 def context_for_run(run_dir: str | Path) -> RedactionContext:
     """The context for outputs derived from one run: its salt, its path spellings, its administrators' names and
     immutable ids (from every ``normalized/`` record, whichever sections the output selects) and role vocabulary."""
+    context, persons = _run_context(run_dir)
+    return _with_index(context, persons)
+
+
+def _with_index(context: RedactionContext, persons: Iterable[_Person]) -> RedactionContext:
+    """``context`` with its D5 index: every directory person of its runs (not only administrators), indexed once for
+    every call on the context, and the unmatched count taken from it."""
+    index = _build_index(_run_persons(persons, context.protected_names), _vocabulary_phrases(context.vocabulary))
+    return replace(context, unmatched_names=index.counts(), _index=index)
+
+
+def _run_persons(persons: Iterable[_Person], names: Iterable[str]) -> tuple[_Person, ...]:
+    """The person records, plus a name-only record for a privileged display name that no person record carries: a
+    privileged user found by discovery is already a person record, so it is one person, never two."""
+    persons = tuple(persons)
+    recorded = {name for person in persons for name in person[1]}
+    return (*persons, *_names_as_persons(name for name in names if name not in recorded))
+
+
+def _run_context(run_dir: str | Path) -> tuple[RedactionContext, frozenset[_Person]]:
+    """One run's context without its D5 index, and the run's person records for ``_with_index``."""
     run_path = Path(run_dir)
     discovery = _scan_run_identities(run_path)
     names, ids, vocabulary = discovery.names, discovery.ids, discovery.vocabulary
@@ -941,7 +1051,7 @@ def context_for_run(run_dir: str | Path) -> RedactionContext:
         "protected_ids": ids,
         "vocabulary": vocabulary,
     }
-    return RedactionContext(**values)
+    return RedactionContext(**values), discovery.persons
 
 
 def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path] = ()) -> RedactionContext:
@@ -960,8 +1070,12 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
     size_limit = False
     salt = ""
     snapshot: list[tuple[str, tuple[int, int, int, int, int]]] = []
+    persons: set[_Person] = set()
+    any_run = False
     for index, run_dir in enumerate(run_dirs):
-        context = context_for_run(run_dir)
+        context, run_persons = _run_context(run_dir)
+        persons |= run_persons
+        any_run = True
         snapshot.extend((f"{index}/{path}", state) for path, state in context.snapshot)
         incomplete = incomplete or context.incomplete
         size_limit = size_limit or context.scan_size_exceeded
@@ -976,7 +1090,7 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         roots.update(run_path_roots(path))
     kept = tuple(files[:_MAX_REASONS])
     omitted += max(0, len(files) - _MAX_REASONS)
-    return RedactionContext(
+    merged = RedactionContext(
         salt=salt,
         run_paths=tuple(sorted(roots, key=lambda r: (-len(r), r))),
         protected_names=frozenset(names),
@@ -989,6 +1103,10 @@ def context_for_runs(run_dirs: Iterable[str | Path], paths: Iterable[str | Path]
         scan_size_exceeded=size_limit,
         snapshot=tuple(snapshot),
     )
+    # D5: one index over the person records of every run, so a person's records in different runs (and the
+    # principal-name references that resolve to them) are one identity, and a role or group name of one run guards the
+    # same words in another.
+    return _with_index(merged, persons) if any_run else merged
 
 
 def assert_runs_stable(run_dirs: Iterable[str | Path], context: RedactionContext) -> None:
@@ -1002,6 +1120,378 @@ def assert_runs_stable(run_dirs: Iterable[str | Path], context: RedactionContext
         now.extend((f"{index}/{path}", state) for path, state in snapshot_run(run_dir))
     if tuple(now) != context.snapshot:
         raise ContextIncompleteError((("<run>", REASON_CHANGED),))
+
+
+# -- D5: person names in free text and ids -------------------------------------------------------------------------
+#
+# Bounded rule (design M05-T01, sections 3 to 6): every directory person's name and id forms become lower-case token
+# phrases (keys) in one dictionary, together with every proper token prefix of every key. Matching is one left-to-right
+# pass per string: at a token, the candidate phrase grows one token at a time while the separator is a whitespace run
+# or exactly one of ``. _ - ' ’``, the grown phrase is in the dictionary and the window holds at most
+# ``_D5_MAX_KEY_TOKENS`` tokens; each step is one dictionary probe and the longest key wins. No regular expression is
+# built from names, so the cost per string is independent of the number of people.
+
+_D5_MAX_KEYS_PER_PERSON = 16
+_D5_MAX_KEY_TOKENS = 6
+_D5_MAX_TOKEN_CHARS = 64
+_D5_MIN_KEY_CHARS = 4
+_D5_SEPARATORS = frozenset(".-_'’")
+_D5_WORD_RE = re.compile(r"[^\W_]+")
+# The first alternative keeps pseudonyms (``User <hex>``, ``user-<hex>``) opaque, so a second pass changes nothing and
+# a person called ``User`` cannot re-match one. The markup form also keeps HTML tags and character references opaque.
+_D5_OPAQUE = rf"(?P<opaque>(?<![^\W_])(?:(?:User|Id|Group|Guid) {_HEX16}|user-{_HEX16})(?![^\W_]))"
+_D5_TOKEN_RE = re.compile(_D5_OPAQUE + r"|(?P<tok>[^\W_]+)")
+_D5_MARKUP_TOKEN_RE = re.compile(_D5_OPAQUE + r"|(?P<tag><[^<>]{0,4096}>|&#?[A-Za-z0-9]{1,32};)|(?P<tok>[^\W_]+)")
+# A whole mapping key of this shape is a product identifier and is never rewritten.
+_D5_STRUCTURAL_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*$")
+_D5_ID_NEIGHBOURS = frozenset("/\\@=_~%")
+_D5_ID_JOINERS = frozenset(".-:+#?&")
+_D5_ID_PREFIX = "user-"
+_D5_PLACEHOLDER_WORDS = frozenset({"user", "id", "group", "guid", "redacted", "text", "run", "dir"})
+_D5_COMMON_WORDS = frozenset(
+    {
+        "admin", "administrator", "admins", "account", "accounts", "user", "users", "guest", "guests", "member",
+        "members", "group", "groups", "team", "teams", "owner", "owners", "service", "services", "support", "help",
+        "helpdesk", "info", "information", "contact", "office", "reception", "sales", "finance", "marketing",
+        "security", "compliance", "audit", "auditor", "operations", "test", "testing", "demo", "sample", "default",
+        "system", "scanner", "printer", "room", "meeting", "meetings", "shared", "mailbox", "mail", "email", "noreply",
+        "global", "tenant", "policy", "policies", "report", "reports", "device", "devices", "application", "app",
+        "apps", "directory", "identity", "external", "internal", "legal", "payroll", "accounting", "training",
+    }
+)
+# Why a recorded name spelling of a person cannot be masked in free text, in the order the unmatched note lists them.
+# ``separator``: a recorded name whose words are joined by something free-text matching does not follow (``Smith
+# (Alice)``), so that spelling as written would stay readable. ``limit``: the person has more accepted keys than
+# ``_D5_MAX_KEYS_PER_PERSON``, so some were not indexed (the required name forms are kept first).
+D5_REASONS = (
+    "too_short", "no_letters", "too_many_tokens", "vocabulary", "common_word", "structural", "separator", "limit",
+)
+
+
+def _joins(separator: str) -> bool:
+    """Whether the text between two tokens continues a name, for the index and the matcher alike: a whitespace run,
+    exactly one of ``_D5_SEPARATORS``, or a comma alone or followed by a whitespace run (``Kovalenko, Priya``)."""
+    if separator[:1] == ",":
+        rest = separator[1:]
+        return not rest or rest.isspace()
+    return separator.isspace() or (len(separator) == 1 and separator in _D5_SEPARATORS)
+
+
+def _written_joinable(raw: str) -> bool:
+    """Whether every separator between the words of ``raw`` is one the matcher follows."""
+    previous: re.Match[str] | None = None
+    for match in _D5_WORD_RE.finditer(raw):
+        if previous is not None and not _joins(raw[previous.end():match.start()]):
+            return False
+        previous = match
+    return True
+
+
+def _swapped(raw: str) -> str | None:
+    """``Kovalenko, Priya`` as ``Priya Kovalenko``: a name with one comma between words, its two sides swapped."""
+    family, comma, given = raw.partition(",")
+    if not comma or "," in given or not _D5_WORD_RE.search(family) or not _D5_WORD_RE.search(given):
+        return None
+    return f"{given.strip()} {family.strip()}"
+
+
+def _fold(token: str) -> str:
+    return token.lower() if token.isascii() else unicodedata.normalize("NFKC", token).casefold()
+
+
+def _phrase(text: str) -> str:
+    """``text`` as a key phrase: its letter-and-digit tokens, folded, joined by single spaces."""
+    return " ".join(_fold(token) for token in _D5_WORD_RE.findall(text))
+
+
+def _vocabulary_phrases(vocabulary: Iterable[str]) -> frozenset[str]:
+    return frozenset(p for p in (_phrase(v) for v in vocabulary if isinstance(v, str)) if p)
+
+
+_D5_FIXED_VOCABULARY = frozenset(_phrase(v) for v in _STATIC_VOCABULARY) | _D5_PLACEHOLDER_WORDS
+
+
+def _drop_reason(phrase: str, vocabulary: frozenset[str], raw: str | None = None) -> str | None:
+    """Why ``phrase`` must not be matched in free text (one of ``D5_REASONS``), or ``None`` when it is a safe key.
+    ``raw`` is the name as recorded, for the structural-shape test."""
+    tokens = phrase.split(" ") if phrase else []
+    if sum(len(t) for t in tokens) < _D5_MIN_KEY_CHARS:
+        return "too_short"
+    if not any(c.isalpha() for c in phrase):
+        return "no_letters"
+    if len(tokens) > _D5_MAX_KEY_TOKENS or any(len(t) > _D5_MAX_TOKEN_CHARS for t in tokens):
+        return "too_many_tokens"
+    if phrase in _D5_FIXED_VOCABULARY or phrase in vocabulary:
+        return "vocabulary"
+    if all(t in _D5_COMMON_WORDS or t in _D5_FIXED_VOCABULARY for t in tokens):
+        return "common_word"
+    if raw is not None and _structural(raw):
+        return "structural"
+    return None
+
+
+def _person_keys(person: _Person, vocabulary: frozenset[str]) -> tuple[list[str], str | None]:
+    """``(keys, reason)`` for one person record. Every recorded spelling (each name field, and given plus family name)
+    is either a key the matcher follows as written, or reported: ``reason`` is the earliest in ``D5_REASONS`` of the
+    spellings that cannot be masked, ``None`` when every one can.
+
+    Keys come in priority order and at most ``_D5_MAX_KEYS_PER_PERSON`` are kept: first the required forms (each
+    accepted spelling, family plus given name, the comma swap of a ``Last, First`` name), then the joined forms
+    (``alicesmith``) and the address forms. A key that does not fit is reported as ``limit``, never dropped silently."""
+    _canonical, names, given, family, ids, _identity = person
+    required: list[str] = []
+    optional: list[str] = []
+    reasons: list[str] = []
+
+    def accepted(phrase: str, raw: str | None = None) -> bool:
+        return bool(phrase) and _drop_reason(phrase, vocabulary, raw) is None
+
+    def joined(phrase: str) -> None:
+        tokens = phrase.split(" ")
+        if 2 <= len(tokens) <= 3 and accepted("".join(tokens)):
+            optional.append("".join(tokens))  # ``alicesmith``
+
+    spellings = [(raw, True) for raw in names]
+    if given and family:
+        spellings.append((f"{given} {family}", False))
+    for raw, as_named in spellings:
+        phrase = _phrase(raw)
+        dropped = _drop_reason(phrase, vocabulary, raw if as_named else None)
+        if dropped is not None:
+            reasons.append(dropped)
+            continue
+        if not _written_joinable(raw):
+            reasons.append("separator")  # the phrase is still a key: it masks the spellings the matcher does follow
+        required.append(phrase)
+        joined(phrase)
+    if given and family and accepted(_phrase(f"{family} {given}")):
+        required.append(_phrase(f"{family} {given}"))
+    for swapped in map(_swapped, names):
+        if swapped is not None and accepted(_phrase(swapped)):
+            required.append(_phrase(swapped))
+            joined(_phrase(swapped))
+    for value in ids:
+        local, at, _domain = value.partition("@")
+        local_phrase = _phrase(local)
+        if local_phrase.count(" ") >= 1 and accepted(local_phrase):  # ``alice.smith``; one token: addresses only
+            optional.append(local_phrase)
+        if at and accepted(_phrase(value)):
+            optional.append(_phrase(value))  # ``alice smith contoso com`` (OneDrive segments)
+    keys = list(dict.fromkeys((*required, *optional)))
+    if len(keys) > _D5_MAX_KEYS_PER_PERSON:
+        reasons.append("limit")
+        keys = keys[:_D5_MAX_KEYS_PER_PERSON]
+    return keys, min(reasons, key=D5_REASONS.index) if reasons else None
+
+
+def _combine(current: str | None, new: str) -> str:
+    """Merge two index values: ``""`` marks a prefix only; of two people the lexicographically smallest name wins."""
+    if not current:
+        return new or (current if current is not None else "")
+    if not new:
+        return current
+    return min(current, new)
+
+
+@dataclass
+class _NameIndex:
+    """``table`` maps every key phrase to its person's canonical name and every proper prefix of a key to ``""``."""
+
+    table: dict[str, str] = field(default_factory=dict)
+    # Coverage, never published: every person with at least one spelling that cannot be masked, as identity group
+    # (``oid:``, ``upn:`` or ``name:`` and the value) to the earliest reason in ``D5_REASONS``.
+    unmatched: dict[str, str] = field(default_factory=dict)
+
+    def add(self, phrase: str, canonical: str) -> None:
+        table = self.table
+        cut = phrase.find(" ")
+        while cut != -1:
+            prefix = phrase[:cut]
+            if prefix not in table:
+                table[prefix] = ""
+            cut = phrase.find(" ", cut + 1)
+        table[phrase] = _combine(table.get(phrase), canonical)
+
+    def counts(self) -> tuple[tuple[str, int], ...]:
+        tally: dict[str, int] = {}
+        for reason in self.unmatched.values():
+            tally[reason] = tally.get(reason, 0) + 1
+        return tuple((reason, tally[reason]) for reason in D5_REASONS if tally.get(reason))
+
+
+def _identity(person: _Person) -> tuple[str, str]:
+    identity = person[5]
+    return (identity[0], identity[1]) if identity else ("", "")
+
+
+def _unmatched_people(
+    pending: list[tuple[str, str, str, str]], persons: Collection[_Person],
+) -> dict[str, str]:
+    """The people behind ``pending`` records (object id, principal name, canonical name, reason), each with its
+    earliest reason. The object id is authoritative: records with different object ids are different people, even
+    when they share a principal name. A record without an object id joins the one object id whose records (any of
+    ``persons``, matched or not) carry its principal name; with none, or several, it is the principal name's own
+    person. A record with neither is identified by its name."""
+    wanted = {upn for oid, upn, _canonical, _reason in pending if upn and not oid}
+    owners: dict[str, str] = {}  # principal name -> its one object id, or "" when several carry it
+    if wanted:
+        for person in persons:
+            oid, upn = _identity(person)
+            if oid and upn in wanted:
+                owner = owners.get(upn)
+                owners[upn] = oid if owner is None or owner == oid else ""
+    people: dict[str, str] = {}
+    for oid, upn, canonical, reason in pending:
+        if oid:
+            group = "oid:" + oid
+        elif upn:
+            owner = owners.get(upn)
+            group = "oid:" + owner if owner else "upn:" + upn
+        else:
+            group = "name:" + canonical
+        current = people.get(group)
+        if current is None or D5_REASONS.index(reason) < D5_REASONS.index(current):
+            people[group] = reason
+    return people
+
+
+def _build_index(persons: Collection[_Person], vocabulary: frozenset[str]) -> _NameIndex:
+    """The index over every person record of a context, identities resolved once over all of them."""
+    index = _NameIndex()
+    pending: list[tuple[str, str, str, str]] = []
+    for person in persons:
+        canonical = person[0]
+        keys, reason = _person_keys(person, vocabulary)
+        for key in keys:
+            index.add(key, canonical)
+        if reason is not None:
+            pending.append((*_identity(person), canonical, reason))
+    if pending:
+        index.unmatched = _unmatched_people(pending, persons)
+    return index
+
+
+def _names_as_persons(names: Iterable[str]) -> list[_Person]:
+    return [(n, (n,), "", "", (), ()) for n in names if _usable(n)]
+
+
+def _context_index(context: "RedactionContext") -> _NameIndex:
+    """The context's index, built once (from ``protected_names`` when the context was not built from a run)."""
+    index = context._index
+    if index is None:
+        index = _build_index(_names_as_persons(context.protected_names), _vocabulary_phrases(context.vocabulary))
+        object.__setattr__(context, "_index", index)
+    return index
+
+
+def unmatched_names_note(context: "RedactionContext") -> str:
+    """The fixed line a shareable HTML or Markdown report carries when some directory people's names could not be
+    matched safely in free text (``RedactionContext.unmatched_names``); ``""`` otherwise. It never holds a name."""
+    counts = context.unmatched_names
+    if not counts:
+        return ""
+    total = sum(count for _, count in counts)
+    reasons = ", ".join(f"{reason} {count}" for reason, count in counts)
+    return (
+        f"Name masking: {total} directory people have names that cannot be matched safely in free text "
+        f"({reasons}); their name fields are pseudonymised, the same words elsewhere are left as written."
+    )
+
+
+class _NameMatcher:
+    """The bounded D5 pass over one string (see the section comment). ``probes`` counts dictionary probes and
+    ``widest`` the largest token window held, for the scan-budget tests."""
+
+    __slots__ = ("table", "overlay", "skip", "salt", "probes", "widest")
+
+    def __init__(self, table: dict[str, str], salt: str, overlay: dict[str, str] | None = None,
+                 skip: frozenset[str] = frozenset()) -> None:
+        self.table = table
+        self.overlay = overlay or {}
+        self.skip = skip
+        self.salt = salt
+        self.probes = 0
+        self.widest = 0
+
+    def _probe(self, phrase: str) -> str | None:
+        self.probes += 1
+        found = self.overlay.get(phrase)
+        return self.table.get(phrase) if found is None else found
+
+    def mask(self, text: str, markup: bool = False) -> str:
+        if not text:
+            return text
+        tokens = (_D5_MARKUP_TOKEN_RE if markup else _D5_TOKEN_RE).finditer(text)
+        ahead: deque[re.Match[str]] = deque()
+        pieces: list[str] = []
+        last = 0
+        while True:
+            match = ahead.popleft() if ahead else next(tokens, None)
+            if match is None:
+                break
+            if match.lastgroup != "tok" or len(match[0]) > _D5_MAX_TOKEN_CHARS:
+                continue
+            phrase = _fold(match[0])
+            value = self._probe(phrase)
+            if value is None:
+                continue
+            best: tuple[int, str, str] | None = None  # (tokens beyond the first, phrase, canonical)
+            if value and not markup:
+                best = (0, phrase, value)
+            end = match
+            width = 1
+            while width < _D5_MAX_KEY_TOKENS:
+                if len(ahead) < width:
+                    following = next(tokens, None)
+                    if following is None:
+                        break
+                    ahead.append(following)
+                    self.widest = max(self.widest, len(ahead) + 1)
+                following = ahead[width - 1]
+                if following.lastgroup != "tok" or len(following[0]) > _D5_MAX_TOKEN_CHARS:
+                    break
+                if not _joins(text[end.end():following.start()]):
+                    break
+                phrase = phrase + " " + _fold(following[0])
+                value = self._probe(phrase)
+                if value is None:
+                    break
+                width += 1
+                end = following
+                if value:
+                    best = (width - 1, phrase, value)
+            if best is None or best[1] in self.skip:
+                continue
+            extra, _phrase_hit, canonical = best
+            last_match = ahead[extra - 1] if extra else match
+            for _ in range(extra):
+                ahead.popleft()
+            start, stop = match.start(), last_match.end()
+            pieces.append(text[last:start])
+            pieces.append(self._replacement(text, start, stop, canonical))
+            last = stop
+        if not pieces:
+            return text
+        pieces.append(text[last:])
+        return "".join(pieces)
+
+    def _replacement(self, text: str, start: int, stop: int, canonical: str) -> str:
+        digest = pseudonym(self.salt, canonical)
+        return (_D5_ID_PREFIX if _id_context(text, start, stop) else _USER_PREFIX) + digest
+
+
+def _id_context(text: str, start: int, stop: int) -> bool:
+    """Whether a hit sits in an id, URL or path (``user-<hex>``) rather than prose (``User <hex>``). A comma inside the
+    hit (``Kovalenko, Priya``) is prose."""
+    if any(not c.isalnum() and not c.isspace() and c != "," for c in text[start:stop]):
+        return True
+    left = text[start - 1] if start else ""
+    right = text[stop] if stop < len(text) else ""
+    if (left and left in _D5_ID_NEIGHBOURS) or (right and right in _D5_ID_NEIGHBOURS):
+        return True
+    if left and left in _D5_ID_JOINERS and start >= 2 and text[start - 2].isalnum():
+        return True
+    return bool(right and right in _D5_ID_JOINERS and stop + 1 < len(text) and text[stop + 1].isalnum())
 
 
 # -- redaction --------------------------------------------------------------------------------------------------------
@@ -1120,29 +1610,28 @@ class _Redactor:
                 size_limit=context.scan_size_exceeded,
             )
         found = _Found()
-        names = set(context.protected_names)
         ids = set(context.protected_ids)
         _collect(value, found, names=True)
         if found.limit_hits:
             raise ContextIncompleteError((("<output value>", REASON_LIMIT),))
-        names |= found.names
         ids |= found.ids
-        # A name that is also report vocabulary (a role, a status word, a key of the structure) stays readable in
-        # free text; the user's own structured ``display_name`` is still pseudonymised.
-        vocabulary = {v.lower() for v in context.vocabulary} | found.vocabulary | _STATIC_VOCABULARY | found.keys
-        vocabulary_norms = {_norm(v) for v in vocabulary}
-        self.names = sorted(
-            (
-                n for n in names
-                if len(n) >= 4 and not _PSEUDONYM_RE.match(n) and n.lower() not in vocabulary and _norm(n) not in vocabulary_norms and not _structural(n)
-            ),
-            key=len, reverse=True,
-        )
-        # The alternation puts a generated pseudonym first, so ``User 0123...`` is never re-read as the name ``User``.
-        self.name_re = (
-            re.compile(_PSEUDONYM_KEEP + r"|(?<!\w)(?P<hit>" + "|".join(re.escape(n) for n in self.names) + r")(?!\w)")
-            if self.names else None
-        )
+        # D5: the context's index (built once per context) plus an overlay for people found only in this value. A
+        # role or group name found only in the value protects the same words at lookup time.
+        base = _context_index(context)
+        context_vocabulary = _vocabulary_phrases(context.vocabulary)
+        value_vocabulary = _vocabulary_phrases(found.vocabulary) - context_vocabulary
+        persons = found.persons
+        persons.update(_names_as_persons(found.names - context.protected_names))
+        overlay: dict[str, str] = {}
+        if persons:
+            table = base.table
+            for phrase, canonical in _build_index(persons, context_vocabulary | value_vocabulary).table.items():
+                current = table.get(phrase)
+                combined = _combine(current, canonical)
+                if combined != current:
+                    overlay[phrase] = combined
+        del found, persons  # this frame's last references to the value's discovery sets
+        self.matcher = _NameMatcher(base.table, self.salt, overlay, value_vocabulary)
         # Immutable ids are protected by value, whatever their shape and case (``planted_immutable_id`` is as much an id
         # as a base64 one); the pseudonym is that of the id as discovered, so every spelling gets the same one. The only
         # boundary is a word character (so ``key=ID``, ``/users/ID/`` and ``a-ID`` are all caught); the only floor is
@@ -1161,9 +1650,10 @@ class _Redactor:
         )
     # -- text ---------------------------------------------------------------------------------------------
     def text(self, value: str, *, names: bool = True, key: bool = False) -> str:
-        """``value`` as text. ``key`` is a mapping key: identifiers and credential assignments only, no name or id
-        substitution, no embedded JSON. ``names=False`` is a controlled-vocabulary value (finding id, setting name,
-        reason code, status): no user name is substituted into it; identifiers in it are still masked."""
+        """``value`` as text. ``key`` is a mapping key: identifiers, credential assignments and person names (unless
+        the whole key is a product identifier), no immutable-id substitution, no embedded JSON. ``names=False`` marks a
+        controlled-vocabulary value (finding id, setting name, reason code, status); since D5 person names are masked
+        in it too (their guard keeps vocabulary words readable) and identifiers in it are still masked."""
         if not value:
             return value
         if self.blank and not key:
@@ -1178,11 +1668,12 @@ class _Redactor:
         value = OUTPUT_EMAIL_RE.sub(self._mask_email, value)
         value = _ENCODED_EMAIL_RE.sub(self._mask_encoded_email, value)
         value = _GUID_RE.sub(self._mask_guid, value)
-        if not key:
-            if names and self.name_re is not None:
-                value = self.name_re.sub(self._name, value)
-            if self.id_re is not None:
-                value = self.id_re.sub(self._identifier, value)
+        # D5 applies to every string, controlled values and group or role names included (DEC-003); a mapping key
+        # is skipped only when it is a whole product identifier.
+        if not key or not _D5_STRUCTURAL_KEY_RE.match(value):
+            value = self.matcher.mask(value, self.markup)
+        if not key and self.id_re is not None:
+            value = self.id_re.sub(self._identifier, value)
         return value
 
     @staticmethod
@@ -1232,9 +1723,6 @@ class _Redactor:
         guid = match[0][len(label):].lower()
         return label + "Guid " + pseudonym(self.salt, guid)
 
-    def _name(self, match: re.Match[str]) -> str:
-        return match["keep"] or _USER_PREFIX + pseudonym(self.salt, match["hit"])
-
     def _identifier(self, match: re.Match[str]) -> str:
         return match["keep"] or _IMMUTABLE_PREFIX + pseudonym(self.salt, self.id_canonical.get(match["hit"].lower(), match["hit"]))
 
@@ -1259,10 +1747,24 @@ class _Redactor:
         finally:
             self.depth -= 1
 
+    def _name_parts(self, record: Mapping[Any, Any], canonical: str, controlled: bool) -> Any:
+        """A person's ``name`` sub-mapping (Google raw): full names pseudonymised, name parts replaced."""
+        parts = {}
+        for key, item in record.items():
+            norm = _norm(key)
+            if isinstance(item, str) and item and norm in _D5_NAME_FIELDS:
+                parts[key] = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.salt, canonical)
+            elif isinstance(item, str) and item and norm in _D5_NAME_PART_FIELDS:
+                parts[key] = TEXT_PLACEHOLDER
+            else:
+                parts[key] = item
+        return self.walk(parts, controlled)
+
     def mapping(self, record: Mapping[Any, Any], controlled: bool = False) -> dict[Any, Any]:
         record = _without_local_proof(record)
-        user = _is_privileged_user(record)
-        group = _is_group(record)
+        normed = {_norm(k): v for k, v in record.items()}
+        person = _person(normed) if _is_directory_person(normed) else None
+        group = str(normed.get("principaltype", "")).lower() == "group"
         rows: list[tuple[Any, Any, Any]] = []
         for key, item in record.items():
             norm = _norm(key)
@@ -1275,8 +1777,10 @@ class _Redactor:
                     item = TEXT_PLACEHOLDER
                 elif norm in _IDENTITY_KEYS:
                     item = item if _PSEUDONYM_RE.match(item) else _IMMUTABLE_PREFIX + pseudonym(self.salt, item)
-                elif user and norm == "displayname":
-                    item = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.salt, item)
+                elif person is not None and norm in _D5_NAME_FIELDS:
+                    item = item if _PSEUDONYM_RE.match(item) else _USER_PREFIX + pseudonym(self.salt, person[0])
+                elif person is not None and norm in _D5_NAME_PART_FIELDS:
+                    item = TEXT_PLACEHOLDER
                 elif group and norm == "displayname":
                     item = self.text(item, names=False)
                 elif str(key).lower() in TENANT_TEXT_KEYS:
@@ -1291,6 +1795,8 @@ class _Redactor:
                     item = self.walk(item, controlled or norm in _CONTROLLED_KEYS)
                 finally:
                     self.blank -= 1
+            elif person is not None and norm == "name" and isinstance(item, Mapping):
+                item = self._name_parts(item, person[0], controlled)
             else:
                 item = self.walk(item, controlled or norm in _CONTROLLED_KEYS)
             if self.blank and isinstance(key, str) and key:

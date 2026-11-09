@@ -37,6 +37,7 @@ from azure_tenant_audit.output_redaction import (
     scrub_run_paths,
     settle_citations,
     snapshot_run,
+    unmatched_names_note,
 )
 from azure_tenant_audit.private_io import harden_tree, make_private_dirs, write_private_bytes, write_private_text
 from azure_tenant_audit.guarded_io import current_context, guard_session, guarded_operation, open_pinned_binary
@@ -3873,6 +3874,19 @@ def _final_pass(content: str, format_name: str, context: RedactionContext, profi
     return redact_output(content, profile=profile, context=context, markup=True)
 
 
+def _with_unmatched_names_note(content: str, format_name: str, context: RedactionContext) -> str:
+    """Shareable HTML and Markdown reports state, in one fixed line, how many directory people have a name spelling
+    that cannot be masked safely in free text (``output_redaction.unmatched_names_note``); other formats are unchanged."""
+    note = unmatched_names_note(context)
+    if not note or format_name not in {"html", "md"}:
+        return content
+    if format_name == "md":
+        return content.rstrip("\n") + "\n\n" + note + "\n"
+    paragraph = f'<p class="name-masking-note">{html.escape(note)}</p>\n'
+    cut = content.rfind("</body>")
+    return content[:cut] + paragraph + content[cut:] if cut != -1 else content + paragraph
+
+
 def preview_report(
     *,
     run_dir: str,
@@ -3928,7 +3942,9 @@ def preview_report(
     safe_citations = _settle_citations(
         {"citations": redact_output(citations, profile=profile, context=redaction), "citation_summary": None}
     )
-    content = _final_pass(renderers[format_name](safe_sections), format_name, redaction, profile)
+    content = _final_pass(
+        _with_unmatched_names_note(renderers[format_name](safe_sections), format_name, redaction), format_name, redaction, profile
+    )
     # What was read to build the sections, what discovery read and what is on disk now must be the same files:
     # a run changed while the report was built is refused, never published half old, half new.
     if before != redaction.snapshot:

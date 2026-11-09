@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -299,3 +300,86 @@ def test_refused_json_symlink_does_not_consume_scan_budget(
     with pytest.raises(redaction.ContextIncompleteError) as error:
         redaction.redact_output({}, context=context)
     assert "non-regular" in str(error.value) and str(root) not in str(error.value)
+
+
+# -- D5: bounded person-name matching (design M05-T01, section 4) ---------------------------------------------------
+
+
+def _d5_people(count: int) -> list[tuple]:
+    letters = "bdgkmrtv"
+    people = []
+    for index in range(count):
+        given = "".join(letters[(index >> shift) & 7] + "aeiou"[(index >> shift) % 5] for shift in (0, 3, 6, 9, 12, 15))
+        family = given[::-1].capitalize() + "x"
+        name = f"{given.capitalize()} {family}"
+        people.append((name, (name,), "", "", (f"{given}.{family.lower()}@bench.example",), ()))
+    return people
+
+
+def _d5_matcher(people: list[tuple]) -> redaction._NameMatcher:
+    return redaction._NameMatcher(redaction._build_index(people, frozenset()).table, "salt")
+
+
+_D5_TEXT = ("The audit found that the shared mailbox for finance forwards to an external address; review owner, "
+            "policy MS.EXO.4.1v1 and https://contoso-my.sharepoint.com/personal/site_contoso_com/Documents. ") * 400
+_D5_TEXT = _D5_TEXT[: 64 * 1024]
+
+
+def test_d5_probe_count_is_independent_of_directory_size() -> None:
+    probes = []
+    for count in (10, 100_000):
+        matcher = _d5_matcher(_d5_people(count))
+        assert matcher.mask(_D5_TEXT) is _D5_TEXT  # nothing matched: the same object comes back
+        probes.append(matcher.probes)
+    tokens = len(redaction._D5_WORD_RE.findall(_D5_TEXT))
+    assert probes[0] == probes[1] <= tokens * redaction._D5_MAX_KEY_TOKENS
+
+
+def test_d5_probes_per_token_and_window_are_bounded() -> None:
+    six = "Ab Cd Ef Gh Ij Kl"
+    matcher = _d5_matcher([(six, (six,), "", "", (), ())])
+    for text in ("ab cd ef gh ij kx " * 500, "ab cd ef gh ij kl " * 500, "ab ab ab ab ab ab ab " * 500,
+                 "ab.cd_ef-gh'ij’kl " * 500, "ab, cd,ef,  gh ij kl, " * 500, "ab, ab, ab, ab, ab, ab, " * 500):
+        matcher.probes = matcher.widest = 0
+        matcher.mask(text)
+        tokens = len(redaction._D5_WORD_RE.findall(text))
+        assert 0 < matcher.probes <= tokens * redaction._D5_MAX_KEY_TOKENS
+        assert matcher.widest <= redaction._D5_MAX_KEY_TOKENS
+    matcher.probes = 0
+    matcher.mask("ab " * 10)
+    plain = matcher.probes
+    matcher.probes = 0
+    matcher.mask("x" * 65 + " " + "ab " * 10 + "ab" + "c" * 70)
+    assert matcher.probes == plain  # a token over 64 characters is never probed and breaks the chain
+
+
+def test_d5_matcher_holds_no_regex_built_from_names() -> None:
+    matcher = _d5_matcher(_d5_people(50))
+    held = [getattr(matcher, slot) for slot in redaction._NameMatcher.__slots__]
+    assert not any(isinstance(value, re.Pattern) for value in held)
+    patterns = [value for value in vars(redaction).values() if isinstance(value, re.Pattern)]
+    assert not any("bdg" in pattern.pattern.lower() for pattern in patterns)
+    assert all(isinstance(key, str) and isinstance(value, str) for key, value in matcher.table.items())
+
+
+def test_d5_keys_per_person_are_capped() -> None:
+    ids = tuple(f"bodatix.kemuraz{n}@d{n}.example" for n in range(12))
+    person = ("Bodatix Kemuraz", ("Bodatix Kemuraz", "Bodatix Q Kemuraz"), "Bodatix", "Kemurazo", ids, ())
+    keys, reason = redaction._person_keys(person, frozenset())
+    assert reason == "limit" and len(keys) == redaction._D5_MAX_KEYS_PER_PERSON == 16
+    assert keys[:4] == ["bodatix kemuraz", "bodatix q kemuraz", "bodatix kemurazo", "kemurazo bodatix"]  # required first
+    assert all(len(key.split(" ")) <= redaction._D5_MAX_KEY_TOKENS for key in keys)
+
+
+def test_d5_index_is_built_once_per_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "run"
+    _write_run(root)
+    (root / "normalized" / "users.json").write_text(json.dumps({"records": [
+        {"kind": "user", "display_name": "Bodatix Kemuraz", "principal_name": "bodatix.kemuraz@bench.example"}]}))
+    context = redaction.context_for_run(root)
+    builds = []
+    original = redaction._build_index
+    monkeypatch.setattr(redaction, "_build_index", lambda *a, **k: builds.append(1) or original(*a, **k))
+    for _ in range(3):
+        assert redaction.redact_output("Bodatix Kemuraz", context=context).startswith("User ")
+    assert builds == []  # strings carry no person records, so no per-call overlay either
