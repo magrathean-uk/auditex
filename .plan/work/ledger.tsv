@@ -142,3 +142,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-08T20:58:37Z	M03-T02	luna	claude-2	claude-haiku-5-5	medium	readonly	2	551	0.0172	blocked	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
 2026-11-08T22:06:02Z	M03-T04	astra	codex2	gpt-6-astra	xhigh	readonly	0	367		done	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
 2026-11-08T22:08:39Z	M03-T04	astra	codex2	gpt-6-astra	xhigh	readonly	0	72		done	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c
+2026-11-09T06:55:15Z	M03-T05	terra	claude-4	claude-sonnet-5-5	xhigh	readonly	2	65	0.2969	blocked	d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c

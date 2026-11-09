@@ -5,6 +5,7 @@
 - none
 
 ## Next
+- Make plain make dist byte-reproducible: pin SOURCE_DATE_EPOCH to the commit time and the sdist gzip mtime, so check-reproducible-build.py can compare sdist bytes (DEC-019).
 - Restore the v3.9.1 vector replay kit (vectors.jsonl, sha256 3515b6fa..., 26,898 rows, plus a2-vectors.jsonl and a2-label-overrides.jsonl) to a documented location and schedule the acceptance replay (DEC-017).
 - Static boundary-scanner limits (DEC-011): the HTTP scanner misses openers passed as untyped parameters or held in containers (M01-T03 notes); the read-boundary scanner misses non-subprocess launchers, dynamic callee lookup, requests held in containers or fetched via getattr, and relies on per-module handle naming (M01-T04 notes, L1-L4). Untraceable sites fail closed only where the scanners can see them.
 - Retire the parked model layer after 1.3.0 (`model-layer-parked` module, `scripts/*oracle*`, `examples/model_development/`, `configs/model-sources.json`, the `model` CLI wiring) - approved by G (DEC-004); the removal list still goes through the deletion gate; nothing changes in 1.3.0.

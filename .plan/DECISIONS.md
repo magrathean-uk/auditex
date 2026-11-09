@@ -162,3 +162,12 @@
 - why: every pre-publication gate passed on the candidate and astra's release gate returned ready (M03-T04).
 - consequences: M03-T05 publishes; M03-T06 verifies the downloaded artefacts against the M03-T03 hashes.
 - approver: G
+
+## DEC-019 Publish a pinned, smoke-tested build of the release commit
+- date: 2026-11-09
+- status: approved
+- decision: M03-T05 builds the release commit with SOURCE_DATE_EPOCH set to its commit time, runs the release smoke and the reproducible-build check on those exact files, records their sha256 and publishes them. M03-T06 verifies the downloaded artefacts against the hashes M03-T05 recorded; the M03-T03 hashes stay as gate evidence only.
+- options: publish a pinned, smoke-tested build of the same commit | make make dist byte-reproducible first (new release commit, all gates again)
+- why: plain make dist embeds build timestamps, so M03-T03's bytes cannot be rebuilt; the content is identical and the reproducibility criterion (wheel bytes, sdist members) holds for pinned builds.
+- consequences: the published hashes differ from those quoted at G's approval; making plain make dist byte-reproducible (pinned SOURCE_DATE_EPOCH, sdist gzip mtime) is a BACKLOG next item.
+- approver: auto

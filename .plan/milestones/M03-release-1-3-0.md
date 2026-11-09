@@ -21,7 +21,7 @@ Three stages in order: the pre-publication gate (DoD items 1-7), G's explicit ye
 - [x] Review: G's explicit yes naming 1.3.0 (D9; the publication form is fixed by DEC-001) is recorded in DECISIONS.md with approver G `grep -n -A8 '^## DEC-[0-9]* Release 1.3.0' .plan/DECISIONS.md | grep -q 'approver: G'` (evidence: DEC-018, G's yes given in this session)
 - [ ] The signed tag `v1.3.0` points at the gated release commit and is on `origin`: `git tag -v v1.3.0 && test "$(git rev-parse 'v1.3.0^{commit}')" = "$(sed -n 's/^reviewed: *\([0-9a-f]\{40\}\).*/\1/p' .plan/work/M03-T04/result.md | head -1)" && git ls-remote --exit-code --tags origin refs/tags/v1.3.0`
 - [ ] The GitHub release `v1.3.0` exists and carries the wheel and the sdist: `test "$(gh release view v1.3.0 --json assets --jq '[.assets[].name | select(endswith(".whl") or endswith(".tar.gz"))] | length')" -eq 2`
-- [ ] Close-out: the published wheel and sdist, downloaded fresh, match the sha256 values M03-T03 recorded, and the downloaded wheel installs and reports 1.3.0: `grep -qx 'published-artefacts: verified' .plan/work/M03-T06/result.md`
+- [ ] Close-out: the published wheel and sdist, downloaded fresh, match the sha256 values M03-T05 recorded at upload (DEC-019), and the downloaded wheel installs and reports 1.3.0: `grep -qx 'published-artefacts: verified' .plan/work/M03-T06/result.md`
 
 ## Tasks
 | id | title | owner | size | tags | status |
