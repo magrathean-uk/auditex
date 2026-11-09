@@ -65,3 +65,12 @@
 - why: the preconditions exist to serialise edits to shared files; a clean rebase plus the full verify on the rebased head gives the same guarantee without idling finished work.
 - consequences: M02-T03, M02-T04, M04-T01 and M04-T03 start from a main that already holds M03-T02 (and M05-T03 once merged); reviewers of those tasks see the earlier changes as base.
 - approver: orchestrator
+
+## DEC-008 Read-boundary scanner re-scoped after two repair rounds
+- date: 2026-11-09
+- status: approved
+- decision: M04-T02 stops at 6e866b3 (AGENTS.md: two repair rounds, then re-scope). L1 to L4 are closed for every planted case from the v2 notes and three review rounds, under one fail-closed rule (a value reaching a launcher, importer, callee lookup or standard input counts as resolved only when proved literal). Three bypasses from the final review need in-repo code written to defeat the scanner: a local function that shadows a read-only hand-off name (`info`) and mutates its argument; a local function that shadows a transparent conversion (`list`); and an import binding that follows a literal assignment to the same name. They are named limits: M04-T03 states them in `docs/reference/security-privacy.md`, and BACKLOG Next holds the fix (treat any callee name the module rebinds as unresolved, and include import bindings in the binding union).
+- options: a third repair round | re-scope with the limits documented
+- why: the scanner guards our own source against accidental write or content-read calls; code review covers deliberate obfuscation, and each further round has found only more contrived cases.
+- consequences: the M04-T02 criteria carry the limit clause below; the final Codex review judges 6e866b3 against it.
+- approver: orchestrator

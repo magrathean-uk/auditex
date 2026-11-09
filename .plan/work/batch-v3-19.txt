@@ -1,0 +1,2 @@
+--task M01-T03 --role terra --template terra-implement --branch --slug acceptance-target --var TITLE="Add make acceptance and the runbook acceptance section (repair round 2)" --var MILESTONE=.plan/milestones/M01-build-and-acceptance.md --var FILES="tests/test_value_rules_replay.py (kit hash helper and kit_hashes tests only)" --var REVIEW=".plan/work/M01-T03/repair-2.md"
+--task REV-M04-T02 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M04-T02/request-3.md --readonly --sha task/M04-T02-read-boundary-limits --tags debug

@@ -2,22 +2,28 @@
 status: done
 summary:
 verdict: changes-required
-reviewed: fab93a51dcefd1ce3ed3547450c3a436922c7b7f
-All three original regressions fail on b7e3438 and pass on this head.
-Current-source checks report no content reads or tenant writes; the 28-method Google pin is unchanged.
-Three further fail-open cases require repair.
+reviewed: 6e866b331a91d7f1c9537a95abc75c0827eaef9b
+All three round-2 cases are fixed, with planted regressions.
+All three new reviewed rows contain fixed read-only commands on main: no tenant writes or content reads.
+Multiple literal assignments are scanned together, but omitted import bindings and callable-name shortcuts leave three silent bypasses.
 changes: none
-verification: PASS `git diff --check main...HEAD`; PASS read-only Python harness: 640 direct test invocations and 27 planted cases. Three additional bypasses reproduced with empty violations, unresolved-input and untraceable-launch results.
-Prescribed verify not runnable: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py`. Worktree `.venv` is absent; invoking the existing interpreter also fails because the sandbox provides no writable temporary directory.
-risks: Full pytest verification remains outstanding. Required `clean-development doctor` failed on a dead/unverifiable lifecycle-lock owner; no repairs attempted.
+verification: PASS `git diff --check main...HEAD`; clean worktree.
+PASS 757 direct test invocations using in-memory temporary files; all 757 still pass with the three bypasses planted through an in-memory source overlay.
+PASS mocked execution confirms each bypass reaches a launcher with `Set-Mailbox x`; scanner violations, unresolved inputs and untraceable launches are all empty.
+PASS runtime read guard for all 29 Exchange and 9 Purview command texts; relevant source files match main; Google 28-method pin unchanged.
+NOT RUNNABLE `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py`: worktree interpreter absent; existing main interpreter fails because the sandbox has no writable temporary directory.
+risks: Documented M04-T03 limits are non-blocking and remain for the privacy reference. Full pytest execution remains outstanding. Required `clean-development doctor` failed on a dead/unverifiable lifecycle-lock owner; no repair attempted.
 questions_for_g: none
 ### Findings
 
-1. tests/test_read_boundaries.py:1197 - Mutated keyword mappings are treated as complete literals. Planting `opts = {}; opts["cmd"] = "pwsh -Command Set-Mailbox x"` before `await asyncio.create_subprocess_shell(**opts)` passes silently. `opts.update(cmd=...)` also bypasses the scan.
-Fix: track mapping mutations or mark affected mappings unresolved; add planted regressions for both forms.
+1. tests/test_read_boundaries.py:560 - Read-only hand-off exemptions trust the callee name.
+Plant `def info(argv): argv[2] = "Set-Mailbox x"`; pass a literal read-only argv to `info(argv)`, then `subprocess.run(argv)`. The mutation is silently ignored.
+Fix: prove the exempt callable's identity or analyse its parameters; otherwise mark the hand-off unresolved. Add this regression.
 
-2. tests/test_read_boundaries.py:1401 - Importer checks require positional arguments, while origin resolution at line 1126 also ignores keyword arguments. `builtins.__import__(name="subprocess").Popen(["pwsh", "-Command", "Set-Mailbox x"])` passes silently, as does `importlib.import_module(name="subprocess")`.
-Fix: resolve the `name=` argument and keyword unpacking, or fail closed on unsupported importer arguments; add planted regressions.
+2. tests/test_read_boundaries.py:972 - Transparent conversions also trust the callee name.
+Plant `def list(x): return "pwsh -Command Set-Mailbox x"` followed by `os.system(list("pwsh -Command Get-Date"))`. The resolver scans the harmless argument instead of the actual return value.
+Fix: establish the builtin/wrapper identity before treating a call as transparent; analyse shadowing functions or fail closed. Add this regression.
 
-3. tests/test_read_boundaries.py:1266 - The added standard-input scan discards byte literals at line 1299 while retaining complete resolution. `subprocess.run(["pwsh", "-Command", "-"], input=b"Set-Mailbox x")` therefore passes silently.
-Fix: scan supported byte-script encodings or mark byte input unresolved; add a planted regression.
+3. tests/test_read_boundaries.py:877 - Finding an assignment binding returns before considering import bindings.
+Plant helper `DANGER = "pwsh -Command Set-Mailbox x"`; inside `f`, assign harmless literal `cmd`, then `from planted_helper import DANGER as cmd`, then `os.system(cmd)`. Only the harmless assignment is scanned.
+Fix: include every applicable import binding in the union, or mark mixed import/assignment bindings unresolved. Add this regression before accepting “every binding proved literal”.

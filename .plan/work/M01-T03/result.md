@@ -1,7 +1,9 @@
 ## RESULT M01-T03
 status: done
-summary: Item 1 is fixed. `check_kit_hashes` now takes the selected vectors path, hashes that exact file against the `vectors.jsonl` pin, and resolves the A2 companions beside it. `test_full_v391_replay_acceptance` passes the selected path to it. Item 2 needed no change, and the stale-name renames are kept. The full criteria verify command passes on the new commit.
-changes: tests/test_value_rules_replay.py (new commit "test(rules): hash the selected replay file against the vectors pin"; no amend, no rebase)
-verification: the criteria verify chain, run on the final commit, passed (printed VERIFY_PASS). Its steps: `make -n acceptance`; `pytest -k kit_hashes` (9 passed); the docs grep; unset-variable and missing-file `make acceptance` runs, each non-zero with the variable named in its log. The two new tests are `test_kit_hashes_selected_file_is_the_one_hashed` and `test_full_replay_hashes_before_replaying`. The second sets the variable to a different file beside a valid kit and shows the full replay fails on the hash before `replay` is reached. `git status --porcelain` is empty.
+summary: `check_kit_hashes` now reads its pins from the module-level `KIT_HASHES` at call time when `pins` is omitted. The acceptance test uses that default, so a test can substitute the pins. The weak regression is replaced by two tests: the fake kit's own `vectors.jsonl` passes hashing, and a different selected file beside a valid kit fails with "hash mismatch for vectors.jsonl". Production pins and behaviour are unchanged. Mutation check below.
+changes: tests/test_value_rules_replay.py (commit 6c17cbd)
+verification: Full M01-T03 verify command on 6c17cbd: pass. `pytest -k "kit_hashes or full_replay"`: 11 passed before the mutation. Mutation, run once and not committed: I restored the old sibling binding `check_kit_hashes(directory / "vectors.jsonl")`, and `test_full_replay_rejects_a_different_selected_file_beside_a_valid_kit` failed, as the review required. The file was then restored and the worktree is clean.
 risks: none
 questions_for_g: none
+
+Review item 1 (line 280 regression too weak): fixed.

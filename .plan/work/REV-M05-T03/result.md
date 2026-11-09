@@ -1,17 +1,23 @@
 ## RESULT REV-M05-T03
 status: done
 summary:
-verdict: changes-required
-reviewed: cce05774d816d369e8648a5beb71f82933ee1b98
-Comma matching is repaired, but silent leakage and per-person coverage defects remain. No local-profile change found.
+verdict: approve
+reviewed: 215148d2951bd775b1b516a22ec47306e49d280c
+All six repair items are fixed. Both diffs reviewed; no new privacy leak, matcher budget break or local-profile change found.
 changes: none
-verification: Both diffs checked; git diff --check passed; worktree clean. Direct in-memory checks: 22 existing cases passed, four regression probes failed, local identity check passed. clean-development doctor completed with configuration/folder warnings; no repairs.
-verification: not runnable: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_profiles_d3.py tests/test_redaction_scan_budget.py tests/test_notify_redaction.py tests/test_redaction_export_schemas.py && make contract-smoke && .venv/bin/python benchmarks/html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked` - `.venv/bin/python` absent; read-only sandbox prevents linking it.
-risks: Full acceptance and HTML peak remain independently unverified.
+verification: PASS: git diff --check main...HEAD; worktree clean. In-memory: 22 existing person-name tests, three discovery-mocked regressions, three budget tests, probe independence, local identity and 39 spelling/separator checks.
+Full verify not runnable: pytest stopped before collection because the sandbox has no writable temporary directory; contract-smoke and HTML peak were skipped.
+Command: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_profiles_d3.py tests/test_redaction_scan_budget.py tests/test_notify_redaction.py tests/test_redaction_export_schemas.py && make contract-smoke && .venv/bin/python benchmarks/html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked`
+Required session diagnostic: clean-development doctor completed with configuration/folder warnings; ownership registration remains unconfirmed. No repairs.
+risks: Full verification and the 90,000-record peak remain independently unverified in this sandbox.
 questions_for_g: none
 
 ### Findings
-1. `src/azure_tenant_audit/output_redaction.py:1250` - The eight-key slice silently discards accepted variants while retaining `named=True`. Supported name fields can consume eight keys before the comma swap, leaving `Priya Kovalenko` readable with zero unmatched people. Fix: account for truncated variants, retaining required forms within the budget or reporting an unmatched reason; add a saturation regression.
-2. `src/azure_tenant_audit/output_redaction.py:1020` - Privileged people enter through both real person records and synthetic name-only records. One privileged `Bo` counts as two unmatched people; adding usable given/family names still leaves one phantom unmatched person. Fix: remove duplicate synthetic people from run discovery and test actual `context_for_run` construction.
-3. `src/azure_tenant_audit/output_redaction.py:1309` - Filtering matched entries before resolving aliases loses identity bridges. A matched object-id reference, an unmatched object-id-plus-UPN reference and an unmatched UPN-only reference leave one unmatched person. This also reproduces across three merged indexes. Fix: resolve complete identity groups before suppressing covered people and preserve alias links across merges.
-4. `src/azure_tenant_audit/output_redaction.py:404` - Object id and UPN are equal union keys, so two distinct object IDs sharing a reused UPN collapse into one person. Fix: make object id authoritative, use UPN as fallback, and test distinct IDs sharing a UPN.
+No required changes. Each named repair regression passed in memory; filesystem discovery was mocked for the run-based cases.
+1. Codex 1: required forms precede optional keys; truncation reports `limit`. Regression: `test_codex_item_1_key_saturation_keeps_the_required_forms_and_reports_limit`.
+2. Codex 2: run discovery suppresses duplicate synthetic privileged-name records. Regression: `test_codex_item_2_a_privileged_person_is_one_entry_through_context_for_run`.
+3. Codex 3: identity resolution retains aliases across complete record sets and merged runs. Regressions: `test_codex_item_3_a_upn_only_reference_joins_the_object_id_person`, `test_codex_item_3_three_merged_runs_keep_the_alias_links`.
+4. Codex 4: distinct object IDs remain separate despite a shared UPN. Regression: `test_codex_item_4_two_object_ids_sharing_a_upn_are_two_people`.
+5. Privacy 1: another matched spelling cannot suppress a readable separator spelling’s notice. Regression: `test_privacy_item_1_a_separator_spelling_in_another_record_is_reported`.
+6. Privacy 2: note wording covers every reason. Regression: `test_privacy_item_2_the_note_is_true_for_every_reason`.
+Middle-initial/title separator support remains a non-blocking refinement; those spellings are reported unmatched.

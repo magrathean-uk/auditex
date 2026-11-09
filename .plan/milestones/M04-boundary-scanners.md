@@ -37,6 +37,7 @@ The static boundary scanners close the blind spots recorded under v2 DEC-011 whe
 - Sources: the M01-T04 limits L1 to L4 in the v2 work notes and `.plan/archive/plan-v2/BACKLOG.md`.
 - Each of L1 to L4 has a planted-source test (`tmp_path`, no new fixture directory) that fails on the current scanner and passes after the change, or a fail-closed rule with a test proving that an untraceable launcher, callee or request fails the suite.
 - On `main` the scanner finds no real content read; if it does, the task stops and the orchestrator raises it with G.
+- Out of scope (DEC-008): bypasses that need in-repo code to shadow a read-only hand-off or transparent-conversion callee name, or to rebind a launcher argument through an import after a literal assignment; M04-T03 lists them as limits.
 - verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py`
 - files: `tests/test_read_boundaries.py`
 

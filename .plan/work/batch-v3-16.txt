@@ -1,0 +1,1 @@
+--task M00-T03 --role luna --brief .plan/work/M00-T03/request.md --readonly --timeout 5400

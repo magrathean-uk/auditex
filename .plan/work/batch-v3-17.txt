@@ -1,0 +1,5 @@
+--task REV-M05-T03 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M05-T03/request-3.md --readonly --sha task/M05-T03-d5-masking --tags debug
+--task REV-M05-T03-privacy --role sol --template sol-review --readonly --sha task/M05-T03-d5-masking --var TASK=M05-T03 --var MILESTONE=.plan/milestones/M05-d5-name-masking.md --var BRANCH=task/M05-T03-d5-masking --var BASE=main
+--task REV-M01-T03 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M01-T03/request-2.md --readonly --sha task/M01-T03-acceptance-target --tags debug
+--task M04-T02 --role sol --template terra-implement --branch --slug read-boundary-limits --tags hard --timeout 3600 --var TITLE="Close the read-boundary scanner blind spots L1 to L4 (repair round 2)" --var MILESTONE=.plan/milestones/M04-boundary-scanners.md --var FILES="tests/test_read_boundaries.py" --var REVIEW=".plan/work/M04-T02/repair-2.md"
+--task M00-T03 --role luna --brief .plan/work/M00-T03/request.md --readonly --timeout 5400

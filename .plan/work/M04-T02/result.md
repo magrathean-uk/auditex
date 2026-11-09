@@ -1,17 +1,11 @@
 ## RESULT M04-T02
 status: done
-summary: All three repair items are fixed in fab93a5, each with planted tmp_path regressions. Item 1 fixed: a `**mapping` at a launcher is resolved and its text keys are scanned; a mapping the scan cannot see leaves the launch unresolved. Item 2 fixed: `_origin` is replaced by `_origins`, which counts every binding and every import of a name. Item 3 fixed: defaults, annotations, decorators, class bases and a comprehension's first iterable now resolve in the enclosing scope, in both the command scan and the Google scan.
-Nearby gaps closed or failed closed (full list in notes.md):
-- The command scan had the same default-scope fail-open.
-- A later import of a name hid an earlier one, and an import hid a plain alias.
-- A launcher re-exported by another source module was not followed.
-- `posix`/`nt` are now read as `os`; `sys.modules`, `builtins.__import__` and `importlib.__import__` with a literal name now resolve.
-- `getattr(loop|adapter, "literal")` callees are now treated as the method.
-- `subprocess` `input=` is now scanned.
-- These are now reported: computed `sys.modules`; importers or dynamic builtins used as values; `eval`/`exec`/`compile`; `globals()`/`locals()`/`vars()` in a module that binds a launcher; any star import.
-- Google handles bound at module scope or in a class body now fail closed.
-Criteria: L1 met, L2 met, L3/L4 met. No real content read on main. File scope is only the owned file.
-changes: tests/test_read_boundaries.py (commit fab93a5)
-verification: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py` passed on fab93a5 (671 passed); `git diff --check` passed; old-vs-new evidence run: 30 planted cases, 0 pass on b7e3438, 30 pass on fab93a5 (evidence.md, Repair round 1). `_UNTRACEABLE_LAUNCHES` (1 row), `_UNRESOLVED_RUNNER_INPUTS` (21 rows) and the 28-method Google pin are unchanged. Not run: make test and make contract-smoke, because only the test file changed and the brief's verify command covers it.
-risks: `getattr(obj, name)` with a computed name on a runtime object (not a launcher module) is still not judged; the scan also cannot read a script written to stdin after the process starts (`communicate`, `stdin.write`). Both are listed for M04-T03 in notes.md. `_origins` counts bindings from every scope in a module: this fails closed but could flag new src code later. One commit covers all three items because they touch the same functions in one file.
+summary: One rule now decides every value that reaches a launcher, an importer name, a callee lookup or standard input. It counts as resolved only when a strict resolver proves it literal. Anything else is unresolved or untraceable: a value changed after binding (changes are traced back through aliases, loop variables, walrus, branches, returned references and defaults), bytes, f-string fields, non-literal or `%` joins, string methods, keywords or `**` keys the scanner does not know.
+Review items: 1 fixed (mapping changed by subscript, `update` and every other mutating form); 2 fixed (`name=` on all four importer forms; `*args`, `**`, relative names and unknown keywords count as computed); 3 fixed (bytes, bytearray, `.encode()` and `bytes()` on `input=` for `run` and `check_output`, directly and through `**`).
+Planted regressions: one per review case, the same changes on a `*args` list and an argv, `name=` on every importer form, bytes input on every launcher that takes `input=`, and module loaders (`pkgutil.resolve_name`, `runpy`, `module_from_spec`).
+Three new reviewed rows in `_UNRESOLVED_RUNNER_INPUTS`: `exchange_policy.py` `ExchangePolicyCollector.run` and `_run_anti_phish` (f-strings over literals only); `purview.py` `PurviewCollector._run_command` (the variant list is handed to the export-summary writer, which only writes JSON). The `_UNTRACEABLE_LAUNCHES` table, the 28-method Google pin and the other rows are unchanged. No content read or tenant write was found on main.
+"Bound exactly once" is relaxed to "every binding proved literal": the scan covers the union of all bindings, so this is still sound.
+changes: tests/test_read_boundaries.py (commit 6e866b3; new commit on the branch, no amend or rebase)
+verification: PASS `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py` on 6e866b3 (757 passed). The same test file also passes against current main's tree, which is 5 commits ahead and was not rebased because the review forbids it. PASS `ruff check --select F,E9`. Old-versus-new table and limits for M04-T03: .plan/work/M04-T02/evidence.md and .plan/work/M04-T02/notes.md.
+risks: The rule ignores statement order: a change or hand-off after the use still makes the launch unresolved (fails closed, as with the purview row). A module-level container changed from another module is not seen. f-strings are not evaluated to exact text.
 questions_for_g: none
