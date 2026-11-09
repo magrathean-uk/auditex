@@ -1,66 +1,63 @@
-# Master plan - Auditex 1.3.0
+# Master plan - Auditex 1.4.0
 <!-- Hub document, max 150 lines. sol-architect writes it, the orchestrator makes small edits, G approves scope. -->
 
 ## Vision
-Auditex 1.3.0 is the release in which an IT administrator or consultant runs one read-only command against a
-Microsoft 365 tenant and receives a validated, sealed run bundle in which every one of the 102 CISA SCuBA
-policies is answered by a deterministic value rule, explained by a deterministic template, and shareable with
-the D3 redaction profile applied, without granting write access or reading message or file content, and with
-nothing sent off the machine except to endpoints the operator configures (notification sinks, the parked
-model endpoint). Google Workspace collection ships as an internal control map. The release is cut only after
-every local gate runs green and reproducibly, the read-only and secret-handling boundaries are proven by tests,
-and the public docs say exactly what the code does.
+Auditex 1.4.0 is the release in which an IT administrator or consultant gets the same read-only, deterministic
+Microsoft 365 audit as 1.3.0 from a smaller, provable product: the parked local-model layer is gone, so every
+verdict and explanation visibly comes from value rules and the template; shareable output masks person names in
+free text and ids, not only in typed fields, without a memory blow-up on large tenants; anyone can rebuild the
+published wheel and sdist byte for byte and rerun the full 26,898-vector acceptance replay with one command; and
+the boundary scanners that prove the tool never writes to a tenant or reads content have fewer blind spots, with
+the rest written down. Nothing new reaches the tenant and nothing leaves the machine except to endpoints the
+operator configures.
 
 ## Target user
 IT administrators and consultants auditing their own or a customer's Microsoft 365 or Google Workspace tenant
-who need defensible, reproducible evidence without write access (wording confirmed by G at the scope gate, DEC-001).
+who need defensible, reproducible evidence without write access (wording confirmed by G for 1.3.0).
 
 ## Success criteria
-- `make release-check` and `make test` exit 0 on the release commit.
-- The full acceptance suites (`value_rule_acceptance`, `explainer_acceptance`) pass once on the release commit. The full v3.9.1 vector replay is waived for 1.3.0 (DEC-017); every other acceptance test passes.
-- Every outbound call site under `src/` (HTTP, SDK, subprocess) is classified against the transport policy in
-  ARCHITECTURE.md, and a test fails on any non-GET HTTP request outside the allow-list frozen from it.
-- Tests prove that no collector requests message or file content, every PowerShell cmdlet and Microsoft 365 CLI command at an executable command site (docstrings, comments and documentation strings excluded) is on a read
-  allow-list, with the three wrapper verbs accepted only at their known wrapper sites, and every Google API call is a read method under read-only scopes. Recorded exceptions: request-level masks or read-and-discard for settings text (DEC-008, DEC-012), four write-capable Google scopes used only for reads (DEC-010), transport class interpretations (DEC-006) and bounded scanner coverage (DEC-011, limits in BACKLOG).
-- Every parser flag that can carry a secret is in its redaction list and has an abbreviation and redaction test.
-- `make audit-deps` exits 0 over the base install and every declared extra, `model_train` included; any
-  accepted advisory carries a G-approved DECISIONS.md entry.
-- `pyproject.toml` says `1.3.0`, `CHANGELOG.md` has a `1.3.0` section that states the D6 limit (names in free
-  text and ids are not masked in shareable output), and `.github/SECURITY.md` supports 1.3.x.
-- The wheel and the sdist each pass `scripts/release-smoke.sh` for the base, Google and MCP installs, and two
-  clean builds of the release commit give a byte-identical wheel and a member-identical sdist.
-- `tests/test_docs_paths.py` passes: no first-party public doc names a repository path that does not exist;
-  the G-owned third-party notice carries the correction text G approved (DEC-003), and the test keeps only
-  the reasoned `tests/providers/m365` exemption.
-- No public doc claims SCuBA Google Workspace coverage.
-- Tier A changes (M01-T01, M01-T03, M01-T04, M03-T01) carry an approving other-vendor review bound to the
-  reviewed head by the `Plan-Review` trailer on the squash commit.
-- astra's pre-publication release gate returns ready; G's explicit yes naming 1.3.0 is recorded; the signed tag
-  `v1.3.0` on the gated commit and a GitHub release carrying the gated wheel and sdist exist, and the downloaded
-  assets match the gated hashes. No PyPI.
+- `make lint` runs the pinned Ruff check over the whole repository with the pre-commit hook's rule set and target
+  version, and `make lint`, `make test`,
+  `make contract-smoke`, `make release-check` and `make audit-deps` exit 0 on the release commit.
+- Two plain `make dist` builds of the release commit give a byte-identical wheel and a byte-identical sdist, and
+  `scripts/check-reproducible-build.py` proves both (v2 DEC-019).
+- `make acceptance` verifies all three pinned kit hashes, runs the full v3.9.1 replay (26,898 vectors) and the
+  explainer acceptance suite, and passes at each milestone close from M02 and on the release commit; the replay is
+  no longer waived (v2 DEC-017). The kit stays in the machine records folder, outside git; no scheduled job.
+- No model module, model CLI command or flag, `model_train` extra, model script or model config remains, after G
+  approved the exact removal list; a normalised digest comparison of contract smoke shows report, projection and
+  explainer output unchanged, with no contract re-baseline (v2 DEC-004).
+- Shareable and customer-pack output mask the names of everyone in the run's own directory records in free text
+  and ids, with bounded per-record matching, an HTML peak on the frozen 90,000-record workload within the `main`
+  baseline plus 15 percent while masking runs, and approving privacy reviews from both providers (D6, DEC-001).
+- Every DEC-011 scanner limit is closed by a test or stated in the security and privacy reference.
+- The approved dead paths and the divergent `tenant-bootstrap/azure_tenant_audit/` copies are removed through the
+  deletion gate and recorded in CLEANUP.md; only the forwarder remains, a test proves it forwards to `src/`, and
+  `tenant-bootstrap/` is described in AGENTS.md.
+- Tier A changes (M01-T01, M02-T03, M02-T04, M04-T01, M04-T02, M05-T03, M06-T01) carry an approving other-vendor
+  review of the exact merged head, checked through the merge trailer and the ledger (ARCHITECTURE.md).
+- astra's release gate returns ready; the release gate compares wheel and sdist bytes; G's yes naming 1.4.0 is recorded; the signed tag `v1.4.0` and a GitHub
+  release with the wheel and sdist exist and the downloaded assets match the gated hashes. No PyPI.
 
 ## Scope of 100 percent
-The 1.3.0 release from the accepted line: local `main` already contains `origin/main` 82d7ca5, which carries the
-key-guard reader, explainer wiring, read-aware evidence gates and the SS 2.1 and SS 2.3 private inputs. What
-remains: make the local gates green and reproducible, including a dependency audit over every extra and a
-wheel and sdist smoke (no hosted CI, by G's decision that GitHub is storage only); resolve the `wt/*` branch
-triage; classify every outbound call and prove the tenant read-only, content and secret-redaction boundaries
-with tests; correct the docs and land the legal-notice fix once G approves its exact text; write the release notes and bump the
-version; pass the pre-publication gate; on G's yes publish the signed tag and a GitHub release with the wheel
-and sdist, then verify what was published. 100 percent means every DoD item in M00-M03 is ticked.
+The 1.4.0 release built from the BACKLOG Next items of plan v2, which G approved as the next scope ("ok to all,
+continue dev until 100%"): a lint-enforced foundation; byte-reproducible `make dist` and a repeatable local
+acceptance run with the restored replay kit; retirement of the parked model layer through the deletion gate;
+the dead-code cleanup and the `tenant-bootstrap/` description and forwarder proof; the DEC-011 scanner
+follow-ups; D5-v2 person-name masking; then release notes, gates and, on G's yes naming 1.4.0, publication.
+100 percent means every DoD item in M00-M06 is ticked.
 
 ## Non-goals
-- Live-tenant work of any kind: playground tenant, trials, certificate auth live checks, IPPS, presets,
-  Teams coverage, the day-one run, the dummy-tenant kit and its gates. All in BACKLOG later.
-- D5 person-name masking beyond the typed D3 fields (redesign track after 1.3.0, per D6).
-- Any development or removal of the parked model layer (training, base-model pulls, AIRR, Hugging Face
-  upload); 1.3.0 only classifies its call sites and audits the `model_train` extra. Its retirement after
-  1.3.0 is approved (DEC-004, BACKLOG next) and goes through the deletion gate.
+- Live-tenant work of any kind (certificate auth live checks, presets, IPPS, Teams coverage, the day-one run,
+  `-Enforce`, the SS 2.1 live wire-shape gate) and the dummy-tenant kit rounds. Never raise the tenant.
 - Answering the SCuBA Google Workspace baselines; the Google provider stays an internal control map.
-- Hosted CI, a separate kit repository, or deleting `wt/*` branches and worktrees.
-- PyPI or any other registry upload; any release other than 1.3.0; any tenant write path (response features
-  stay lab-only behind `AUDITEX_ENABLE_RESPONSE`).
-- Workstation tooling issues (clean-development doctor and lifecycle registration), by G's 5 Nov 2026 ruling.
+- Merging `wt/redact-person-names` or the `wt/d5-*` branches; D5 is a redesign from `main` (D6).
+- Hosted CI; merging the Codex branch `wt/github-build-tags-20261108`; deleting `wt/*` branches or worktrees.
+- PyPI or any registry upload; any release other than 1.4.0 without G's yes naming it; any tenant write path.
+- Model training, base-model pulls, AIRR or Hugging Face upload (the layer is retired, not developed).
+- A wider Ruff rule set than the hook's E4, E7, E9 and F; workstation tooling issues (clean-development doctor).
+- A launchd or other scheduled acceptance job (G declined); acceptance runs at milestone close and the release gate.
+- Edits to G-owned legal files except text G approves verbatim.
 
 ## Architecture
 See ARCHITECTURE.md. Parallel work only across modules with different owners; sol agrees interfaces before any parallel dispatch.
@@ -69,28 +66,36 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 <!-- milestones:begin -->
 | id | name | weight | % | status |
 |---|---|---|---|---|
-| M00 | foundation | 20 | 100 | done |
-| M01 | boundary-proof | 30 | 100 | done |
-| M02 | docs-accuracy | 20 | 100 | done |
-| M03 | release-1-3-0 | 30 | 100 | done |
+| M00 | foundation | 10 | 44 | active |
+| M01 | build-and-acceptance | 15 | 0 | planned |
+| M02 | model-layer-retirement | 20 | 0 | planned |
+| M03 | cleanup-and-bootstrap | 10 | 0 | planned |
+| M04 | boundary-scanners | 10 | 0 | planned |
+| M05 | d5-name-masking | 20 | 0 | planned |
+| M06 | release-1-4-0 | 15 | 0 | planned |
 <!-- milestones:end -->
 
+Order: M00 first (M00-T01 alone); read-only tasks (M01-T02, M02-T01, M03-T01, M05-T01) may run alongside it.
+Then, serialised on shared files: M01-T01 -> M01-T03 -> M02-T03 -> M02-T04 -> M02-T05 (`Makefile`, runbook,
+model guide); M02-T02 runs after M02-T01 and before M02-T03; M05-T02 after the frozen harness section of M05-T01.
+After M02-T05: M03-T02 -> M03-T03 -> M03-T04, and M04-T01, M04-T02 in parallel; M04-T03 after M03-T02 (shared
+`docs/reference/security-privacy.md`); then M05-T03 -> M05-T04; then M06. Only M03-T02 deletes bootstrap files.
+
 ## Top risks
-1. The transport inventory may surface a call class the policy does not cover (operator sinks are settled:
-   class 5, DEC-002); M01-T03 waits on the frozen allow-list, so an unclassified row blocks M01 until sol or
-   G rules.
-2. The `model_train` audit covers exact pins of the parked layer; an advisory there needs a pin change
-   (not development) or G's acceptance, and resolution stays metadata-only so no multi-gigabyte pull happens.
-3. The assessment predates the 120 accepted commits; some findings are stale (`tests/providers/m365` is an
-   upstream path). Every task re-checks its finding on current `main` before changing code.
-4. Heavy runs (about 20,000 tests, then the 26,898-vector acceptance replay): one heavy job at a time on
-   the Mac, under `run-job`, behind the load rule.
-5. Squash merges give `main` commits no review saw; the M01 and M03 review items bind each approval to the
-   reviewed head through the `Plan-Review` trailer, and the tag must sit on the commit astra reviewed.
-6. Release authority: D9 keeps D7's 1.3.0 approval unused; publication runs only after G's separate yes
-   naming 1.3.0 (form fixed by DEC-001). M02 cannot close until G approves the exact notice text (DEC-003).
-7. The repo is public: plan files, committed briefs and release notes carry no workstation paths, credentials
-   or live evidence; gitleaks and the taint scan run before every push.
+1. Ruff findings sit in 54 files across modules; M00-T01 runs alone before parallel writers, or it collides
+   with every later branch.
+2. The replay kit was found only by one inventory slice and the plan session could not re-locate it; if
+   M01-T02 cannot find it, M01 and every milestone-close acceptance item wait on a G decision.
+3. Model-layer helpers feed the shipped report, projection and value-rule paths; removing them before
+   re-homing breaks 1.4.0. M02-T02 records normalised digests first; M02-T03 and M02-T04 must match them.
+4. D5 is the third attempt (D6): matching cost and HTML peak are the known failure modes, hence the frozen
+   harness interface, the person-bearing workload and the baseline before the change, and the design gate.
+5. Two deletion gates (M02, M03 with the bootstrap copies), the D5 design and the 1.4.0 yes wait on G;
+   dispatch keeps independent work moving while they wait.
+6. Removing the `model` command and extra changes the CLI surface in a minor release; the notes must say so.
+7. Plan v2 used the same task ids M00-M03; predicates bind to plan v3 merges, DEC ids and CLEANUP.md rows,
+   never to a work path alone. The repo is public: plan files, briefs and notes carry no workstation paths, credentials, live evidence or
+   sealed evaluation rows (the kit location stays outside git); gitleaks and the taint scan run before every push.
 
 ## Links
 STATE.md, ARCHITECTURE.md, milestones/, BACKLOG.md, DECISIONS.md, CLEANUP.md, RETRO.md
