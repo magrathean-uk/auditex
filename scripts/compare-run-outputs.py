@@ -12,7 +12,6 @@ first; see ``.plan/work/M02-T01/design.md`` section 8.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import re
@@ -23,6 +22,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+
+from azure_tenant_audit.argument_parser import build_argument_parser  # noqa: E402
 
 RUNS = (
     "ci-contract",
@@ -226,7 +227,7 @@ def compare_digests(digest_file: Path, rundir: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser = build_argument_parser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", metavar="FILE", type=Path, help="record digests of RUNDIR to FILE")
     mode.add_argument("--digests", metavar="FILE", type=Path, help="compare RUNDIR against FILE")

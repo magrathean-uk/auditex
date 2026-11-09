@@ -73,6 +73,7 @@ SCRIPT_BUILDERS = [
     ("build-model-examples.py", "main"),
     ("build-oracle-cases.py", "main"),
     ("build-prowler-cases.py", "main"),
+    ("compare-run-outputs.py", "main"),
     ("derive-scuba-projection-shapes.py", "main"),
     ("derive-scubagear-prune-table.py", "main"),
     ("generate-explainer-baselines.py", "main"),
