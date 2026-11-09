@@ -2,7 +2,7 @@
 id: M03
 name: cleanup-and-bootstrap
 weight: 10
-status: planned
+status: done
 ---
 # M03 cleanup-and-bootstrap
 Writers run after M02-T05 merges (shared test files, `docs/reference/security-privacy.md`, README and runbook). Every removal goes through the deletion gate: G approves the exact path list first, the approved paths become `.plan/CLEANUP.md` rows, and M03-T02 is the only task that deletes.
@@ -17,7 +17,7 @@ The dead paths the v3 assessment confirmed and the divergent `tenant-bootstrap/a
 - [x] Only the forwarder is left in `tenant-bootstrap/azure_tenant_audit/`, and a test proves it resolves to `src/azure_tenant_audit` from the repository: `o=$(git ls-files -- tenant-bootstrap/azure_tenant_audit) && test "$o" = tenant-bootstrap/azure_tenant_audit/__init__.py && .venv/bin/python -m pytest tests/test_tenant_bootstrap_forwarder.py tests/test_tenant_bootstrap_config.py tests/test_tenant_bootstrap_wrapper.py`
 - [x] AGENTS.md has a tenant-bootstrap section: `grep -q -i '^## .*tenant-bootstrap' AGENTS.md`
 - [x] Full suite and release archive pass after the cleanup: `make test && make release-archive`
-- [ ] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance`
+- [x] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance` (evidence: GATE-M02-M04 on fe9d1e4: make test 22547 passed 0 failed; make acceptance pass, replay 1 passed 0 skipped, explainer 6 passed)
 
 ## Tasks
 | id | title | owner | size | tags | status |

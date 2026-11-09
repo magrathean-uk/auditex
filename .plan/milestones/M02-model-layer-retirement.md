@@ -2,7 +2,7 @@
 id: M02
 name: model-layer-retirement
 weight: 20
-status: active
+status: done
 ---
 # M02 model-layer-retirement
 Implements v2 DEC-004 (G: retire the parked local-model layer after 1.3.0). Removal goes through the deletion gate: G approves the exact path list before any `git rm`, and the approved paths become `.plan/CLEANUP.md` rows. The deterministic template explainer stays. Writers run after M01-T03 merges (shared `Makefile`, runbook and model guide).
@@ -18,7 +18,7 @@ The parked model layer is gone from code, CLI, packaging, configs, tests and doc
 - [x] The HTTP allow-list and transport tests pass with no model-endpoint site left: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py tests/test_transport_hygiene.py && ! git grep -q -i 'chat/completions' -- src`
 - [x] Shipped report, projection and explainer output are unchanged by the retirement, by normalised digest against the pre-retirement baseline: `make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && .venv/bin/python -m pytest tests/test_compare_run_outputs.py tests/test_reporting.py tests/test_scuba_projection.py tests/test_explainer_integration.py tests/test_value_rules_contract.py` (evidence: merge.sh verify for M02-T04 on the tree merged as c97539d: make test 22471 passed 0 failed, contract-smoke and the 43-digest comparison pass, make audit-deps pass)
 - [x] Full suite, shipped-content parity and dependency audit pass: `make test && make audit-deps` (evidence: merge.sh verify for M02-T04 on the tree merged as c97539d: make test 22471 passed 0 failed, contract-smoke and the 43-digest comparison pass, make audit-deps pass)
-- [ ] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance`
+- [x] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance` (evidence: GATE-M02-M04 on fe9d1e4: make test 22547 passed 0 failed; make acceptance pass, replay 1 passed 0 skipped, explainer 6 passed)
 - [x] No public doc describes the model layer as present: `test -f README.md && ! git grep -q -E 'auditex model|model_train' -- README.md AGENTS.md docs agent skills`
 - [x] Review: other-vendor reviews approve the plan v3 merges of M02-T03 and M02-T04 (Tier A: network and schemas) at the exact merged heads (ARCHITECTURE.md review binding): `ok=1; for T in M02-T03 M02-T04; do ( c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/REV-$T/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/REV-$T/result.md" ) || ok=0; done; test $ok = 1` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
 

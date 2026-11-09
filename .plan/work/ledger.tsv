@@ -252,3 +252,7 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-09T19:26:28Z	REV-M04-T03	codex	codex2	gpt-6.1-sol	high	readonly	0	92		done	task/M04-T03-scanner-limits-doc
 2026-11-09T19:27:32Z	M04-T03	terra	claude-5	claude-sonnet-5-5	medium	branch	0	25	0.1759	done	task/M04-T03-scanner-limits-doc
 2026-11-09T19:28:37Z	REV-M04-T03	codex	codex2	gpt-6.1-sol	high	readonly	0	53		done	task/M04-T03-scanner-limits-doc
+2026-11-09T20:21:11Z	GATE-M02-M04	terra	claude-5	claude-sonnet-5-5	medium	readonly	0	3117	0.3801	done	fe9d1e4
+2026-11-09T20:23:10Z	RETRO-M02	luna	claude-5	claude-haiku-5-5	medium	inplace	0	98	0.0288	done	main
+2026-11-09T20:24:38Z	RETRO-M03	luna	claude-2	claude-haiku-5-5	medium	inplace	0	86	0.0252	done	main
+2026-11-09T20:25:33Z	RETRO-M04	luna	claude-4	claude-haiku-5-5	medium	inplace	0	54	0.0169	done	main

@@ -2,7 +2,7 @@
 id: M05
 name: d5-name-masking
 weight: 20
-status: planned
+status: active
 ---
 # M05 d5-name-masking
 D6 (G): D5 person-name masking is a redesign from current `main`, not a merge of `wt/redact-person-names` or the `wt/d5-*` branches (reference reading only): bounded per-record matching, HTML peak within `main` plus 15 percent, privacy review by both providers. Scope (G, DEC-001): the names of everyone in the run's own directory records, wherever they appear in shareable output. M05-T03 starts after M02, M03 and M04 have merged their edits to the shared redaction, writer and privacy files.

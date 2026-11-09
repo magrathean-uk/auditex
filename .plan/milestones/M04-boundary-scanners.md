@@ -2,7 +2,7 @@
 id: M04
 name: boundary-scanners
 weight: 10
-status: planned
+status: done
 ---
 # M04 boundary-scanners
 Runs after M02-T04 merges (shared `tests/test_http_verb_allowlist.py`). Follows up v2 DEC-011: the static scanners shipped in 1.3.0 with named blind spots.
@@ -14,8 +14,8 @@ The static boundary scanners close the blind spots recorded under v2 DEC-011 whe
 - [x] The HTTP scanner reports planted openers passed as untyped parameters and held in containers, and passes on `main`: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py`
 - [x] The read-boundary scanner reports or fails closed on planted cases for limits L1 to L4, and passes on `main`: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py`
 - [x] Review: terra confirms every DEC-011 limit (the two HTTP limits and L1 to L4) is either closed by a named test or stated in `docs/reference/security-privacy.md` (read-through recorded in `.plan/work/M04-T03/result.md`) (evidence: M04-T03 result.md maps all six DEC-011 limits; REV-M04-T03 approve at 4329812)
-- [ ] Full suite passes: `make test`
-- [ ] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance`
+- [x] Full suite passes: `make test` (evidence: GATE-M02-M04 on fe9d1e4: make test 22547 passed 0 failed; make acceptance pass, replay 1 passed 0 skipped, explainer 6 passed)
+- [x] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance` (evidence: GATE-M02-M04 on fe9d1e4: make test 22547 passed 0 failed; make acceptance pass, replay 1 passed 0 skipped, explainer 6 passed)
 - [x] Review: other-vendor reviews approve the plan v3 merges of M04-T01 and M04-T02 (Tier A: network) at the exact merged heads (ARCHITECTURE.md review binding): `ok=1; for T in M04-T01 M04-T02; do ( c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/REV-$T/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/REV-$T/result.md" ) || ok=0; done; test $ok = 1` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
 
 ## Tasks

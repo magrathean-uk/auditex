@@ -1,13 +1,13 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 61% (was 56%)
-milestone: M02-model-layer-retirement 90%
+overall: 68% (was 61%)
+milestone: M05-d5-name-masking 13%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: fe9d1e4 2026-11-09T19:29:20Z
+last_checkpoint: 0fae07b 2026-11-09T20:25:43Z
 
 ## Next tasks
-- none
+- M05-T04 Update the privacy reference and release notes for D5 (terra)
 
 ## Blockers
 - none
@@ -25,12 +25,12 @@ last_checkpoint: fe9d1e4 2026-11-09T19:29:20Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude - orchestrator
+claude 90% orchestrator
 claude-1 84% ok
 claude-2 28% shared
-claude-3 83% ok
+claude-3 84% ok
 claude-4 79% ok
-claude-5 15% ok
-codex 86% hot
-codex2 38% ok
+claude-5 16% ok
+codex 87% hot
+codex2 40% ok
 <!-- quota:end -->
