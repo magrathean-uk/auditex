@@ -11,22 +11,22 @@ D6 (G): D5 person-name masking is a redesign from current `main`, not a merge of
 Shareable and customer-pack output mask the names of every person in the run's own directory records, in free text and in ids beyond the typed D3 fields, with matching cost bounded per record; an in-repo harness with a frozen, person-bearing workload and an explicit redaction profile proves the HTML report peak on the 90,000-record run stays within the recorded `main` baseline plus 15 percent while masking demonstrably runs; the docs and release notes state exactly what is and is not masked.
 
 ## Definition of Done
-- [ ] Review: G approved the D5 design (DECISIONS.md entry titled "D5 design", approver G): `grep -A8 '^## DEC-[0-9]* D5 design' .plan/DECISIONS.md | grep -q '^- approver: G'`
+- [x] Review: G approved the D5 design (DECISIONS.md entry titled "D5 design", approver G): `grep -A8 '^## DEC-[0-9]* D5 design' .plan/DECISIONS.md | grep -q '^- approver: G'`
 - [x] The HTML peak harness runs on the frozen workload with an explicit profile and the baseline from `main` before D5 is committed: `.venv/bin/python -m pytest tests/test_html_peak_harness.py && test -s benchmarks/html-peak-baseline.json && grep -q '"profile": "shareable"' benchmarks/html-peak-baseline.json && grep -q '"workload_sha256"' benchmarks/html-peak-baseline.json`
-- [ ] With D5 on, the shareable HTML report of the frozen 90,000-record workload contains no workload person name and its peak is within the baseline plus 15 percent: `.venv/bin/python benchmarks/html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked`
-- [ ] Person-name masking, the D3 profiles and the per-record scan budget pass: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_profiles_d3.py tests/test_redaction_scan_budget.py tests/test_notify_redaction.py tests/test_redaction_export_schemas.py`
-- [ ] Full suite and contract smoke pass: `make test && make contract-smoke`
+- [x] With D5 on, the shareable HTML report of the frozen 90,000-record workload contains no workload person name and its peak is within the baseline plus 15 percent: `.venv/bin/python benchmarks/html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked` (evidence: merge.sh verify for M05-T03 on the tree merged as 6d1cdc0: html_peak peak 645529600 bytes, limit 699042202, unmasked_name_hits 0)
+- [x] Person-name masking, the D3 profiles and the per-record scan budget pass: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_profiles_d3.py tests/test_redaction_scan_budget.py tests/test_notify_redaction.py tests/test_redaction_export_schemas.py`
+- [x] Full suite and contract smoke pass: `make test && make contract-smoke` (evidence: merge.sh verify for M05-T03 on 6d1cdc0: make test 22615 passed 0 failed; make contract-smoke pass)
 - [ ] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance`
-- [ ] Review: the privacy reference and the CHANGELOG `[Unreleased]` section state the D5 boundary as implemented and no longer carry the 1.3.0 D6 limit sentence (terra read-through in the plan v3 M05-T04 `result.md`)
-- [ ] Review: privacy reviews by both providers approve the plan v3 merge of M05-T03 at the exact merged head (`REV-M05-T03` through the merge gate, `REV-M05-T03-privacy` from the other vendor): `c=$(git log v1.3.0..HEAD --format=%H -1 --grep='^Plan-Task: M05-T03$') && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n 's/^Plan-Review: REV-M05-T03 approve \([0-9a-f]\{12,40\}\)$/\1/p') && test -n "$s" && for R in REV-M05-T03 REV-M05-T03-privacy; do grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/$R/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/$R/result.md" || exit 1; done` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
+- [x] Review: the privacy reference and the CHANGELOG `[Unreleased]` section state the D5 boundary as implemented and no longer carry the 1.3.0 D6 limit sentence (terra read-through in the plan v3 M05-T04 `result.md`) (evidence: M05-T04 result.md on main 1509ac9, `read-through: complete`; REV-M05-T04 approve at bdd9063)
+- [x] Review: privacy reviews by both providers approve the plan v3 merge of M05-T03 at the exact merged head (`REV-M05-T03` through the merge gate, `REV-M05-T03-privacy` from the other vendor): `c=$(git log v1.3.0..HEAD --format=%H -1 --grep='^Plan-Task: M05-T03$') && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n 's/^Plan-Review: REV-M05-T03 approve \([0-9a-f]\{12,40\}\)$/\1/p') && test -n "$s" && for R in REV-M05-T03 REV-M05-T03-privacy; do grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/$R/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/$R/result.md" || exit 1; done` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
 
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M05-T01 | Design D5-v2 masking and freeze the harness interface | sol | M | hard | done |
 | M05-T02 | Add the HTML peak harness and record the main baseline | codex | M | - | done |
-| M05-T03 | Implement D5-v2 masking per the approved design | codex | L | cross-cutting | review |
-| M05-T04 | Update the privacy reference and release notes for D5 | terra | S | - | todo |
+| M05-T03 | Implement D5-v2 masking per the approved design | codex | L | cross-cutting | done |
+| M05-T04 | Update the privacy reference and release notes for D5 | terra | S | - | done |
 
 ## Acceptance criteria
 ### M05-T01 Design D5-v2 masking and freeze the harness interface

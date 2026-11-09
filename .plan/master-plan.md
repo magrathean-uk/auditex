@@ -71,7 +71,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M02 | model-layer-retirement | 20 | 100 | done |
 | M03 | cleanup-and-bootstrap | 10 | 100 | done |
 | M04 | boundary-scanners | 10 | 100 | done |
-| M05 | d5-name-masking | 20 | 13 | active |
+| M05 | d5-name-masking | 20 | 88 | active |
 | M06 | release-1-4-0 | 15 | 0 | planned |
 <!-- milestones:end -->
 

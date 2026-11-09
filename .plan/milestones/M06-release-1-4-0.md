@@ -25,7 +25,7 @@ Starts after every M00-M05 DoD item is ticked. The version name and publication 
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M06-T01 | Write the 1.4.0 release notes and bump the version | terra | M | - | todo |
+| M06-T01 | Write the 1.4.0 release notes and bump the version | terra | M | - | doing |
 | M06-T02 | Run the pre-publication gates on the release candidate | luna | S | - | todo |
 | M06-T03 | Pre-publication release gate validation | astra | S | gate | todo |
 | M06-T04 | Tag and publish 1.4.0 after G's yes | orchestrator | S | gate | todo |

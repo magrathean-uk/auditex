@@ -85,3 +85,12 @@
 - why: M04-T02 needed five review rounds before the bar was set; stating it in the criteria first keeps the review on the milestone goal.
 - consequences: the M04-T01 criteria carry the clause; reviewers judge against it.
 - approver: orchestrator
+
+## DEC-010 D5 design approved as implemented
+- date: 2026-11-09
+- status: approved
+- decision: G approves the D5-v2 design (`.plan/work/M05-T01/design.md`) as implemented on `task/M05-T03-d5-masking` at 215148d, which Codex and the Claude privacy review both approved. Scope as DEC-001, DEC-003 and DEC-004. The repair rounds changed four things against the written design: up to 16 keys per person (not 8, required forms first, overflow reported as `limit`), a comma joins name parts ("Kovalenko, Priya"), and two new unmatched reasons, `separator` and `limit`. Unmatched people are counted per person (object id, else user principal name), and the note reads "names that cannot be matched safely in free text".
+- options: approve as implemented | approve after adding middle-initial and title masking | hold
+- why: both providers approve after two repair rounds; the 90,000-record report has no surviving name with peak memory 1.03 to 1.07 times the baseline (limit 1.15); every name the matcher cannot follow is reported, never silent.
+- consequences: M05-T03 merges; M05-T04 documents the boundary and its limits in the privacy reference and the CHANGELOG; masking names with middle initials or titles stays in BACKLOG Next.
+- approver: G

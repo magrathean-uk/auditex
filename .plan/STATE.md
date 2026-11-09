@@ -1,19 +1,18 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 68% (was 61%)
-milestone: M05-d5-name-masking 13%
+overall: 83% (was 68%)
+milestone: M05-d5-name-masking 88%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 0fae07b 2026-11-09T20:25:43Z
+last_checkpoint: 1509ac9 2026-11-09T21:44:22Z
 
 ## Next tasks
-- M05-T04 Update the privacy reference and release notes for D5 (terra)
+- none
 
 ## Blockers
 - none
 
 ## Pending G decisions
-- D5 design approval (M05 DoD item 1): G answered its scope, group/role and salt questions (DEC-001, DEC-003, DEC-004); the design document itself is not yet approved. Ask with the repaired M05-T03 evidence.
 - G's yes naming 1.4.0 at publication (D9). Deletion gates approved (DEC-005, DEC-006).
 
 ## Notes
@@ -25,12 +24,12 @@ last_checkpoint: 0fae07b 2026-11-09T20:25:43Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 90% orchestrator
-claude-1 84% ok
-claude-2 28% shared
-claude-3 84% ok
-claude-4 79% ok
-claude-5 16% ok
+claude 91% orchestrator
+claude-1 85% hot
+claude-2 29% shared
+claude-3 85% hot
+claude-4 80% ok
+claude-5 19% ok
 codex 87% hot
-codex2 40% ok
+codex2 42% ok
 <!-- quota:end -->

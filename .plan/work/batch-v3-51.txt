@@ -1,0 +1,1 @@
+--task M05-T04 --role terra --template terra-implement --branch --slug d5-docs --var TITLE="Update the privacy reference and release notes for D5 (repair round 1)" --var MILESTONE=.plan/milestones/M05-d5-name-masking.md --var FILES="docs/reference/security-privacy.md" --var REVIEW=".plan/work/M05-T04/repair-1.md"

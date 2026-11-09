@@ -1,0 +1,1 @@
+--task M05-T04 --role terra --brief .plan/work/M05-T04/readthrough.md --readonly --sha main --tags size:S
