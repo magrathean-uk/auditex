@@ -5,7 +5,7 @@ verdict: changes-required
 reviewed: cce05774d816d369e8648a5beb71f82933ee1b98
 A spelling the index accepts stays readable and uncounted when the same person is matched in another record (reproduced). The note misstates why "separator" people are unmatched.
 The full verify passes: 154 tests, contract-smoke, html_peak ratio 1.115, unmasked_name_hits 0. No security, dependency or scope problems.
-changes: /Users/bolyki/dev/source/auditex/.plan/work/REV-M05-T03-privacy/evidence.md (review evidence only; no repository files touched)
+changes: .plan/work/REV-M05-T03-privacy/evidence.md (review evidence only; no repository files touched)
 verification: PYTHONPATH=src pytest test_redaction_person_names, _profiles_d3, _scan_budget, test_notify_redaction, test_redaction_export_schemas pass (154); make contract-smoke pass; html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked pass (peak 678019072, limit 699042202); log in evidence.md
 risks: Middle-initial and title spellings ("John A. Smith", "Dr. Jane Doe") match the design's separator rule, so they are counted unmatched and stay readable in free text; real tenants may have many. Single-token and structural mapping keys (`Priya_Kovalenko`, `PriyaKovalenko`) stay as written, as the design says. The final markup pass leaves names inside HTML tags as written; main's D3 pass masked privileged names there, so structure-first redaction is the only defence.
 questions_for_g: none

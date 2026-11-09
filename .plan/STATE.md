@@ -4,7 +4,7 @@ overall: 20% (was 15%)
 milestone: M00-foundation 78%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: af9e5a5 2026-11-09T12:36:52Z
+last_checkpoint: c3fe107 2026-11-09T12:37:40Z
 
 ## Next tasks
 - M00-T03 Re-run the gate chain on main after the M00 merges (luna)

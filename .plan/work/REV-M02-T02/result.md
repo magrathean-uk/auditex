@@ -11,7 +11,7 @@ questions_for_g: none
 
 ### Findings
 
-- Met: precondition. Delivered design inspected at `/Users/bolyki/dev/source/auditex/.plan/work/M02-T01/design.md:281`; branch starts at pre-retirement main commit `223fbaa5b082bed6f1bccb4740d8038ea6278431`.
+- Met: precondition. Delivered design inspected at `.plan/work/M02-T01/design.md:281`; branch starts at pre-retirement main commit `223fbaa5b082bed6f1bccb4740d8038ea6278431`.
 - Met by inspection: required report, projection and explainer coverage, normalisation, commit recording and comparison diagnostics in `scripts/compare-run-outputs.py:27`, `scripts/compare-run-outputs.py:81`, `scripts/compare-run-outputs.py:180` and `scripts/compare-run-outputs.py:199`.
 - Untestable: independent reproduction of fixture digests. `tests/fixtures/contract-smoke-digests.json:2` records the correct base commit and contains 43 digests across all eight runs.
 - Met by inspection: behavioural tests cover volatile-only equality, verdict and explainer differences, missing artefacts and invalid digest files at `tests/test_compare_run_outputs.py:72`, `tests/test_compare_run_outputs.py:80`, `tests/test_compare_run_outputs.py:94`, `tests/test_compare_run_outputs.py:118` and `tests/test_compare_run_outputs.py:140`.
