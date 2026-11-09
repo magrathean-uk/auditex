@@ -203,6 +203,47 @@ Customer packs contain no absolute path of the operator's machine and no file th
 integrity mismatch and the pack is refused. The effective boundary against a mistake in any of these is the
 read-only role and scopes granted to the auditor.
 
+## Boundary scanner limits
+
+Two static scanners guard the source tree against an accidental write or content read:
+`tests/test_read_boundaries.py` (process launches, command text and Google Workspace requests) and
+`tests/test_http_verb_allowlist.py` (HTTP verbs and openers). They check our own code and are not a defence against
+code written to defeat them; review covers deliberate obfuscation. The runtime layer behind them is the adapter guard
+(`adapters/read_guard.py`), which refuses any non-read command sent through the adapters before a process starts. The
+read-only role and scopes granted to the auditor remain the authoritative boundary.
+
+Both scanners fail closed on a value they cannot prove: a launcher argument, importer name, callee lookup, standard
+input or HTTP receiver that is not provably literal or a known non-opener is reported and fails the suite. Over-reporting
+is therefore possible (for example a flow-insensitive mutation mark, an f-string with a field, or a parameter that shares
+a receiver's name in another scope); it is a false positive, not a gap. Limits that hide a call are listed below. No test
+asserts a limit itself: the test named for each is the nearest one, and it pins the neighbouring case the scanner does
+handle.
+
+Read-boundary scanner:
+
+| Limit | Bounded by |
+| --- | --- |
+| A local function that shadows a read-only hand-off callee (such as `info`) and changes its argument | `test_values_proved_literal_stay_resolved` |
+| A local function that shadows a transparent conversion (such as `list`) | `test_values_proved_literal_stay_resolved` |
+| An import binding after a literal assignment to the same launcher argument name | `test_a_declared_import_joins_the_declared_scope` (declared form only) |
+| A plain `with`, `def`, `class`, `except` or `match` binding, or a comprehension walrus, after a literal assignment to a launcher argument name; the same forms under `global` or `nonlocal` fail closed | `test_a_declared_binding_the_scan_cannot_follow_leaves_the_launch_unresolved` |
+| A launch in a class body that reads a class-local name | `test_default_values_annotations_and_decorators_belong_to_the_enclosing_scope` |
+| A script passed by file (`-File`) or encoded (`-EncodedCommand`); the launch is found, the script text is not read | `test_launches_outside_plain_subprocess_calls_are_found` |
+| A script written to a process's standard input after it starts (`communicate`, `stdin.write`); `input=` is read | `test_values_the_scan_cannot_prove_literal_leave_the_launch_unresolved` |
+| Launchers outside the named set (`ctypes` or `cffi` calls into libc, `multiprocessing`, third-party process libraries) | `test_untraceable_launch_forms_are_reported` |
+| `getattr(obj, name)` with a computed name on a runtime object that is not a launcher module | `test_dynamic_access_that_cannot_reach_a_launcher_is_not_reported` |
+| A module-level container changed from another module (`helpers.ARGV.append(x)`) is not seen in the module that binds it | `test_a_launcher_re_exported_by_another_module_is_followed` |
+| A Google service read straight from the builder cache outside the builder methods | `test_google_calls_held_or_fetched_indirectly_fail_closed` |
+
+HTTP verb scanner:
+
+| Limit | Bounded by |
+| --- | --- |
+| A trusted module attribute rebound to a factory that returns an opener (`pathlib.Path = factory`), so `pathlib.Path().open(...)` is classified as safe | `test_a_receiver_proved_not_to_be_an_opener_is_not_a_site` |
+| Cross-module writes through `__dict__`, `vars(obj)` or `sys.modules` | `test_an_attribute_set_from_another_module_joins_the_union` |
+| A parameter annotation is trusted, so an argument that contradicts it is not seen | `test_a_receiver_proved_not_to_be_an_opener_is_not_a_site` |
+| Send methods of clients the source does not use (such as an `httpx` `stream`), a verb chosen by `getattr` with a computed name, and `googleapiclient` request chains | `test_the_scanner_sees_the_known_get_call_sites` and `test_a_request_value_the_scan_cannot_prove_is_not_get` |
+
 ## External lookups
 
 Live Microsoft 365 runs with the `dns_posture` collector make unauthenticated,
