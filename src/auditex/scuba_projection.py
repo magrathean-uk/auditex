@@ -9,12 +9,10 @@ from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-import hmac
 import json
 import os
 from pathlib import Path
 import re
-import stat
 from typing import Any
 
 from azure_tenant_audit.chunk_reader import _open_chunk

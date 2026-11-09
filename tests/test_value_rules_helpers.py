@@ -68,7 +68,9 @@ SCAN = {"section": "s", "what": "x is on", "fields": ["f"], "bad": True}
 
 
 def _bad_wins(items, label_ok=lambda item: type(item.get("Identity")) is str):
-    evaluate = lambda item: _flag(item, "f", True)
+    def evaluate(item):
+        return _flag(item, "f", True)
+
     return _scan_bad_wins(P, SCAN, {"s": items}, evaluate, label_ok)
 
 

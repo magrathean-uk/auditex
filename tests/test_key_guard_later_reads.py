@@ -29,7 +29,7 @@ def _swap_to_key(path: Path, run: Path) -> None:
     os.link(run / "operator-inputs" / "sensitive-users.key", path)
 
 
-def test_model_corpus_refuses_swap_before_later_stream(private_run: Path, tmp_path: Path) -> None:
+def test_model_corpus_refuses_swap_before_later_stream(private_run: Path, tmp_path: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
     from auditex import model_corpus
 
     source = tmp_path / "training.jsonl"
@@ -43,7 +43,7 @@ def test_model_corpus_refuses_swap_before_later_stream(private_run: Path, tmp_pa
 
 
 def test_model_corpus_refuses_swap_before_manifest_reopen(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,  # noqa: F811 - shared pytest fixture injected by name
 ) -> None:
     from auditex import model_corpus
 
@@ -70,7 +70,7 @@ def test_model_corpus_refuses_swap_before_manifest_reopen(
 
 @pytest.mark.parametrize("combine", [False, True])
 def test_model_evaluation_never_rehashes_swapped_private_key(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, combine: bool,
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, combine: bool,  # noqa: F811 - shared pytest fixture injected by name
 ) -> None:
     from auditex import model_eval
 
@@ -102,7 +102,7 @@ def test_model_evaluation_never_rehashes_swapped_private_key(
 
 
 @pytest.mark.parametrize("reader", ["cases", "responses", "replay"])
-def test_active_reader_refuses_swapped_key(private_run: Path, tmp_path: Path, reader: str) -> None:
+def test_active_reader_refuses_swapped_key(private_run: Path, tmp_path: Path, reader: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
     from auditex.model_eval import _load_responses
     from auditex.model_training import load_cases
     from azure_tenant_audit.offline_replay import replay_source
@@ -119,7 +119,7 @@ def test_active_reader_refuses_swapped_key(private_run: Path, tmp_path: Path, re
 
 
 @pytest.mark.parametrize("kind", ["export", "results"])
-def test_scubagear_uses_selected_bytes_after_path_swap(private_run: Path, tmp_path: Path, kind: str) -> None:
+def test_scubagear_uses_selected_bytes_after_path_swap(private_run: Path, tmp_path: Path, kind: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
     from auditex.scubagear_export import load_export, load_results
     from azure_tenant_audit.guarded_io import open_pinned_binary
 
@@ -142,7 +142,7 @@ def test_scubagear_uses_selected_bytes_after_path_swap(private_run: Path, tmp_pa
             assert result.sha256 == hashlib.sha256(original).hexdigest() if kind == "export" else result[1] == "scubaresults"
 
 
-def test_explorer_uses_selected_bytes_after_path_swap(private_run: Path, tmp_path: Path) -> None:
+def test_explorer_uses_selected_bytes_after_path_swap(private_run: Path, tmp_path: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
     from auditex.explorer import _read_json
     from azure_tenant_audit.guarded_io import open_pinned_binary
 
@@ -161,7 +161,7 @@ def test_explorer_uses_selected_bytes_after_path_swap(private_run: Path, tmp_pat
             assert result == {"expected": True}
 
 
-def test_gate_uses_pinned_manifest_after_path_swap(private_run: Path) -> None:
+def test_gate_uses_pinned_manifest_after_path_swap(private_run: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
     from auditex.gate import _open_run
 
     manifest = private_run / "run-manifest.json"
@@ -176,7 +176,7 @@ def test_gate_uses_pinned_manifest_after_path_swap(private_run: Path) -> None:
             assert isinstance(result.manifest(), dict)
 
 
-def test_normalized_sections_use_pinned_run_after_root_swap(private_run: Path, tmp_path: Path) -> None:
+def test_normalized_sections_use_pinned_run_after_root_swap(private_run: Path, tmp_path: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
     from azure_tenant_audit.output_redaction import read_normalized_sections
 
     original = private_run / "normalized"

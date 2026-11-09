@@ -185,7 +185,6 @@ def _open_run(run_dir: str | Path, label: str) -> RunBundle:
     root = Path(run_dir)
     if not root.is_dir():
         raise GateInputError("run_dir_missing", f"{label} directory not found: {run_dir}")
-    manifest_path = root / "run-manifest.json"
     try:
         with guard_session() as guard:
             guard.bind_run(root)

@@ -52,7 +52,8 @@ def test_same_count_catalogue_edit_is_detected():
 
 
 def test_shared_exception_edit_is_detected(monkeypatch):
-    changed = deepcopy(tk.FAULT); changed["explanation"] += " Changed."
+    changed = deepcopy(tk.FAULT)
+    changed["explanation"] += " Changed."
     monkeypatch.setattr(tk, "FAULT", changed)
     rebuilt = generate_template(CAT, B, C)
     old = shipped()
@@ -105,10 +106,14 @@ def test_generator_refuses_to_overwrite_collection():
 
 
 def test_missing_or_duplicate_collection_entry_rejected():
-    changed = deepcopy(C); changed["cells"].append(changed["cells"][0])
-    with pytest.raises(ValueError): generate_template(CAT, B, changed)
-    changed = deepcopy(C); changed["cells"] = [e for e in changed["cells"] if not e["applies"]]
-    with pytest.raises(KeyError): generate_template(CAT, B, changed)
+    changed = deepcopy(C)
+    changed["cells"].append(changed["cells"][0])
+    with pytest.raises(ValueError):
+        generate_template(CAT, B, changed)
+    changed = deepcopy(C)
+    changed["cells"] = [e for e in changed["cells"] if not e["applies"]]
+    with pytest.raises(KeyError):
+        generate_template(CAT, B, changed)
 
 
 def test_catalogue_sourced_without_vectors_or_rule_implementation():
@@ -116,8 +121,10 @@ def test_catalogue_sourced_without_vectors_or_rule_implementation():
     source = Path(generate.__file__).read_text()
     assert "import ref_impl" not in source and "cell-tables.md" not in source
     assert "open(" not in source and "read_text(" not in source
-    changed = deepcopy(B); changed["source_commit"] = "unknown"
-    with pytest.raises(ValueError): generate_template(CAT, changed, C)
+    changed = deepcopy(B)
+    changed["source_commit"] = "unknown"
+    with pytest.raises(ValueError):
+        generate_template(CAT, changed, C)
 
 
 def test_product_inputs_regenerate_shipped_template():

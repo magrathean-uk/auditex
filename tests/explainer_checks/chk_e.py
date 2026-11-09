@@ -23,7 +23,6 @@ Matching rules (all after textnorm.norm; a step is checked on its own):
  Verdicts met and not_applicable: any step fails (nothing is approved).
 """
 import re
-from functools import lru_cache
 
 from .config import PARAPHRASE_MAX_NOVEL, PARAPHRASE_MIN_TOKENS, PARAPHRASE_THETA, PARAPHRASE_WINDOW_UNITS
 from .specifics import extract
@@ -216,7 +215,6 @@ def check_e(ctx, out):
     for c in ctx.cited:
         approved_names.add(norm(c))
     approved_numbers = {sp.key for sp in extract(" \n ".join(units)) if sp.cls == "number"}
-    prompt_text = norm(" ".join(ctx.approved_lines_prompt))
     for i, s in enumerate(steps):
         if ctx.whole_command(s):
             continue
@@ -242,7 +240,7 @@ def check_e(ctx, out):
         # not verbatim: E3 applies. Exact-class specifics first (these fail without any similarity rule)
         specs = extract(s)
         exact_bad = []
-        total_spec = in_prompt_spec = in_approved_spec = 0
+        total_spec = in_approved_spec = 0
         for sp in specs:
             if sp.cls in EXACT_CLASSES:
                 total_spec += 1

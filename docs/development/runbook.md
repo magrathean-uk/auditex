@@ -88,7 +88,7 @@ Install the test dependencies for development: `python -m pip install -e '.[test
 
 | Check | What it exercises |
 | --- | --- |
-| `make lint` | Compiles Python under `src` and `tests`; it does not check style or types. |
+| `make lint` | Compiles Python under `src` and `tests`, then runs `ruff check .` with the rule set and target version in `pyproject.toml` (the same as the pre-commit hook) and fails on any finding. It does not check formatting or types. It needs the Ruff version pinned in the `dev` extra, found in `.venv` (`python -m pip install -e '.[dev]'`), the `make audit-deps` tool environment or on `PATH`, and stops with a message when Ruff is missing, at another version, or pinned differently from the hook. |
 | `make test` | Runs pytest with the interpreter selected by `scripts/select-python.sh`. |
 | `make contract-smoke` | Deletes and recreates `outputs/ci-contract`, validates an offline bundle and its evidence index, and replays a generated sample with one blocked read and one cut list, which must come out partial (exit status 1). |
 | `./scripts/oss-taint-scan.sh` | Checks forbidden research/derived paths and taint markers. |

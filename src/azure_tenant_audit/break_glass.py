@@ -32,7 +32,6 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 ENV_VAR = "AUDITEX_BREAK_GLASS_ACCOUNTS"

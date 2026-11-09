@@ -85,10 +85,15 @@ def _spam_cascade(policy_id, sp, sections):
         return A("data_unusable_default_policy_ambiguous", "Data unusable: more than one hosted content filter policy is marked Default; the policy was not assessed.",
                  "default_policy_ambiguous", [POL])
     by_id = {p["Identity"]: p for p in pols}
-    topo_preset = lambda: A("data_unusable_preset_topology", "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
-                            "preset_topology_unusable", [PP, POL])
-    topo_custom = lambda: A("data_unusable_custom_topology", "Data unusable: a custom anti-spam rule does not point at exactly one custom policy; the policy was not assessed.",
-                            "custom_topology_unusable", [CR, POL])
+
+    def topo_preset():
+        return A("data_unusable_preset_topology", "Data unusable: a preset security policy rule cannot be tied to exactly one policy of its kind; the policy was not assessed.",
+                 "preset_topology_unusable", [PP, POL])
+
+    def topo_custom():
+        return A("data_unusable_custom_topology", "Data unusable: a custom anti-spam rule does not point at exactly one custom policy; the policy was not assessed.",
+                 "custom_topology_unusable", [CR, POL])
+
     if any(type(r.get("Identity")) is not str for r in pres):
         return topo_preset()
     accepted = _accepted(sections)
@@ -163,9 +168,14 @@ def _spam_cascade(policy_id, sp, sections):
                      "custom_policy_without_rule", [POL, CR], div="D95")
         covering = {e[0] for e in enabled if e[1] == "q"}
         partial = [e for e in enabled if e[1] == "x"]
-        order_dep = lambda: A("data_unavailable_custom_policy_priority", "Data unavailable: which custom anti-spam policy applies first depends on the rule Priority, which the export does not carry; the policy was not assessed.",
-                              "custom_order_dependent", [CR])
-        leaf_unusable = lambda: A(sp["leaf_code"], f"Data unusable: {sp['leaf_text']}; the policy was not assessed.", "policy_leaf_unusable", [POL])
+
+        def order_dep():
+            return A("data_unavailable_custom_policy_priority", "Data unavailable: which custom anti-spam policy applies first depends on the rule Priority, which the export does not carry; the policy was not assessed.",
+                     "custom_order_dependent", [CR])
+
+        def leaf_unusable():
+            return A(sp["leaf_code"], f"Data unusable: {sp['leaf_text']}; the policy was not assessed.", "policy_leaf_unusable", [POL])
+
         if covering:
             if "ok" in covering and "bad" in covering:
                 return order_dep()

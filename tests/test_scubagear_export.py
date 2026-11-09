@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from contextlib import nullcontext
 from hashlib import sha256
 import ast
 import importlib.util
@@ -362,27 +361,44 @@ def _save_text(tmp_path, text):
 def test_canonicaliser_rejects_partial_and_unseen_shapes(mutation):
     users = deepcopy(json.loads(PROVIDER.read_text())["privileged_users"])
     first = next(iter(users))
-    if mutation == "extra": users[first]["ServicePrincipalId"] = "mock"
-    if mutation == "missing_immutable": del users[first]["OnPremisesImmutableId"]
-    if mutation == "missing_name": del users[first]["DisplayName"]
-    if mutation == "missing_roles": del users[first]["roles"]
-    if mutation == "name_null": users[first]["DisplayName"] = None
-    if mutation == "immutable_int": users[first]["OnPremisesImmutableId"] = 1
-    if mutation == "roles_string": users[first]["roles"] = "Global Administrator"
-    if mutation == "roles_empty": users[first]["roles"] = []
-    if mutation == "roles_bad": users[first]["roles"] = [None]
-    if mutation == "id_bad": users[first]["id"] = 1
-    if mutation == "id_other": users[first]["id"] = "other"
+    if mutation == "extra":
+        users[first]["ServicePrincipalId"] = "mock"
+    if mutation == "missing_immutable":
+        del users[first]["OnPremisesImmutableId"]
+    if mutation == "missing_name":
+        del users[first]["DisplayName"]
+    if mutation == "missing_roles":
+        del users[first]["roles"]
+    if mutation == "name_null":
+        users[first]["DisplayName"] = None
+    if mutation == "immutable_int":
+        users[first]["OnPremisesImmutableId"] = 1
+    if mutation == "roles_string":
+        users[first]["roles"] = "Global Administrator"
+    if mutation == "roles_empty":
+        users[first]["roles"] = []
+    if mutation == "roles_bad":
+        users[first]["roles"] = [None]
+    if mutation == "id_bad":
+        users[first]["id"] = 1
+    if mutation == "id_other":
+        users[first]["id"] = "other"
     if mutation in {"mixed", "email_key", "brace_key", "urn_key", "unhyphenated_key"}:
         key = {"mixed": "User1", "email_key": "user1@mocktenant.invalid", "brace_key": "{" + first + "}",
                "urn_key": "urn:uuid:" + first, "unhyphenated_key": first.replace("-", "")}[mutation]
         users[key] = users.pop(first) if mutation != "mixed" else deepcopy(users[first])
-    if mutation == "empty_map": users = {}
-    if mutation == "empty_entry": users[first] = {}
-    if mutation == "list": users = []
-    if mutation == "null": users = None
-    if mutation == "entry_list": users[first] = []
-    if mutation == "one_bad": users[first]["AppId"] = "mock"
+    if mutation == "empty_map":
+        users = {}
+    if mutation == "empty_entry":
+        users[first] = {}
+    if mutation == "list":
+        users = []
+    if mutation == "null":
+        users = None
+    if mutation == "entry_list":
+        users[first] = []
+    if mutation == "one_bad":
+        users[first]["AppId"] = "mock"
     converted, applied, object_ids = canonicalise_privileged_users(users)
     assert not applied and object_ids is None and converted == users
     with pytest.raises(Exception):
@@ -498,7 +514,8 @@ def test_projection_fail_closed_and_ledger_repair(tmp_path):
                                        policy_catalogue()["policies"])
         row = projection.report["sections"][section]
         assert row["reason"] == reason
-        if kind: assert row["detail"]["kind"] == kind
+        if kind:
+            assert row["detail"]["kind"] == kind
     raw = deepcopy(original)
     raw["tenant_id"] = SENTINEL
     projection, _ = project_export(load_export(_save(tmp_path, raw)), policy_catalogue()["policies"])
@@ -1426,15 +1443,19 @@ def test_output_dir_and_private_files(tmp_path):
     assert _model_output_directory(str(target)) == str(target)
     target.mkdir()
     (target / "occupied").write_text("x")
-    with pytest.raises(ValueError): resolve_output_directory(target)
+    with pytest.raises(ValueError):
+        resolve_output_directory(target)
     (tmp_path / "link").symlink_to(target, target_is_directory=True)
-    with pytest.raises(ValueError): resolve_output_directory(tmp_path / "link")
+    with pytest.raises(ValueError):
+        resolve_output_directory(tmp_path / "link")
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "run-manifest.json").write_text("{}")
     for value in (bundle / "nested", bundle.parent if False else bundle / "nested" / "deeper"):
-        with pytest.raises(ValueError): resolve_output_directory(value)
-        with pytest.raises(ValueError): _model_output_directory(str(value))
+        with pytest.raises(ValueError):
+            resolve_output_directory(value)
+        with pytest.raises(ValueError):
+            _model_output_directory(str(value))
     result, _, _ = _dry(tmp_path / "normal")
     out = Path(result["path"]).parent
     assert {p.name for p in out.iterdir()} == {"model_assessment_prompts.jsonl", "scubagear_adapter_report.json"}

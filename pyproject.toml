@@ -44,9 +44,11 @@ model_train = [
 ]
 
 # Development tooling; never a runtime dependency. `make audit-deps` resolves and installs it
-# into a build-directory tool environment, not into .venv.
+# into a build-directory tool environment, not into .venv. Ruff is the single pin `make lint`
+# checks against; keep it equal to the ruff-pre-commit rev in .pre-commit-config.yaml.
 dev = [
     "pip-audit>=2.9,<3",
+    "ruff==0.17.0",
 ]
 
 [project.scripts]

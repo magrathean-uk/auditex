@@ -12,7 +12,9 @@ from .chk_s import Output, check_s
 from .context import Context
 from .specifics import extract, identifiers
 from .corpus import base_pairs as local_pairs
-from .support import local_resources
+from .support import local_resources, wordlist
+from .driver import run_pair
+from .fault_fixtures import fault_pair
 
 
 def out(o):
@@ -171,11 +173,6 @@ def inherited_cases():
 @pytest.mark.parametrize("name,passed,detail", inherited_cases(), ids=lambda x: x if isinstance(x,str) else None)
 def test_inherited_checkers(name, passed, detail):
     assert passed, (name, detail)
-
-
-from .driver import run_pair
-from .fault_fixtures import fault_pair
-from .support import wordlist
 
 
 @pytest.mark.parametrize("field,value", [

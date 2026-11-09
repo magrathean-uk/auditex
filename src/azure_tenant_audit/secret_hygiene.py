@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .argument_parser import DiagnosticRedactingArgumentParser, build_argument_parser
+from .argument_parser import DiagnosticRedactingArgumentParser, build_argument_parser  # noqa: F401 - re-exported for callers of this module
 
 SENSITIVE_ARG_FLAGS = frozenset(
     {

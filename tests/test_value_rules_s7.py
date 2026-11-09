@@ -18,7 +18,7 @@ from azure_tenant_audit.model_evidence import NOT_COLLECTED
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
 from azure_tenant_audit.value_rules.catalogue import catalogue
-from test_value_rules_contract import assessment, assessment_for
+from test_value_rules_contract import assessment, assessment_for  # noqa: F401 - shared pytest fixture
 from test_value_rules_vectors import STAGE7_POLICIES, _grouped, _rows
 
 FIXTURE = Path(__file__).parent / "fixtures/value-rules/vectors-s7.jsonl.xz"
@@ -100,7 +100,7 @@ def test_optional_full_final_source():
 
 
 @pytest.mark.parametrize("policy", sorted(STAGE7_POLICIES))
-def test_every_cell_validates_and_s2_is_distinct(policy, rows_s7, assessment):
+def test_every_cell_validates_and_s2_is_distinct(policy, rows_s7, assessment):  # noqa: F811 - shared pytest fixture injected by name
     from auditex.model_serving import _comparison
     samples = {r["rule_cell"]: r for r in rows_s7[policy]}
     for cell, row in samples.items():

@@ -15,7 +15,6 @@ from auditex.scuba_projection import (
     _collector_error,
     _fields,
     _licence_refused,
-    _require,
 )
 from azure_tenant_audit.value_rules.defender_targeted_users import COVERAGE_KEY, bound_coverage
 

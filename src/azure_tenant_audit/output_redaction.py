@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from .citations import build_citation_summary, dedupe_citations
+from .guarded_io import UnsafeRunFileError, current_context, guarded_operation
 from .secret_hygiene import BEARER_RE, JWT_RE, _OUTPUT_EMAIL_RE as OUTPUT_EMAIL_RE, _OUTPUT_GUID_RE as OUTPUT_GUID_RE
 
 # Keep the output-specific form local: diagnostic argv redaction is a separate boundary.
@@ -746,9 +747,6 @@ class _Frame:
         self.parts = parts
         self.names = names
         self.position = 0
-
-
-from .guarded_io import UnsafeRunFileError, current_context, guarded_operation
 
 
 @guarded_operation

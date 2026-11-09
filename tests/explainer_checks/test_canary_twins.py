@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from .canary import KEY, audit_twins
+from .canary import audit_twins
 from .driver import run_pair
 from .fault_fixtures import fault_pair
 from .support import local_resources

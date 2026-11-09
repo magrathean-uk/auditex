@@ -220,7 +220,7 @@ def test_optional_full_stage9_vectors():
 
 @pytest.mark.skipif(not (os.getenv("AUDITEX_TEST_OPA") and os.getenv("AUDITEX_TEST_SCUBAGEAR")),
                     reason="set AUDITEX_TEST_OPA and AUDITEX_TEST_SCUBAGEAR for pinned offline replay")
-def test_stage9_cells_against_pinned_opa(rows, tmp_path, pinned):
+def test_stage9_cells_against_pinned_opa(rows, tmp_path, pinned):  # noqa: F811 - shared pytest fixture injected by name
     groups = defaultdict(list)
     for row in rows:
         if row.get("gold_source") == "opa-replay":

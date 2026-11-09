@@ -148,7 +148,9 @@ def test_null_citations_mean_all_required_sections():
     ("verdict", "not_met"), ("cell", "unknown"), ("cell", None), ("cited_sections", []),
     ("cited_sections", ["uncited"]), ("cited_sections", "authentication_method")])
 def test_rejects_bad_rule_record(field, value):
-    rec = deepcopy(CASES[0]); view = view_for(rec); rec[field] = value
+    rec = deepcopy(CASES[0])
+    view = view_for(rec)
+    rec[field] = value
     with pytest.raises((KeyError, ValueError)):
         render(rec, view, templates=T)
 
@@ -157,19 +159,32 @@ def test_rejects_bad_rule_record(field, value):
 def test_rejects_bad_view(mutation):
     rec = next(r for r in CASES if len(r["cited_sections"]) >= 2)
     view = view_for(rec)
-    if mutation == "extra": view["detail"] = "never read"
-    if mutation == "reason": view["reason_text"] += " changed"
-    if mutation == "policy": view["evidence"][0]["observed"]["policy_id"] = "unknown"
-    if mutation == "requirement": view["evidence"][0]["observed"]["requirement"] = "invented"
-    if mutation == "criticality": view["evidence"][0]["observed"]["criticality"] = "invented"
-    if mutation == "duplicate": view["evidence"].append(deepcopy(view["evidence"][1]))
-    if mutation == "uncited": view["evidence"][1]["section"] = "secret"
-    if mutation == "id": view["evidence"][1]["id"] = "e0"
-    if mutation == "order": view["evidence"][1:] = reversed(view["evidence"][1:])
-    if mutation == "remediation": view["approved_remediation"] = ["Click Save."]
-    if mutation == "cap": view["evidence"][1]["observed"] = "x" * 6001
-    if mutation == "raw_email": view["evidence"][1]["observed"] = "jane@example.com"
-    with pytest.raises(ValueError): render(rec, view, templates=T)
+    if mutation == "extra":
+        view["detail"] = "never read"
+    if mutation == "reason":
+        view["reason_text"] += " changed"
+    if mutation == "policy":
+        view["evidence"][0]["observed"]["policy_id"] = "unknown"
+    if mutation == "requirement":
+        view["evidence"][0]["observed"]["requirement"] = "invented"
+    if mutation == "criticality":
+        view["evidence"][0]["observed"]["criticality"] = "invented"
+    if mutation == "duplicate":
+        view["evidence"].append(deepcopy(view["evidence"][1]))
+    if mutation == "uncited":
+        view["evidence"][1]["section"] = "secret"
+    if mutation == "id":
+        view["evidence"][1]["id"] = "e0"
+    if mutation == "order":
+        view["evidence"][1:] = reversed(view["evidence"][1:])
+    if mutation == "remediation":
+        view["approved_remediation"] = ["Click Save."]
+    if mutation == "cap":
+        view["evidence"][1]["observed"] = "x" * 6001
+    if mutation == "raw_email":
+        view["evidence"][1]["observed"] = "jane@example.com"
+    with pytest.raises(ValueError):
+        render(rec, view, templates=T)
 
 
 def test_pairing_is_not_cartesian_and_citation_order_exceptions():
@@ -177,13 +192,15 @@ def test_pairing_is_not_cartesian_and_citation_order_exceptions():
     a, b = cell["reason_pairs"]
     rec = {"policy_id": cell["policy_id"], "cell": cell["cell"], "verdict": cell["verdict"], **a, "cited_sections": cell["cited"]}
     bad = dict(rec, reason_code=b["reason_code"])
-    with pytest.raises(ValueError): render(bad, view_for(bad), templates=T)
+    with pytest.raises(ValueError):
+        render(bad, view_for(bad), templates=T)
     for pid in ("MS.SECURITYSUITE.7.1v1", "MS.SECURITYSUITE.7.2v1", "MS.SECURITYSUITE.7.3v1"):
         rec = next(r for r in CASES if r["policy_id"] == pid and r["cell"] == "preset_rule_unusable")
         out = render(rec, view_for(rec), templates=T)
         assert out["evidence_refs"][1:] != sorted(out["evidence_refs"][1:])
         bad = dict(rec, cited_sections=list(reversed(rec["cited_sections"])))
-        with pytest.raises(ValueError): render(bad, view_for(bad), templates=T)
+        with pytest.raises(ValueError):
+            render(bad, view_for(bad), templates=T)
 
 
 def fault_record(pid="MS.AAD.5.6v1"):
@@ -194,7 +211,8 @@ def fault_record(pid="MS.AAD.5.6v1"):
 def test_shared_fault_on_every_policy():
     assert set(T["shared_exceptions"]) == {"rule_evaluation_failed", "rule_not_implemented"}
     for pid in T["policies"]:
-        rec = fault_record(pid); view = view_for(rec)
+        rec = fault_record(pid)
+        view = view_for(rec)
         out = render(rec, view, templates=T)
         assert out["explanation"] == tk.FAULT["explanation"]
         assert out["remediation_steps"] == tk.FAULT["remediation_steps"]
@@ -205,17 +223,24 @@ def test_shared_fault_on_every_policy():
 @pytest.mark.parametrize("field,value", [("cell", "rule_evaluation_failed"), ("reason_text", "Product failed: secret"),
     ("verdict", "met"), ("reason_code", "rule_evaluation_failed_counterfeit"), ("cited_sections", []), ("policy_id", "unknown")])
 def test_shared_fault_rejects_counterfeits(field, value):
-    rec = fault_record(); view = view_for(rec); rec[field] = value
-    with pytest.raises((KeyError, ValueError)): render(rec, view, templates=T)
+    rec = fault_record()
+    view = view_for(rec)
+    rec[field] = value
+    with pytest.raises((KeyError, ValueError)):
+        render(rec, view, templates=T)
 
 
 def test_shared_fault_rejects_collection_and_diagnostics():
     rec = fault_record()
     for bad in ([], ["Collect evidence."], ["Report this fault to the product team at contact+auditex@magrathean.uk. Diagnostic: secret"]):
-        view = view_for(rec); view["approved_remediation"] = bad
-        with pytest.raises(ValueError): render(rec, view, templates=T)
-    view = view_for(rec); view["evidence"].pop()
-    with pytest.raises(ValueError): render(rec, view, templates=T)
+        view = view_for(rec)
+        view["approved_remediation"] = bad
+        with pytest.raises(ValueError):
+            render(rec, view, templates=T)
+    view = view_for(rec)
+    view["evidence"].pop()
+    with pytest.raises(ValueError):
+        render(rec, view, templates=T)
 
 
 def test_constructed_malformed_lifetimes_render_only_the_fixed_fault():
@@ -241,8 +266,10 @@ def test_injected_fault_is_a_record_input_and_renderer_errors_stay_errors():
     assert "DIAGNOSTIC" not in tk.canonical(out)
     # This part does not implement or catch evaluator exceptions. A deterministic
     # injected product-fault record bypasses ordinary cell and prefix handling.
-    bad = deepcopy(T); bad["limits"]["max_steps"] = 7
-    with pytest.raises(ValueError): render(rec, view_for(rec), templates=bad)
+    bad = deepcopy(T)
+    bad["limits"]["max_steps"] = 7
+    with pytest.raises(ValueError):
+        render(rec, view_for(rec), templates=bad)
 
 
 def test_source_drop_accounting_xrefs_and_url_cut():
@@ -252,7 +279,8 @@ def test_source_drop_accounting_xrefs_and_url_cut():
     policy = T["policies"]["MS.AAD.6.1v1"]
     assert policy["shown_steps_cut_before_url_step"] is not None
     rec = next(r for r in CASES if r["policy_id"] == "MS.AAD.6.1v1" and r["verdict"] == "not_met")
-    shown = render(rec, view_for(rec), templates=T); full = render_full(rec, view_for(rec), templates=T)
+    shown = render(rec, view_for(rec), templates=T)
+    full = render_full(rec, view_for(rec), templates=T)
     assert not any("https://" in s for s in shown["remediation_steps"])
     assert any("https://" in s for s in full["remediation_steps"])
     assert len(full["remediation_steps"]) == 4  # three prose steps plus one whole command block
@@ -269,13 +297,17 @@ def test_source_drop_accounting_xrefs_and_url_cut():
 def test_load_is_explicit_once_and_rejects_corruption():
     calls = []
     def read(path):
-        calls.append(path); return (ROOT / path).read_text()
+        calls.append(path)
+        return (ROOT / path).read_text()
     templates = load_templates(read)
     render(CASES[0], view_for(CASES[0]), templates=templates)
     assert calls == ["configs/explainer-template.json"]
-    with pytest.raises(ValueError): load_templates(lambda _: '{"schema_version":1,"schema_version":1}')
-    bad = deepcopy(T); bad["cells"].append(bad["cells"][0])
-    with pytest.raises(ValueError): load_templates(lambda _: json.dumps(bad))
+    with pytest.raises(ValueError):
+        load_templates(lambda _: '{"schema_version":1,"schema_version":1}')
+    bad = deepcopy(T)
+    bad["cells"].append(bad["cells"][0])
+    with pytest.raises(ValueError):
+        load_templates(lambda _: json.dumps(bad))
 
 
 def test_runtime_uses_this_worktree_without_io_or_network(monkeypatch):
@@ -283,7 +315,8 @@ def test_runtime_uses_this_worktree_without_io_or_network(monkeypatch):
     import inspect
     import socket
     assert Path(inspect.getfile(render)).is_relative_to(ROOT / "src")
-    rec = CASES[0]; view = view_for(rec)
+    rec = CASES[0]
+    view = view_for(rec)
     def forbidden(*args, **kwargs):
         raise AssertionError("runtime attempted I/O")
     monkeypatch.setattr(builtins, "open", forbidden)
@@ -298,29 +331,35 @@ def test_output_plain_text_guard_rejects_unicode_and_markdown(bad):
 
 
 def test_fallbacks_are_whole_sentences_and_limits_fail_closed():
-    rec = CASES[0]; view = view_for(rec); bad = deepcopy(T)
+    rec = CASES[0]
+    view = view_for(rec)
+    bad = deepcopy(T)
     cell = next(c for c in bad["cells"] if c["id"] == rec["policy_id"] + "/" + rec["cell"])
     fallback = "What the evidence shows: {finding}."
     cell["explanation_template"] = "Word " * 81 + "."
     cell["explanation_template_fallbacks"] = [fallback]
     assert render(rec, view, templates=bad)["explanation"] == fallback.format(finding=tk.split_reason(rec["reason_text"])[2])
     cell["explanation_template_fallbacks"] = []
-    with pytest.raises(ValueError): render(rec, view, templates=bad)
+    with pytest.raises(ValueError):
+        render(rec, view, templates=bad)
     cell["explanation_template"] = "{unfilled}"
-    with pytest.raises(ValueError): render(rec, view, templates=bad)
+    with pytest.raises(ValueError):
+        render(rec, view, templates=bad)
 
 
 @pytest.mark.parametrize("bad_step", ["word " * 31, "Read https://example.com/fix.", "{unknown}", "Review `Setting`."])
 def test_corrupt_baseline_template_steps_fail_closed(bad_step):
     rec = next(r for r in CASES if r["verdict"] == "not_met")
-    view = view_for(rec); bad = deepcopy(T)
+    view = view_for(rec)
+    bad = deepcopy(T)
     cell = next(c for c in bad["cells"] if c["id"] == rec["policy_id"] + "/" + rec["cell"])
     cell["remediation_steps"][0]["text"] = bad_step
     # Runtime strips harmless markdown from a trusted baseline string, matching S.
     if "`" in bad_step:
         assert render(rec, view, templates=bad)["remediation_steps"][0] == "Review Setting."
     else:
-        with pytest.raises(ValueError): render(rec, view, templates=bad)
+        with pytest.raises(ValueError):
+            render(rec, view, templates=bad)
 
 
 @pytest.mark.parametrize("n", [31, 59, 61, 89])
@@ -335,22 +374,31 @@ def test_balanced_splits_keep_every_word_without_tiny_tail(n):
 def test_planted_self_test_negative_controls(kind):
     verdict = "not_assessed" if kind in ("hedge", "no_conclusion", "collection_change") else "not_met" if kind == "invented_step" else "met"
     rec = next(r for r in CASES if r["verdict"] == verdict)
-    view = view_for(rec); out = render(rec, view, templates=T)
-    if kind == "empty_refs": out["evidence_refs"] = []
-    if kind == "external_refs": out["evidence_refs"].append("e99")
+    view = view_for(rec)
+    out = render(rec, view, templates=T)
+    if kind == "empty_refs":
+        out["evidence_refs"] = []
+    if kind == "external_refs":
+        out["evidence_refs"].append("e99")
     additions = {"url": " See https://example.com/fix.", "placeholder": " {finding}", "em_dash": " \u2014 bad.",
         "number": " Set the value to 4242.", "name": " Review EnableMagicSwitch.", "email": " Contact jane@example.com.",
         "guid": " Group 99999999-8888-7777-6666-555555555555.", "infrastructure": " The Rego decided this.",
         "overlong": " word" * 81, "opposite": " The requirement is not met.", "hedge": " The policy probably fails."}
     out["explanation"] += additions.get(kind, "")
-    if kind == "steps_on_met": out["remediation_steps"] = ["Click Save."]
-    if kind == "no_conclusion": out["explanation"] = "The evidence is unavailable."
-    if kind == "collection_change": out["remediation_steps"] = ["Delete the policy."]
-    if kind == "invented_step": out["remediation_steps"] = ["Click Imaginary Menu."]
+    if kind == "steps_on_met":
+        out["remediation_steps"] = ["Click Save."]
+    if kind == "no_conclusion":
+        out["explanation"] = "The evidence is unavailable."
+    if kind == "collection_change":
+        out["remediation_steps"] = ["Delete the policy."]
+    if kind == "invented_step":
+        out["remediation_steps"] = ["Click Imaginary Menu."]
     with pytest.raises((ValueError, AssertionError)):
         assert_source_constraints(out, rec, view)
-        if verdict == "not_assessed": assert out["remediation_steps"] == view["approved_remediation"]
-        if verdict == "not_met": assert "Imaginary" not in " ".join(out["remediation_steps"])
+        if verdict == "not_assessed":
+            assert out["remediation_steps"] == view["approved_remediation"]
+        if verdict == "not_met":
+            assert "Imaginary" not in " ".join(out["remediation_steps"])
 
 
 def test_all_source_self_test_planted_controls_on_every_applicable_case():

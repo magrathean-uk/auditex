@@ -295,7 +295,7 @@ def test_power_platform_coverage_many_environments_and_except_policies():
 def test_power_platform_default_and_wrapper_shapes():
     pid = "MS.POWERPLATFORM.2.1v1"
     policies = [{"environmentType": "ExceptEnvironments", "displayName": "d", "name": f"n{i}",
-                 "environments": [{"name": f"Default-t"} for _ in range(3)]} for i in range(N)]
+                 "environments": [{"name": "Default-t"} for _ in range(3)]} for i in range(N)]
     sections = {"dlp_policies": [{"value": policies} for _ in range(50)], "tenant_id": "t"}
     assert _timed(lambda: assess(pid, sections))["cell"] == "default_environment_not_covered"
     sections["dlp_policies"] = [{"value": [{"environmentType": "AllEnvironments", "displayName": "d", "name": "n"}] * N}]

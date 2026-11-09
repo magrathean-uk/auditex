@@ -69,7 +69,7 @@ def test_precheck_private_alias_still_refused(tmp_path):
 
 # --- finding 2: direct MemoryError propagates; ordinary failures stay suppressed ------------------------------------------
 
-def test_report_context_memory_error_propagates(tmp_path, assessment, monkeypatch):
+def test_report_context_memory_error_propagates(tmp_path, assessment, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     import auditex.reporting as reporting
     root, _ = make_report_run(tmp_path, assessment)
     monkeypatch.setattr(reporting, "context_for_run", lambda _: (_ for _ in ()).throw(MemoryError()))
@@ -77,7 +77,7 @@ def test_report_context_memory_error_propagates(tmp_path, assessment, monkeypatc
         load_report_bundle(root)
 
 
-def test_report_derive_explainer_memory_error_propagates(tmp_path, assessment, monkeypatch):
+def test_report_derive_explainer_memory_error_propagates(tmp_path, assessment, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     root, _ = make_report_run(tmp_path, assessment)
     monkeypatch.setattr("azure_tenant_audit.model_assessment.derive_explainer",
                         lambda _row: (_ for _ in ()).throw(MemoryError()))
@@ -86,7 +86,7 @@ def test_report_derive_explainer_memory_error_propagates(tmp_path, assessment, m
 
 
 @pytest.mark.parametrize("target", ["context", "derive"])
-def test_report_runtime_error_still_suppresses_without_value(tmp_path, assessment, monkeypatch, target):
+def test_report_runtime_error_still_suppresses_without_value(tmp_path, assessment, monkeypatch, target):  # noqa: F811 - shared pytest fixture injected by name
     import auditex.reporting as reporting
     root, _ = make_report_run(tmp_path, assessment)
     def broken(*args):
@@ -100,7 +100,7 @@ def test_report_runtime_error_still_suppresses_without_value(tmp_path, assessmen
     assert "private-person" not in json.dumps(sections, default=str)
 
 
-def test_report_unsafe_file_still_propagates(tmp_path, assessment):
+def test_report_unsafe_file_still_propagates(tmp_path, assessment):  # noqa: F811 - shared pytest fixture injected by name
     root, _ = make_report_run(tmp_path, assessment)
     target = root / "model_assessment.json"
     moved = tmp_path / "moved.json"

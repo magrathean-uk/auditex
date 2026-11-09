@@ -5,7 +5,6 @@ import hmac
 import json
 import os
 import re
-import stat
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path

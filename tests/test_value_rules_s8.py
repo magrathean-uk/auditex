@@ -198,7 +198,7 @@ def test_optional_full_stage8_vectors():
 
 @pytest.mark.skipif(not (os.getenv("AUDITEX_TEST_OPA") and os.getenv("AUDITEX_TEST_SCUBAGEAR")),
                     reason="set AUDITEX_TEST_OPA and AUDITEX_TEST_SCUBAGEAR for pinned offline replay")
-def test_stage8_cells_against_pinned_opa(rows, tmp_path, pinned):
+def test_stage8_cells_against_pinned_opa(rows, tmp_path, pinned):  # noqa: F811 - shared pytest fixture injected by name
     # Reuse the shared pin checks and the v3 oracle result vocabulary.
     rego = pinned
     opa = os.getenv("AUDITEX_TEST_OPA")

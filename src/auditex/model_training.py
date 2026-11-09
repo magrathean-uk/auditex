@@ -6,7 +6,6 @@ by an explicitly invoked, qualified-runtime training entry point.
 """
 from __future__ import annotations
 
-import argparse
 from collections.abc import Mapping
 import hashlib
 import json

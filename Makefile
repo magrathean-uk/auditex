@@ -15,9 +15,20 @@ login:
 		exit 2; \
 	fi
 
+# Ruff is pinned once, in the `dev` extra of pyproject.toml, at the .pre-commit-config.yaml hook
+# version; the rule set and target version come from [tool.ruff] there. Lookup order: RUFF, .venv,
+# the make audit-deps tool environment, then PATH.
+RUFF_VERSION = $(shell sed -n 's/^ *"ruff==\([0-9.]*\)".*/\1/p' pyproject.toml)
+RUFF_HOOK_VERSION = $(shell sed -n '/astral-sh\/ruff-pre-commit/{n;s/^ *rev: *v//p;}' .pre-commit-config.yaml)
+RUFF ?= $(firstword $(wildcard $(VENV)/bin/ruff $(AUDIT_DEPS_DIR)/tool/bin/ruff) ruff)
+
 .PHONY: lint
 lint:
 	$(PYTHON) -m compileall -q src tests
+	@test -n "$(RUFF_VERSION)" && test "$(RUFF_VERSION)" = "$(RUFF_HOOK_VERSION)" || { echo "make lint: the Ruff pin in pyproject.toml ($(RUFF_VERSION)) must equal the .pre-commit-config.yaml hook version ($(RUFF_HOOK_VERSION))" >&2; exit 2; }
+	@command -v "$(RUFF)" >/dev/null 2>&1 || { echo "make lint: Ruff $(RUFF_VERSION) not found; install the dev extra (.venv/bin/python -m pip install -e '.[dev]') or put ruff $(RUFF_VERSION) on PATH" >&2; exit 2; }
+	@found="$$("$(RUFF)" --version 2>/dev/null)"; test "$$found" = "ruff $(RUFF_VERSION)" || { echo "make lint: Ruff $(RUFF_VERSION) is required, $(RUFF) reports '$$found'; install the dev extra (.venv/bin/python -m pip install -e '.[dev]')" >&2; exit 2; }
+	"$(RUFF)" check .
 
 .PHONY: sample
 sample:

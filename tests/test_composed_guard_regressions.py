@@ -285,7 +285,7 @@ def test_a_partially_read_text_buffer_is_refused_on_every_runtime(python, tmp_pa
 
 @pytest.mark.parametrize("python", _matrix_pythons())
 @pytest.mark.parametrize("member", ["sensitive-users.key", "sensitive-users.txt", "hardlink"])
-def test_private_aliases_are_never_admitted_on_any_runtime(python, private_run, tmp_path, member):
+def test_private_aliases_are_never_admitted_on_any_runtime(python, private_run, tmp_path, member):  # noqa: F811 - shared pytest fixture injected by name
     if member == "hardlink":
         original = tmp_path / "unrelated"
         original.write_text("ordinary input", encoding="utf-8")
@@ -454,7 +454,7 @@ def _add_index(run: Path) -> None:
         conn.close()
 
 
-def test_a_log_aliasing_a_private_key_refuses_the_append_but_not_the_read(private_run, tmp_path, monkeypatch):
+def test_a_log_aliasing_a_private_key_refuses_the_append_but_not_the_read(private_run, tmp_path, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     _add_index(private_run)
     key = private_run / "operator-inputs" / "sensitive-users.key"
     (private_run / "audit-debug.log").symlink_to(key)
@@ -464,7 +464,7 @@ def test_a_log_aliasing_a_private_key_refuses_the_append_but_not_the_read(privat
     assert key.read_bytes() == KEY
 
 
-def test_a_log_hardlinked_to_a_private_list_refuses_the_run_and_writes_nothing(private_run, tmp_path, monkeypatch):
+def test_a_log_hardlinked_to_a_private_list_refuses_the_run_and_writes_nothing(private_run, tmp_path, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     _add_index(private_run)
     private = private_run / "operator-inputs" / "sensitive-users.txt"
     os.link(private, private_run / "audit-debug.log")

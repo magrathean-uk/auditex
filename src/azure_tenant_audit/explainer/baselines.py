@@ -85,8 +85,8 @@ def _code_lines(raw_lines):
     lines remain PowerShell comments, never prose or standalone bare commands.
     """
     out, carry = [], ""
-    for l in raw_lines:
-        t = plain_code(re.sub(r"</?pre>", "", l))
+    for raw in raw_lines:
+        t = plain_code(re.sub(r"</?pre>", "", raw))
         if carry:
             t = (carry + " " + t).strip()
             carry = ""

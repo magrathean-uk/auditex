@@ -965,10 +965,12 @@ def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
     assert next(c for c in row["claims"] if c["id"] == "requirement_met")["status"] == "unknown"
     _validate(result)
     _jsonschema.validate(result, _json.loads(_Path("schemas/model_assessment.schema.json").read_text(encoding="utf-8")))
-    tampered = _deepcopy(result); tampered["policies"][0]["rule_precheck"]["class"] = "closed_gate"
+    tampered = _deepcopy(result)
+    tampered["policies"][0]["rule_precheck"]["class"] = "closed_gate"
     with pytest.raises(ValueError):
         _validate(tampered)
-    tampered = _deepcopy(result); tampered["policies"][0]["rule_precheck"]["rule_id"] = "MS.SHAREPOINT.1.2v1.ODBSharingCapability_absent"
+    tampered = _deepcopy(result)
+    tampered["policies"][0]["rule_precheck"]["rule_id"] = "MS.SHAREPOINT.1.2v1.ODBSharingCapability_absent"
     with pytest.raises(ValueError):
         _validate(tampered)
 
@@ -976,7 +978,7 @@ def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
 def test_lone_surrogate_in_a_faked_section_does_not_abort_the_live_assessment(tmp_path, monkeypatch):
     """The projection refuses text with a lone surrogate, so this cannot happen from a real bundle; as defence in depth the
     serving path hashes and sends with surrogatepass, so even a faked section records a row instead of raising."""
-    from auditex.model_serving import ModelClient as _Client, ModelConfig as _Config, assess_run as _assess
+    from auditex.model_serving import ModelClient as _Client, ModelConfig as _Config
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     # The kill switch keeps this defence-in-depth check on the model route.
     values = {"privileged_users": {"DisplayName": "x\ud800y"}}

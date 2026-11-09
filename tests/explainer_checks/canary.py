@@ -39,7 +39,10 @@ def twins(record, sections, section_order, *, fixed_sections=None):
 
 def audit_twins(build, record, sections, section_order, *, fixed_sections=None):
     base = build(copy.deepcopy(record), copy.deepcopy(sections), list(section_order))
-    canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
     leaks, identical, rejected = [], {}, []
     for name, rec, sec, order in twins(record, sections, section_order, fixed_sections=fixed_sections):
         forbidden = fixed_sections is not None and any(s not in fixed_sections for s in rec.get("cited_sections", []))

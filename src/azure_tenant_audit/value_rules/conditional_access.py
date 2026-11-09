@@ -518,7 +518,7 @@ def _ca_exists(policy_id, sp, sections):
                     "Requirement met: a Conditional Access policy meets every condition" + ("." if clean else ", its exclusions all on the configured exemption list."),
                     "met_policy_clean" if clean else "met_policy_declared_exclusions", None)
     if any(r[0] == "unknown" for r in res):
-        return _A(policy_id, ITEM_VALUE, f"Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed.",
+        return _A(policy_id, ITEM_VALUE, "Data unusable: a Conditional Access policy lacks a usable value for a field the policy reads, or its exclusions cannot be read; the policy was not assessed.",
                   "policy_field_unusable", [s for s in sp["sections"] if s != "service_plans"])
     near = [r for r in res if r[0] == "near_miss"]
     if policy_id == "MS.AAD.3.2v2" and near and _v2_key(sections):

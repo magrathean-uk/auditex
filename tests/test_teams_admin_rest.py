@@ -1,7 +1,6 @@
 """Offline transport contracts; real requests use only a loopback fake server."""
 import ast
 import base64
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 import inspect

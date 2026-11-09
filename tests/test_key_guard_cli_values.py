@@ -25,7 +25,7 @@ def _invoke(entry: str, argv: list[str]) -> int:
 @pytest.mark.parametrize("inline", [False, True])
 @pytest.mark.parametrize("link", ["symlink", "hardlink"])
 def test_dash_and_at_file_aliases_are_admitted_and_refused(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],  # noqa: F811 - shared pytest fixture injected by name
     entry: str, flag: str, name: str, inline: bool, link: str,
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -120,7 +120,7 @@ def _prefix_for(flag: str, safe_run: Path, safe_file: Path, out_dir: Path) -> li
 @pytest.mark.parametrize("link", ["symlink", "hardlink"])
 @pytest.mark.parametrize("inline", [False, True])
 def test_cli_path_alias_matrix(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],  # noqa: F811 - shared pytest fixture injected by name
     flag: str, suffix: str, link: str, inline: bool,
 ) -> None:
     from support import RunBundleBuilder
@@ -155,7 +155,7 @@ def test_cli_path_alias_matrix(
 @pytest.mark.parametrize("member", ["sensitive-users.key", "sensitive-users.txt"])
 @pytest.mark.parametrize("form", ["vol", "vol-double", "vol-symlink", "fd", "fd-symlink", "uppercase-fd"])
 def test_registered_pair_special_inode_aliases_across_cli_flags(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],  # noqa: F811 - shared pytest fixture injected by name
     member: str, form: str,
 ) -> None:
     from azure_tenant_audit.guarded_io import GuardContext
@@ -203,7 +203,7 @@ def test_registered_pair_special_inode_aliases_across_cli_flags(
 
 @pytest.mark.parametrize("entry", ["engine", "run", "guided-run"])
 def test_sensitive_environment_refuses_prior_run_private_list(
-    private_run: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], entry: str,
+    private_run: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], entry: str,  # noqa: F811 - shared pytest fixture injected by name
 ) -> None:
     private = private_run / "operator-inputs/sensitive-users.txt"
     monkeypatch.setenv("AUDITEX_SENSITIVE_USERS_FILE", str(private))
@@ -218,7 +218,7 @@ def test_sensitive_environment_refuses_prior_run_private_list(
 
 
 def test_sensitive_flag_overrides_private_environment(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,  # noqa: F811 - shared pytest fixture injected by name
 ) -> None:
     selected = tmp_path / "selected-sensitive.txt"
     selected.write_text("chosen@example.invalid\n", encoding="utf-8")
@@ -230,7 +230,7 @@ def test_sensitive_flag_overrides_private_environment(
 
 
 def test_sensitive_environment_from_guarded_env_file_refuses_private_list(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],  # noqa: F811 - shared pytest fixture injected by name
 ) -> None:
     settings = tmp_path / "settings.env"
     settings.write_text(f"AUDITEX_SENSITIVE_USERS_FILE={private_run / 'operator-inputs/sensitive-users.txt'}\n")

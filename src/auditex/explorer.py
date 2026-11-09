@@ -30,7 +30,6 @@ from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, g
 from azure_tenant_audit.collection_gaps import SECTION_GAP_REASON_TEXT
 from azure_tenant_audit.evidence_gates import collectors_with_successful_reads
 from azure_tenant_audit.resources import load_json_resource, resolve_resource_path
-from azure_tenant_audit.run_files import read_run_file
 
 from .run_bundle import RunBundle
 

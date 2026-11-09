@@ -183,8 +183,6 @@ def analyse(text, exempt_texts=(), min_run=3):
         if not toks:
             continue
         words = [t[0] for t in toks]
-        # char offset -> token index
-        starts = {t[1]: i for i, t in enumerate(toks)}
 
         def tok_at(char):
             for i, t in enumerate(toks):

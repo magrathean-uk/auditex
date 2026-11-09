@@ -4,13 +4,11 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit import auth_context
 from azure_tenant_audit.auth_context import (
-    AUTH_CONTEXTS_PATH_ENV_VAR,
     default_auth_contexts_path,
 )
 from azure_tenant_audit.m365_home import m365_subprocess_kwargs

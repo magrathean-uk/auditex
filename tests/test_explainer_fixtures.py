@@ -6,7 +6,6 @@ The explainer test set, pairs and mutants are not stored: they are generated fro
 tests/explainer_checks (see its README) and pinned by a small manifest.
 """
 import hashlib
-import json
 from pathlib import Path
 
 import pytest

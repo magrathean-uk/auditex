@@ -334,18 +334,30 @@ def test_legacy_assessment_still_validates_before_and_after_upgrade(tmp_path, mo
 def test_validator_rejects_damaged_explainer(assessment, mutation):
     result = assessment_with_row(assessment, "not_met")
     item = result["policies"][0]["explainer"]
-    if mutation == "extra": item["extra"] = "unapproved"
-    elif mutation == "missing": del item["explanation"]
-    elif mutation == "empty_refs": item["evidence_refs"] = []
-    elif mutation == "duplicate_refs": item["evidence_refs"] = ["e0", "e0"]
-    elif mutation == "bad_ref": item["evidence_refs"] = ["e0", "e-1"]
-    elif mutation == "outside_claim": item["evidence_refs"] = ["e0", "e999"]
-    elif mutation == "no_e0": item["evidence_refs"] = ["e1"]
-    elif mutation == "empty_step": item["remediation_steps"] = [""]
-    elif mutation == "too_many_steps": item["remediation_steps"] = ["Do this."] * 7
-    elif mutation == "too_many_words": item["explanation"] = " ".join(["word"] * 81)
-    elif mutation == "too_many_sentences": item["explanation"] = "One. Two. Three. Four."
-    elif mutation == "invalid_unicode": item["explanation"] = "invalid \ud800 text"
+    if mutation == "extra":
+        item["extra"] = "unapproved"
+    elif mutation == "missing":
+        del item["explanation"]
+    elif mutation == "empty_refs":
+        item["evidence_refs"] = []
+    elif mutation == "duplicate_refs":
+        item["evidence_refs"] = ["e0", "e0"]
+    elif mutation == "bad_ref":
+        item["evidence_refs"] = ["e0", "e-1"]
+    elif mutation == "outside_claim":
+        item["evidence_refs"] = ["e0", "e999"]
+    elif mutation == "no_e0":
+        item["evidence_refs"] = ["e1"]
+    elif mutation == "empty_step":
+        item["remediation_steps"] = [""]
+    elif mutation == "too_many_steps":
+        item["remediation_steps"] = ["Do this."] * 7
+    elif mutation == "too_many_words":
+        item["explanation"] = " ".join(["word"] * 81)
+    elif mutation == "too_many_sentences":
+        item["explanation"] = "One. Two. Three. Four."
+    elif mutation == "invalid_unicode":
+        item["explanation"] = "invalid \ud800 text"
     with pytest.raises(ValueError):
         validate_assessment(result)
 
@@ -354,13 +366,15 @@ def test_validator_rejects_damaged_explainer(assessment, mutation):
 def test_validator_rejects_steps_for_non_action_verdicts(assessment, verdict):
     payload = assessment_with_row(assessment, verdict)
     payload["policies"][0]["explainer"]["remediation_steps"] = ["Change a setting."]
-    with pytest.raises(ValueError): validate_assessment(payload)
+    with pytest.raises(ValueError):
+        validate_assessment(payload)
 
 
 def test_validator_requires_steps_for_not_met(assessment):
     payload = assessment_with_row(assessment, "not_met")
     payload["policies"][0]["explainer"]["remediation_steps"] = []
-    with pytest.raises(ValueError): validate_assessment(payload)
+    with pytest.raises(ValueError):
+        validate_assessment(payload)
 
 
 def test_no_rule_has_no_explainer_and_schema_rejects_one(tmp_path, monkeypatch):
@@ -373,8 +387,10 @@ def test_no_rule_has_no_explainer_and_schema_rejects_one(tmp_path, monkeypatch):
     assert "explainer" not in payload["policies"][0]
     payload["policies"][0]["explainer"] = {"explanation": "Unavailable.", "remediation_steps": [], "evidence_refs": ["e0"]}
     schema = json.loads((ROOT / "schemas/model_assessment.schema.json").read_text())
-    with pytest.raises(jsonschema.ValidationError): jsonschema.validate(payload, schema)
-    with pytest.raises(ValueError): validate_assessment(payload)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, schema)
+    with pytest.raises(ValueError):
+        validate_assessment(payload)
 
 
 def make_report_run(tmp_path, assessment, verdict="not_met"):
@@ -394,24 +410,36 @@ def test_report_loader_rejects_damaged_assessments(tmp_path, assessment, damage)
     (root / "run-manifest.json").write_text('{"run_id":"wire-test"}')
     path = root / "model_assessment.json"
     payload = assessment_with_row(assessment, "not_met")
-    if damage == "schema": payload["policies"][0]["explainer"]["evidence_refs"] = ["e999"]
-    if damage == "run_id": payload["run_id"] = "different"
-    if damage == "invalid_unicode": payload["policies"][0]["explainer"]["explanation"] = "invalid \ud800 text"
+    if damage == "schema":
+        payload["policies"][0]["explainer"]["evidence_refs"] = ["e999"]
+    if damage == "run_id":
+        payload["run_id"] = "different"
+    if damage == "invalid_unicode":
+        payload["policies"][0]["explainer"]["explanation"] = "invalid \ud800 text"
     text = json.dumps(payload)
-    if damage == "invalid_json": path.write_text("{")
-    elif damage == "invalid_utf8": path.write_bytes(b"\xff")
-    elif damage == "duplicate_key": path.write_text(text[:-1] + ', "run_id": "wire-test"}')
-    elif damage == "nonfinite": path.write_text(text[:-1] + ', "nonfinite": NaN}')
+    if damage == "invalid_json":
+        path.write_text("{")
+    elif damage == "invalid_utf8":
+        path.write_bytes(b"\xff")
+    elif damage == "duplicate_key":
+        path.write_text(text[:-1] + ', "run_id": "wire-test"}')
+    elif damage == "nonfinite":
+        path.write_text(text[:-1] + ', "nonfinite": NaN}')
     elif damage in {"symlink", "hardlink"}:
         other = root / "other.json"
         other.write_text(text)
-        if damage == "symlink": path.symlink_to(other)
-        else: path.hardlink_to(other)
-    elif damage == "directory": path.mkdir()
+        if damage == "symlink":
+            path.symlink_to(other)
+        else:
+            path.hardlink_to(other)
+    elif damage == "directory":
+        path.mkdir()
     elif damage == "oversize":
         from azure_tenant_audit.run_files import MAX_RUN_DATA_BYTES
-        with path.open("wb") as stream: stream.truncate(MAX_RUN_DATA_BYTES + 1)
-    else: path.write_text(text)
+        with path.open("wb") as stream:
+            stream.truncate(MAX_RUN_DATA_BYTES + 1)
+    else:
+        path.write_text(text)
     if damage in {"symlink", "hardlink", "directory", "oversize"}:
         from azure_tenant_audit.guarded_io import UnsafeRunFileError
 
@@ -512,9 +540,12 @@ def test_tampered_schema_valid_explanation_never_reaches_customer_pack_report(tm
     root, payload = make_report_run(tmp_path, assessment)
     item = payload["policies"][0]["explainer"]
     planted = "Planted-by-attacker advice: send your admin password to the helpdesk."
-    if field == "explanation": item["explanation"] = planted
-    elif field == "step": item["remediation_steps"] = [planted]
-    else: item["evidence_refs"] = item["evidence_refs"][:1]
+    if field == "explanation":
+        item["explanation"] = planted
+    elif field == "step":
+        item["remediation_steps"] = [planted]
+    else:
+        item["evidence_refs"] = item["evidence_refs"][:1]
     validate_assessment(payload)
     (root / "model_assessment.json").write_text(json.dumps(payload))
     for profile in ("customer_pack", "shareable", "local"):

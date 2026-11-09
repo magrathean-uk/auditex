@@ -267,11 +267,14 @@ def test_summary_does_not_walk_unrelated_nested_directories(run: Path) -> None:
 def test_mcp_caller_supplied_inputs_refuse_private_files(run: Path, mcp, private: str, tool: str, argument: str) -> None:
     path = str(run / private)
     if argument == "assessment_paths":
-        call = lambda: mcp[tool](assessment_paths=[path])
+        def call():
+            return mcp[tool](assessment_paths=[path])
     elif argument == "input_path":
-        call = lambda: mcp[tool](source="maester", input_path=path)
+        def call():
+            return mcp[tool](source="maester", input_path=path)
     else:
-        call = lambda: mcp[tool](config_path=path)
+        def call():
+            return mcp[tool](config_path=path)
     _refused(call, argument)
 
 
@@ -299,7 +302,8 @@ def test_normalized_link_to_json_key_is_not_read(
         os.link(run / KEY_PATH, normalized / "users.json")
     other = RunBundleBuilder(tmp_path, name="other").build()
     if surface == "preview":
-        call = lambda: preview_report(run_dir=str(run), format_name="json", profile=PROFILE_SHAREABLE)
+        def call():
+            return preview_report(run_dir=str(run), format_name="json", profile=PROFILE_SHAREABLE)
         assert marker not in _refused(call, "run_dir")
     elif surface == "mcp_diff":
         assert marker not in _refused(lambda: mcp["auditex_diff_runs"](run_a=str(run), run_b=str(other)), "run_a")

@@ -8,7 +8,7 @@ import pytest
 
 from auditex import scuba_projection
 from auditex.model_serving import canonical
-from test_scuba_projection import EXPECTED, complete_bundle
+from test_scuba_projection import EXPECTED, complete_bundle  # noqa: F401 - shared pytest fixture
 
 
 def register_modules(monkeypatch, *modules):
@@ -18,7 +18,7 @@ def register_modules(monkeypatch, *modules):
 
 
 @pytest.mark.parametrize("redact", [False, True])
-def test_empty_area_modules_leave_projection_unchanged(complete_bundle, monkeypatch, redact):
+def test_empty_area_modules_leave_projection_unchanged(complete_bundle, monkeypatch, redact):  # noqa: F811 - shared pytest fixture injected by name
     # Golden output re-pinned at the rebase onto main da9d06c (sharing_policy is no longer withheld unconditionally there), originally from b41cb97: in a scratch subprocess, AST-replace the sole
     # `for name in AREA_ADAPTER_MODULES` iterator with (), then project complete_bundle
     # with each redaction mode. Hash canonical([dict(result), report, views, rule_sections,
@@ -38,7 +38,7 @@ def test_empty_area_modules_leave_projection_unchanged(complete_bundle, monkeypa
             assert after[section] == value
 
 
-def test_area_adapter_is_used_for_its_section(complete_bundle, monkeypatch):
+def test_area_adapter_is_used_for_its_section(complete_bundle, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     module = ModuleType("test_area_adapter")
     expected = [{"Name": "Area adapter", "DomainName": "area.invalid"}]
     calls = []
@@ -60,7 +60,7 @@ def test_area_adapter_is_used_for_its_section(complete_bundle, monkeypatch):
 
 
 @pytest.mark.parametrize("redact", [False, True])
-def test_unseen_area_shape_reaches_rules_but_is_withheld_from_model(complete_bundle, monkeypatch, redact):
+def test_unseen_area_shape_reaches_rules_but_is_withheld_from_model(complete_bundle, monkeypatch, redact):  # noqa: F811 - shared pytest fixture injected by name
     before = scuba_projection.project_run(complete_bundle, redact=redact)
     module = ModuleType("test_area_unseen_shape")
     expected = [{"AreaContact": "synthetic.person@area.invalid"}]
@@ -90,7 +90,7 @@ def test_unseen_area_shape_reaches_rules_but_is_withheld_from_model(complete_bun
     assert detail["detail"] == {"field": "$", "kind": "unseen_shape"}
 
 
-def test_all_unadapted_catalogue_sections_are_accepted(complete_bundle, monkeypatch):
+def test_all_unadapted_catalogue_sections_are_accepted(complete_bundle, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     catalogue = json.loads(scuba_projection.open_text_resource("configs/scuba-policy-sections.json"))["policies"]
     sections = {section for policy in catalogue.values() for section in policy["sections"]}
     builtins = {"SPO_tenant", "conditional_access_policies", "authorization_policies", "service_plans",
@@ -109,7 +109,7 @@ def test_all_unadapted_catalogue_sections_are_accepted(complete_bundle, monkeypa
         assert projected.rule_sections[section] == [{"Area": section}]
 
 
-def test_area_module_without_adapters_raises(complete_bundle, monkeypatch):
+def test_area_module_without_adapters_raises(complete_bundle, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     module = ModuleType("test_area_missing_adapters")
     register_modules(monkeypatch, module)
 
@@ -119,7 +119,7 @@ def test_area_module_without_adapters_raises(complete_bundle, monkeypatch):
 
 @pytest.mark.parametrize("section", ["SPO_tenant", *scuba_projection.PS_SECTIONS,
                                      "dmarc_records", "spf_records", "dkim_records"])
-def test_area_adapter_cannot_override_builtin(complete_bundle, monkeypatch, section):
+def test_area_adapter_cannot_override_builtin(complete_bundle, monkeypatch, section):  # noqa: F811 - shared pytest fixture injected by name
     module = ModuleType("test_area_collision")
     module.ADAPTERS = {section: lambda bundle: pytest.fail("Duplicate adapter was called")}
     register_modules(monkeypatch, module)
@@ -128,7 +128,7 @@ def test_area_adapter_cannot_override_builtin(complete_bundle, monkeypatch, sect
         scuba_projection.project_run(complete_bundle)
 
 
-def test_area_adapters_cannot_override_each_other(complete_bundle, monkeypatch):
+def test_area_adapters_cannot_override_each_other(complete_bundle, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     first = ModuleType("test_area_first")
     second = ModuleType("test_area_second")
     for module in (first, second):
@@ -140,7 +140,7 @@ def test_area_adapters_cannot_override_each_other(complete_bundle, monkeypatch):
 
 
 @pytest.mark.parametrize("adapters", [[], None, ("remote_domains",)])
-def test_adapters_must_be_a_dict(complete_bundle, monkeypatch, adapters):
+def test_adapters_must_be_a_dict(complete_bundle, monkeypatch, adapters):  # noqa: F811 - shared pytest fixture injected by name
     module = ModuleType("test_area_invalid_mapping")
     module.ADAPTERS = adapters
     register_modules(monkeypatch, module)
@@ -149,7 +149,7 @@ def test_adapters_must_be_a_dict(complete_bundle, monkeypatch, adapters):
         scuba_projection.project_run(complete_bundle)
 
 
-def test_adapter_must_be_callable(complete_bundle, monkeypatch):
+def test_adapter_must_be_callable(complete_bundle, monkeypatch):  # noqa: F811 - shared pytest fixture injected by name
     module = ModuleType("test_area_non_callable")
     module.ADAPTERS = {"remote_domains": 5}
     register_modules(monkeypatch, module)
@@ -159,7 +159,7 @@ def test_adapter_must_be_callable(complete_bundle, monkeypatch):
 
 
 @pytest.mark.parametrize("section", ["scuba_config", "tenant_id"])
-def test_reserved_adapter_key_is_rejected(complete_bundle, monkeypatch, section):
+def test_reserved_adapter_key_is_rejected(complete_bundle, monkeypatch, section):  # noqa: F811 - shared pytest fixture injected by name
     module = ModuleType("test_area_reserved")
     module.ADAPTERS = {section: lambda bundle: pytest.fail("Reserved adapter was called")}
     register_modules(monkeypatch, module)
@@ -169,7 +169,7 @@ def test_reserved_adapter_key_is_rejected(complete_bundle, monkeypatch, section)
 
 
 @pytest.mark.parametrize("section", ["not_a_section", "remote_domians", 123])
-def test_unknown_adapter_key_is_rejected(complete_bundle, monkeypatch, section):
+def test_unknown_adapter_key_is_rejected(complete_bundle, monkeypatch, section):  # noqa: F811 - shared pytest fixture injected by name
     module = ModuleType("test_area_unknown")
     module.ADAPTERS = {section: lambda bundle: pytest.fail("Unknown adapter was called")}
     register_modules(monkeypatch, module)

@@ -6,7 +6,6 @@ import html
 import json
 import os
 import re
-import shutil
 from collections.abc import Iterable, Mapping
 from io import StringIO
 from pathlib import Path
@@ -40,7 +39,7 @@ from azure_tenant_audit.output_redaction import (
     snapshot_run,
 )
 from azure_tenant_audit.private_io import harden_tree, make_private_dirs, write_private_bytes, write_private_text
-from azure_tenant_audit.guarded_io import guard_session, open_pinned_binary
+from azure_tenant_audit.guarded_io import current_context, guard_session, guarded_operation, open_pinned_binary
 from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.run_files import UnsafeRunFileError, hash_run_file, read_run_file
 from azure_tenant_audit.waivers import accepted_risk_summary
@@ -2043,9 +2042,6 @@ def _prepare_pack_directory(target_dir: Path) -> None:
     if stale.is_dir():
         from azure_tenant_audit.guarded_io import remove_guarded_tree
         remove_guarded_tree(stale)
-
-
-from azure_tenant_audit.guarded_io import current_context, guarded_operation
 
 
 @guarded_operation

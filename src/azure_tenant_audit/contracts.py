@@ -5,7 +5,6 @@ import re
 import sqlite3
 from collections import Counter
 from collections.abc import Mapping
-from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -540,7 +539,6 @@ def _validate_evidence_db(
     run_dir: Path, issues: list[dict[str, Any]], *, read_only: bool = False,
     _fresh_index_proof: _FreshIndexProof | None = None,
 ) -> dict[str, Any]:
-    db_path = run_dir / "index" / "evidence.sqlite"
     metadata: dict[str, Any] = {}
 
     def inspect(conn: sqlite3.Connection) -> None:

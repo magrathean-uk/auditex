@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from azure_tenant_audit.auth_context import (
-    b64url_json,
     inspect_token_claims,
-    iso_from_epoch,
     resolve_stored_auth_context,
 )
 from azure_tenant_audit.config import CollectorConfig
@@ -21,7 +19,6 @@ from azure_tenant_audit.m365_home import m365_subprocess_kwargs
 from azure_tenant_audit.capability_gate import enrich_capability_row
 from azure_tenant_audit.profiles import get_profile
 from azure_tenant_audit.scope_catalog import build_m365_scope_catalog
-from azure_tenant_audit.resources import resolve_resource_path
 from azure_tenant_audit.secret_hygiene import (
     redact_output,
     sanitize_token_claims,

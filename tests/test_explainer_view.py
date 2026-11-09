@@ -38,18 +38,23 @@ def test_exact_fields_cited_evidence_and_stable_positions():
 def test_extra_record_fields_are_never_read(extra):
     class Guard(dict):
         def __getitem__(self, key):
-            if key == extra: raise AssertionError("forbidden record read")
+            if key == extra:
+                raise AssertionError("forbidden record read")
             return super().__getitem__(key)
         def get(self, key, default=None):
-            if key == extra: raise AssertionError("forbidden record read")
+            if key == extra:
+                raise AssertionError("forbidden record read")
             return super().get(key, default)
-    rec = Guard(record()); rec[extra] = "SECRET_CANARY"
+    rec = Guard(record())
+    rec[extra] = "SECRET_CANARY"
     assert build(rec) == build()
 
 
 def test_no_input_mutation_or_aliasing():
-    rec = record(); sections = {"scuba_config": {"M365Environment": "commercial"}}
-    inputs = deepcopy((rec, sections, B, C)); view = build(rec, sections)
+    rec = record()
+    sections = {"scuba_config": {"M365Environment": "commercial"}}
+    inputs = deepcopy((rec, sections, B, C))
+    view = build(rec, sections)
     assert (rec, sections, B, C) == inputs
     view["evidence"][1]["observed"]["M365Environment"] = "changed"
     assert (rec, sections, B, C) == inputs
@@ -79,7 +84,8 @@ def test_email_guard_idempotent_values_only_no_extra_pseudonymisation():
 
 def test_missing_and_null_citations():
     assert [e["id"] for e in build(sections={})["evidence"]] == ["e0"]
-    rec = record(); rec["cited_sections"] = None
+    rec = record()
+    rec["cited_sections"] = None
     view = build(rec, {"conditional_access_policies": [], "scuba_config": None})
     assert [e["id"] for e in view["evidence"]] == ["e0", "e1", "e2"]
     rec["cited_sections"] = []
@@ -89,18 +95,23 @@ def test_missing_and_null_citations():
 @pytest.mark.parametrize("cites", ["scuba_config", ["unknown"], ["scuba_config", "scuba_config"], [None]])
 def test_rejects_invalid_citations(cites):
     rec = dict(record(), cited_sections=cites)
-    with pytest.raises(ValueError): build(rec)
+    with pytest.raises(ValueError):
+        build(rec)
 
 
 @pytest.mark.parametrize("order", [["scuba_config", "scuba_config"], ["policy"], ["tenant/path"], [None], "scuba_config"])
 def test_rejects_invalid_section_order(order):
-    with pytest.raises(ValueError): build(order=order)
+    with pytest.raises(ValueError):
+        build(order=order)
 
 
 def test_unknown_policy_and_invalid_record_rejected():
-    with pytest.raises(KeyError): build(dict(record(), policy_id="unknown"))
-    with pytest.raises(ValueError): build({"policy_id": PID})
-    with pytest.raises(ValueError): build(dict(record(), verdict="deferred"))
+    with pytest.raises(KeyError):
+        build(dict(record(), policy_id="unknown"))
+    with pytest.raises(ValueError):
+        build({"policy_id": PID})
+    with pytest.raises(ValueError):
+        build(dict(record(), verdict="deferred"))
 
 
 def test_baseline_addresses_and_commands_preserved_in_public_remediation():
@@ -122,8 +133,10 @@ def test_xref_own_then_target_children_including_pp_without_a_rule():
         else:
             expected, enabled = [], False
             for unit in target:
-                if unit["level"] == 0: enabled = unit["kind"] == "num" and unit["label"] in x["labels"]
-                if enabled: expected.append(unit)
+                if unit["level"] == 0:
+                    enabled = unit["kind"] == "num" and unit["label"] in x["labels"]
+                if enabled:
+                    expected.append(unit)
         assert got[len(own):] == expected
     assert len(B["xrefs"]) == 16
 
@@ -142,9 +155,11 @@ def test_shared_fault_requires_collected_evidence_and_ignores_diagnostics():
     assert view["approved_remediation"] == ["Report this fault to the product team at contact+auditex@magrathean.uk."]
     assert "SECRET" not in canonical(view)
     for bad in ({}, {"conditional_access_policies": {"collection_status": "not_collected"}, "scuba_config": None}):
-        with pytest.raises(ValueError): build(rec, bad)
+        with pytest.raises(ValueError):
+            build(rec, bad)
     for changes in ({"cell": "rule_evaluation_failed"}, {"reason_text": FAULT["reason_text"] + " secret"}, {"cited_sections": []}):
-        with pytest.raises(ValueError): build(dict(rec, **changes), sections)
+        with pytest.raises(ValueError):
+            build(dict(rec, **changes), sections)
 
 
 def test_direct_builder_fixed_read_sets_for_all_102_policies():

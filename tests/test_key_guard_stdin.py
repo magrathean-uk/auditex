@@ -40,7 +40,7 @@ def _env() -> dict[str, str]:
 
 
 @pytest.mark.parametrize("member", ["sensitive-users.key", "sensitive-users.txt"])
-def test_stdin_refuses_registered_private_files(private_run: Path, member: str) -> None:
+def test_stdin_refuses_registered_private_files(private_run: Path, member: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
     with (private_run / "operator-inputs" / member).open("rb") as source:
         result = subprocess.run([sys.executable, "-B", "-c", _CHILD, str(private_run), "plain"],
                                 stdin=source, env=_env(), capture_output=True, timeout=15, check=False)
@@ -49,7 +49,7 @@ def test_stdin_refuses_registered_private_files(private_run: Path, member: str) 
     assert KEY not in result.stdout + result.stderr and ADDRESS.encode() not in result.stdout + result.stderr
 
 
-def test_stdin_refuses_an_unregistered_hardlink(private_run: Path, tmp_path: Path) -> None:
+def test_stdin_refuses_an_unregistered_hardlink(private_run: Path, tmp_path: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
     source = tmp_path / "unrelated"
     source.write_text("ordinary input", encoding="utf-8")
     alias = tmp_path / "hardlink"
@@ -62,7 +62,7 @@ def test_stdin_refuses_an_unregistered_hardlink(private_run: Path, tmp_path: Pat
 
 
 @pytest.mark.parametrize("kind", ["unseen-file", "pipe"])
-def test_stdin_allows_unseen_single_link_file_and_pipe(private_run: Path, tmp_path: Path, kind: str) -> None:
+def test_stdin_allows_unseen_single_link_file_and_pipe(private_run: Path, tmp_path: Path, kind: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
     args = [sys.executable, "-B", "-c", _CHILD, str(private_run), "plain"]
     if kind == "pipe":
         result = subprocess.run(args, input=b"ordinary\n", env=_env(), capture_output=True, timeout=15, check=False)
@@ -76,7 +76,7 @@ def test_stdin_allows_unseen_single_link_file_and_pipe(private_run: Path, tmp_pa
 
 
 @pytest.mark.parametrize("mode", ["prebuffer", "prebuffer-binary"])
-def test_stdin_rejects_unverifiable_buffered_input(private_run: Path, tmp_path: Path, mode: str) -> None:
+def test_stdin_rejects_unverifiable_buffered_input(private_run: Path, tmp_path: Path, mode: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
     source = tmp_path / "buffered"
     source.write_bytes(b"ordinary\nwith prior buffered bytes\n")
     with source.open("rb") as handle:
@@ -88,7 +88,7 @@ def test_stdin_rejects_unverifiable_buffered_input(private_run: Path, tmp_path: 
 
 @pytest.mark.parametrize("size", [32, 20000])
 @pytest.mark.parametrize("mode", ["prebuffer", "prebuffer-binary"])
-def test_stdin_rejects_prebuffered_pipe(private_run: Path, size: int, mode: str) -> None:
+def test_stdin_rejects_prebuffered_pipe(private_run: Path, size: int, mode: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
     result = subprocess.run([sys.executable, "-B", "-c", _CHILD, str(private_run), mode],
                             input=b"x" * size, env=_env(),
                             capture_output=True, timeout=15, check=False)
@@ -98,7 +98,7 @@ def test_stdin_rejects_prebuffered_pipe(private_run: Path, size: int, mode: str)
 
 @pytest.mark.parametrize("python", _pythons())
 @pytest.mark.parametrize("mode", ["plain", "prebuffer", "prebuffer-binary"])
-def test_pipe_provenance_on_supported_runtimes(private_run: Path, python: str, mode: str) -> None:
+def test_pipe_provenance_on_supported_runtimes(private_run: Path, python: str, mode: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
     result = subprocess.run([python, "-B", "-c", _CHILD, str(private_run), mode],
                             input=b"constructed-input\n", env=_env(), capture_output=True, timeout=15, check=False)
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
@@ -106,7 +106,7 @@ def test_pipe_provenance_on_supported_runtimes(private_run: Path, python: str, m
 
 
 @pytest.mark.skipif(not hasattr(os, "openpty"), reason="pseudo-terminals are unavailable")
-def test_stdin_allows_a_terminal(private_run: Path) -> None:
+def test_stdin_allows_a_terminal(private_run: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
     master, slave = os.openpty()
     try:
         process = subprocess.Popen([sys.executable, "-B", "-c", _CHILD, str(private_run), "plain"],

@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from . import corpus, pool, redteam
+from . import pool, redteam
 
 
 def pytest_generate_tests(metafunc):
@@ -46,7 +46,10 @@ def test_desired_behaviour(gap):
 
 
 def test_texts_are_the_original_texts_unless_marked_adapted():
-    canon = lambda v: json.dumps(v, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+    def canon(v):
+        return json.dumps(v, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
     adapted = set()
     for row in redteam.load()["candidates"]:
         same = hashlib.sha256(canon({"explanation": row["explanation"], "steps": row["steps"]}).encode()).hexdigest() == row["r_text_sha256"]

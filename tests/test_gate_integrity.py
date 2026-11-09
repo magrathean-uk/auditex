@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import io
 import json
-import shutil
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
@@ -11,13 +10,11 @@ from typing import Any
 import pytest
 
 from gate_support import (
-    SAMPLE_COLLECTORS,
     _update_manifest,
     finding,
     offline_run,
     read_json,
     rehash,
-    set_coverage,
     write_findings,
 )
 

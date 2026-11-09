@@ -23,7 +23,7 @@ from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 
 from .scuba_projection import (
     ASSIGNMENT_HARMLESS, PACK_SHAPE_DIGESTS, PROJECTION_VERSION, ROLE_HARMLESS,
-    SCUBA_CAP_EXCLUSION_POLICIES, SCUBA_CONFIG_EXCLUSION_KEYS, SCUBA_ENVIRONMENT_POLICIES,
+    SCUBA_CAP_EXCLUSION_POLICIES, SCUBA_ENVIRONMENT_POLICIES,
     SCUBA_ROLE_EXCLUSION_POLICIES, RULE_ONLY_SECTIONS, _EMPTY_CAP, _EMPTY_ROLE, _FIELD_NAME, _annotation,
     _blank, _oversize, _redact, _rule_target, _seen_shape, _user_entries, _json,
     Bundle, Projection, Unavailable,

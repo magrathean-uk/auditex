@@ -30,7 +30,7 @@ make contract-smoke
 ./scripts/oss-taint-scan.sh
 ```
 
-The first command is an example of a focused test. Select the test modules for the affected provider or behavior. `make lint` checks Python compilation, not formatting or types. `make contract-smoke` deletes and recreates `outputs/ci-contract`; use it for changes to collectors, normalization, schemas, reports, evidence references, or customer packs. Do not store valuable runs there.
+The first command is an example of a focused test. Select the test modules for the affected provider or behavior. `make lint` checks Python compilation and then runs Ruff (`ruff check .`, the pre-commit hook's rules, at the version pinned in the `dev` extra: `python -m pip install -e '.[dev]'`); it does not check formatting or types. `make contract-smoke` deletes and recreates `outputs/ci-contract`; use it for changes to collectors, normalization, schemas, reports, evidence references, or customer packs. Do not store valuable runs there.
 
 Run `pre-commit install` once so Ruff, the whitespace checks and a staged-file gitleaks scan run on every commit. Before a release, `make release-check` chains lint, tests, contract smoke, the rule-pack drift check, the taint scan and a gitleaks scan of the tree.
 

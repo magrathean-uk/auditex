@@ -61,8 +61,8 @@ def load(read_text):
             if cur[1]:
                 for b in _BOLD.findall(line):
                     bold.add(plain(b))
-                for l in _LINK.findall(line):
-                    links.add(plain(l))
+                for link in _LINK.findall(line):
+                    links.add(plain(link))
                 for pm in re.finditer(r"[Ss]ign in to the ([^.]+?)\.", plain(line)):
                     portals.add(pm.group(1).strip())
     res = {}

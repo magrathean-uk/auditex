@@ -11,7 +11,7 @@ import stat
 from typing import BinaryIO
 
 from .guarded_io import (
-    GuardContext, UnsafeRunFileError, current_context, guard_session, open_guarded_file, open_private_output,
+    GuardContext, UnsafeRunFileError, current_context, guard_session, open_guarded_file, open_private_output,  # noqa: F401 - re-exported for callers of this module
 )
 
 MAX_RUN_FILE_BYTES = 32 * 1024 * 1024

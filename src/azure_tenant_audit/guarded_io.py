@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-import errno
 from functools import wraps
 import gc
 import hmac
