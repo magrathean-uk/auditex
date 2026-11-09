@@ -37,6 +37,20 @@ Python 3.11+. Claude Code reads this file through `CLAUDE.md`; Codex reads it di
   `schemas/`, `docs/`, `agent/`, `skills/`, `assets/`, `examples/`) is listed in both
   `pyproject.toml` `[tool.setuptools.data-files]` and `shipped_content.py`; a test checks they match.
 
+## Tenant-bootstrap
+
+- `tenant-bootstrap/` is lab seeding and rehearsal only. Its scripts write to a lab tenant, so run
+  them only against a tenant the owner has named for lab work. It is never part of audit, probe, report,
+  export, customer-pack or MCP flows, and `src/` never imports from it.
+- Its only `azure_tenant_audit` is the forwarder `tenant-bootstrap/azure_tenant_audit/__init__.py`, which
+  resolves to `src/azure_tenant_audit`; `tests/test_tenant_bootstrap_forwarder.py` proves it. Do not
+  copy engine modules back into it.
+- Under `tenant-bootstrap/scripts`, `run-auditor.sh`, `create-lab-populator-app.py` and
+  `auth-lab-populator.py` stay with the parked
+  dummy-tenant kit (DEC-006).
+- The `runs` and `.secrets` folders under `tenant-bootstrap` are git-ignored; keep lab credentials
+  and outputs there, apart from customer audits.
+
 ## Commands
 
 ```sh

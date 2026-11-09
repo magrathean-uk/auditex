@@ -16,7 +16,7 @@
 
 Auditex is a Python CLI and MCP toolkit for read-only Microsoft 365 and Google Workspace tenant audits. It collects local evidence, normalizes results, and produces report, export, comparison, and customer handoff artifacts.
 
-The public audit surface does not write to production tenants. It also does not read message bodies or file contents in audit mode. The separate `tenant-bootstrap/` kit is for lab setup and rehearsal; treat it as a writable lab tool with its own credentials, outputs, and safeguards.
+The public audit surface does not write to production tenants. It also does not read message bodies or file contents in audit mode. The separate `tenant-bootstrap/` kit is for lab setup and rehearsal; treat it as a writable lab tool with its own credentials, outputs, and safeguards, kept out of audit, report, export, and MCP flows. `AGENTS.md` has the rules.
 
 ## What is included
 

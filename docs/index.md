@@ -38,4 +38,4 @@ questions and issue reports, see [SUPPORT.md](../.github/SUPPORT.md).
 
 ## Product boundary
 
-Auditex's public audit, probe, report, export, MCP audit, and customer-pack verification surfaces are read-only with respect to production tenants and do not read mail or file body content. The `tenant-bootstrap/` directory is a separate lab helper for seeding and rehearsing test environments; follow its own scripts and keep its credentials and generated runs local.
+Auditex's public audit, probe, report, export, MCP audit, and customer-pack verification surfaces are read-only with respect to production tenants and do not read mail or file body content. The `tenant-bootstrap/` directory is a separate lab helper for seeding and rehearsing test environments; follow its own scripts and keep its credentials and generated runs in its git-ignored `runs` and `.secrets` folders under `tenant-bootstrap`. It is never part of audit, report, export, or MCP flows.

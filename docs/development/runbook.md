@@ -127,7 +127,7 @@ Publication for 1.3.0 is the one G approved in DEC-001: a signed `v1.3.0` tag pl
 
 ## Lab tools
 
-`tenant-bootstrap/` seeds lab tenant data and contains writable operations. `run-enterprise-audit.sh` runs bootstrap before audit by default; it is not a production audit shortcut. Inspect its `--help` and the selected configuration before any separately authorized lab work. Keep lab credentials and outputs separate from customer audits.
+`tenant-bootstrap/` seeds lab tenant data and contains writable operations. `run-enterprise-audit.sh` runs bootstrap before audit by default; it is not a production audit shortcut. Inspect its `--help` and the selected configuration before any separately authorized lab work. Keep lab credentials and outputs separate from customer audits, in the git-ignored `runs` and `.secrets` folders under `tenant-bootstrap`. Its only `azure_tenant_audit` is a forwarder to `src/azure_tenant_audit`.
 
 The response plane is hidden by default and guarded separately. Do not enable it for an ordinary audit. Agent command templates under `agent/` include lab tools as well as audit commands; inspect the selected tool before execution.
 
