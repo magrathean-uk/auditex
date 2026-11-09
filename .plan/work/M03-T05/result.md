@@ -1,7 +1,10 @@
 ## RESULT M03-T05
-status: blocked
-summary: Step 1 passed (HEAD is d9f050f, no v1.3.0 tag locally or on origin). Step 2 failed: `make dist` gave different hashes from the M03-T03 pair, and repeat builds differ from each other because `make dist` doesn't pin the timestamp. Stopped per the brief; no tag, push or release made. Details in .plan/work/M03-T05/notes.md.
-changes: none (git-ignored `.venv` link and `dist/` in this worktree only)
-verification: git rev-parse HEAD: pass; git tag -l v1.3.0 and git ls-remote --tags origin v1.3.0: pass (both empty); make dist: pass; shasum -a 256 dist/* vs expected: FAIL (wheel f3457aea..., sdist db7c1d9b...); second make dist: different again; SOURCE_DATE_EPOCH build twice: wheel stable (6b2efad8...) but not the expected hash, sdist varies; steps 3 to 7: not run
-risks: the equality check can't pass on any fresh build, so the brief needs amending; T03's artefacts are gone, so the exact bytes it hashed can't be published; a byte-reproducible build would need a code change and a new release commit
-questions_for_g: none (orchestrator decision: publish a fresh build with its hashes recorded, which I recommend, or make the build reproducible first)
+status: done
+summary: Signed tag v1.3.0 (tag object 5f61f29df4b2b6c0d56cc0fde64028813dc693d7) points at d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c; only the tag was pushed. Release: https://github.com/magrathean-uk/auditex/releases/tag/v1.3.0 (assets auditex-1.3.0-py3-none-any.whl 2184464 bytes, auditex-1.3.0.tar.gz 3122427 bytes)
+sha256: 6b2efad8860c82aa7bb8c845f7b3f09d558de3f2152b7af27ef86e0ce35527e0  auditex-1.3.0-py3-none-any.whl
+sha256: 3780b561da3b71eecb4b31cd1d1a050f6efc6e380d05626efa0d16e0583c1d84  auditex-1.3.0.tar.gz
+Built with SOURCE_DATE_EPOCH=1794158384 and not rebuilt afterwards; release notes are the CHANGELOG 1.3.0 section (63.5 KB).
+changes: none to tracked files (git-ignored .venv link and dist/ only; evidence.md and release-notes-1.3.0.md written to .plan/work/M03-T05/)
+verification: preflight (HEAD, empty local and remote tag) pass; make dist pass; release-smoke.sh on dist pass; check-reproducible-build.py pass; gh auth (repo scope) pass; tag -v with temporary allowed-signers pass; ls-remote pass; gh release view (both assets uploaded, digests match local) pass
+risks: check-reproducible-build.py wheel (c78c95c1...) is not byte-equal to the make dist wheel (mode bits only, zero content diffs; cause in evidence.md), so the script proves determinism of its own method; M03-T06 must verify against the hashes above, not the script's
+questions_for_g: none

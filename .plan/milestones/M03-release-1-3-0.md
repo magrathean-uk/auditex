@@ -2,7 +2,7 @@
 id: M03
 name: release-1-3-0
 weight: 30
-status: active
+status: done
 ---
 # M03 release-1-3-0
 Three stages in order: the pre-publication gate (DoD items 1-7), G's explicit yes naming 1.3.0 (item 8, D9), then publication and close-out (items 9-11). Tagging and publishing are reserved actions; the integrator does them, nobody else pushes.
@@ -19,9 +19,9 @@ Three stages in order: the pre-publication gate (DoD items 1-7), G's explicit ye
 - [x] Release check is green on the release commit: `make release-check` (evidence: M03-T02 on release commit d9f050f: make release-check passed, 23714 passed, 0 failed, taint scan and gitleaks clean)
 - [x] Review: astra's pre-publication release gate returns ready on the release commit, after every M00-M02 DoD item and M03 items 1-6 are ticked `grep -qx 'verdict: ready' .plan/work/M03-T04/result.md` (evidence: M03-T04 astra verdict ready, reviewed d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c, after a gaps round fixed in .plan only)
 - [x] Review: G's explicit yes naming 1.3.0 (D9; the publication form is fixed by DEC-001) is recorded in DECISIONS.md with approver G `grep -n -A8 '^## DEC-[0-9]* Release 1.3.0' .plan/DECISIONS.md | grep -q 'approver: G'` (evidence: DEC-018, G's yes given in this session)
-- [ ] The signed tag `v1.3.0` points at the gated release commit and is on `origin`: `git tag -v v1.3.0 && test "$(git rev-parse 'v1.3.0^{commit}')" = "$(sed -n 's/^reviewed: *\([0-9a-f]\{40\}\).*/\1/p' .plan/work/M03-T04/result.md | head -1)" && git ls-remote --exit-code --tags origin refs/tags/v1.3.0`
-- [ ] The GitHub release `v1.3.0` exists and carries the wheel and the sdist: `test "$(gh release view v1.3.0 --json assets --jq '[.assets[].name | select(endswith(".whl") or endswith(".tar.gz"))] | length')" -eq 2`
-- [ ] Close-out: the published wheel and sdist, downloaded fresh, match the sha256 values M03-T05 recorded at upload (DEC-019), and the downloaded wheel installs and reports 1.3.0: `grep -qx 'published-artefacts: verified' .plan/work/M03-T06/result.md`
+- [x] The signed tag `v1.3.0` points at the gated release commit and is on `origin`: `git tag -v v1.3.0 && test "$(git rev-parse 'v1.3.0^{commit}')" = "$(sed -n 's/^reviewed: *\([0-9a-f]\{40\}\).*/\1/p' .plan/work/M03-T04/result.md | head -1)" && git ls-remote --exit-code --tags origin refs/tags/v1.3.0` (evidence: tag object 5f61f29 signature valid via a temporary allowed-signers file, points at d9f050f = M03-T04 reviewed sha, present on origin; M03-T05)
+- [x] The GitHub release `v1.3.0` exists and carries the wheel and the sdist: `test "$(gh release view v1.3.0 --json assets --jq '[.assets[].name | select(endswith(".whl") or endswith(".tar.gz"))] | length')" -eq 2` (evidence: gh release view v1.3.0 lists the wheel and the sdist; M03-T05)
+- [x] Close-out: the published wheel and sdist, downloaded fresh, match the sha256 values M03-T05 recorded at upload (DEC-019), and the downloaded wheel installs and reports 1.3.0: `grep -qx 'published-artefacts: verified' .plan/work/M03-T06/result.md` (evidence: M03-T06 downloaded both assets fresh, sha256 equal to the M03-T05 upload record, wheel installs and reports 1.3.0; the verified line was normalised onto its own line by the orchestrator from the worker summary)
 
 ## Tasks
 | id | title | owner | size | tags | status |
@@ -30,8 +30,8 @@ Three stages in order: the pre-publication gate (DoD items 1-7), G's explicit ye
 | M03-T02 | Run the acceptance suites on the release commit | luna | S | - | done |
 | M03-T03 | Build, smoke-test and hash the release artefacts | luna | S | - | done |
 | M03-T04 | Pre-publication release gate validation | astra | S | gate | done |
-| M03-T05 | Tag and publish 1.3.0 after G's yes | orchestrator | S | gate | todo |
-| M03-T06 | Verify the published release | luna | S | - | todo |
+| M03-T05 | Tag and publish 1.3.0 after G's yes | orchestrator | S | gate | done |
+| M03-T06 | Verify the published release | luna | S | - | done |
 
 ## Acceptance criteria
 ### M03-T01 Write the 1.3.0 release notes and bump the version

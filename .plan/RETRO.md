@@ -190,3 +190,56 @@ Mapping from role to brief is inferred; the ledger has no brief column.
 - Low-effort terra writers on Tier A tasks passed first review: M01-T08 (0.2329 USD), M01-T11 (0.1631 USD).
 
 Applied 8 Nov 2026 after the M00 and M01 retros, to briefs/_footer.md: a cause line on any partial or blocked status, no keys beyond the contract, verify on the final commit.
+
+## M03
+
+Scope: 17 ledger rows (M03-T01 4 writer rows, REV-M03-T01 3, M03-T02 3, M03-T03 2, M03-T04 2, M03-T05 2, M03-T06 1). VAL-v2 excluded: its result names the milestone file, not an M03 task id. Detail: `.plan/work/RETRO-M03/notes.md`; rows and discrepancies: `.plan/work/RETRO-M03/evidence.md`.
+
+### Spend
+
+Recorded `cost_usd` covers Claude rows only. The 5 codex2 rows and 2 astra rows have no cost, so their spend is unknown, not zero.
+
+| launcher | runs | cost_usd | rows without cost | seconds | non-zero exits |
+|---|---|---|---|---|---|
+| claude-4 | 6 | 1.8366 | 0 | 722 | 1 |
+| claude-2 | 6 | 0.0868 | 0 | 1910 | 3 |
+| codex2 | 5 | not recorded | 5 | 707 | 0 |
+| **total** | **17** | **1.9234** | **5** | **3339** | **4** |
+
+| role | runs | cost_usd | rows without cost | seconds | non-zero exits |
+|---|---|---|---|---|---|
+| terra | 6 | 1.8366 | 0 | 722 | 1 |
+| luna | 6 | 0.0868 | 0 | 1910 | 3 |
+| codex | 3 | not recorded | 3 | 268 | 0 |
+| astra | 2 | not recorded | 2 | 439 | 0 |
+
+### Failures and retries
+
+Failure count: 4 non-zero exits in 17 runs, all exit 2 and all `blocked`, across 3 tasks.
+
+| task | attempts | final status | cause |
+|---|---|---|---|
+| M03-T02 | 3: blocked (21 s), done (1204 s), blocked (551 s) | blocked in ledger and result.md; milestone DoD item 1 still says done | Mechanical: v3.9.1 `vectors.jsonl` kit not found in any location searched. Cause of the first blocked run not recorded. |
+| M03-T03 | 2: blocked (23 s), done (83 s) | done | Cause of the blocked run not recorded. |
+| M03-T05 | 2: blocked (65 s, xhigh), done (198 s) | done; tag and release published | Cause of the blocked run not recorded. |
+| M03-T01 | 4 writer and 3 review runs, all exit 0 | done; review approve | Technical: review found a 1.2.4 contract-history claim in the wrong list; two fix rounds. |
+| release artefacts | not a retry | conflict | Technical: sha256 for the same commit d9f050f differs between M03-T03 and M03-T05 (wheel c938ad5c vs 6b2efad8). Not explained by the inputs. |
+
+Discrepancy: M03-T02 final ledger row and result.md are blocked, but the milestone DoD item 1 cites a pass ("6 passed"). The result carrying that pass is not in the inputs.
+
+### Proposed brief fixes
+
+Brief mapping is inferred; the ledger has no brief column.
+
+- `luna-explore.md` (inferred for M03-T02): precondition step checks each required input path and exits blocked with the paths searched, before run-job. Problem: M03-T02 blocked on the missing kit.
+- `_footer.md`: each attempt writes its own result file (for example `result.attemptN.md`), so a later blocked attempt cannot overwrite a done one. Problem: M03-T02 done then blocked; causes for M03-T03 and M03-T05 lost.
+- `terra-implement.md`: check each "since version X" or "first documented in" claim against the tagged source before handoff. Problem: M03-T01 review round on a wrong 1.2.4 claim.
+- `terra-implement.md` (inferred for the release steps): pin SOURCE_DATE_EPOCH and require the publishing build's sha256 to match M03-T03 before tagging. Problem: artefact hash mismatch between M03-T03 and M03-T05.
+
+### Keep
+
+- Frozen-commit cross-provider review: REV-M03-T01 (codex2) approved the release notes after three rounds.
+- Blocked reported with evidence, not faked: M03-T02 named the missing file, the paths searched and the question for G.
+- Gate before publication: M03-T04 (astra) verdict ready at d9f050f before G's yes.
+- Post-publication check from a fresh download with checksum and install: M03-T06 (luna, 0.0111 USD).
+- Signed tag verified before push, and release asset digests compared to local files: M03-T05.
