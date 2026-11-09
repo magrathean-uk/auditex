@@ -24,8 +24,8 @@ Plan v3 starts from a green, lint-enforced `main`: the 1.3.0 gate chain still pa
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M00-T01 | Run the pinned Ruff check in make lint and clear its findings | codex | M | cross-cutting | todo |
-| M00-T02 | Fix the pytest norecursedirs and taint-scan prune hygiene | codex | S | mechanical | todo |
+| M00-T01 | Run the pinned Ruff check in make lint and clear its findings | codex | M | cross-cutting | done |
+| M00-T02 | Fix the pytest norecursedirs and taint-scan prune hygiene | codex | S | mechanical | done |
 | M00-T03 | Re-run the gate chain on main after the M00 merges | luna | S | - | todo |
 
 ## Acceptance criteria

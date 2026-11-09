@@ -38,3 +38,21 @@
 - why: no bundle or contract change in 1.4.0.
 - consequences: M05-T04 documents the limit.
 - approver: G
+
+## DEC-005 Model-layer removal list approved
+- date: 2026-11-09
+- status: approved
+- decision: the 38 tracked paths in `.plan/work/M02-T01/removal-list.txt` (reviewed design, Codex approve at 52c0de3) are approved for removal in M02-T04, after M02-T03 re-homes the shared helpers and adds `auditex assess` (DEC-002).
+- options: approve all 38 | hold
+- why: model-layer-only paths; shipped assessment, report and bundle output are preserved and checked by the M02-T02 digests.
+- consequences: each deletion is recorded in CLEANUP.md (M02-T06).
+- approver: G
+
+## DEC-006 Cleanup removal list approved, lab tools kept
+- date: 2026-11-09
+- status: approved
+- decision: 30 of the 33 paths in `.plan/work/M03-T01/removal-list.txt` are approved for removal in M03-T02: the 25 drifted tenant-bootstrap module copies (forwarder kept, dependent tests updated), benchmarks/fake_graph_benchmark.py, scripts/tenant-audit-flow, assets/auditex-logo.png, requirements.txt and tenant-bootstrap/requirements.txt. The Dependabot entry is updated and docs/legal/third-party-notices.md line 65 is changed to say the dependencies are declared in pyproject.toml (G approved that change). tenant-bootstrap/scripts/run-auditor.sh, create-lab-populator-app.py and auth-lab-populator.py stay with the parked dummy-tenant kit.
+- options: approve keeping the three lab tools | approve all 33 | hold
+- why: unreferenced or duplicate paths; the lab tools may belong to parked kit work.
+- consequences: each deletion is recorded in CLEANUP.md (M03-T05).
+- approver: G

@@ -1,0 +1,2 @@
+--task REV-M02-T01 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M02-T01/request-3.md --readonly --tags debug
+--task REV-M05-T02 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M05-T02-d5-harness --tags debug --var TASK=M05-T02 --var MILESTONE=.plan/milestones/M05-d5-name-masking.md --var BRANCH=task/M05-T02-d5-harness --var BASE=main

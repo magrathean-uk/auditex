@@ -174,3 +174,17 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-09T08:46:46Z	M00-T02	codex	codex2	gpt-6.1-terra	low	branch	1	88		partial	task/M00-T02-test-hygiene
 2026-11-09T08:46:47Z	M03-T01-check	terra	claude-4	claude-sonnet-5-5	medium	readonly	0	94	0.5125	done	c117d99
 2026-11-09T08:48:32Z	REV-M02-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	200		done	c117d99
+2026-11-09T09:19:00Z	REV-M00-T02	terra	claude-4	claude-sonnet-5-5	high	readonly	0	192	0.1687	done	task/M00-T02-test-hygiene
+2026-11-09T09:19:01Z	M05-T02	terra	claude-1	claude-sonnet-5-5	medium	branch	0	193	0.3218	done	task/M05-T02-d5-harness
+2026-11-09T09:21:25Z	M02-T01	sol	claude-3	claude-opus-5-5	high	readonly	0	337	2.7689	done	4571492
+2026-11-09T09:45:50Z	M00-T01	sol	claude-5	claude-opus-5-5	high	branch	124	1802		timeout	task/M00-T01-ruff-lint
+2026-11-09T09:46:51Z	REV-M00-T02	terra	claude-4	claude-sonnet-5-5	low	readonly	0	15	0.1612	done	task/M00-T02-test-hygiene
+2026-11-09T09:48:57Z	REV-M05-T02	codex	codex2	gpt-6.1-sol	high	readonly	0	141		done	task/M05-T02-d5-harness
+2026-11-09T09:49:22Z	REV-M02-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	166		done	4571492
+2026-11-09T10:23:09Z	M00-T01	sol	claude-5	claude-opus-5-5	high	branch	0	2194	0.7879	done	task/M00-T01-ruff-lint
+2026-11-09T10:24:48Z	SETUP-ruff	terra	claude-5	claude-sonnet-5-5	low	readonly	0	13	0.0786	done	52c0de3
+2026-11-09T10:26:03Z	M02-T01	sol	claude-4	claude-opus-5-5	high	readonly	0	88	0.8319	done	52c0de3
+2026-11-09T10:26:10Z	M05-T02	terra	claude-1	claude-sonnet-5-5	medium	branch	0	95	0.2137	done	task/M05-T02-d5-harness
+2026-11-09T10:26:29Z	REV-M00-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	114		done	task/M00-T01-ruff-lint
+2026-11-09T10:28:09Z	REV-M02-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	74		done	52c0de3
+2026-11-09T10:28:13Z	REV-M05-T02	codex	codex2	gpt-6.1-sol	high	readonly	0	78		done	task/M05-T02-d5-harness
