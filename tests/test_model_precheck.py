@@ -8,14 +8,12 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from auditex.cli import main
-from support import RunBundleBuilder, make_contract_valid
 from auditex.rule_assessment import precheck_case
 from auditex.rule_assessment import assess_run
-from auditex.rule_assessment import build_case, canonical
+from auditex.rule_assessment import build_case
 from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
-from azure_tenant_audit.scuba_precheck import check_fields, check_gate, field_name, policy_rule, precheck_policy, rule_catalogue
+from azure_tenant_audit.scuba_precheck import check_fields, check_gate, field_name, precheck_policy, rule_catalogue
 
 ROOT = Path(__file__).resolve().parents[1]
 SP = "MS.SHAREPOINT.3.1v1"
