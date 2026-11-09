@@ -166,8 +166,7 @@ review of partial runs. The broader enterprise bootstrap profile is a separate
 workload/licensing flow.
 
 Use normal `auditex probe live` and `auditex run` for read-only before/after
-collection. `scripts/build-lab-model-cases.py` can then export fixture-only,
-unreviewed cases from the finalized audit; see [model development](../guides/model-development.md#cases-from-a-directory-lab).
+collection.
 
 To exercise a completed free-directory lab, use its private seed manifest:
 

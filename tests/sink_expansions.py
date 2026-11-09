@@ -31,15 +31,6 @@ WILDCARD_EXPANSIONS: dict[str, tuple[str, ...]] = {
         'auditex.guided:_read_prompt',
         'auditex.guided:run_guided',
     ),
-    'auditex.model_serving:ModelClient.*': (
-        'auditex.model_serving:ModelClient.__init__',
-        'auditex.model_serving:ModelClient._request',
-    ),
-    'auditex.model_training:*': (
-        'auditex.model_training:_write_json',
-        'auditex.model_training:_write_jsonl',
-        'auditex.model_training:prepare_training_pack',
-    ),
     'azure_tenant_audit.adapters.powershell_graph:*': (
         'azure_tenant_audit.adapters.powershell_graph:PowerShellGraphAdapter._session_prelude',
     ),

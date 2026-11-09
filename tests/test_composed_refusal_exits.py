@@ -96,8 +96,8 @@ def test_derive_preserves_the_identical_unsafe_refusal(monkeypatch):
     assert caught.value is failure
 
 
-def test_serving_preserves_unsafe_refusal_without_writing_assessment(tmp_path, monkeypatch):
-    from auditex import model_serving, rule_assessment
+def test_assessment_preserves_unsafe_refusal_without_writing_assessment(tmp_path, monkeypatch):
+    from auditex import rule_assessment
     from test_explainer_wire import PBI
 
     (tmp_path / "run-manifest.json").write_text('{"run_id":"context"}')
@@ -108,7 +108,7 @@ def test_serving_preserves_unsafe_refusal_without_writing_assessment(tmp_path, m
 
     monkeypatch.setattr(rule_assessment, "context_for_run", refuse)
     with pytest.raises(UnsafeRunFileError) as caught:
-        model_serving.assess_run(tmp_path, policies=[PBI])
+        rule_assessment.assess_run(tmp_path, policies=[PBI])
     assert caught.value is failure
     assert not (tmp_path / "model_assessment.json").exists()
 

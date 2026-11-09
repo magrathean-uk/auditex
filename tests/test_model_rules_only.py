@@ -9,7 +9,8 @@ import jsonschema
 import pytest
 
 from auditex.cli import main
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, assess_scubagear_export
+from auditex import rule_assessment
+from auditex.rule_assessment import assess_run, assess_scubagear_export
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.scuba_assessment import validate_assessment
 
@@ -38,12 +39,20 @@ def rules_only(root):
     return assess_run(root, policies=['MS.POWERBI.1.1v1'])
 
 
-def model_row():
-    from test_model_serving import client_with_responses, sample_case, sample_answer, envelope
+def historical_row(case, answer):
+    """A model-answered row as the retired client recorded it (valid answer, one attempt)."""
     from auditex.rule_assessment import _comparison
-    row = client_with_responses([envelope(sample_answer())]).assess(sample_case())
+    row = {'policy_id': case['policy_id'], 'claims': answer['claims'], 'limitations': answer['limitations'],
+           'recommendations': answer['recommendations'], 'validation_status': 'valid', 'reason': None,
+           'attempts': 1, 'latency_ms': 0.17, 'prompt_sha256': '0' * 64, 'response_sha256': '1' * 64,
+           'finish_reason': 'stop', 'thinking_disabled': True, 'thinking_stripped': False}
     row['comparison'] = _comparison(row['policy_id'], row, {})
     return row
+
+
+def model_row():
+    from test_model_serving import sample_case, sample_answer
+    return historical_row(sample_case(), sample_answer())
 
 
 def test_uncovered_contract_and_legacy_rejection(tmp_path, uncovered_policy):
@@ -160,17 +169,29 @@ def test_uncovered_text_is_forbidden_on_other_rows(tmp_path, policy):
         validate_assessment(result)
 
 
-def test_legacy_options_warn_once_without_values_and_keep_rules(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize('flags', [
+    ['--endpoint', 'private-url'], ['--model', 'private-name'], ['--dry-run'], ['--no-redaction'],
+    ['--shadow-model-on-precheck'],
+], ids=['endpoint', 'model', 'dry-run', 'no-redaction', 'shadow'])
+def test_assess_rejects_retired_model_options_and_writes_nothing(tmp_path, capsys, flags):
+    (tmp_path / 'run-manifest.json').write_text('{"run_id":"synthetic"}')
+    before = sorted(tmp_path.iterdir())
+    with pytest.raises(SystemExit) as exit_info:
+        main(['assess', str(tmp_path), *flags])
+    assert exit_info.value.code == 2
+    assert sorted(tmp_path.iterdir()) == before
+    assert 'private' not in capsys.readouterr().err
+
+
+def test_legacy_environment_keeps_rules(tmp_path, monkeypatch, capsys):
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"synthetic"}')
     baseline = assess_run(tmp_path)
     capsys.readouterr()
     for key in ('ENDPOINT', 'NAME', 'API_KEY', 'TIMEOUT', 'ALLOW_INSECURE'):
         monkeypatch.setenv('AUDITEX_MODEL_' + key, 'private-invalid-value')
     monkeypatch.setenv('AUDITEX_DISABLE_VALUE_RULES', '1')
-    assert main(['model', 'assess', str(tmp_path), '--endpoint', 'private-url', '--model', 'private-name',
-                 '--no-redaction', '--shadow-model-on-precheck']) == 0
-    warning = capsys.readouterr().err
-    assert len(warning.splitlines()) == 1 and 'ignored' in warning and 'private' not in warning
+    assert main(['assess', str(tmp_path)]) == 0
+    assert 'private' not in capsys.readouterr().err
     result = json.loads((tmp_path / 'model_assessment.json').read_text())
     assert result['policies'] == baseline['policies']
     assert result['projection']['redaction']['enabled']
@@ -185,20 +206,17 @@ def test_no_model_or_network_is_reachable_on_demo_and_mocktenant_exports(tmp_pat
         expected = {request.getfixturevalue('uncovered_policy')}
     def forbidden(*args, **kwargs):
         pytest.fail('Rules-only assessment reached a model client or network')
-    monkeypatch.setattr(ModelClient, '__init__', forbidden)
     monkeypatch.setattr(urllib.request, 'urlopen', forbidden)
     monkeypatch.setattr(urllib.request.OpenerDirector, 'open', forbidden)
     monkeypatch.setattr(socket.socket, 'connect', forbidden)
     monkeypatch.setattr(http.client.HTTPConnection, 'connect', forbidden)
     assert run_offline(ROOT / DEMO_SAMPLE, tmp_path, 'synthetic', 'demo', plane='full', as_of=DEMO_AS_OF) == 0
-    results = [assess_run(tmp_path / 'synthetic-demo', ModelConfig(model_name='parked'),
-                          shadow_model_on_precheck=True, no_redaction=True)]
+    results = [assess_run(tmp_path / 'synthetic-demo')]
     fixtures = ROOT / 'tests/fixtures/scubagear-export'
     for index, name in enumerate(('mocktenant-provider-export.json', 'mocktenant-realformat-export.json')):
         source = fixtures / name
         for with_results in (False, True):
             results.append(assess_scubagear_export(source, tmp_path / f'export-{index}-{with_results}',
-                ModelConfig(model_name='parked'), no_redaction=True,
                 results_path=fixtures / 'mocktenant-scubaresults.json' if with_results else None))
     for result in results:
         assert result['endpoint_host'] == 'none' and result['model_name'] == 'rules-only' and 'serving' not in result
@@ -213,13 +231,12 @@ def test_no_model_or_network_is_reachable_on_demo_and_mocktenant_exports(tmp_pat
 @pytest.mark.parametrize('version', ['2026-10-27', '2026-10-27.1', '2026-10-28', '2026-10-29'])
 def test_historical_model_records_keep_their_recorded_schema(tmp_path, version, recorded):
     # Legacy files are unchanged: the rules-only envelope check applies to 2026-11-05 only.
-    from test_model_serving import client_with_responses, sample_case, sample_answer, envelope
-    from auditex.rule_assessment import _comparison, _totals
+    from test_model_serving import sample_case, sample_answer
+    from auditex.rule_assessment import _totals
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"historical-synthetic"}')
     case = sample_case()
     result = assess_run(tmp_path, policies=[case['policy_id']])
-    row = client_with_responses([envelope(sample_answer())]).assess(case)
-    row['comparison'] = _comparison(row['policy_id'], row, {})
+    row = historical_row(case, sample_answer())
     result.update(schema_version=version, policies=[row], totals=_totals([row]),
                   endpoint_host=recorded[0], model_name=recorded[1])
     filename = 'model_assessment-' + version + '.schema.json'
@@ -240,3 +257,71 @@ def test_historical_model_records_keep_their_recorded_schema(tmp_path, version, 
     trim(result, schema)
     validate_assessment(result)
     jsonschema.validate(result, schema)
+
+
+def _demo_run(tmp_path):
+    from auditex.demo import DEMO_SAMPLE, DEMO_AS_OF
+    assert run_offline(ROOT / DEMO_SAMPLE, tmp_path, 'synthetic', 'demo', plane='full', as_of=DEMO_AS_OF) == 0
+    return tmp_path / 'synthetic-demo'
+
+
+def test_assess_command_writes_the_rule_assessment_rows(tmp_path, capsys):
+    run = _demo_run(tmp_path)
+    assert main(['assess', str(run)]) == 0
+    written = json.loads((run / 'model_assessment.json').read_text())
+    assert json.loads(capsys.readouterr().out)['policies'] == written['policies']
+    direct = assess_run(run)
+    assert written['policies'] == direct['policies'] and written['totals'] == direct['totals']
+    validate_assessment(written)
+
+
+def test_assess_command_passes_policies_and_projection_flags(tmp_path, monkeypatch):
+    seen = []
+    def fake(run_dir, **kwargs):
+        seen.append((run_dir, kwargs))
+        return {'policies': []}
+    monkeypatch.setattr(rule_assessment, 'assess_run', fake)
+    (tmp_path / 'run-manifest.json').write_text('{"run_id":"synthetic"}')
+    assert main(['assess', str(tmp_path), '--policies', 'MS.AAD.1.1v1, MS.EXO.4.1v1',
+                 '--projection-max-items', '7', '--projection-max-chars', '800',
+                 '--projection-scan-max-rows', '11', '--projection-scan-max-bytes', '1234',
+                 '--projection-scan-max-chunks', '5']) == 0
+    assert main(['assess', str(tmp_path)]) == 0
+    assert seen == [
+        (str(tmp_path), {'policies': ['MS.AAD.1.1v1', 'MS.EXO.4.1v1'], 'projection_max_items': 7,
+                         'projection_max_chars': 800, 'projection_scan_max_rows': 11,
+                         'projection_scan_max_bytes': 1234, 'projection_scan_max_chunks': 5}),
+        (str(tmp_path), {'policies': None, 'projection_max_items': 40, 'projection_max_chars': 12000,
+                         'projection_scan_max_rows': 250000, 'projection_scan_max_bytes': 268435456,
+                         'projection_scan_max_chunks': 10000}),
+    ]
+
+
+def test_assess_failure_is_reported_on_stderr_with_exit_2(tmp_path, capsys):
+    (tmp_path / 'run-manifest.json').write_text('{"run_id":"synthetic"}')
+    assert main(['assess', str(tmp_path), '--policies', 'MS.NOT.A.POLICY']) == 2
+    captured = capsys.readouterr()
+    assert captured.err.startswith('Assessment failed: ') and captured.out == ''
+    assert not (tmp_path / 'model_assessment.json').exists()
+    assert main(['assess', str(tmp_path / 'missing-run')]) == 2
+    assert capsys.readouterr().out == ''
+
+
+def test_assess_and_assessment_dispatch_separately(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(rule_assessment, 'assess_run',
+                        lambda *a, **k: pytest.fail('auditex assessment reached the rule assessment'))
+    assert main(['assessment', 'sources']) == 0
+    assert 'scubagear' in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exit_info:
+        main(['assess', 'sources', 'extra'])
+    assert exit_info.value.code == 2
+
+
+@pytest.mark.parametrize('argv', [['model'], ['model', 'assess', '{run}'], ['model', 'sources']])
+def test_model_command_is_unknown(tmp_path, argv, capsys):
+    (tmp_path / 'run-manifest.json').write_text('{"run_id":"synthetic"}')
+    with pytest.raises(SystemExit) as exit_info:
+        main([arg.format(run=tmp_path) for arg in argv])
+    assert exit_info.value.code == 2
+    assert 'invalid arguments' in capsys.readouterr().err
+    assert not (tmp_path / 'model_assessment.json').exists()

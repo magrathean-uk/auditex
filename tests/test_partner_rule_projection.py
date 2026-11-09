@@ -243,16 +243,16 @@ def test_private_values_never_reach_model_views_or_public_outputs(tmp_path, monk
         assert json.dumps(a.rule_sections, sort_keys=True) == json.dumps(b.rule_sections, sort_keys=True)
 
 
-def test_assessment_and_dry_run_outputs_keep_partner_domains_private(tmp_path, monkeypatch, capsys, caplog):
-    from auditex.model_serving import ModelClient, assess_run
+def test_assessment_and_case_outputs_keep_partner_domains_private(tmp_path, monkeypatch, capsys, caplog):
+    from auditex.rule_assessment import assess_run
+    from test_model_serving import case_texts
     from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")
     root = bundle(tmp_path, users=())
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
     result = assess_run(root, policies=[SS23])
     validate_assessment(result)
-    dry = assess_run(root, policies=[SS23], dry_run=True)
+    dry = case_texts(root, [SS23])
     captured = capsys.readouterr()
     text = json.dumps([result, dry]) + captured.out + captured.err + caplog.text
     assert not any(value in text for value in DOMAINS)
@@ -317,7 +317,7 @@ CASES = [
 @pytest.mark.parametrize("changes,cell,verdict", CASES)
 def test_verified_partner_domains_without_sensitive_users_decide_ss23(tmp_path, monkeypatch, changes, cell, verdict):
     """Fail-first on the base: with no PartnerDomains consumer every case is section_not_collected."""
-    from auditex.model_serving import ModelClient, assess_run
+    from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import project_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
 
@@ -327,7 +327,6 @@ def test_verified_partner_domains_without_sensitive_users_decide_ss23(tmp_path, 
     assert rule_view(projection, SS21) == NOT_COLLECTED
     record = direct_record(projection)
     assert (record["cell"], record["verdict"]) == (cell, verdict)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
     result = assess_run(root, policies=[SS23])
     validate_assessment(result)
     assert result["policies"][0]["rule_precheck"]["cell"] == cell
@@ -344,7 +343,7 @@ def test_ss23_decides_independently_beside_sensitive_users(tmp_path):
 
 
 def test_absent_partner_domains_keep_ss23_not_collected(tmp_path, monkeypatch):
-    from auditex.model_serving import ModelClient, assess_run
+    from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import project_run
 
     for name, users in (("none", ()), ("users", USERS)):
@@ -352,14 +351,13 @@ def test_absent_partner_domains_keep_ss23_not_collected(tmp_path, monkeypatch):
         root = bundle(tmp_path / name, users=users, domains=())
         write_policy(root)
         assert rule_view(project_run(root), SS23) == NOT_COLLECTED
-        monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
         result = assess_run(root, policies=[SS23])
         assert result["policies"][0]["rule_precheck"]["cell"] == "section_not_collected"
 
 
 def test_resume_and_offline_replay_reach_the_same_ss23_cells(tmp_path):
     import shutil
-    from auditex.model_serving import assess_run
+    from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import project_run
     from azure_tenant_audit.output import AuditWriter
 
@@ -387,7 +385,8 @@ def test_resume_and_offline_replay_reach_the_same_ss23_cells(tmp_path):
 def test_ss23_end_to_end_keeps_model_shape_and_canaries_private(tmp_path, monkeypatch, capsys, caplog):
     import json as _json
     from auditex import scuba_projection as module
-    from auditex.model_serving import ModelClient, assess_run
+    from test_model_serving import case_texts
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")
@@ -398,7 +397,6 @@ def test_ss23_end_to_end_keeps_model_shape_and_canaries_private(tmp_path, monkey
     for root in (with_inputs, without):
         # Collected domains may remain public; these differ from the private operator canaries.
         write_policy(root, TargetedDomainsToProtect=["collected-only.example.invalid"])
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
     a, b = module.project_run(with_inputs), module.project_run(without)
     # Model-facing case material is byte-identical; only the in-memory rule view differs.
     for part in ("views", "rule_sections"):
@@ -409,7 +407,7 @@ def test_ss23_end_to_end_keeps_model_shape_and_canaries_private(tmp_path, monkey
     assert module.policy_section(a, SS23, "scuba_config") == NOT_COLLECTED
     result = assess_run(with_inputs, policies=[SS23])
     validate_assessment(result)
-    dry = assess_run(with_inputs, policies=[SS23], dry_run=True)
+    dry = case_texts(with_inputs, [SS23])
     captured = capsys.readouterr()
     # Only the operator input holds these canaries; collected domains remain a separate control.
     assert not any(value in captured.out + captured.err + caplog.text for value in DOMAINS)

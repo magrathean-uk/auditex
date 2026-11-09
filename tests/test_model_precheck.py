@@ -4,16 +4,14 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
-import runpy
 
 import jsonschema
 import pytest
 
 from auditex.cli import main
 from support import RunBundleBuilder, make_contract_valid
-from auditex.model_precheck import evaluate_precheck
 from auditex.rule_assessment import precheck_case
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, messages_for
+from auditex.rule_assessment import assess_run
 from auditex.rule_assessment import build_case, canonical
 from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
@@ -54,30 +52,6 @@ def test_missing_or_ambiguous_gate_is_unknown(observed):
                                      "required_evidence_section_not_collected:SPO_tenant.SharingCapability"]
 
 
-def test_value_rules_are_off_in_offline_scoring_by_default():
-    from hashlib import sha256
-
-    path = ROOT / "tests/fixtures/model-serving-cases.jsonl"
-    report = evaluate_precheck(str(path))
-    digest = sha256(json.dumps(report, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    # Pinned from HEAD before value-rule support was added.
-    assert digest == "0cfe7d1d50db6532fb51a7a199ec38eb996c7fb9a7358dcf85142360a2cd24eb"
-    rows = []
-    for line in path.read_text().splitlines():
-        item = json.loads(line)
-        case = json.loads(next(message["content"] for message in item["messages"] if message["role"] == "user"))
-        rows.append(precheck_case(case))
-    digest = sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    assert digest == "95cb9b4f84ceff132cc7a875d8c192bf4997016a939ee64141c1fd628c0e8738"
-
-    case = build_case("MS.POWERBI.1.1v1", {"powerbi_license_found": False,
-        "powerbi_access_denied_reason": "", "powerbi_tenant_settings": []}, "unused")
-    default = precheck_case(case)
-    enabled = precheck_case(case, value_rules=True)
-    assert default is None or default["rule_precheck"]["class"] != "value_rule"
-    assert enabled["rule_precheck"]["class"] == "value_rule"
-
-
 def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path, monkeypatch):
     from azure_tenant_audit import value_rules
     from azure_tenant_audit.value_rules import catalogue as value_catalogue
@@ -102,8 +76,7 @@ def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path,
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
     from test_model_serving import fake_projection
     monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kw: fake_projection(root, {}))
-    monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy_id])
+    result = assess_run(tmp_path, policies=[policy_id])
     served = result["policies"][0]
     assert served["reason"] == "rule_precheck" and served["rule_precheck"]["cell"] is None
     assert served["rule_precheck"]["reason_code"] == "rule_evaluation_failed"
@@ -339,30 +312,6 @@ def test_absent_field_rows_are_unknown_in_every_frozen_v10_row(name):
     assert fired == (5 if name == "test.jsonl" else 67)
 
 
-def test_evaluator_scores_absent_field_only_on_request(tmp_path):
-    case = benchmark_row({"SPO_tenant": [{"SharingCapability": 2}]})
-    case["messages"][1]["content"] = canonical({**json.loads(case["messages"][1]["content"]), "policy_id": PBI})
-    path = tmp_path / "test.jsonl"
-    rows = []
-    for observed in ([], [{"settingName": "EimInformationProtectionEdit", "enabled": True}]):
-        built = build_case(PBI, {**PBI_SECTIONS, "powerbi_tenant_settings": observed}, "unused")
-        record = precheck_case(built, absent_fields=True, named_limitations=False) or {
-            "claims": [{"id": "requirement_met", "status": "confirmed", "value": True, "evidence_ids": ["e0", "e1", "e2", "e3"]},
-                       {"id": "policy_criticality", "status": "confirmed", "value": "Should", "evidence_ids": ["e0"]}],
-            "limitations": [], "recommendations": []}
-        response = {key: record[key] for key in ("claims", "limitations", "recommendations")}
-        rows.append({"id": built["case_id"], "family": "precheck-test", "split": "test",
-                     "provenance": {"source": "synthetic:precheck-test", "synthetic": True, "review_status": "approved",
-                                    "reviewer": "unit-test"},
-                     "messages": [*messages_for(built), {"role": "assistant", "content": canonical(response)}],
-                     "expected": {**response, "allowed_evidence_ids": ["e0", "e1", "e2", "e3"]}})
-    path.write_text("".join(canonical(row) + "\n" for row in rows))
-    assert evaluate_precheck(str(path))["rule_answered"] == 0
-    report = evaluate_precheck(str(path), absent_fields=True)
-    assert report["classes"]["absent_field"] == {"rule_answered": 1, "correct": 1}
-    assert report["left_to_model"] == 1
-
-
 def run_assessment(tmp_path, monkeypatch, projection, **kwargs):
     # Exercise the legacy precheck contract explicitly; no environment flag changes production routing.
     from auditex.rule_assessment import precheck_case
@@ -371,13 +320,12 @@ def run_assessment(tmp_path, monkeypatch, projection, **kwargs):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
     from test_model_serving import fake_projection
     monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kw: fake_projection(root, projection))
-    return assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[SP], **kwargs)
+    return assess_run(tmp_path, policies=[SP], **kwargs)
 
 
 @pytest.mark.parametrize("projection", [{"SPO_tenant": [{"SharingCapability": 0}]},
                                        {"SPO_tenant": NOT_COLLECTED}, {"SPO_tenant": [{}]}, {"unrelated": 1}])
 def test_rule_rows_are_valid_and_never_call_model(tmp_path, monkeypatch, projection):
-    monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
     result = run_assessment(tmp_path, monkeypatch, projection)
     row = result["policies"][0]
     assert row["reason"] == "rule_precheck" and row["attempts"] == 0
@@ -387,25 +335,6 @@ def test_rule_rows_are_valid_and_never_call_model(tmp_path, monkeypatch, project
     assert result["totals"]["answered"] + result["totals"]["unknown"] == 1
     validate_assessment(result)
     jsonschema.validate(result, json.loads((ROOT / "schemas/model_assessment.schema.json").read_text()))
-
-
-def test_legacy_shadow_option_never_calls_model(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(ModelClient, "__init__", lambda *a: pytest.fail("no model client"))
-    result = run_assessment(tmp_path, monkeypatch, {"SPO_tenant": [{"SharingCapability": 0}]},
-                            shadow_model_on_precheck=True)
-    assert "model_shadow" not in result["policies"][0]
-    assert len(capsys.readouterr().err.splitlines()) == 1
-
-
-def test_shadow_flag_reaches_serving(tmp_path, monkeypatch, capsys):
-    seen = {}
-    def assess(*args, **kwargs):
-        seen.update(kwargs)
-        return {}
-    monkeypatch.setattr("auditex.model_serving.assess_run", assess)
-    run = make_contract_valid(RunBundleBuilder(tmp_path, "run").manifest(tenant_name="synthetic").build())
-    assert main(["model", "assess", str(run), "--model", "test", "--shadow-model-on-precheck"]) == 0
-    assert seen["shadow_model_on_precheck"] is True  # accepted for compatibility; assess_run ignores it
 
 
 @pytest.mark.parametrize("mutation", ["attempts", "prompt", "response", "reason", "class", "value", "section", "field",
@@ -427,115 +356,6 @@ def test_rule_contract_rejects_tampering(tmp_path, monkeypatch, mutation):
                                           "field": "invented", "rule_id": "invented"}[mutation]
     with pytest.raises(ValueError):
         validate_assessment(result)
-
-
-def test_generator_uses_shared_gate_instead_of_conflicting_learned_gate():
-    miner = runpy.run_path(str(ROOT / "scripts/build-oracle-cases.py"))
-    assert miner["APPLICABILITY_NOTES"] == rule_catalogue()["applicability_notes"]
-    rows = [({"SharingCapability": value}, value) for value in (0, 2)]
-    evaluations = [({"input": {"SPO_tenant": [observed]}, "name": str(value), "sha256": "a" * 64}, [{"PolicyId": SP, "Criticality": "Shall",
-        "RequirementMet": False, "ReportDetails": "SPO_tenant or SharingCapability are missing from input JSON"}])
-        for observed, value in rows]
-    cases, _ = miner["build_cases"]("sharepoint", evaluations, {SP: ["SPO_tenant"]}, {}, {"SPO_tenant": []},
-        commit="abcdef123456", opa_version="test", config_name="test.rego", not_collected_every=1000,
-        gates={SP: {("SPO_tenant", 0, "SharingCapability"): {"2"}}})
-    assert [row["provenance"]["oracle_outcome"] for row in cases] == ["not_applicable", "fail_closed_missing_input"]
-    assert "doc-sourced" in policy_rule("MS.SHAREPOINT.1.3v1")["source"]
-
-
-def test_generator_rejects_oracle_gate_drift_and_abstains_on_unusable_gate():
-    miner = runpy.run_path(str(ROOT / "scripts/build-oracle-cases.py"))
-    def generate(value):
-        return miner["build_cases"]("sharepoint", [({"name": "test", "sha256": "a" * 64,
-            "input": {"SPO_tenant": [{"SharingCapability": value}]}}, [
-                {"PolicyId": SP, "Criticality": "Shall", "RequirementMet": True,
-                 "ReportDetails": "This policy is only applicable if sharing is Anyone."}])],
-            {SP: ["SPO_tenant"]}, {}, {}, commit="abcdef123456", opa_version="test",
-            config_name="test.rego", not_collected_every=1000)
-    with pytest.raises(ValueError, match="disagrees with shipped pre-check"):
-        generate(2)
-    cases, _ = generate(4)
-    assert cases[0]["expected"]["claims"][0]["status"] == "unknown"
-
-
-@pytest.mark.parametrize("report", ["federation_configuration is missing from input JSON", "Requirement met"])
-def test_generator_and_serving_agree_when_closed_gate_has_removed_dependency(report):
-    miner = runpy.run_path(str(ROOT / "scripts/build-oracle-cases.py"))
-    pid = "MS.TEAMS.2.3v2"
-    projection = {"scuba_config": {"M365Environment": "gcc"}}
-    cases, _ = miner["build_cases"]("teams", [({"name": "test", "sha256": "a" * 64, "input": projection}, [
-        {"PolicyId": pid, "Criticality": "Should", "RequirementMet": False,
-         "ReportDetails": report}])],
-        {pid: ["federation_configuration", "scuba_config"]}, {}, {**projection, "federation_configuration": {}},
-        commit="abcdef123456", opa_version="test", config_name="test.rego", not_collected_every=1000)
-    case = json.loads(cases[0]["messages"][1]["content"])
-    record = precheck_case(case, named_limitations=False)
-    assert record["claims"] == cases[0]["expected"]["claims"]
-    assert (record["claims"][0]["status"], record["claims"][0]["value"]) == ("inferred", True)
-    assert record["limitations"] == cases[0]["expected"]["limitations"] == ["policy_not_applicable"]
-    assert record["recommendations"] == cases[0]["expected"]["recommendations"] == []
-
-
-@pytest.mark.parametrize("licensed,denied,refs", [
-    (False, None, ["e0", "e2", "e3"]),
-    (True, "HTTP 403", ["e0", "e1", "e3"]),
-])
-def test_generator_and_serving_cite_all_powerbi_unavailable_input_blockers(licensed, denied, refs):
-    miner = runpy.run_path(str(ROOT / "scripts/build-oracle-cases.py"))
-    pid = "MS.POWERBI.7.1v1"
-    sections = ["powerbi_access_denied_reason", "powerbi_license_found", "powerbi_tenant_settings"]
-    projection = {"powerbi_access_denied_reason": denied, "powerbi_license_found": licensed}
-    base = {**projection, "powerbi_tenant_settings": [{"settingName": "EnableSensitivityLabels", "enabled": True}]}
-    details = ("Power BI license was not found. Unable to evaluate tenant setting." if not licensed else
-               "Unable to evaluate tenant setting. HTTP 403")
-    cases, _ = miner["build_cases"]("powerbi", [({"name": "test", "sha256": "a" * 64, "input": projection}, [
-        {"PolicyId": pid, "Criticality": "Should", "RequirementMet": False, "ReportDetails": details}])],
-        {pid: sections}, {}, base, commit="abcdef123456", opa_version="test",
-        config_name="test.rego", not_collected_every=1000)
-    case = json.loads(cases[0]["messages"][1]["content"])
-    expected = cases[0]["expected"]
-    assert expected["claims"][0] == {"id": "requirement_met", "status": "unknown", "value": None,
-                                      "evidence_ids": refs}
-    record = precheck_case(case, named_limitations=False)
-    assert {key: record[key] for key in ("claims", "limitations", "recommendations")} == {
-        key: expected[key] for key in ("claims", "limitations", "recommendations")}
-    assert precheck_case(case)["limitations"] == ["required_evidence_section_not_collected", *(
-        "required_evidence_section_not_collected:" + sections[int(ref[1:]) - 1] for ref in refs[1:])]
-
-
-def benchmark_row(projection):
-    case = build_case(SP, projection, "unused")
-    record = precheck_case(case, named_limitations=False)
-    response = ({key: record[key] for key in ("claims", "limitations", "recommendations")} if record else {
-        "claims": [{"id": "requirement_met", "status": "confirmed", "value": True, "evidence_ids": ["e0", "e1"]},
-                   {"id": "policy_criticality", "status": "confirmed", "value": "Shall", "evidence_ids": ["e0"]}],
-        "limitations": [], "recommendations": []})
-    return {"id": case["case_id"], "family": "precheck-test", "split": "test",
-            "provenance": {"source": "synthetic:precheck-test", "synthetic": True, "review_status": "approved",
-                           "reviewer": "unit-test"},
-            "messages": [*messages_for(case), {"role": "assistant", "content": canonical(response)}],
-            "expected": {**response, "allowed_evidence_ids": ["e0", "e1"]}}
-
-
-def test_evaluator_combines_rules_with_recorded_model_and_counts_missing(tmp_path):
-    cases = [benchmark_row({"SPO_tenant": [{"SharingCapability": 0}]}), benchmark_row({}),
-             benchmark_row({"SPO_tenant": [{"SharingCapability": 2}]})]
-    path = tmp_path / "test.jsonl"
-    path.write_text("".join(canonical(row) + "\n" for row in cases))
-    report = evaluate_precheck(str(path))
-    assert report["rule_answered"] == report["rule_correct"] == 2
-    assert report["left_to_model"] == 1
-    responses = tmp_path / "responses.jsonl"
-    responses.write_text("".join(canonical({"case_id": row["id"], "model_id": "test-model",
-        "response": {key: row["expected"][key] for key in ("claims", "limitations", "recommendations")}
-                    if i == 2 else "invalid unused model answer"}) + "\n" for i, row in enumerate(cases)))
-    report = evaluate_precheck(str(path), str(responses))
-    assert report["product_scores"][0] == {"model_id": "test-model", "correct": 3, "out_of": 3,
-        "model_correct_on_remaining": 1, "missing_model_on_remaining": 0}
-    responses.write_text(canonical({"case_id": cases[0]["id"], "model_id": "test-model", "response": "broken"}) + "\n")
-    report = evaluate_precheck(str(path), str(responses))
-    assert report["product_scores"][0]["correct"] == 2
-    assert report["product_scores"][0]["missing_model_on_remaining"] == 1
 
 
 # --- empty required list (`empty_required_list`) ------------------------------------------------------------------------
@@ -724,24 +544,6 @@ def test_empty_list_rows_are_not_met_in_every_frozen_v10_row(name):
     assert fired == (0 if name == "test.jsonl" else 6)
 
 
-def test_evaluator_scores_empty_list_only_on_request(tmp_path):
-    pid = "MS.AAD.1.1v1"
-    built = build_case(pid, empty_ca(pid), "unused")
-    response = {key: value for key, value in precheck_case(built, empty_lists=True, named_limitations=False).items()
-                if key in ("claims", "limitations", "recommendations")}
-    row = {"id": built["case_id"], "family": "precheck-test", "split": "test",
-           "provenance": {"source": "synthetic:precheck-test", "synthetic": True, "review_status": "approved",
-                          "reviewer": "unit-test"},
-           "messages": [*messages_for(built), {"role": "assistant", "content": canonical(response)}],
-           "expected": {**response, "allowed_evidence_ids": ["e0", "e1", "e2"]}}
-    path = tmp_path / "test.jsonl"
-    path.write_text(canonical(row) + "\n")
-    assert evaluate_precheck(str(path))["rule_answered"] == 0
-    report = evaluate_precheck(str(path), empty_lists=True)
-    assert report["classes"]["empty_required_list"] == {"rule_answered": 1, "correct": 1}
-    assert report["empty_lists"] is True
-
-
 def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
     from test_model_serving import fake_projection
     pid = "MS.AAD.1.1v1"
@@ -757,8 +559,7 @@ def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
     from auditex.rule_assessment import precheck_case
     monkeypatch.setattr("auditex.rule_assessment.precheck_case", lambda case, **kw: precheck_case(
         case, **{**kw, "value_rules": False}))
-    monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[pid])
+    result = assess_run(tmp_path, policies=[pid])
     row = result["policies"][0]
     assert row["reason"] == "rule_precheck" and row["rule_precheck"]["class"] == "empty_required_list"
     assert (row["claims"][0]["status"], row["claims"][0]["value"]) == ("confirmed", False)
@@ -778,61 +579,6 @@ def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
     tampered["policies"][0]["comparison"]["model_status"] = "pass"
     with pytest.raises(ValueError):
         validate_assessment(tampered)
-
-
-SCUBAGEAR_PIN = "2446ad723b7f55031cc02c8aca244d731d468cba"   # the ScubaGear revision the oracle packs were mined from
-OPA_PIN = "1.20.2"                                            # the OPA release the packs were evaluated with
-
-
-@pytest.fixture(scope="module")
-def pinned_rego():
-    """The local oracle, only at the pinned revisions: another ScubaGear or OPA would test a different oracle."""
-    import subprocess
-    opa_value, scuba_value = os.environ.get("AUDITEX_TEST_OPA"), os.environ.get("AUDITEX_TEST_SCUBAGEAR")
-    if not opa_value or not scuba_value:
-        pytest.skip("export AUDITEX_TEST_OPA and AUDITEX_TEST_SCUBAGEAR for local oracle evaluation")
-    revision = subprocess.run(["git", "-C", scuba_value, "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip()
-    assert revision == SCUBAGEAR_PIN, f"ScubaGear checkout at {revision or 'unknown'}, the oracle packs were mined from {SCUBAGEAR_PIN}"
-    version = subprocess.run([opa_value, "version"], capture_output=True, text=True, check=False).stdout
-    assert f"Version: {OPA_PIN}" in version, f"OPA is not {OPA_PIN}: {version.splitlines()[0] if version else 'no output'}"
-    return Path(opa_value), Path(scuba_value)
-
-
-def test_every_list_rule_is_not_met_in_the_pinned_rego(pinned_rego, tmp_path):
-    """ScubaGear's Rego with an empty Conditional Access list, across environment, licence and Authenticator variants:
-    every registered policy is not met unless its `unless` condition holds; MS.AAD.3.3v2 can be met."""
-    import itertools
-    opa, scuba = pinned_rego
-    miner = runpy.run_path(str(ROOT / "scripts/build-oracle-cases.py"))
-    meta = miner["product_meta"](scuba, "AAD")
-    base = miner["load_base"](opa, meta)[0]
-    rules = {rule["policy_id"]: rule for rule in rule_catalogue()["list_rules"]}
-    met_33 = False
-    for index, (env, licensed, auth) in enumerate(itertools.product(
-            ["commercial", "gcc", "gcchigh", "dod", None], [True, False], ["enabled", "disabled"])):
-        variant = deepcopy(base)
-        variant["conditional_access_policies"] = []
-        if env is None:
-            variant.pop("scuba_config", None)
-        else:
-            variant["scuba_config"]["M365Environment"] = env
-        if not licensed:
-            variant["service_plans"] = []
-        for method in variant["authentication_method"]:
-            for setting in method.get("authentication_method_feature_settings", []):
-                if setting.get("Id") == "MicrosoftAuthenticator":
-                    setting["State"] = auth
-        path = tmp_path / f"aad-{index}.json"
-        path.write_text(json.dumps(variant))
-        results = miner["opa_json"](opa, ["-d", str(meta["config"]), "-d", str(scuba / "Rego/Utils"), "-i", str(path),
-                                          f"data.{meta['package']}.tests"])
-        for pid, rule in rules.items():
-            if any(env in c["values"] for c in rule["unless"]):
-                continue
-            target = [r for r in results if r.get("PolicyId") == pid and miner["is_verdict"](r)]
-            assert len(target) == 1 and target[0]["RequirementMet"] is False, (pid, env, licensed, auth)
-        met_33 |= any(r.get("PolicyId") == "MS.AAD.3.3v2" and r["RequirementMet"] is True for r in results)
-    assert met_33
 
 
 @pytest.mark.parametrize("rule_projection", [None, {}])

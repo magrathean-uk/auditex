@@ -521,17 +521,15 @@ def test_ca_variant_changes_only_rules(run, monkeypatch, extra):
 ], ids=["conditional_access_policies", "SPO_tenant"])
 def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
         run, monkeypatch, capsys, caplog, section, policy, cell, reason_code):
-    import auditex.model_serving as serving
     import auditex.rule_assessment as rule_assessment
+    from test_model_serving import case_texts
 
     class FixedDatetime(datetime):
         @classmethod
         def now(cls, tz=None):
             return datetime(2026, 11, 5, 0, 0, tzinfo=timezone.utc)
 
-    monkeypatch.setattr(serving, "datetime", FixedDatetime)
     monkeypatch.setattr(rule_assessment, "datetime", FixedDatetime)
-    monkeypatch.setattr(serving.ModelClient, "assess", lambda *a, **k: pytest.fail("unexpected model call"))
     caplog.set_level("DEBUG")
     # A recorded empty emergency-access list makes the CA config usable; an
     # unrecorded list would mask the variant's answer as section_not_collected.
@@ -555,13 +553,11 @@ def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
 
     def outputs(result):
         public = public_projection_bytes(result)
-        # Exercise the real prompt writer for both affected policy families.
-        serving.assess_run(run, dry_run=True,
-                           policies=["MS.AAD.1.1v1", "MS.SHAREPOINT.1.1v1"])
-        serving.assess_run(run,
-                           policies=["MS.AAD.1.1v1", "MS.SHAREPOINT.1.1v1"])
-        public.update({name: (run / name).read_bytes() for name in (
-            "model_assessment_prompts.jsonl", "model_assessment.json")})
+        # The case bytes the retired prompt writer carried, for both affected policy families.
+        policies = ["MS.AAD.1.1v1", "MS.SHAREPOINT.1.1v1"]
+        public["case_bytes"] = "\n".join(case_texts(run, policies)).encode()
+        rule_assessment.assess_run(run, policies=policies)
+        public["model_assessment.json"] = (run / "model_assessment.json").read_bytes()
         return public
 
     with_variant = outputs(enabled)

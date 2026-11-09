@@ -1,7 +1,7 @@
-"""Composed model-boundary regressions: the precheck evaluator loader shape and direct MemoryError propagation.
+"""Composed assessment-boundary regressions: direct MemoryError propagation.
 
-Fail-first against 93ccb51: evaluate_precheck iterated the (cases, digest) tuple, and three explainer boundaries
-suppressed MemoryError. Every dataset here is constructed in tmp_path (permitted test split); no held-out data.
+Fail-first against 93ccb51: three explainer boundaries suppressed MemoryError. Every dataset here is constructed in
+tmp_path (permitted test split); no held-out data.
 """
 from __future__ import annotations
 
@@ -12,59 +12,11 @@ import os
 import pytest
 
 from auditex import rule_assessment
-from auditex.model_precheck import evaluate_precheck
-from auditex.model_serving import assess_run
+from auditex.rule_assessment import assess_run
 from auditex.reporting import load_report_bundle
 from azure_tenant_audit.run_files import UnsafeRunFileError
 
 from test_explainer_wire import PBI, assessment, make_report_run  # noqa: F401  (assessment is a fixture)
-from test_model_precheck import benchmark_row
-from auditex.rule_assessment import canonical
-
-
-def _cases(tmp_path, projections):
-    path = tmp_path / "cases.jsonl"
-    path.write_text("".join(canonical(benchmark_row(p)) + "\n" for p in projections))
-    return path
-
-
-# --- finding 1: evaluate_precheck unpacks the loader's (cases, digest) -------------------------------------------------
-
-def test_precheck_scores_without_responses(tmp_path):
-    path = _cases(tmp_path, [{"SPO_tenant": [{"SharingCapability": 0}]}, {"SPO_tenant": [{"SharingCapability": 2}]}])
-    report = evaluate_precheck(str(path))
-    assert report["rule_answered"] == report["rule_correct"] == 1
-    assert report["left_to_model"] == 1
-
-
-def test_precheck_scores_with_responses_and_single_case(tmp_path):
-    rows = [benchmark_row({"SPO_tenant": [{"SharingCapability": 2}]})]
-    path = tmp_path / "one.jsonl"
-    path.write_text(canonical(rows[0]) + "\n")
-    responses = tmp_path / "responses.jsonl"
-    responses.write_text(canonical({"case_id": rows[0]["id"], "model_id": "m", "response": {
-        key: rows[0]["expected"][key] for key in ("claims", "limitations", "recommendations")}}) + "\n")
-    report = evaluate_precheck(str(path), str(responses))
-    assert report["product_scores"][0]["model_id"] == "m"
-    assert report["product_scores"][0]["correct"] == 1
-
-
-@pytest.mark.parametrize("content", ["", "\n", "{not json}\n", '{"id": 1}\n'])
-def test_precheck_malformed_or_empty_cases_fail_sanitised(tmp_path, content):
-    path = tmp_path / "bad.jsonl"
-    path.write_text(content)
-    with pytest.raises((ValueError, UnsafeRunFileError)) as caught:
-        evaluate_precheck(str(path))
-    assert not isinstance(caught.value, TypeError)
-    assert str(tmp_path) not in str(caught.value)
-
-
-def test_precheck_private_alias_still_refused(tmp_path):
-    real = _cases(tmp_path, [{"SPO_tenant": [{"SharingCapability": 0}]}])
-    alias = tmp_path / "alias.jsonl"
-    os.symlink(real, alias)
-    with pytest.raises(UnsafeRunFileError):
-        evaluate_precheck(str(alias))
 
 
 # --- finding 2: direct MemoryError propagates; ordinary failures stay suppressed ------------------------------------------

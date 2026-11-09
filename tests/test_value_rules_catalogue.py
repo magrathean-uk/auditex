@@ -67,11 +67,11 @@ def test_fixture_origins_and_p9_correction_are_auditable():
 def test_each_cell_validates_as_a_modern_assessment(tmp_path, monkeypatch):
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from azure_tenant_audit.value_rules.record import as_pack_response
-    from auditex.model_serving import ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-stage5"}')
-    template = assess_run(tmp_path, ModelConfig(model_name="contract-probe"), policies=["MS.POWERBI.1.1v1"])
+    template = assess_run(tmp_path, policies=["MS.POWERBI.1.1v1"])
     seen = set()
     for vector in read_rows(FIXTURE):
         key = vector["policy"], vector["rule_cell"]

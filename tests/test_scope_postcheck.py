@@ -11,7 +11,7 @@ from unittest.mock import patch
 import jsonschema
 import pytest
 
-from auditex.model_serving import ModelClient, ModelConfig, assess_run
+from auditex.rule_assessment import assess_run
 from auditex.rule_assessment import policy_catalogue
 from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.scuba_scope import (
@@ -389,8 +389,7 @@ def write_raw(root, policies, *, manifest=None, **metadata):
 
 
 def assess_raw(root, monkeypatch, **kwargs):
-    monkeypatch.setattr(ModelClient, "_request", lambda *args: pytest.fail("No section is projected, so no model call"))
-    result = assess_run(root, ModelConfig(model_name="stub"), policies=["MS.AAD.3.2v2"], **kwargs)
+    result = assess_run(root, policies=["MS.AAD.3.2v2"], **kwargs)
     validate_assessment(result)
     jsonschema.validate(result, SCHEMA)
     return result
@@ -447,31 +446,21 @@ def test_raw_evidence_that_cannot_be_read_is_not_evaluated_with_a_reason(tmp_pat
     assert result["totals"]["scope_narrowed"] == 0
 
 
-@pytest.mark.parametrize("no_redaction", [False, True])
-def test_raw_names_mask_email_local_parts_even_with_the_ignored_no_redaction_option(tmp_path, monkeypatch,
-                                                                                     no_redaction):
-    # --no-redaction is a parked legacy option: it is ignored and can no longer unmask a local part.
+def test_raw_names_mask_email_local_parts(tmp_path, monkeypatch):
+    # Redaction is always on; no option can unmask a local part.
     write_raw(tmp_path, [policy("Office of person@example.invalid", builtin=["mfa"], Locations=NAMED)])
-    result = assess_raw(tmp_path, monkeypatch, no_redaction=no_redaction)
+    result = assess_raw(tmp_path, monkeypatch)
     assert result["scope_post_check"]["policies"][0]["name"] == "Office of ***@example.invalid"
 
 
-@pytest.mark.parametrize("no_redaction", [False, True])
-def test_raw_names_are_masked_before_they_are_cut_to_the_name_limit(tmp_path, monkeypatch, no_redaction):
+def test_raw_names_are_masked_before_they_are_cut_to_the_name_limit(tmp_path, monkeypatch):
     # A cut at 200 characters falls inside the domain: cutting first would leave "person@exam" unmasked.
     name = "x" * 190 + " person@example.invalid"
     write_raw(tmp_path, [policy(name, builtin=["mfa"], Locations=NAMED)])
-    listed = assess_raw(tmp_path, monkeypatch, no_redaction=no_redaction)["scope_post_check"]["policies"][0]["name"]
+    listed = assess_raw(tmp_path, monkeypatch)["scope_post_check"]["policies"][0]["name"]
     assert len(listed) == 200
     assert listed == ("x" * 190 + " ***@example.invalid")[:200]
-    # Masking holds with the ignored --no-redaction option too.
     assert "person" not in listed
-
-
-def test_dry_run_reads_no_scope_evidence(tmp_path, monkeypatch):
-    write_raw(tmp_path, [policy("Office only", builtin=["mfa"], Locations=NAMED)])
-    monkeypatch.setattr("auditex.rule_assessment.collect_scope_evidence", lambda *a, **k: pytest.fail("dry run reads no scope"))
-    assert assess_run(tmp_path, ModelConfig(), dry_run=True, policies=["MS.AAD.3.2v2"])["dry_run"] is True
 
 
 @pytest.mark.parametrize("state", ["disabled", "enabledForReportingButNotEnforced"])

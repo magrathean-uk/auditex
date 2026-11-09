@@ -16,7 +16,7 @@ from .rules import list_rule_inventory, list_rule_packs
 from .setup_guide import build_setup_guide, render_setup_guide_markdown
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.cli_guard import RunArgumentRefusal, guarded_cli, parse_guarded
-from azure_tenant_audit.guarded_io import guard_session, open_private_output, read_guarded_bytes
+from azure_tenant_audit.guarded_io import guard_session, open_private_output
 from azure_tenant_audit.diffing import diff_run_directories
 from azure_tenant_audit.output_redaction import (
     PROFILE_LOCAL, PROFILE_SHAREABLE, ContextIncompleteError, Snapshot, assert_snapshot_stable, context_for_run,
@@ -61,7 +61,7 @@ def _build_root_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("report", allow_abbrev=False, help="Preview or render reports from a run.")
     subparsers.add_parser("export", allow_abbrev=False, help="List and run exporters.")
     subparsers.add_parser("assessment", allow_abbrev=False, help="Import and compare local Microsoft assessment reports.")
-    subparsers.add_parser("model", allow_abbrev=False, help="Prepare model data, evaluate answers, and assess runs using a configured endpoint.")
+    subparsers.add_parser("assess", allow_abbrev=False, help="Write the rule-only SCuBA assessment for a finished run; rows without a rule are not assessed.")
     subparsers.add_parser("notify", allow_abbrev=False, help="Build or send post-run notifications.")
     subparsers.add_parser("rules", allow_abbrev=False, help="Inspect built-in rule packs.")
     subparsers.add_parser("auth", allow_abbrev=False, help="Inspect and manage local auth state.")
@@ -673,66 +673,30 @@ def gate_findings(
     )
 
 
-def _build_model_parser() -> argparse.ArgumentParser:
+def _build_assess_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(
         allow_abbrev=False,
-        prog="auditex model",
-        description="Prepare model-development materials and assess runs using deterministic rules.",
+        prog="auditex assess",
+        description="Write the rule-only SCuBA assessment for a finished run; rows without a rule are not assessed.",
     )
-    commands = parser.add_subparsers(dest="model_command", required=True)
-    commands.add_parser("sources", allow_abbrev=False, help="List pinned model and dataset reference metadata.")
-    assess = commands.add_parser("assess", allow_abbrev=False, help="Write a rule-only assessment; rows without a rule are not assessed. The model layer is parked.")
-    assess.add_argument("run_dir", help="Existing audit run directory.")
-    assess.add_argument("--policies", help="Comma-separated SCuBA policy IDs; defaults to the shipped policy set.")
-    assess.add_argument("--dry-run", action="store_true", help="Write development prompts locally; no model is called.")
-    assess.add_argument("--no-redaction", action="store_true", help=argparse.SUPPRESS)
-    assess.add_argument("--projection-max-items", type=int, default=40,
+    parser.add_argument("run_dir", help="Existing audit run directory.")
+    parser.add_argument("--policies", help="Comma-separated SCuBA policy IDs; defaults to the shipped policy set.")
+    parser.add_argument("--projection-max-items", type=int, default=40,
                         help="Projection budget: maximum items in each projected section, counted on the "
                              "projected object, not the source (default: 40).")
-    assess.add_argument("--projection-max-chars", type=int, default=12000,
+    parser.add_argument("--projection-max-chars", type=int, default=12000,
                         help="Projection budget: maximum canonical JSON characters in each projected section "
                              "(default: 12000).")
-    assess.add_argument("--projection-scan-max-rows", type=int, default=250000,
+    parser.add_argument("--projection-scan-max-rows", type=int, default=250000,
                         help="Scan bound: most rows examined in one source read; beyond it the section is "
                              "withheld as oversize/scan_bound (default: 250000).")
-    assess.add_argument("--projection-scan-max-bytes", type=int, default=268435456,
+    parser.add_argument("--projection-scan-max-bytes", type=int, default=268435456,
                         help="Scan bound: most bytes read for one source read (chunk lines, or a JSON file read "
                              "whole); beyond it the section is withheld as oversize/scan_bound (default: 268435456).")
-    assess.add_argument("--projection-scan-max-chunks", type=int, default=10000,
+    parser.add_argument("--projection-scan-max-chunks", type=int, default=10000,
                         help="Scan bound: most chunk files listed by one source read; beyond it the section is "
                              "withheld as oversize/scan_bound (default: 10000).")
-    assess.add_argument("--shadow-model-on-precheck", action="store_true",
-                        help=argparse.SUPPRESS)
-    doctor = commands.add_parser("doctor", allow_abbrev=False, help="Check the endpoint models and print configuration without the API key.")
-    for command in (assess, doctor):
-        command.add_argument("--endpoint", help=("OpenAI-compatible base URL (AUDITEX_MODEL_ENDPOINT)." if command is doctor else argparse.SUPPRESS))
-        command.add_argument("--model", help=("Served model name (AUDITEX_MODEL_NAME)." if command is doctor else argparse.SUPPRESS))
-    stage = commands.add_parser("stage", allow_abbrev=False, help="Deduplicate public conversations into an unreviewed corpus.")
-    stage.add_argument("--manifest", required=True, help="Pinned source manifest with training and evaluation paths.")
-    stage.add_argument("--output-dir", required=True, help="New or empty destination outside finalized audit runs.")
-    for name, help_text in (("evaluate", "Check recorded structured answers against reviewed cases."),
-                            ("combine", "Curate unanimous reviewed training candidates from recorded answers.")):
-        command = commands.add_parser(name, allow_abbrev=False, help=help_text)
-        command.add_argument("--cases", required=True, help="Auditex review cases JSONL.")
-        command.add_argument("--responses", required=True, action="append" if name == "combine" else "store",
-                             help="Recorded answers JSONL; repeat for combine.")
-        command.add_argument("--output", help="Write JSON to a new file outside finalized audit runs.")
-    prepare = commands.add_parser("prepare", allow_abbrev=False, help="Write a guarded single-base LoRA recipe and reviewed data exports.")
-    prepare.add_argument("--cases", required=True, action="append", help="Review cases JSONL; repeat to combine case files.")
-    prepare.add_argument("--output-dir", required=True, help="New or empty training-pack destination.")
-    prepare.add_argument("--base-model", default="Qwen/Qwen3.8-27B", help="One Hugging Face model repository.")
-    prepare.add_argument("--revision", help="Immutable 40-character base-model commit SHA.")
-    prepare.add_argument("--max-steps", type=int, default=100, help="Pilot optimizer step limit for the generated recipe.")
-    prepare.add_argument("--training-overrides",
-                         help="JSON file with reviewed {\"sft\": {...}, \"peft\": {...}} hyperparameter overrides.")
     return parser
-
-
-def _model_output_directory(value: str) -> str:
-    path = Path(value).expanduser().absolute()
-    if any((parent / "run-manifest.json").exists() for parent in (path, *path.parents)):
-        raise ValueError("Model-development output must be outside finalized run bundles.")
-    return str(path)
 
 
 def _build_assessment_parser() -> argparse.ArgumentParser:
@@ -1025,57 +989,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Assessment review failed: {exc}", file=sys.stderr)
             return 2
         return 0
-    if argv[0] == "model":
-        parser = _build_model_parser()
-        args = parse_guarded(parser, argv[1:])
+    if argv[0] == "assess":
+        args = parse_guarded(_build_assess_parser(), argv[1:])
         try:
-            if args.model_command == "sources":
-                from .model_sources import list_model_sources
+            from .rule_assessment import assess_run
 
-                payload = list_model_sources()
-            elif args.model_command in {"assess", "doctor"}:
-                from .model_serving import ModelClient, ModelConfig, assess_run
-
-                if args.model_command == "doctor":
-                    config = ModelConfig.from_environment(endpoint=args.endpoint, model=args.model)
-                    payload = ModelClient(config).doctor()
-                    _emit_assessment(payload, None)
-                    return 0 if payload["ok"] else 2
-                payload = assess_run(args.run_dir, dry_run=args.dry_run,
-                                     legacy_options=(args.endpoint is not None or args.model is not None),
-                                     no_redaction=args.no_redaction, projection_max_items=args.projection_max_items,
-                                     projection_max_chars=args.projection_max_chars,
-                                     projection_scan_max_rows=args.projection_scan_max_rows,
-                                     projection_scan_max_bytes=args.projection_scan_max_bytes,
-                                     projection_scan_max_chunks=args.projection_scan_max_chunks,
-                                     shadow_model_on_precheck=args.shadow_model_on_precheck,
-                                     policies=[pid.strip() for pid in args.policies.split(",")] if args.policies is not None else None)
-            elif args.model_command == "stage":
-                from .model_corpus import stage_public_corpus
-
-                payload = stage_public_corpus(args.manifest, _model_output_directory(args.output_dir))
-            elif args.model_command == "prepare":
-                from .model_training import _parse_json, prepare_training_pack
-
-                overrides = None
-                if args.training_overrides:
-                    overrides = _parse_json(read_guarded_bytes(args.training_overrides, field="training-overrides").decode("utf-8"))
-                payload = prepare_training_pack(
-                    args.cases, _model_output_directory(args.output_dir),
-                    base_model=args.base_model, revision=args.revision, max_steps=args.max_steps,
-                    training_overrides=overrides,
-                )
-            elif args.model_command == "evaluate":
-                from .model_eval import evaluate_responses
-
-                payload = evaluate_responses(args.cases, args.responses)
-            else:
-                from .model_eval import combine_model_responses
-
-                payload = combine_model_responses(args.cases, args.responses)
-            _emit_assessment(payload, getattr(args, "output", None))
+            payload = assess_run(args.run_dir,
+                                 policies=[pid.strip() for pid in args.policies.split(",")] if args.policies is not None else None,
+                                 projection_max_items=args.projection_max_items,
+                                 projection_max_chars=args.projection_max_chars,
+                                 projection_scan_max_rows=args.projection_scan_max_rows,
+                                 projection_scan_max_bytes=args.projection_scan_max_bytes,
+                                 projection_scan_max_chunks=args.projection_scan_max_chunks)
+            _emit_assessment(payload, None)
         except (OSError, ValueError, TypeError) as exc:
-            print(f"Model command failed: {exc}", file=sys.stderr)
+            print(f"Assessment failed: {exc}", file=sys.stderr)
             return 2
         return 0
     if argv[0] == "demo":

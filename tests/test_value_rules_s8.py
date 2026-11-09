@@ -144,7 +144,7 @@ def test_uncollected_markers_precede_rule_values(policy):
                                                          ("null", "section_not_a_list")])
 def test_served_outputs_and_logs_do_not_contain_rule_view_evidence(
         tmp_path, monkeypatch, caplog, coverage_shape, coverage_cell):
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
@@ -168,8 +168,7 @@ def test_served_outputs_and_logs_do_not_contain_rule_view_evidence(
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("Power Platform called the model"))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=sorted(STAGE8_POLICIES))
+    result = assess_run(tmp_path, policies=sorted(STAGE8_POLICIES))
     validate_assessment(result)
     assert len(result["policies"]) == 8
     assert all(row["rule_precheck"]["class"] == "value_rule" for row in result["policies"])

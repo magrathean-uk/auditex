@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from auditex.rule_assessment import precheck_case
-from auditex.model_serving import ModelConfig, assess_run, messages_for
+from auditex.rule_assessment import assess_run
 from auditex.rule_assessment import canonical, policy_catalogue
 from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
@@ -38,7 +38,7 @@ def contracts():
 def assessment(tmp_path, monkeypatch):
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-contract"}')
-    return assess_run(tmp_path, ModelConfig(model_name="contract-probe"), policies=["MS.POWERBI.1.1v1"])
+    return assess_run(tmp_path, policies=["MS.POWERBI.1.1v1"])
 
 
 def assessment_for(template, record, *, legacy=False):
@@ -250,7 +250,7 @@ def test_legacy_schema_and_model_non_rule_fixture_bytes(tmp_path, monkeypatch):
     monkeypatch.setattr("auditex.rule_assessment.precheck_case", lambda case, **kw: precheck_case(
         case, **{**kw, "value_rules": False}))
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-contract"}')
-    result = assess_run(tmp_path, ModelConfig(model_name="contract-probe"), policies=["MS.POWERBI.1.1v1"])
+    result = assess_run(tmp_path, policies=["MS.POWERBI.1.1v1"])
     for version in ("2026-10-29", "2026-11-05"):
         result["schema_version"] = version
         validate_assessment(result)
@@ -258,7 +258,8 @@ def test_legacy_schema_and_model_non_rule_fixture_bytes(tmp_path, monkeypatch):
     for line in (ROOT / "tests/fixtures/model-serving-cases.jsonl").read_text().splitlines():
         item = json.loads(line)
         case = json.loads(next(m["content"] for m in item["messages"] if m["role"] == "user"))
-        rows.append({"precheck": precheck_case(case), "messages": messages_for(case)})
+        # The fixture records the retired prompt; its first two messages equal what messages_for built.
+        rows.append({"precheck": precheck_case(case), "messages": item["messages"][:2]})
     # Captured at the required clean starting HEAD before this contract change.
     assert sha256(canonical(rows).encode()).hexdigest() == "efd8c647e7982248916068d1c40c0d798c2c47dec5aa958cc990faa0a3ce1882"
 

@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from auditex.model_serving import ModelConfig, assess_run
+from auditex.rule_assessment import assess_run
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.collectors import power_platform as pp
 from azure_tenant_audit.collectors.power_bi import PowerBICollector, TENANT_SETTINGS
@@ -79,7 +79,6 @@ def forbid_network(monkeypatch):
     monkeypatch.setattr("requests.sessions.Session.request", blocked)
     monkeypatch.setattr("socket.socket.connect", blocked)
     monkeypatch.setattr("socket.create_connection", blocked)
-    monkeypatch.setattr("auditex.model_serving.ModelClient.assess", blocked)
     yield
     # Collectors catch transport errors, so also fail outside their exception handlers.
     assert not attempts, "a collector attempted real network access"
@@ -337,7 +336,7 @@ def test_no_admin_token_withholds_every_optional_section(collect_run):
 
 def assess_optional_run(root):
     # Use the same customer assessment entry point as test_optional_collection_reason.py.
-    result = assess_run(root, ModelConfig(model_name="constructed-powerplat-e2e"), policies=OPTIONAL_POLICIES)
+    result = assess_run(root, policies=OPTIONAL_POLICIES)
     assert len(result["policies"]) == 16
     assert {row["policy_id"] for row in result["policies"]} == set(OPTIONAL_POLICIES)
     return result

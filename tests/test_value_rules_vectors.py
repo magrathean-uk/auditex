@@ -489,7 +489,7 @@ def test_optional_full_source_vectors():
 def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
     """Served stage-3 answers (the gate rendered as the rule's closed_gate cell, a lookup verdict, an environment
     cell and a raising rule) validate under the 2026-11-05 assessment validator and never call the model."""
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit import value_rules
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
@@ -519,9 +519,8 @@ def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(value_rules, "assess", failing_for_exo)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("a value-rule row called the model"))
     policies = ["MS.TEAMS.1.1v1", "MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1", "MS.EXO.13.1v1"]
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=policies)
+    result = assess_run(tmp_path, policies=policies)
     cells = {row["policy_id"]: row["rule_precheck"]["cell"] for row in result["policies"]}
     assert cells == {"MS.TEAMS.1.1v1": "flag_bad", "MS.TEAMS.2.2v2": "closed_gate",
                      "MS.TEAMS.2.3v2": "environment_unknown", "MS.TEAMS.4.1v1": "all_clear",
@@ -553,10 +552,8 @@ def test_expected_uncovered_policies_matches_registry():
 
 @pytest.mark.parametrize('rule_view', [False, True], ids=['case-evidence', 'production-rule-view'])
 def test_covered_vectors_never_reach_rule_not_implemented(rule_view, monkeypatch, record_property):
-    from auditex.model_serving import ModelClient
     from auditex.rule_assessment import _assess_policies, policy_catalogue
     from auditex.scuba_projection import Projection
-    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No model client'))
     items = policy_catalogue()
     reached = defaultdict(set)
     by_cell = Counter()

@@ -66,10 +66,10 @@ def test_safe_dash_prefixed_sample_is_accepted_as_a_filename(
 
 
 _FILE_FLAGS = [
-    "--input", "--assessment", "--baseline", "--break-glass-accounts", "--cases", "--compare",
-    "--config", "--current", "--env", "--expect-manifest-sha256", "--manifest", "--out", "--output",
-    "--output-dir", "--partner-domains", "--permission-hints", "--responses", "--resume-from", "--run-dir", "--sample",
-    "--sensitive-users", "--training-overrides", "--waiver-file",
+    "--input", "--assessment", "--baseline", "--break-glass-accounts", "--compare",
+    "--config", "--current", "--env", "--expect-manifest-sha256", "--out", "--output",
+    "--output-dir", "--partner-domains", "--permission-hints", "--resume-from", "--run-dir", "--sample",
+    "--sensitive-users", "--waiver-file",
 ]
 _ENGINE_FLAGS = {"--break-glass-accounts", "--config", "--env", "--out", "--partner-domains", "--permission-hints",
                  "--resume-from", "--sample", "--sensitive-users", "--waiver-file"}
@@ -102,15 +102,11 @@ def _prefix_for(flag: str, safe_run: Path, safe_file: Path, out_dir: Path) -> li
         "--assessment": ["assessment", "compare"],
         "--baseline": ["gate-drift", "--current", str(safe_run), "--fail-on", "high"],
         "--current": ["gate-drift", "--baseline", str(safe_run), "--fail-on", "high"],
-        "--cases": ["model", "evaluate", "--responses", str(safe_file)],
-        "--responses": ["model", "evaluate", "--cases", str(safe_file)],
         "--compare": ["report", "explorer", str(safe_run)],
         "--expect-manifest-sha256": ["compare", "--run-dir", str(safe_run)],
-        "--manifest": ["model", "stage", "--output-dir", str(out_dir)],
         "--output": ["assessment", "import", "--source", "maester", "--input", str(safe_file)],
-        "--output-dir": ["model", "stage", "--manifest", str(safe_file)],
+        "--output-dir": ["report", "customer-pack", str(safe_run)],
         "--run-dir": ["compare"],
-        "--training-overrides": ["model", "prepare", "--cases", str(safe_file), "--output-dir", str(out_dir)],
     }
     return ["run", "--offline"] if flag in _ENGINE_FLAGS else commands[flag]
 

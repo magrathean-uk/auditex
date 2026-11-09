@@ -302,7 +302,7 @@ def _canary_sections(unusable=False):
 
 @pytest.mark.parametrize("unusable", [False, True])
 def test_served_outputs_and_logs_do_not_contain_any_section_evidence(tmp_path, monkeypatch, caplog, unusable):
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
@@ -317,8 +317,7 @@ def test_served_outputs_and_logs_do_not_contain_any_section_evidence(tmp_path, m
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("AAD pilot called the model"))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=sorted(STAGE9_POLICIES))
+    result = assess_run(tmp_path, policies=sorted(STAGE9_POLICIES))
     validate_assessment(result)
     assert len(result["policies"]) == 8
     assert all(row["rule_precheck"]["class"] == "value_rule" for row in result["policies"])
@@ -500,7 +499,7 @@ def test_domain_inheritance_10000_roots_and_10000_subdomains_within_five_seconds
 
 
 def test_rule_exceptions_use_existing_failure_handler(tmp_path, monkeypatch, caplog):
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit import value_rules
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
@@ -518,11 +517,10 @@ def test_rule_exceptions_use_existing_failure_handler(tmp_path, monkeypatch, cap
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("A failing rule called the model"))
     registry = dict(value_rules._registry())
     registry.update({row_for(policy)["kind"]: broken for policy in STAGE9_POLICIES})
     monkeypatch.setattr(value_rules, "_REGISTRY", registry)
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=sorted(STAGE9_POLICIES))
+    result = assess_run(tmp_path, policies=sorted(STAGE9_POLICIES))
     validate_assessment(result)
     assert all(row["rule_precheck"]["cell"] is None and row["rule_precheck"]["reason_code"] == "rule_evaluation_failed"
                for row in result["policies"])

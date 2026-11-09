@@ -120,7 +120,6 @@ _GRAPH = "src/azure_tenant_audit/graph.py"
 _GOOGLE_AUTH = "src/auditex/google_workspace/auth.py"
 _GOOGLE_CLIENT = "src/auditex/google_workspace/client.py"
 _NOTIFY = "src/auditex/notify.py"
-_MODEL = "src/auditex/model_serving.py"
 
 # Frozen non-GET allow-list: transport-inventory section E (M01-T02, DEC-006). Do not widen it
 # without a new inventory row and decision; a site outside the eight transport classes needs sol.
@@ -165,13 +164,6 @@ ALLOW_LIST: tuple[Allowed, ...] = (
             "operator-configured Jira issue create, redacted"),
     Allowed(_NOTIFY, "_send_github", "requests.post", "POST", 2, 5, "A18, A19",
             "operator-configured GitHub issue comment and issue create, redacted"),
-    Allowed(_MODEL, "ModelClient._request", "Request", VARIABLE, 1, 6, "A20a",
-            "parked model endpoint request construction; the verb is chosen by the caller"),
-    Allowed(_MODEL, "ModelClient._request", "self._opener.open", VARIABLE, 1, 6, "A20b",
-            "parked model endpoint: executes the A20a request, no proxy, no redirects"),
-    Allowed(_MODEL, "ModelClient.assess", "self._request", "POST", 1, 6, "A20",
-            "chat-completions on the parked model endpoint, loopback by default, off unless configured",
-            target_contains="/chat/completions"),
 )
 
 
@@ -599,9 +591,10 @@ def test_every_allow_list_entry_names_a_transport_class_row_and_reason() -> None
     keys = [entry.key for entry in ALLOW_LIST]
     assert len(keys) == len(set(keys))
     for entry in ALLOW_LIST:
-        # Classes 2 token, 3 Graph $batch, 5 operator sink, 6 parked model; class 1, 4 and 8 are
-        # GET or not HTTP, class 7 (lab response path) has no HTTP non-GET site today.
-        assert entry.transport_class in {2, 3, 5, 6}, entry
+        # Classes 2 token, 3 Graph $batch, 5 operator sink; class 1, 4 and 8 are GET or not HTTP,
+        # class 6 (the retired model endpoint) is gone, class 7 (lab response path) has no HTTP
+        # non-GET site today.
+        assert entry.transport_class in {2, 3, 5}, entry
         assert entry.rows.strip() and entry.reason.strip(), entry
 
 

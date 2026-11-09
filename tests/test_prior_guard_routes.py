@@ -344,14 +344,9 @@ def test_cli_assessment_import_refuses_private_input(run: Path, capsys, private:
 @pytest.mark.parametrize("private", [KEY_PATH, BUNDLE_PATH])
 @pytest.mark.parametrize("arguments,field", [
     (["run", "--offline", "--sample"], "sample"),
-    (["model", "prepare", "--training-overrides"], "training-overrides"),
 ])
 def test_other_cli_readers_refuse_private_input(run: Path, tmp_path: Path, capsys, private: str, arguments: list[str], field: str) -> None:
     # Auth/token files are an explicit exclusion of the descriptor-guard design.
-    if field == "training-overrides":
-        cases = tmp_path / "cases.jsonl"
-        cases.write_text("{}\n")
-        arguments = [*arguments[:-1], "--cases", str(cases), "--output-dir", str(tmp_path / "model"), arguments[-1]]
     assert cli.main([*arguments, str(run / private)]) == 2
     captured = capsys.readouterr()
     assert field in captured.err

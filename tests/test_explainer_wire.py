@@ -11,7 +11,7 @@ import pytest
 
 from auditex import rule_assessment
 from auditex.rule_assessment import precheck_case
-from auditex.model_serving import assess_run
+from auditex.rule_assessment import assess_run
 from auditex.rule_assessment import build_case
 from auditex.reporting import load_report_bundle, preview_report
 from azure_tenant_audit.cli import run_offline
@@ -215,15 +215,12 @@ def test_explanation_is_deterministic_and_does_not_mutate_case():
     assert first == second and case == original
 
 
-def test_default_precheck_and_dry_run_never_call_explainer(tmp_path, monkeypatch):
+def test_default_precheck_never_calls_explainer(monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("explainer was called without opt-in")
     monkeypatch.setattr(rule_assessment, "render_explanation", forbidden)
     row = precheck_case(case_for("not_met"), value_rules=True)
     assert "explainer" not in row
-    monkeypatch.setattr(rule_assessment, "context_for_run", forbidden)
-    (tmp_path / "run-manifest.json").write_text('{"run_id":"dry"}')
-    assert assess_run(tmp_path, policies=[PBI], dry_run=True)["prompts"] == 1
 
 
 @pytest.mark.parametrize("kind,policy,projection", [

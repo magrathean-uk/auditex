@@ -39,7 +39,7 @@ checkout or executes report content.
 
 ## Model-development references
 
-`configs/model-sources.json` pins the catalogued, parked Auditex model (`product_model`: base revision, adapter archive and
+A model-sources manifest, removed with the model layer, pinned the catalogued Auditex model (`product_model`: base revision, adapter archive and
 adapter weights file hashes, GGUF hash, base and distribution licence, llama.cpp revision, training pack and scores) and the inspected OpenAdmin and M365 Expert
 model artifacts, OpenAdmin public dataset and source pipeline, and proposed
 base checkpoints. Reference models, original data and sparse source copies
@@ -63,7 +63,7 @@ as an Auditex measurement.
 | --- | --- | --- |
 | ScubaGear `2446ad723b7f55031cc02c8aca244d731d468cba` | CC0 1.0 Universal | `configs/risky-delegated-permissions.json`: the resource map and delegated risky permission ids with `Name` and `RiskLevel`, from `PowerShell/ScubaGear/schemas/RiskyAppPermissions.json`; application permissions omitted. |
 
-`scripts/build-oracle-cases.py` and `scripts/split-oracle-cases.py` produce model-development
+Oracle case builders, removed with the model layer, produced model-development
 cases whose labels are the deterministic output of CISA's ScubaGear policy engine, run offline.
 
 - **cisagov/ScubaGear**, commit `2446ad723b7f55031cc02c8aca244d731d468cba`, CC0 1.0 Universal
@@ -106,15 +106,15 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   it informed the idea of simulated tenant fixtures. No code, data or text from it is used, and it is
   not a label source.
 - **prowler-cloud/prowler**, commit `f45173997b8331e6cba3deac78bc2e1043b9281d`, Apache-2.0. Used as a second labelling
-  oracle by `scripts/build-prowler-cases.py`: the script imports the Microsoft 365 provider's pydantic service models and check
-  classes from a local checkout supplied on the command line and runs the checks offline against a stub client, so ScubaGear
+  oracle by a case builder removed with the model layer: it imported the Microsoft 365 provider's pydantic service models and check
+  classes from a local checkout supplied on the command line and ran the checks offline against a stub client, so ScubaGear
   labels can be compared with Prowler verdicts. No Prowler code, metadata text or check message is vendored or shipped;
-  `configs/oracle-policy-map.json` holds check ids with Auditex's own wording. The `status_extended` strings in the generated
+  an oracle policy map held check ids with Auditex's own wording. The `status_extended` strings in the generated
   verdict files are Prowler output text, so those files stay with the other oracle outputs outside the distributable tree
   (attribute Prowler and include its Apache-2.0 licence if they are shared). Prowler's own dependencies are installed only in a
   throwaway environment under the build cache, never in the project `.venv`.
-- Labels are engine output, not human judgement. `scripts/split-oracle-cases.py --approve-as-oracle`
-  records the engine and OPA version as reviewer so the pack preparer accepts the rows; see
+- Labels are engine output, not human judgement. The removed case splitter's `--approve-as-oracle` option
+  recorded the engine and OPA version as reviewer so the pack preparer accepted the rows; see
   [Model development](../guides/model-development.md#oracle-labelled-cases).
 
 P1 serving ships `configs/scuba-policy-sections.json`: all 102 policy items and ordered

@@ -3,15 +3,13 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 import hashlib
-import json
 import os
 from pathlib import Path
 
 import pytest
 
 from azure_tenant_audit import run_files
-from test_guarded_admission import KEY, private_run  # noqa: F401 - shared fixture
-from test_model_eval import _answer, _case, _inputs
+from test_guarded_admission import private_run  # noqa: F401 - shared fixture
 
 
 def _context(run: Path):
@@ -29,82 +27,7 @@ def _swap_to_key(path: Path, run: Path) -> None:
     os.link(run / "operator-inputs" / "sensitive-users.key", path)
 
 
-def test_model_corpus_refuses_swap_before_later_stream(private_run: Path, tmp_path: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
-    from auditex import model_corpus
-
-    source = tmp_path / "training.jsonl"
-    source.write_text('{"messages": []}\n', encoding="utf-8")
-    with _context(private_run) as context:
-        _bind(context, private_run)
-        info = model_corpus._file_info(source)
-        _swap_to_key(source, private_run)
-        with pytest.raises(run_files.UnsafeRunFileError):
-            list(model_corpus._rows(info))
-
-
-def test_model_corpus_refuses_swap_before_manifest_reopen(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,  # noqa: F811 - shared pytest fixture injected by name
-) -> None:
-    from auditex import model_corpus
-
-    manifest = tmp_path / "sources.json"
-    manifest.write_text(json.dumps({"sources": []}), encoding="utf-8")
-    original = model_corpus._file_info
-    swapped = False
-
-    def first_read_then_swap(path: Path) -> dict:
-        nonlocal swapped
-        info = original(path)
-        if path == manifest:
-            _swap_to_key(manifest, private_run)
-            swapped = True
-        return info
-
-    monkeypatch.setattr(model_corpus, "_file_info", first_read_then_swap)
-    with _context(private_run) as context:
-        _bind(context, private_run)
-        with pytest.raises(run_files.UnsafeRunFileError):
-            model_corpus._manifest(manifest)
-    assert swapped
-
-
-@pytest.mark.parametrize("combine", [False, True])
-def test_model_evaluation_never_rehashes_swapped_private_key(
-    private_run: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, combine: bool,  # noqa: F811 - shared pytest fixture injected by name
-) -> None:
-    from auditex import model_eval
-
-    case = _case()
-    cases, responses = _inputs(tmp_path, case, _answer(case))
-    expected = hashlib.sha256(cases.read_bytes()).hexdigest()
-    original = model_eval._load_responses
-    swapped = False
-
-    def load_then_swap(paths: list[str | Path]):
-        nonlocal swapped
-        result = original(paths)
-        _swap_to_key(cases, private_run)
-        swapped = True
-        return result
-
-    monkeypatch.setattr(model_eval, "_load_responses", load_then_swap)
-    with _context(private_run) as context:
-        _bind(context, private_run)
-        try:
-            result = (model_eval.combine_model_responses(cases, [responses]) if combine
-                      else model_eval.evaluate_responses(cases, responses))
-        except run_files.UnsafeRunFileError:
-            pass
-        else:
-            assert result["cases_input"]["sha256"] == expected
-            assert hashlib.sha256(KEY).hexdigest() not in json.dumps(result)
-    assert swapped
-
-
-@pytest.mark.parametrize("reader", ["cases", "responses", "replay"])
-def test_active_reader_refuses_swapped_key(private_run: Path, tmp_path: Path, reader: str) -> None:  # noqa: F811 - shared pytest fixture injected by name
-    from auditex.model_eval import _load_responses
-    from auditex.model_training import load_cases
+def test_active_reader_refuses_swapped_key(private_run: Path, tmp_path: Path) -> None:  # noqa: F811 - shared pytest fixture injected by name
     from azure_tenant_audit.offline_replay import replay_source
 
     path = tmp_path / "selected.jsonl"
@@ -112,10 +35,8 @@ def test_active_reader_refuses_swapped_key(private_run: Path, tmp_path: Path, re
     with _context(private_run) as context:
         _bind(context, private_run)
         _swap_to_key(path, private_run)
-        call = {"cases": lambda: load_cases(path), "responses": lambda: _load_responses([path]),
-                "replay": lambda: replay_source(path)}[reader]
         with pytest.raises(run_files.UnsafeRunFileError):
-            call()
+            replay_source(path)
 
 
 @pytest.mark.parametrize("kind", ["export", "results"])

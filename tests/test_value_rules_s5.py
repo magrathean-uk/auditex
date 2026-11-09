@@ -355,9 +355,9 @@ def test_rule_view_canaries_never_leave_records_or_responses(policy, rows, capsy
     ("MS.SECURITYSUITE.3.3v1", "all_rules_block"),
     ("MS.SECURITYSUITE.3.4v1", "all_rules_notify")])
 def test_linked_success_canaries_never_persist(policy, cell, tmp_path, monkeypatch, capsys, caplog):
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
-    from test_model_serving import fake_projection
+    from test_model_serving import case_texts, fake_projection
 
     caplog.set_level("DEBUG")
     if policy.startswith("MS.EXO."):
@@ -385,17 +385,14 @@ def test_linked_success_canaries_never_persist(policy, cell, tmp_path, monkeypat
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called model"))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy])
+    result = assess_run(tmp_path, policies=[policy])
     assert result["policies"][0]["rule_precheck"]["cell"] == cell
     validate_assessment(result)
     persisted = tmp_path / "model_assessment.json"
     assert json.loads(persisted.read_text()) == result
-    assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy], dry_run=True)
-    assert (tmp_path / "model_assessment_prompts.jsonl").is_file()
+    cases = case_texts(tmp_path, [policy])
     captured = capsys.readouterr()
-    rendered = json.dumps([record, result]) + caplog.text + captured.out + captured.err
+    rendered = json.dumps([record, result, cases]) + caplog.text + captured.out + captured.err
     rendered += "".join(path.read_text() for path in tmp_path.rglob("*") if path.is_file())
     assert all(canary not in rendered for canary in CANARIES)
 
@@ -420,7 +417,7 @@ def test_dlp_join_preserves_raw_json_equality_and_duplicate_semantics():
 
 
 def test_validator_accepts_ss13_defender_licence_citation(tmp_path, monkeypatch):
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
@@ -435,8 +432,7 @@ def test_validator_accepts_ss13_defender_licence_citation(tmp_path, monkeypatch)
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called model"))
-    result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy])
+    result = assess_run(tmp_path, policies=[policy])
     assert result["policies"][0]["rule_precheck"]["section"] == ["defender_license"]
     validate_assessment(result)
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, assess_scubagear_export
+from auditex.rule_assessment import assess_run, assess_scubagear_export
 from auditex.rule_assessment import policy_catalogue
 from auditex.scuba_projection import NOT_COLLECTED, project_run, rule_policy_section
 from auditex.scubagear_export import load_export, project_export
@@ -90,7 +90,6 @@ def test_fixture_covers_the_three_policies_and_every_cell():
 def test_every_vector_through_the_serving_dispatcher(policy, monkeypatch):
     """Rule dispatch, closed-contract checker, precheck detail, pack response and the served claim all agree."""
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called the model"))
     criticality = policy_catalogue()["policies"][policy]["policy_item"]["criticality"]
     rows = [row for row in VECTORS if row["policy"] == policy]
     reached, mismatches, failures = set(), [], []
@@ -127,8 +126,7 @@ def test_run_path_supplies_every_section_the_three_rules_read(bundle, cases, mon
         checked(assess(policy, evidence))
         assert assess(policy, evidence)["cell"] != "section_not_collected"
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called the model"))
-    result = assess_run(bundle, ModelConfig(model_name="test-model"), policies=list(POLICIES))
+    result = assess_run(bundle, policies=list(POLICIES))
     for row in result["policies"]:
         assert row["rule_precheck"]["class"] == "value_rule"
         assert row["rule_precheck"]["reason_code"] != "rule_evaluation_failed"
@@ -148,7 +146,6 @@ def _export_source(tmp_path, policy, sections, failed=()):
 @pytest.mark.parametrize("policy", POLICIES)
 def test_export_path_supplies_and_serves_every_vector_cell(policy, tmp_path, monkeypatch):
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called the model"))
     chosen = {}
     for row in VECTORS:
         if row["policy"] == policy and not row["vector_id"].startswith("a2-constructed:"):
@@ -164,7 +161,7 @@ def test_export_path_supplies_and_serves_every_vector_cell(policy, tmp_path, mon
         projection, _ = project_export(load_export(source), policy_catalogue()["policies"])
         for name, value in sections.items():
             assert rule_policy_section(projection, policy, name) == value, (policy, cell, name)
-        result = assess_scubagear_export(source, out / "assessed", ModelConfig(model_name="test-model"), policies=[policy])
+        result = assess_scubagear_export(source, out / "assessed", policies=[policy])
         detail = result["policies"][0]["rule_precheck"]
         assert detail["class"] == "value_rule"
         # accepted_domains is collected by the mock export itself, so a vector that omits it can differ only there.
@@ -178,7 +175,6 @@ def test_export_path_supplies_and_serves_every_vector_cell(policy, tmp_path, mon
 def test_failed_export_command_is_never_read_as_an_empty_list(failed, tmp_path, monkeypatch):
     """A failed Security Suite command withholds every section, so the three rules say 'not collected', never 'none'."""
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called the model"))
     for policy in POLICIES:
         row = next(r for r in VECTORS if r["policy"] == policy and r["rule_verdict"] == "met")
         out = tmp_path / policy
@@ -189,7 +185,7 @@ def test_failed_export_command_is_never_read_as_an_empty_list(failed, tmp_path, 
         for name in catalogue()["policies"][policy]["sections"]:
             if name != "accepted_domains":
                 assert rule_policy_section(projection, policy, name) == NOT_COLLECTED, (policy, name)
-        result = assess_scubagear_export(source, out / "assessed", ModelConfig(model_name="test-model"), policies=[policy])
+        result = assess_scubagear_export(source, out / "assessed", policies=[policy])
         detail = result["policies"][0]["rule_precheck"]
         assert (detail["class"], detail["cell"]) == ("value_rule", "section_not_collected")
         assert result["policies"][0]["claims"][0]["status"] == "unknown"

@@ -416,7 +416,7 @@ def test_every_read_field_has_canaries(policy, rows_s7, caplog):
 
 @pytest.mark.parametrize("policy", sorted(STAGE7_POLICIES))
 def test_canaries_never_persist_or_log(policy, rows_s7, tmp_path, monkeypatch, caplog):
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from auditex.scuba_projection import rule_policy_section
     from test_model_serving import fake_projection
     caplog.set_level("DEBUG")
@@ -424,14 +424,13 @@ def test_canaries_never_persist_or_log(policy, rows_s7, tmp_path, monkeypatch, c
     projection = fake_projection(tmp_path, {})
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", lambda *a, **kw: projection)
-    monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("rule called model"))
     for label, sections in _canary_cases(policy, rows_s7[policy]):
         projection.rule_sections = {k: v for k, v in sections.items() if k != "scuba_config"}
         projection.rule_views = {policy: {"scuba_config": sections["scuba_config"]}} if "scuba_config" in sections else {}
         for name, value in sections.items():
             assert rule_policy_section(projection, policy, name) == value
         expected = assess(policy, sections)
-        result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy])
+        result = assess_run(tmp_path, policies=[policy])
         validate_assessment(result)
         detail = result["policies"][0]["rule_precheck"]
         assert detail["class"] == "value_rule" and detail["cell"] == expected["cell"] != "section_not_collected", label

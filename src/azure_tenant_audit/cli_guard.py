@@ -14,9 +14,8 @@ from .guarded_io import (
 from .secret_hygiene import SENSITIVE_ARG_FLAGS, _sensitive_option, collect_sensitive_argv_values
 
 _INPUT_FLAGS = frozenset({
-    "--assessment", "--break-glass-accounts", "--cases", "--config", "--env", "--input",
-    "--manifest", "--partner-domains", "--permission-hints", "--responses", "--sample", "--sensitive-users",
-    "--training-overrides", "--waiver-file",
+    "--assessment", "--break-glass-accounts", "--config", "--env", "--input",
+    "--partner-domains", "--permission-hints", "--sample", "--sensitive-users", "--waiver-file",
 })
 _RUN_FLAGS = frozenset({"--run-dir", "--resume-from", "--baseline", "--current", "--compare"})
 _OUTPUT_FLAGS = frozenset({"--out", "--output", "--output-dir"})

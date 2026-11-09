@@ -203,8 +203,9 @@ def test_summary_is_stripped_before_shape_budget_and_redaction(tmp_path, monkeyp
     assert DIGEST not in public_text(projection)
 
 
-def test_assessment_dry_run_and_new_files_never_carry_the_proof(tmp_path, monkeypatch, capsys, caplog):
-    from auditex.model_serving import assess_run
+def test_assessment_case_bytes_and_new_files_never_carry_the_proof(tmp_path, monkeypatch, capsys, caplog):
+    from auditex.rule_assessment import assess_run
+    from test_model_serving import case_texts
     from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")
@@ -213,9 +214,9 @@ def test_assessment_dry_run_and_new_files_never_carry_the_proof(tmp_path, monkey
     result = assess_run(root, policies=[SS21])
     validate_assessment(result)
     assert result["policies"][0]["rule_precheck"]["cell"] == "default_qualifies"
-    dry = assess_run(root, policies=[SS21], dry_run=True)
+    cases = case_texts(root, [SS21])
     captured = capsys.readouterr()
-    text = json.dumps([result, dry], default=str) + captured.out + captured.err + caplog.text
+    text = json.dumps([result, cases], default=str) + captured.out + captured.err + caplog.text
     for token in (DIGEST, COVERAGE_KEY, BINDING_KEY, *ADDRESSES):
         assert token not in text
     for artifact in root.rglob("*"):

@@ -13,14 +13,13 @@ import logging
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
 import traceback
 from unittest.mock import patch
 
 import pytest
 
-from auditex import cli as product_cli, model_training
+from auditex import cli as product_cli
 from auditex.demo import build_demo_parser
 from auditex.guided import build_guided_parser
 from auditex.mcp_server import _build_mcp_parser
@@ -67,22 +66,13 @@ BUILDERS = [
 # Maintenance scripts are scanned too. Capture their parsers before dispatch,
 # so no script reads inputs or performs its normal work during these tests.
 SCRIPT_BUILDERS = [
-    ("annotate-oracle-cases.py", "main"),
     ("assess-scubagear-export.py", "main"),
-    ("build-lab-model-cases.py", "main"),
-    ("build-model-examples.py", "main"),
-    ("build-oracle-cases.py", "main"),
-    ("build-prowler-cases.py", "main"),
     ("compare-run-outputs.py", "main"),
     ("derive-scuba-projection-shapes.py", "main"),
     ("derive-scubagear-prune-table.py", "main"),
     ("generate-explainer-baselines.py", "main"),
     ("generate-explainer.py", "main"),
     ("generate-rule-packs.py", "main"),
-    ("run-model-benchmark.py", "parser"),
-    ("score-adapter-checkpoints.py", "build_parser"),
-    ("score-model-precheck.py", "main"),
-    ("split-oracle-cases.py", "main"),
 ]
 
 
@@ -104,9 +94,7 @@ def _script_parser(filename, entry):
     def capture(parser, *args, **kwargs):
         raise ParserCaptured(parser)
 
-    parser_class = (module._parser_module.DiagnosticRedactingArgumentParser
-                    if filename == "build-prowler-cases.py" else DiagnosticRedactingArgumentParser)
-    with patch.object(parser_class, "parse_args", capture):
+    with patch.object(DiagnosticRedactingArgumentParser, "parse_args", capture):
         try:
             module.main()
         except ParserCaptured as exc:
@@ -120,7 +108,6 @@ def _all_parsers():
         roots.extend([
             _captured_parser(product_cli, product_cli.main, ["setup", "--bad-option"]),
             _captured_parser(product_cli, product_cli.main, ["doctor", "--bad-option"]),
-            _captured_parser(model_training, model_training.training_main, []),
         ])
         roots.extend(_script_parser(filename, entry) for filename, entry in SCRIPT_BUILDERS)
     return [child for root in roots for child in _children(root)]
@@ -320,16 +307,6 @@ def test_help_and_version_remain_available(capsys):
         captured = capsys.readouterr()
         assert expected in captured.out
         assert captured.err == ""
-
-
-def test_prowler_script_help_needs_only_the_standard_library():
-    result = subprocess.run(
-        [sys.executable, "-I", "-S", "-B", str(ROOT / "scripts" / "build-prowler-cases.py"), "--help"],
-        capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0
-    assert "usage:" in result.stdout
-    assert result.stderr == ""
 
 
 def _parser_violations(tree, allowed_type_calls=frozenset()):
@@ -689,7 +666,6 @@ def test_factory_call_sites_are_in_the_parser_matrix():
     # These entry points construct parsers inside the handler rather than
     # exposing a builder; _all_parsers captures them before dispatch.
     expected[("src/auditex/cli.py", "main")] += 2
-    expected[("src/auditex/model_training.py", "training_main")] += 1
     expected.update((f"scripts/{filename}", entry) for filename, entry in SCRIPT_BUILDERS)
     found = Counter()
     roots = [ROOT / "src" / "auditex", ROOT / "src" / "azure_tenant_audit", ROOT / "scripts"]

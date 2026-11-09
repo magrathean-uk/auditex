@@ -12,8 +12,8 @@ import jsonschema
 import pytest
 
 from auditex.cli import main
-from auditex.rule_assessment import precheck_case
-from auditex.model_serving import ModelClient, ModelConfig, assess_run
+from auditex.rule_assessment import policy_catalogue, precheck_case
+from auditex.rule_assessment import assess_run
 from auditex.rule_assessment import build_case, canonical
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.collectors.identity import IdentityCollector
@@ -256,13 +256,8 @@ def test_default_redaction_is_stable_per_run_and_changes_between_runs(complete_b
     assert project_run(complete_bundle)['privileged_users']['User1']['DisplayName'] != original
 
 
-@pytest.mark.parametrize('no_redaction', [False, True])
-def test_assessment_never_calls_model_and_keeps_redaction(complete_bundle, monkeypatch, no_redaction):
-    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
-    args = ['model', 'assess', str(complete_bundle), '--model', 'stub']
-    if no_redaction:
-        args.append('--no-redaction')
-    assert main(args) == 0
+def test_assessment_is_rule_only_and_keeps_redaction(complete_bundle):
+    assert main(['assess', str(complete_bundle)]) == 0
     result = json.loads((complete_bundle / 'model_assessment.json').read_text())
     assert result['projection']['redaction']['enabled']
     assert 'salt' not in result['projection']['redaction']
@@ -271,11 +266,9 @@ def test_assessment_never_calls_model_and_keeps_redaction(complete_bundle, monke
     validate_assessment(result)
 
 
-@pytest.mark.parametrize('host', ['model.example.invalid', '127.0.0.1.example.invalid', '192.168.1.2'])
-def test_no_redaction_ignored_for_any_model_host(tmp_path, host, monkeypatch):
+def test_rule_only_assessment_keeps_redaction_and_has_no_endpoint(tmp_path):
     write(tmp_path, 'run-manifest.json', {'run_id': 'run'})
-    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
-    result = assess_run(tmp_path, ModelConfig(endpoint=f'https://{host}/v1', model_name='test'), no_redaction=True)
+    result = assess_run(tmp_path)
     assert result['projection']['redaction']['enabled'] and result['endpoint_host'] == 'none'
     validate_assessment(result)
 
@@ -285,8 +278,7 @@ def test_other_platform_and_absent_bundle_are_all_markers(tmp_path, monkeypatch)
     p = project_run(tmp_path)
     assert all(v == NOT_COLLECTED for v in p.values())
     assert {v['reason'] for v in p.report['sections'].values()} == {'not_applicable_to_platform'}
-    monkeypatch.setattr(ModelClient, '_request', lambda *a: pytest.fail('Absent sections called model'))
-    result = assess_run(tmp_path, ModelConfig(model_name='stub'))
+    result = assess_run(tmp_path)
     assert result['totals']['rule_answered'] == 102 and result['totals']['unknown'] == 102
     assert result['limitations'] == ['projection_not_implemented']
 
@@ -299,7 +291,7 @@ def test_previous_schema_is_byte_identical_to_pinned_predecessor():
 @pytest.mark.parametrize('mutation', ['status_reason', 'missing_section', 'bounds', 'source', 'limitations', 'redaction'])
 def test_projection_envelope_validation_rejects_tampering(complete_bundle, monkeypatch, mutation):
     # Select a missing-section rule so no transport is needed.
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     if mutation == 'status_reason':
         result['projection']['sections']['SPO_tenant']['reason'] = 'missing_artifact'
     elif mutation == 'missing_section':
@@ -357,7 +349,6 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
     assert {r['rule_id']: r['severity'] for r in findings if r['rule_id'] in {
         'sharepoint.default_link_type_broad', 'sharepoint.external_sharing_broad'}} == {
         'sharepoint.default_link_type_broad': 'high', 'sharepoint.external_sharing_broad': 'high'}
-    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('Rules-only assessment built a model client'))
     returned = assess_run(root)
     written_text = (root / 'model_assessment.json').read_text(encoding='utf-8')
     result = json.loads(written_text)
@@ -372,7 +363,7 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
     assert sections['accepted_domains']['status'] == 'projected'
     assert sections['accepted_domains']['ignored_fields'] == ['Default', 'DomainType', 'Identity']
     # Every catalogue policy has a value rule: all 102 rows are rule answers, none reaches a model. This file turns
-    # the area adapters off (autouse fixture), so more rows abstain than in test_model_serving's demo (24 answered).
+    # the area adapters off (autouse fixture), so more rows abstain than in the full demo (24 answered).
     assert result['totals'] == {'answered': 13, 'unknown': 89, 'invalid': 0, 'skipped': 0, 'rule_answered': 102,
                                 'scope_narrowed': 0}
     assert (result['endpoint_host'], result['model_name']) == ('none', 'rules-only') and 'serving' not in result
@@ -382,8 +373,9 @@ def test_synthetic_demo_assess_split_and_prompt_privacy(tmp_path, monkeypatch):
         assert row['attempts'] == 0 and row['prompt_sha256'] is None and row['response_sha256'] is None
     # Privacy: neither the written assessment nor the locally written development prompts carry a demo user's
     # display name or e-mail address.
-    assert assess_run(root, dry_run=True)['prompts'] == 102
-    prompts_text = (root / 'model_assessment_prompts.jsonl').read_text(encoding='utf-8')
+    catalogue = policy_catalogue()
+    prompts_text = canonical([build_case(pid, project_run(root), '2026-11-05', catalogue=catalogue)
+                              for pid in catalogue['policies']])
     demo = json.loads((ROOT / DEMO_SAMPLE).read_text())
     users = demo['identity']['users']['value']
     assert users
@@ -447,7 +439,7 @@ def test_legacy_assessments_continue_to_validate(complete_bundle, monkeypatch, v
     from auditex.rule_assessment import precheck_case
     monkeypatch.setattr('auditex.rule_assessment.precheck_case', lambda case, **kw: precheck_case(
         case, **{**kw, 'value_rules': False}))
-    payload = assess_run(complete_bundle, ModelConfig(model_name='unused'), policies=['MS.POWERBI.1.1v1'])
+    payload = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert payload['policies'][0]['rule_precheck']['class'] != 'value_rule'
     payload['schema_version'] = version
     if version == '2026-10-28':
@@ -605,7 +597,7 @@ def test_ca_microsoft_managed_policy_beside_a_kit_policy_gives_a_collected_secti
     section, report = ca_section(complete_bundle, [ca_row(pid=POLICY_A), managed])
     assert section == [CA, {**CA, 'State': 'disabled', 'DisplayName': managed['displayName']}]
     assert report['status'] == 'projected' and report['dropped_conditions'] == [f'{POLICY_B}:sessionControls']
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     validate_assessment(result)
     jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
     assert result['projection']['sections']['conditional_access_policies']['dropped_conditions'] == [
@@ -661,7 +653,7 @@ def test_ca_section_withheld_oversize_after_redaction_carries_no_record_keys(com
     assert p['conditional_access_policies'] == NOT_COLLECTED
     assert report['status'] == 'not_collected' and report['reason'] == 'oversize'
     assert 'dropped_conditions' not in report and 'null_lists_read_as_empty' not in report
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'],
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'],
                         projection_max_chars=bound)
     validate_assessment(result)
     jsonschema.validate(result, json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text()))
@@ -670,7 +662,7 @@ def test_ca_section_withheld_oversize_after_redaction_carries_no_record_keys(com
 @pytest.mark.parametrize('name,value', [('dropped_conditions', [f'{POLICY_A}:sessionControls']),
                                         ('null_lists_read_as_empty', ['Conditions.Users.ExcludeRoles'])])
 def test_ca_record_keys_validate(complete_bundle, name, value):
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     sections = result['projection']['sections']
     sections['conditional_access_policies'][name] = value
     validate_assessment(result)
@@ -696,7 +688,7 @@ def test_ca_unsupported_scope_withholds_entire_section_and_names_condition(compl
     assert p['conditional_access_policies'] == NOT_COLLECTED
     assert p.report['sections']['conditional_access_policies']['unsupported_conditions'] == ['conditions.' + condition]
     assert p.report['sections']['conditional_access_policies']['reason'] == 'incomplete_shape'
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'], dry_run=False)
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     validate_assessment(result)
 
 
@@ -822,7 +814,7 @@ def test_chunk_iteration_stops_at_scan_row_and_byte_bounds(complete_bundle, monk
 
 
 def test_redaction_salt_is_absent_and_rejected_by_both_validators(complete_bundle):
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert 'salt' not in result['projection']['redaction']
     result['projection']['redaction']['salt'] = 'a' * 64
     with pytest.raises(ValueError):
@@ -972,7 +964,7 @@ def test_nested_diagnostic_paths_do_not_echo_person_data(complete_bundle, mutati
 
 def test_numeric_enum_diagnostic_and_optional_detail_validate(complete_bundle):
     operation(complete_bundle, 'sharepoint_access', 'sharePointSettings', [{**SPO, 'FileAnonymousLinkType': 99}])
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert result['projection']['sections']['SPO_tenant']['detail'] == {
         'field': 'FileAnonymousLinkType', 'kind': 'unseen_enum_value', 'value': 99}
     schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
@@ -993,7 +985,7 @@ def test_numeric_enum_diagnostic_and_optional_detail_validate(complete_bundle):
     {'field': 'AllowInvitesFrom', 'kind': 'missing_field', 'extra': PERSON},
 ])
 def test_projection_diagnostic_both_validators_reject_malformed_detail(complete_bundle, diagnostic):
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     result['projection']['sections']['scuba_config']['detail'] = diagnostic
     with pytest.raises(ValueError):
         validate_assessment(result)
@@ -1007,7 +999,7 @@ def test_projection_diagnostic_both_validators_reject_malformed_detail(complete_
     ('scuba_config', {'field': 'DisplayName', 'kind': 'unseen_enum_value', 'value': 'everyone'}),
 ])
 def test_projection_diagnostic_validation_rejects_inconsistent_detail(complete_bundle, section, diagnostic):
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     result['projection']['sections'][section]['detail'] = diagnostic
     with pytest.raises(ValueError):
         validate_assessment(result)
@@ -1274,7 +1266,7 @@ def test_service_plan_extra_fields_are_ignored_and_reported(complete_bundle, ext
     section = p.report['sections']['service_plans']
     assert section['status'] == 'projected' and section['ignored_fields'] == ignored
     assert 'Injected Private Person' not in canonical(p) and 'Injected Private Person' not in canonical(p.report)
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert result['projection']['sections']['service_plans']['ignored_fields'] == ignored
     validate_assessment(result)
 
@@ -1438,8 +1430,7 @@ def test_paged_identity_users_keep_late_admins_on_the_model_path(complete_bundle
 
         write(complete_bundle, 'raw/identity.json', result.payload)
         write(complete_bundle, 'coverage.json', {'records': result.coverage})
-        bounded = assess_run(complete_bundle, ModelConfig(model_name='stub'),
-                             policies=['MS.AAD.7.1v1', 'MS.AAD.7.2v1', 'MS.AAD.7.3v1'],
+        bounded = assess_run(complete_bundle, policies=['MS.AAD.7.1v1', 'MS.AAD.7.2v1', 'MS.AAD.7.3v1'],
                              projection_scan_max_rows=100)
         withheld = bounded['projection']['sections']['privileged_users']
         assert withheld['status'] == 'not_collected' and withheld['reason'] == 'oversize'
@@ -1516,7 +1507,7 @@ def test_oversized_manifest_reports_the_scan_bound_not_a_shape_failure(complete_
 
 def test_scan_fields_and_detail_validate_in_both_validators(complete_bundle):
     many_users(complete_bundle)
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'],
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'],
                         projection_scan_max_rows=100)
     section = result['projection']['sections']['privileged_users']
     assert section['detail'] == {'field': 'scan_max_rows', 'kind': 'scan_bound'} and section['scan']['rows'] == 100
@@ -1556,23 +1547,22 @@ def test_scan_fields_and_detail_validate_in_both_validators(complete_bundle):
 
 
 def test_scan_flags_reach_the_projection_and_defaults_match(complete_bundle, monkeypatch, capsys):
-    import auditex.model_serving as serving
+    import auditex.rule_assessment as serving
     from auditex.scuba_projection import DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS
     seen = []
     def spy(*args, **kwargs):
         seen.append(kwargs)
         return project_run(*args, **kwargs)
     monkeypatch.setattr(serving, 'project_run', spy)
-    assert main(['model', 'assess', str(complete_bundle), '--dry-run']) == 0
+    assert main(['assess', str(complete_bundle)]) == 0
     assert (seen[-1]['scan_max_rows'], seen[-1]['scan_max_bytes'], seen[-1]['scan_max_chunks']) == (
         DEFAULT_SCAN_MAX_ROWS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS)
     assert (seen[-1]['max_items'], seen[-1]['max_chars']) == (40, 12000)
-    (complete_bundle / 'model_assessment_prompts.jsonl').unlink()
-    assert main(['model', 'assess', str(complete_bundle), '--dry-run', '--projection-scan-max-rows', '7',
+    assert main(['assess', str(complete_bundle), '--projection-scan-max-rows', '7',
                  '--projection-scan-max-bytes', '9000000', '--projection-scan-max-chunks', '3']) == 0
     assert (seen[-1]['scan_max_rows'], seen[-1]['scan_max_bytes'], seen[-1]['scan_max_chunks']) == (7, 9000000, 3)
     with pytest.raises(SystemExit):
-        main(['model', 'assess', '--help'])
+        main(['assess', '--help'])
     help_text = capsys.readouterr().out
     for flag in ('--projection-scan-max-rows', '--projection-scan-max-bytes', '--projection-scan-max-chunks'):
         assert flag in help_text
@@ -1991,8 +1981,8 @@ def test_dns_resolver_log_is_private_on_run_path(complete_bundle, section, caplo
     assert projection[section] == before[section]
     assert canary not in json.dumps(projection) + json.dumps(projection.report)
     with caplog.at_level('DEBUG'):
-        assess_run(complete_bundle, ModelConfig(model_name='stub'), dry_run=True)
-    written = (complete_bundle / 'model_assessment_prompts.jsonl').read_text()
+        assess_run(complete_bundle)
+    written = (complete_bundle / 'model_assessment.json').read_text()
     assert canary not in written + caplog.text + str(capsys.readouterr())
     bounded = project_run(complete_bundle, scan_max_rows=1, scan_max_bytes=1)
     assert bounded.rule_sections[section] == NOT_COLLECTED
@@ -2043,11 +2033,10 @@ def test_run_rule_view_canaries_never_enter_prompts_or_assessment(complete_bundl
     assert canary_name in repr(projection.rule_sections['privileged_roles'])
     assert projection['privileged_roles'] == NOT_COLLECTED
     with caplog.at_level('DEBUG'):
-        assess_run(complete_bundle, ModelConfig(model_name='stub'), dry_run=True)
-        assess_run(complete_bundle, ModelConfig(model_name='stub'),
-                   policies=['MS.POWERBI.1.1v1'])
-    written = (complete_bundle / 'model_assessment_prompts.jsonl').read_text() + (
-        complete_bundle / 'model_assessment.json').read_text()
+        assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
+    catalogue = policy_catalogue()
+    written = canonical([build_case(pid, projection, '2026-11-05', catalogue=catalogue)
+                         for pid in catalogue['policies']]) + (complete_bundle / 'model_assessment.json').read_text()
     assert canary_email not in written + caplog.text + str(capsys.readouterr())
     assert canary_name not in written + caplog.text
 
@@ -2078,7 +2067,7 @@ def test_run_rule_reads_unredacted_canary_without_persisting_it(complete_bundle,
     monkeypatch.setattr(serving, 'project_run', with_private_evidence)
     monkeypatch.setattr(value_rules, 'assess', reading_rule)
     with caplog.at_level('DEBUG'):
-        result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+        result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert seen == [(canary_name, canary_email)]
     assert result['policies'][0]['rule_precheck']['cell'] == 'enabled_not_boolean'
     written = (complete_bundle / 'model_assessment.json').read_text()
@@ -2086,17 +2075,18 @@ def test_run_rule_reads_unredacted_canary_without_persisting_it(complete_bundle,
     assert canary_name not in written + caplog.text
 
 
-def test_unaffected_run_prompt_hashes_match_pre_rule_view_fixture(complete_bundle):
-    from auditex.model_serving import messages_for
+def test_unaffected_run_case_hashes_match_pre_rule_view_fixture(complete_bundle):
+    # The retired prompt was [constant system message, canonical(case)]; this digest over the same 102 case bytes
+    # was taken on the last head that still produced the prompt, where the prompt digest was a57bba64...2047.
     from auditex.rule_assessment import policy_catalogue
     projection = project_run(complete_bundle)
     hashes = {}
     for policy_id in policy_catalogue()['policies']:
-        messages = messages_for(build_case(policy_id, projection, '2026-11-05'))
-        hashes[policy_id] = sha256(canonical(messages).encode()).hexdigest()
+        case = build_case(policy_id, projection, '2026-11-05')
+        hashes[policy_id] = sha256(canonical(case).encode()).hexdigest()
     assert len(hashes) == 102
     assert sha256(canonical(hashes).encode()).hexdigest() == (
-        'a57bba64c13c01be52bb609e00d22d2fb4d18e359d8822445d1704a22a0b2047')
+        '15ce23ca6bd3b8b83bc198e113f7814d7041aa7c4743ad0da68f64f308e32d62')
 
 
 @pytest.mark.parametrize('kwargs,environment,basis', [
@@ -2159,8 +2149,6 @@ def identity_rows(root):
 
 
 def test_scuba_config_break_glass_maps_to_exclusions_by_object_id(complete_bundle):
-    from auditex.model_serving import messages_for
-    from auditex.rule_assessment import build_case
     p = project_run(config_bundle(identity_rows(complete_bundle), accounts=[BREAK_GLASS_UPN]))
     from auditex.scuba_projection import SCUBA_CONFIG_EXCLUSION_KEYS
     assert SCUBA_CONFIG_EXCLUSION_KEYS == {'MS.AAD.3.2v2': 'MS.AAD.3.2v1'}
@@ -2181,7 +2169,7 @@ def test_scuba_config_break_glass_maps_to_exclusions_by_object_id(complete_bundl
     assert synthesis['break_glass'] == {'source': 'operator', 'entries': 1, 'unresolved': 0, 'unverified': 0,
                                         'state': 'resolved', 'users': 1, 'groups': 0}
     # The operator's entry is a user principal name: only the object ID reaches a prompt or the report.
-    prompts = canonical([messages_for(build_case(pid, p, '2026-10-30T00:00:00Z')) for pid in CONFIG_READERS])
+    prompts = canonical([canonical(build_case(pid, p, '2026-10-30T00:00:00Z')) for pid in CONFIG_READERS])
     assert BREAK_GLASS_UPN not in prompts and 'breakglass1' not in canonical(p.report)
     assert BREAK_GLASS_ID in prompts
 
@@ -2214,7 +2202,7 @@ def test_scuba_config_unresolved_or_unrecorded_list_withholds_exclusion_policies
 def test_scuba_config_synthesis_validates_and_tampering_is_rejected(complete_bundle):
     schema = json.loads((ROOT / 'schemas/model_assessment.schema.json').read_text())
     config_bundle(complete_bundle)
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     validate_assessment(result)
     jsonschema.validate(result, schema)
     entry = result['projection']['sections']['scuba_config']
@@ -2241,7 +2229,7 @@ def test_dns_sections_say_why_they_are_missing(complete_bundle, selected, reason
     write(complete_bundle, 'raw/dns_posture.json', payload)
     manifest = json.loads((complete_bundle / 'run-manifest.json').read_text())
     write(complete_bundle, 'run-manifest.json', {**manifest, 'selected_collectors': selected})
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.EXO.4.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.EXO.4.1v1'])
     for name in ('dmarc_records', 'spf_records', 'dkim_records'):
         assert result['projection']['sections'][name]['status'] == 'not_collected'
         assert result['projection']['sections'][name]['reason'] == reason
@@ -2262,7 +2250,7 @@ def test_authorization_extra_permissions_are_ignored_and_reported(complete_bundl
     assert p['authorization_policies'] == [AUTH]
     assert p.report['sections']['authorization_policies']['ignored_fields'] == [
         'DefaultUserRolePermissions.allowedToCreateTenants', 'DefaultUserRolePermissions.allowedToReadBitlockerKeysForOwnedDevice']
-    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+    validate_assessment(assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1']))
 
 
 @pytest.mark.parametrize('mutation,expected', [
@@ -2307,7 +2295,7 @@ def test_ca_extra_fields_ignored_unless_populated_inside_conditions_or_controls(
 def test_collector_error_names_the_error_class_and_operation_never_the_message(complete_bundle):
     message = f'Forbidden for {PERSON} ({EMAIL})'
     operation(complete_bundle, 'licensing', 'subscribedSkus', [], error=message, error_class='permission_stop')
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     section = result['projection']['sections']['service_plans']
     assert section['status'] == 'not_collected' and section['reason'] == 'collector_error'
     assert section['detail'] == {'error_class': 'permission_stop', 'operation': 'licensing.subscribedSkus'}
@@ -2343,7 +2331,7 @@ def test_no_p2_privileged_users_project_from_directory_roles(complete_bundle):
     # Without Entra ID P2 the PIM schedules are refused for want of a licence: the admin set is the directory role
     # assignments (the normaliser marks the schedule sources not_applicable) and the training shape has no PIM field.
     pim_refused(complete_bundle)
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     p = project_run(complete_bundle, redact=False)
     users = p.report['sections']['privileged_users']
     assert p['privileged_users'] == EXPECTED['privileged_users'] and users['status'] == 'projected'
@@ -2419,7 +2407,7 @@ def test_immutable_id_comes_from_the_sync_sample_when_the_user_read_lacks_it(com
 
 @pytest.mark.parametrize('ignored', [['b', 'a'], ['a', 'a'], ['has space'], [PERSON]])
 def test_ignored_fields_validation(complete_bundle, ignored):
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     result['projection']['sections']['service_plans']['ignored_fields'] = ['a', 'b.c']
     validate_assessment(result)
     result['projection']['sections']['service_plans']['ignored_fields'] = ignored
@@ -2436,7 +2424,7 @@ def test_ignored_fields_validation(complete_bundle, ignored):
 ])
 def test_collector_error_detail_validation(complete_bundle, section, reason, diagnostic):
     operation(complete_bundle, 'licensing', 'subscribedSkus', [], error='Forbidden', error_class='license_required')
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     validate_assessment(result)
     entry = result['projection']['sections'][section]
     entry.update(status='not_collected', reason=reason)
@@ -2499,7 +2487,7 @@ def test_privileged_role_qualifiers_withhold_when_populated(complete_bundle, whe
         assert 'restricted' not in canonical(p.report) and '/administrativeUnits' not in canonical(p.report)
     else:
         assert p['privileged_roles'] == ROLES and section['ignored_fields'] == [field]
-    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+    validate_assessment(assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1']))
 
 
 @pytest.mark.parametrize('rule_id,recipient,withheld', [
@@ -2544,7 +2532,7 @@ def test_privileged_users_withhold_a_role_held_only_at_a_scope(complete_bundle, 
     else:
         assert p['privileged_users'] == NOT_COLLECTED and section['detail'] == detail
         assert 'administrativeUnits' not in canonical(p.report)
-    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+    validate_assessment(assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1']))
 
 
 def test_service_plans_keep_only_provisioned_plans_as_scubagear_does(complete_bundle):
@@ -2580,7 +2568,7 @@ def test_every_adapter_reports_a_new_source_field(complete_bundle, section, path
     p = project_run(complete_bundle, redact=False)
     assert p[section] == EXPECTED[section] and p.report['sections'][section]['ignored_fields'] == ignored
     assert 'Injected Private Person' not in canonical(p) and 'Injected Private Person' not in canonical(p.report)
-    validate_assessment(assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1']))
+    validate_assessment(assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1']))
 
 
 def test_ca_records_policy_metadata_and_skips_nested_annotations(complete_bundle):
@@ -2600,7 +2588,7 @@ def test_ca_records_policy_metadata_and_skips_nested_annotations(complete_bundle
 ])
 def test_collector_error_class_is_checked_against_the_collector_vocabulary(complete_bundle, error_class, reported):
     operation(complete_bundle, 'licensing', 'subscribedSkus', [], error='Forbidden', error_class=error_class)
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.POWERBI.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.POWERBI.1.1v1'])
     assert result['projection']['sections']['service_plans']['detail']['error_class'] == reported
     validate_assessment(result)
     result['projection']['sections']['service_plans']['detail']['error_class'] = 'alice_smith'
@@ -2626,7 +2614,7 @@ def test_teams_unsupported_environment_error_projects_and_validates(
     operation(complete_bundle, 'teams_policy', 'meetingPolicies', [], status='error', **marker)
     projection = project_run(complete_bundle)
     assert projection['meeting_policies'] == NOT_COLLECTED
-    result = assess_run(complete_bundle, ModelConfig(model_name='stub'), policies=['MS.TEAMS.1.1v1'])
+    result = assess_run(complete_bundle, policies=['MS.TEAMS.1.1v1'])
     section = result['projection']['sections']['meeting_policies']
     assert section['status'] == 'not_collected' and section['reason'] == 'collector_error'
     assert section['detail'] == {'error_class': reported, 'operation': 'teams_policy.meetingPolicies'}

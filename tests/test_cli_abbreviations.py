@@ -8,13 +8,12 @@ from pathlib import Path
 import pytest
 
 from auditex import cli as product_cli
-from auditex import model_training, mcp_server
+from auditex import mcp_server, rule_assessment
 from auditex.command_runner import SENSITIVE_ARGS
 from auditex.demo import build_demo_parser
 from auditex.google_workspace.run import _SENSITIVE_COMMAND_FLAGS, scrub_google_command_line
 from auditex.guided import build_guided_parser
 from auditex.mcp_server import _build_mcp_parser, main as mcp_main
-from auditex.model_training import training_main
 from azure_tenant_audit import cli as engine_cli
 from azure_tenant_audit.auth_runtime import SENSITIVE_CLI_ARGS
 from azure_tenant_audit.response import RESPONSE_SENSITIVE_ARGS
@@ -91,7 +90,7 @@ def test_audit_parsers_redact_rejected_sensitive_arguments(builder, flag, inline
 
 @pytest.mark.parametrize("flag", SENSITIVE_FLAGS)
 @pytest.mark.parametrize("inline", [False, True])
-@pytest.mark.parametrize("entry", ["engine", "legacy", "run", "guided", "probe", "login", "import-token", "inspect-token", "google-run", "google-probe", "google-doctor", "setup-google", "response", "mcp", "setup", "doctor", "training"])
+@pytest.mark.parametrize("entry", ["engine", "legacy", "run", "guided", "probe", "login", "import-token", "inspect-token", "google-run", "google-probe", "google-doctor", "setup-google", "response", "mcp", "setup", "doctor", "assess"])
 def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypatch, tmp_path, capsys) -> None:
     from azure_tenant_audit.output import AuditWriter
 
@@ -106,7 +105,7 @@ def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypa
         monkeypatch.setattr(product_cli, name, forbidden_writer)
     for name in ("login_connection", "resolve_token_input", "import_token_context", "inspect_token_claims"):
         monkeypatch.setattr(product_cli.auditex_auth, name, forbidden_writer)
-    monkeypatch.setattr(model_training, "validate_training_pack", forbidden_writer)
+    monkeypatch.setattr(rule_assessment, "assess_run", forbidden_writer)
     monkeypatch.setattr(mcp_server, "mcp_root", forbidden_writer)
     monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", "1")
     monkeypatch.chdir(tmp_path)
@@ -127,7 +126,7 @@ def test_entrypoints_reject_before_bundle_creation(entry, flag, inline, monkeypa
         "mcp": (mcp_main, []),
         "setup": (product_cli.main, ["setup"]),
         "doctor": (product_cli.main, ["doctor"]),
-        "training": (training_main, ["--pack-dir", "constructed", "--output-dir", "constructed"]),
+        "assess": (product_cli.main, ["assess", "constructed"]),
     }
     main, argv = entries[entry]
     option = _abbreviation(flag)

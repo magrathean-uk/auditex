@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from auditex.rule_assessment import precheck_case
-from auditex.model_serving import ModelConfig, assess_run, assess_scubagear_export, messages_for
+from auditex.rule_assessment import assess_run, assess_scubagear_export
 from auditex.rule_assessment import build_case, canonical, policy_catalogue
 from auditex.scuba_projection import project_run
 from auditex.scubagear_export import load_export, project_export
@@ -57,7 +57,6 @@ def offline(monkeypatch, request):
     def forbidden(*args, **kwargs):
         raise AssertionError("A6 must not call a model or network")
 
-    monkeypatch.setattr("auditex.model_serving.ModelClient.assess", forbidden)
     monkeypatch.setattr("socket.create_connection", forbidden)
     monkeypatch.setattr("socket.socket.connect", forbidden)
 
@@ -67,7 +66,7 @@ def manifest(root, **metadata):
 
 
 def answer(root, policies=POLICIES):
-    return assess_run(root, ModelConfig(model_name="synthetic-a6"), policies=policies)
+    return assess_run(root, policies=policies)
 
 
 def test_catalogue_exact_scope_and_constant():
@@ -169,7 +168,7 @@ def test_scubagear_export_unchanged(tmp_path):
         case = build_case(pid, projection, "synthetic")
         row = precheck_case(case, value_rules=True, rule_projection=projection.rule_sections)
         assert row is not None and CODE not in row["limitations"]
-    result = assess_scubagear_export(source, tmp_path / "assessment", ModelConfig(model_name="synthetic-a6"),
+    result = assess_scubagear_export(source, tmp_path / "assessment",
                                      policies=POLICIES)
     validate_assessment(result)
     assert all(s["reason"] != CODE for s in result["projection"]["sections"].values())
@@ -230,7 +229,8 @@ def test_model_fixture_bytes_and_other_policy_outputs_unchanged(tmp_path):
     for line in (ROOT / "tests/fixtures/model-serving-cases.jsonl").read_text().splitlines():
         item = json.loads(line)
         case = json.loads(next(m["content"] for m in item["messages"] if m["role"] == "user"))
-        rows.append({"precheck": precheck_case(case), "messages": messages_for(case)})
+        # The fixture records the retired prompt; its first two messages equal what messages_for built.
+        rows.append({"precheck": precheck_case(case), "messages": item["messages"][:2]})
     assert sha256(canonical(rows).encode()).hexdigest() == "efd8c647e7982248916068d1c40c0d798c2c47dec5aa958cc990faa0a3ce1882"
     manifest(tmp_path)
     before = project_run(tmp_path)

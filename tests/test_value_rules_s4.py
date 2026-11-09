@@ -379,7 +379,7 @@ def test_rule_outputs_never_echo_evidence(policy, vectors):
     ("MS.EXO.4.4v1", "domain_noncompliant.agency_contact_missing", None),
 ])
 def test_served_answers_validate_and_persist_no_canaries(policy, cell, cited, vectors, tmp_path, monkeypatch, caplog):
-    from auditex.model_serving import ModelClient, ModelConfig, assess_run
+    from auditex.rule_assessment import assess_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
@@ -394,8 +394,7 @@ def test_served_answers_validate_and_persist_no_canaries(policy, cell, cited, ve
         return projection
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called the model"))
-    result = assess_run(tmp_path, ModelConfig(model_name="unused"), policies=[policy])
+    result = assess_run(tmp_path, policies=[policy])
     assert result["policies"][0]["rule_precheck"]["cell"] == cell
     validate_assessment(result)
     rendered = json.dumps(result) + caplog.text

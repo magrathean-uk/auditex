@@ -16,9 +16,10 @@ import sys
 
 import pytest
 
-from auditex.model_serving import ModelConfig, assess_scubagear_export
-from auditex.rule_assessment import policy_catalogue
+from auditex import rule_assessment
+from auditex.rule_assessment import assess_scubagear_export, canonical, policy_catalogue
 from auditex.scuba_projection import (
+    DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS,
     PACK_ENUM_DOMAINS, PACK_SHAPE_DIGESTS, SCUBA_CAP_EXCLUSION_POLICIES,
     SCUBA_ROLE_EXCLUSION_POLICIES, _json, _seen_shape, policy_section, rule_policy_section,
 )
@@ -35,8 +36,6 @@ from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
 ROOT = Path(__file__).resolve().parents[1]
-IGNORED_OPTIONS_WARNING = ("Warning: legacy model options are ignored for assessment; the model layer is parked "
-                           "and redaction stays enabled.")
 FIXTURES = ROOT / "tests/fixtures/scubagear-export"
 PROVIDER = FIXTURES / "mocktenant-provider-export.json"
 REAL = FIXTURES / "mocktenant-realformat-export.json"
@@ -62,13 +61,24 @@ def _save(tmp_path, value, name="export.json"):
     return path
 
 
-def _dry(tmp_path, source=PROVIDER, **kwargs):
+def _assess(tmp_path, source=PROVIDER, **kwargs):
     tmp_path.mkdir(parents=True, exist_ok=True)
     out = tmp_path / "assessment"
-    result = assess_scubagear_export(source, out, ModelConfig(model_name="test-model"), dry_run=True, **kwargs)
+    result = assess_scubagear_export(source, out, **kwargs)
+    assert result == json.loads((out / "model_assessment.json").read_text())
     sidecar = json.loads((out / "scubagear_adapter_report.json").read_text())
-    prompts = [json.loads(line) for line in (out / "model_assessment_prompts.jsonl").read_text().splitlines()]
-    return result, sidecar, prompts
+    catalogue = policy_catalogue()
+    selected = kwargs.get("policies") or list(catalogue["policies"])
+    projection, _ = project_export(
+        load_export(source), catalogue["policies"], redact=True,
+        max_items=kwargs.get("projection_max_items", DEFAULT_MAX_ITEMS),
+        max_chars=kwargs.get("projection_max_chars", DEFAULT_MAX_CHARS))
+    cases = []
+    for pid in selected:
+        case = rule_assessment.build_case(pid, projection, "unused", catalogue=catalogue)
+        cases.append({"policy_id": pid, "case": case,
+                      "case_sha256": sha256(canonical(case).encode("utf-8", "surrogatepass")).hexdigest()})
+    return result, sidecar, cases
 
 
 def test_fixture_ceiling_and_policy_disposition(tmp_path):
@@ -79,8 +89,8 @@ def test_fixture_ceiling_and_policy_disposition(tmp_path):
     assert set(UNMAPPABLE_REGO_POLICIES).isdisjoint(catalogue)
     for source, disposition_file, expected in ((PROVIDER, "policy-disposition.json", 44),
                                                (REAL, "policy-disposition-realformat.json", 43)):
-        result, sidecar, prompts = _dry(tmp_path / source.stem, source)
-        assert result["prompts"] == len(catalogue) == len(prompts)
+        result, sidecar, prompts = _assess(tmp_path / source.stem, source)
+        assert len(prompts) == len(result["policies"]) == len(catalogue)
         assert {p["policy_id"] for p in prompts} == set(catalogue)
         assert sidecar["disposition"] == json.loads((FIXTURES / disposition_file).read_text())["disposition"]
         assert sidecar["ceiling"]["overall"] == {"assessed": expected, "total": len(catalogue)}
@@ -90,17 +100,17 @@ def test_fixture_ceiling_and_policy_disposition(tmp_path):
         assert sidecar["pruning"]["totals"]["pruned_keys"] == sum(
             row["pruned_keys"] for row in sidecar["pruning"]["sections"].values())
         assert set(sidecar["unmappable"]["ids"]) >= set(UNMAPPABLE_REGO_POLICIES)
-    clean = {p["policy_id"]: p["prompt_sha256"] for p in _dry(tmp_path / "clean-prompts")[2]}
-    real = {p["policy_id"]: p["prompt_sha256"] for p in _dry(tmp_path / "real-prompts", REAL)[2]}
+    clean = {p["policy_id"]: p["case_sha256"] for p in _assess(tmp_path / "clean-prompts")[2]}
+    real = {p["policy_id"]: p["case_sha256"] for p in _assess(tmp_path / "real-prompts", REAL)[2]}
     assert {pid for pid in clean if clean[pid] != real[pid]} == {
         "MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1", "MS.EXO.13.1v1"}
 
 
 def test_provider_and_raw_wrapper_same_projection_and_prompts(tmp_path):
-    _, provider_report, provider_prompts = _dry(tmp_path / "provider")
-    _, wrapper_report, wrapper_prompts = _dry(tmp_path / "wrapper", RESULTS)
-    assert {p["policy_id"]: p["prompt_sha256"] for p in provider_prompts} == {
-        p["policy_id"]: p["prompt_sha256"] for p in wrapper_prompts}
+    _, provider_report, provider_prompts = _assess(tmp_path / "provider")
+    _, wrapper_report, wrapper_prompts = _assess(tmp_path / "wrapper", RESULTS)
+    assert {p["policy_id"]: p["case_sha256"] for p in provider_prompts} == {
+        p["policy_id"]: p["case_sha256"] for p in wrapper_prompts}
     for key in ("canonicalised", "pruning", "disposition", "ceiling"):
         assert provider_report[key] == wrapper_report[key]
     assert provider_report["input"]["kind"] == "provider_export"
@@ -111,27 +121,27 @@ def test_real_scubaresults_group_lists_and_unreadable_baselines(tmp_path):
     wrapper = json.loads(RESULTS.read_text())
     assert isinstance(wrapper["Results"]["AAD"], list)
     assert {"GroupName", "GroupNumber", "GroupReferenceURL", "Controls"} <= set(wrapper["Results"]["AAD"][0])
-    _, sidecar, _ = _dry(tmp_path / "real-list", RESULTS)
+    _, sidecar, _ = _assess(tmp_path / "real-list", RESULTS)
     assert sidecar["verdicts"]["state"] == "readable"
     assert sidecar["verdicts"]["counts"] == {"pass": 1, "fail": 2, "not_assessed": 2}
     invented = deepcopy(wrapper)
     invented["Results"]["AAD"] = {"Mock": invented["Results"]["AAD"][0]}
-    _, unreadable, _ = _dry(tmp_path / "wrong-layout", _save(tmp_path, invented))
+    _, unreadable, _ = _assess(tmp_path / "wrong-layout", _save(tmp_path, invented))
     assert unreadable["verdicts"]["source"] == "embedded"
     assert unreadable["verdicts"]["state"] == "unreadable_layout"
     assert unreadable["verdicts"]["counts"] == {}
     malformed_group = deepcopy(wrapper)
     malformed_group["Results"]["AAD"].append({"GroupName": "Broken", "Controls": "not-a-list"})
-    _, malformed_report, _ = _dry(tmp_path / "malformed-group", _save(tmp_path, malformed_group))
+    _, malformed_report, _ = _assess(tmp_path / "malformed-group", _save(tmp_path, malformed_group))
     assert malformed_report["verdicts"]["state"] == "unreadable_layout"
     assert malformed_report["verdicts"]["counts"] == {}
     empty = deepcopy(wrapper)
     empty["Results"]["AAD"] = []
-    _, empty_report, _ = _dry(tmp_path / "empty-results", _save(tmp_path, empty))
+    _, empty_report, _ = _assess(tmp_path / "empty-results", _save(tmp_path, empty))
     assert empty_report["verdicts"]["state"] == "empty"
     malformed = tmp_path / "malformed-results.json"
     malformed.write_text("{this is not JSON}")
-    _, unreadable_file, _ = _dry(tmp_path / "unreadable-file", PROVIDER, results_path=malformed)
+    _, unreadable_file, _ = _assess(tmp_path / "unreadable-file", PROVIDER, results_path=malformed)
     assert unreadable_file["verdicts"]["source"] == "results_file"
     assert unreadable_file["verdicts"]["state"] == "unreadable_file"
     assert unreadable_file["verdicts"]["counts"] == {}
@@ -139,7 +149,7 @@ def test_real_scubaresults_group_lists_and_unreadable_baselines(tmp_path):
     from auditex.scubagear_export import load_results
     assert load_results(_save(tmp_path, single, "single-result.json")) == ([single], "testresults")
     repaired_results = RESULTS.read_text().replace('"Result": "Pass"', '"Result": ', 1)
-    _, repaired_report, _ = _dry(tmp_path / "repaired-results", _save_text(tmp_path, repaired_results))
+    _, repaired_report, _ = _assess(tmp_path / "repaired-results", _save_text(tmp_path, repaired_results))
     assert repaired_report["verdicts"]["state"] == "unreadable_repaired"
     assert repaired_report["verdicts"]["counts"] == {}
 
@@ -162,7 +172,7 @@ def test_nested_repairs_withhold_enclosing_section_and_string_matches_refuse(tmp
     masked_text = json.dumps(raw).replace('"non.identifier": []', '"non.identifier": ', 1)
     masked = load_export(_save_text(tmp_path, masked_text))
     assert masked.repaired_masked_count == 1 and "dkim_config" in masked.repaired_keys
-    _, sidecar, _ = _dry(tmp_path / "masked-repair", _save_text(tmp_path, masked_text))
+    _, sidecar, _ = _assess(tmp_path / "masked-repair", _save_text(tmp_path, masked_text))
     assert sidecar["parse"]["masked_repaired_keys"] == 1
 
 
@@ -192,7 +202,7 @@ def test_repair_after_sidecar_cap_still_withholds_provider(tmp_path):
     )
     assert baseline["MS.TEAMS.1.1v1"] == "not_assessed"
     assert reasons["MS.TEAMS.1.1v1"] == "ledger_unavailable"
-    _, sidecar, _ = _dry(tmp_path / "capped-report", _save_text(tmp_path, content))
+    _, sidecar, _ = _assess(tmp_path / "capped-report", _save_text(tmp_path, content))
     assert len(sidecar["parse"]["repaired_keys"]) == 64
 
 
@@ -205,7 +215,7 @@ def test_repaired_export_keys_never_reach_sidecar_or_diagnostics(tmp_path, caplo
     for name in hostile:
         content = content.replace('"' + name + '": []', '"' + name + '": ', 1)
     with caplog.at_level("DEBUG"):
-        _, sidecar, _ = _dry(tmp_path / "repaired-private", _save_text(tmp_path, content))
+        _, sidecar, _ = _assess(tmp_path / "repaired-private", _save_text(tmp_path, content))
         assert sidecar["parse"]["masked_repaired_keys"] >= len(hostile)
         assert not any(name in sidecar["parse"]["repaired_keys"] for name in hostile)
         refused = content.replace('"tenant_id":', '"' + hostile[1] + '": 0, "' + hostile[1] + '": 1, "tenant_id":', 1)
@@ -253,24 +263,25 @@ def test_whole_export_salt_is_canonical_and_file_hash_is_bytes(tmp_path):
     reordered = _save(tmp_path, shuffled, "reordered.json")
     assert load_export(reordered).whole_digest == loaded.whole_digest
     assert load_export(reordered).sha256 != loaded.sha256
-    a, _, _ = _dry(tmp_path / "salt-a", source)
-    b, _, _ = _dry(tmp_path / "salt-b", alternate)
-    assert a["prompts"] == b["prompts"] == 102
-    first = (tmp_path / "salt-a/assessment/model_assessment_prompts.jsonl").read_text()
-    second = (tmp_path / "salt-b/assessment/model_assessment_prompts.jsonl").read_text()
-    assert first != second
+    a, _, a_rows = _assess(tmp_path / "salt-a", source)
+    b, _, b_rows = _assess(tmp_path / "salt-b", alternate)
+    a_cases = {row["policy_id"]: row["case_sha256"] for row in a_rows}
+    b_cases = {row["policy_id"]: row["case_sha256"] for row in b_rows}
+    assert len(a_cases) == len(b_cases) == 102
+    assert len(a["policies"]) == len(b["policies"]) == 102
+    assert a_cases != b_cases
 
 
 def test_distinct_fixture_exports_have_distinct_salts_and_pseudonyms(tmp_path):
     assert load_export(PROVIDER).whole_digest != load_export(REAL).whole_digest
-    clean = _dry(tmp_path / "clean", PROVIDER)[2]
-    real = _dry(tmp_path / "real", REAL)[2]
+    clean = _assess(tmp_path / "clean", PROVIDER)[2]
+    real = _assess(tmp_path / "real", REAL)[2]
     for policy_id in ("MS.AAD.7.1v1", "MS.AAD.7.2v1", "MS.AAD.7.3v1"):
         a = next(row for row in clean if row["policy_id"] == policy_id)
         b = next(row for row in real if row["policy_id"] == policy_id)
-        assert a["prompt_sha256"] != b["prompt_sha256"]
+        assert a["case_sha256"] != b["case_sha256"]
         def names(row):
-            case = json.loads(row["messages"][1]["content"])
+            case = row["case"]
             observed = next(item["observed"] for item in case["evidence"]
                             if item["section"] == "privileged_users")
             return {entry["DisplayName"] for entry in observed.values()}
@@ -445,14 +456,15 @@ def test_redaction_salt_blocks_output_only_name_dictionary(tmp_path):
     raw["privileged_users"] = dict(list(raw["privileged_users"].items())[:2])
     raw.pop("privileged_roles")
     source = _save(tmp_path, raw)
-    _, _, prompts = _dry(tmp_path / "attack", source)
+    _, attack_sidecar, prompts = _assess(tmp_path / "attack", source)
     selected = next(row for row in prompts if row["policy_id"] == "MS.AAD.7.1v1")
-    case = json.loads(selected["messages"][1]["content"])
+    case = selected["case"]
     observed = next(item["observed"] for item in case["evidence"] if item["section"] == "privileged_users")
     pseudonyms = {entry["DisplayName"] for entry in observed.values()}
     assert len(pseudonyms) == 2
-    assert all(key not in (tmp_path / "attack/assessment/model_assessment_prompts.jsonl").read_text()
-               for key in raw["privileged_users"])
+    attack_text = ((tmp_path / "attack/assessment/model_assessment.json").read_text() + json.dumps(attack_sidecar)
+                   + canonical(prompts))
+    assert all(key not in attack_text for key in raw["privileged_users"])
     roles = [entry["roles"] for entry in raw["privileged_users"].values()]
     names = [entry["DisplayName"] for entry in raw["privileged_users"].values()]
     candidates = names + [f"Synthetic Name {index}" for index in range(98)]
@@ -474,8 +486,7 @@ def test_redaction_salt_blocks_output_only_name_dictionary(tmp_path):
                for a in candidates for b in candidates if a != b)
 
 
-@pytest.mark.parametrize("clear", [False, True])
-def test_user_entries_guard_withholds_mixed_missing_immutable(tmp_path, clear):
+def test_user_entries_guard_withholds_mixed_missing_immutable(tmp_path):
     raw = json.loads(PROVIDER.read_text())
     users = dict(list(raw["privileged_users"].items())[:2])
     numbered = canonicalise_privileged_users(users)[0]
@@ -484,8 +495,8 @@ def test_user_entries_guard_withholds_mixed_missing_immutable(tmp_path, clear):
     names = [entry["DisplayName"] for entry in numbered.values()]
     raw["privileged_users"] = numbered
     source = _save(tmp_path, raw)
-    result = assess_scubagear_export(source, tmp_path / "output", ModelConfig(model_name="test-model"),
-                                     policies=["MS.AAD.3.3v2"], no_redaction=clear)
+    result = assess_scubagear_export(source, tmp_path / "output",
+                                     policies=["MS.AAD.3.3v2"])
     validate_assessment(result)
     row = result["projection"]["sections"]["privileged_users"]
     assert row["reason"] == "incomplete_shape" and row["detail"] == {
@@ -589,10 +600,10 @@ def test_baselines_map_and_reasons():
 
 
 def test_verdict_precedence_and_dropped_criticality(tmp_path):
-    _, embedded, _ = _dry(tmp_path / "embedded", RESULTS)
-    _, overridden, _ = _dry(tmp_path / "overridden", RESULTS,
+    _, embedded, _ = _assess(tmp_path / "embedded", RESULTS)
+    _, overridden, _ = _assess(tmp_path / "overridden", RESULTS,
                             results_path=FIXTURES / "mocktenant-testresults.json")
-    _, absent, _ = _dry(tmp_path / "absent")
+    _, absent, _ = _assess(tmp_path / "absent")
     assert embedded["verdicts"]["source"] == "embedded"
     assert overridden["verdicts"]["source"] == "results_file"
     assert absent["verdicts"]["source"] == "none" and absent["verdicts"]["counts"] == {}
@@ -688,14 +699,12 @@ def test_warning_and_na_switches_are_independent_and_keep_ledger_failures():
 def test_hostile_report_uuid_never_becomes_run_id(tmp_path):
     raw = json.loads(PROVIDER.read_text())
     raw["report_uuid"] = SENTINEL
-    result = assess_scubagear_export(_save(tmp_path, raw), tmp_path / "hostile",
-                                     ModelConfig(model_name="test-model"), policies=["MS.AAD.3.3v2"])
+    result = assess_scubagear_export(_save(tmp_path, raw), tmp_path / "hostile", policies=["MS.AAD.3.3v2"])
     validate_assessment(result)
     assert re.fullmatch(r"scubagear-[0-9a-f]{16}", result["run_id"])
     assert SENTINEL not in json.dumps(result) + (tmp_path / "hostile/scubagear_adapter_report.json").read_text()
     raw["report_uuid"] = "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
-    canonical = assess_scubagear_export(_save(tmp_path, raw, "uuid.json"), tmp_path / "uuid",
-                                        ModelConfig(model_name="test-model"), policies=["MS.AAD.3.3v2"])
+    canonical = assess_scubagear_export(_save(tmp_path, raw, "uuid.json"), tmp_path / "uuid", policies=["MS.AAD.3.3v2"])
     assert canonical["run_id"] == "scubagear-3f2504e0-4f89-41d3-9a0c-0305e82c3301"
 
 
@@ -1055,8 +1064,8 @@ def test_unseen_shapes_after_pruning_are_withheld_without_ignored_fields(tmp_pat
 
 def test_twenty_key_order_shuffles_keep_prompt_hashes_and_pruning_blocks(tmp_path):
     original = json.loads(REAL.read_text())
-    _, baseline, prompts = _dry(tmp_path / "baseline", REAL)
-    hashes = [row["prompt_sha256"] for row in prompts]
+    _, baseline, prompts = _assess(tmp_path / "baseline", REAL)
+    hashes = [row["case_sha256"] for row in prompts]
     randomizer = random.Random(20261104)
     def shuffle(value, path=""):
         if isinstance(value, dict):
@@ -1067,8 +1076,8 @@ def test_twenty_key_order_shuffles_keep_prompt_hashes_and_pruning_blocks(tmp_pat
         return value
     for index in range(20):
         source = _save(tmp_path, shuffle(original), f"shuffle-{index}.json")
-        _, sidecar, rows = _dry(tmp_path / f"shuffle-{index}", source)
-        assert [row["prompt_sha256"] for row in rows] == hashes
+        _, sidecar, rows = _assess(tmp_path / f"shuffle-{index}", source)
+        assert [row["case_sha256"] for row in rows] == hashes
         assert sidecar["pruning"] == baseline["pruning"]
         assert sidecar["canonicalised"] == baseline["canonicalised"]
         assert sidecar["disposition"] == baseline["disposition"]
@@ -1085,24 +1094,23 @@ def test_empty_pruning_proof_is_identity_on_clean_fixture(tmp_path):
 
 def test_replacing_every_privileged_guid_keeps_unrelated_prompt_bytes(tmp_path):
     raw = json.loads(PROVIDER.read_text())
-    original = _dry(tmp_path / "original-guid")[2]
+    original = _assess(tmp_path / "original-guid")[2]
     replaced = {}
     for index, (old, entry) in enumerate(raw["privileged_users"].items(), 1):
         new = f"3f2504e0-4f89-41d3-9a0c-{index:012x}"
         replaced[new] = {**entry, "id": new}
     raw["privileged_users"] = replaced
-    changed = _dry(tmp_path / "changed-guid", _save(tmp_path, raw))[2]
+    changed = _assess(tmp_path / "changed-guid", _save(tmp_path, raw))[2]
     users_readers = {pid for pid, item in policy_catalogue()["policies"].items()
                      if "privileged_users" in item["sections"]}
     assert users_readers
-    before = {row["policy_id"]: row["prompt_sha256"] for row in original}
-    after = {row["policy_id"]: row["prompt_sha256"] for row in changed}
+    before = {row["policy_id"]: row["case_sha256"] for row in original}
+    after = {row["policy_id"]: row["case_sha256"] for row in changed}
     assert all(before[pid] == after[pid] for pid in before if pid not in users_readers)
     assert any(before[pid] != after[pid] for pid in users_readers)
 
 
-@pytest.mark.parametrize("clear", [False, True])
-def test_removed_values_and_invalid_key_names_do_not_leak(tmp_path, caplog, capsys, clear):
+def test_removed_values_and_invalid_key_names_do_not_leak(tmp_path, caplog, capsys):
     raw = json.loads(REAL.read_text())
     for row in raw["dkim_config"]:
         row["PrunedSecret"] = SENTINEL
@@ -1110,22 +1118,21 @@ def test_removed_values_and_invalid_key_names_do_not_leak(tmp_path, caplog, caps
         row["@odata.type"] = SENTINEL
     source = _save(tmp_path, raw)
     with caplog.at_level("DEBUG"):
-        _, sidecar, prompts = _dry(tmp_path / "out", source, no_redaction=clear)
+        _, sidecar, prompts = _assess(tmp_path / "out", source)
     loaded = load_export(source)
-    projection, _ = project_export(loaded, policy_catalogue()["policies"], redact=not clear)
+    projection, _ = project_export(loaded, policy_catalogue()["policies"], redact=True)
     report = projection.report["sections"]["dkim_config"]
     assert report["status"] == "projected"
     assert "PrunedSecret" in report["ignored_fields"]
     assert "unrecognisedField" in report["ignored_fields"]
     assert "non.identifier.key" not in repr(report)
     assert "@odata." not in repr(report)
-    written = (tmp_path / "out/assessment/model_assessment_prompts.jsonl").read_text() + (
-        tmp_path / "out/assessment/scubagear_adapter_report.json").read_text()
+    written = (tmp_path / "out/assessment/model_assessment.json").read_text() + (
+        tmp_path / "out/assessment/scubagear_adapter_report.json").read_text() + canonical(prompts)
     assert SENTINEL not in written + repr(sidecar) + repr(projection.report) + caplog.text + str(capsys.readouterr())
 
 
-@pytest.mark.parametrize("clear", [False, True])
-def test_sensitive_unlisted_export_and_result_fields_never_reach_outputs(tmp_path, caplog, capsys, clear):
+def test_sensitive_unlisted_export_and_result_fields_never_reach_outputs(tmp_path, caplog, capsys):
     raw = json.loads(PROVIDER.read_text())
     raw["scuba_config"].update(AppID=SENTINEL, CertificateThumbprint=SENTINEL)
     raw["tenant_details"]["Ignored"] = SENTINEL
@@ -1139,22 +1146,21 @@ def test_sensitive_unlisted_export_and_result_fields_never_reach_outputs(tmp_pat
                    Requirement=SENTINEL)
     result_path = _save(tmp_path, results, "results.json")
     with caplog.at_level("DEBUG"):
-        _, sidecar, prompts = _dry(tmp_path / "leak", _save(tmp_path, raw),
-                                   results_path=result_path, no_redaction=clear)
-    output = (tmp_path / "leak/assessment/model_assessment_prompts.jsonl").read_text() + json.dumps(sidecar)
+        _, sidecar, prompts = _assess(tmp_path / "leak", _save(tmp_path, raw),
+                                   results_path=result_path)
+    output = ((tmp_path / "leak/assessment/model_assessment.json").read_text() + json.dumps(sidecar)
+              + canonical(prompts))
     assert SENTINEL not in output + repr(prompts) + caplog.text + str(capsys.readouterr())
     assessed = assess_scubagear_export(_save(tmp_path, raw, "assessment-source.json"),
-                                       tmp_path / "leak-envelope", ModelConfig(model_name="test-model"),
-                                       results_path=result_path, policies=["MS.AAD.3.3v2"], no_redaction=clear)
+                                       tmp_path / "leak-envelope",
+                                       results_path=result_path, policies=["MS.AAD.3.3v2"])
     validate_assessment(assessed)
     assert SENTINEL not in json.dumps(assessed) + (tmp_path / "leak-envelope/scubagear_adapter_report.json").read_text()
     assert "mocktenant.invalid" in output
-    if not clear:
-        assert "mock.user@mocktenant.invalid" not in output
+    assert "mock.user@mocktenant.invalid" not in output
 
 
-@pytest.mark.parametrize("clear", [False, True])
-def test_guid_key_and_id_forms_never_leak_even_on_rejection(tmp_path, caplog, capsys, clear):
+def test_guid_key_and_id_forms_never_leak_even_on_rejection(tmp_path, caplog, capsys):
     guid = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
     raw = json.loads(PROVIDER.read_text())
     old, entry = next(iter(raw["privileged_users"].items()))
@@ -1164,27 +1170,26 @@ def test_guid_key_and_id_forms_never_leak_even_on_rejection(tmp_path, caplog, ca
     source = _save(tmp_path, raw)
     forms = {guid, guid.upper(), guid.replace("-", ""), guid.replace("-", "").upper()}
     with caplog.at_level("DEBUG"):
-        result, sidecar, prompts = _dry(tmp_path / "valid", source, no_redaction=clear)
-    text = json.dumps(result) + json.dumps(sidecar) + repr(prompts)
+        result, sidecar, prompts = _assess(tmp_path / "valid", source)
+    text = json.dumps(result) + json.dumps(sidecar) + canonical(prompts)
     assert all(form not in text + caplog.text + str(capsys.readouterr()) for form in forms)
-    envelope = assess_scubagear_export(source, tmp_path / "valid-envelope", ModelConfig(model_name="test-model"),
-                                       policies=["MS.AAD.3.3v2"], no_redaction=clear)
+    envelope = assess_scubagear_export(source, tmp_path / "valid-envelope",
+                                       policies=["MS.AAD.3.3v2"])
     validate_assessment(envelope)
     assert all(form not in json.dumps(envelope) for form in forms)
     raw["privileged_users"][guid]["Extra"] = SENTINEL
     rejected = _save(tmp_path, raw, "rejected.json")
     with caplog.at_level("DEBUG"):
-        result, sidecar, prompts = _dry(tmp_path / "rejected", rejected, no_redaction=clear)
-    text = json.dumps(result) + json.dumps(sidecar) + repr(prompts)
+        result, sidecar, prompts = _assess(tmp_path / "rejected", rejected)
+    text = json.dumps(result) + json.dumps(sidecar) + canonical(prompts)
     assert all(form not in text + caplog.text + str(capsys.readouterr()) for form in forms)
     assert sidecar["disposition"]["MS.AAD.7.1v1"]["status"] == "withheld"
     for index, malformed_id in enumerate((guid.upper(), guid.replace("-", "").upper())):
         changed = deepcopy(raw)
         changed["privileged_users"][guid]["id"] = malformed_id
-        result, sidecar, prompts = _dry(tmp_path / f"malformed-id-{index}",
-                                        _save(tmp_path, changed, f"malformed-id-{index}.json"),
-                                        no_redaction=clear)
-        text = json.dumps(result) + json.dumps(sidecar) + repr(prompts)
+        result, sidecar, prompts = _assess(tmp_path / f"malformed-id-{index}",
+                                        _save(tmp_path, changed, f"malformed-id-{index}.json"))
+        text = json.dumps(result) + json.dumps(sidecar) + canonical(prompts)
         assert all(form not in text for form in forms)
     assert all("PrunedSecret" not in json.dumps(row) for row in sidecar["pruning"]["sections"].values())
 
@@ -1398,7 +1403,7 @@ def test_scope_branches_validate_envelope(tmp_path, variant, expected_source, ex
     else:
         source = _save(tmp_path, raw)
     bound = 2 if variant == "oversize" else 40
-    result = assess_scubagear_export(source, tmp_path / "output", ModelConfig(model_name="test-model"),
+    result = assess_scubagear_export(source, tmp_path / "output",
                                      policies=["MS.AAD.3.3v2"], projection_max_items=bound)
     validate_assessment(result)
     summary = result["scope_post_check"]
@@ -1419,7 +1424,7 @@ def test_scope_oversize_inside_raw_read_is_not_evaluated(tmp_path, monkeypatch):
     assert summary["status"] == "not_evaluated" and summary["reason"] == "oversize"
 
 
-def test_dry_run_no_network_or_process_and_refusal_no_output(tmp_path, monkeypatch):
+def test_assessment_no_network_or_process_and_refusal_no_output(tmp_path, monkeypatch):
     import shutil
     import socket
     def forbidden(*_args, **_kwargs):
@@ -1428,20 +1433,18 @@ def test_dry_run_no_network_or_process_and_refusal_no_output(tmp_path, monkeypat
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(os, "system", forbidden)
     monkeypatch.setattr(shutil, "which", forbidden)
-    result, _, _ = _dry(tmp_path / "offline")
-    assert result["prompts"] == len(policy_catalogue()["policies"])
+    result, _, _ = _assess(tmp_path / "offline")
+    assert len(result["policies"]) == len(policy_catalogue()["policies"])
     bad = _save(tmp_path, {"Raw": [], "MetaData": {}}, "invalid-shape.json")
     target = tmp_path / "absent"
     with pytest.raises(ValueError, match="Invalid ScubaGear export"):
-        assess_scubagear_export(bad, target, ModelConfig(model_name="test-model"), dry_run=True)
+        assess_scubagear_export(bad, target)
     assert not target.exists()
 
 
 def test_output_dir_and_private_files(tmp_path):
-    from auditex.cli import _model_output_directory
     target = tmp_path / "new"
     assert resolve_output_directory(target) == target
-    assert _model_output_directory(str(target)) == str(target)
     target.mkdir()
     (target / "occupied").write_text("x")
     with pytest.raises(ValueError):
@@ -1455,11 +1458,9 @@ def test_output_dir_and_private_files(tmp_path):
     for value in (bundle / "nested", bundle.parent if False else bundle / "nested" / "deeper"):
         with pytest.raises(ValueError):
             resolve_output_directory(value)
-        with pytest.raises(ValueError):
-            _model_output_directory(str(value))
-    result, _, _ = _dry(tmp_path / "normal")
-    out = Path(result["path"]).parent
-    assert {p.name for p in out.iterdir()} == {"model_assessment_prompts.jsonl", "scubagear_adapter_report.json"}
+    _assess(tmp_path / "normal")
+    out = tmp_path / "normal" / "assessment"
+    assert {p.name for p in out.iterdir()} == {"model_assessment.json", "scubagear_adapter_report.json"}
     assert out.stat().st_mode & 0o777 == 0o700
     assert all(p.stat().st_mode & 0o777 == 0o600 for p in out.iterdir())
 
@@ -1468,12 +1469,12 @@ def test_existing_empty_output_dir_becomes_private_and_validation_fails_without_
     target = tmp_path / "empty"
     target.mkdir(mode=0o755)
     target.chmod(0o755)
-    assess_scubagear_export(PROVIDER, target, ModelConfig(model_name="test-model"), dry_run=True)
+    assess_scubagear_export(PROVIDER, target)
     assert target.stat().st_mode & 0o777 == 0o700
     bad = _save(tmp_path, {"Raw": [], "MetaData": {}}, "invalid-export.json")
     refused = tmp_path / "refused-output"
     with pytest.raises(ValueError, match="Invalid ScubaGear export"):
-        assess_scubagear_export(bad, refused, ModelConfig(model_name="test-model"))
+        assess_scubagear_export(bad, refused)
     assert not refused.exists()
 
 
@@ -1486,21 +1487,21 @@ def test_assessment_validation_failure_creates_no_directory(tmp_path, monkeypatc
     monkeypatch.setattr(assessment, "validate_assessment", reject)
     monkeypatch.setattr(rules, "_assess_policies", lambda *_args, **_kwargs: [])
     with pytest.raises(ValueError, match="synthetic validation failure"):
-        assess_scubagear_export(PROVIDER, target, ModelConfig(model_name="test-model"))
+        assess_scubagear_export(PROVIDER, target)
     assert not target.exists()
 
 
 def test_output_directory_rechecked_after_assessment(tmp_path, monkeypatch):
-    import auditex.model_serving as serving
-    original = serving._dry_run_prompts
+    import auditex.rule_assessment as rules
+    original = rules._assess_policies
     target = tmp_path / "raced"
     def insert_file(*args, **kwargs):
         target.mkdir()
         (target / "occupied").write_text("keep")
         return original(*args, **kwargs)
-    monkeypatch.setattr(serving, "_dry_run_prompts", insert_file)
+    monkeypatch.setattr(rules, "_assess_policies", insert_file)
     with pytest.raises(ValueError, match="new or empty"):
-        assess_scubagear_export(PROVIDER, target, ModelConfig(model_name="test-model"), dry_run=True)
+        assess_scubagear_export(PROVIDER, target)
     assert (target / "occupied").read_text() == "keep"
 
 
@@ -1511,8 +1512,7 @@ def test_tilde_script_path_uses_resolved_output(tmp_path, monkeypatch, capsys):
     spec.loader.exec_module(module)
     monkeypatch.setattr(Path, "expanduser", lambda self: tmp_path / str(self)[2:]
                         if str(self).startswith("~/") else self)
-    monkeypatch.setattr(sys, "argv", [str(script), str(PROVIDER), "--output-dir", "~/tilde-output",
-                                  "--dry-run", "--model", "test-model"])
+    monkeypatch.setattr(sys, "argv", [str(script), str(PROVIDER), "--output-dir", "~/tilde-output"])
     assert module.main() == 0
     summary = json.loads(capsys.readouterr().out)
     assert Path(summary["sidecar_path"]) == tmp_path / "tilde-output/scubagear_adapter_report.json"
@@ -1529,11 +1529,12 @@ def test_internal_script_and_surface(tmp_path, monkeypatch, capsys):
         module.main()
     assert help_exit.value.code == 0
     capsys.readouterr()
-    monkeypatch.setattr(sys, "argv", [str(module_path), str(PROVIDER), "--output-dir", str(tmp_path / "script"),
-                                  "--dry-run", "--model", "test-model"])
+    monkeypatch.setattr(sys, "argv", [str(module_path), str(PROVIDER), "--output-dir", str(tmp_path / "script")])
     assert module.main() == 0
     summary = json.loads(capsys.readouterr().out)
     assert summary["assessed"] == 44 and SENTINEL not in json.dumps(summary)
+    assert {p.name for p in (tmp_path / "script").iterdir()} == {"model_assessment.json", "scubagear_adapter_report.json"}
+    assert summary["assessment_path"] == str(tmp_path / "script/model_assessment.json")
     import tomllib
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert set(project["project"]["scripts"]) == {"azure-tenant-audit", "auditex", "auditex-mcp"}
@@ -1542,18 +1543,16 @@ def test_internal_script_and_surface(tmp_path, monkeypatch, capsys):
     occupied = tmp_path / "occupied"
     occupied.mkdir()
     (occupied / "file").write_text("x")
-    monkeypatch.setattr(sys, "argv", [str(module_path), str(PROVIDER), "--output-dir", str(occupied),
-                                  "--dry-run", "--model", "test-model"])
+    monkeypatch.setattr(sys, "argv", [str(module_path), str(PROVIDER), "--output-dir", str(occupied)])
     assert module.main() == 2
-    warning, failure = capsys.readouterr().err.splitlines()
-    assert warning == IGNORED_OPTIONS_WARNING and failure.startswith("ScubaGear assessment failed: ")
+    (failure,) = capsys.readouterr().err.splitlines()
+    assert failure.startswith("ScubaGear assessment failed: ")
     invalid = _save(tmp_path, {"Raw": [], "MetaData": {}}, "invalid.json")
     refused = tmp_path / "refused"
-    monkeypatch.setattr(sys, "argv", [str(module_path), str(invalid), "--output-dir", str(refused),
-                                  "--dry-run", "--model", "test-model"])
+    monkeypatch.setattr(sys, "argv", [str(module_path), str(invalid), "--output-dir", str(refused)])
     assert module.main() == 2
-    warning, failure = capsys.readouterr().err.splitlines()
-    assert warning == IGNORED_OPTIONS_WARNING and failure.startswith("ScubaGear assessment failed: Invalid ScubaGear export")
+    (failure,) = capsys.readouterr().err.splitlines()
+    assert failure.startswith("ScubaGear assessment failed: Invalid ScubaGear export")
     assert not refused.exists()
 
 
@@ -1565,14 +1564,14 @@ def test_no_public_cli_mcp_or_customer_document_surface(monkeypatch):
         else:
             monkeypatch.setenv("AUDITEX_ENABLE_RESPONSE", response)
         root_help = cli._build_root_parser().format_help().lower()
-        model_help = cli._build_model_parser().format_help().lower()
-        assert "assess-scubagear" not in root_help + model_help
-        assert "scubagear" not in root_help + model_help
+        assess_help = cli._build_assess_parser().format_help().lower()
+        assert "assess-scubagear" not in root_help + assess_help
+        assert "scubagear" not in root_help + assess_help
         specs = mcp_registry.iter_tool_specs(include_response=bool(response))
         names = {item["name"].lower() for item in specs}
         assert all("assess-scubagear" not in name and "scubagear" not in name for name in names)
         assert "assess-scubagear-export" not in json.dumps(specs).lower()
-    for args in ((), ("model",)):
+    for args in ((), ("assess",)):
         proc = subprocess.run([str(ROOT / ".venv/bin/auditex"), *args, "--help"],
                               capture_output=True, text=True, timeout=30)
         assert proc.returncode == 0
@@ -1587,20 +1586,14 @@ def test_no_public_cli_mcp_or_customer_document_surface(monkeypatch):
         assert "scubagear_export" not in text and "assess-scubagear-export" not in text
 
 
-def test_non_dry_run_validates_without_model_request(tmp_path):
-    result = assess_scubagear_export(PROVIDER, tmp_path / "result", ModelConfig(model_name="test-model"),
+def test_assessment_validates_without_model_request(tmp_path):
+    result = assess_scubagear_export(PROVIDER, tmp_path / "result",
                                      policies=["MS.AAD.3.3v2"])
     validate_assessment(result)
     assert (tmp_path / "result/model_assessment.json").is_file()
     assert result["scope_post_check"]["source"] == "projection"
     assert SENTINEL not in (tmp_path / "result/model_assessment.json").read_text()
-    result2 = assess_scubagear_export(PROVIDER, tmp_path / "clear", ModelConfig(model_name="test-model"),
-                                      policies=["MS.AAD.3.3v2"], no_redaction=True)
-    validate_assessment(result2)
-    remote = assess_scubagear_export(PROVIDER, tmp_path / "remote", ModelConfig(endpoint="https://example.invalid/v1",
-                                     model_name="test-model"), no_redaction=True)
-    assert remote["projection"]["redaction"]["enabled"] and remote["endpoint_host"] == "none"
-    validate_assessment(remote)
+    assert result["projection"]["redaction"]["enabled"] and result["endpoint_host"] == "none"
 
 
 @pytest.mark.parametrize('section,value', [
@@ -1663,8 +1656,8 @@ def test_rule_view_canaries_never_enter_outputs_or_logs(tmp_path, caplog, capsys
     assert canary_name in repr(projection.rule_sections['powerbi_tenant_settings'])
     assert projection['powerbi_tenant_settings'] == NOT_COLLECTED
     with caplog.at_level('DEBUG'):
-        _dry(tmp_path / 'dry', source)
-        assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+        _assess(tmp_path / 'dry', source)
+        assess_scubagear_export(source, tmp_path / 'assessed',
                                 policies=['MS.POWERBI.1.1v1'])
     written = ''.join(path.read_text() for folder in ('dry/assessment', 'assessed')
                       for path in (tmp_path / folder).iterdir() if path.is_file())
@@ -1774,9 +1767,7 @@ def test_atp_recipients_and_ledger_never_enter_persisted_outputs(
     monkeypatch.setattr(catalogue, 'row_for', with_atp_read_set)
     monkeypatch.setattr(value_rules, 'assess', reading_rule)
     with caplog.at_level('DEBUG'):
-        _, sidecar, _ = _dry(tmp_path / 'dry', source, no_redaction=not redact)
-        assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
-                                policies=['MS.POWERBI.1.1v1'], no_redaction=not redact)
+        _, sidecar, _ = _assess(tmp_path / 'dry', source, policies=['MS.POWERBI.1.1v1'])
     # The serving read-set passes the failed ledger privately while withholding its provider sections.
     assert seen == [(NOT_COLLECTED if failed_ledger else raw['atp_policy_rules'],
                      [ledger_canary] if failed_ledger else [])]
@@ -1786,8 +1777,7 @@ def test_atp_recipients_and_ledger_never_enter_persisted_outputs(
     assert projection.rule_sections['atp_policy_rules'] == (NOT_COLLECTED if failed_ledger else raw['atp_policy_rules'])
     assert sidecar['ledger']['securitysuite'] == {'unsuccessful_count': int(failed_ledger)}
     assert all(set(row) == {'unsuccessful_count'} for row in sidecar['ledger'].values())
-    written = ''.join(path.read_text() for folder in ('dry/assessment', 'assessed')
-                      for path in (tmp_path / folder).rglob('*') if path.is_file())
+    written = ''.join(path.read_text() for path in (tmp_path / 'dry/assessment').rglob('*') if path.is_file())
     emitted = written + caplog.text + str(capsys.readouterr())
     assert canary not in emitted
     assert ledger_canary not in emitted
@@ -1830,15 +1820,14 @@ def test_export_environment_is_retained_only_when_recognised(tmp_path, environme
 
 # Retaining recognised rule-view environments lets the commercial-only Teams gates fire.
 # Compare with the same export under the previous environment branch; unrelated rule additions
-# must not invalidate this regression, and model prompts must remain byte-identical.
+# must not invalidate this regression, and case bytes must remain byte-identical.
 @pytest.mark.parametrize('source', [PROVIDER, REAL], ids=['provider', 'realformat'])
 @pytest.mark.parametrize('environment', ['gcc', 'gcchigh', 'dod'])
 @pytest.mark.parametrize('redact', [True, False])
-def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behaviour(
+def test_noncommercial_export_case_bytes_and_prechecks_match_committed_behaviour(
         tmp_path, monkeypatch, source, environment, redact):
     from auditex import scubagear_export
     from auditex.rule_assessment import precheck_case
-    from auditex.model_serving import ModelClient, ModelEndpointError
     from auditex.rule_assessment import build_case
     from azure_tenant_audit.value_rules.catalogue import row_for
 
@@ -1849,7 +1838,7 @@ def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behavi
 
     def signatures(label):
         projection, _ = project_export(load_export(export), policy_catalogue()['policies'], redact=redact)
-        prompts = _dry(tmp_path / label, export, no_redaction=not redact)[2]
+        prompts = _assess(tmp_path / label, export)[2]
         assert len(prompts) == 102
         prechecks = {}
         for prompt in prompts:
@@ -1859,7 +1848,7 @@ def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behavi
             precheck = precheck_case(build_case(pid, projection, 'unused'), absent_fields=True, empty_lists=True,
                                      value_rules=True, rule_projection=rule_input)
             prechecks[pid] = precheck['rule_precheck'] if precheck else None
-        return projection, {p['policy_id']: p['prompt_sha256'] for p in prompts}, prechecks
+        return projection, {p['policy_id']: p['case_sha256'] for p in prompts}, prechecks
 
     projection, prompts, prechecks = signatures('current')
     config_view = scubagear_export._config_view
@@ -1894,23 +1883,7 @@ def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behavi
         assert prechecks['MS.AAD.9.1v1']['reason_code'] == 'data_unavailable_no_licence'
         assert prechecks['MS.AAD.9.1v1']['section'] == ['service_plans']
 
-    calls = []
-    original_assess = ModelClient.assess
-
-    def guarded_assess(client, case):
-        pid = case['policy_id']
-        assert prechecks[pid] is None, f'{pid} must retain its committed precheck'
-        calls.append(pid)
-        return original_assess(client, case)
-
-    def unavailable(*args, **kwargs):
-        raise ModelEndpointError('Synthetic endpoint unavailable')
-
-    monkeypatch.setattr(ModelClient, 'assess', guarded_assess)
-    monkeypatch.setattr(ModelClient, '_request', unavailable)
-    result = assess_scubagear_export(export, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
-                                     no_redaction=not redact)
-    assert not calls
+    result = assess_scubagear_export(export, tmp_path / 'assessed')
     assert {row['policy_id']: row.get('rule_precheck') for row in result['policies']} == {
         pid: detail if row_for(pid) else None for pid, detail in prechecks.items()}
 
@@ -1930,7 +1903,7 @@ def test_bad_guid_keyed_user_is_shape_withheld_before_user_detail(tmp_path):
     source = _save(tmp_path, raw)
     projection, _ = project_export(load_export(source), policy_catalogue()['policies'])
     assert projection.rule_sections['privileged_users'] == NOT_COLLECTED
-    result = assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+    result = assess_scubagear_export(source, tmp_path / 'assessed',
                                      policies=['MS.POWERBI.1.1v1'])
     assert result['projection']['sections']['privileged_users']['detail'] == {
         'field': '$', 'kind': 'unseen_shape'}
@@ -1952,7 +1925,7 @@ def test_one_rule_cannot_mutate_later_policy_evidence(tmp_path, monkeypatch):
         sections['powerbi_tenant_settings'].append({'settingName': 'injected', 'enabled': False})
         return original(policy_id, sections)
     monkeypatch.setattr(value_rules, 'assess', mutating_rule)
-    assess_scubagear_export(source, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+    assess_scubagear_export(source, tmp_path / 'assessed',
                             policies=['MS.POWERBI.1.1v1', 'MS.POWERBI.2.1v1'])
     assert seen == [1, 1]
 
@@ -1963,7 +1936,7 @@ def test_rule_exception_text_never_reaches_export_artifacts_or_stderr(tmp_path, 
     def broken_rule(*args):
         raise RuntimeError(secret)
     monkeypatch.setattr(value_rules, 'assess', broken_rule)
-    result = assess_scubagear_export(PROVIDER, tmp_path / 'assessed', ModelConfig(model_name='test-model'),
+    result = assess_scubagear_export(PROVIDER, tmp_path / 'assessed',
                                      policies=['MS.POWERBI.1.1v1'])
     row = result['policies'][0]
     assert row['rule_precheck']['cell'] is None and row['rule_precheck']['reason_code'] == 'rule_evaluation_failed'
@@ -1973,14 +1946,16 @@ def test_rule_exception_text_never_reaches_export_artifacts_or_stderr(tmp_path, 
 
 
 @pytest.mark.parametrize('source,expected', [
-    (PROVIDER, 'c8e526c5e27692b2884a9215389428a309571e6b8683a3e3558c75c36da2ef14'),
-    (REAL, '12b876594566f27bdebf3cc688ada165c809efb250adf539cbc474243a534cdb'),
+    # Digests over the case bytes (the retired prompt's user message), taken on the last head that still produced
+    # the prompt, where the prompt digests were c8e526c5...2ef14 and 12b87659...534cdb.
+    (PROVIDER, '493b343581a8f1cf181df356c6b2d0e504c43988502151453b5323188dfaa0ba'),
+    (REAL, 'cf65845c4668e91d9eeaf5d82f18ea54057aa800f6442b9b0b4772d6634d5f64'),
 ])
-def test_unaffected_export_prompt_hashes_match_pre_rule_view_fixture(tmp_path, source, expected):
+def test_unaffected_export_case_hashes_match_pre_rule_view_fixture(tmp_path, source, expected):
     changed_by_m5 = {'MS.SECURITYSUITE.2.1v1', 'MS.SECURITYSUITE.2.3v1', 'MS.SECURITYSUITE.3.2v1'}
-    prompts = _dry(tmp_path / source.stem, source)[2]
-    assert len(prompts) == 102
-    hashes = {row['policy_id']: row['prompt_sha256'] for row in prompts
+    cases = _assess(tmp_path / source.stem, source)[2]
+    assert len(cases) == 102
+    hashes = {row['policy_id']: row['case_sha256'] for row in cases
               if row['policy_id'] not in changed_by_m5}
     assert len(hashes) == 99
     assert sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest() == expected
@@ -1988,8 +1963,6 @@ def test_unaffected_export_prompt_hashes_match_pre_rule_view_fixture(tmp_path, s
 
 @pytest.mark.parametrize("baseline_status,expected", [("pass", "agree"), ("fail", "disagree")])
 def test_rule_export_comparisons_without_model(tmp_path, monkeypatch, baseline_status, expected):
-    from auditex.model_serving import ModelClient
-    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
     pid = "MS.EXO.13.1v1"
     raw = json.loads(PROVIDER.read_text())
     raw['org_config'] = [{'Name': 'Synthetic', 'AuditDisabled': False}]
@@ -2008,8 +1981,6 @@ FORMERLY_HELD = ['MS.SECURITYSUITE.1.1v1', 'MS.SECURITYSUITE.6.1v1', 'MS.SECURIT
 
 
 def test_export_formerly_held_policies_are_rule_rows_without_model(tmp_path, monkeypatch):
-    from auditex.model_serving import ModelClient
-    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
     result = assess_scubagear_export(PROVIDER, tmp_path / 'assessment', results_path=RESULTS, policies=FORMERLY_HELD)
     assert [row['policy_id'] for row in result['policies']] == FORMERLY_HELD
     assert all(row['reason'] == 'rule_precheck' and row['rule_precheck']['class'] == 'value_rule'
@@ -2018,9 +1989,7 @@ def test_export_formerly_held_policies_are_rule_rows_without_model(tmp_path, mon
 
 
 def test_export_policy_without_a_rule_is_uncovered_without_model(tmp_path, monkeypatch):
-    from auditex.model_serving import ModelClient
     from azure_tenant_audit.value_rules import catalogue as rule_catalogue
-    monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No assessment model client'))
     # Every catalogue policy has a rule today: withdraw one to reach the uncovered path through the export flow.
     original, withdrawn = rule_catalogue.row_for, FORMERLY_HELD[0]
     monkeypatch.setattr(rule_catalogue, 'row_for', lambda pid: None if pid == withdrawn else original(pid))

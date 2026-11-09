@@ -613,30 +613,6 @@ def test_enclosing_pair_is_registered_before_selected_file_open(
     assert pair_ids <= admitted_at_open[-1]
 
 
-@pytest.mark.parametrize("private_name", ["sensitive-users.key", "sensitive-users.txt"])
-@pytest.mark.parametrize("consumer", ["digest", "pack", "tokenizer", "resume"])
-def test_training_helpers_do_not_read_private_pair_from_caller_root(
-    private_run: Path, private_name: str, consumer: str,
-) -> None:
-    from auditex import model_training
-    from azure_tenant_audit.guarded_io import UnsafeRunFileError
-
-    private = private_run / "operator-inputs"
-    (private / "run-manifest.json").write_text("{}", encoding="utf-8")
-    names = {"pack": "manifest.json", "tokenizer": "config.json", "resume": "auditex-training-input.json"}
-    if consumer != "digest":
-        (private / names[consumer]).symlink_to(private / private_name)
-    with pytest.raises(UnsafeRunFileError):
-        if consumer == "digest":
-            model_training._digest(private / private_name)
-        elif consumer == "pack":
-            model_training.validate_training_pack(private)
-        elif consumer == "tokenizer":
-            model_training._load_tokenizer(str(private), transformers=object())
-        else:
-            model_training._validate_resume_input(private, private, {})
-
-
 def test_unrelated_operator_inputs_ancestor_does_not_capture_a_nested_run(tmp_path: Path) -> None:
     from azure_tenant_audit.guarded_io import GuardContext, open_guarded_file
 

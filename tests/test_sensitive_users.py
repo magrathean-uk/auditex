@@ -790,7 +790,7 @@ def test_rule_input_rejects_mutation(tmp_path, monkeypatch, damage, capsys, capl
 @pytest.mark.parametrize("entrypoint", ["project", "assess"])
 @pytest.mark.parametrize("invalid", ["UPPERCASE@EXAMPLE.INVALID", "not-an-email"])
 def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path, monkeypatch, entrypoint, invalid):
-    from auditex import model_serving, scuba_projection
+    from auditex import rule_assessment, scuba_projection
 
     root = rule_input_bundle(tmp_path)
     operations_path = root / "raw/exchange_policy.json"
@@ -842,7 +842,7 @@ def test_rule_input_rejects_invalid_captured_snapshot_after_replacement(tmp_path
         if entrypoint == "project":
             scuba_projection.project_run(root)
         else:
-            model_serving.assess_run(root, policies=[SS21])
+            rule_assessment.assess_run(root, policies=[SS21])
 
     assert swapped
     assert private_file_opens == ["sensitive-users.txt", "sensitive-users.key"]
@@ -950,8 +950,9 @@ def test_rule_input_assessment_replay_and_all_public_outputs_are_private(
     from copy import deepcopy
     import shutil
     from auditex import scuba_projection as module
-    from auditex.model_serving import ModelClient, assess_run, assess_scubagear_export
+    from auditex.rule_assessment import assess_run, assess_scubagear_export, build_case, canonical
     from auditex.rule_assessment import policy_catalogue
+    from test_model_serving import case_texts
     from auditex.scubagear_export import load_export, project_export
     from azure_tenant_audit.scuba_assessment import validate_assessment
     from azure_tenant_audit.value_rules import assess
@@ -962,7 +963,6 @@ def test_rule_input_assessment_replay_and_all_public_outputs_are_private(
     operations = json.loads(operations_path.read_text())
     operations["antiPhishPolicies"]["value"][0]["TargetedUserProtectionAction"] = action
     operations_path.write_text(json.dumps(operations))
-    monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("operator input called the model"))
     projection = module.project_run(root)
     sections = deepcopy(projection.rule_sections)
     sections["scuba_config"] = private_config(projection)
@@ -973,7 +973,7 @@ def test_rule_input_assessment_replay_and_all_public_outputs_are_private(
     assert result["policies"][0]["rule_precheck"]["cell"] == cell
     assert result["policies"][1]["rule_precheck"]["cell"] == "section_not_collected"
     public_outputs.append(result)
-    public_outputs.append(assess_run(root, policies=[SS21], dry_run=True))
+    public_outputs.append(case_texts(root, [SS21]))
     replay = tmp_path / "offline-replay"
     shutil.copytree(root, replay)
     replay_result = assess_run(replay, policies=[SS21, SS23])
@@ -992,8 +992,7 @@ def test_rule_input_assessment_replay_and_all_public_outputs_are_private(
     export_result = assess_scubagear_export(export_path, tmp_path / "export-assessment", policies=[SS21])
     validate_assessment(export_result)
     public_outputs.append(export_result)
-    public_outputs.append(assess_scubagear_export(
-        export_path, tmp_path / "export-dry", policies=[SS21], dry_run=True))
+    public_outputs.append(canonical(build_case(SS21, exported, "unused", catalogue=policy_catalogue())))
     captured = capsys.readouterr()
     text = json.dumps(public_outputs) + captured.out + captured.err + caplog.text
     assert all(address not in text for address in CANARIES)
@@ -1063,7 +1062,8 @@ def test_rule_input_verified_configuration_reaches_every_compatible_vector_cell(
 
 def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path, monkeypatch, capsys, caplog):
     """A bound TargetedUsersCoverage establishes met; injected literal targets are ignored and never published."""
-    from auditex.model_serving import assess_run
+    from auditex.rule_assessment import assess_run
+    from test_model_serving import case_texts
     from auditex.scuba_projection import project_run
     from azure_tenant_audit.scuba_assessment import validate_assessment
 
@@ -1077,11 +1077,10 @@ def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path
     row["TargetedUsersCoverage"] = {"version": 1, "state": "known", "input_hmac_sha256": meta["hmac_sha256"],
                                     "input_count": meta["count"], "protected_nonempty": True, "missing_count": 0}
     monkeypatch.setattr("auditex.rule_assessment.project_run", lambda *args, **kwargs: projection)
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda *args, **kwargs: projection)
     result = assess_run(root, policies=[SS21])
     validate_assessment(result)
     assert result["policies"][0]["rule_precheck"]["cell"] == "default_qualifies"
-    dry = assess_run(root, policies=[SS21], dry_run=True)
+    dry = case_texts(root, [SS21])
     captured = capsys.readouterr()
     public = json.dumps([result, dry, projection, projection.views, projection.report])
     public += captured.out + captured.err + caplog.text

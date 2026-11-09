@@ -146,7 +146,7 @@ def test_copy_does_not_use_a_writable_temporary_parent(tmp_path, monkeypatch):
 def test_no_input_demo_and_mocktenant_on_unproved_storage(tmp_path, monkeypatch, capsys, simulated):
     from auditex.cli import main as auditex_main
     from auditex.demo import DEMO_AS_OF
-    from auditex.model_serving import assess_run, assess_scubagear_export
+    from auditex.rule_assessment import assess_run, assess_scubagear_export
     from azure_tenant_audit.cli import run_offline
 
     scratch = tmp_path / "index-scratch"
