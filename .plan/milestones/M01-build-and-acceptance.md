@@ -11,18 +11,18 @@ Starts after M00. Closes the two release-process gaps 1.3.0 shipped with: v2 DEC
 Plain `make dist` is byte-reproducible and `scripts/check-reproducible-build.py` proves byte identity for both the wheel and the sdist. The v3.9.1 replay kit is located on this Mac, hash-verified and kept in the Auditex machine records folder outside the public repo (G, DEC-001), and one local command, `make acceptance`, runs the full value-rule replay and the explainer acceptance suite, which pass on `main`.
 
 ## Definition of Done
-- [ ] Two plain `make dist` builds of the same clean commit give a byte-identical wheel and a byte-identical sdist, and the check proves both: `.venv/bin/python scripts/check-reproducible-build.py && .venv/bin/python -m pytest tests/test_check_reproducible_build.py`
+- [x] Two plain `make dist` builds of the same clean commit give a byte-identical wheel and a byte-identical sdist, and the check proves both: `.venv/bin/python scripts/check-reproducible-build.py && .venv/bin/python -m pytest tests/test_check_reproducible_build.py`
 - [ ] `make acceptance` runs the full v3.9.1 replay (26,898 vectors, pinned hashes) and the explainer acceptance suite and passes on `main`: `make acceptance`
 - [ ] The runbook documents the acceptance run and its kit variable, and no doc names the stale variable: `grep -q 'AUDITEX_TEST_VALUE_RULE_VECTORS_V391' docs/development/runbook.md && ! git grep -q -E 'AUDITEX_TEST_VALUE_RULE_VECTORS([^_]|$)' -- docs README.md`
 - [ ] Review: the runbook build and acceptance sections say exactly what `make dist`, `scripts/check-reproducible-build.py` and `make acceptance` do (terra read-through recorded in `.plan/work/M01-T04/result.md`)
 - [ ] Every acceptance run verifies all three pinned kit hashes (vectors, A2 vectors, A2 overrides) and fails on a wrong companion file: `.venv/bin/python -m pytest tests/test_value_rules_replay.py -k kit_hashes`
 - [ ] `make acceptance` refuses to run without the kit and names the variable, whether it is unset or points at a missing file: `! env -u AUDITEX_TEST_VALUE_RULE_VECTORS_V391 make acceptance >"$TMPDIR/acc-unset.log" 2>&1 && grep -q AUDITEX_TEST_VALUE_RULE_VECTORS_V391 "$TMPDIR/acc-unset.log" && ! env AUDITEX_TEST_VALUE_RULE_VECTORS_V391="$TMPDIR/no-such-kit/vectors.jsonl" make acceptance >"$TMPDIR/acc-missing.log" 2>&1 && grep -q AUDITEX_TEST_VALUE_RULE_VECTORS_V391 "$TMPDIR/acc-missing.log"`
-- [ ] Review: an other-vendor review approves the plan v3 merge of M01-T01 (Tier A: release build) at the exact merged head (ARCHITECTURE.md review binding): `T=M01-T01; c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{40\}\)\$/\1/p") && test -n "$s" && grep -q "^reviewed: $s\$" ".plan/work/REV-$T/result.md" && grep -q '^verdict: approve' ".plan/work/REV-$T/result.md"` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
+- [x] Review: an other-vendor review approves the plan v3 merge of M01-T01 (Tier A: release build) at the exact merged head (ARCHITECTURE.md review binding): `T=M01-T01; c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && grep -q "^reviewed: $s" ".plan/work/REV-$T/result.md" && grep -q '^verdict: approve' ".plan/work/REV-$T/result.md"` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
 
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M01-T01 | Make plain make dist byte-reproducible and check sdist bytes | codex | M | - | review |
+| M01-T01 | Make plain make dist byte-reproducible and check sdist bytes | codex | M | - | done |
 | M01-T02 | Locate and hash-verify the v3.9.1 replay kit | luna | S | - | done |
 | M01-T03 | Add make acceptance and the runbook acceptance section | terra | S | - | todo |
 | M01-T04 | Run the acceptance suites on main | luna | S | - | todo |

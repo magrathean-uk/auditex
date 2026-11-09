@@ -56,3 +56,12 @@
 - why: unreferenced or duplicate paths; the lab tools may belong to parked kit work.
 - consequences: each deletion is recorded in CLEANUP.md (M03-T05).
 - approver: G
+
+## DEC-007 Merge order for shared files, and the REASON_OUTSIDE line
+- date: 2026-11-09
+- status: approved
+- decision: (1) M03-T02 and M05-T03 may merge before the M02 to M04 tasks their preconditions name. merge.sh rebases each branch onto current main and runs the full criteria verify there, and every later task that edits the same test, doc, redaction or writer files is cut from main after these merges, so those files are still edited one task at a time, in the order M03, M05, then M02 to M04. (2) The unused constant `REASON_OUTSIDE` in `src/azure_tenant_audit/output_redaction.py` (one line, no reader: `rg -nw` finds only its definition, M03-T01) is removed in M03-T02. It is a code line, not a path, so the path deletion gate (DEC-006) does not cover it; git history keeps it.
+- options: merge in milestone order (holds M03-T02 and M05-T03 behind the model-layer removal) | rebase-and-verify order as above
+- why: the preconditions exist to serialise edits to shared files; a clean rebase plus the full verify on the rebased head gives the same guarantee without idling finished work.
+- consequences: M02-T03, M02-T04, M04-T01 and M04-T03 start from a main that already holds M03-T02 (and M05-T03 once merged); reviewers of those tasks see the earlier changes as base.
+- approver: orchestrator

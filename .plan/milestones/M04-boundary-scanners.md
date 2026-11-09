@@ -16,13 +16,13 @@ The static boundary scanners close the blind spots recorded under v2 DEC-011 whe
 - [ ] Review: terra confirms every DEC-011 limit (the two HTTP limits and L1 to L4) is either closed by a named test or stated in `docs/reference/security-privacy.md` (read-through recorded in `.plan/work/M04-T03/result.md`)
 - [ ] Full suite passes: `make test`
 - [ ] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance`
-- [ ] Review: other-vendor reviews approve the plan v3 merges of M04-T01 and M04-T02 (Tier A: network) at the exact merged heads (ARCHITECTURE.md review binding): `ok=1; for T in M04-T01 M04-T02; do ( c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{40\}\)\$/\1/p") && test -n "$s" && grep -q "^reviewed: $s\$" ".plan/work/REV-$T/result.md" && grep -q '^verdict: approve' ".plan/work/REV-$T/result.md" ) || ok=0; done; test $ok = 1` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
+- [ ] Review: other-vendor reviews approve the plan v3 merges of M04-T01 and M04-T02 (Tier A: network) at the exact merged heads (ARCHITECTURE.md review binding): `ok=1; for T in M04-T01 M04-T02; do ( c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && grep -q "^reviewed: $s" ".plan/work/REV-$T/result.md" && grep -q '^verdict: approve' ".plan/work/REV-$T/result.md" ) || ok=0; done; test $ok = 1` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
 
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M04-T01 | Close the HTTP scanner blind spots | codex | M | hard | todo |
-| M04-T02 | Close the read-boundary scanner blind spots L1 to L4 | codex | M | hard | todo |
+| M04-T02 | Close the read-boundary scanner blind spots L1 to L4 | codex | M | hard | doing |
 | M04-T03 | State the remaining scanner limits in the privacy reference | terra | S | - | todo |
 
 ## Acceptance criteria
