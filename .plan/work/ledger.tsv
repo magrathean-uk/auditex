@@ -235,3 +235,4 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-09T15:26:11Z	M01-T04	terra	claude-5	claude-sonnet-5-5	medium	readonly	0	359	0.2687	done	b3fc70f
 2026-11-09T16:01:46Z	RETRO-M00	luna	claude-5	claude-haiku-5-5	medium	inplace	0	110	0.0338	done	main
 2026-11-09T16:11:24Z	M02-T04	sol	claude-5	claude-opus-5-5	high	branch	5	687	4.6927	failed	task/M02-T04-remove-model-layer
+2026-11-09T16:14:18Z	RETRO-M01	luna	claude-5	claude-haiku-5-5	medium	inplace	0	106	0.0267	done	main

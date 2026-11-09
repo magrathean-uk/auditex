@@ -12,7 +12,7 @@ Shareable and customer-pack output mask the names of every person in the run's o
 
 ## Definition of Done
 - [ ] Review: G approved the D5 design (DECISIONS.md entry titled "D5 design", approver G): `grep -A8 '^## DEC-[0-9]* D5 design' .plan/DECISIONS.md | grep -q '^- approver: G'`
-- [ ] The HTML peak harness runs on the frozen workload with an explicit profile and the baseline from `main` before D5 is committed: `.venv/bin/python -m pytest tests/test_html_peak_harness.py && test -s benchmarks/html-peak-baseline.json && grep -q '"profile": "shareable"' benchmarks/html-peak-baseline.json && grep -q '"workload_sha256"' benchmarks/html-peak-baseline.json`
+- [x] The HTML peak harness runs on the frozen workload with an explicit profile and the baseline from `main` before D5 is committed: `.venv/bin/python -m pytest tests/test_html_peak_harness.py && test -s benchmarks/html-peak-baseline.json && grep -q '"profile": "shareable"' benchmarks/html-peak-baseline.json && grep -q '"workload_sha256"' benchmarks/html-peak-baseline.json`
 - [ ] With D5 on, the shareable HTML report of the frozen 90,000-record workload contains no workload person name and its peak is within the baseline plus 15 percent: `.venv/bin/python benchmarks/html_peak.py --records 90000 --profile shareable --baseline benchmarks/html-peak-baseline.json --max-ratio 1.15 --require-masked`
 - [ ] Person-name masking, the D3 profiles and the per-record scan budget pass: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_profiles_d3.py tests/test_redaction_scan_budget.py tests/test_notify_redaction.py tests/test_redaction_export_schemas.py`
 - [ ] Full suite and contract smoke pass: `make test && make contract-smoke`

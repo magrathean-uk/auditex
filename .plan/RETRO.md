@@ -57,3 +57,62 @@ Non-zero exits: 18 rows (M00-T01 12, M00-T02 4, M00-T03 1, M00-T05 1). Gate outc
 - Reviews that caught missing evidence rather than passing on code alone: REV-M00-T02 result-1.md, then re-review after the evidence was filed.
 - Honest red gate: M00-T03 reported the failing test with its path and line and made no fixes, as its criteria required.
 - Orchestrator decision on the RETRO-M00 proposals: not applied to the skill source. Proposals 1 and 2 concern `codex-implement`, which this repository no longer uses for implementation (Claude implements, Codex reviews, since its sandbox cannot run the suite). Proposal 3, routing, is already how v3 dispatches. Lessons applied in v3 instead: merge verifies export `PYTHONPATH="$PWD/src"`, run `make test` (or `make release-check`) once per merge batch with `PLAN_VERIFY_TIMEOUT=4500`, and long runs go under run-job.
+
+## M01
+Source: `.plan/work/ledger.tsv` (73 rows: 69 `M01-*`/`REV-M01-*` plus `VAL-v3` and `REV-PLAN-v2`, the two other results that name an M01 task) and result.md files. Detail in `.plan/work/RETRO-M01/evidence.md`.
+
+### Spend
+Totals: 73 runs, $24.3623 recorded cost (37 rows with a cost; 36 blank, all codex and codex2 launches, so the total is a floor), 11987 s as recorded, 7 non-zero exits (5 partial, 2 blocked).
+
+By launcher:
+
+| launcher | runs | cost_usd | seconds | non-zero exits |
+|---|---|---|---|---|
+| claude-1 | 8 | 4.4426 | 2071 | 1 |
+| claude-2 | 2 | 0.0514 | 471 | 0 |
+| claude-3 | 2 | 0.5644 | 65 | 0 |
+| claude-4 | 19 | 16.4411 | 3784 | 1 |
+| claude-5 | 6 | 2.8628 | 941 | 0 |
+| codex | 7 | blank | 964 | 1 |
+| codex2 | 29 | blank | 3691 | 4 |
+
+By role:
+
+| role | runs | cost_usd | seconds | non-zero exits |
+|---|---|---|---|---|
+| codex | 35 | blank | 4178 | 5 |
+| sol | 11 | 17.4456 | 4290 | 0 |
+| terra | 24 | 6.8653 | 2571 | 2 |
+| luna | 2 | 0.0514 | 471 | 0 |
+| astra | 1 | blank | 477 | 0 |
+
+Id reuse: the current milestone lists M01-T01 to M01-T04 only. Ledger rows for M01-T05 to M01-T12, M01-FU and the earlier M01-T01, T03 and T04 runs belong to the earlier boundary-proof plan (branches such as `task/M01-T07-gmail-fields-masks`), so the spend above mixes two plans.
+
+### Failures and retries
+Non-zero exits: 7 rows (M01-T01 1, M01-T03 1, M01-T07 2, M01-T09 1, M01-T11 1, M01-T12 1). Causes are not recorded in the ledger; the earlier-plan tasks have no result.md.
+
+| task | attempts | final status | cause |
+|---|---|---|---|
+| M01-T01 (earlier) | 1: codex exit 1 (376 s) | partial | not recorded |
+| M01-T03 (earlier) | 4: codex2 exit 1, then sol, sol, sol | done | not recorded; VAL-v3 later found its verify returned 0 with the target absent |
+| M01-T07 (earlier) | 5: codex2 exit 2 twice (22 s, 31 s), then terra done 3 times | done | launcher-level: the same launcher failed twice in under 35 s; not recorded |
+| M01-T09 (earlier) | 3: terra done, exit 1 (45 s), terra done | done | transient; not recorded |
+| M01-T11 (earlier) | 2: terra exit 1 (72 s), terra done | done | not recorded |
+| M01-T12 (earlier) | 3: codex done, codex2 exit 1, sol done (787 s) | done | not recorded; re-run on the same branch |
+| M01-T02 (current) | 6 done runs (luna, terra, sol), then T02b | done after T02b | mechanical: verify needs `AUDITEX_TEST_VALUE_RULE_VECTORS_V391`, unset; kit on the 4TB only, not in records |
+| M01-T04 (earlier) | 3 done runs (sol) | done | no failure recorded; repeat runs |
+| M01-T10 (earlier) | 3 done runs (terra, terra, sol) | done | no failure recorded; repeat runs |
+| REV-M01-T01 | 2 reviews | approve, verify not runnable | mechanical: no `.venv` in the reviewer worktree |
+| REV-M01-T03 | repeat reviews | approve, chain not runnable | mechanical: no `.venv`; read-only sandbox blocked the link |
+
+### Proposed brief fixes
+- `codex-implement.md`: after a launch that exits 2 within about 30 s, do not relaunch the same launcher with the same brief; fall back to `terra-implement` on a Claude launcher. Backed by M01-T07 (two codex2 exit-2 runs, then terra done).
+- `terra-implement.md` or `luna-explore.md`: when a verify command reads an env var, the brief exports it or names the records path where the input is copied. Backed by M01-T02 (verify fails as written with the variable unset) and M01-T02b (fixed by copying the kit to records).
+- `sol-review.md` and `codex-review.md`: first step links `.venv` from the main checkout; if the link is blocked, the review states "verification not runnable" and names the run that covers it. Backed by REV-M01-T01 and REV-M01-T03.
+
+### Keep
+- Independent review on a frozen commit, re-run after a fix: REV-M01-T03 (approve on 6c17cbd); M01-T03 fixed review item 1 and ran a mutation check.
+- Hash-pinned kit checks with a records copy and README: M01-T02, M01-T02b, M01-T04 (0 skips in the replay and explainer acceptance).
+- Honest "not runnable" in reviews, with no pass claimed: REV-M01-T01, REV-M01-T03.
+- Fallback to a Claude launcher after a Codex failure: M01-T07 (terra done after codex2 blocked), M01-T12 (sol done after codex2 exit 1).
+- Load gate before a heavy run under run-job: M01-T04 (waited from load 14.8 to 10.4, then `make acceptance` exit 0).

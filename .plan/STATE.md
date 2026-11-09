@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 36% (was 28%)
+overall: 38% (was 36%)
 milestone: M02-model-layer-retirement 10%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: dceafcd 2026-11-09T16:12:12Z
+last_checkpoint: 2fdf2a5 2026-11-09T16:14:25Z
 
 ## Next tasks
 - M02-T05 Rewrite the docs for the retired model layer (terra)
