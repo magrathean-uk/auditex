@@ -153,3 +153,12 @@
 - why: the kit cannot be found and regenerating it would delay the release without reproducing the frozen kit.
 - consequences: restoring the kit and a scheduled replay is a BACKLOG next item; the 1.3.0 release notes need no change.
 - approver: G
+
+## DEC-018 Release 1.3.0
+- date: 2026-11-09
+- status: approved
+- decision: G's explicit yes naming 1.3.0 (D9): tag release commit d9f050f1be6b4ce9c04d8a7caa7e493c22546a8c as signed v1.3.0, push the tag, and publish a GitHub release carrying the wheel and the sdist, no PyPI (DEC-001).
+- options: release 1.3.0 now | hold at the approved candidate
+- why: every pre-publication gate passed on the candidate and astra's release gate returned ready (M03-T04).
+- consequences: M03-T05 publishes; M03-T06 verifies the downloaded artefacts against the M03-T03 hashes.
+- approver: G
