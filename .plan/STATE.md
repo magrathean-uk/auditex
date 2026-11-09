@@ -4,13 +4,12 @@ overall: 4%
 milestone: M00-foundation 44%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: none
+last_checkpoint: e9d4214 2026-11-09T08:25:09Z
 
 ## Next tasks
 - M00-T01 Run the pinned Ruff check in make lint and clear its findings (codex)
 - M00-T02 Fix the pytest norecursedirs and taint-scan prune hygiene (codex)
-- M02-T01 Design the retirement and write the exact removal list (sol)
-- M01-T02 Locate and hash-verify the v3.9.1 replay kit (luna)
+- M00-T03 Re-run the gate chain on main after the M00 merges (luna)
 
 ## Blockers
 - none
@@ -25,5 +24,12 @@ last_checkpoint: none
 
 ## Quota snapshot
 <!-- quota:begin -->
-not yet recorded
+claude 87% orchestrator
+claude-1 76% ok
+claude-2 22% shared
+claude-3 76% ok
+claude-4 70% ok
+claude-5 83% ok
+codex - unknown:collector
+codex2 27% ok
 <!-- quota:end -->
