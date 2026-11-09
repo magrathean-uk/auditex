@@ -1,8 +1,11 @@
-"""Optional rule-only SCuBA assessment and parked offline model client."""
+"""Parked offline model client and the legacy entry points of the rule-only assessment.
+
+The rule-only writer lives in :mod:`auditex.rule_assessment`; ``assess_run`` and ``assess_scubagear_export`` here keep
+their legacy signatures, warn about ignored model options, write dry-run prompts locally and delegate every other call.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from copy import deepcopy
 from datetime import datetime, timezone
 from hashlib import sha256
 from http.client import HTTPException
@@ -20,87 +23,29 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
-from azure_tenant_audit.guarded_io import UnsafeRunFileError, current_context, guarded_operation, read_guarded_bytes
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
-from azure_tenant_audit.output_redaction import RedactionContext, context_for_run
-from azure_tenant_audit.private_io import make_private_dirs, write_private_text
-from azure_tenant_audit.resources import open_text_resource
+from azure_tenant_audit.guarded_io import guarded_operation
+from azure_tenant_audit.private_io import write_private_text
+from azure_tenant_audit.strict_json import reject_json_constant as _invalid_constant, strict_pairs as _pairs
 
-from .model_eval import _invalid_constant, _pairs, validate_model_response
+from . import rule_assessment
+from .model_eval import validate_model_response
 from .model_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256
-from .model_precheck import precheck_case
-from .scope_postcheck import collect_scope_evidence
+from .rule_assessment import (  # noqa: F401  (re-exported for legacy callers until the model layer is removed)
+    PROMPT_CONVENTION, RULE_NOT_IMPLEMENTED_TEXT, SCHEMA_VERSION, PolicyUnavailable, _baseline_statuses, _comparison,
+    _identity_view, _totals, _uncovered_record, build_case, canonical, policy_catalogue,
+    precheck_case,
+)
 from .scuba_projection import (
     DEFAULT_MAX_CHARS, DEFAULT_MAX_ITEMS, DEFAULT_SCAN_MAX_BYTES, DEFAULT_SCAN_MAX_CHUNKS, DEFAULT_SCAN_MAX_ROWS,
-    policy_section, project_run, rule_policy_section,
+    project_run,
 )
 
-SCHEMA_VERSION = "2026-11-05"
-PROMPT_CONVENTION = "named-enums-v1"
 _MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 # Pause before re-sending a request whose reply was lost in transit (P5: a relay dropped replies under load).
 _TRANSPORT_BACKOFF_SECONDS = 2.0
 # finish_reason is server text: keep it only when it is a plain token such as stop or length.
 _FINISH_REASON = re.compile(r"[a-z][a-z0-9_]{0,31}")
 LOG = logging.getLogger(__name__)
-
-
-def canonical(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-
-
-def policy_catalogue() -> dict[str, Any]:
-    return json.loads(open_text_resource("configs/scuba-policy-sections.json"))
-
-
-class PolicyUnavailable(ValueError):
-    """A policy absent from the catalogue cannot be assessed."""
-
-
-def _identity_view(value: Any) -> Any:
-    # conv3 IDs predate enum annotation. Strip only the seven derived names,
-    # and only in SPO_tenant, retaining every original numeric value.
-    if isinstance(value, list):
-        return [_identity_view(item) for item in value]
-    if isinstance(value, dict):
-        names = {f"{key}_name" for key in ENUM_NAME_KEYS if key in value}
-        return {key: _identity_view(item) for key, item in value.items() if key not in names}
-    return value
-
-
-def build_case(policy_id: str, projection: dict[str, Any], as_of: str, *,
-               catalogue: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Build exactly the training user object; serialise with :func:`canonical`.
-
-    ``as_of`` belongs to the assessment envelope, not the training user shape.
-    Case IDs are serving-generated and are not reproducible for pack rows,
-    whose IDs also depend on generator inputs unavailable in a serving run.
-    No timestamp or additional user-message field is introduced.
-    """
-    data = catalogue if catalogue is not None else policy_catalogue()
-    if policy_id not in data["policies"]:
-        raise PolicyUnavailable("policy_not_in_catalogue")
-    entry = data["policies"][policy_id]
-    item = entry["policy_item"]
-    observed = {section: policy_section(projection, policy_id, section) for section in entry["sections"]}
-    identity = {section: _identity_view(value) if section == "SPO_tenant" else value
-                for section, value in observed.items()}
-    view_hash = sha256(f"conv3:{canonical(identity)}".encode("utf-8", "surrogatepass")).hexdigest()[:10]
-    product = policy_id.split(".")[1].lower()
-    case_id = f"scuba-{product}-{policy_id.lower().replace('.', '-')}-{view_hash}"
-    evidence = [{"id": "e0", "observed": dict(item), "section": "policy"}]
-    evidence.extend({"id": f"e{index}", "observed": annotate_enum_names(section, value), "section": section}
-                    for index, (section, value) in enumerate(observed.items(), start=1))
-    # Round-trip sorts every nested key just as the training samples do.
-    return json.loads(canonical({
-        "case_id": case_id, "evidence": evidence, "limitation_ids": data["limitation_ids"],
-        "policy_id": policy_id, "recommendation_ids": data["recommendation_ids"],
-        "requested_claims": [
-            {"id": "requirement_met", "question": f"Does this tenant meet {policy_id}?"},
-            {"id": "policy_criticality", "question": "What criticality does the baseline assign to this policy?"},
-        ],
-    }))
 
 
 def messages_for(case: dict[str, Any]) -> list[dict[str, str]]:
@@ -318,44 +263,6 @@ class ModelClient:
         return record
 
 
-def _comparison(policy_id: str, record: dict[str, Any], baseline: dict[str, str]) -> dict[str, Any]:
-    rule_status = baseline.get(policy_id)
-    match = "exact" if policy_id in baseline else "none"
-    if match == "none":
-        unversioned = re.sub(r"v\d+$", "", policy_id)
-        candidates = [status for pid, status in baseline.items() if re.sub(r"v\d+$", "", pid) == unversioned]
-        if len(candidates) == 1:
-            rule_status, match = candidates[0], "version_mismatch"
-    requirement = next((claim for claim in record["claims"] if claim["id"] == "requirement_met"), {})
-    model_status = None
-    if record["validation_status"] == "valid" and requirement.get("status") == "confirmed":
-        model_status = "pass" if requirement.get("value") is True else "fail"
-    agreement = "not_assessed"
-    if rule_status in {"pass", "fail"} and model_status is not None:
-        agreement = "agree" if rule_status == model_status else "disagree"
-    return {"baseline_status": rule_status, "baseline_match": match, "model_status": model_status, "result": agreement}
-
-
-def _baseline_statuses(pack_path: Path) -> dict[str, str]:
-    """Ignore malformed optional report-pack comparison data."""
-    try:
-        node = json.loads(read_guarded_bytes(pack_path, field="input").decode("utf-8"))
-        for key in ("baseline_alignment", "frameworks", "cisa_scuba", "controls"):
-            node = node.get(key) if isinstance(node, dict) else None
-        if not isinstance(node, list):
-            return {}
-        return {row["control_id"]: row["status"] for row in node if isinstance(row, dict)
-                and isinstance(row.get("control_id"), str)
-                and row.get("status") in ("pass", "fail", "accepted_risk", "not_assessed")}
-    except UnsafeRunFileError:
-        raise
-    except (OSError, ValueError, RecursionError):
-        return {}
-
-
-RULE_NOT_IMPLEMENTED_TEXT = "Not assessed: Auditex has no rule for this policy yet."
-
-
 def legacy_model_options_set() -> bool:
     return "AUDITEX_DISABLE_VALUE_RULES" in os.environ or any(
         name.startswith("AUDITEX_MODEL_") for name in os.environ)
@@ -366,77 +273,25 @@ def warn_ignored_model_options() -> None:
           file=sys.stderr)
 
 
-def _uncovered_record(case: dict[str, Any]) -> dict[str, Any]:
-    return {"policy_id": case["policy_id"],
-            "claims": [{"id": item["id"], "status": "unknown", "value": None, "evidence_ids": []}
-                       for item in case["requested_claims"]],
-            "limitations": [], "recommendations": [], "validation_status": "unknown",
-            "reason": "rule_not_implemented", "reason_text": RULE_NOT_IMPLEMENTED_TEXT,
-            "latency_ms": 0, "attempts": 0, "prompt_sha256": None, "response_sha256": None,
-            "thinking_disabled": False, "thinking_stripped": False}
-
-
-def _assess_policies(projection: dict[str, Any], selected: list[str],
-                     catalogue: dict[str, Any], generated_at: str, *, dry_run: bool,
-                     baseline: dict[str, str], explainer_context: RedactionContext | None = None,
-                     explainer_context_error: str | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    records, prompts = [], []
+def _dry_run_prompts(projection: Any, selected: list[str], catalogue: dict[str, Any],
+                     generated_at: str) -> list[dict[str, Any]]:
+    prompts: list[dict[str, Any]] = []
     for policy_id in selected:
         try:
             case = build_case(policy_id, projection, generated_at, catalogue=catalogue)
         except PolicyUnavailable:
-            record = {"policy_id": policy_id, "claims": [], "limitations": [], "recommendations": [],
-                      "validation_status": "skipped", "reason": "policy_not_in_catalogue", "latency_ms": 0,
-                      "attempts": 0, "prompt_sha256": None, "response_sha256": None,
-                      "thinking_disabled": False, "thinking_stripped": False}
-            if dry_run:
-                prompts.append({"policy_id": policy_id, "skipped": True, "reason": "policy_not_in_catalogue"})
-        else:
-            if dry_run:
-                messages = messages_for(case)
-                prompts.append({"policy_id": policy_id, "messages": messages,
-                                "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(),
-                                "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
-                continue
-            from azure_tenant_audit.value_rules.catalogue import row_for
-            row = row_for(policy_id)
-            rule_projection = None
-            if hasattr(projection, "rule_sections"):
-                if row:
-                    rule_projection = {section: deepcopy(projection.rule_sections.get(section, NOT_COLLECTED))
-                                       for section in row["sections"] if section != "scuba_config"}
-                    # stage 4: optional evidence informs the rule without becoming required or cited.
-                    rule_projection.update({section: deepcopy(projection.rule_sections[section])
-                                            for section in row.get("optional_sections", [])
-                                            if section in projection.rule_sections})
-                    if "scuba_config" in row["sections"]:
-                        rule_projection["scuba_config"] = deepcopy(rule_policy_section(projection, policy_id, "scuba_config"))
-            record = (precheck_case(case, absent_fields=True, empty_lists=True, value_rules=True,
-                                    rule_projection=rule_projection, explain=explainer_context is not None,
-                                    redaction_context=explainer_context) if row else None)
-            if record is None:
-                record = _uncovered_record(case)
-            elif explainer_context_error and record["rule_precheck"]["class"] == "value_rule":
-                LOG.debug("Explainer %s failed (%s)", policy_id, explainer_context_error)
-        record["comparison"] = _comparison(policy_id, record, baseline)
-        records.append(record)
-    return records, prompts
+            prompts.append({"policy_id": policy_id, "skipped": True, "reason": "policy_not_in_catalogue"})
+            continue
+        messages = messages_for(case)
+        prompts.append({"policy_id": policy_id, "messages": messages,
+                        "prompt_sha256": sha256(canonical(messages).encode("utf-8", "surrogatepass")).hexdigest(),
+                        "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256})
+    return prompts
 
 
-def _totals(records: list[dict[str, Any]]) -> dict[str, int]:
-    # Keep the historical total in current output; row-level scope metadata is no longer produced.
-    totals = {"answered": 0, "unknown": 0, "invalid": 0, "skipped": 0, "rule_answered": 0,
-              "scope_narrowed": 0}
-    for record in records:
-        totals["rule_answered"] += record["reason"] == "rule_precheck"
-        state = record["validation_status"]
-        if state in {"invalid", "skipped"}:
-            totals[state] += 1
-        elif state == "unknown" or any(c["id"] == "requirement_met" and c["status"] == "unknown" for c in record["claims"]):
-            totals["unknown"] += 1
-        else:
-            totals["answered"] += 1
-    return totals
+def _prompt_counts(prompts: list[dict[str, Any]]) -> dict[str, int]:
+    return {"prompts": sum("messages" in row for row in prompts),
+            "skipped": sum(row.get("skipped", False) for row in prompts)}
 
 
 @guarded_operation
@@ -448,64 +303,21 @@ def assess_run(run_dir: str | Path, config: ModelConfig | None = None, *, polici
                projection_scan_max_chunks: int = DEFAULT_SCAN_MAX_CHUNKS) -> dict[str, Any]:
     if config is not None or no_redaction or shadow_model_on_precheck or legacy_options or legacy_model_options_set():
         warn_ignored_model_options()
-    root = Path(os.path.abspath(os.path.expanduser(run_dir)))
-    current_context().bind_run(root)
-    from azure_tenant_audit.run_files import read_run_file
-    manifest = json.loads(read_run_file(root, "run-manifest.json").decode("utf-8"))
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("run_id"), str) or not manifest["run_id"]:
-        raise ValueError("Run manifest requires a run_id")
-    catalogue = policy_catalogue()
-    selected = list(catalogue["policies"]) if policies is None else policies
-    if not selected or len(set(selected)) != len(selected) or any(
-        not re.fullmatch(r"MS\.[A-Z]+\.\d+\.\d+v\d+", pid) for pid in selected
-    ):
-        raise ValueError("Policies must be unique SCuBA policy IDs")
-    filename = "model_assessment_prompts.jsonl" if dry_run else "model_assessment.json"
+    if not dry_run:
+        return rule_assessment.assess_run(
+            run_dir, policies=policies, projection_max_items=projection_max_items,
+            projection_max_chars=projection_max_chars, projection_scan_max_rows=projection_scan_max_rows,
+            projection_scan_max_bytes=projection_scan_max_bytes, projection_scan_max_chunks=projection_scan_max_chunks)
+    filename = "model_assessment_prompts.jsonl"
+    root, _manifest, catalogue, selected = rule_assessment._admit_run(run_dir, policies, filename)
     target = root / filename
-    # Never replace a file already sealed into the original bundle.
-    from azure_tenant_audit.bundle_integrity import listed_artifact_paths
-    if filename in (listed_artifact_paths(root) or ()):
-        raise ValueError("Model output is already sealed in this bundle; use a fresh run copy")
-    if target.is_symlink():
-        raise ValueError("Model output must not be a symbolic link")
     generated_at = datetime.now(timezone.utc).isoformat()
     projection = project_run(root, redact=True, max_items=projection_max_items,
                              max_chars=projection_max_chars, scan_max_rows=projection_scan_max_rows,
                              scan_max_bytes=projection_scan_max_bytes, scan_max_chunks=projection_scan_max_chunks)
-    baseline = {} if dry_run else _baseline_statuses(root / "reports" / "report-pack.json")
-    # Read-only and verdict-independent: which enabled Conditional Access policies carry a scope condition the
-    # pinned Rego ignores. The envelope carries this caveat; nothing here reaches a prompt.
-    scope = None if dry_run else collect_scope_evidence(
-        root, projection, redact=True, max_items=projection_max_items,
-        scan_max_rows=projection_scan_max_rows, scan_max_bytes=projection_scan_max_bytes,
-        scan_max_chunks=projection_scan_max_chunks)
-    explainer_context = None
-    explainer_context_error = None
-    if not dry_run:
-        try:
-            explainer_context = context_for_run(root)
-        except (UnsafeRunFileError, MemoryError):
-            raise
-        except Exception as exc:
-            explainer_context_error = type(exc).__name__
-    records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
-                                        dry_run=dry_run, baseline=baseline, explainer_context=explainer_context,
-                                        explainer_context_error=explainer_context_error)
-    if dry_run:
-        write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
-        return {"path": str(target), "dry_run": True, "prompts": sum("messages" in row for row in prompts),
-                "skipped": sum(row.get("skipped", False) for row in prompts)}
-    totals = _totals(records)
-    result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at, "run_id": manifest["run_id"],
-              "endpoint_host": "none", "model_name": "rules-only",
-              "prompt_convention": PROMPT_CONVENTION, "system_prompt_sha256": SYSTEM_PROMPT_SHA256,
-              "totals": totals, "policies": records,
-              "projection": projection.report, "scope_post_check": scope.summary,
-              "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
-    from azure_tenant_audit.model_assessment import validate_assessment
-    validate_assessment(result)
-    write_private_text(target, json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
-    return result
+    prompts = _dry_run_prompts(projection, selected, catalogue, generated_at)
+    write_private_text(target, "".join(canonical(row) + "\n" for row in prompts))
+    return {"path": str(target), "dry_run": True, **_prompt_counts(prompts)}
 
 
 @guarded_operation
@@ -516,95 +328,29 @@ def assess_scubagear_export(export_path: str | Path, output_dir: str | Path, con
                             projection_max_chars: int = DEFAULT_MAX_CHARS,
                             verdict_map: dict[str, str] | None = None) -> dict[str, Any]:
     """Assess a local ScubaGear export without a run bundle or tenant contact."""
-    from .scubagear_export import (
-        VERDICT_MAP, _valid_map, build_baseline, build_sidecar, load_export, load_results,
-        project_export, resolve_output_directory, scope_from_export, scubaresults_layout_ok,
-    )
+    from .scubagear_export import VERDICT_MAP, _valid_map
     if verdict_map is None:
         verdict_map = VERDICT_MAP
     _valid_map(verdict_map)
     if config is not None or no_redaction or legacy_options or legacy_model_options_set():
         warn_ignored_model_options()
-    target_dir = resolve_output_directory(output_dir)
-    catalogue = policy_catalogue()
-    selected = list(catalogue["policies"]) if policies is None else policies
-    if not selected or len(set(selected)) != len(selected) or any(
-        not re.fullmatch(r"MS\.[A-Z]+\.\d+\.\d+v\d+", pid) for pid in selected
-    ):
-        raise ValueError("Policies must be unique SCuBA policy IDs")
-    loaded = load_export(export_path)
-    projection, extras = project_export(loaded, catalogue["policies"], redact=True,
-                                        max_items=projection_max_items, max_chars=projection_max_chars)
-    verdict_error = False
-    if results_path is not None:
-        try:
-            verdict_rows, verdict_kind = load_results(results_path)
-        except UnsafeRunFileError:
-            raise
-        except (OSError, ValueError):
-            verdict_rows, verdict_kind, verdict_error = None, "none", True
-        verdict_source = "results_file"
-    elif loaded.kind == "scubaresults":
-        verdict_rows, verdict_kind = loaded.results, "scubaresults"
-        verdict_source = "embedded"
-    else:
-        verdict_rows, verdict_kind, verdict_source = None, "none", "none"
-    layout_error = verdict_kind == "scubaresults" and not scubaresults_layout_ok(verdict_rows)
-    if ("Results" in loaded.repaired_keys and results_path is None) or layout_error:
-        verdict_rows, verdict_kind = None, "none"
-    baseline, reasons, unmappable = build_baseline(
-        verdict_rows, loaded.raw, kind=verdict_kind, repaired_keys=loaded.repaired_keys,
-        verdict_map=verdict_map, catalogue_ids=set(catalogue["policies"]))
-    if "Results" in loaded.repaired_keys and results_path is None:
-        verdict_state = "unreadable_repaired"
-    elif verdict_error:
-        verdict_state = "unreadable_file"
-    elif verdict_source == "none":
-        verdict_state = "absent"
-    elif layout_error:
-        verdict_state = "unreadable_layout"
-    elif not baseline:
-        verdict_state = "empty"
-    else:
-        verdict_state = "readable"
-    generated_at = datetime.now(timezone.utc).isoformat()
-    scope = None if dry_run else scope_from_export(projection, extras["raw_ca"],
-                                                   redact=True, max_items=projection_max_items)
-    records, prompts = _assess_policies(projection, selected, catalogue, generated_at,
-                                        dry_run=dry_run, baseline=baseline,
-                                        explainer_context=None if dry_run else RedactionContext())
-    sidecar = build_sidecar(loaded, projection, extras, catalogue["policies"], selected, baseline,
-                            reasons, unmappable, verdict_source, verdict_state, verdict_map, generated_at, scope)
-    filename = "model_assessment_prompts.jsonl" if dry_run else "model_assessment.json"
-    if dry_run:
-        content = "".join(canonical(row) + "\n" for row in prompts)
-        result: dict[str, Any] = {"path": str(target_dir / filename), "dry_run": True,
-                                  "prompts": sum("messages" in row for row in prompts),
-                                  "skipped": sum(row.get("skipped", False) for row in prompts),
-                                  "sidecar_path": str(target_dir / "scubagear_adapter_report.json")}
-    else:
-        run_suffix = loaded.report_uuid or loaded.sha256[:16]
-        result = {"schema_version": SCHEMA_VERSION, "generated_at": generated_at,
-                  "run_id": "scubagear-" + run_suffix, "endpoint_host": "none",
-                  "model_name": "rules-only", "prompt_convention": PROMPT_CONVENTION,
-                  "system_prompt_sha256": SYSTEM_PROMPT_SHA256, "totals": _totals(records),
-                  "policies": records, "projection": projection.report,
-                  "scope_post_check": scope.summary,
-                  "limitations": [] if any(v != NOT_COLLECTED for v in projection.values()) else ["projection_not_implemented"]}
-        from azure_tenant_audit.model_assessment import validate_assessment
-        validate_assessment(result)
-        content = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    if not dry_run:
+        return rule_assessment.assess_scubagear_export(
+            export_path, output_dir, results_path=results_path, policies=policies,
+            projection_max_items=projection_max_items, projection_max_chars=projection_max_chars,
+            verdict_map=verdict_map)
+    view = rule_assessment._export_view(export_path, output_dir, results_path=results_path, policies=policies,
+                                        projection_max_items=projection_max_items,
+                                        projection_max_chars=projection_max_chars, verdict_map=verdict_map)
+    target_dir = view["target_dir"]
+    prompts = _dry_run_prompts(view["projection"], view["selected"], view["catalogue"], view["generated_at"])
+    sidecar = rule_assessment._export_sidecar(view, None, verdict_map)
+    filename = "model_assessment_prompts.jsonl"
+    content = "".join(canonical(row) + "\n" for row in prompts)
+    result: dict[str, Any] = {"path": str(target_dir / filename), "dry_run": True, **_prompt_counts(prompts),
+                              "sidecar_path": str(target_dir / "scubagear_adapter_report.json")}
     sidecar_text = json.dumps(sidecar, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
-    resolve_output_directory(target_dir)
-    make_private_dirs(target_dir)
-    from azure_tenant_audit.guarded_io import _safe_directory
-    directory_fd = current_context()._directory(target_dir)
-    try:
-        if not _safe_directory(os.fstat(directory_fd)):
-            raise UnsafeRunFileError("output-dir")
-        os.fchmod(directory_fd, 0o700)
-    finally:
-        os.close(directory_fd)
+    rule_assessment._prepare_output_directory(target_dir)
     created: list[Path] = []
     try:
         for name, data in ((filename, content), ("scubagear_adapter_report.json", sidecar_text)):

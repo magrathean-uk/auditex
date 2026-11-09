@@ -14,7 +14,7 @@ from auditex.model_serving import ModelConfig, assess_run
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.collectors import power_platform as pp
 from azure_tenant_audit.collectors.power_bi import PowerBICollector, TENANT_SETTINGS
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.power_bi import PowerBIError
 from azure_tenant_audit.power_platform import PowerPlatformError
 from azure_tenant_audit.value_rules import assess

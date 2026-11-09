@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from auditex.model_precheck import precheck_case
-from auditex.model_serving import ModelConfig, assess_run, canonical, messages_for, policy_catalogue
-from azure_tenant_audit.model_assessment import validate_assessment
+from auditex.rule_assessment import precheck_case
+from auditex.model_serving import ModelConfig, assess_run, messages_for
+from auditex.rule_assessment import canonical, policy_catalogue
+from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import assess, as_pack_response
 from azure_tenant_audit.value_rules import catalogue as loader
@@ -246,7 +247,7 @@ def test_undecidable_keeps_baseline_review_and_missing_stays_missing(assessment)
 
 def test_legacy_schema_and_model_non_rule_fixture_bytes(tmp_path, monkeypatch):
     # Build a historical precheck fixture explicitly; the removed switch cannot select this route.
-    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+    monkeypatch.setattr("auditex.rule_assessment.precheck_case", lambda case, **kw: precheck_case(
         case, **{**kw, "value_rules": False}))
     (tmp_path / "run-manifest.json").write_text('{"run_id":"synthetic-contract"}')
     result = assess_run(tmp_path, ModelConfig(model_name="contract-probe"), policies=["MS.POWERBI.1.1v1"])
@@ -340,9 +341,9 @@ def test_rule_failure_validates_end_to_end_and_no_rule_is_not_a_rule_record(asse
         tampered["policies"][0]["rule_precheck"][key] = bad
         with pytest.raises(ValueError):
             validate_assessment(tampered)
-    # No rule: product answers a row-level reason (auditex.model_serving._uncovered_record), never a rule record. Its
+    # No rule: product answers a row-level reason (auditex.rule_assessment._uncovered_record), never a rule record. Its
     # constant is the catalogued A1 text, and a rule record that claims it is refused by every checker.
-    from auditex.model_serving import RULE_NOT_IMPLEMENTED_TEXT
+    from auditex.rule_assessment import RULE_NOT_IMPLEMENTED_TEXT
     shared = loader.shared_reason("rule_not_implemented")
     assert RULE_NOT_IMPLEMENTED_TEXT == shared["reason_text"] == A1_NO_RULE_TEXT and shared["recommendation"] is None
     sections = policy_catalogue()["policies"][policy]["sections"]

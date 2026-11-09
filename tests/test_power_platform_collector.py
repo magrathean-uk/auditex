@@ -8,7 +8,7 @@ import pytest
 
 from azure_tenant_audit.collectors import power_platform as module
 from azure_tenant_audit.collectors.power_platform import PowerPlatformCollector
-from azure_tenant_audit.model_assessment import COLLECTOR_ERROR_CLASSES
+from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES
 from azure_tenant_audit.normalize import build_normalized_snapshot
 from azure_tenant_audit.power_platform import BAP_SCOPE, PowerPlatformClient, PowerPlatformError, power_platform_client_from
 

@@ -17,7 +17,7 @@ import subprocess
 
 import pytest
 
-from auditex.model_serving import policy_catalogue
+from auditex.rule_assessment import policy_catalogue
 from auditex.scuba_projection import PACK_ENUM_DOMAINS, PACK_SHAPE_DIGESTS, _json
 from auditex.scubagear_export import canonicalise_privileged_users, prune_section
 from auditex.scubagear_prune_proof import PRUNE_PROOF, REGO_SHA256

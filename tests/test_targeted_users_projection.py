@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from auditex.model_serving import canonical
+from auditex.rule_assessment import canonical
 from auditex.scuba_projection import NOT_COLLECTED, Bundle, PrivateSnapshot, project_run, rule_policy_section
 from azure_tenant_audit.sensitive_users import BUNDLE_PATH, KEY_PATH, SensitiveUsers
 from azure_tenant_audit.value_rules import assess
@@ -205,7 +205,7 @@ def test_summary_is_stripped_before_shape_budget_and_redaction(tmp_path, monkeyp
 
 def test_assessment_dry_run_and_new_files_never_carry_the_proof(tmp_path, monkeypatch, capsys, caplog):
     from auditex.model_serving import assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")
     root = coverage_bundle(tmp_path, monkeypatch, [met_row()])

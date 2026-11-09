@@ -7,7 +7,7 @@ from types import ModuleType
 import pytest
 
 from auditex import scuba_projection
-from auditex.model_serving import canonical
+from auditex.rule_assessment import canonical
 from test_scuba_projection import EXPECTED, complete_bundle  # noqa: F401 - shared pytest fixture
 
 

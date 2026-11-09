@@ -19,16 +19,14 @@ import pytest
 from auditex.cli import main
 from auditex.model_eval import validate_model_response
 from auditex.model_prompt import SYSTEM_PROMPT, SYSTEM_PROMPT_SHA256
-from auditex.model_serving import (
-    ModelClient, ModelConfig, PolicyUnavailable, assess_run, build_case,
-    canonical, messages_for, policy_catalogue,
-)
+from auditex.model_serving import ModelClient, ModelConfig, assess_run, messages_for
+from auditex.rule_assessment import PolicyUnavailable, build_case, canonical, policy_catalogue
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.bundle_integrity import verify_bundle_hashes
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.contracts import build_validation_report, contract_schema_manifest
-from azure_tenant_audit.model_assessment import validate_assessment
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.resources import shipped_resource_manifest
 from azure_tenant_audit.run_files import UnsafeRunFileError
 
@@ -558,7 +556,7 @@ def test_assessment_baseline_comparison(tmp_path, monkeypatch, rule_status, valu
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports/report-pack.json").write_text(canonical({"baseline_alignment": {"frameworks": {
         "cisa_scuba": {"controls": [{"control_id": pid, "status": rule_status}]}}}}))
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kwargs: fake_projection(
         root, {"org_config": [{"Name": "Synthetic", "AuditDisabled": not value}], "scuba_config": {}}))
     result = assess_run(tmp_path, policies=[pid])
     assert result["policies"][0]["comparison"]["result"] == expected
@@ -658,7 +656,7 @@ def test_value_rule_legacy_switch_is_ignored(optional_collection_bundle, monkeyp
 @pytest.mark.parametrize("mutation", ["evidence", "criticality", "policy", "comparison", "nonfinite", "boolean_number"])
 def test_optional_artifact_validation_rejects_tampering(tmp_path, monkeypatch, mutation):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
     monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(sample_answer()))
     result = assess_historical_model(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     row = result["policies"][0]
@@ -680,7 +678,7 @@ def test_optional_artifact_validation_rejects_tampering(tmp_path, monkeypatch, m
 
 def test_transport_failure_is_written_as_unknown_and_validated(tmp_path, monkeypatch):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
     monkeypatch.setattr(ModelClient, "_request", lambda *args: b"")
     result = assess_historical_model(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     row = result["policies"][0]
@@ -710,7 +708,7 @@ def test_assessment_schema_checker_handles_large_json_integer(tmp_path, monkeypa
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     monkeypatch.setattr(ModelClient, "_request", lambda *args: envelope(missing_answer()))
     # This checks numeric range handling, independently of zero-latency rule provenance.
-    monkeypatch.setattr("auditex.model_serving.project_run",
+    monkeypatch.setattr("auditex.rule_assessment.project_run",
                         lambda root, **kwargs: fake_projection(root, {"privileged_users": {}}))
     result = assess_historical_model(tmp_path, ModelConfig(model_name="test-model"), policies=[POLICY])
     result["policies"][0]["latency_ms"] = 10 ** 400
@@ -925,7 +923,7 @@ def test_known_older_optional_assessment_uses_its_recorded_schema(tmp_path, monk
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"run"}')
     monkeypatch.setattr(ModelClient, '_request', lambda *a: envelope(missing_answer()))
     # Legacy schema dispatch is checked using an actual model row.
-    monkeypatch.setattr('auditex.model_serving.project_run',
+    monkeypatch.setattr('auditex.rule_assessment.project_run',
                         lambda root, **kwargs: fake_projection(root, {'privileged_users': {}}))
     result = assess_historical_model(tmp_path, ModelConfig(model_name='test-model'), policies=[POLICY])
     result['schema_version'] = '2026-10-27'
@@ -949,12 +947,13 @@ def test_absent_field_rule_is_served_and_validated(tmp_path, monkeypatch):
     from copy import deepcopy as _deepcopy
     from pathlib import Path as _Path
     import jsonschema as _jsonschema
-    from auditex.model_serving import ModelClient as _Client, ModelConfig as _Config, assess_run as _assess, policy_catalogue as _catalogue
-    from azure_tenant_audit.model_assessment import validate_assessment as _validate
+    from auditex.model_serving import ModelClient as _Client, ModelConfig as _Config, assess_run as _assess
+    from auditex.rule_assessment import policy_catalogue as _catalogue
+    from azure_tenant_audit.scuba_assessment import validate_assessment as _validate
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     values = {section: {} for section in _catalogue()["policies"]["MS.SHAREPOINT.1.1v1"]["sections"]}
     values["SPO_tenant"] = [{"SharingDomainRestrictionMode": 0}]  # collected, but SharingCapability (Rego-read) is missing
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **options: fake_projection(root, values))
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **options: fake_projection(root, values))
     monkeypatch.setattr(_Client, "_request", lambda *args: pytest.fail("a rule row never calls the model"))
     result = _assess(tmp_path, _Config(model_name="stub"), policies=["MS.SHAREPOINT.1.1v1"])
     row = result["policies"][0]
@@ -982,7 +981,7 @@ def test_lone_surrogate_in_a_faked_section_does_not_abort_the_live_assessment(tm
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     # The kill switch keeps this defence-in-depth check on the model route.
     values = {"privileged_users": {"DisplayName": "x\ud800y"}}
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **options: fake_projection(root, values))
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **options: fake_projection(root, values))
     sent = []
     def reply(self, method, path, payload):
         sent.append(payload['messages'])
@@ -997,9 +996,9 @@ def test_lone_surrogate_in_a_faked_section_does_not_abort_the_live_assessment(tm
 
 def assess_historical_model(root, config, *, policies, **kwargs):
     """Build a historical fixture via ModelClient directly, outside product assessment."""
-    from auditex.model_serving import _comparison, _totals
+    from auditex.rule_assessment import _comparison, _totals
     result = assess_run(root, policies=policies, **kwargs)
-    projection = __import__('auditex.model_serving', fromlist=['project_run']).project_run(root)
+    projection = __import__('auditex.rule_assessment', fromlist=['project_run']).project_run(root)
     client = ModelClient(config)
     records = [client.assess(build_case(pid, projection, 'synthetic')) for pid in policies]
     for row in records:

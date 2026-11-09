@@ -50,7 +50,7 @@ def _check_reason_variants(policy_id: str, cell: str, pairs: Any) -> None:
 
 # A1.2: two reasons that are not cells, catalogued once under ``shared_reasons``. A rule that raised answers the first
 # with a rule record whose cell is null, dispatched before any cell lookup. A policy without a rule answers the second
-# as a row-level reason in ``auditex.model_serving`` (never a rule record); the constant text is kept here so one
+# as a row-level reason in ``auditex.rule_assessment`` (never a rule record); the constant text is kept here so one
 # test can pin the serving constant to the catalogue.
 FAILURE_REASON = "rule_evaluation_failed"
 NOT_IMPLEMENTED_REASON = "rule_not_implemented"

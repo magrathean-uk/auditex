@@ -14,7 +14,7 @@ from test_value_rules_s5 import DIRECTORY, FIXTURE, POLICIES, SS11, direct, read
 
 def assessment_with_comparison(template, record):
     """Replace claims, derive their comparison and refresh the summary totals."""
-    from auditex.model_serving import _totals
+    from auditex.rule_assessment import _totals
     from test_value_rules_contract import assessment_for
 
     result = assessment_for(template, record)
@@ -65,7 +65,7 @@ def test_fixture_origins_and_p9_correction_are_auditable():
 
 
 def test_each_cell_validates_as_a_modern_assessment(tmp_path, monkeypatch):
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from azure_tenant_audit.value_rules.record import as_pack_response
     from auditex.model_serving import ModelConfig, assess_run
 

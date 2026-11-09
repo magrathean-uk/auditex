@@ -356,7 +356,7 @@ def test_rule_view_canaries_never_leave_records_or_responses(policy, rows, capsy
     ("MS.SECURITYSUITE.3.4v1", "all_rules_notify")])
 def test_linked_success_canaries_never_persist(policy, cell, tmp_path, monkeypatch, capsys, caplog):
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
     caplog.set_level("DEBUG")
@@ -384,6 +384,7 @@ def test_linked_success_canaries_never_persist(policy, cell, tmp_path, monkeypat
         return projection
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr("auditex.model_serving.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy])
@@ -420,7 +421,7 @@ def test_dlp_join_preserves_raw_json_equality_and_duplicate_semantics():
 
 def test_validator_accepts_ss13_defender_licence_citation(tmp_path, monkeypatch):
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
     policy = "MS.SECURITYSUITE.1.3v1"
@@ -433,7 +434,7 @@ def test_validator_accepts_ss13_defender_licence_citation(tmp_path, monkeypatch)
         return projection
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy])
     assert result["policies"][0]["rule_precheck"]["section"] == ["defender_license"]

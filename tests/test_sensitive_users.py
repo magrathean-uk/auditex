@@ -892,7 +892,7 @@ def test_rule_input_reads_valid_private_files_once(tmp_path, monkeypatch):
 
 def test_rule_input_private_capture_ignores_model_budgets_and_never_enters_gate(tmp_path, monkeypatch):
     from auditex import scuba_projection as module
-    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+    from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
     addresses = tuple(f"private-{i:04}@example.invalid" for i in range(100))
     root = rule_input_bundle(tmp_path, addresses)
@@ -950,9 +950,10 @@ def test_rule_input_assessment_replay_and_all_public_outputs_are_private(
     from copy import deepcopy
     import shutil
     from auditex import scuba_projection as module
-    from auditex.model_serving import ModelClient, assess_run, assess_scubagear_export, policy_catalogue
+    from auditex.model_serving import ModelClient, assess_run, assess_scubagear_export
+    from auditex.rule_assessment import policy_catalogue
     from auditex.scubagear_export import load_export, project_export
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from azure_tenant_audit.value_rules import assess
 
     caplog.set_level("DEBUG")
@@ -1064,7 +1065,7 @@ def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path
     """A bound TargetedUsersCoverage establishes met; injected literal targets are ignored and never published."""
     from auditex.model_serving import assess_run
     from auditex.scuba_projection import project_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
 
     root = rule_input_bundle(tmp_path)
     projection = project_run(root)
@@ -1075,6 +1076,7 @@ def test_rule_input_met_canaries_with_synthetic_private_policy_evidence(tmp_path
     row["TargetedUsersToProtect"] = list(CANARIES)
     row["TargetedUsersCoverage"] = {"version": 1, "state": "known", "input_hmac_sha256": meta["hmac_sha256"],
                                     "input_count": meta["count"], "protected_nonempty": True, "missing_count": 0}
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda *args, **kwargs: projection)
     monkeypatch.setattr("auditex.model_serving.project_run", lambda *args, **kwargs: projection)
     result = assess_run(root, policies=[SS21])
     validate_assessment(result)

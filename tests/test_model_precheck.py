@@ -11,10 +11,12 @@ import pytest
 
 from auditex.cli import main
 from support import RunBundleBuilder, make_contract_valid
-from auditex.model_precheck import evaluate_precheck, precheck_case
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, build_case, canonical, messages_for
-from azure_tenant_audit.model_assessment import validate_assessment
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from auditex.model_precheck import evaluate_precheck
+from auditex.rule_assessment import precheck_case
+from auditex.model_serving import ModelClient, ModelConfig, assess_run, messages_for
+from auditex.rule_assessment import build_case, canonical
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.scuba_precheck import check_fields, check_gate, field_name, policy_rule, precheck_policy, rule_catalogue
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +101,7 @@ def test_rule_evidence_ids_follow_case_order_when_rule_sections_differ(tmp_path,
     # End to end: the served envelope, built from the same patched row, validates.
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
     from test_model_serving import fake_projection
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, {}))
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kw: fake_projection(root, {}))
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[policy_id])
     served = result["policies"][0]
@@ -131,7 +133,7 @@ def test_rule_exception_is_a_constant_not_assessed_answer(monkeypatch, capsys, c
     assert record["limitations"] == [] and record["recommendations"] == ["report_product_fault"]
     assert secret not in json.dumps(record) + str(capsys.readouterr())
     # One line per failure: the rule id and the class name, never the message, evidence or repr.
-    lines = [item for item in caplog.records if item.name == "auditex.model_precheck"]
+    lines = [item for item in caplog.records if item.name == "auditex.rule_assessment"]
     assert len(lines) == 1 and lines[0].exc_info is None
     text = lines[0].getMessage()
     assert "MS.POWERBI.1.1v1" in text
@@ -363,12 +365,12 @@ def test_evaluator_scores_absent_field_only_on_request(tmp_path):
 
 def run_assessment(tmp_path, monkeypatch, projection, **kwargs):
     # Exercise the legacy precheck contract explicitly; no environment flag changes production routing.
-    from auditex.model_precheck import precheck_case
-    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+    from auditex.rule_assessment import precheck_case
+    monkeypatch.setattr("auditex.rule_assessment.precheck_case", lambda case, **kw: precheck_case(
         case, **{**kw, "value_rules": False}))
     (tmp_path / "run-manifest.json").write_text('{"run_id":"precheck-test"}')
     from test_model_serving import fake_projection
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, projection))
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kw: fake_projection(root, projection))
     return assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[SP], **kwargs)
 
 
@@ -544,7 +546,7 @@ CA_RULES = ["MS.AAD.1.1v1", "MS.AAD.2.1v1", "MS.AAD.2.3v1", "MS.AAD.3.1v1", "MS.
 
 def empty_ca(pid, **sections):
     """Every input of the policy collected, the Conditional Access list empty."""
-    from auditex.model_serving import policy_catalogue
+    from auditex.rule_assessment import policy_catalogue
     projection = {section: [] for section in policy_catalogue()["policies"][pid]["sections"]}
     projection["scuba_config"] = {"CapExclusions": {}, "M365Environment": "commercial"}
     return {**projection, **sections}
@@ -751,9 +753,9 @@ def test_empty_list_rule_is_served_and_validated(tmp_path, monkeypatch):
                                             "scuba_config": {"CapExclusions": {}}})
         projection.views[pid] = {"scuba_config": {"CapExclusions": {}}}
         return projection
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
-    from auditex.model_precheck import precheck_case
-    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
+    from auditex.rule_assessment import precheck_case
+    monkeypatch.setattr("auditex.rule_assessment.precheck_case", lambda case, **kw: precheck_case(
         case, **{**kw, "value_rules": False}))
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("Rule-answered row called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=[pid])

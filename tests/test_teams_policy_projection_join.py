@@ -12,7 +12,7 @@ import pytest
 from auditex.scuba_projection import PS_SECTIONS, project_run
 from azure_tenant_audit.adapters import teams_admin_rest as rest
 from azure_tenant_audit.collectors.teams_policy import TeamsPolicyCollector
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from test_teams_admin_rest import Client, Response, TOKEN, command_reader, connect
 
 

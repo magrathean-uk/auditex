@@ -9,7 +9,7 @@ import json
 import math
 from typing import Any
 
-from .model_evidence import NOT_COLLECTED
+from .collection_markers import NOT_COLLECTED
 from .resources import open_text_resource
 
 

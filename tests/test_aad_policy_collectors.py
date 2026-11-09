@@ -19,7 +19,7 @@ from azure_tenant_audit.collectors.consent_policy import ConsentPolicyCollector
 from azure_tenant_audit.collectors.identity import IdentityCollector
 from azure_tenant_audit.config import AuthConfig
 from azure_tenant_audit.graph import GraphClient, GraphError, graph_url, read_only_violation
-from azure_tenant_audit.model_assessment import COLLECTOR_ERROR_CLASSES, collector_error_class
+from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES, collector_error_class
 from azure_tenant_audit.secret_hygiene import SENSITIVE_KEY_RE
 
 SETTINGS = "https://graph.microsoft.com/beta/settings"

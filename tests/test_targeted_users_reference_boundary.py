@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from auditex.model_serving import policy_catalogue
+from auditex.rule_assessment import policy_catalogue
 from auditex.scubagear_export import load_export, project_export
 from test_scubagear_export import PROVIDER
 

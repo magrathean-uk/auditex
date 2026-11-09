@@ -491,7 +491,7 @@ def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
     cell and a raising rule) validate under the 2026-11-05 assessment validator and never call the model."""
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
     from azure_tenant_audit import value_rules
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage3"}')
@@ -517,7 +517,7 @@ def test_stage3_answers_validate_end_to_end(tmp_path, monkeypatch):
         return original(policy_id, sections)
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(value_rules, "assess", failing_for_exo)
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("a value-rule row called the model"))
     policies = ["MS.TEAMS.1.1v1", "MS.TEAMS.2.2v2", "MS.TEAMS.2.3v2", "MS.TEAMS.4.1v1", "MS.EXO.13.1v1"]
@@ -545,7 +545,7 @@ EXPECTED_UNCOVERED = frozenset()
 
 
 def test_expected_uncovered_policies_matches_registry():
-    from auditex.model_serving import policy_catalogue
+    from auditex.rule_assessment import policy_catalogue
     catalogue = set(policy_catalogue()['policies'])
     assert catalogue - set(rule_policies()) == EXPECTED_UNCOVERED
     assert len(rule_policies()) == len(catalogue) - len(EXPECTED_UNCOVERED) == 102
@@ -553,7 +553,8 @@ def test_expected_uncovered_policies_matches_registry():
 
 @pytest.mark.parametrize('rule_view', [False, True], ids=['case-evidence', 'production-rule-view'])
 def test_covered_vectors_never_reach_rule_not_implemented(rule_view, monkeypatch, record_property):
-    from auditex.model_serving import ModelClient, _assess_policies, policy_catalogue
+    from auditex.model_serving import ModelClient
+    from auditex.rule_assessment import _assess_policies, policy_catalogue
     from auditex.scuba_projection import Projection
     monkeypatch.setattr(ModelClient, '__init__', lambda *args: pytest.fail('No model client'))
     items = policy_catalogue()
@@ -573,9 +574,8 @@ def test_covered_vectors_never_reach_rule_not_implemented(rule_view, monkeypatch
                 projection.rule_views = {}
                 if 'scuba_config' in sections:
                     projection.rule_views[policy] = {'scuba_config': deepcopy(sections['scuba_config'])}
-            records, prompts = _assess_policies(projection, [policy], items, 'synthetic', dry_run=False,
-                                               baseline={})
-            assert not prompts and records[0]['reason'] == 'rule_precheck', row['vector_id']
+            records = _assess_policies(projection, [policy], items, 'synthetic', baseline={})
+            assert records[0]['reason'] == 'rule_precheck', row['vector_id']
             assert records[0]['rule_precheck']['class'] == 'value_rule', row['vector_id']
             cell = records[0]['rule_precheck']['cell']
             reached[policy].add(cell)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.scuba_precheck import unavailable_input_sections
 
 # Shared reason codes (spec v3.9 section 3: every list policy).
@@ -58,7 +58,7 @@ def _A(policy_id: str, code: str, text: str, cell: str, cited: list[str],
 
 def is_shared_reason(code: Any) -> bool:
     """A reason a rule record carries with a null cell. ``rule_not_implemented`` is not one: product answers it as a
-    row-level reason (``model_serving._uncovered_record``) before any rule record exists."""
+    row-level reason (``rule_assessment._uncovered_record``) before any rule record exists."""
     return code == RULE_FAILURE_CODE
 
 

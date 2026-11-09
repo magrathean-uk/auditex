@@ -573,13 +573,13 @@ def load_report_bundle(run_dir: str | Path, *, shareable: bool = False) -> dict[
 
 def _load_policy_explanations(run_path: Path, manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Read the optional assessment through the existing run-file guard and fail closed on damage."""
-    from azure_tenant_audit.model_assessment import (MODEL_ASSESSMENT_PATH, derive_explainer, validate_assessment,
-                                                  value_rule_verdict)
-    from .model_eval import _invalid_constant, _pairs
+    from azure_tenant_audit.scuba_assessment import (MODEL_ASSESSMENT_PATH, derive_explainer, validate_assessment,
+                                                     value_rule_verdict)
+    from azure_tenant_audit.strict_json import reject_json_constant, strict_pairs
 
     try:
         assessment = json.loads(read_run_file(run_path, MODEL_ASSESSMENT_PATH).decode("utf-8"),
-                                object_pairs_hook=_pairs, parse_constant=_invalid_constant)
+                                object_pairs_hook=strict_pairs, parse_constant=reject_json_constant)
         validate_assessment(assessment)
         if assessment["run_id"] != manifest.get("run_id"):
             return []

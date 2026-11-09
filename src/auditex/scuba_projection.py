@@ -18,8 +18,8 @@ from typing import Any
 from azure_tenant_audit.chunk_reader import _open_chunk
 from azure_tenant_audit.guarded_io import guarded_operation
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS, annotate_enum_names
-from azure_tenant_audit.model_assessment import collector_error_class, safe_projection_enum_value
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import collector_error_class, safe_projection_enum_value
 from azure_tenant_audit.run_files import MAX_RUN_FILE_BYTES, UnsafeRunFileError, read_run_file
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid

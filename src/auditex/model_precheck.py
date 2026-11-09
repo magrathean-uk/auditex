@@ -1,99 +1,17 @@
-"""Rule pre-check records and offline scoring of frozen oracle cases."""
+"""Offline scoring of frozen oracle cases; the rule pre-check lives in :mod:`auditex.rule_assessment`."""
 from __future__ import annotations
 
 from collections import Counter
-from copy import deepcopy
 import json
 import logging
 from typing import Any
 
-from azure_tenant_audit.explainer import explain as render_explanation
-from azure_tenant_audit.guarded_io import UnsafeRunFileError
-from azure_tenant_audit.model_assessment import validate_explainer, value_rule_verdict
-from azure_tenant_audit.output_redaction import PROFILE_EXPLAINER, RedactionContext, redact_output
-from azure_tenant_audit.scuba_precheck import optional_collection_entry, precheck_policy, precheck_response
+from azure_tenant_audit.strict_json import reject_json_constant as _invalid_constant, strict_pairs as _pairs
 
-from .model_eval import _evaluate, _invalid_constant, _load_cases, _load_responses, _pairs, _score
+from .model_eval import _evaluate, _load_cases, _load_responses, _score
+from .rule_assessment import precheck_case
 
 LOG = logging.getLogger(__name__)
-
-
-def precheck_case(case: dict[str, Any], *, skip_absent_sections: bool = False,
-                  named_limitations: bool = True, absent_fields: bool = False,
-                  empty_lists: bool = False, value_rules: bool = False,
-                  rule_projection: dict[str, Any] | None = None, explain: bool = False,
-                  redaction_context: RedactionContext | None = None) -> dict[str, Any] | None:
-    sections = [item["section"] for item in case["evidence"][1:]]
-    projection = {item["section"]: item["observed"] for item in case["evidence"][1:]}
-    detail = None
-    optional = optional_collection_entry()
-    optional_policy = optional["policies"].get(case["policy_id"])
-    if optional_policy and rule_projection is not None:
-        missing = [s for s in sections if s in optional_policy["sections"]
-                   and isinstance(rule_projection.get(s), dict)
-                   and rule_projection[s].get("collection_status") == "not_collected"
-                   and rule_projection[s].get("reason") == optional["reason_code"]]
-        if missing:
-            detail = {"class": "absent_section", "rule_id": "required_sections_present",
-                      "section": missing, "field": None, "value": None,
-                      "reason_code": optional["reason_code"], "reason_text": optional["reason_text"]}
-    row = None
-    if value_rules:
-        from azure_tenant_audit.value_rules.catalogue import row_for
-        row = row_for(case["policy_id"])
-    if row is not None and detail is None:
-        # A value-rule policy: the rule view when serving supplies one, else the case evidence.
-        rule_input, rule_sections = ((rule_projection, list(row["sections"])) if rule_projection is not None
-                                     else (projection, sections))
-        try:
-            candidate = precheck_policy(case["policy_id"], rule_input, rule_sections,
-                                        skip_absent_sections=skip_absent_sections, value_rules=True,
-                                        absent_fields=absent_fields, empty_lists=empty_lists)
-        except (UnsafeRunFileError, MemoryError):
-            raise
-        except Exception as exc:
-            # Log the rule id and the exception class name only: the message and repr can hold tenant evidence.
-            LOG.warning("Value rule %s failed (%s); the row is answered not assessed",
-                        row["rule_id"], type(exc).__name__)
-            # The fault is ours, not the evidence's (main, 5 Nov 07:12 GMT): the catalogued rule_evaluation_failed
-            # answer, a constant text and the report_product_fault recommendation. Never render the exception.
-            from azure_tenant_audit.value_rules import rule_failure
-            failed = rule_failure(case["policy_id"])
-            candidate = {"class": "value_rule", "rule_id": row["rule_id"], "section": failed["cited_sections"],
-                         "field": None, "value": None, "cell": failed["cell"],
-                         "reason_code": failed["reason_code"], "reason_text": failed["reason_text"]}
-        if rule_projection is None or candidate is not None and candidate["class"] in {"value_rule", "closed_gate"}:
-            detail = candidate
-    if detail is None and (row is None or rule_projection is not None):
-        detail = precheck_policy(case["policy_id"], projection, sections,
-                                 skip_absent_sections=skip_absent_sections, absent_fields=absent_fields,
-                                 empty_lists=empty_lists, value_rules=False)
-    if detail is None:
-        return None
-    record = {**precheck_response(detail, case["evidence"][0]["observed"], sections,
-                                  named_limitations=named_limitations),
-              "policy_id": case["policy_id"], "rule_precheck": detail,
-              "validation_status": "valid", "reason": "rule_precheck", "latency_ms": 0,
-              "attempts": 0, "prompt_sha256": None, "response_sha256": None,
-              "thinking_disabled": False, "thinking_stripped": False}
-    if explain and detail["class"] == "value_rule":
-        try:
-            # The case must carry the complete fixed read set, even if this cell cites only a subset.
-            if row is None or not set(row["sections"]) <= set(sections):
-                return record
-            # Only the public rule answer and the case's redacted model-view evidence cross this boundary.
-            public = {"policy_id": record["policy_id"], "verdict": value_rule_verdict(record),
-                      "cell": detail["cell"], "reason_code": detail["reason_code"],
-                      "reason_text": detail["reason_text"], "cited_sections": list(detail["section"])}
-            explanation = render_explanation(public, deepcopy(projection), list(sections))
-            safe = redact_output(explanation, profile=PROFILE_EXPLAINER, context=redaction_context)
-            validate_explainer(record, safe)
-            record["explainer"] = safe
-        except (UnsafeRunFileError, MemoryError):
-            raise
-        except Exception as exc:
-            LOG.debug("Explainer %s failed (%s)", case["policy_id"], type(exc).__name__)
-    return record
 
 
 def evaluate_precheck(cases_path: str, responses_path: str | None = None, *,

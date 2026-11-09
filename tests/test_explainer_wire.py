@@ -9,13 +9,14 @@ import time
 import jsonschema
 import pytest
 
-from auditex import model_precheck, model_serving
-from auditex.model_precheck import precheck_case
-from auditex.model_serving import assess_run, build_case
+from auditex import rule_assessment
+from auditex.rule_assessment import precheck_case
+from auditex.model_serving import assess_run
+from auditex.rule_assessment import build_case
 from auditex.reporting import load_report_bundle, preview_report
 from azure_tenant_audit.cli import run_offline
 from azure_tenant_audit.explainer import ExplainerError
-from azure_tenant_audit.model_assessment import ASSESSMENT_SCHEMAS, validate_assessment, value_rule_verdict
+from azure_tenant_audit.scuba_assessment import ASSESSMENT_SCHEMAS, validate_assessment, value_rule_verdict
 from azure_tenant_audit.output_redaction import RedactionContext
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,9 +47,9 @@ def assessment(tmp_path):
 def assessment_with_row(template, verdict):
     payload = deepcopy(template)
     row = explained(verdict)
-    row["comparison"] = model_serving._comparison(row["policy_id"], row, {})
+    row["comparison"] = rule_assessment._comparison(row["policy_id"], row, {})
     payload["policies"] = [row]
-    payload["totals"] = model_serving._totals([row])
+    payload["totals"] = rule_assessment._totals([row])
     validate_assessment(payload)
     return payload
 
@@ -71,8 +72,8 @@ def test_explainer_failures_are_suppressed_and_log_no_values(monkeypatch, caplog
     secret = "sensitive-person@example.invalid"
     def broken(*args, **kwargs):
         raise error(secret)
-    monkeypatch.setattr(model_precheck, "render_explanation", broken)
-    caplog.set_level(logging.DEBUG, logger=model_precheck.__name__)
+    monkeypatch.setattr(rule_assessment, "render_explanation", broken)
+    caplog.set_level(logging.DEBUG, logger=rule_assessment.__name__)
     row = precheck_case(case_for("not_met"), value_rules=True, explain=True)
     assert "explainer" not in row and value_rule_verdict(row) == "not_met"
     assert len(caplog.records) == 1
@@ -85,8 +86,8 @@ def test_redaction_failure_suppresses_explainer_and_logs_only_class_and_policy(m
     secret = "person@example.invalid"
     def broken(*args, **kwargs):
         raise RuntimeError(secret)
-    monkeypatch.setattr(model_precheck, "redact_output", broken)
-    caplog.set_level(logging.DEBUG, logger=model_precheck.__name__)
+    monkeypatch.setattr(rule_assessment, "redact_output", broken)
+    caplog.set_level(logging.DEBUG, logger=rule_assessment.__name__)
     row = precheck_case(case_for("not_met"), value_rules=True, explain=True)
     assert "explainer" not in row
     assert [r.getMessage() for r in caplog.records] == [f"Explainer {PBI} failed (RuntimeError)"]
@@ -94,8 +95,8 @@ def test_redaction_failure_suppresses_explainer_and_logs_only_class_and_policy(m
 
 
 def test_invalid_redacted_result_is_suppressed(monkeypatch, caplog):
-    monkeypatch.setattr(model_precheck, "redact_output", lambda *args, **kwargs: {"explanation": "bad"})
-    caplog.set_level(logging.DEBUG, logger=model_precheck.__name__)
+    monkeypatch.setattr(rule_assessment, "redact_output", lambda *args, **kwargs: {"explanation": "bad"})
+    caplog.set_level(logging.DEBUG, logger=rule_assessment.__name__)
     row = precheck_case(case_for("not_met"), value_rules=True, explain=True)
     assert "explainer" not in row and value_rule_verdict(row) == "not_met"
     assert [r.getMessage() for r in caplog.records] == [f"Explainer {PBI} failed (ValueError)"]
@@ -110,13 +111,13 @@ def test_a_failing_explainer_cannot_mutate_the_rule_answer_or_case(monkeypatch):
         sections["powerbi_tenant_settings"].clear()
         order.clear()
         raise RuntimeError("discarded")
-    monkeypatch.setattr(model_precheck, "render_explanation", broken)
+    monkeypatch.setattr(rule_assessment, "render_explanation", broken)
     assert precheck_case(case, value_rules=True, explain=True) == expected
     assert case == original
 
 
 def test_incomplete_identity_context_suppresses_explanation(caplog):
-    caplog.set_level(logging.DEBUG, logger=model_precheck.__name__)
+    caplog.set_level(logging.DEBUG, logger=rule_assessment.__name__)
     row = precheck_case(case_for("not_met"), value_rules=True, explain=True,
                         redaction_context=RedactionContext(incomplete=True))
     assert "explainer" not in row
@@ -127,11 +128,11 @@ def test_context_creation_failure_disables_explainer_without_leaking(tmp_path, m
     (tmp_path / "run-manifest.json").write_text('{"run_id":"context"}')
     def broken(*args):
         raise RuntimeError("sensitive-person@example.invalid")
-    monkeypatch.setattr(model_serving, "context_for_run", broken)
-    caplog.set_level(logging.DEBUG, logger=model_serving.__name__)
+    monkeypatch.setattr(rule_assessment, "context_for_run", broken)
+    caplog.set_level(logging.DEBUG, logger=rule_assessment.__name__)
     result = assess_run(tmp_path, policies=[PBI])
     assert "explainer" not in result["policies"][0]
-    assert [r.getMessage() for r in caplog.records if r.name == model_serving.__name__] == [
+    assert [r.getMessage() for r in caplog.records if r.name == rule_assessment.__name__] == [
         f"Explainer {PBI} failed (RuntimeError)"]
     assert "sensitive-person" not in caplog.text
 
@@ -155,7 +156,7 @@ def test_private_rule_view_cannot_be_read_by_explainer(monkeypatch):
             return super().__iter__()
     private = PoisonView({item["section"]: deepcopy(item["observed"]) for item in case["evidence"][1:]})
     private["private_only"] = secret
-    original = model_precheck.render_explanation
+    original = rule_assessment.render_explanation
     calls = []
     def spy(record, sections, order):
         private.frozen = True
@@ -164,7 +165,7 @@ def test_private_rule_view_cannot_be_read_by_explainer(monkeypatch):
         assert set(record) == {"policy_id", "verdict", "cell", "reason_code", "reason_text", "cited_sections"}
         assert sections == {item["section"]: item["observed"] for item in case["evidence"][1:]}
         return original(record, sections, order)
-    monkeypatch.setattr(model_precheck, "render_explanation", spy)
+    monkeypatch.setattr(rule_assessment, "render_explanation", spy)
     result = precheck_case(case, value_rules=True, rule_projection=private, explain=True)
     assert len(calls) == 1 and "explainer" in result and secret not in repr(result)
 
@@ -177,13 +178,13 @@ def test_complete_result_is_redacted_with_explainer_profile(monkeypatch):
     text = f"{address} {guid} password={credential} {run_path}/evidence"
     fake = {"explanation": text, "remediation_steps": [text], "evidence_refs": ["e0"]}
     context = RedactionContext(salt="wire-test", run_paths=(run_path,))
-    real_redact = model_precheck.redact_output
+    real_redact = rule_assessment.redact_output
     calls = []
     def redact_spy(value, *, profile, context):
         calls.append((value, profile, context))
         return real_redact(value, profile=profile, context=context)
-    monkeypatch.setattr(model_precheck, "render_explanation", lambda *args: fake)
-    monkeypatch.setattr(model_precheck, "redact_output", redact_spy)
+    monkeypatch.setattr(rule_assessment, "render_explanation", lambda *args: fake)
+    monkeypatch.setattr(rule_assessment, "redact_output", redact_spy)
     result = precheck_case(case_for("not_met"), value_rules=True, explain=True, redaction_context=context)["explainer"]
     assert calls == [(fake, "explainer", context)]
     serial = json.dumps(result)
@@ -217,10 +218,10 @@ def test_explanation_is_deterministic_and_does_not_mutate_case():
 def test_default_precheck_and_dry_run_never_call_explainer(tmp_path, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("explainer was called without opt-in")
-    monkeypatch.setattr(model_precheck, "render_explanation", forbidden)
+    monkeypatch.setattr(rule_assessment, "render_explanation", forbidden)
     row = precheck_case(case_for("not_met"), value_rules=True)
     assert "explainer" not in row
-    monkeypatch.setattr(model_serving, "context_for_run", forbidden)
+    monkeypatch.setattr(rule_assessment, "context_for_run", forbidden)
     (tmp_path / "run-manifest.json").write_text('{"run_id":"dry"}')
     assert assess_run(tmp_path, policies=[PBI], dry_run=True)["prompts"] == 1
 
@@ -234,7 +235,7 @@ def test_default_precheck_and_dry_run_never_call_explainer(tmp_path, monkeypatch
 ])
 def test_legacy_precheck_kinds_are_never_explained(monkeypatch, kind, policy, projection):
     calls = []
-    monkeypatch.setattr(model_precheck, "render_explanation", lambda *args: calls.append(args))
+    monkeypatch.setattr(rule_assessment, "render_explanation", lambda *args: calls.append(args))
     row = precheck_case(build_case(policy, projection, "unused"), absent_fields=True, empty_lists=True, explain=True)
     assert row["rule_precheck"]["class"] == kind
     assert "explainer" not in row and not calls
@@ -254,9 +255,9 @@ def test_securitysuite_without_complete_model_case_is_always_suppressed(monkeypa
     detail = {"class": "value_rule", "rule_id": rule["rule_id"], "section": cell["cited"],
               "field": None, "value": None, "cell": cell_name, "reason_code": cell["reason_code"],
               "reason_text": cell["reason_texts"][0]}
-    monkeypatch.setattr(model_precheck, "precheck_policy", lambda *args, **kwargs: detail)
+    monkeypatch.setattr(rule_assessment, "precheck_policy", lambda *args, **kwargs: detail)
     calls = []
-    monkeypatch.setattr(model_precheck, "render_explanation", lambda *args: calls.append(args))
+    monkeypatch.setattr(rule_assessment, "render_explanation", lambda *args: calls.append(args))
     result = precheck_case(case, value_rules=True, explain=True)
     assert "explainer" not in result and not calls
 
@@ -313,8 +314,8 @@ def test_each_legacy_schema_rejects_explainer_as_an_addition(assessment, version
 
 
 def test_legacy_assessment_still_validates_before_and_after_upgrade(tmp_path, monkeypatch):
-    original = model_serving.precheck_case
-    monkeypatch.setattr(model_serving, "precheck_case", lambda case, **kw: original(
+    original = rule_assessment.precheck_case
+    monkeypatch.setattr(rule_assessment, "precheck_case", lambda case, **kw: original(
         case, **{**kw, "value_rules": False, "explain": False}))
     (tmp_path / "run-manifest.json").write_text('{"run_id":"legacy"}')
     result = assess_run(tmp_path, policies=[PBI])
@@ -474,7 +475,7 @@ def test_report_escapes_markup_and_redacts_assessment_again(tmp_path, assessment
     validate_assessment(payload)
     (root / "model_assessment.json").write_text(json.dumps(payload))
     # Isolate the escaping and redaction layers: the integrity re-derivation is covered separately below.
-    monkeypatch.setattr("azure_tenant_audit.model_assessment.derive_explainer", lambda _row: deepcopy(row))
+    monkeypatch.setattr("azure_tenant_audit.scuba_assessment.derive_explainer", lambda _row: deepcopy(row))
     outputs = {fmt: preview_report(run_dir=str(root), format_name=fmt, profile=profile) for fmt in ("json", "md", "html")}
     for output in outputs.values():
         assert "policy_explanations" in output["sections"]
@@ -528,7 +529,7 @@ def test_fault_explanation_and_report_keep_support_address(tmp_path, assessment,
     from azure_tenant_audit.value_rules import rule_failure
     def boom(*args, **kwargs):
         raise ValueError("x")
-    monkeypatch.setattr(model_precheck, "precheck_policy", boom)
+    monkeypatch.setattr(rule_assessment, "precheck_policy", boom)
     row = precheck_case(case_for("not_met"), value_rules=True, explain=True, redaction_context=RedactionContext())
     assert row["rule_precheck"]["reason_code"] == rule_failure(PBI)["reason_code"]
     steps = " ".join(row["explainer"]["remediation_steps"])
@@ -563,7 +564,7 @@ def test_untampered_explanation_is_kept_after_rederivation(tmp_path, assessment)
 
 
 def test_derivation_never_reads_rule_projection_or_missing_context():
-    from azure_tenant_audit.model_assessment import derive_explainer
+    from azure_tenant_audit.scuba_assessment import derive_explainer
     row = explained("not_met")
     expected = row["explainer"]
     row["rule_projection"] = {"poison": object()}
@@ -575,7 +576,7 @@ def test_derivation_never_reads_rule_projection_or_missing_context():
 def test_memory_and_recursion_errors_in_explainer(monkeypatch):
     def broken(*args, **kwargs):
         raise MemoryError()
-    monkeypatch.setattr(model_precheck, "render_explanation", broken)
+    monkeypatch.setattr(rule_assessment, "render_explanation", broken)
     with pytest.raises(MemoryError):
         precheck_case(case_for("not_met"), value_rules=True, explain=True)
 
@@ -588,7 +589,7 @@ def fault_row(monkeypatch):
     def boom(*args, **kwargs):
         raise ValueError("x")
     with monkeypatch.context() as patch:
-        patch.setattr(model_precheck, "precheck_policy", boom)
+        patch.setattr(rule_assessment, "precheck_policy", boom)
         return precheck_case(case_for("not_met"), value_rules=True, explain=True, redaction_context=RedactionContext())
 
 
@@ -599,9 +600,9 @@ def write_report_run(tmp_path, template, row, tenant_name=None):
     if tenant_name:
         (root / "summary.json").write_text(json.dumps({"tenant_name": tenant_name}))
     payload = deepcopy(template)
-    row["comparison"] = model_serving._comparison(row["policy_id"], row, {})
+    row["comparison"] = rule_assessment._comparison(row["policy_id"], row, {})
     payload["policies"] = [row]
-    payload["totals"] = model_serving._totals([row])
+    payload["totals"] = rule_assessment._totals([row])
     validate_assessment(payload)
     (root / "model_assessment.json").write_text(json.dumps(payload))
     return root, payload
@@ -668,7 +669,7 @@ def test_mismatched_public_fields_never_reach_the_report(tmp_path, assessment, m
     (root / "run-manifest.json").write_text('{"run_id":"wire-test"}')
     payload = deepcopy(assessment)
     payload["policies"] = [row]
-    payload["totals"] = model_serving._totals([row])
+    payload["totals"] = rule_assessment._totals([row])
     (root / "model_assessment.json").write_text(json.dumps(payload))
     for profile in ("customer_pack", "shareable", "local"):
         output = preview_report(run_dir=str(root), format_name="md", profile=profile)

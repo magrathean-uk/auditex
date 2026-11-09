@@ -177,7 +177,7 @@ def test_no_stage6_evidence_echo(policy):
 
 def test_canary_rule_view_never_persists_or_logs(tmp_path, monkeypatch, caplog):
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
     canary_email, canary_name = "canary.person@example.invalid", "Canary Display Name"
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage6"}')
@@ -192,7 +192,7 @@ def test_canary_rule_view_never_persists_or_logs(tmp_path, monkeypatch, caplog):
         })
         return projection
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("value rule called model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=sorted(STAGE6_POLICIES))
     validate_assessment(result)

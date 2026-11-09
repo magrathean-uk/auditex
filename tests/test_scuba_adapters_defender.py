@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from auditex.model_serving import canonical
+from auditex.rule_assessment import canonical
 from auditex.scuba_adapters_defender import ADAPTERS, DEFENDER_ADAPTERS, SECTION_KEYS
 from auditex.scuba_projection import Bundle, NOT_COLLECTED, PACK_SHAPE_DIGESTS, project_run
 

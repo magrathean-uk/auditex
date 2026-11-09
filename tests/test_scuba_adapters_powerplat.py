@@ -14,7 +14,7 @@ import pytest
 
 from auditex import scuba_adapters_powerplat as adapters
 from auditex.scuba_projection import project_run
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 from azure_tenant_audit.value_rules import assess
 

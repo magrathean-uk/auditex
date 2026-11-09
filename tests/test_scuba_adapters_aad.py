@@ -15,8 +15,8 @@ import pytest
 from auditex import scuba_adapters_aad as aad
 from auditex import scuba_projection as projection
 from azure_tenant_audit.external_sharing import ENUM_NAME_KEYS
-from azure_tenant_audit.model_assessment import validate_explainer, value_rule_verdict
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_explainer, value_rule_verdict
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.run_files import UnsafeRunFileError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -522,6 +522,7 @@ def test_ca_variant_changes_only_rules(run, monkeypatch, extra):
 def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
         run, monkeypatch, capsys, caplog, section, policy, cell, reason_code):
     import auditex.model_serving as serving
+    import auditex.rule_assessment as rule_assessment
 
     class FixedDatetime(datetime):
         @classmethod
@@ -529,6 +530,7 @@ def test_variant_model_serialisation_and_written_sidecars_are_byte_identical(
             return datetime(2026, 11, 5, 0, 0, tzinfo=timezone.utc)
 
     monkeypatch.setattr(serving, "datetime", FixedDatetime)
+    monkeypatch.setattr(rule_assessment, "datetime", FixedDatetime)
     monkeypatch.setattr(serving.ModelClient, "assess", lambda *a, **k: pytest.fail("unexpected model call"))
     caplog.set_level("DEBUG")
     # A recorded empty emergency-access list makes the CA config usable; an

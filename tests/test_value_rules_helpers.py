@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.value_rules import assess, rule_failure
 from azure_tenant_audit.value_rules.catalogue import catalogue, shared_reason
 from azure_tenant_audit.value_rules.helpers import (

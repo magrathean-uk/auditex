@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
@@ -145,7 +145,7 @@ def test_uncollected_markers_precede_rule_values(policy):
 def test_served_outputs_and_logs_do_not_contain_rule_view_evidence(
         tmp_path, monkeypatch, caplog, coverage_shape, coverage_cell):
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
     canary, display_name = "s8.person@example.invalid", "Stage Eight Canary Display Name"
@@ -167,7 +167,7 @@ def test_served_outputs_and_logs_do_not_contain_rule_view_evidence(
         return projection
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("Power Platform called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=sorted(STAGE8_POLICIES))
     validate_assessment(result)

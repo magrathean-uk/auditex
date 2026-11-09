@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from azure_tenant_audit.guarded_io import UnsafeRunFileError
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.partner_domains import (
     BUNDLE_PATH as PARTNER_PATH, KEY_PATH as PARTNER_KEY_PATH, PartnerDomains,
 )
@@ -245,7 +245,7 @@ def test_private_values_never_reach_model_views_or_public_outputs(tmp_path, monk
 
 def test_assessment_and_dry_run_outputs_keep_partner_domains_private(tmp_path, monkeypatch, capsys, caplog):
     from auditex.model_serving import ModelClient, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")
     root = bundle(tmp_path, users=())
@@ -319,7 +319,7 @@ def test_verified_partner_domains_without_sensitive_users_decide_ss23(tmp_path, 
     """Fail-first on the base: with no PartnerDomains consumer every case is section_not_collected."""
     from auditex.model_serving import ModelClient, assess_run
     from auditex.scuba_projection import project_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
 
     root = bundle(tmp_path, users=())
     write_policy(root, **changes)
@@ -388,7 +388,7 @@ def test_ss23_end_to_end_keeps_model_shape_and_canaries_private(tmp_path, monkey
     import json as _json
     from auditex import scuba_projection as module
     from auditex.model_serving import ModelClient, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
 
     caplog.set_level("DEBUG")
     for name in ("with", "without"):

@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from auditex.model_serving import canonical
+from auditex.rule_assessment import canonical
 from auditex.scuba_adapters_teams import ADAPTERS, TEAMS_ADAPTERS
 from auditex.scuba_projection import AREA_ADAPTER_MODULES, PS_SECTIONS, project_run
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
 
 OPERATIONS = {

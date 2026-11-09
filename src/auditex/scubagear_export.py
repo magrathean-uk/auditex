@@ -17,7 +17,7 @@ from uuid import UUID
 
 from azure_tenant_audit.external_sharing import annotate_enum_names
 from azure_tenant_audit.guarded_io import read_guarded_bytes
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.scuba_scope import ScopeOversize, scope_entries, scope_summary
 from azure_tenant_audit.tenant_identity import canonical_tenant_uuid
 

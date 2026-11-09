@@ -12,7 +12,7 @@ import pytest
 
 from auditex import scuba_adapters_exchange as exchange
 from auditex import scuba_projection as projection
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
 MODULE = 'auditex.scuba_adapters_exchange'
 OPERATIONS = {'remote_domains': 'remoteDomains', 'transport_rule': 'transportRules',

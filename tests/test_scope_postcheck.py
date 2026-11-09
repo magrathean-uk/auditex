@@ -11,8 +11,9 @@ from unittest.mock import patch
 import jsonschema
 import pytest
 
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, policy_catalogue
-from azure_tenant_audit.model_assessment import validate_assessment
+from auditex.model_serving import ModelClient, ModelConfig, assess_run
+from auditex.rule_assessment import policy_catalogue
+from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.scuba_scope import (
     scope_catalogue, scope_entries, scope_summary,
 )
@@ -97,7 +98,7 @@ def marked(tmp_path, monkeypatch):
     (tmp_path / "run-manifest.json").write_text('{"run_id":"run"}')
     policy_id = "MS.AAD.3.2v2"
     values = {CA: [policy("Office only", builtin=["mfa"], Locations=NAMED)]}
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw: fake_projection(root, values))
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kw: fake_projection(root, values))
     result = assess_run(tmp_path, policies=[policy_id])
     result.update(endpoint_host="127.0.0.1", model_name="historical-model")
     result["policies"] = [{
@@ -469,7 +470,7 @@ def test_raw_names_are_masked_before_they_are_cut_to_the_name_limit(tmp_path, mo
 
 def test_dry_run_reads_no_scope_evidence(tmp_path, monkeypatch):
     write_raw(tmp_path, [policy("Office only", builtin=["mfa"], Locations=NAMED)])
-    monkeypatch.setattr("auditex.model_serving.collect_scope_evidence", lambda *a, **k: pytest.fail("dry run reads no scope"))
+    monkeypatch.setattr("auditex.rule_assessment.collect_scope_evidence", lambda *a, **k: pytest.fail("dry run reads no scope"))
     assert assess_run(tmp_path, ModelConfig(), dry_run=True, policies=["MS.AAD.3.2v2"])["dry_run"] is True
 
 
@@ -496,13 +497,13 @@ def test_ca_rule_row_is_untouched_and_envelope_names_the_scope(tmp_path, monkeyp
     write_raw(tmp_path, policies, manifest={"run_id": "run", "platform": "m365",
                                             "rule_parameters": {"break_glass_accounts": []}})
     if projected:
-        monkeypatch.setattr("auditex.model_serving.project_run", lambda root, **kw:
+        monkeypatch.setattr("auditex.rule_assessment.project_run", lambda root, **kw:
             fake_projection(root, {CA: policies}))
     result = assess_raw(tmp_path, monkeypatch)
     expected = deepcopy(result["policies"][0])
     no_scope = SimpleNamespace(summary={"status": "not_evaluated", "source": None,
                                         "reason": "missing_artifact", "count": 0, "policies": []})
-    monkeypatch.setattr("auditex.model_serving.collect_scope_evidence", lambda *a, **kw: no_scope)
+    monkeypatch.setattr("auditex.rule_assessment.collect_scope_evidence", lambda *a, **kw: no_scope)
     without_scope = assess_run(tmp_path, policies=["MS.AAD.3.2v2"])
     assert without_scope["policies"][0] == expected
     assert expected["reason"] == "rule_precheck"

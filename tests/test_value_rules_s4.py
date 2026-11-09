@@ -137,7 +137,7 @@ def test_prepared_anti_spam_rows_are_enabled_exactly_as_prepared():
 @pytest.mark.parametrize("policy", sorted(POLICIES))
 @pytest.mark.parametrize("missing_state", ["absent", "marked", "mixed"])
 def test_every_missing_section_combination_is_catalogued(policy, missing_state, vectors, monkeypatch):
-    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+    from azure_tenant_audit.collection_markers import NOT_COLLECTED
     import azure_tenant_audit.value_rules.catalogue as loader
 
     data = deepcopy(catalogue())
@@ -250,7 +250,7 @@ def test_accepted_domains_is_optional_and_not_cited_when_absent(policy, vectors)
 
 
 def _serve_rule(policy, sections):
-    from auditex.model_serving import _assess_policies, policy_catalogue
+    from auditex.rule_assessment import _assess_policies, policy_catalogue
     from auditex.scuba_projection import Projection
 
     # The public/model view has no evidence: serving must use the private rule view.
@@ -259,10 +259,8 @@ def _serve_rule(policy, sections):
     projection.rule_views = {}
     if "scuba_config" in sections:
         projection.rule_views[policy] = {"scuba_config": deepcopy(sections["scuba_config"])}
-    records, prompts = _assess_policies(
-        projection, [policy], policy_catalogue(), "2026-11-05T00:00:00Z",
-        dry_run=False, baseline={})
-    assert not prompts
+    records = _assess_policies(
+        projection, [policy], policy_catalogue(), "2026-11-05T00:00:00Z", baseline={})
     assert projection.rule_sections == sections
     return records[0]
 
@@ -293,7 +291,7 @@ def test_safelinks_vectors_through_serving(policy, vectors, monkeypatch):
     ("absent", "preset_rule_unusable"), ("not_collected", "preset_rule_unusable"),
 ])
 def test_safelinks_optional_domain_scopes_through_serving(policy, scope, cell, vectors, monkeypatch):
-    from azure_tenant_audit.model_evidence import NOT_COLLECTED
+    from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
     suffix = "preset_domain_partial_builtin_ok" if scope == "partial" else "preset_domain_covers_all_accepted"
@@ -382,7 +380,7 @@ def test_rule_outputs_never_echo_evidence(policy, vectors):
 ])
 def test_served_answers_validate_and_persist_no_canaries(policy, cell, cited, vectors, tmp_path, monkeypatch, caplog):
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
     vector = next(row for row in vectors[policy] if row["rule_cell"] == cell
@@ -395,7 +393,7 @@ def test_served_answers_validate_and_persist_no_canaries(policy, cell, cited, ve
         projection.rule_sections.update(sections)
         return projection
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("value rule called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="unused"), policies=[policy])
     assert result["policies"][0]["rule_precheck"]["cell"] == cell

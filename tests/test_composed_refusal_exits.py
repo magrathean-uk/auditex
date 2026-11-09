@@ -80,7 +80,7 @@ def test_real_permission_change_before_sqlite_open_refuses(tmp_path, monkeypatch
 
 def test_derive_preserves_the_identical_unsafe_refusal(monkeypatch):
     from azure_tenant_audit import explainer
-    from azure_tenant_audit.model_assessment import derive_explainer
+    from azure_tenant_audit.scuba_assessment import derive_explainer
     from test_explainer_wire import explained
 
     row = explained("not_met")
@@ -97,7 +97,7 @@ def test_derive_preserves_the_identical_unsafe_refusal(monkeypatch):
 
 
 def test_serving_preserves_unsafe_refusal_without_writing_assessment(tmp_path, monkeypatch):
-    from auditex import model_serving
+    from auditex import model_serving, rule_assessment
     from test_explainer_wire import PBI
 
     (tmp_path / "run-manifest.json").write_text('{"run_id":"context"}')
@@ -106,7 +106,7 @@ def test_serving_preserves_unsafe_refusal_without_writing_assessment(tmp_path, m
     def refuse(*args, **kwargs):
         raise failure
 
-    monkeypatch.setattr(model_serving, "context_for_run", refuse)
+    monkeypatch.setattr(rule_assessment, "context_for_run", refuse)
     with pytest.raises(UnsafeRunFileError) as caught:
         model_serving.assess_run(tmp_path, policies=[PBI])
     assert caught.value is failure
@@ -115,7 +115,7 @@ def test_serving_preserves_unsafe_refusal_without_writing_assessment(tmp_path, m
 
 @pytest.mark.parametrize("hook", ["precheck_policy", "render_explanation", "redact_output"])
 def test_precheck_direct_hooks_preserve_unsafe_refusal(monkeypatch, hook):
-    from auditex import model_precheck
+    from auditex import rule_assessment
     from test_explainer_wire import case_for
 
     failure = UnsafeRunFileError("input")
@@ -123,9 +123,9 @@ def test_precheck_direct_hooks_preserve_unsafe_refusal(monkeypatch, hook):
     def refuse(*args, **kwargs):
         raise failure
 
-    monkeypatch.setattr(model_precheck, hook, refuse)
+    monkeypatch.setattr(rule_assessment, hook, refuse)
     with pytest.raises(UnsafeRunFileError) as caught:
-        model_precheck.precheck_case(case_for("not_met"), value_rules=True, explain=True)
+        rule_assessment.precheck_case(case_for("not_met"), value_rules=True, explain=True)
     assert caught.value is failure
 
 

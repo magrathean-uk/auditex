@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from azure_tenant_audit.guarded_io import UnsafeRunFileError, guarded_operation, read_guarded_bytes
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
+from azure_tenant_audit.strict_json import reject_json_constant as _invalid_constant, strict_pairs as _pairs
 
 SCHEMA_VERSION = "2026-10-18"
 _STATUSES = {"confirmed", "inferred", "unknown"}
@@ -48,19 +49,6 @@ def _json(value: Any) -> str:
     # JSON serialization preserves bool/int/float distinctions that Python
     # equality erases (True == 1 == 1.0).
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-
-
-def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate JSON key: {key}")
-        result[key] = value
-    return result
-
-
-def _invalid_constant(value: str) -> None:
-    raise ValueError(f"invalid JSON constant: {value}")
 
 
 def _validate_response(value: Any) -> dict[str, Any]:

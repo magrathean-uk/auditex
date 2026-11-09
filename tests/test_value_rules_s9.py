@@ -14,7 +14,7 @@ from time import perf_counter
 
 import pytest
 
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.resources import open_text_resource
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
@@ -303,7 +303,7 @@ def _canary_sections(unusable=False):
 @pytest.mark.parametrize("unusable", [False, True])
 def test_served_outputs_and_logs_do_not_contain_any_section_evidence(tmp_path, monkeypatch, caplog, unusable):
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
     sections, canary, display = _canary_sections(unusable)
@@ -316,7 +316,7 @@ def test_served_outputs_and_logs_do_not_contain_any_section_evidence(tmp_path, m
         return projection
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("AAD pilot called the model"))
     result = assess_run(tmp_path, ModelConfig(model_name="test-model"), policies=sorted(STAGE9_POLICIES))
     validate_assessment(result)
@@ -502,7 +502,7 @@ def test_domain_inheritance_10000_roots_and_10000_subdomains_within_five_seconds
 def test_rule_exceptions_use_existing_failure_handler(tmp_path, monkeypatch, caplog):
     from auditex.model_serving import ModelClient, ModelConfig, assess_run
     from azure_tenant_audit import value_rules
-    from azure_tenant_audit.model_assessment import validate_assessment
+    from azure_tenant_audit.scuba_assessment import validate_assessment
     from test_model_serving import fake_projection
 
     sections, canary, display = _canary_sections()
@@ -517,7 +517,7 @@ def test_rule_exceptions_use_existing_failure_handler(tmp_path, monkeypatch, cap
         raise ValueError(canary)
 
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", projected)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", projected)
     monkeypatch.setattr(ModelClient, "assess", lambda *args: pytest.fail("A failing rule called the model"))
     registry = dict(value_rules._registry())
     registry.update({row_for(policy)["kind"]: broken for policy in STAGE9_POLICIES})

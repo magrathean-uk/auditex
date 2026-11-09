@@ -966,7 +966,7 @@ def _build_validation_report(
             issues.append(_issue("missing_required_artifact", path=relative))
 
     _validate_required_json_fields(run_path, issues)
-    from .model_assessment import MODEL_ASSESSMENT_PATH, validate_assessment
+    from .scuba_assessment import MODEL_ASSESSMENT_PATH, validate_assessment
 
     assessment_path = run_path / MODEL_ASSESSMENT_PATH
     if assessment_path.exists() or assessment_path.is_symlink():

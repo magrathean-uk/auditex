@@ -13,8 +13,8 @@ from time import monotonic
 
 import pytest
 
-from azure_tenant_audit.model_assessment import validate_assessment
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.scuba_precheck import precheck_policy, precheck_response
 from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for
 from azure_tenant_audit.value_rules.catalogue import catalogue
@@ -101,7 +101,7 @@ def test_optional_full_final_source():
 
 @pytest.mark.parametrize("policy", sorted(STAGE7_POLICIES))
 def test_every_cell_validates_and_s2_is_distinct(policy, rows_s7, assessment):  # noqa: F811 - shared pytest fixture injected by name
-    from auditex.model_serving import _comparison
+    from auditex.rule_assessment import _comparison
     samples = {r["rule_cell"]: r for r in rows_s7[policy]}
     for cell, row in samples.items():
         record = assess(policy, row["sections"])
@@ -231,7 +231,7 @@ def test_32_exemptions_use_v1_entry(rows_s7):
 
 
 def test_export_declared_exclusions_stay_not_collected(tmp_path):
-    from auditex.model_serving import policy_catalogue
+    from auditex.rule_assessment import policy_catalogue
     from auditex.scubagear_export import load_export, project_export
     from auditex.scuba_projection import rule_policy_section
     source = Path(__file__).parent / "fixtures/scubagear-export/mocktenant-provider-export.json"
@@ -252,7 +252,7 @@ def test_export_declared_exclusions_stay_not_collected(tmp_path):
 
 def test_export_aad91_declared_application_exemption_stays_unresolved(tmp_path, rows_s7):
     """Scope blocker: stage 2 omits 9.1 from its exclusion-reader policy set."""
-    from auditex.model_serving import policy_catalogue
+    from auditex.rule_assessment import policy_catalogue
     from auditex.scubagear_export import load_export, project_export
     from auditex.scuba_projection import rule_policy_section
     p = "MS.AAD.9.1v1"
@@ -423,7 +423,7 @@ def test_canaries_never_persist_or_log(policy, rows_s7, tmp_path, monkeypatch, c
     (tmp_path / "run-manifest.json").write_text('{"run_id":"stage7"}')
     projection = fake_projection(tmp_path, {})
     monkeypatch.delenv("AUDITEX_DISABLE_VALUE_RULES", raising=False)
-    monkeypatch.setattr("auditex.model_serving.project_run", lambda *a, **kw: projection)
+    monkeypatch.setattr("auditex.rule_assessment.project_run", lambda *a, **kw: projection)
     monkeypatch.setattr(ModelClient, "assess", lambda *a: pytest.fail("rule called model"))
     for label, sections in _canary_cases(policy, rows_s7[policy]):
         projection.rule_sections = {k: v for k, v in sections.items() if k != "scuba_config"}

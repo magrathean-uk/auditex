@@ -11,7 +11,7 @@ from auditex.scuba_projection import project_run
 from azure_tenant_audit.adapters.read_guard import check_command
 from azure_tenant_audit.collectors.exchange_policy import ExchangePolicyCollector
 from azure_tenant_audit.detection_coverage import build_detection_signals
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.normalize import build_normalized_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -11,7 +11,7 @@ import pytest
 from auditex.cli import main
 from auditex.model_serving import ModelClient, ModelConfig, assess_run, assess_scubagear_export
 from azure_tenant_audit.cli import run_offline
-from azure_tenant_audit.model_assessment import validate_assessment
+from azure_tenant_audit.scuba_assessment import validate_assessment
 
 ROOT = Path(__file__).resolve().parents[1]
 # Every catalogue policy has a value rule today; tests withdraw this one rule to reach the uncovered path.
@@ -40,7 +40,7 @@ def rules_only(root):
 
 def model_row():
     from test_model_serving import client_with_responses, sample_case, sample_answer, envelope
-    from auditex.model_serving import _comparison
+    from auditex.rule_assessment import _comparison
     row = client_with_responses([envelope(sample_answer())]).assess(sample_case())
     row['comparison'] = _comparison(row['policy_id'], row, {})
     return row
@@ -88,7 +88,7 @@ def test_uncovered_and_mixed_file_mutations_are_rejected(tmp_path, uncovered_pol
     elif mutation == 'serving':
         result['serving'] = {'cache_prompt': 'disabled', 'response_format': 'json_object'}
     elif mutation == 'model_row':
-        from auditex.model_serving import _totals
+        from auditex.rule_assessment import _totals
         result['policies'].append(model_row())
         result['totals'] = _totals(result['policies'])
     else:
@@ -114,7 +114,7 @@ def test_rules_only_file_without_uncovered_rows_validates(tmp_path):
 ])
 def test_rules_only_envelope_binds_without_uncovered_rows(tmp_path, mutation):
     """The rules-only envelope alone (no rule_not_implemented row) forbids every model trace."""
-    from auditex.model_serving import _totals
+    from auditex.rule_assessment import _totals
     result = rules_only(tmp_path)
     assert not any(row['reason'] == 'rule_not_implemented' for row in result['policies'])
     if mutation == 'endpoint_host':
@@ -143,7 +143,7 @@ def test_rules_only_envelope_binds_without_uncovered_rows(tmp_path, mutation):
 
 def test_current_model_file_with_a_real_endpoint_still_validates(tmp_path):
     """A 2026-11-05 file recorded before the model was parked keeps validating."""
-    from auditex.model_serving import _totals
+    from auditex.rule_assessment import _totals
     result = rules_only(tmp_path)
     result.update(policies=[model_row()], endpoint_host='localhost', model_name='historical-model',
                   serving={'cache_prompt': 'disabled', 'response_format': 'json_object'})
@@ -214,7 +214,7 @@ def test_no_model_or_network_is_reachable_on_demo_and_mocktenant_exports(tmp_pat
 def test_historical_model_records_keep_their_recorded_schema(tmp_path, version, recorded):
     # Legacy files are unchanged: the rules-only envelope check applies to 2026-11-05 only.
     from test_model_serving import client_with_responses, sample_case, sample_answer, envelope
-    from auditex.model_serving import _comparison, _totals
+    from auditex.rule_assessment import _comparison, _totals
     (tmp_path / 'run-manifest.json').write_text('{"run_id":"historical-synthetic"}')
     case = sample_case()
     result = assess_run(tmp_path, policies=[case['policy_id']])

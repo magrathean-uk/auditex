@@ -13,7 +13,7 @@ from azure_tenant_audit import dns_lookup as dns
 from azure_tenant_audit.collectors import dns_posture as collector
 from azure_tenant_audit.collection_gaps import REASON_FANOUT_LIMIT, TRUNCATION_ERROR_CLASS
 from azure_tenant_audit.graph import GraphError
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
 OPERATIONS = ('spf_records', 'dkim_records', 'dmarc_records')
 VECTORS = json.loads((Path(__file__).parent / 'fixtures/collect-exchange/dns-vectors-v39.json').read_text())

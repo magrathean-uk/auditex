@@ -16,7 +16,8 @@ import sys
 
 import pytest
 
-from auditex.model_serving import ModelConfig, assess_scubagear_export, policy_catalogue
+from auditex.model_serving import ModelConfig, assess_scubagear_export
+from auditex.rule_assessment import policy_catalogue
 from auditex.scuba_projection import (
     PACK_ENUM_DOMAINS, PACK_SHAPE_DIGESTS, SCUBA_CAP_EXCLUSION_POLICIES,
     SCUBA_ROLE_EXCLUSION_POLICIES, _json, _seen_shape, policy_section, rule_policy_section,
@@ -30,8 +31,8 @@ from auditex.scubagear_prune_proof import (
     GATE_DIGEST, PINNED_REVISION, PRUNE_PROOF, PRUNE_REASONS, PROOF_VERSION, REGO_SHA256,
     shape_paths, verdict_of,
 )
-from azure_tenant_audit.model_assessment import validate_assessment
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
 ROOT = Path(__file__).resolve().parents[1]
 IGNORED_OPTIONS_WARNING = ("Warning: legacy model options are ignored for assessment; the model layer is parked "
@@ -636,7 +637,7 @@ def test_scubaresults_other_labels_and_testresults_criticalities():
 
 
 def test_warning_and_fail_comparisons_have_identical_semantics():
-    from auditex.model_serving import _comparison
+    from auditex.rule_assessment import _comparison
     raw = json.loads(PROVIDER.read_text())
     records = [{"claims": [{"id": "requirement_met", "status": "confirmed", "value": False}],
                 "validation_status": "valid"} for _ in range(4)]
@@ -1477,13 +1478,13 @@ def test_existing_empty_output_dir_becomes_private_and_validation_fails_without_
 
 
 def test_assessment_validation_failure_creates_no_directory(tmp_path, monkeypatch):
-    import azure_tenant_audit.model_assessment as assessment
-    import auditex.model_serving as serving
+    import azure_tenant_audit.scuba_assessment as assessment
+    import auditex.rule_assessment as rules
     target = tmp_path / "invalid-assessment"
     def reject(_result):
         raise ValueError("synthetic validation failure")
     monkeypatch.setattr(assessment, "validate_assessment", reject)
-    monkeypatch.setattr(serving, "_assess_policies", lambda *_args, **_kwargs: ([], []))
+    monkeypatch.setattr(rules, "_assess_policies", lambda *_args, **_kwargs: [])
     with pytest.raises(ValueError, match="synthetic validation failure"):
         assess_scubagear_export(PROVIDER, target, ModelConfig(model_name="test-model"))
     assert not target.exists()
@@ -1491,13 +1492,13 @@ def test_assessment_validation_failure_creates_no_directory(tmp_path, monkeypatc
 
 def test_output_directory_rechecked_after_assessment(tmp_path, monkeypatch):
     import auditex.model_serving as serving
-    original = serving._assess_policies
+    original = serving._dry_run_prompts
     target = tmp_path / "raced"
     def insert_file(*args, **kwargs):
         target.mkdir()
         (target / "occupied").write_text("keep")
         return original(*args, **kwargs)
-    monkeypatch.setattr(serving, "_assess_policies", insert_file)
+    monkeypatch.setattr(serving, "_dry_run_prompts", insert_file)
     with pytest.raises(ValueError, match="new or empty"):
         assess_scubagear_export(PROVIDER, target, ModelConfig(model_name="test-model"), dry_run=True)
     assert (target / "occupied").read_text() == "keep"
@@ -1836,8 +1837,9 @@ def test_export_environment_is_retained_only_when_recognised(tmp_path, environme
 def test_noncommercial_export_model_prompts_and_prechecks_match_committed_behaviour(
         tmp_path, monkeypatch, source, environment, redact):
     from auditex import scubagear_export
-    from auditex.model_precheck import precheck_case
-    from auditex.model_serving import ModelClient, ModelEndpointError, build_case
+    from auditex.rule_assessment import precheck_case
+    from auditex.model_serving import ModelClient, ModelEndpointError
+    from auditex.rule_assessment import build_case
     from azure_tenant_audit.value_rules.catalogue import row_for
 
     monkeypatch.delenv('AUDITEX_DISABLE_VALUE_RULES', raising=False)

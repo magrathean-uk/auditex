@@ -13,10 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, assess_scubagear_export, policy_catalogue
+from auditex.model_serving import ModelClient, ModelConfig, assess_run, assess_scubagear_export
+from auditex.rule_assessment import policy_catalogue
 from auditex.scuba_projection import NOT_COLLECTED, project_run, rule_policy_section
 from auditex.scubagear_export import load_export, project_export
-from azure_tenant_audit.model_assessment import validate_assessment
+from azure_tenant_audit.scuba_assessment import validate_assessment
 from azure_tenant_audit.value_rules import assess, as_pack_response, cells_for, rule_policies
 from azure_tenant_audit.value_rules.catalogue import catalogue
 from azure_tenant_audit.value_rules.record import checked

@@ -12,12 +12,13 @@ import jsonschema
 import pytest
 
 from auditex.cli import main
-from auditex.model_precheck import precheck_case
-from auditex.model_serving import ModelClient, ModelConfig, assess_run, build_case, canonical
+from auditex.rule_assessment import precheck_case
+from auditex.model_serving import ModelClient, ModelConfig, assess_run
+from auditex.rule_assessment import build_case, canonical
 from auditex.scuba_projection import project_run
 from azure_tenant_audit.collectors.identity import IdentityCollector
-from azure_tenant_audit.model_assessment import validate_assessment
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 
 ROOT = Path(__file__).resolve().parents[1]
 TENANT = '11111111-1111-4111-8111-111111111111'
@@ -443,8 +444,8 @@ def test_effective_admin_set_requires_all_counted_users_and_redacts_immutable_id
 @pytest.mark.parametrize('version', ['2026-10-28', '2026-10-29'])
 def test_legacy_assessments_continue_to_validate(complete_bundle, monkeypatch, version):
     # Construct the historical precheck fixture explicitly; the legacy switch no longer selects a route.
-    from auditex.model_precheck import precheck_case
-    monkeypatch.setattr('auditex.model_serving.precheck_case', lambda case, **kw: precheck_case(
+    from auditex.rule_assessment import precheck_case
+    monkeypatch.setattr('auditex.rule_assessment.precheck_case', lambda case, **kw: precheck_case(
         case, **{**kw, 'value_rules': False}))
     payload = assess_run(complete_bundle, ModelConfig(model_name='unused'), policies=['MS.POWERBI.1.1v1'])
     assert payload['policies'][0]['rule_precheck']['class'] != 'value_rule'
@@ -706,7 +707,7 @@ def test_ca_unsupported_scope_withholds_entire_section_and_names_condition(compl
     ('meeting_policies', 'raw/teams_policy.json', ('meetingPolicies', 'value', 0)),
 ])
 def test_unexpected_nested_person_field_cannot_reach_prompt(complete_bundle, monkeypatch, section, path, keys):
-    from auditex.model_serving import build_case, policy_catalogue
+    from auditex.rule_assessment import build_case, policy_catalogue
     data = json.loads((complete_bundle / path).read_text())
     row = data
     for key in keys:
@@ -1881,7 +1882,7 @@ def footprint(scope='NA', sub=None, instance='microsoftonline.com', domain='exam
 
 
 def case_config(projection, policy_id):
-    from auditex.model_serving import build_case
+    from auditex.rule_assessment import build_case
     case = build_case(policy_id, projection, '2026-10-30T00:00:00Z')
     return next(e['observed'] for e in case['evidence'] if e['section'] == 'scuba_config')
 
@@ -2052,7 +2053,7 @@ def test_run_rule_view_canaries_never_enter_prompts_or_assessment(complete_bundl
 
 
 def test_run_rule_reads_unredacted_canary_without_persisting_it(complete_bundle, monkeypatch, caplog, capsys):
-    import auditex.model_serving as serving
+    import auditex.rule_assessment as serving
     from azure_tenant_audit import value_rules
     canary_email = 'rule-input-canary@example.invalid'
     canary_name = 'Rule Input Canary DisplayName'
@@ -2086,7 +2087,8 @@ def test_run_rule_reads_unredacted_canary_without_persisting_it(complete_bundle,
 
 
 def test_unaffected_run_prompt_hashes_match_pre_rule_view_fixture(complete_bundle):
-    from auditex.model_serving import messages_for, policy_catalogue
+    from auditex.model_serving import messages_for
+    from auditex.rule_assessment import policy_catalogue
     projection = project_run(complete_bundle)
     hashes = {}
     for policy_id in policy_catalogue()['policies']:
@@ -2141,7 +2143,7 @@ def test_scuba_config_m365_environment_derivation(complete_bundle, kwargs, envir
 
 
 def test_scuba_config_gov_cloud_closes_teams_gate_by_rule(complete_bundle):
-    from auditex.model_serving import build_case
+    from auditex.rule_assessment import build_case
     p = project_run(config_bundle(complete_bundle, footprint=[footprint('USGov', 'DODCON', 'microsoftonline.us')]))
     record = precheck_case(build_case('MS.TEAMS.4.1v1', p, '2026-10-30T00:00:00Z'))
     assert record['rule_precheck']['class'] == 'closed_gate' and record['rule_precheck']['value'] == 'gcchigh'
@@ -2157,7 +2159,8 @@ def identity_rows(root):
 
 
 def test_scuba_config_break_glass_maps_to_exclusions_by_object_id(complete_bundle):
-    from auditex.model_serving import build_case, messages_for
+    from auditex.model_serving import messages_for
+    from auditex.rule_assessment import build_case
     p = project_run(config_bundle(identity_rows(complete_bundle), accounts=[BREAK_GLASS_UPN]))
     from auditex.scuba_projection import SCUBA_CONFIG_EXCLUSION_KEYS
     assert SCUBA_CONFIG_EXCLUSION_KEYS == {'MS.AAD.3.2v2': 'MS.AAD.3.2v1'}
@@ -2638,7 +2641,7 @@ def test_collector_error_vocabulary_covers_every_class_the_engine_writes():
     # Every error class literal under src/azure_tenant_audit: classifier returns, ``error_class`` dict values and keyword
     # arguments, and names ending in error_class. A new one must be added to COLLECTOR_ERROR_CLASSES or it reads unclassified.
     import ast
-    from azure_tenant_audit.model_assessment import COLLECTOR_ERROR_CLASSES
+    from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES
 
     def literals(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):

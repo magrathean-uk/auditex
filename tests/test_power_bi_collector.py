@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from azure_tenant_audit.collectors.power_bi import TENANT_SETTINGS, PowerBICollector
-from azure_tenant_audit.model_assessment import COLLECTOR_ERROR_CLASSES
+from azure_tenant_audit.scuba_assessment import COLLECTOR_ERROR_CLASSES
 from azure_tenant_audit.power_bi import POWERBI_SCOPE, PowerBIClient, PowerBIError, power_bi_client_from
 from azure_tenant_audit.profiles import PROFILES
 

@@ -5,14 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from auditex.model_precheck import precheck_case
-from auditex.model_serving import (
-    ModelConfig, assess_run, assess_scubagear_export, build_case, canonical, messages_for, policy_catalogue,
-)
+from auditex.rule_assessment import precheck_case
+from auditex.model_serving import ModelConfig, assess_run, assess_scubagear_export, messages_for
+from auditex.rule_assessment import build_case, canonical, policy_catalogue
 from auditex.scuba_projection import project_run
 from auditex.scubagear_export import load_export, project_export
-from azure_tenant_audit.model_assessment import validate_assessment
-from azure_tenant_audit.model_evidence import NOT_COLLECTED
+from azure_tenant_audit.scuba_assessment import validate_assessment
+from azure_tenant_audit.collection_markers import NOT_COLLECTED
 from azure_tenant_audit.scuba_precheck import optional_collection_entry
 
 CODE = "optional_collection_not_enabled"
@@ -217,8 +216,8 @@ def test_validator_rejects_reason_outside_contract(tmp_path, mutation):
 
 
 def test_legacy_bundles_validate(tmp_path, monkeypatch):
-    from auditex.model_precheck import precheck_case
-    monkeypatch.setattr("auditex.model_serving.precheck_case", lambda case, **kw: precheck_case(
+    from auditex.rule_assessment import precheck_case
+    monkeypatch.setattr("auditex.rule_assessment.precheck_case", lambda case, **kw: precheck_case(
         case, **{**kw, "value_rules": False}))
     manifest(tmp_path, selected_collectors=["power_bi", "power_platform"])
     result = answer(tmp_path)
