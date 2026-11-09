@@ -1175,7 +1175,7 @@ SCUBA_CAP_EXCLUSION_POLICIES = frozenset({
     "MS.AAD.3.8v1", "MS.AAD.3.9v1", "MS.AAD.9.1v1"})
 SCUBA_ROLE_EXCLUSION_POLICIES = frozenset({"MS.AAD.7.4v1"})
 # The scuba_config entry a policy's Rego reads its exclusions from. MS.AAD.3.2v2 still reads Aad["MS.AAD.3.2v1"]
-# (CISA finding F2; scripts/build-oracle-cases.py): an entry written under the v2 id would be ignored by the oracle.
+# (CISA finding F2): an entry written under the v2 id would be ignored by ScubaGear's Rego.
 SCUBA_CONFIG_EXCLUSION_KEYS = {"MS.AAD.3.2v2": "MS.AAD.3.2v1"}
 SCUBA_ENVIRONMENT_POLICIES = frozenset({"MS.AAD.9.1v1"})
 SCUBA_CONFIG_SOURCE = "synthesised:default-config"

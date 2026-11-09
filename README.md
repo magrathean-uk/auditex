@@ -26,7 +26,6 @@ The public audit surface does not write to production tenants. It also does not 
 - Offline fixtures for contract checks and demonstrations.
 - Report rendering, CSV/JSON and other exporters, comparison and drift gates, customer handoff packs, and a local MCP server.
 - Offline imports and control-by-control review of Maester, ScubaGear and Monkey365 JSON assessments, with source hashes and strict tenant identity checks.
-- Offline model-development tools for staging public conversations, checking recorded structured answers, and preparing a reviewed single-base LoRA training pack.
 - Read-only privilege graph: potential routes from users, groups and applications to tier-0 control, with evidence per hop, explicit unverified prerequisites and candidate breakpoints.
 - Detection coverage ("could this tenant see an attack?") and the tenant's public footprint, including MTA-STS and TLS-RPT.
 - Baseline alignment with CIS Microsoft 365 Foundations v7, CISA SCuBA, Microsoft Secure Score, Zero Trust, the Microsoft cloud security benchmark, and the NCSC Cyber Essentials requirements (v3.3), where device-side requirements show as manual or assessor-tested, the ones Intune and Exchange Online evidence in part (updates, anti-malware) show as partial, and tenant-backed ones never read pass. See [framework mappings](docs/reference/framework-mappings.md).
@@ -128,16 +127,14 @@ supported formats, evidence references and comparison limits.
 
 Each finalized run contains a manifest, summary, report pack, evidence index, AI context, and validation result. The current contract version is recorded in `run-manifest.json`; required files and evidence rules are documented in [the output contract](docs/reference/output-contract.md).
 
-For an optional rule-only SCuBA assessment, `auditex model assess <run-dir>` has
+For an optional rule-only SCuBA assessment, `auditex assess <run-dir>` has
 value rules for all 102 catalogue policies across Entra ID, Exchange Online, Power BI, Power Platform, Defender,
 SharePoint and Teams. Rule availability does not guarantee a verdict: available evidence, the adapter and
 permissions determine whether a policy can be assessed. A policy without a rule reports not assessed
 (`rule_not_implemented`): "Not assessed: Auditex has no rule for this policy yet."
-The model layer is parked and never called by assessment; no endpoint or model name is required.
+Assessment runs locally from the run bundle; no endpoint or model name is involved.
 Assessments can attach deterministic template explanations to supported rule results. JSON, Markdown and HTML reports show them when present; findings are unchanged.
 Each policy's status is in the run's `model_assessment.json`; see [AI assessment](docs/guides/ai-assessment.md#run-and-read-the-result) for coverage and output.
-`auditex model sources`, `stage`, `evaluate`, `combine` and `prepare` remain available for
-[offline model development](docs/guides/model-development.md).
 
 ```bash
 auditex report render <run-dir> --format md

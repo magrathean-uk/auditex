@@ -75,7 +75,7 @@ in `operator-inputs` are never loaded by projection and retain their normal bund
 integrity accounting; they do not invalidate an otherwise verified list.
 
 Addresses bypass the model shape gate and projection budgets only in the private
-rule view. They never enter model views, prompts, assessment records, sidecars,
+rule view. They never enter projection views, assessment cases, assessment records, sidecars,
 AI context, logs, reports, exports or packs; rule reasons remain constant text.
 The synthesis outcome `projected` for SS 2.1 describes its private rule view;
 its model view remains `not_collected`. The copy must never become a persisted
@@ -226,7 +226,7 @@ the verified snapshot only into `SecuritySuite["MS.SECURITYSUITE.2.3v1"].Partner
 in that policy's private rule view. SensitiveUsers is loaded independently; ordinary
 absence of either input leaves only its own policy unconfigured. Unsafe or
 inconsistent private material still refuses run admission. Neither list enters
-model views, the shape gate, prompts or assessment/report output.
+projection views, the shape gate, assessment cases or assessment/report output.
 
 ## Contract history
 
@@ -280,8 +280,8 @@ New bundles also include `data-handling.json`, `audit-plan.json`, and `api-inven
 
 ## Evidence discipline
 
-`model_assessment.json` is an optional root artefact written by `auditex model assess`.
-Assessment is rules only: the model is parked and never called. Current outputs use
+`model_assessment.json` is an optional root artefact written by `auditex assess`.
+Assessment is rules only: the model layer is removed and nothing is called. Current outputs use
 `endpoint_host: "none"`, `model_name: "rules-only"` and omit `serving`.
 Its schema is `schemas/model_assessment.schema.json` (version `2026-11-05`), listed
 by the schema manifest and checked when present by bundle validation. The known
@@ -359,11 +359,14 @@ baseline has none. That `result` value and the baseline's `not_assessed` status 
 four verdict totals (`answered`, `unknown`, `invalid`, `skipped`) are internal counters and keep their names.
 Rules decide all product answers; every catalogue policy has a value rule, so no current row reports
 `rule_not_implemented`.
-The model never answers a product policy; the shipped deterministic template explainer describes value-rule answers and never changes them.
+No model answers a product policy; the shipped deterministic template explainer describes value-rule answers and never changes them.
 
 Version `2026-10-28` adds deterministic pre-checks from the shipped
 `configs/scuba-rule-precheck.json`, resolved through the engine resource resolver.
-The product and oracle generator share the gate evaluator and its data; the generator applies the first two classes below (closed gate, absent section) and leaves the field-level and empty-list classes off, while serving enables all four. In order:
+For a policy with a value rule the value-rule result is returned first, in this order: the shared closed
+gate, then the rule's missing or `not_collected` sections, then the rule kind. The remaining classes below are
+compatibility shims in `azure_tenant_audit/scuba_precheck.py`; they run only when no value rule answered (a policy
+without a catalogue row), and they keep the historical `rule_precheck` class names:
 
 1. A present, usable gate section and field with a typed value in the closed set
    produces `closed_gate`: requirement `inferred` true, limitations exactly
@@ -377,13 +380,11 @@ The product and oracle generator share the gate evaluator and its data; the gene
    produces `absent_field` (unknown, as above).
 4. Otherwise a registered list rule whose section was collected as exactly `[]` produces
    `empty_required_list`: requirement `confirmed` false (the ten AAD policies that need a
-   matching Conditional Access policy; `docs/guides/model-development.md`).
-5. The historical offline scorer leaves undecided rows for recorded-model scoring. Current product
-   assessment uses the registered value rule or returns `rule_not_implemented`; no model decides.
+   matching Conditional Access policy; see [AI assessment](../guides/ai-assessment.md#rule-pre-checks)).
+5. A policy with no registered value rule is `rule_not_implemented`; no model decides.
 
-Explicit null sections retain their model/default semantics outside registered
-gate fields. A visibly closed gate makes the other dependent evidence moot, as
-required by the training system prompt.
+Explicit null sections keep their default semantics outside registered gate fields. A visibly
+closed gate makes the other dependent evidence moot.
 
 Rule rows have `reason: "rule_precheck"`, `validation_status: "valid"`, zero attempts
 and latency, null prompt/response hashes, and false thinking flags. Their
@@ -415,10 +416,7 @@ The route covers 102 policies and 1,084 cells (`len(policies)` in that inventory
 | SharePoint | 8 | `1.1v1`, `1.2v1`, `1.3v1`, `2.1v1`, `2.2v1`, `3.1v1`, `3.2v1`, `3.3v2` |
 | Teams | 14 | `1.1v1`, `1.2v2`, `1.3v1`, `1.4v1`, `1.5v1`, `1.6v1`, `1.7v2`, `2.1v2`, `2.2v2`, `2.3v2`, `4.1v1`, `5.1v2`, `5.2v2`, `5.3v2` |
 
-Serving always enables the 102 registered value rules. `AUDITEX_DISABLE_VALUE_RULES` is a legacy option:
-accepted, ignored and warned once, just like model configuration flags. It cannot change answers.
-Offline `evaluate_precheck` scoring leaves value rules off to preserve historical scoring. Legacy
-field and empty-list prechecks remain available to that scorer.
+Assessment always enables the 102 registered value rules; no setting turns them off.
 
 For a value-rule policy, a usable closed gate wins, then the rule's ordered read
 set determines missing or marked sections, then the value predicate answers before
@@ -480,7 +478,7 @@ licensing and tenant-ID sections remain independent. The private rule view carri
 this cause to an `absent_section` precheck with the exact constant `reason_text`,
 one `optional_collection_not_enabled` limitation and no recommendation. The
 validator checks the policy, cited sections and matching projection reasons.
-Prompt evidence remains the exact `not_collected` marker. The optional-collection
+Assessment-case evidence remains the exact `not_collected` marker. The optional-collection
 reason is independent of legacy `AUDITEX_DISABLE_VALUE_RULES`, which is ignored. Only
 explicit optional-collection provenance selects it; value rules remain enabled.
 
@@ -514,13 +512,12 @@ No partial record, empty list or null stands for unknown collection. An explicit
 complete empty source enumeration can still project as a known empty collection.
 Pre-checks
 always run, including when every section is unavailable; a dependent missing-section
-row makes zero model calls, subject to the closed-gate precedence above. The envelope
+row is answered by its rule, subject to the closed-gate precedence above. The envelope
 retains `limitations: ["projection_not_implemented"]` only when no section can be
 projected at all, for compatibility. Otherwise envelope limitations are empty; there
-is no `projection_partial` limitation. Dry-run exports all selected prompts without
-inference, including markers, and applies the same redaction and bounds.
+is no `projection_partial` limitation.
 
-The required `projection` envelope is separate from prompt evidence:
+The required `projection` envelope is separate from the assessment-case evidence:
 
 - `schema_version: "2026-10-29"`.
 - `sections`: every section referenced by the shipped policy catalogue, with
@@ -540,10 +537,10 @@ The required `projection` envelope is separate from prompt evidence:
   recognised non-personal enum tokens. Currently the string allowlist is the
   `AllowInvitesFrom` tokens `everyone`, `none`, `adminsAndGuestInviters` and
   `adminsGuestInvitersAndAllMembers`; unfamiliar strings, display names, e-mails and
-  free text are omitted even with `--no-redaction`. This diagnostic allowlist does
+  free text are omitted; redaction is unconditional and `--no-redaction` is rejected. This diagnostic allowlist does
   not widen the frozen pack enum domain: `everyone` still withholds the section.
   `detail` is optional in schema `2026-10-29` for backwards compatibility, and is
-  never included in prompt evidence. CA `unsupported_conditions` lists the non-empty restrictions of
+  never included in assessment-case evidence. CA `unsupported_conditions` lists the non-empty restrictions of
   enabled policies. A projected CA section may also carry `dropped_conditions` (sorted
   `<policy id>:<field path>` strings: the unsupported conditions dropped from policies that are
   not enabled; the id is the policy's GUID, else `policy<position>`) and `null_lists_read_as_empty`
@@ -562,7 +559,7 @@ The required `projection` envelope is separate from prompt evidence:
   gap); its `detail` is `error_class` (the collector's class, never the error message)
   and, when attributable, `operation` (`<collector>.<operation>`). The class is checked
   against one vocabulary, `COLLECTOR_ERROR_CLASSES` in
-  `azure_tenant_audit/model_assessment.py`, shared by the projection and the validator: the
+  `azure_tenant_audit/scuba_assessment.py`, shared by the projection and the validator: the
   classes this engine's collectors, adapters, preflight and offline replay write, plus
   `graph_http_<status>` for an HTTP status the Graph classifier does not name. Any other
   value, however token-shaped (`alice_smith`), reads `unclassified`, and the validator
@@ -620,7 +617,7 @@ The required `projection` envelope is separate from prompt evidence:
   No identity-to-pseudonym table is persisted. E-mail local parts anywhere in
   projected string values become `***`, retaining the domain. GUID principal IDs,
   role and policy names remain available. The salt stays in memory only and is
-  rejected by the envelope schema and validator; counters never enter prompts. Hashes support
+  rejected by the envelope schema and validator; counters never enter assessment cases. Hashes support
   pseudonymisation, not anonymisation or a disclosure guarantee.
 - `bounds`: the projection budget `max_items` (default 40) and `max_chars` (default
   12,000 canonical JSON characters), and the scan bounds `scan_max_rows` (default
@@ -633,7 +630,7 @@ The required `projection` envelope is separate from prompt evidence:
     to the source read to build it. The item bound covers top-level collections, user
     dictionaries and nested lists of the projected object; the character bound its
     canonical JSON. Both are checked on the projected object, again after redaction
-    and after prompt enum annotation; exceeding either replaces the whole section
+    and after enum-name annotation; exceeding either replaces the whole section
     with the marker and reason `oversize` (no `detail`). Nothing is silently sliced.
     A tenant with thousands of users still projects `privileged_users` when it has
     a handful of administrators.
@@ -643,10 +640,9 @@ The required `projection` envelope is separate from prompt evidence:
     (seen on a real tenant: 88, with 130 role assignments and 145 role definitions in the
     authoritative chunks) is enough. Nothing is sliced to fit, since a partial role list
     would read as a narrower admin set. There is no supported operator action today:
-    `--projection-max-items` would let the section through, but the default is the budget
-    the model is served with, and a larger section is outside it, so the default stays. Whether such a
-    tenant should get a rule-only answer, a summarised role list or a larger trained budget
-    is a product question recorded for G.
+    `--projection-max-items` would let the section through, but the default budget is the
+    retained projection limit and a larger section is outside it, so the default stays. Whether such a
+    tenant should get a summarised role list or a larger budget is a product question recorded for G.
   - The scan bounds are safety limits on one source read, whatever the budget: rows
     examined in one operation, bytes read (the chunk lines of one operation, and the
     size of any JSON artefact read whole, such as an inline payload or a normalised
@@ -658,11 +654,9 @@ The required `projection` envelope is separate from prompt evidence:
     the distinct plans.
   Row-level pack limitation IDs are unchanged.
 
-Legacy `--no-redaction`, `--endpoint`, `--model` and `--shadow-model-on-precheck` options are
-accepted, ignored and hidden from assessment help. They and `AUDITEX_MODEL_*` configuration or
-`AUDITEX_DISABLE_VALUE_RULES` produce one evidence-free warning per invocation. Redaction stays
-enabled, including dry-run. Prompt assembly, policy items and evidence-ID ordering retain the
-frozen v7 convention; dry-run exports prompts locally without a model call.
+The removed `--no-redaction`, `--endpoint`, `--model`, `--dry-run` and `--shadow-model-on-precheck`
+options are rejected by `auditex assess` (exit 2), and `AUDITEX_MODEL_*` and
+`AUDITEX_DISABLE_VALUE_RULES` are no longer read. Redaction is always enabled.
 
 Projection reads inline `raw/<collector>.json`, offline `raw/sample_input.json`,
 or export-only `raw/<collector>/<operation>/summary.json`. Non-empty `chunk_files`
@@ -714,7 +708,7 @@ Graph camelCase is converted recursively for the selected fields.
 
 | Section | Required saved evidence and projection |
 | --- | --- |
-| `SPO_tenant` | `normalized/sharepoint_tenant_settings.json` with collected, agreeing canonical sharing and OneDrive capabilities; raw `sharepoint_access.sharePointSettings` or `onedrive_posture.sharePointSettings` with all remaining settings. Emits one dict with `SharingCapability`, `ODBSharingCapability`, `DefaultLinkPermission`, `DefaultSharingLinkType`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `SharingDomainRestrictionMode`, `RequireAnonymousLinksExpireInDays`, `EmailAttestationRequired`, `EmailAttestationReAuthDays`. Capabilities use the Management Shell mapping 0 disabled, 1 new/existing guests, 2 anyone, 3 existing guests; other enums use the shared numeric maps. Expiry -1 is retained. No `_name` companions are projected; prompt assembly adds them later. Graph-only settings are usually insufficient. |
+| `SPO_tenant` | `normalized/sharepoint_tenant_settings.json` with collected, agreeing canonical sharing and OneDrive capabilities; raw `sharepoint_access.sharePointSettings` or `onedrive_posture.sharePointSettings` with all remaining settings. Emits one dict with `SharingCapability`, `ODBSharingCapability`, `DefaultLinkPermission`, `DefaultSharingLinkType`, `FileAnonymousLinkType`, `FolderAnonymousLinkType`, `SharingDomainRestrictionMode`, `RequireAnonymousLinksExpireInDays`, `EmailAttestationRequired`, `EmailAttestationReAuthDays`. Capabilities use the Management Shell mapping 0 disabled, 1 new/existing guests, 2 anyone, 3 existing guests; other enums use the shared numeric maps. Expiry -1 is retained. No `_name` companions are projected; assessment-case construction adds them later. Graph-only settings are usually insufficient. |
 | `conditional_access_policies` | Full raw `conditional_access.conditionalAccessPolicies`, not `conditional_access_graph` counts. Requires `DisplayName`, `State`, selected `Conditions` applications, authentication flows, client app types/applications, sign-in/user/agent risks and all user inclusions/exclusions; `GrantControls` built-ins, operator and authentication strength, including `AllowedCombinations` when non-null. Every policy must match a whole observed pack shape. A null, empty or all-empty unsupported condition or control (`null`, `{}`, `[]`, `""`, or an object whose members are all such; `false` and `0` are values) is read as absent, whichever way Graph serialises an unset one. A non-empty unsupported condition or control (locations, platforms, devices, session controls, `includeGroups`, `includeGuestsOrExternalUsers`, the application and service-principal filters and the other restriction keys) on an **enabled** policy withholds the entire section with `incomplete_shape`; the field paths appear in `unsupported_conditions`. The same on a policy whose `State` is `disabled` or `enabledForReportingButNotEnforced` does not withhold: every pinned ScubaGear Conditional Access rule requires `policy.State == "enabled"` (`AADConfig.rego`, the ten `*BaseCheck` functions for MS.AAD.1.1v1, 2.1v1, 2.3v1, 3.1v1, 3.2v2, 3.6v1, 3.7v1, 3.8v1, 3.9v1 and 9.1v1; 3.3v2 reads the 3.1v1 result), so such a policy cannot change a verdict. It stays in the projection with its `State`, and what was dropped from it is recorded as `dropped_conditions` (`<policy id>:<field path>`). A schema list field (`IncludeUsers`, `ExcludeRoles`, `ClientAppTypes`, `BuiltInControls` and the rest) that Graph returns as `null` is read as `[]` and recorded as `null_lists_read_as_empty`: the pinned Rego reads a null list as an empty one (`Count`, `ContainsValue` and `ConvertToSet` in `utils/KeyFunctions.rego`; an `in` over either is false), and Graph's reference documents no nullability for these collections. The result must still match a whole observed pack shape, so a null that reads as an empty list the pack never held withholds as `unseen_shape`. Every dropped or normalised value is recorded. |
 | `authorization_policies` | Raw `external_identity.authorizationPolicy` or `consent_policy.authorizationPolicy`; singleton `Id`, `AllowInvitesFrom`, `GuestUserRoleId`, default-role `AllowedToCreateApps` and assigned permission grant policy IDs. Duplicate sources must agree. Graph `defaultUserRolePermissions.allowedToCreateSecurityGroups` and `allowedToReadOtherUsers` are accepted and dropped: dependent SCuBA policies do not read them and the pack shape has no such fields. Other default-role permission fields (`allowedToCreateTenants`, `allowedToReadBitlockerKeysForOwnedDevice`) are dropped and listed in `ignored_fields`. |
 | `service_plans` | Full raw `licensing.subscribedSkus`, streamed, each `servicePlans` entry with `servicePlanId` and `servicePlanName`. Emits distinct `{ServicePlanId, ServicePlanName}` rows of the plans whose `provisioningStatus` is `Success`, as ScubaGear's exporter does (`ExportAADProvider.psm1`); a disabled or pending plan is left out, a plan without a status is kept, and a tenant with no provisioned plan projects an empty list. Conflicting duplicate IDs invalidate the section. Licence counts alone do not suffice. |
@@ -751,7 +745,7 @@ types and observed enum domains, with source-file SHA-256s, row counts and a row
 witness for every shape. List cardinality is ignored but empty lists and
 combinations of distinct item shapes remain distinct; numbered user keys represent
 a collection of complete user shapes. Derived SharePoint enum annotations are
-excluded from raw shapes and applied only during prompt assembly. All shape
+excluded from raw shapes and applied only when the assessment case is built. All shape
 variants require a real train/test witness; paths or types from separate variants
 are never combined to authorise a new object.
 
@@ -767,7 +761,7 @@ relax the frozen model shape gate; collected sections can reach rules while rema
 | Power Platform | `dlp_policies`, `environment_creation`, `environment_list` and `tenant_isolation` have adapters. Environment `display_name` is discarded; only machine identifiers and rule settings are retained. `domain_settings` remains absent on the run path. |
 | Power BI | `powerbi_access_denied_reason`, `powerbi_license_found` and `powerbi_tenant_settings` have adapters for explicit access/licence state and tenant settings. |
 
-All product rows make zero model calls. Shadow mode is removed; its legacy flag is ignored.
+All product rows make zero model calls. Shadow mode and its flag are removed.
 Historical model/shadow records still validate under their recorded contracts, with the original
 attempt, hash and nested-policy consistency checks.
 
@@ -776,7 +770,7 @@ attempt, hash and nested-policy consistency checks.
 Current rule-only assessments collect the `scope_post_check` envelope for local review,
 independently of verdicts. The row-level marking code has been removed; current assessments
 never add `post_check` or the `scope_narrowed` limitation to a row, and continue to write
-`totals.scope_narrowed: 0`. No output or schema version changes. Dry-run reads no scope evidence.
+`totals.scope_narrowed: 0`. No output or schema version changes.
 The table `configs/scuba-scope-blind.json` is shared by the envelope summary, historical
 validation and tests.
 
@@ -798,7 +792,7 @@ suppress another candidate's scoped entry. The private rule view and its verdict
 - `count`: the number of enabled candidate policies carrying an ignored scope condition.
 - `policies`: distinct names in sorted order, each with sorted `conditions`, bounded by the
   projection item budget. Names have e-mail local parts masked before being cut to 200 characters;
-  legacy `--no-redaction` is ignored. Conditions are `conditions.locations`,
+  the removed `--no-redaction` is rejected by `auditex assess` (exit 2). Conditions are `conditions.locations`,
   `conditions.platforms`, `conditions.devices`, `conditions.clientApplications` and
   `conditions.clientAppTypes`. The grant operator is never listed in the envelope.
 
@@ -821,13 +815,13 @@ projection. No report, export or explorer renders these rows today; a future his
 renderer must present a marked result as **met per ScubaGear, scope narrowed**, naming the
 policies and conditions rather than presenting a clean pass.
 
-`model_assessment_prompts.jsonl` is the dry-run alternative, containing message/hash
-rows or explicit skip rows. Both are private, named post-finalisation outputs and may
-be unlisted by the original hash manifest; that manifest is never rewritten. They
-are reported as unlisted limitations, and an already sealed output cannot be replaced.
+`model_assessment.json` is a private, named post-finalisation output and may be unlisted by the
+original hash manifest; that manifest is never rewritten. It is reported as an unlisted
+limitation, and an already sealed output cannot be replaced. The removed dry-run option once wrote
+`model_assessment_prompts.jsonl`; no current command writes it.
 Consumers should validate optional assessment JSON before using it. Model assessment
 never changes findings or the deterministic rule-based baseline alignment. See
-[Running the assessment](../guides/model-development.md#running-the-assessment).
+[Running the assessment](../guides/model-development.md#running-the-assessment) (the anchor is kept for the `auditex assess` instructions).
 
 Findings must include `evidence_refs`. Each reference must identify at least `artifact_path`, `artifact_kind`, `collector`, and `record_key`. Bundle validation checks duplicate finding IDs, missing references, malformed references, references pointing at missing artifacts, and references whose record does not exist in the artifact they name (see "Evidence references and traceability").
 
@@ -1551,8 +1545,7 @@ not-met rows have at least one. Historical date-named schemas reject the field.
 The expanded `render_full` helper is outside the compact schema and is not the
 integration entry point.
 
-Serving enables the explainer after building the rule answer; offline precheck
-scoring leaves it off. A failure suppresses only the explainer and logs the
+Assessment enables the explainer after building the rule answer. A failure suppresses only the explainer and logs the
 policy id and exception class, without the exception message. The whole fixed
 rule read set must exist in the model case, and a fault explanation also needs
 that set collected. Optional-collection `absent_section` rows are suppressed.

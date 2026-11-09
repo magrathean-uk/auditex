@@ -7,6 +7,29 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+### Removed
+
+- **The parked model layer.** The `auditex model` command is gone with its `sources`, `stage`, `evaluate`,
+  `combine`, `prepare`, `assess` and `doctor` subcommands, the model client and prompt builders, the training,
+  evaluation and benchmark tools, the oracle and lab case builders, the model catalogue and
+  the model-development examples. The `model_train` optional dependency extra is removed. No product answer ever
+  came from the model: every SCuBA answer comes from the value rules, unchanged.
+- **The legacy model options and settings.** `--endpoint`, `--model`, `--dry-run`, `--no-redaction` and
+  `--shadow-model-on-precheck` are no longer accepted (exit 2), `AUDITEX_MODEL_*` and
+  `AUDITEX_DISABLE_VALUE_RULES` are no longer read, and `model_assessment_prompts.jsonl` is no longer written.
+  The model endpoint is no longer a permitted outbound destination.
+
+### Added
+
+- **`auditex assess <run-dir>`** writes the same private, rule-only `model_assessment.json` that
+  `auditex model assess` wrote, with `--policies` and the `--projection-*` budget and scan flags. Existing
+  assessment files, their schema and every verdict are unchanged. See `docs/guides/ai-assessment.md`.
+
+### Changed
+
+- The AI assessment guide now holds the rule pre-check description; `docs/guides/model-development.md` is a short
+  retirement note that keeps its anchors.
+
 ## [1.3.0] - 2026-11-08
 
 Highlights, ordered by user impact. The detailed entries follow.

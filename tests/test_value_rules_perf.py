@@ -582,7 +582,7 @@ def test_dlp_coverage_matches_the_set_subtraction_on_random_inputs():
 
 def test_the_rule_modules_stay_free_of_unbounded_recursion():
     """No module of this sweep calls itself or copies evidence recursively; a RecursionError would reach the engine's
-    ``rule_evaluation_failed`` path (``auditex.model_precheck``), but none of these rules can raise one."""
+    ``rule_evaluation_failed`` path (``auditex.rule_assessment``), but none of these rules can raise one."""
     import azure_tenant_audit.value_rules as package
     for module in (dns, power_platform, defender_resolution):
         source = inspect.getsource(module)

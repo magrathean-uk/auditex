@@ -35,9 +35,9 @@ serialised into prompts, assessment files, sidecars or logs. This includes
 Defender ATP preset-rule recipient and exclusion lists (`SentTo`,
 `SentToMemberOf`, `RecipientDomainIs` and their `ExceptIf*` counterparts),
 DNS resolver `log` entries and the Security Suite unsuccessful-command ledger.
-The model layer is parked: neither assessment route calls an endpoint. Dry-run exports only the
-gated, redacted model view locally. Legacy model flags and `AUDITEX_DISABLE_VALUE_RULES` are ignored
-with one warning per invocation, without values; redaction remains enabled. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
+The model layer is removed: assessment makes no network request and no model endpoint is a permitted outbound destination. `auditex assess` rejects the removed model, endpoint, dry-run and
+redaction options (exit 2) and reads no `AUDITEX_MODEL_*` or `AUDITEX_DISABLE_VALUE_RULES` setting;
+redaction is always on. Each view uses its own per-policy `scuba_config` synthesis outcome: an unprojected
 view receives the not-collected marker. The private rule view can retain recognised
 government environments while the model view remains withheld.
 Conditional Access policy display names in `scope_post_check` are retained as
@@ -49,14 +49,13 @@ The identity collector's user inventory selects `onPremisesImmutableId`, so raw
 safety ceiling. Previously only the hybrid collector's first 100 sampled users
 carried it. Normalised user records, the evidence index and customer packs do
 not carry it. Model projection keeps only effective administrators and
-pseudonymises non-null values in local prompt exports; legacy `--no-redaction` is ignored.
+pseudonymises non-null values in the local projection.
 
 The PIM role policy reads of the directory roles (`identity_governance`) collect the
 notification recipients of each policy rule: these are e-mail addresses, collected as
 evidence like the other directory identifiers (they sit in `raw/` and in
 `normalized/governance_objects.json` and `normalized/privileged_roles.json`, which stay local). The
-projection masks their e-mail local parts in local prompt exports. Assessment calls no model endpoint;
-legacy `--no-redaction` cannot disable masking.
+projection masks their e-mail local parts. Assessment calls no endpoint, and no option disables masking.
 The approvers' names and ids of an approval rule are not stored. Nothing else of these reads
 leaves the machine, and the reads are GET-only.
 
@@ -543,9 +542,8 @@ the explainer profile again, including for local reports, so modified
 assessment text does not bypass that boundary. If the context or assessment is
 unusable, explanations are omitted. The support address in the fixed fault
 step currently has its local part masked by this profile.
-It has no inference dependency, endpoint or model fallback. Model use is parked;
-if separately authorised later, it must be loopback only, with this same input
-and output boundary and no `--no-redaction` path.
+It has no inference dependency, endpoint or model fallback. Reintroducing any model use would need
+explicit authorisation, the same input and output boundary and no redaction opt-out.
 
 Explainer test material follows the public-repository fixture rule: stored fixtures hold only constructed rows and
 model-pack train and validation rows, each with a vector id and an origin; held-out test rows (pack or pilot), sealed

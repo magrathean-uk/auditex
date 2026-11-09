@@ -39,23 +39,12 @@ checkout or executes report content.
 
 ## Model-development references
 
-A model-sources manifest, removed with the model layer, pinned the catalogued Auditex model (`product_model`: base revision, adapter archive and
-adapter weights file hashes, GGUF hash, base and distribution licence, llama.cpp revision, training pack and scores) and the inspected OpenAdmin and M365 Expert
-model artifacts, OpenAdmin public dataset and source pipeline, and proposed
-base checkpoints. Reference models, original data and sparse source copies
-are retained outside the distributable tree, in the development workspace's
-data and third-party areas.
-Per-file hashes and upstream revisions accompany the development kit.
-
-Auditex's corpus staging, structured evaluator, case curation and training-pack
-writer are independent implementations. The source pipeline informed separate
-holdouts, completion-only training and explicit abstention checks. No upstream
-generator or model runtime source is vendored. The 48 shipped Auditex cases
-and two recorded-response fixtures are newly generated synthetic proposals;
-they contain no tenant evidence and carry no human approval. Public source
-conversations remain unreviewed, and matching text from those sources is not
-shipped as Auditex training gold. No upstream evaluation result is presented
-as an Auditex measurement.
+The parked model layer is removed (see [Model development](../guides/model-development.md)). Its model-sources
+manifest pinned the inspected OpenAdmin and M365 Expert model artifacts, the OpenAdmin public dataset and source
+pipeline, and proposed base checkpoints; the corpus staging, evaluator, case curation and training-pack writer
+were independent implementations, and no upstream generator or model runtime source was vendored. Reference
+models, original data and sparse source copies are retained outside the distributable tree, in the development
+workspace's data and third-party areas.
 
 ## Oracle-labelled cases
 
@@ -70,10 +59,10 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   (public domain dedication). Used: the Rego policies (`PowerShell/ScubaGear/Rego/`), the unit-test
   fixtures and their `json.patch` mutations (`Testing/Unit/Rego/`) and the baseline markdown
   (`baselines/*.md`). The policies are evaluated with Open Policy Agent 1.20.2 (Apache-2.0, the version
-  ScubaGear pins; not redistributed) over fictional tenant configurations. The oracle scripts do not ship
+  ScubaGear pins; not redistributed) over fictional tenant configurations. The removed oracle scripts did not ship
   original ScubaGear code or fixtures; the explainer baseline extraction and test-source exception is
-  documented below. The scripts read a local checkout supplied on
-  the command line, and each case records the commit (the 12-character short commit, in `provenance.source` and
+  documented below. They read a local checkout supplied on
+  the command line, and each case recorded the commit (the 12-character short commit, in `provenance.source` and
   in the oracle reviewer; the run's `summary.json` holds the full 40-character commit), policy id, test name, OPA
   version and input hash.
   The value-rule engine (`src/azure_tenant_audit/value_rules/`) ports the reviewed
@@ -113,21 +102,18 @@ cases whose labels are the deterministic output of CISA's ScubaGear policy engin
   verdict files are Prowler output text, so those files stay with the other oracle outputs outside the distributable tree
   (attribute Prowler and include its Apache-2.0 licence if they are shared). Prowler's own dependencies are installed only in a
   throwaway environment under the build cache, never in the project `.venv`.
-- Labels are engine output, not human judgement. The removed case splitter's `--approve-as-oracle` option
-  recorded the engine and OPA version as reviewer so the pack preparer accepted the rows; see
-  [Model development](../guides/model-development.md#oracle-labelled-cases).
+- Labels are engine output, not human judgement. The removed case tools recorded the engine and OPA version as
+  reviewer; see [Model development](../guides/model-development.md#oracle-labelled-cases).
 
 P1 serving ships `configs/scuba-policy-sections.json`: all 102 policy items and ordered
 section dependencies extracted from the local v7 oracle pack (source pack SHA-256 and
 ScubaGear revision recorded in the file). Policy items preserve the trained baseline
 excerpts verbatim, including eight applicability statements and the intentionally empty
-MS.POWERPLATFORM.2.3v1 excerpt. A 56-row synthetic pack extract is retained under
-`tests/fixtures/` for prompt-parity checks. Baseline prose is attributed to CISA and
+MS.POWERPLATFORM.2.3v1 excerpt. Baseline prose is attributed to CISA and
 Microsoft: CISA SCuBA / ScubaGear, CC0 1.0 Universal, with portions adapted from
 Microsoft documentation under CC BY 4.0. The source is ScubaGear's `baselines/` at
 revision `2446ad723b7f55031cc02c8aca244d731d468cba`. The excerpts are unchanged;
-this use implies no endorsement. The training system prompt is embedded verbatim in
-`auditex/model_prompt.py` with its UTF-8 SHA-256 beside it.
+this use implies no endorsement.
 
 ## Framework identifiers
 

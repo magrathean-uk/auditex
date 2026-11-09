@@ -31,8 +31,8 @@ Python 3.11+. Claude Code reads this file through `CLAUDE.md`; Codex reads it di
 - `src/auditex/` is the product layer (the `auditex` CLI, guided flows, Google Workspace provider,
   reporting, exporters, compare and drift, MCP server: `mcp_registry.py`, `mcp_server.py`).
 - SCuBA answers come only from `src/azure_tenant_audit/value_rules/` and
-  `configs/scuba-value-rules.json` (spec v3.9.1). There is no model fallback; the local model and
-  the template explainer never decide a verdict.
+  `configs/scuba-value-rules.json` (spec v3.9.1). There is no model layer or model fallback; the
+  template explainer never decides a verdict.
 - Collection scope is data-driven from `configs/`. Shipped content (`configs/`, `profiles/`,
   `schemas/`, `docs/`, `agent/`, `skills/`, `assets/`, `examples/`) is listed in both
   `pyproject.toml` `[tool.setuptools.data-files]` and `shipped_content.py`; a test checks they match.

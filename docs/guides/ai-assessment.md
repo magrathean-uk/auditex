@@ -1,8 +1,9 @@
 # AI assessment
 
-`auditex model assess <run-dir>` writes an optional rule-only CISA SCuBA assessment from a finished
-Microsoft 365 run's local evidence. It writes private `model_assessment.json` without changing findings,
-scores, reports, exports or customer packs. No model client or endpoint is called.
+`auditex assess <run-dir>` writes an optional rule-only CISA SCuBA assessment from a finished
+Microsoft 365 run's local evidence. It writes private `model_assessment.json` (the file name is kept for
+compatibility) without changing findings, scores, reports, exports or customer packs. Nothing is sent anywhere:
+the assessment is computed locally from the run bundle.
 
 ## What decides each answer
 
@@ -18,7 +19,7 @@ empty; attempts and latency are zero; prompt and response hashes are null; think
 IDs outside the catalogue are skipped as `policy_not_in_catalogue`.
 
 For covered policies, a closed applicability gate wins, then missing sections, then the value predicate.
-Rules read a private in-memory view captured before the model projection's frozen shape gate, budgets and
+Rules read a private in-memory view captured before the projection's frozen shape gate, budgets and
 redaction. Source, ledger, collector-error, qualifier and scan checks still apply. A rule's met, not met,
 not assessed or not applicable result carries its cell, reason code and constant text. Missing evidence
 uses `section_not_collected`; collected but unusable evidence uses `evidence_unusable` and the relevant
@@ -34,7 +35,7 @@ For SS 2.1, supply `--sensitive-users <file>` during collection (or set
 count and HMAC before passing bare lower-case addresses to that rule in memory.
 With the other required evidence, SS 2.1 can now decide; an absent or unusable
 list retains the existing not-assessed outcome. A copied bundle replays the
-same way. Addresses never enter assessment outputs or model prompts.
+same way. Addresses never enter assessment outputs.
 SS 2.3 uses the separate `--partner-domains <file>` input (or
 `AUDITEX_PARTNER_DOMAINS_FILE`); its verified snapshot reaches only that rule's
 private in-memory view, independently of SensitiveUsers.
@@ -49,134 +50,106 @@ Missing verified private input reports `section_not_collected`.
 `config_list_empty` applies only to a direct ScubaGear configuration with no
 usable SensitiveUsers entries. A supplied list alone does not establish
 compliance. The summary, binding and operator count/HMAC stay out of assessment
-outputs, prompts, shareable exports and customer packs. See
+outputs, shareable exports and customer packs. See
 [TargetedUsersCoverage v1](../reference/output-contract.md#targeteduserscoverage-v1)
 for limits, replay and resume behaviour.
 
 ## Run and read the result
 
 ```sh
-auditex model assess <run-dir>
-auditex model assess <run-dir> --policies MS.AAD.3.4v1,MS.POWERBI.1.1v1
-auditex model assess <run-dir> --dry-run
+auditex assess <run-dir>
+auditex assess <run-dir> --policies MS.AAD.3.4v1,MS.POWERBI.1.1v1
 ```
 
-Assessment needs no endpoint or model name. Dry-run exports local development prompts to
-`model_assessment_prompts.jsonl`; it calls nothing. Both files are private (0600), outside the original
-bundle seal; sealed outputs cannot be replaced. Treat them as confidential evidence.
+Assessment needs no endpoint, model name or network access. `--policies` takes a comma-separated list of
+policy IDs; the `--projection-max-items`, `--projection-max-chars` and `--projection-scan-*` options set the
+projection budgets and scan bounds (`auditex assess --help` lists the defaults). The file is private (0600) and
+outside the original bundle seal; a sealed output cannot be replaced. Treat it as confidential evidence.
 
-Legacy `--endpoint`, `--model`, `--no-redaction`, `--shadow-model-on-precheck`, `AUDITEX_MODEL_*`
-configuration and `AUDITEX_DISABLE_VALUE_RULES` are accepted and ignored with one stderr warning per
-invocation, without echoing values. They cannot change any answer. Redaction stays enabled.
-Assessment help hides the legacy flags.
+`auditex assess` has no dry-run, endpoint, model or redaction options, and no `AUDITEX_MODEL_*` or
+`AUDITEX_DISABLE_VALUE_RULES` setting is read. The old `model` command is removed: it
+exits 2 as an unknown command, and so does any of the removed options (`--endpoint`, `--model`, `--dry-run`, `--no-redaction`,
+`--shadow-model-on-precheck`). Redaction is always on.
 
 The envelope keeps historical field names: `endpoint_host` is `none`, `model_name` is `rules-only`, and
 there is no `serving` object. `totals.rule_answered` counts rule rows including abstentions;
 `totals.unknown` includes all not-assessed rows, including any `rule_not_implemented` row. Confirmed rule
 verdicts can agree or disagree with baseline pass/fail statuses; not-assessed rows compare as `not_assessed`.
 
-## Parked model development
+## Rule pre-checks
 
-`ModelClient`, `ModelConfig`, the model catalogue, doctor, training, benchmarking and offline evaluation
-remain available for development. They do not feed product assessment. `auditex model doctor` probes a
-development endpoint only when explicitly invoked. A deterministic template explainer ships and is wired into reports; it describes rule results
-and never changes a verdict. The catalogued verdict model is parked and has not been evaluated as an explainer.
-See [model development](model-development.md).
+A value rule uses the shared closed gate first (the rule's `closed_gate` cell, rendered by
+`value_rules/gates.py`), then its own ordered section list, then its kind. The rule engine and catalogue follow
+spec v3.9.1 with addenda A1 and A2 (the catalogue's `spec_version` is `v3.9.1`); the cell inventory and reason
+codes are checked by the `2026-11-05` assessment validator. The [output contract](../reference/output-contract.md)
+lists the policy ids each rule covers. A rule that raises answers the catalogued `rule_evaluation_failed` reason
+with the `report_product_fault` recommendation, and logs only the rule id and the exception class.
 
-## Obtain the catalogued model
+`configs/scuba-rule-precheck.json` is the shared authority for the gate, field and list rules. For a policy with a
+value rule, `precheck_policy` (`scuba_precheck.py`) calls `value_rules.assess` first, and that result is the answer.
+`assess` applies, in order:
 
-One model is catalogued: **`auditex-ministral3-8b-scuba-v10`**, Ministral 3 8B Instruct with a LoRA adapter trained on the
-Auditex SCuBA oracle pack v10, merged and quantised to `model-Q5_K_M.gguf` (6,058,747,104 bytes). It was fine-tuned on verdict labels; it is parked, and it
-has not been evaluated as an explainer (the shipped explainer is a deterministic template). Its full
-provenance (base revision, adapter archive and weights hashes, llama.cpp revision, training pack, scores) is the `product_model` entry of
-`auditex model sources`.
+1. The shared closed gate (`value_rules/gates.py`, which calls `check_gate`): a present, usable gate section and
+   field whose typed value is closed. The row is not applicable: requirement `inferred` true, limitations exactly
+   `["policy_not_applicable"]`, no recommendations. It wins even when another dependent section is missing or
+   marked `not_collected`.
+2. The rule's own section list: a missing or `not_collected` section gives an unknown answer naming the
+   unavailable sections. A `not_collected` marker is unusable, including a gate section marker.
+3. The rule kind, which always answers (a kind with no implementation raises, and the row then answers
+   `rule_evaluation_failed`).
 
-The public Hugging Face repository `magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF` is **pending upload**.
-Until it is published the model is not publicly available. Once it is:
+The `absent_field` and `empty_required_list` classes (`check_fields`, `check_lists`, the `field_rules` and
+`list_rules` entries) and the stand-alone `absent_section` check are compatibility shims. They run only when no
+value rule answered, that is for a policy without a catalogue row or when `value_rules` is off, and they still
+render the historical `rule_precheck` classes (`closed_gate`, `absent_section`, `absent_field`,
+`empty_required_list`) in `model_assessment.json`. With every catalogue policy ruled they do not decide a current
+product row. Their behaviour:
 
-```sh
-hf download magrathean-uk/auditex-ministral3-8b-scuba-v10-GGUF model-Q5_K_M.gguf SHA256SUMS --local-dir ./auditex-model
-cd auditex-model && shasum -a 256 -c SHA256SUMS      # Linux: sha256sum -c SHA256SUMS
-```
+- `absent_field`: a field the policy's Rego reads is missing inside a collected section and a registered
+  `field_rules` entry covers it (a missing key in the single tenant object, an empty singleton list, or no entry
+  whose `settingName` equals the policy's Power BI setting). The answer is unknown, citing the one section.
+- `empty_required_list`: a registered `list_rules` entry whose collected list is exactly `[]` for a policy that
+  passes only when some entry satisfies it (Conditional Access policies for ten Entra ID policies). The answer is
+  confirmed not met, with the one recommendation `review_policy_against_baseline_text`. A list with entries,
+  null, an object or a marker is left to the earlier classes. Some entries carry an `unless` condition (for
+  example MS.AAD.9.1v1 in the `gcchigh` and `dod` clouds) that leaves the row to the value rule.
 
-The expected SHA-256 is `840fb447eb062d7cae8ff1980d30548e1198138e8235e88e1bc0449bacead01a`. Do not serve a file
-that fails the check. A copy distributed as two parts (`model-Q5_K_M.gguf.part-00`, 4,294,967,296 bytes, and
-`.part-01`, 1,763,779,808 bytes, made with `split -b 4G`) is reassembled and checked with:
+| Policies | Decisive field | Closed values |
+| --- | --- | --- |
+| MS.SHAREPOINT.3.1v1, 3.2v1 | `SPO_tenant.SharingCapability` | `0`, `1`, `3` |
+| MS.SHAREPOINT.3.3v2 | `SPO_tenant.SharingCapability` | `0` |
+| MS.SHAREPOINT.1.3v1 | `SPO_tenant.SharingCapability` | `0`; doc-sourced |
+| MS.TEAMS.2.2v2, 2.3v2, 4.1v1 | `scuba_config.M365Environment` (synthesised; see below) | `gcc`, `gcchigh`, `dod` |
+| MS.AAD.3.3v2 | `authentication_method.authentication_method_feature_settings[Id=MicrosoftAuthenticator].State` | `disabled` |
 
-```sh
-cat model-Q5_K_M.gguf.part-00 model-Q5_K_M.gguf.part-01 > model-Q5_K_M.gguf
-shasum -a 256 -c SHA256SUMS
-```
+Sharing values mean `0` organisation only, `1` new and existing guests, `2` anyone, `3` existing guests. Real
+integers and integral floats are accepted; booleans, numeric strings, fractional and out-of-range values cannot
+close a gate. String gates use exact exported values. Singleton object arrays and objects are supported;
+empty or ambiguous objects and missing, null or invalid gate fields give unknown. Policies without a registered
+value rule report `rule_not_implemented`.
 
-The parts are plain byte splits, not llama.cpp `gguf-split` shards: llama.cpp cannot load them until they are
-joined. The base model (`mistralai/Ministral-3-8B-Instruct-2512-BF16`) is Apache-2.0 (read on its model card at the
-pinned revision on 31 October 2026), and the merged, quantised file is distributed under Apache-2.0 as a modified work:
-a mirror keeps the licence text and the base model's notices and says the weights were modified. The training labels are CC0 1.0.
+`scuba_config` is ScubaGear's operator configuration, not tenant evidence, so assessment synthesises it (output
+contract, `scuba_config` row): ScubaGear's default configuration, the tenant's cloud and the run's
+`--break-glass-accounts` list, per policy family. Its projection report entry says so (`synthesis.source`
+`synthesised:default-config`, with the cloud and its evidence, the emergency-access counts and each reading
+policy's outcome). The cloud comes from the `dns_posture` OpenID discovery when the run has it, else from US
+Government licence SKUs, else it is taken as `commercial`.
 
-## Serve it for development
+**DNS evidence for EXO 2.2, 3.1 and 4.1 to 4.4.** The opt-in `dns_posture` collector saves `spf_records`,
+`dkim_records` and `dmarc_records` for tenant Exchange accepted domains (coexistence excluded) when complete
+same-run `acceptedDomains` evidence is available; otherwise it uses Graph-verified domains with the Email service
+(a missing or non-list `supportedServices` field is kept). Records include resolver logs, which the private rule
+view keeps and the projection drops before its shape and budget checks. Failed or truncated reads withhold the
+dependent sections. `dns_posture` remains outside default collector sets; its public lookups and OpenID discovery
+are described in the [privacy model](../reference/security-privacy.md).
 
-The validated runtime is `llama-server` from llama.cpp at revision `620d2225cc436ab0b001e3200e590e3b286ef9ab`
-(build b11669); later builds probably work but were not measured. Build it for your hardware (Metal on Apple
-silicon, CUDA, or CPU) and start it on loopback:
+The value-rule test vectors live in `tests/fixtures/value-rules/` (constructed rows with vector ids and origins;
+see [provenance](../provenance/provenance.md)). `AUDITEX_TEST_VALUE_RULE_VECTORS_V391=<kit vectors.jsonl>`
+replays a full source file, and `AUDITEX_TEST_OPA` with `AUDITEX_TEST_SCUBAGEAR` enable pinned offline Rego
+replay.
 
-```sh
-llama-server -m ./auditex-model/model-Q5_K_M.gguf --alias auditex-ministral3-8b-scuba-v10 \
-  --host 127.0.0.1 --port 8080 -c 8192 -ngl 99 --seed 42 --parallel 1 --jinja --no-context-shift
-```
+## The retired model layer
 
-`-c 8192` is the context the scores were measured at (test prompts are at most about 1,400 tokens; real tenants
-send more). `-ngl 99` offloads every layer to the GPU; leave it out on a CPU-only machine. `--parallel 1` keeps
-one slot, so requests are answered one at a time, as measured. `--jinja` uses the chat template embedded in the
-GGUF, which is identical to training. The parked development client uses the pinned training system prompt. Product assessment makes no requests. The shipped explainer is a deterministic template and uses no prompt.
-
-**Memory.** Estimated, not measured: the weights take 6.06 GB and the f16 KV cache at 8,192 tokens about 1.1 GB
-(34 layers x 8 KV heads x 128 dimensions x 2 bytes, keys and values, calculated), plus llama.cpp compute and
-runtime buffers of a few hundred MB (not measured), so plan on roughly 7.5 to 8 GB of free GPU memory, or of unified
-memory on Apple silicon, on top of what the operating system and other applications hold. Whether a given laptop
-(for example a 16 GB Apple silicon machine) serves it comfortably has not been measured; check free memory before
-starting the server and treat laptop suitability as unverified. On one data-centre GPU it generated about 197 tokens/s, about
-0.55 s per policy in the verdict benchmark; a laptop is slower (not measured). A VM works the same way; keep the server on
-loopback, or put it behind HTTPS and set `AUDITEX_MODEL_API_KEY` for direct development-client experiments elsewhere (a non-loopback
-endpoint prints a warning, because evidence leaves the machine).
-
-Ollama can load the same file if you restate the chat template in a Modelfile by hand, but that path has not
-been validated against the scores; prefer `llama-server`.
-
-## Measured accuracy as an answering model
-
-These are historical verdict-model measurements from before value rules. They do not measure the current
-rule-only assessment or the template explainer. The model is parked and never answers a product policy.
-
-Measured on 30 October 2026 on the frozen test set test-v7: 435 synthetic cases over 12 policies, built from
-ScubaGear's Rego unit-test fixtures and labelled by running that Rego (oracle labels, not human review).
-
-| Measure | Result |
-| --- | --- |
-| Historical rules and model together (173 rule rows, all correct) | 419/435 (96.3 %) |
-| Model alone on every row | 403/435 (92.6 %) |
-| Historical rules and model on rows with no training twin (no train row with the same Rego-read evidence) | 282/298 (94.6 %) |
-| Historical rules and model, each of the 12 policies weighted equally | 89.1 % |
-
-The twin-free and per-policy figures were recomputed on 4 November 2026 on the 419/435 scoring, with all four rule
-classes (earlier figures: 280/298 and 88.6 % on the 417/435 scoring). The same test set also chose between candidate builds, so all figures
-are mildly optimistic. One policy, MS.AAD.9.1v1, is 171 of the 435 rows. Synthetic cases say nothing direct about
-real tenants, which are noisier and wider; on the one real tenant used for evaluation only, before the `empty_required_list`
-class existed, the model answered "met" for two Conditional Access policies in a tenant that had none.
-
-Known weak classes, to read with care:
-
-- Confident "met" on policies whose rule needs several fields at once: 13 false passes on the test set, for
-  example MS.EXO.7.1v1 judged on `State` alone (4/9 correct).
-- Teams app policies MS.TEAMS.5.1v1 to 5.3v1: the model tends to reuse one verdict across the three on shared
-  evidence.
-- A missing field inside a collected section: guessed rather than abstained (4/20 correct), unless an
-  `absent_field` rule covers it; SharePoint rows without `SharingCapability` are sometimes called not applicable.
-
-These historical verdict scores do not measure the current rule-only assessment or the template explainer.
-
-## Model lifecycle
-
-The base model is re-chosen in January 2027 against the then-current open models (EU-hosted bases preferred when
-within the noise band), retrained on the same oracle pipeline and re-measured on the frozen test before it replaces
-this one. A replacement would not be used as an explainer without its own explainer evaluation, which does not
-exist; the shipped explainer is a deterministic template. A replacement gets a new model id, a new catalogue entry and new scores; this entry stays pinned.
+The parked verdict model and its tooling were removed (see the [retirement note](model-development.md) and the
+changelog). No product answer ever came from a model. A deterministic template explainer ships and is wired
+into reports; it describes rule results and never changes a verdict.

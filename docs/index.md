@@ -14,8 +14,8 @@ questions and issue reports, see [SUPPORT.md](../.github/SUPPORT.md).
 - [Administrator Permission Guide](guides/admin-permission-guide.md): Microsoft 365 and Google Workspace access models.
 - [Customer Handoff Guide](guides/customer-handoff-guide.md): pack contents, integrity checks, evidence review, and partial runs.
 - [External Assessment Comparison](guides/external-assessments.md): offline Maester, ScubaGear and Monkey365 imports, evidence references, and cross-tool review.
-- [AI Assessment](guides/ai-assessment.md): the optional rule-only assessment, current coverage, reading the result, and parked model-development references.
-- [Model Development](guides/model-development.md): pinned model references, unreviewed corpus assembly, recorded-answer evaluation, and a separate single-base training handoff.
+- [AI Assessment](guides/ai-assessment.md): the optional rule-only assessment, current coverage, rule pre-checks and reading the result.
+- [Model Development (retired)](guides/model-development.md): retirement note for the removed model layer and the `auditex assess` replacement.
 - [Troubleshooting Guide](guides/troubleshooting.md): local runtime, authentication, provider scope, report, and pack failures.
 
 ## Assurance and contracts

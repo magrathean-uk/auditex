@@ -1,14 +1,14 @@
 # Auditex model development (retired)
 
-The parked model layer has been removed from Auditex. The `auditex model` command and its `sources`,
+The parked model layer has been removed from Auditex. The old `model` command and its `sources`,
 `stage`, `evaluate`, `combine`, `prepare`, `assess` and `doctor` subcommands, the model client and prompt
 builders, the training, evaluation and benchmark tools, the oracle and lab case builders, the
-model-development examples and the `model_train` extra are no longer in the tree. No product answer ever
+model-development examples and the model training extra are no longer in the tree. No product answer ever
 came from the model: every SCuBA answer comes from the value rules in `configs/scuba-value-rules.json`.
 
 ## Running the assessment
 
-`auditex assess <run-dir>` replaces `auditex model assess`. It writes the same private, rule-only
+`auditex assess <run-dir>` replaces the old `model assess` subcommand. It writes the same private, rule-only
 `model_assessment.json` for a finished run (`endpoint_host: "none"`, `model_name: "rules-only"`, no
 `serving` object) and accepts `--policies` and the `--projection-*` budget and scan flags. It has no
 dry-run, endpoint, model or redaction options; argparse rejects them with exit 2.
