@@ -62,7 +62,7 @@ and SHA-256 of each file.
 
 ## Declared Python dependencies
 
-These dependencies are declared in `pyproject.toml` / `requirements.txt`. They are not vendored in this source package.
+These dependencies are declared in `pyproject.toml`. They are not vendored in this source package.
 
 | Package | Declared use | License recorded | Notice handling |
 | --- | --- | --- | --- |

@@ -16,7 +16,6 @@ import re
 import subprocess
 import sys
 import traceback
-from types import ModuleType
 from unittest.mock import patch
 
 import pytest
@@ -29,7 +28,6 @@ from azure_tenant_audit import cli as engine_cli
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VENDORED = ROOT / "tenant-bootstrap" / "azure_tenant_audit"
 SECRET = "SECRETVALUE-1234"
 FIXED = "error: invalid arguments"
 
@@ -57,21 +55,6 @@ def _captured_parser(module, entry, argv):
             entry(argv)
     assert len(made) == 1
     return made[0]
-
-
-def _vendored_parser(shared_helper):
-    name = "_parser_privacy_bootstrap_shared" if shared_helper else "_parser_privacy_bootstrap_standalone"
-    package = ModuleType(name)
-    package.__path__ = [str(VENDORED)]
-    if shared_helper:
-        package.__path__.append(str(ROOT / "src" / "azure_tenant_audit"))
-    sys.modules[name] = package
-    spec = importlib.util.spec_from_file_location(f"{name}.cli", VENDORED / "cli.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module.build_parser()
 
 
 BUILDERS = [
@@ -137,7 +120,6 @@ def _all_parsers():
             _captured_parser(product_cli, product_cli.main, ["setup", "--bad-option"]),
             _captured_parser(product_cli, product_cli.main, ["doctor", "--bad-option"]),
             _captured_parser(model_training, model_training.training_main, []),
-            _vendored_parser(False), _vendored_parser(True),
         ])
         roots.extend(_script_parser(filename, entry) for filename, entry in SCRIPT_BUILDERS)
     return [child for root in roots for child in _children(root)]
@@ -658,13 +640,9 @@ def test_parser_ast_guard_scans_scripts_and_extensionless_python_entries(tmp_pat
 
 
 def test_no_parser_constructor_or_subparser_override_outside_factory():
-    roots = [ROOT / "src" / "azure_tenant_audit", ROOT / "src" / "auditex", VENDORED, ROOT / "scripts"]
-    # A dedicated parser module is mirrored in the standalone bootstrap kit;
-    # it is the sole place where either copy may construct the parser class.
-    factories = {
-        ROOT / "src" / "azure_tenant_audit" / "argument_parser.py",
-        VENDORED / "argument_parser.py",
-    }
+    roots = [ROOT / "src" / "azure_tenant_audit", ROOT / "src" / "auditex", ROOT / "scripts"]
+    # The dedicated parser module is the sole place that may construct the parser class.
+    factories = {ROOT / "src" / "azure_tenant_audit" / "argument_parser.py"}
     violations = []
     for path in _python_sources(roots):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -672,7 +650,6 @@ def test_no_parser_constructor_or_subparser_override_outside_factory():
             allowed = _known_collection_type_calls(path, tree)
             violations.extend((str(path.relative_to(ROOT)), line) for line in _parser_violations(tree, allowed))
     assert not violations
-    assert (ROOT / "src" / "azure_tenant_audit" / "argument_parser.py").read_bytes() == (VENDORED / "argument_parser.py").read_bytes()
 
 
 def _factory_calls(tree, path):
@@ -712,10 +689,9 @@ def test_factory_call_sites_are_in_the_parser_matrix():
     # exposing a builder; _all_parsers captures them before dispatch.
     expected[("src/auditex/cli.py", "main")] += 2
     expected[("src/auditex/model_training.py", "training_main")] += 1
-    expected[("tenant-bootstrap/azure_tenant_audit/cli.py", "build_parser")] += 1
     expected.update((f"scripts/{filename}", entry) for filename, entry in SCRIPT_BUILDERS)
     found = Counter()
-    roots = [ROOT / "src" / "auditex", ROOT / "src" / "azure_tenant_audit", VENDORED, ROOT / "scripts"]
+    roots = [ROOT / "src" / "auditex", ROOT / "src" / "azure_tenant_audit", ROOT / "scripts"]
     for path in _python_sources(roots):
         found.update(_factory_calls(ast.parse(path.read_text(encoding="utf-8")), str(path.relative_to(ROOT))))
     assert found == expected

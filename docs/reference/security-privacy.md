@@ -190,9 +190,9 @@ preserved for tool chaining only where not preceded by an e-mail local-part
 character; an operator address does not exempt a suffix of another address.
 Credentials are redacted before those exemptions.
 Syntax errors in the product CLIs (`azure-tenant-audit`, `auditex`, `auditex-mcp`
-and the vendored `tenant-bootstrap` package copy) print usage and a fixed error
+and the `tenant-bootstrap` forwarder to the engine) print usage and a fixed error
 message without echoing supplied argument values. The lab scripts under
-`tenant-bootstrap/scripts` and `benchmarks` are outside this guarantee.
+`tenant-bootstrap/scripts` are outside this guarantee.
 Operator-input validation can also show a line number and a fixed reason,
 without the source value or path. Use `--help` to inspect options.
 Collected evidence and raw inputs to parsers and error classifiers retain their

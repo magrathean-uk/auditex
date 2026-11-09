@@ -453,7 +453,6 @@ REASON_SCAN_BYTES = "scan bytes limit"
 REASON_NON_REGULAR = "non-regular"
 REASON_DANGLING = "dangling link"
 REASON_LIMIT = "limit"
-REASON_OUTSIDE = "outside run"
 REASON_CHANGED = "changed during scan"
 
 
