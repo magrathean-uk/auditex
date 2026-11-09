@@ -1,0 +1,1 @@
+--task REV-M04-T03 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M04-T03/request-2.md --readonly --sha task/M04-T03-scanner-limits-doc --tags debug

@@ -1,0 +1,1 @@
+--task GATE-M02-M04 --role terra --brief .plan/work/GATE-M02-M04/request.md --readonly --timeout 7200

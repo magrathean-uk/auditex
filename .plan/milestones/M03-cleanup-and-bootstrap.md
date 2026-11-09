@@ -15,7 +15,7 @@ The dead paths the v3 assessment confirmed and the divergent `tenant-bootstrap/a
 - [x] Every approved path is gone and nothing in the tree still names it: `d=$(sed -n 's/^## \(DEC-[0-9]*\) M03 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && test -n "$P" && o=$(printf '%s\n' "$P" | xargs git ls-files --) && test -z "$o" && .venv/bin/python -m pytest tests/test_docs_paths.py tests/test_architecture_modules.py`
 - [x] The cleanup ledger records each M03 removal with reason, evidence, approval and commit: `d=$(sed -n 's/^## \(DEC-[0-9]*\) M03 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && test -n "$P" && ! awk -F'|' -v d="$d" '{gsub(/ /,"",$5)} $5==d && ($3 !~ /[a-z]/ || $4 !~ /[a-z]/ || $6 !~ /[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/)' .plan/CLEANUP.md | grep -q .`
 - [x] Only the forwarder is left in `tenant-bootstrap/azure_tenant_audit/`, and a test proves it resolves to `src/azure_tenant_audit` from the repository: `o=$(git ls-files -- tenant-bootstrap/azure_tenant_audit) && test "$o" = tenant-bootstrap/azure_tenant_audit/__init__.py && .venv/bin/python -m pytest tests/test_tenant_bootstrap_forwarder.py tests/test_tenant_bootstrap_config.py tests/test_tenant_bootstrap_wrapper.py`
-- [ ] AGENTS.md has a tenant-bootstrap section: `grep -q -i '^## .*tenant-bootstrap' AGENTS.md`
+- [x] AGENTS.md has a tenant-bootstrap section: `grep -q -i '^## .*tenant-bootstrap' AGENTS.md`
 - [x] Full suite and release archive pass after the cleanup: `make test && make release-archive`
 - [ ] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance`
 
@@ -25,7 +25,7 @@ The dead paths the v3 assessment confirmed and the divergent `tenant-bootstrap/a
 | M03-T01 | Re-check the dead candidates and write the cleanup list | luna | S | - | done |
 | M03-T02 | Remove the approved dead paths and bootstrap copies | codex | M | mechanical | done |
 | M03-T03 | Prove the tenant-bootstrap forwarder | codex | S | - | done |
-| M03-T04 | Describe tenant-bootstrap in AGENTS.md and align its docs | terra | S | - | doing |
+| M03-T04 | Describe tenant-bootstrap in AGENTS.md and align its docs | terra | S | - | done |
 | M03-T05 | Record the M03 removals in the cleanup ledger | orchestrator | S | mechanical | done |
 
 ## Acceptance criteria
