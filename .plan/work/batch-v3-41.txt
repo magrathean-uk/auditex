@@ -1,0 +1,1 @@
+--task M02-T05 --role terra --template terra-implement --branch --slug model-docs --var TITLE="Rewrite the docs for the retired model layer (repair round 2)" --var MILESTONE=.plan/milestones/M02-model-layer-retirement.md --var FILES="docs/development/scubagear-export-adapter.md, docs/reference/output-contract.md" --var REVIEW=".plan/work/M02-T05/repair-2.md"

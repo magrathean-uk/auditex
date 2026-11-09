@@ -19,7 +19,7 @@ The parked model layer is gone from code, CLI, packaging, configs, tests and doc
 - [x] Shipped report, projection and explainer output are unchanged by the retirement, by normalised digest against the pre-retirement baseline: `make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract && .venv/bin/python -m pytest tests/test_compare_run_outputs.py tests/test_reporting.py tests/test_scuba_projection.py tests/test_explainer_integration.py tests/test_value_rules_contract.py` (evidence: merge.sh verify for M02-T04 on the tree merged as c97539d: make test 22471 passed 0 failed, contract-smoke and the 43-digest comparison pass, make audit-deps pass)
 - [x] Full suite, shipped-content parity and dependency audit pass: `make test && make audit-deps` (evidence: merge.sh verify for M02-T04 on the tree merged as c97539d: make test 22471 passed 0 failed, contract-smoke and the 43-digest comparison pass, make audit-deps pass)
 - [ ] Both acceptance suites, the full v3.9.1 replay included, pass at milestone close: `make acceptance`
-- [ ] No public doc describes the model layer as present: `test -f README.md && ! git grep -q -E 'auditex model|model_train' -- README.md AGENTS.md docs agent skills`
+- [x] No public doc describes the model layer as present: `test -f README.md && ! git grep -q -E 'auditex model|model_train' -- README.md AGENTS.md docs agent skills`
 - [x] Review: other-vendor reviews approve the plan v3 merges of M02-T03 and M02-T04 (Tier A: network and schemas) at the exact merged heads (ARCHITECTURE.md review binding): `ok=1; for T in M02-T03 M02-T04; do ( c=$(git log v1.3.0..HEAD --format=%H -1 --grep="^Plan-Task: $T\$") && test -n "$c" && s=$(git log -1 --format=%B "$c" | sed -n "s/^Plan-Review: REV-$T approve \([0-9a-f]\{12,40\}\)\$/\1/p") && test -n "$s" && grep -qE "^[[:space:]]*(summary: )?reviewed: $s" ".plan/work/REV-$T/result.md" && grep -qE '^[[:space:]]*(summary: )?verdict: approve' ".plan/work/REV-$T/result.md" ) || ok=0; done; test $ok = 1` Orchestrator check at close (ARCHITECTURE.md provider binding): the dispatch record names a launcher of the other vendor from the author's.
 
 ## Tasks
@@ -29,7 +29,7 @@ The parked model layer is gone from code, CLI, packaging, configs, tests and doc
 | M02-T02 | Record the pre-retirement output digest baseline | codex | M | - | done |
 | M02-T03 | Re-home the shared helpers out of the model modules | codex | M | cross-cutting | done |
 | M02-T04 | Remove the model layer per the approved list | codex | L | cross-cutting | done |
-| M02-T05 | Rewrite the docs for the retired model layer | terra | M | - | doing |
+| M02-T05 | Rewrite the docs for the retired model layer | terra | M | - | done |
 | M02-T06 | Record the M02 removals in the cleanup ledger | orchestrator | S | mechanical | done |
 
 ## Acceptance criteria
@@ -70,7 +70,7 @@ The parked model layer is gone from code, CLI, packaging, configs, tests and doc
 - `README.md`, `AGENTS.md` (the model-fallback sentence), `docs/guides/ai-assessment.md`, `docs/reference/output-contract.md`, `docs/reference/security-privacy.md` (transport class 6), `docs/development/runbook.md` and `docs/provenance/` describe the product without a model layer; `docs/guides/model-development.md` is removed if on the approved list, otherwise reduced to a short retirement note; `CHANGELOG.md` `[Unreleased]` records the removal of the `model` command, its flags and the `model_train` extra.
 - Legal files are not edited; any needed legal change is drafted for G in `result.md`.
 - verify: `test -f README.md && ! git grep -q -E 'auditex model|model_train' -- README.md AGENTS.md docs agent skills && grep -q 'model_train' CHANGELOG.md && .venv/bin/python -m pytest tests/test_docs_paths.py tests/test_architecture_modules.py`
-- files: `README.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/guides/ai-assessment.md`, `docs/guides/model-development.md`, `docs/reference/output-contract.md`, `docs/reference/security-privacy.md`, `docs/development/runbook.md`, `docs/provenance/provenance.md`, `docs/provenance/provenance.csv`; per design.md section 12: `docs/guides/product-manual.md`, `docs/index.md`, `docs/development/scubagear-export-adapter.md`
+- files: `README.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/guides/ai-assessment.md`, `docs/guides/model-development.md`, `docs/reference/output-contract.md`, `docs/reference/security-privacy.md`, `docs/development/runbook.md`, `docs/provenance/provenance.md`, `docs/provenance/provenance.csv`; per design.md section 12: `docs/guides/product-manual.md`, `docs/index.md`, `docs/development/scubagear-export-adapter.md`; and (orchestrator, wording only) the comment at `src/auditex/scuba_projection.py:1178` and the docstring at `tests/test_value_rules_perf.py:585` that named removed paths
 
 ### M02-T06 Record the M02 removals in the cleanup ledger
 - At the deletion gate: one `.plan/CLEANUP.md` row per approved path with its reason and reference evidence from `design.md` and the gate's DEC id; after M02-T04 merges: the squash commit sha in each row's commit column.

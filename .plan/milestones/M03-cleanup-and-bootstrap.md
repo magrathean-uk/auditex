@@ -25,7 +25,7 @@ The dead paths the v3 assessment confirmed and the divergent `tenant-bootstrap/a
 | M03-T01 | Re-check the dead candidates and write the cleanup list | luna | S | - | done |
 | M03-T02 | Remove the approved dead paths and bootstrap copies | codex | M | mechanical | done |
 | M03-T03 | Prove the tenant-bootstrap forwarder | codex | S | - | done |
-| M03-T04 | Describe tenant-bootstrap in AGENTS.md and align its docs | terra | S | - | todo |
+| M03-T04 | Describe tenant-bootstrap in AGENTS.md and align its docs | terra | S | - | doing |
 | M03-T05 | Record the M03 removals in the cleanup ledger | orchestrator | S | mechanical | done |
 
 ## Acceptance criteria

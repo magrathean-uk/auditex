@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 52% (was 38%)
-milestone: M02-model-layer-retirement 80%
+overall: 56% (was 52%)
+milestone: M02-model-layer-retirement 90%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: c97539d 2026-11-09T17:33:35Z
+last_checkpoint: eb39d74 2026-11-09T19:23:29Z
 
 ## Next tasks
 - none
@@ -25,12 +25,12 @@ last_checkpoint: c97539d 2026-11-09T17:33:35Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 89% orchestrator
-claude-1 83% ok
+claude - orchestrator
+claude-1 84% ok
 claude-2 28% shared
 claude-3 83% ok
-claude-4 78% ok
-claude-5 14% ok
-codex - unknown:collector
+claude-4 79% ok
+claude-5 15% ok
+codex 86% hot
 codex2 38% ok
 <!-- quota:end -->

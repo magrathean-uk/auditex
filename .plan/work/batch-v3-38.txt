@@ -1,0 +1,2 @@
+--task REV-M02-T05 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M02-T05-model-docs --tags debug --var TASK=M02-T05 --var MILESTONE=.plan/milestones/M02-model-layer-retirement.md --var BRANCH=task/M02-T05-model-docs --var BASE=main
+--task REV-M04-T01 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M04-T01-http-scanner-limits --tags debug --var TASK=M04-T01 --var MILESTONE=.plan/milestones/M04-boundary-scanners.md --var BRANCH=task/M04-T01-http-scanner-limits --var BASE=main

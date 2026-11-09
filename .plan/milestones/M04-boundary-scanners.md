@@ -11,7 +11,7 @@ Runs after M02-T04 merges (shared `tests/test_http_verb_allowlist.py`). Follows 
 The static boundary scanners close the blind spots recorded under v2 DEC-011 where they can, and fail closed where they cannot: the HTTP scanner sees openers passed as untyped parameters or held in containers; the read-boundary scanner covers non-subprocess launchers, dynamic callee lookup, requests held in containers or fetched through `getattr`, and does not rely on per-module handle naming. Every limit that remains is stated in the security and privacy reference.
 
 ## Definition of Done
-- [ ] The HTTP scanner reports planted openers passed as untyped parameters and held in containers, and passes on `main`: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py`
+- [x] The HTTP scanner reports planted openers passed as untyped parameters and held in containers, and passes on `main`: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py`
 - [x] The read-boundary scanner reports or fails closed on planted cases for limits L1 to L4, and passes on `main`: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py`
 - [ ] Review: terra confirms every DEC-011 limit (the two HTTP limits and L1 to L4) is either closed by a named test or stated in `docs/reference/security-privacy.md` (read-through recorded in `.plan/work/M04-T03/result.md`)
 - [ ] Full suite passes: `make test`
@@ -21,9 +21,9 @@ The static boundary scanners close the blind spots recorded under v2 DEC-011 whe
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M04-T01 | Close the HTTP scanner blind spots | codex | M | hard | doing |
+| M04-T01 | Close the HTTP scanner blind spots | codex | M | hard | done |
 | M04-T02 | Close the read-boundary scanner blind spots L1 to L4 | codex | M | hard | done |
-| M04-T03 | State the remaining scanner limits in the privacy reference | terra | S | - | todo |
+| M04-T03 | State the remaining scanner limits in the privacy reference | terra | S | - | doing |
 
 ## Acceptance criteria
 ### M04-T01 Close the HTTP scanner blind spots
