@@ -11,7 +11,7 @@
 - Vendored `tenant-bootstrap/vendor/microsoft-skills` entries with no code reference (ALL-SKILLS-CATALOG, microsoft-foundry, entra-agent-id) - removal changes G-owned legal notices.
 - `tests/test_value_rules_contract.py:266` still reads the stale `AUDITEX_TEST_VALUE_RULE_VECTORS` name and also needs `AUDITEX_TEST_VALUE_RULE_CATALOGUE`, which the v3.9.1 kit lacks, so it always skips (M01-T03); give it the kit name and a catalogue source, or retire it.
 - D5 follow-up: mask names written with middle initials or titles ("John A. Smith", "Dr. Jane Doe") by letting the matcher join one separator character followed by a space (REV-M05-T03-privacy suggestion; same probe budget). In 1.4.0 they are counted unmatched and stay readable in free text, and the note says so.
-- Read-boundary scanner (DEC-008 limits): treat any callee name the module rebinds (def, class, assignment, import) as unresolved for the read-only hand-off and transparent-conversion shortcuts, and include import bindings in the binding union.
+- Read-boundary scanner (DEC-008 limits): treat any callee name the module rebinds (def, class, assignment, import) as unresolved for the read-only hand-off and transparent-conversion shortcuts, and include import, `with`, `def`, `class`, `except`, `match` and comprehension-walrus bindings in the binding union.
 
 ## Later
 - Answer the SCuBA Google Workspace baselines from the Google provider (today an internal control map).

@@ -22,7 +22,7 @@ The static boundary scanners close the blind spots recorded under v2 DEC-011 whe
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M04-T01 | Close the HTTP scanner blind spots | codex | M | hard | todo |
-| M04-T02 | Close the read-boundary scanner blind spots L1 to L4 | codex | M | hard | review |
+| M04-T02 | Close the read-boundary scanner blind spots L1 to L4 | codex | M | hard | doing |
 | M04-T03 | State the remaining scanner limits in the privacy reference | terra | S | - | todo |
 
 ## Acceptance criteria
@@ -37,7 +37,7 @@ The static boundary scanners close the blind spots recorded under v2 DEC-011 whe
 - Sources: the M01-T04 limits L1 to L4 in the v2 work notes and `.plan/archive/plan-v2/BACKLOG.md`.
 - Each of L1 to L4 has a planted-source test (`tmp_path`, no new fixture directory) that fails on the current scanner and passes after the change, or a fail-closed rule with a test proving that an untraceable launcher, callee or request fails the suite.
 - On `main` the scanner finds no real content read; if it does, the task stops and the orchestrator raises it with G.
-- Out of scope (DEC-008): bypasses that need in-repo code to shadow a read-only hand-off or transparent-conversion callee name, or to rebind a launcher argument through an import after a literal assignment; M04-T03 lists them as limits.
+- Out of scope (DEC-008): bypasses that need in-repo code to shadow a read-only hand-off or transparent-conversion callee name, or to rebind a launcher argument name after a literal assignment through an import or a plain `with`, `def`, `class`, `except` or `match` binding or a comprehension walrus; M04-T03 lists them as limits.
 - verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py tests/test_read_guard_content_cmdlets.py`
 - files: `tests/test_read_boundaries.py`
 

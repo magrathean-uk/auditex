@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 21% (was 20%)
+overall: 28% (was 21%)
 milestone: M00-foundation 78%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: e6531a3 2026-11-09T13:25:36Z
+last_checkpoint: 931665d 2026-11-09T13:42:59Z
 
 ## Next tasks
 - none
@@ -30,7 +30,7 @@ claude-1 80% ok
 claude-2 28% shared
 claude-3 81% ok
 claude-4 77% ok
-claude-5 10% ok
+claude-5 11% ok
 codex - unknown:collector
-codex2 35% ok
+codex2 36% ok
 <!-- quota:end -->

@@ -1,0 +1,1 @@
+--task M04-T02 --role sol --template terra-implement --branch --slug read-boundary-limits --tags hard --timeout 3600 --var TITLE="Close the read-boundary scanner blind spots L1 to L4 (re-scoped fix: global and nonlocal)" --var MILESTONE=.plan/milestones/M04-boundary-scanners.md --var FILES="tests/test_read_boundaries.py" --var REVIEW=".plan/work/M04-T02/repair-3.md"

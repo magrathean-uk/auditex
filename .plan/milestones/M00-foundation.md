@@ -12,8 +12,8 @@ Plan v3 starts from a green, lint-enforced `main`: the 1.3.0 gate chain still pa
 
 ## Definition of Done
 - [x] Lint runs the pinned Ruff check over the whole repository and passes: `make lint` (evidence: merge.sh verify for M00-T01 ran make lint && make test on the integrated tree and passed, squash f4ca1c2)
-- [x] Test harness runs locally and is green: `make test` (evidence: merge.sh verify for M00-T01, 23714 passed, 0 failed, squash f4ca1c2)
-- [ ] Contract smoke is green: `make contract-smoke`
+- [ ] Test harness runs locally and is green: `make test` (M00-T03 at e6531a3: 1 failed, 23679 passed; the M02-T02 script builds a parser outside the factory, fix M02-T02b)
+- [x] Contract smoke is green: `make contract-smoke` (evidence: M00-T03 gate run at e6531a3, exit 0)
 - [ ] Release check passes end to end, including archive and wheel check, rule-pack drift, taint scan and gitleaks: `make release-check`
 - [x] Secrets scan passes: `gitleaks dir . --no-banner --redact` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
 - [x] Taint scan passes on the tracked tree: `bash scripts/oss-taint-scan.sh` (evidence: .plan/work/PLAN-v3/plan-evidence.md)

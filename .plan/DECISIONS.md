@@ -74,3 +74,4 @@
 - why: the scanner guards our own source against accidental write or content-read calls; code review covers deliberate obfuscation, and each further round has found only more contrived cases.
 - consequences: the M04-T02 criteria carry the limit clause below; the final Codex review judges 6e866b3 against it.
 - approver: orchestrator
+- amendment (2026-11-09): the re-scoped verdict found one real gap outside the clause (`global` rebinding), fixed with `nonlocal` in 9655dfb. The clause now also names the binding forms the author disclosed that still do not join their scope's binding union without a declaration: plain `with`, `def`, `class`, `except` and `match` bindings and a comprehension walrus that rebind a launcher argument name after a literal assignment. The final Codex verdict judges 9655dfb.

@@ -67,7 +67,7 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | id | name | weight | % | status |
 |---|---|---|---|---|
 | M00 | foundation | 10 | 78 | active |
-| M01 | build-and-acceptance | 15 | 29 | planned |
+| M01 | build-and-acceptance | 15 | 71 | planned |
 | M02 | model-layer-retirement | 20 | 10 | planned |
 | M03 | cleanup-and-bootstrap | 10 | 71 | planned |
 | M04 | boundary-scanners | 10 | 0 | planned |

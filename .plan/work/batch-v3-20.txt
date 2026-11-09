@@ -1,0 +1,2 @@
+--task REV-M01-T03 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M01-T03/request-3.md --readonly --sha task/M01-T03-acceptance-target --tags debug
+--task REV-M04-T02 --role codex --model gpt-6.1-sol --brief .plan/work/REV-M04-T02/request-4.md --readonly --sha task/M04-T02-read-boundary-limits --tags debug
