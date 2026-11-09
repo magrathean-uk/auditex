@@ -36,6 +36,7 @@ import json
 import lzma
 import os
 from pathlib import Path
+import re
 
 import pytest
 
@@ -216,6 +217,95 @@ def test_override_preconditions_reject_wrong_ids_policy_and_ids():
         override_gold({**vector, "policy": "MS.AAD.1.1v1"}, entry)
 
 
+KIT_HASHES = {
+    "vectors.jsonl": "3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e",
+    "a2-vectors.jsonl": "0351259550c0a87d27d65cfac8f98b8547334cbd1d94321af244ad06b622ac0b",
+    "a2-label-overrides.jsonl": "74639d1775267bb7d8e3d7cdf777b5eac4449e636ec383c16e21f79b3d8e1fa1",
+}
+
+
+def check_kit_hashes(vectors: Path, pins: dict[str, str] | None = None) -> None:
+    """Fail (never skip) unless every kit file exists and matches its pinned sha256.
+
+    `vectors` is the exact file that will be replayed; it is hashed against the vectors pin and
+    the A2 companions are resolved beside it. `pins` defaults to the module-level `KIT_HASHES`,
+    read at call time so a test can substitute it.
+    """
+    for name, pin in (KIT_HASHES if pins is None else pins).items():
+        file = vectors if name == "vectors.jsonl" else vectors.parent / name
+        if not file.is_file():
+            raise AssertionError(f"replay kit file missing: {name}")
+        digest = sha256(file.read_bytes()).hexdigest()
+        if digest != pin:
+            raise AssertionError(f"replay kit hash mismatch for {name}: {digest} != {pin}")
+
+
+def _fake_kit(directory: Path) -> dict[str, str]:
+    pins = {}
+    for name in KIT_HASHES:
+        data = name.encode()
+        (directory / name).write_bytes(data)
+        pins[name] = sha256(data).hexdigest()
+    return pins
+
+
+def test_kit_hashes_accept_matching_files(tmp_path):
+    check_kit_hashes(tmp_path / "vectors.jsonl", _fake_kit(tmp_path))
+
+
+@pytest.mark.parametrize("name", sorted(KIT_HASHES))
+def test_kit_hashes_wrong_hash_in_any_file_fails(tmp_path, name):
+    pins = _fake_kit(tmp_path)
+    (tmp_path / name).write_bytes(b"changed")
+    with pytest.raises(AssertionError, match="hash mismatch for " + re.escape(name)):
+        check_kit_hashes(tmp_path / "vectors.jsonl", pins)
+
+
+@pytest.mark.parametrize("name", sorted(KIT_HASHES))
+def test_kit_hashes_missing_file_fails_and_never_skips(tmp_path, name):
+    pins = _fake_kit(tmp_path)
+    (tmp_path / name).unlink()
+    with pytest.raises(AssertionError, match="missing: " + re.escape(name)):
+        check_kit_hashes(tmp_path / "vectors.jsonl", pins)
+
+
+def test_kit_hashes_selected_file_is_the_one_hashed(tmp_path):
+    pins = _fake_kit(tmp_path)
+    other = tmp_path / "other-vectors.jsonl"
+    other.write_bytes(b"different")
+    with pytest.raises(AssertionError, match="hash mismatch for vectors.jsonl"):
+        check_kit_hashes(other, pins)
+
+
+def _stop_after_hashing(monkeypatch):
+    def reached(*args, **kwargs):
+        raise RuntimeError("hashing passed")
+
+    monkeypatch.setitem(globals(), "_overrides", reached)
+
+
+def test_full_replay_hashes_the_selected_file_against_the_pins(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "KIT_HASHES", _fake_kit(tmp_path))
+    _stop_after_hashing(monkeypatch)
+    monkeypatch.setenv(FULL_ENV, str(tmp_path / "vectors.jsonl"))
+    with pytest.raises(RuntimeError, match="hashing passed"):
+        test_full_v391_replay_acceptance()
+
+
+def test_full_replay_rejects_a_different_selected_file_beside_a_valid_kit(tmp_path, monkeypatch):
+    monkeypatch.setitem(globals(), "KIT_HASHES", _fake_kit(tmp_path))
+    _stop_after_hashing(monkeypatch)
+    other = tmp_path / "other-vectors.jsonl"
+    other.write_bytes(b"different")
+    monkeypatch.setenv(FULL_ENV, str(other))
+    with pytest.raises(AssertionError, match="hash mismatch for vectors.jsonl"):
+        test_full_v391_replay_acceptance()
+
+
+def test_kit_hashes_pins_cover_all_three_files():
+    assert sorted(KIT_HASHES) == ["a2-label-overrides.jsonl", "a2-vectors.jsonl", "vectors.jsonl"]
+
+
 @pytest.mark.value_rule_acceptance
 def test_full_v391_replay_acceptance():
     """The 26,898 vectors and ADDENDUM-A2's 3 constructed vectors and 190 overrides, one process, streamed."""
@@ -224,7 +314,7 @@ def test_full_v391_replay_acceptance():
         pytest.skip(FULL_ENV + " unset (explicit acceptance job)")
     vectors = Path(path)
     directory = vectors.parent
-    assert sha256(vectors.read_bytes()).hexdigest() == "3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e"
+    check_kit_hashes(vectors)
     overrides = _overrides(directory / "a2-label-overrides.jsonl")
     assert len(overrides) == 190
 

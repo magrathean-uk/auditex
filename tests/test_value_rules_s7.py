@@ -87,9 +87,9 @@ def test_manifest_and_every_cell(rows_s7):
 
 
 def test_optional_full_final_source():
-    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not source:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     from azure_tenant_audit.resources import open_text_resource
     items = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]
     grouped = _grouped(Path(source))

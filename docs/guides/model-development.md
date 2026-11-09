@@ -145,7 +145,7 @@ The compressed fixtures under `tests/fixtures/value-rules/` cover v2, the v3.9 l
 stages 4 to 9; each manifest pins hashes, policy and cell counts, and row origins.
 They contain constructed rows and pack train/validation rows with vector ids and origins,
 excluding held-out test, pilot and sealed freeze rows. See [provenance](../provenance/provenance.md).
-`AUDITEX_TEST_VALUE_RULE_VECTORS=<kit vectors.jsonl>` replays a full source file;
+`AUDITEX_TEST_VALUE_RULE_VECTORS_V391=<kit vectors.jsonl>` replays a full source file;
 `AUDITEX_TEST_OPA` and `AUDITEX_TEST_SCUBAGEAR` enable pinned offline Rego replay.
 
 Assessment applies deterministic rules to the private rule view. The shipped

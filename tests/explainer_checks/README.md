@@ -18,7 +18,7 @@ Default pytest excludes `explainer_acceptance` via pytest.ini. The default mutat
 harmful type and six per benign type in generated order (all 160 types). The generated base pairs replay by default,
 twice in fresh interpreters within one tmp_path; persistent output files are never test expectations.
 
-Run the acceptance jobs serially from the repository root (no network), each under a 300 s cap:
+`make acceptance` runs these jobs after the v3.9.1 value-rule replay (it needs `AUDITEX_TEST_VALUE_RULE_VECTORS_V391`; see the runbook). To run only the explainer jobs, use the recipe below, serially from the repository root (no network), each under a 300 s cap:
 
 ```sh
 for chunk in 00 01 02 03; do

@@ -196,9 +196,9 @@ def test_citation_variants_are_closed(vectors, monkeypatch):
 
 @pytest.fixture(scope="module")
 def external_vectors():
-    path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not path:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     grouped = defaultdict(list)
     for row in _rows(Path(path)):
         if row["policy"] in POLICIES:

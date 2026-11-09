@@ -6,6 +6,19 @@ TENANT ?= organizations
 test:
 	$(PYTHON) -m pytest
 
+# Full acceptance replays: the v3.9.1 vectors replay, then the explainer acceptance jobs, serially.
+# The replay never skips silently: the kit variable must name an existing file.
+.PHONY: acceptance
+acceptance:
+	@test -n "$$AUDITEX_TEST_VALUE_RULE_VECTORS_V391" || { echo "make acceptance: AUDITEX_TEST_VALUE_RULE_VECTORS_V391 is unset; point it at the replay kit vectors.jsonl" >&2; exit 2; }
+	@test -f "$$AUDITEX_TEST_VALUE_RULE_VECTORS_V391" || { echo "make acceptance: AUDITEX_TEST_VALUE_RULE_VECTORS_V391 names a missing file: $$AUDITEX_TEST_VALUE_RULE_VECTORS_V391" >&2; exit 2; }
+	$(PYTHON) -m pytest tests/test_value_rules_replay.py -m value_rule_acceptance -p no:cacheprovider -q -s -o addopts=
+	for chunk in 00 01 02 03; do \
+		PYTHONPATH="$$PWD/src" perl -e 'alarm 300; exec @ARGV' $(PYTHON) -B -I -m pytest tests/explainer_checks/test_mutation.py -m explainer_acceptance -k "chunk-$$chunk" -p no:cacheprovider -q -s -o addopts= || exit 1; \
+	done
+	PYTHONPATH="$$PWD/src" perl -e 'alarm 300; exec @ARGV' $(PYTHON) -B -I -m pytest tests/test_explainer_integration.py -m explainer_acceptance -k twins -p no:cacheprovider -q -s -o addopts=
+	PYTHONPATH="$$PWD/src" perl -e 'alarm 300; exec @ARGV' $(PYTHON) -B -I -m pytest tests/test_explainer_integration.py -m explainer_acceptance -k byte_identical -p no:cacheprovider -q -s -o addopts=
+
 .PHONY: login
 login:
 	@if command -v az >/dev/null 2>&1; then \

@@ -80,9 +80,9 @@ def test_manifest_hash_counts_and_complete_cell_coverage(rows_s6):
 
 
 def test_optional_full_stage6_source():
-    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not source:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     grouped = _grouped(Path(source))
     from azure_tenant_audit.resources import open_text_resource
     items = json.loads(open_text_resource("configs/scuba-policy-sections.json"))["policies"]

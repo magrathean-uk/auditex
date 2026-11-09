@@ -185,9 +185,9 @@ def test_served_outputs_and_logs_do_not_contain_rule_view_evidence(
 
 
 def test_optional_full_stage8_vectors():
-    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not source:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     reached = defaultdict(set)
     for vector in _rows(Path(source)):
         if vector["policy"] in STAGE8_POLICIES:

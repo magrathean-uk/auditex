@@ -105,6 +105,18 @@ Install the test dependencies for development: `python -m pip install -e '.[test
 
 There is no hosted CI; the repository is stored on Git and checks run locally. Before tagging a release, install the Google and MCP extras, run `make release-check`, run `make dist` to build the wheel and source distribution, then `make audit-deps`, `python3 scripts/check-reproducible-build.py` and `bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke"`, which creates isolated environments for base, Google, and MCP package checks. The release tag must be `v` followed by the packaged version, which is the `version` in `pyproject.toml` and is listed with its date in [CHANGELOG.md](../../CHANGELOG.md). Update the changelog for every release, and bump `CONTRACT_VERSION` in `src/azure_tenant_audit/contracts.py` and the date in the [output contract](../reference/output-contract.md) when the bundle shape changes. The `mcp` extra is capped below 2 in `pyproject.toml` because the MCP server is only tested against a stand-in for `FastMCP`; raise the cap only together with a test that starts the real server and checks every tool's read-only annotations.
 
+### Acceptance replays
+
+`make acceptance` runs the full v3.9.1 value-rule replay (`-m value_rule_acceptance`), then the `explainer_acceptance` jobs from `tests/explainer_checks/README.md`, serially, and exits non-zero on any failure. `make test` deselects both through `pytest.ini`. Run it at each milestone close and at the release gate.
+
+The replay kit is three files in one folder: `vectors.jsonl`, `a2-vectors.jsonl` and `a2-label-overrides.jsonl`. Set `AUDITEX_TEST_VALUE_RULE_VECTORS_V391` to the path of `vectors.jsonl`; the other two are read from the same folder. The target stops with a message naming the variable when it is unset or names a missing file, and the replay never skips. Before replaying, the test checks the sha256 of all three files:
+
+| File | sha256 |
+| --- | --- |
+| `vectors.jsonl` | `3515b6facbac73091ef43bfa51b746e9265ac508909103ffcc016a5dab92cf4e` |
+| `a2-vectors.jsonl` | `0351259550c0a87d27d65cfac8f98b8547334cbd1d94321af244ad06b622ac0b` |
+| `a2-label-overrides.jsonl` | `74639d1775267bb7d8e3d7cdf777b5eac4449e636ec383c16e21f79b3d8e1fa1` |
+
 ### Publication
 
 Publication for 1.3.0 is the one G approved in DEC-001: a signed `v1.3.0` tag plus a GitHub release carrying the wheel and sdist from `make dist` (`gh release create v1.3.0 dist/*.whl dist/*.tar.gz`). There is no PyPI upload. Tagging and the release wait for G's explicit yes naming the version; a green `make release-check` is not approval.

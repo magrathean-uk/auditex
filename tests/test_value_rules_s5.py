@@ -441,9 +441,9 @@ def test_validator_accepts_ss13_defender_licence_citation(tmp_path, monkeypatch)
 
 
 def test_optional_full_vectors():
-    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not source:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     rows = read_rows(Path(source))
     reached = defaultdict(set)
     for row in rows:
@@ -484,9 +484,9 @@ def test_stratified_s5_cells_against_pinned_rego(rows, tmp_path):
 
 
 def test_optional_builder_reproduces_fixture(tmp_path):
-    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not source:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     spec = importlib.util.spec_from_file_location("stage5_builder", ROOT / "scripts/build-value-rule-fixture-s5.py")
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)

@@ -204,9 +204,9 @@ def test_agreeing_pack_response_parity(policy, rows, a2_overrides):
 
 
 def test_optional_full_stage9_vectors():
-    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    source = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not source:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     reached = defaultdict(set)
     count = 0
     for vector in _rows(Path(source)):

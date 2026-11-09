@@ -415,9 +415,9 @@ def test_full_source_response_guard_checks_controls_and_citation_exceptions():
 
 
 def test_optional_full_source_vectors():
-    path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")
+    path = os.getenv("AUDITEX_TEST_VALUE_RULE_VECTORS_V391")
     if not path:
-        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS unset")
+        pytest.skip("AUDITEX_TEST_VALUE_RULE_VECTORS_V391 unset")
     from hashlib import sha256
     from test_value_rules_replay import MANIFEST, _overrides, override_gold
 
