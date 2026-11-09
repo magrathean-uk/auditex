@@ -1,0 +1,1 @@
+--task REV-M04-T02 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M04-T02-read-boundary-limits --tags debug --var TASK=M04-T02 --var MILESTONE=.plan/milestones/M04-boundary-scanners.md --var BRANCH=task/M04-T02-read-boundary-limits --var BASE=main

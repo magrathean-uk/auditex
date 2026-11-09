@@ -25,7 +25,7 @@ Shareable and customer-pack output mask the names of every person in the run's o
 |---|---|---|---|---|---|
 | M05-T01 | Design D5-v2 masking and freeze the harness interface | sol | M | hard | done |
 | M05-T02 | Add the HTML peak harness and record the main baseline | codex | M | - | done |
-| M05-T03 | Implement D5-v2 masking per the approved design | codex | L | cross-cutting | review |
+| M05-T03 | Implement D5-v2 masking per the approved design | codex | L | cross-cutting | doing |
 | M05-T04 | Update the privacy reference and release notes for D5 | terra | S | - | todo |
 
 ## Acceptance criteria

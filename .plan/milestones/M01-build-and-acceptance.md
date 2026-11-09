@@ -24,7 +24,7 @@ Plain `make dist` is byte-reproducible and `scripts/check-reproducible-build.py`
 |---|---|---|---|---|---|
 | M01-T01 | Make plain make dist byte-reproducible and check sdist bytes | codex | M | - | done |
 | M01-T02 | Locate and hash-verify the v3.9.1 replay kit | luna | S | - | done |
-| M01-T03 | Add make acceptance and the runbook acceptance section | terra | S | - | todo |
+| M01-T03 | Add make acceptance and the runbook acceptance section | terra | S | - | doing |
 | M01-T04 | Run the acceptance suites on main | luna | S | - | todo |
 
 ## Acceptance criteria
@@ -50,7 +50,7 @@ Plain `make dist` is byte-reproducible and `scripts/check-reproducible-build.py`
 - `docs/development/runbook.md` gains an acceptance section: the variable, the three pinned hashes, the command and when to run it (each milestone close and the release gate); `tests/explainer_checks/README.md` points to `make acceptance`.
 - `docs/guides/model-development.md:148` names `AUDITEX_TEST_VALUE_RULE_VECTORS_V391` (unless M02 has already removed the guide).
 - verify: `make -n acceptance >/dev/null && .venv/bin/python -m pytest tests/test_value_rules_replay.py -k kit_hashes && ! git grep -q -E 'AUDITEX_TEST_VALUE_RULE_VECTORS([^_]|$)' -- docs README.md && ! env -u AUDITEX_TEST_VALUE_RULE_VECTORS_V391 make acceptance >"$TMPDIR/acc-unset.log" 2>&1 && grep -q AUDITEX_TEST_VALUE_RULE_VECTORS_V391 "$TMPDIR/acc-unset.log" && ! env AUDITEX_TEST_VALUE_RULE_VECTORS_V391="$TMPDIR/no-such-kit/vectors.jsonl" make acceptance >"$TMPDIR/acc-missing.log" 2>&1 && grep -q AUDITEX_TEST_VALUE_RULE_VECTORS_V391 "$TMPDIR/acc-missing.log"`
-- files: `Makefile` (new acceptance target only), `docs/development/runbook.md` (new acceptance section only), `tests/explainer_checks/README.md`, `docs/guides/model-development.md` (line 148 only), `tests/test_value_rules_replay.py` (kit hash helper and `kit_hashes` tests only)
+- files: `Makefile` (new acceptance target only), `docs/development/runbook.md` (new acceptance section only), `tests/explainer_checks/README.md`, `docs/guides/model-development.md` (line 148 only), `tests/test_value_rules_replay.py` (kit hash helper and `kit_hashes` tests only), and the stale `AUDITEX_TEST_VALUE_RULE_VECTORS` reads in `tests/test_value_rules_{contract,s4,s5,s6,s7,s8,s9,vectors}.py` (variable name only; INV3 finding: switched to the `_V391` name where those tests pass on the v3.9.1 kit, listed in `result.md` where they do not)
 
 ### M01-T04 Run the acceptance suites on main
 - Precondition: M01-T01 and M01-T03 merged; M01-T02 reported the kit found and verified.

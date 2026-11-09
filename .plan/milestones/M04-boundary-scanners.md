@@ -22,7 +22,7 @@ The static boundary scanners close the blind spots recorded under v2 DEC-011 whe
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M04-T01 | Close the HTTP scanner blind spots | codex | M | hard | todo |
-| M04-T02 | Close the read-boundary scanner blind spots L1 to L4 | codex | M | hard | doing |
+| M04-T02 | Close the read-boundary scanner blind spots L1 to L4 | codex | M | hard | review |
 | M04-T03 | State the remaining scanner limits in the privacy reference | terra | S | - | todo |
 
 ## Acceptance criteria

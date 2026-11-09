@@ -26,7 +26,7 @@ The parked model layer is gone from code, CLI, packaging, configs, tests and doc
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M02-T01 | Design the retirement and write the exact removal list | sol | M | - | done |
-| M02-T02 | Record the pre-retirement output digest baseline | codex | M | - | doing |
+| M02-T02 | Record the pre-retirement output digest baseline | codex | M | - | done |
 | M02-T03 | Re-home the shared helpers out of the model modules | codex | M | cross-cutting | todo |
 | M02-T04 | Remove the model layer per the approved list | codex | L | cross-cutting | todo |
 | M02-T05 | Rewrite the docs for the retired model layer | terra | M | - | todo |
