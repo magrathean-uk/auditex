@@ -95,10 +95,10 @@ Install the test dependencies for development: `python -m pip install -e '.[test
 | `python3 scripts/generate-rule-packs.py --check` | Fails when `configs/rule-packs.json` differs from the packs generated from the rule templates and mappings; without `--check` it rewrites the file. |
 | `gitleaks dir .` | Secret scan of the working tree. `.gitleaks.toml` skips the git-ignored local and generated directories (`.venv`, `.secrets`, `outputs` and similar). |
 | `make release-archive` | Builds a wheel from `git archive HEAD` with no build isolation and no index, rejects `build/` and `egg-info` entries, and runs `scripts/check-archive-wheel.py` against the archived source. |
-| `make dist` | Builds the sdist and wheel from `git archive HEAD` in a temporary folder and copies them to `dist/`. |
+| `make dist` | Builds the sdist and wheel from `git archive HEAD` in a temporary folder and copies them to `dist/`. When `SOURCE_DATE_EPOCH` is unset it uses the commit time of `HEAD`, and it normalises the sdist (gzip header time, member times, owner, group, mode, order), so the wheel and sdist bytes depend only on the commit. |
 | `make audit-deps` | Resolves the base install and every extra from `pyproject.toml` with `uv` (metadata only, no source builds) and audits the result. Needs `uv`. |
 | `bash scripts/release-smoke.sh dist <work-dir>` | Wheel and sdist smoke: installs the artefacts in `dist/` into isolated environments for base, Google and MCP checks. |
-| `python3 scripts/check-reproducible-build.py` | Builds the current commit twice and compares the sdist members and digests. |
+| `python3 scripts/check-reproducible-build.py` | Builds the current commit twice through plain `make dist` and compares the wheel bytes and the sdist bytes; it exits non-zero and names the artefact that differs. |
 | `make release-check` | Runs `lint`, `test`, `contract-smoke`, `release-archive`, the rule-pack drift check, the taint scan and the gitleaks scan in that order and stops at the first failure. Needs `gitleaks` on `PATH`. |
 
 `.pre-commit-config.yaml` runs Ruff, the trailing-whitespace and final-newline checks, a staged-file gitleaks scan and the generic file checks on every commit once the hook is installed with `pre-commit install`. The typos, shellcheck and shfmt hooks stay manual: run one with `pre-commit run --hook-stage manual <hook-id> --all-files`. Use focused tests for changed behavior. Contract changes need contract smoke. See [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) for contribution scope and check reporting.

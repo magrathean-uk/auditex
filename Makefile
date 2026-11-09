@@ -120,8 +120,10 @@ dist:
 		git archive HEAD > "$$dir/source.tar"; \
 		mkdir "$$dir/source" "$$dir/artifacts"; \
 		tar -xf "$$dir/source.tar" -C "$$dir/source"; \
+		: "$${SOURCE_DATE_EPOCH:=$$(git show -s --format=%ct HEAD)}"; export SOURCE_DATE_EPOCH; \
 		cd "$$dir/source"; \
 		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_sdist(sys.argv[1])' "$$dir/artifacts"; \
+		$(abspath $(PYTHON)) "$(CURDIR)/scripts/check-reproducible-build.py" --normalise-sdist "$$dir"/artifacts/*.tar.gz "$$SOURCE_DATE_EPOCH"; \
 		$(abspath $(PYTHON)) -c 'import setuptools.build_meta as b, sys; b.build_wheel(sys.argv[1])' "$$dir/artifacts"; \
 		set -- "$$dir"/artifacts/*.whl; test -f "$$1"; \
 		set -- "$$dir"/artifacts/*.tar.gz; test -f "$$1"; \
