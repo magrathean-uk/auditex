@@ -5,7 +5,10 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
-## [Unreleased]
+## [1.4.0] - 2026-11-09
+
+The model layer is retired, shareable output masks names, and the build is reproducible. `CONTRACT_VERSION` and
+`docs/reference/output-contract.md` are unchanged: no bundle change was made.
 
 ### Security and privacy
 
@@ -18,6 +21,9 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   changes. Peak memory is checked with `benchmarks/html_peak.py` against `benchmarks/html-peak-baseline.json`.
   Limits (initials, a family name alone, URL-encoded names, names in HTML tags, structural identifier keys) are in
   `docs/reference/security-privacy.md`.
+- **The read-boundary and HTTP scanner tests are hardened.** `tests/test_read_boundaries.py` and
+  `tests/test_http_verb_allowlist.py` close their known blind spots with a fail-closed proven-literal rule and proved
+  receivers. The remaining scanner limits are stated in `docs/reference/security-privacy.md`.
 
 ### Removed
 
@@ -31,14 +37,29 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
   `AUDITEX_DISABLE_VALUE_RULES` are no longer read, and `model_assessment_prompts.jsonl` is no longer written.
   The model endpoint is no longer a permitted outbound destination.
 
+- **Dead paths are removed.** The drifted module copies under `tenant-bootstrap/azure_tenant_audit/` (the forwarder
+  `__init__.py` stays and resolves to `src/azure_tenant_audit`, proved by `tests/test_tenant_bootstrap_forwarder.py`),
+  `requirements.txt`, `tenant-bootstrap/requirements.txt`, `assets/auditex-logo.png`,
+  `benchmarks/fake_graph_benchmark.py` and `scripts/tenant-audit-flow`.
+
 ### Added
 
 - **`auditex assess <run-dir>`** writes the same private, rule-only `model_assessment.json` that
   `auditex model assess` wrote, with `--policies` and the `--projection-*` budget and scan flags. Existing
   assessment files, their schema and every verdict are unchanged. See `docs/guides/ai-assessment.md`.
 
+- **Plain `make dist` is byte-reproducible.** The wheel and the sdist are identical across builds, checked by
+  `scripts/check-reproducible-build.py`.
+- **`make acceptance`** runs the full v3.9.1 value-rule replay against the pinned kit hashes, then the explainer
+  acceptance jobs, serially. `make test` deselects both. See `docs/development/runbook.md`.
+- **`benchmarks/html_peak.py`** measures peak memory of the HTML report, with its baseline in
+  `benchmarks/html-peak-baseline.json`.
+
 ### Changed
 
+- **`make lint` runs the pinned Ruff check** in addition to the compile check.
+- Test and scan hygiene: the pytest `norecursedirs` no-op is fixed and `scripts/oss-taint-scan.sh` scans tracked
+  files only. The `compare-run-outputs` script builds its parser through the shared factory.
 - The AI assessment guide now holds the rule pre-check description; `docs/guides/model-development.md` is a short
   retirement note that keeps its anchors.
 
