@@ -76,3 +76,12 @@
 - approver: orchestrator
 - amendment (2026-11-09): the re-scoped verdict found one real gap outside the clause (`global` rebinding), fixed with `nonlocal` in 9655dfb. The clause now also names the binding forms the author disclosed that still do not join their scope's binding union without a declaration: plain `with`, `def`, `class`, `except` and `match` bindings and a comprehension walrus that rebind a launcher argument name after a literal assignment. The final Codex verdict judges 9655dfb.
 - amendment 2 (2026-11-09): the verdict on 9655dfb found a further class (a launch in a class body that reads a class-local name). Each round now finds a new, more contrived class while the runtime adapter guard (`adapters/read_guard.py`) already refuses non-read commands sent through the adapters. So the merge bar is the milestone's own goal: L1 to L4 as the v2 notes define them closed for their planted cases, and the fail-closed proven-literal rule in place. Any further bypass class a review finds is a named limit (M04-T03 privacy-reference text and BACKLOG), not a blocker.
+
+## DEC-009 HTTP scanner merge bar set up front
+- date: 2026-11-09
+- status: approved
+- decision: M04-T01 uses the same bar DEC-008 set for M04-T02. The two DEC-011 HTTP limits (an opener passed as an untyped parameter; an opener held in a container) must be closed for planted cases, and one fail-closed rule must apply: an opener or request value that the scanner cannot prove counts as unresolved and fails the suite. Further bypass classes a review finds beyond those two limits are named limits for M04-T03 and the backlog, not blockers.
+- options: open-ended adversarial review | the M04-T02 bar from the start
+- why: M04-T02 needed five review rounds before the bar was set; stating it in the criteria first keeps the review on the milestone goal.
+- consequences: the M04-T01 criteria carry the clause; reviewers judge against it.
+- approver: orchestrator
