@@ -5,6 +5,7 @@
 - none
 
 ## Next
+- Keyed per-run pseudonym scheme for D5 masking (private per-run key, bundle change), replacing the run-path salt (DEC-004).
 - A wider Ruff rule set (W, I, B, UP) than the pre-commit hook's, and a format hook (orchestrator ruling, DEC-001): about 31,800 findings on the broader probe (INV3-lint); needs its own cleanup round.
 - Explainer fixtures named in `tests/test_explainer_fixtures.py:43` but absent at the top level of `tests/fixtures/explainer/` - confirm where they live or fix the test.
 - Vendored `tenant-bootstrap/vendor/microsoft-skills` entries with no code reference (ALL-SKILLS-CATALOG, microsoft-foundry, entra-agent-id) - removal changes G-owned legal notices.

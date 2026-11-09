@@ -11,3 +11,30 @@
 - why: G's 9 Nov answer takes the Next items as the next release scope; each item closes a gap 1.3.0 shipped with (v2 DEC-004, DEC-011, DEC-017, DEC-019, D6).
 - consequences: plan v2 decisions stay binding and are cited as "v2 DEC-nnn" (archive `.plan/archive/plan-v2/DECISIONS.md`); D6 (G, 7 Nov 2026) is recorded here for the first time: D5 is a redesign from `main` with bounded per-record matching, an HTML peak within `main` plus 15 percent and a privacy review by both providers. Removals wait on G's approval of each exact path list; the orchestrator records each gate as its own entry ("M02 deletion gate", "M03 deletion gate") and each approved path as a CLEANUP.md row. The model retirement changes no verdict, explainer output or bundle field; a needed change is a G re-baseline. Tier A reviews bind to the exact merged head through the merge trailer and the ledger. No hosted CI, no PyPI.
 - approver: G
+
+## DEC-002 auditex assess replaces the model assess command
+- date: 2026-11-09
+- status: approved
+- decision: retiring the model layer adds a top-level `auditex assess <run-dir>` with the same `--policies` and projection flags (minus dry-run and model-endpoint options) and unchanged output files; it is the only writer of the rule-only SCuBA assessment behind report policy explanations.
+- options: auditex assess | fold the assessment into auditex report
+- why: keeps the shipped behaviour while the model subcommand goes.
+- consequences: M02-T03 or M02-T04 adds the command; the 1.4.0 notes name the change.
+- approver: G
+
+## DEC-003 D5 masks names inside group and role names
+- date: 2026-11-09
+- status: approved
+- decision: a person's full name is masked wherever it appears in shareable output, including inside group and role names.
+- options: mask inside group and role names | keep them as a stated D3 limit
+- why: matches "wherever they appear" (plan v3 DEC-001).
+- consequences: one D3 test that kept group and role names verbatim changes.
+- approver: G
+
+## DEC-004 D5 pseudonyms keep the run-path salt in 1.4.0
+- date: 2026-11-09
+- status: approved
+- decision: pseudonyms stay SHA-256 salted with the run path (deterministic per run, no bundle change); the confirm-a-guess limit is documented in the privacy reference; a keyed per-run scheme is a BACKLOG item.
+- options: keep the run-path salt | keyed per-run secret now (bundle change)
+- why: no bundle or contract change in 1.4.0.
+- consequences: M05-T04 documents the limit.
+- approver: G

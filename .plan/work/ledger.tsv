@@ -163,3 +163,14 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-09T08:21:42Z	REV-PLAN-v3	codex	codex2	gpt-6.1-sol	high	readonly	0	106		done	task/PLAN-v3-plan-v3
 2026-11-09T08:23:00Z	PLAN-v3	terra	claude-4	claude-sonnet-5-5	medium	branch	0	35	0.2152	done	task/PLAN-v3-plan-v3
 2026-11-09T08:24:20Z	REV-PLAN-v3	codex	codex2	gpt-6.1-sol	high	readonly	0	79		done	task/PLAN-v3-plan-v3
+2026-11-09T08:26:20Z	M00-T02	codex	codex2	gpt-6.1-terra	low	branch	2	27		blocked	task/M00-T02-test-hygiene
+2026-11-09T08:26:41Z	M00-T01	codex	codex2	gpt-6.1-sol	high	branch	2	49		blocked	task/M00-T01-ruff-lint
+2026-11-09T08:28:19Z	M03-T01	luna	claude-4	claude-haiku-5-5	medium	readonly	1	147	0.0402	partial	c117d99
+2026-11-09T08:32:40Z	M01-T02	luna	claude-2	claude-haiku-5-5	medium	readonly	0	408	0.0336	done	c117d99
+2026-11-09T08:34:25Z	M02-T01	sol	claude-4	claude-opus-5-5	high	readonly	0	513	3.2157	done	c117d99
+2026-11-09T08:44:02Z	M05-T01	sol	claude-1	claude-opus-5-5	xhigh	readonly	0	1090	5.3432	done	c117d99
+2026-11-09T08:45:27Z	M01-T02b	terra	claude-3	claude-sonnet-5-5	low	readonly	0	15	0.3096	done	c117d99
+2026-11-09T08:45:54Z	M00-T01	codex	codex2	gpt-6.1-sol	high	branch	1	43		partial	task/M00-T01-ruff-lint
+2026-11-09T08:46:46Z	M00-T02	codex	codex2	gpt-6.1-terra	low	branch	1	88		partial	task/M00-T02-test-hygiene
+2026-11-09T08:46:47Z	M03-T01-check	terra	claude-4	claude-sonnet-5-5	medium	readonly	0	94	0.5125	done	c117d99
+2026-11-09T08:48:32Z	REV-M02-T01	codex	codex2	gpt-6.1-sol	high	readonly	0	200		done	c117d99
