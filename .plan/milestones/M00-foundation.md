@@ -11,14 +11,14 @@ No feature work before this milestone is green. Read-only inventories and design
 Plan v3 starts from a green, lint-enforced `main`: the 1.3.0 gate chain still passes, `make lint` runs the pinned Ruff check over the whole repository with no findings, the small pytest and taint-scan hygiene defects are fixed, and the ownership map matches the tree. There is no hosted CI by G's decision; the gates are local commands.
 
 ## Definition of Done
-- [ ] Lint runs the pinned Ruff check over the whole repository and passes: `make lint`
-- [ ] Test harness runs locally and is green: `make test`
+- [x] Lint runs the pinned Ruff check over the whole repository and passes: `make lint` (evidence: merge.sh verify for M00-T01 ran make lint && make test on the integrated tree and passed, squash f4ca1c2)
+- [x] Test harness runs locally and is green: `make test` (evidence: merge.sh verify for M00-T01, 23714 passed, 0 failed, squash f4ca1c2)
 - [ ] Contract smoke is green: `make contract-smoke`
 - [ ] Release check passes end to end, including archive and wheel check, rule-pack drift, taint scan and gitleaks: `make release-check`
 - [x] Secrets scan passes: `gitleaks dir . --no-banner --redact` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
 - [x] Taint scan passes on the tracked tree: `bash scripts/oss-taint-scan.sh` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
 - [x] Dependency audit over the base install and every declared extra exits 0: `make audit-deps` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
-- [ ] pytest keeps its default exclusions and the taint scan prunes no absent path and no git-ignored build output: `! grep -q '!Review' pytest.ini && ! grep -q 'docs/taint' scripts/oss-taint-scan.sh && make audit-deps && bash scripts/oss-taint-scan.sh`
+- [x] pytest keeps its default exclusions and the taint scan prunes no absent path and no git-ignored build output: `! grep -q '!Review' pytest.ini && ! grep -q 'docs/taint' scripts/oss-taint-scan.sh && make audit-deps && bash scripts/oss-taint-scan.sh` (evidence: merge.sh verify for M00-T02 ran this command and passed, squash 52c0de3; REV-M00-T02 terra approve)
 - [x] Review: sol confirms the ARCHITECTURE.md ownership map matches the repository (every tracked non-test path outside `.plan/` in exactly one module) `git ls-tree -r --name-only HEAD` (evidence: .plan/work/PLAN-v3/plan-evidence.md)
 
 ## Tasks

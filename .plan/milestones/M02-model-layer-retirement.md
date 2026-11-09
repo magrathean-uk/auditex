@@ -11,7 +11,7 @@ Implements v2 DEC-004 (G: retire the parked local-model layer after 1.3.0). Remo
 The parked model layer is gone from code, CLI, packaging, configs, tests and docs. The helpers the shipped report, projection, export and value-rule paths still use live under non-model names first. No verdict, explainer output or bundle field changes: a normalised digest comparison of the contract-smoke runs, recorded before the retirement, proves it. A change that cannot be avoided stops the milestone for an explicit G re-baseline.
 
 ## Definition of Done
-- [ ] Review: G approved the exact removal path list at the deletion gate (DECISIONS.md entry titled "M02 deletion gate", approver G) and every approved path is a `.plan/CLEANUP.md` row with that DEC id: `d=$(sed -n 's/^## \(DEC-[0-9]*\) M02 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && test -n "$P" && grep -A8 "^## $d M02 deletion gate" .plan/DECISIONS.md | grep -q '^- approver: G'`
+- [x] Review: G approved the exact removal path list at the deletion gate (DECISIONS.md entry titled "M02 deletion gate", approver G) and every approved path is a `.plan/CLEANUP.md` row with that DEC id: `d=$(sed -n 's/^## \(DEC-[0-9]*\) M02 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && test -n "$P" && grep -A8 "^## $d M02 deletion gate" .plan/DECISIONS.md | grep -q '^- approver: G'`
 - [ ] Every approved path is gone from the tree: `d=$(sed -n 's/^## \(DEC-[0-9]*\) M02 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && test -n "$P" && o=$(printf '%s\n' "$P" | xargs git ls-files --) && test -z "$o"`
 - [ ] The cleanup ledger records each M02 removal with reason, evidence, approval and commit: `d=$(sed -n 's/^## \(DEC-[0-9]*\) M02 deletion gate.*/\1/p' .plan/DECISIONS.md) && test -n "$d" && P=$(awk -F'|' -v d="$d" '{gsub(/[ `]/,"",$2); gsub(/ /,"",$5)} $5==d {print $2}' .plan/CLEANUP.md) && test -n "$P" && ! awk -F'|' -v d="$d" '{gsub(/ /,"",$5)} $5==d && ($3 !~ /[a-z]/ || $4 !~ /[a-z]/ || $6 !~ /[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/)' .plan/CLEANUP.md | grep -q .`
 - [ ] No source, Makefile or packaging file references the model client, the model CLI or the `model_train` extra: `test -d src && ! git grep -q -E 'ModelClient|_build_model_parser|model_serving|model_train' -- src Makefile pyproject.toml`
@@ -25,8 +25,8 @@ The parked model layer is gone from code, CLI, packaging, configs, tests and doc
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M02-T01 | Design the retirement and write the exact removal list | sol | M | - | todo |
-| M02-T02 | Record the pre-retirement output digest baseline | codex | M | - | todo |
+| M02-T01 | Design the retirement and write the exact removal list | sol | M | - | done |
+| M02-T02 | Record the pre-retirement output digest baseline | codex | M | - | doing |
 | M02-T03 | Re-home the shared helpers out of the model modules | codex | M | cross-cutting | todo |
 | M02-T04 | Remove the model layer per the approved list | codex | L | cross-cutting | todo |
 | M02-T05 | Rewrite the docs for the retired model layer | terra | M | - | todo |

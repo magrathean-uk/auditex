@@ -22,8 +22,8 @@ Plain `make dist` is byte-reproducible and `scripts/check-reproducible-build.py`
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M01-T01 | Make plain make dist byte-reproducible and check sdist bytes | codex | M | - | todo |
-| M01-T02 | Locate and hash-verify the v3.9.1 replay kit | luna | S | - | todo |
+| M01-T01 | Make plain make dist byte-reproducible and check sdist bytes | codex | M | - | review |
+| M01-T02 | Locate and hash-verify the v3.9.1 replay kit | luna | S | - | done |
 | M01-T03 | Add make acceptance and the runbook acceptance section | terra | S | - | todo |
 | M01-T04 | Run the acceptance suites on main | luna | S | - | todo |
 
