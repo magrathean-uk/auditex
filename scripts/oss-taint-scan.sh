@@ -30,20 +30,12 @@ PATTERN='(^|[^[:alnum:]_])steal([^[:alnum:]_]|$)|Competitor harvest|auditex rese
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
-find . \
-  -path './.git' -prune -o \
-  -path './.venv' -prune -o \
-  -path './.secrets' -prune -o \
-  -path './outputs' -prune -o \
-  -path './.pytest_cache' -prune -o \
-  -path './docs/taint' -prune -o \
-  -path './docs/provenance' -prune -o \
-  -path './tenant-bootstrap/vendor/microsoft-skills' -prune -o \
-  -path './scripts/oss-taint-scan.sh' -prune -o \
-  -name 'third-party-notices.md' -prune -o \
-  -name '*.pyc' -prune -o \
-  -name '__pycache__' -prune -o \
-  -type f -print0 \
+git ls-files -z -- \
+  ':!:docs/provenance/**' \
+  ':!:tenant-bootstrap/vendor/microsoft-skills/**' \
+  ':!:scripts/oss-taint-scan.sh' \
+  ':!:**/third-party-notices.md' \
+  ':!:*.pyc' \
   | xargs -0 grep -nIE "$PATTERN" > "$TMP" || true
 
 if [ -s "$TMP" ]; then
