@@ -7,6 +7,18 @@ date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`)
 
 ## [Unreleased]
 
+### Security and privacy
+
+- **Shareable output masks every directory person's name (D5).** Reports, built-in exports, MCP payloads,
+  notifications, customer packs and the explainer profile mask the names of everyone in the run's directory records,
+  in free text, identifiers and mapping keys, not only privileged users. Prose becomes `User <digest>` and identifiers
+  keep their shape as `user-<digest>`. A person whose name cannot be matched safely is counted in a fixed note on
+  shareable HTML and Markdown reports, with a reason, never by name. Group and role names that contain a person's full
+  name are masked. Pseudonyms use the run-path salt: this is pseudonymisation, not anonymisation. No bundle field
+  changes. Peak memory is checked with `benchmarks/html_peak.py` against `benchmarks/html-peak-baseline.json`.
+  Limits (initials, a family name alone, URL-encoded names, names in HTML tags, structural identifier keys) are in
+  `docs/reference/security-privacy.md`.
+
 ### Removed
 
 - **The parked model layer.** The `auditex model` command is gone with its `sources`, `stage`, `evaluate`,

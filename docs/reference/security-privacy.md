@@ -477,8 +477,9 @@ The local rendered report retains the original values. Shareable reports and
 built-in exports, MCP report payloads, customer packs, notifications and the
 explainer profile redact dashed GUIDs and strings under `owner`, `justification`,
 `comment`, `comments` and `notes`, including strings used as keys in nested containers. Domains, group
-names and role names remain. The redactor also masks e-mail local parts, known
-privileged-user display names and immutable IDs, credentials and run-directory
+names and role names remain. The redactor also masks e-mail local parts, the names of
+every person in the run's directory records (see
+[Person names](#person-names)), immutable IDs, credentials and run-directory
 paths. Public baseline example addresses are kept. A run-specific pseudonym uses
 the resolved run path as its salt input. GUIDs become `Guid` plus a digest,
 which is stable on another pass without reserving a range of real GUIDs.
@@ -493,6 +494,109 @@ produced. A derivative is bound to the pack checksums, so detecting an edit
 followed by recomputing those checksums requires a separately recorded digest
 passed to `verify-pack --expect-checksums-sha256`.
 
+### Person names
+
+Who is masked: every person in the run's directory records, not only privileged
+users. A record is a directory person when its normalised kind is `user` or
+`google_user`, its raw type is `#microsoft.graph.user` or `admin#directory#user`,
+it is a privileged-user record, or it carries a principal address and a display
+name (a user reference such as an audit-event initiator, which also finds people
+seen only in events). A principal type that is not a user (service principal,
+group, device and similar) is not a person.
+
+Where: the shareable, customer-pack and explainer profiles, in every string the
+redactor visits: values, values under controlled keys, group and role display
+names (a group named after a person's full name is masked; a group or role name
+equal to a person's name protects that name instead), JSON embedded in strings,
+and mapping keys, except a whole key that is a structural identifier such as
+`policy_id`. The local profile is unchanged. JSON, CSV, SARIF, OSCAL, MCP and
+notification payloads keep their shape.
+
+What is matched, case-insensitively and Unicode-folded, over whole words only:
+the display name, given plus family name, the family name first, a
+`Family, Given` name, the joined form (`alicesmith`, for two or three words),
+the local part of an address when it has two or more words (`alice.smith`), and
+the whole address read as words, which finds OneDrive-style segments
+(`alice_smith_contoso_com`). Between words the matcher follows white space or
+exactly one of `.` `_` `-` `'`. A possessive such as `Smith's` matches. At most six
+words and 64 characters per word form a name. A person keeps at most 16 such
+keys, required forms first; keys past 16 are reported, not dropped silently.
+`Malice Smithers` and `alice_smithers` do not match `Alice Smith`. Matching is
+one linear pass with a bounded window and at most six dictionary probes per
+word, so its cost does not depend on the number of people.
+
+Replacement forms: prose becomes `User <16 hex>`. An identifier keeps its shape
+and becomes `user-<16 hex>` (for example `/personal/user-<hex>_contoso_com`).
+In a directory-person record `displayName` and `fullName` become
+`User <digest>` whole and `givenName`, `surname` and `familyName` become
+`<redacted-text>`. The pass is idempotent: a pseudonym is never matched again.
+Final markup passes over rendered HTML leave tags and character references
+alone and skip single-word keys, so the renderers' own markup is never
+rewritten; multi-word keys still apply.
+
+Pseudonym scheme: the salt is the SHA-256 hex digest of the UTF-8 real path of
+the run directory; the pseudonym is the first 16 hex characters of SHA-256 over
+the salt, a NUL byte and the person's canonical name in UTF-8 (the display name,
+else the address). It is
+deterministic for a run path, so the prose form equals the structured
+`displayName` form, and differs for another run path. Two people with the same
+display name share a pseudonym. The salt derives from the run path, which is not
+secret: this is pseudonymisation, not anonymisation, and someone who can guess
+the path and holds a candidate list can confirm a guess. A keyed scheme with a
+private per-run key is in the backlog; it would add a file to the run bundle and
+needs approval. `scuba_projection` keeps its own pseudonym for privileged users
+(salted with the manifest digest, a field of the assessment envelope); it feeds
+the private assessment path, not a shareable writer. Multi-run contexts (compare
+and drift) mask the names of every run with the first run's salt.
+
+The unmatched note: a person whose names cannot all be followed safely is
+counted, never named. When any such person exists, shareable HTML and Markdown
+reports (and so a customer pack's Markdown report) end with one line,
+`Name masking: N directory people have names that cannot be matched safely in
+free text (reason count, ...); their name fields are pseudonymised, the same
+words elsewhere are left as written.` People are counted once each (by object
+id, else principal name), under the first applicable reason:
+
+| Reason | Meaning |
+|---|---|
+| `too_short` | fewer than four letters and digits |
+| `no_letters` | no letter at all (a numeric name must not rewrite numbers) |
+| `too_many_tokens` | more than six words or a word over 64 characters |
+| `vocabulary` | equal to product, role or group vocabulary found in the run, or a pseudonym word |
+| `common_word` | only common words such as `admin`, `support` or `meeting room` |
+| `structural` | a structural code such as a policy id or snake-case name |
+| `separator` | a separator the matcher does not follow (for example `/` or `+`); the spellings it does follow are still masked |
+| `limit` | more than 16 keys for the person |
+
+Limits, as implemented. A name left as written is not reported unless it is in
+the table above.
+
+- People who are not in the run's directory records and never appear as a user
+  reference are not discovered.
+- Only recorded spellings match. Nicknames, transliterations, dropped
+  diacritics, initials (`A. Smith`) and a family name on its own are not masked.
+  Middle initials and titles are counted as unmatched or left, and masking them
+  is in the backlog.
+- A name URL-encoded (`Alice%20Smith`), joined by `+` or `/`, or inside an HTML
+  tag or attribute of already rendered text, is left as written.
+- A mapping key that is a person written as an identifier (`priya_kovalenko`,
+  `PriyaKovalenko`) is treated as a structural key and left, and is not counted
+  in the note. Its value is still masked.
+- Scripts written without spaces (CJK) match only where spaces or punctuation
+  delimit the name.
+- Single-word local parts (`asmith`) are masked inside addresses and full-address
+  forms only.
+- Names counted in the note are not left out of free-text matching: only the
+  spellings the index does not support can stay readable (for `separator` and
+  `limit`, every other accepted spelling is still masked), and the name fields
+  are pseudonymised.
+- Over-masking: an ordinary word equal to a person's name and outside the
+  common-word and vocabulary lists is masked too.
+- Immutable-ID matching is unchanged and is one alternation over every
+  discovered ID.
+- The unsalted explainer context of an internal ScubaGear export has no run
+  salt, so it uses unsalted pseudonyms.
+
 Before sharing, identity discovery reads all `normalized/**/*.json` files. It
 refuses malformed, unreadable or non-regular entries, symbolic and hard links, changes
 during discovery and scans exceeding 5,000 files, 64 MiB per file, 256 MiB
@@ -502,23 +606,23 @@ customer packs, notifications and MCP tools. A size-limit refusal reports the
 supported sizes without naming files; other refusals identify the reason using
 safe file labels. Repair the evidence before retrying.
 
-The limits are on bytes scanned, not a resident-memory ceiling. A synthetic
-25,000-user run had 54 normalised files totalling 23.6 MiB; a 90,000-user run
-had 54 files totalling 84.1 MiB, with a largest file of 44.1 MiB. On the test
-machine, their shareable HTML previews peaked at about 0.5 GiB and 1.5 GiB of
-resident memory respectively. The 2 GiB ceiling used for these tests is not
-enforced by the scanner; memory use also depends on the evidence and output.
+The limits are on bytes scanned, not a resident-memory ceiling. Peak
+resident memory of a shareable HTML render is measured by
+`benchmarks/html_peak.py` against `benchmarks/html-peak-baseline.json`, which
+fails above a ratio of 1.15 of the baseline and, with `--require-masked`, when a
+workload name survives in the output. Run the harness for current figures
+instead of relying on numbers quoted here. The harness measures the child
+process's resident memory and compares it with the baseline times the ratio;
+memory use also depends on the evidence and output.
 
-On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 4 GiB at the 64 MiB per-file cap. This is an upper bound that ordinary evidence does not reach; the tested sizes remain as listed above.
+On adversarial JSON, worst-case scanner memory is about 64 times the file size, up to about 4 GiB at the 64 MiB per-file cap. This is an upper bound that ordinary evidence does not reach.
 
 These are pattern and structure rules, not a guarantee that every personal
 value in arbitrary prose is recognised. URL userinfo passwords are matched
 for schemes of 1 to 32 characters and scheme-relative URLs. Known immutable
 IDs are matched in narrative only at word-character boundaries and when at
 least four characters long; a structured immutable-ID field is redacted even
-when shorter. Narrative name matching has the same minimum length and word
-boundaries, and preserves recognised structural, group and role vocabulary.
-Names not discovered in the run or output can remain in prose.
+when shorter. Person-name matching follows [Person names](#person-names), which lists its limits.
 
 ## Credentials and local files
 
