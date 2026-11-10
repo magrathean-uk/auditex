@@ -1,0 +1,2 @@
+--task PASS-verify --role codex --model gpt-6.1-sol --brief .plan/work/PASS-verify/request.md --readonly --sha main --tags debug
+--task PASS-critic --account claude-5 --role sol --brief .plan/work/PASS-critic/request.md --readonly --sha main --timeout 2400 --max-turns 100

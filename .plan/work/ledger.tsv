@@ -281,3 +281,6 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-10T07:19:01Z	RETRO-M06	luna	claude-5	claude-haiku-5-5	medium	inplace	0	62	0.0191	done	main
 2026-11-10T07:33:01Z	PASS-airr	luna	claude-5	claude-haiku-5-5	medium	readonly	0	110	0.1240	done	e32914b
 2026-11-10T07:44:05Z	PASS-model	sol	claude-5	claude-opus-5-5	high	readonly	0	775	2.8236	done	main
+2026-11-10T07:53:37Z	PASS-critic	sol	claude-5	claude-opus-5-5	high	readonly	0	229	1.1195	done	main
+2026-11-10T07:56:41Z	PASS-verify	codex	codex2	gpt-6.1-sol	high	readonly	0	413		done	main
+2026-11-10T08:04:56Z	PASS-verify	codex	codex2	gpt-6.1-sol	high	readonly	0	225		done	main

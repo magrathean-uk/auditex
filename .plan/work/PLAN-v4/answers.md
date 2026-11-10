@@ -8,11 +8,15 @@ and `.plan/archive/plan-v2/DECISIONS.md` (plan v2); do not re-ask them.
 - 10 Nov 2026 (G): "also going forward, we can re-train this on AIRR, we got access now." Model
   re-training on AIRR is an allowed direction. This reverses plan v3's non-goal "Model training,
   base-model pulls, AIRR or Hugging Face upload", so it is a scope change for the gate. Not decided:
-  what is re-trained, its product role and acceptance bar, the base model, where training code
-  lives, and whether any of it enters the next release. Until G rules otherwise, SCuBA verdicts come
-  only from value rules, no model decides a verdict, and the product repository has no model layer
-  (plan v2 DEC-004, plan v3 DEC-005). Starting point: `.plan/work/PASS-model/result.md` (records
-  digest) and `.plan/work/PASS-airr/result.md` (public AIRR facts, unverified against G's allocation).
+  what re-training is for (its product role and how it is judged), how many GPU-hours plan v4 may
+  spend, and whether any of it enters the next release. Until G rules otherwise: SCuBA verdicts come
+  only from value rules and no model decides a verdict; training code stays out of the product
+  repository (plan v2 DEC-004, plan v3 DEC-005) and lives in a dated folder of the development kit,
+  as every earlier round did; a new repository, public or private, needs G's yes; the base model
+  follows G's EU-first rule (re-pick due January 2027); the public model card names no
+  infrastructure; no GPU-hours are spent before G sets a cap. Starting point:
+  `.plan/work/PASS-model/result.md` (records digest) and `.plan/work/PASS-airr/result.md` (public
+  AIRR facts, unverified against G's allocation).
 - 10 Nov 2026 (G): public history is not rewritten for commit c3fe107 ("No, leave history"). Do not
   re-ask.
 - Releases: every release needs G's explicit yes naming the version. The form is a signed tag plus a
@@ -33,3 +37,17 @@ and `.plan/archive/plan-v2/DECISIONS.md` (plan v2); do not re-ask them.
   writes code. Downloads over 5 GB (a base-model snapshot is about 17 GB) are told to G first.
 - Held-out and sealed evaluation rows, credentials, tokens, live tenant evidence, workstation paths and
   session links are never committed. Training-derived vectors and packs may be public.
+- Approving the plan v4 scope approves the plan only. It does not approve a release, a new
+  repository, a download over 5 GB or GPU-hours beyond G's cap.
+
+## For the plan v4 architect and orchestrator
+
+- G's gate answers are appended to this file before the architect runs.
+- Archive: when the architect archives plan v3 into `.plan/archive/plan-v3/` in its branch, it also
+  moves every folder of `.plan/work/` there except `PLAN-*` and `PASS-*`, as plan v2's task folders
+  were archived. `ledger.tsv`, `assessment-*.md`, `batch-*.txt` and `.gitignore` stay in `.plan/work/`.
+- Names that do not collide with plan v2 and v3: `INV4-<slice>`, `batch-v4-inv.txt`, `ASSESS-v4` writing
+  `.plan/work/assessment-v4.md`, `batch-v4-NN.txt`, `VAL-v4`, `REL-v4`, and milestone tags `v4-Mxx`.
+- Fast-forward pushes of `main` are authorised for reviewed merges (machine records D2 and D9) and for
+  plan checkpoints, which change only `.plan/` (plan v2 DEC-001), with gitleaks and a workstation-path
+  scan over the new range. Tags, releases and new repositories are not.

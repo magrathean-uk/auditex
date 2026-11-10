@@ -4,7 +4,7 @@ overall: 100% (was 96%)
 milestone: M06-release-1-4-0 100%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: e32914b 2026-11-10T07:46:33Z
+last_checkpoint: 6ddfc03 2026-11-10T08:05:30Z
 
 ## Next tasks
 - none
@@ -26,11 +26,11 @@ last_checkpoint: e32914b 2026-11-10T07:46:33Z
 ## Quota snapshot
 <!-- quota:begin -->
 claude 93% orchestrator
-claude-1 87% hot
-claude-2 33% shared
+claude-1 88% hot
+claude-2 34% shared
 claude-3 88% hot
 claude-4 82% ok
-claude-5 29% ok
+claude-5 30% ok
 codex 87% hot
-codex2 54% ok
+codex2 55% ok
 <!-- quota:end -->
