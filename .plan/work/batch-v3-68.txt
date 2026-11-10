@@ -1,0 +1,1 @@
+--task M06-T03 --role astra --brief .plan/work/M06-T03/request.md --readonly --sha 5843f0b4977c --tags gate
