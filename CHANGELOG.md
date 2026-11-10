@@ -5,7 +5,7 @@ All notable changes to Auditex are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The run-bundle contract has its own
 date-based version, `CONTRACT_VERSION` (see `docs/reference/output-contract.md`).
 
-## [1.4.0] - 2026-11-09
+## [1.4.0] - 2026-11-10
 
 The model layer is retired, shareable output masks names, and the build is reproducible. `CONTRACT_VERSION` and
 `docs/reference/output-contract.md` are unchanged: no bundle change was made.
