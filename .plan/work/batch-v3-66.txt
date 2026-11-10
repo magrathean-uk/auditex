@@ -1,0 +1,1 @@
+--task REV-M02-T02c --role codex --model gpt-6.1-sol --brief .plan/work/REV-M02-T02c/request.md --readonly --sha task/M02-T02c-digest-clock --tags debug

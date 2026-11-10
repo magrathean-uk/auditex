@@ -1,0 +1,1 @@
+--task M06-T02 --role terra --account claude-5 --brief .plan/work/M06-T02/request.md --readonly --sha 5843f0b4977c --timeout 9000
