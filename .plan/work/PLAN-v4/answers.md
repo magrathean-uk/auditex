@@ -24,9 +24,11 @@ and `.plan/archive/plan-v2/DECISIONS.md` (plan v2); do not re-ask them.
   still decides between bases that score inside the noise band. No numeric cap is set: the plan
   carries a GPU-hour budget per stage, and no hours are spent before G approves the plan v4 scope.
   Because the allocation ends, the AIRR work runs beside the product release, not after it.
-- 10 Nov 2026, build check asked by G: no copy of the model build is on this Mac or the external
-  volume. The object-store copies were not checked (1Password was locked); the earlier cluster's
-  copies need G's login. Securing the build is an early task.
+- 10 Nov 2026, build check asked by G: done. After G unlocked 1Password the object-store copies
+  were pulled onto the external volume and verified: the model file (6,058,747,104 bytes, sha256
+  840fb447...ead01a) and the adapter archive (373,913,600 bytes, sha256 40db5b31...), whose
+  checkpoint-500 weights match the recorded b477f2b6... for the first time. Securing the build is
+  no longer a task. The earlier cluster's copies were not checked.
 - 10 Nov 2026 (G): public history is not rewritten for commit c3fe107 ("No, leave history"). Do not
   re-ask.
 - Releases: every release needs G's explicit yes naming the version. The form is a signed tag plus a
