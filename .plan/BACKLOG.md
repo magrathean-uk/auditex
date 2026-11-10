@@ -5,6 +5,7 @@
 - none
 
 ## Next
+- Model re-training on AIRR (G, 10 Nov 2026: "we can re-train this on AIRR, we got access now"). 1.4.0 retired the in-repo model layer and rules decide every verdict, so the product role, the acceptance bar, the base model and where training code lives go to G at the plan v4 gate. The last build of record is Ministral 3 8B with LoRA checkpoint-500 on oracle pack v10 (403/435 alone, 419/435 with the rule pre-check); training code is recoverable from tag `v1.3.0`. Starting point: `.plan/work/PASS-model/result.md` and `.plan/work/PASS-airr/result.md`.
 - Keyed per-run pseudonym scheme for D5 masking (private per-run key, bundle change), replacing the run-path salt (DEC-004).
 - A wider Ruff rule set (W, I, B, UP) than the pre-commit hook's, and a format hook (orchestrator ruling, DEC-001): about 31,800 findings on the broader probe (INV3-lint); needs its own cleanup round.
 - Explainer fixtures named in `tests/test_explainer_fixtures.py:43` but absent at the top level of `tests/fixtures/explainer/` - confirm where they live or fix the test.
@@ -19,3 +20,4 @@
 - Live-tenant work, parked until G raises it: certificate auth live acceptance (`wt/collect-certauth-1`), presets, IPPS, Teams coverage, the day-one run, `-Enforce`, and the SS 2.1 `TargetedUsersToProtect` live wire-shape gate.
 - Dummy-tenant kit: 7l6 full offline suite and gate, then 7m, 7n and 7o behind it; the 7m ancestry merge stays blocked without a common base.
 - Hosted CI or merging `wt/github-build-tags-20261108`, only if G asks.
+- Housekeeping, only with G: about 195 worktrees and 89 `wt/*` branches from the 5 to 8 Nov development remain on the external volume. Triage them (merged, superseded, still wanted) and bring G an exact removal list.
