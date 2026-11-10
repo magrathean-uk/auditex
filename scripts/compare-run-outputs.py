@@ -6,7 +6,7 @@
 or is missing, and on an empty or unreadable digest file.  RUNDIR is the directory holding
 the ``ci-*`` run directories (``outputs/ci-contract``).
 
-Volatile fields (run-time timestamps, run ids, durations, absolute paths) are normalised
+Volatile fields (run-time timestamps, run ids, durations, absolute paths, date-relative day counts) are normalised
 first; see ``.plan/work/M02-T01/design.md`` section 8.
 """
 
@@ -50,11 +50,14 @@ TIMESTAMP_KEYS = {"generated_at", "collected_at", "started_at", "completed_at", 
 DURATION_KEYS = {"duration_seconds", "latency_ms"}
 RUN_ID_KEYS = {"run_id"}
 PATH_KEYS = {"run_dir"}
+# Values derived from the current date (credential expiry day counts); see design.md section 8.
+RELATIVE_DAY_KEYS = {"expiry_days_remaining"}
 TS_PLACEHOLDER = "<timestamp>"
 RUN_ID_PLACEHOLDER = "<run-id>"
 DURATION_PLACEHOLDER = "<duration>"
 PATH_PLACEHOLDER = "<path>"
 ROOT_PLACEHOLDER = "<root>"
+RELATIVE_DAYS_PLACEHOLDER = "<days-from-run-date>"
 
 # Run-time timestamps in free text (summary.md): only those carrying fractional seconds or an
 # explicit offset are written at run time; fixed sample-data stamps end in Z with no fraction.
@@ -79,9 +82,29 @@ def _scrub_string(value: str, prefixes: list[str]) -> str:
     return value
 
 
+def _relative_days(value: Any) -> list[Any]:
+    """Every date-relative day count nested in ``value``."""
+    if isinstance(value, dict):
+        found = [v for k, v in value.items() if k in RELATIVE_DAY_KEYS and v is not None]
+        for child in value.values():
+            found.extend(_relative_days(child))
+        return found
+    if isinstance(value, list):
+        return [d for child in value for d in _relative_days(child)]
+    return []
+
+
 def normalise(value: Any, prefixes: list[str], key: str | None = None) -> Any:
     if isinstance(value, dict):
-        return {k: normalise(v, prefixes, k) for k, v in value.items()}
+        # A finding's returned_value repeats the expiry day count of its evidence.
+        derived = _relative_days(value) if "returned_value" in value else []
+        out = {}
+        for k, v in value.items():
+            if k == "returned_value" and v is not None and not isinstance(v, bool) and v in derived:
+                out[k] = RELATIVE_DAYS_PLACEHOLDER
+            else:
+                out[k] = normalise(v, prefixes, k)
+        return out
     if isinstance(value, list):
         return [normalise(v, prefixes, key) for v in value]
     if key in TIMESTAMP_KEYS and value is not None:
@@ -92,6 +115,8 @@ def normalise(value: Any, prefixes: list[str], key: str | None = None) -> Any:
         return DURATION_PLACEHOLDER
     if key in PATH_KEYS and value is not None:
         return PATH_PLACEHOLDER
+    if key in RELATIVE_DAY_KEYS and value is not None:
+        return RELATIVE_DAYS_PLACEHOLDER
     if isinstance(value, str):
         return _scrub_string(value, prefixes)
     return value

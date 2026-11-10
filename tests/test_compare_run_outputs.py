@@ -20,7 +20,7 @@ def _write(path: Path, payload) -> None:
     path.write_text(payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8")
 
 
-def _make_run(base: Path, name: str, *, stamp: str, verdict: str = "pass", line: str = "Policy met.") -> Path:
+def _make_run(base: Path, name: str, *, stamp: str, verdict: str = "pass", line: str = "Policy met.", days: int = -436) -> Path:
     run = base / name
     run_dir = str(run.resolve())
     _write(
@@ -35,7 +35,17 @@ def _make_run(base: Path, name: str, *, stamp: str, verdict: str = "pass", line:
     )
     _write(run / "reports/action-plan.json", [{"title": "Do it"}])
     _write(run / "summary.json", {"duration_seconds": float(stamp), "run_id": f"id-{stamp}", "total": 3})
-    _write(run / "findings/findings.json", [{"rule_id": "a", "evidence_refs": [{"collected_at": f"t{stamp}"}]}])
+    _write(
+        run / "findings/findings.json",
+        [
+            {
+                "rule_id": "a",
+                "evidence_refs": [{"collected_at": f"t{stamp}"}],
+                "evidence": {"expiry_state": "expired", "expiry_days_remaining": days},
+                "returned_value": days,
+            }
+        ],
+    )
     _write(run / "summary.md", f"# Summary {name}\nGenerated 2026-01-01T00:00:{stamp}.123456+00:00 in {run_dir}\nVerdict {verdict}\n")
     if name == cro.PROJECTION_RUN:
         _write(
@@ -75,6 +85,36 @@ def test_volatile_fields_only_compare_equal(tmp_path):
     digests = tmp_path / "digests.json"
     assert cro.main(["--write", str(digests), str(first)]) == 0
     assert cro.main(["--digests", str(digests), str(second)]) == 0
+
+
+def test_shifting_the_run_date_by_a_day_keeps_digests_equal(tmp_path):
+    first = _make_tree(tmp_path / "a", stamp="11", days=-436)
+    second = _make_tree(tmp_path / "b", stamp="11", days=-435)
+    digests = tmp_path / "digests.json"
+    assert cro.main(["--write", str(digests), str(first)]) == 0
+    assert cro.main(["--digests", str(digests), str(second)]) == 0
+
+
+def test_unrelated_returned_value_is_still_compared(tmp_path, capsys):
+    base = _make_tree(tmp_path / "a", stamp="11")
+    digests = tmp_path / "digests.json"
+    cro.main(["--write", str(digests), str(base)])
+    other = _make_tree(tmp_path / "b", stamp="11")
+    path = other / "ci-admin-set/findings/findings.json"
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    rows[0]["returned_value"] = 7
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    capsys.readouterr()
+    assert cro.main(["--digests", str(digests), str(other)]) == 1
+    assert "ci-admin-set/findings/findings.json: differs" in capsys.readouterr().err
+
+
+def test_changed_verdict_with_shifted_date_still_differs(tmp_path):
+    base = _make_tree(tmp_path / "a", stamp="11", days=-436)
+    digests = tmp_path / "digests.json"
+    cro.main(["--write", str(digests), str(base)])
+    changed = _make_tree(tmp_path / "b", stamp="11", days=-435, verdict="fail")
+    assert cro.main(["--digests", str(digests), str(changed)]) == 1
 
 
 def test_changed_verdict_is_named(tmp_path, capsys):
