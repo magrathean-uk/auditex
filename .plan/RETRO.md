@@ -261,3 +261,48 @@ Out of scope, noted as a risk: REV-M04-T01, REV-M04-T02 and REV-M04-T03 each rep
 - Other-provider review on every writer task: REV-M04-T01, REV-M04-T02 and REV-M04-T03 (codex2) each returned approve.
 - Honest UNTESTABLE reviews: REV-M04-T01 reported verify as not run rather than as a pass. REV-M04-T02 named its sandbox blocker.
 - Cheap doc task on terra: M04-T03 cost $0.18 to $0.30 per run, and its result checks each test name with grep.
+
+## M05
+Source: `.plan/work/ledger.tsv` (19 rows: `M05-*`, `REV-M05-*`, and `REV2-M05-T03`) and result.md files. Detail in `.plan/work/RETRO-M05/evidence.md`.
+
+### Spend
+Costs are as recorded. Seconds are as recorded.
+
+| launcher | runs | cost_usd | seconds | non-zero exits |
+|---|---|---|---|---|
+| claude-1 | 3 | 5.8787 | 1378 | 0 |
+| claude-3 | 1 | 5.2494 | 2066 | 0 |
+| claude-4 | 1 | 1.0449 | 217 | 0 |
+| claude-5 | 7 | 8.1057 | 2015 | 0 |
+| codex2 | 7 | not recorded | 1050 | 0 |
+| total | 19 | 20.2787 | 6726 | 0 |
+
+| role | runs | cost_usd | seconds |
+|---|---|---|---|
+| sol | 7 | 18.9865 | 5252 |
+| terra | 5 | 1.2922 | 424 |
+| codex | 7 | not recorded | 1050 |
+
+Seven codex2 rows have an empty cost_usd, so the total excludes codex2 spend. The M05-T04 read-through row names launcher `main` and branch `main`, so it is malformed.
+
+### Failures and retries
+| task | attempts | final status | cause | one line |
+|---|---|---|---|---|
+| M05-T02 | 2 | done | technical | REV-M05-T02 found the baseline loader did not validate its fields; fixed on the second attempt. |
+| M05-T03 | 3 | done at 215148d | technical (design gap) | Six review items on identity joins, key cap, separator spellings and note wording; two repair rounds. |
+| M05-T04 | 3 | done | not recorded in result.md | REV-M05-T04 needed repairs; approved at bdd9063 after them. |
+| REV-M05-T02, REV-M05-T03, REV-M05-T04 | 1 each | done | mechanical | Reviewer worktree lacked `.venv` or a writable temporary folder, so verify was not run there. |
+| M05 DoD item 1 | n/a | open | mechanical | No "D5 design" DEC entry with approver G; orchestrator item. |
+
+Non-zero exits: 0. Retry attempts beyond the first: 5.
+
+### Proposed brief fixes
+- `terra-implement.md` (M05-T02): require a type and range check on every baseline field, exit non-zero on malformed input, and one test per field.
+- The sol writer brief used for M05-T03 (name not in the ledger; likely `sol-architect.md`): design.md must list identity-join and spelling-variant cases with expected outcomes before code.
+- `codex-review.md`: before verify, link `.venv` from the main checkout and set `TMPDIR` to `$TMPDIR` in the reviewer worktree.
+
+### Keep
+- Frozen interface first: M05-T01 froze the harness interface before M05-T02 started, and M05-T02 was done in one retry with no design change.
+- Other-provider review on writer tasks: REV-M05-T02, REV-M05-T03 and REV-M05-T04 (codex2) all reached approve, and REV-M05-T03-privacy (claude-5) reviewed the privacy surface.
+- Repair rounds capped at two: M05-T03 closed in two rounds at 215148d.
+- Cheap doc work on terra: M05-T04 cost $0.17 to $0.38 per run and its result.md checks the constants against the code.

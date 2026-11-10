@@ -1,0 +1,1 @@
+--task REV-M06-T01 --role codex --model gpt-6.1-sol --template codex-review --readonly --sha task/M06-T01-release-notes --tags debug --var TASK=M06-T01 --var MILESTONE=.plan/milestones/M06-release-1-4-0.md --var BRANCH=task/M06-T01-release-notes --var BASE=main

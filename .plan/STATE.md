@@ -1,13 +1,15 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 83% (was 68%)
-milestone: M05-d5-name-masking 88%
+overall: 94% (was 83%)
+milestone: M06-release-1-4-0 60%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 1509ac9 2026-11-09T21:44:22Z
+last_checkpoint: 0589f07 2026-11-10T00:09:41Z
 
 ## Next tasks
-- none
+- M06-T03 Pre-publication release gate validation (astra)
+- M06-T04 Tag and publish 1.4.0 after G's yes (orchestrator)
+- M06-T05 Verify the published release (luna)
 
 ## Blockers
 - none
@@ -24,12 +26,12 @@ last_checkpoint: 1509ac9 2026-11-09T21:44:22Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 91% orchestrator
+claude 92% orchestrator
 claude-1 85% hot
-claude-2 29% shared
-claude-3 85% hot
-claude-4 80% ok
-claude-5 19% ok
+claude-2 32% shared
+claude-3 86% hot
+claude-4 81% ok
+claude-5 23% ok
 codex 87% hot
-codex2 42% ok
+codex2 45% ok
 <!-- quota:end -->

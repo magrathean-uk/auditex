@@ -71,8 +71,8 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 | M02 | model-layer-retirement | 20 | 100 | done |
 | M03 | cleanup-and-bootstrap | 10 | 100 | done |
 | M04 | boundary-scanners | 10 | 100 | done |
-| M05 | d5-name-masking | 20 | 88 | active |
-| M06 | release-1-4-0 | 15 | 0 | planned |
+| M05 | d5-name-masking | 20 | 100 | done |
+| M06 | release-1-4-0 | 15 | 60 | active |
 <!-- milestones:end -->
 
 Order: M00 first (M00-T01 alone); read-only tasks (M01-T02, M02-T01, M03-T01, M05-T01) may run alongside it.
