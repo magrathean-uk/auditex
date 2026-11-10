@@ -8,15 +8,25 @@ and `.plan/archive/plan-v2/DECISIONS.md` (plan v2); do not re-ask them.
 - 10 Nov 2026 (G): "also going forward, we can re-train this on AIRR, we got access now." Model
   re-training on AIRR is an allowed direction. This reverses plan v3's non-goal "Model training,
   base-model pulls, AIRR or Hugging Face upload", so it is a scope change for the gate. Not decided:
-  what re-training is for (its product role and how it is judged), how many GPU-hours plan v4 may
-  spend, and whether any of it enters the next release. Until G rules otherwise: SCuBA verdicts come
+  what re-training is for (its product role and how it is judged) and whether any of it enters the
+  next release. Until G rules otherwise: SCuBA verdicts come
   only from value rules and no model decides a verdict; training code stays out of the product
   repository (plan v2 DEC-004, plan v3 DEC-005) and lives in a dated folder of the development kit,
   as every earlier round did; a new repository, public or private, needs G's yes; the base model
   follows G's EU-first rule (re-pick due January 2027); the public model card names no
-  infrastructure; no GPU-hours are spent before G sets a cap. Starting point:
+  infrastructure. Starting point:
   `.plan/work/PASS-model/result.md` (records digest) and `.plan/work/PASS-airr/result.md` (public
   AIRR facts, unverified against G's allocation).
+- 10 Nov 2026 (G), the AIRR facts: "airr: we have loads of hours, so we can use this best. also qwen4
+  coming soon. isambard. i can login, end is jan late." The allocation is on Isambard-AI, ends in late
+  January 2027 and has plentiful hours, which are to be put to the best use. G logs in; workers
+  cannot. Qwen 4 is expected soon and is a candidate in the base-model re-pick; the EU-first rule
+  still decides between bases that score inside the noise band. No numeric cap is set: the plan
+  carries a GPU-hour budget per stage, and no hours are spent before G approves the plan v4 scope.
+  Because the allocation ends, the AIRR work runs beside the product release, not after it.
+- 10 Nov 2026, build check asked by G: no copy of the model build is on this Mac or the external
+  volume. The object-store copies were not checked (1Password was locked); the earlier cluster's
+  copies need G's login. Securing the build is an early task.
 - 10 Nov 2026 (G): public history is not rewritten for commit c3fe107 ("No, leave history"). Do not
   re-ask.
 - Releases: every release needs G's explicit yes naming the version. The form is a signed tag plus a
@@ -38,7 +48,7 @@ and `.plan/archive/plan-v2/DECISIONS.md` (plan v2); do not re-ask them.
 - Held-out and sealed evaluation rows, credentials, tokens, live tenant evidence, workstation paths and
   session links are never committed. Training-derived vectors and packs may be public.
 - Approving the plan v4 scope approves the plan only. It does not approve a release, a new
-  repository, a download over 5 GB or GPU-hours beyond G's cap.
+  repository or a download over 5 GB. GPU-hours follow the budget in the approved plan.
 
 ## For the plan v4 architect and orchestrator
 
