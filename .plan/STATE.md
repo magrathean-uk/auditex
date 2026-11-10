@@ -1,20 +1,19 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 96% (was 94%)
-milestone: M06-release-1-4-0 70%
+overall: 100% (was 96%)
+milestone: M06-release-1-4-0 100%
 plan_version: v3
 release_scope: 1.4.0 from plan v2's BACKLOG Next items - lint-enforced gates, byte-reproducible dist (wheel and sdist), make acceptance with the full v3.9.1 replay at each milestone close, model layer retired via the deletion gate with unchanged output, dead-code and bootstrap-copy cleanup with the forwarder proof, DEC-011 scanner follow-ups, D5-v2 masking of everyone in the run's directory records, signed v1.4.0 tag plus GitHub release with wheel and sdist (no PyPI) on G's yes
-last_checkpoint: 5369c38 2026-11-10T01:09:37Z
+last_checkpoint: 44273d6 2026-11-10T07:19:08Z
 
 ## Next tasks
-- M06-T04 Tag and publish 1.4.0 after G's yes (orchestrator)
-- M06-T05 Verify the published release (luna)
+- none
 
 ## Blockers
 - none
 
 ## Pending G decisions
-- G's yes naming 1.4.0 at publication (D9). Deletion gates approved (DEC-005, DEC-006).
+- none. 1.4.0 is released (DEC-011): signed tag v1.4.0 on 5843f0b, GitHub release verified (M06-T05). Next work is BACKLOG Next through a new /plan.
 
 ## Notes
 - Merge order for shared files: DEC-007 (M03-T02 and M05-T03 before M02 to M04 tasks, rebase plus full verify).
@@ -25,12 +24,12 @@ last_checkpoint: 5369c38 2026-11-10T01:09:37Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 92% orchestrator
+claude 93% orchestrator
 claude-1 85% hot
-claude-2 32% shared
-claude-3 87% hot
-claude-4 81% ok
-claude-5 24% ok
+claude-2 33% shared
+claude-3 88% hot
+claude-4 82% ok
+claude-5 28% ok
 codex 87% hot
-codex2 47% ok
+codex2 53% ok
 <!-- quota:end -->

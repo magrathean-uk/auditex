@@ -306,3 +306,49 @@ Non-zero exits: 0. Retry attempts beyond the first: 5.
 - Other-provider review on writer tasks: REV-M05-T02, REV-M05-T03 and REV-M05-T04 (codex2) all reached approve, and REV-M05-T03-privacy (claude-5) reviewed the privacy surface.
 - Repair rounds capped at two: M05-T03 closed in two rounds at 215148d.
 - Cheap doc work on terra: M05-T04 cost $0.17 to $0.38 per run and its result.md checks the constants against the code.
+
+## M06
+
+### Spend
+
+Ledger rows: 13 (10 M06 task rows, 3 REV-M06 rows). No malformed rows.
+
+| launcher | role | runs | total cost_usd | total seconds | non-zero exits |
+|---|---|---|---|---|---|
+| claude-5 | terra | 8 | 1.6385 | 7703 | 1 |
+| codex2 | codex (reviews) | 3 | not recorded | 141 | 0 |
+| codex2 | astra (validation) | 2 | not recorded | 780 | 0 |
+| **total** | | **13** | **1.6385 (codex2 not recorded)** | **8624** | **1** |
+
+### Failures and retries
+
+| task | attempts | final status | cause | one line |
+|---|---|---|---|---|
+| M06-T02 | 3 | done at 5843f0b | technical | Attempt 1 (exit 1, 25 s, partial) has no recorded cause. Attempt 2 passed on 0589f07; attempt 3 reran on 5843f0b after the digest fix. Its first release-check hit the 10-minute harness limit and was rerun (mechanical). |
+| M06-T03 | 2 | done at 5843f0b | technical | Attempt 1 on 0589f07 found the date-sensitive output comparison; re-validated on 5843f0b. |
+| M06-T01b | 1 (fix task) | done | technical | Five unused imports in tests/test_model_precheck.py; lint fix. The failing lint run is not recorded. |
+| M06-T01c | 1 (fix task) | done | design | Release heading dated 2026-11-09; corrected to 2026-11-10 after review. |
+| REV-M06-T01 | 1 | approve, verify not run | mechanical | Reviewer worktree had no pytest; make test and contract-smoke not reached. Same gap as M05. |
+| REV-M06-T01b | 1 | approve, ruff not run | mechanical | `.venv` missing in the reviewer worktree. |
+| REV-M06-T01c | 1 | approve | mechanical | Storage diagnostic failed on a lifecycle lock; no repair attempted. |
+
+Non-zero exits: 1 (M06-T02 attempt 1). Retry attempts beyond the first: 5 (M06-T02 x2, M06-T03 x1, M06-T01b, M06-T01c).
+
+Ledger gaps (not guessed):
+- M06-T02 attempt 1: the branch column holds commit `d542d0b`, not a branch name.
+- codex2 rows (5): cost_usd blank, so codex2 spend is not recorded, not zero.
+- Owner mismatch: M06-T02 is luna in the milestone but terra in the ledger; M06-T04 is orchestrator but terra; M06-T05 is luna but terra.
+
+### Proposed brief fixes
+- `terra-verify.md` (M06-T02, attempts 1 and 3): run `make release-check` and the other gates under `run-job <outdir> -- <cmd>` and wait on `.done`, not in the foreground.
+- `terra-implement.md` (M06-T01 to M06-T01b): add `make lint` to the verify command so unused imports fail before review.
+- `terra-implement.md` (M06-T01 to M06-T01c): do not write a release date into a heading; the tagging step sets it.
+- `astra-validate.md` (M06-T03, rerun on 5843f0b): if the candidate SHA changes, rerun the gate and validation and record both on the new SHA.
+- `codex-review.md` (REV-M06-T01, REV-M06-T01b): link `.venv` from the main checkout before verify; if blocked, report verify not run and do not give approve. Recurs from M05.
+
+### Keep
+- Frozen candidate SHA with recorded gates: M06-T02 and M06-T03 both ran on 5843f0b, and M06-T04 and M06-T05 released and verified on it with no retries.
+- Other-provider review: REV-M06-T01, REV-M06-T01b and REV-M06-T01c (codex2, gpt-6.1-sol) all reviewed frozen commits.
+- Narrow fix tasks: M06-T01b ($0.1255, 21 s) and M06-T01c ($0.1182, 15 s) each fixed one finding at low effort.
+- Independent post-release check: M06-T05 downloaded both assets fresh and matched the recorded hashes ($0.0760, 20 s).
+- Signed tag pushed alone: M06-T04 pushed only `v1.4.0` after all seven steps passed.

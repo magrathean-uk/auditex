@@ -1,0 +1,1 @@
+--task M06-T04 --account claude-5 --role terra --brief .plan/work/M06-T04/request.md --readonly --sha 5843f0b4977c --tags gate --timeout 3600

@@ -2,7 +2,7 @@
 id: M06
 name: release-1-4-0
 weight: 15
-status: active
+status: done
 ---
 # M06 release-1-4-0
 Starts after every M00-M05 DoD item is ticked. The version name and publication need G's explicit yes naming 1.4.0 (D9); the form stays a signed tag plus a GitHub release with the wheel and sdist, no PyPI (v2 DEC-001).
@@ -18,9 +18,9 @@ Starts after every M00-M05 DoD item is ticked. The version name and publication 
 - [x] Both acceptance suites, the full v3.9.1 replay included, pass on the release commit: `make acceptance` (evidence: M06-T02 on candidate 5843f0b: release-check 22620 passed 0 failed, audit-deps clean, acceptance pass with 0 replay skips, two byte-identical builds, release smoke ok; wheel cd66fe86..., sdist d41f154a...)
 - [x] Two plain builds of the release commit give byte-identical wheel and sdist bytes, and both pass the base, Google and MCP release smoke: `make dist && bash scripts/release-smoke.sh dist "$TMPDIR/auditex-release-smoke" && .venv/bin/python scripts/check-reproducible-build.py` (evidence: M06-T02 on candidate 5843f0b: release-check 22620 passed 0 failed, audit-deps clean, acceptance pass with 0 replay skips, two byte-identical builds, release smoke ok; wheel cd66fe86..., sdist d41f154a...)
 - [x] Review: astra's pre-publication release gate returns ready on the release commit: `grep -qx 'verdict: ready' .plan/work/M06-T03/result.md`
-- [ ] Review: G's explicit yes naming 1.4.0 is recorded in DECISIONS.md with approver G: `grep -n -A8 '^## DEC-[0-9]* Release 1.4.0' .plan/DECISIONS.md | grep -q 'approver: G'`
-- [ ] The signed tag `v1.4.0` points at the gated commit and is on `origin`: `git tag -v v1.4.0 && test "$(git rev-parse 'v1.4.0^{commit}')" = "$(sed -n 's/^reviewed: *\([0-9a-f]\{12,40\}\).*/\1/p' .plan/work/M06-T03/result.md | head -1)" && git ls-remote --exit-code --tags origin refs/tags/v1.4.0`
-- [ ] The GitHub release `v1.4.0` carries the wheel and the sdist, and both, downloaded fresh, byte-match the hashes gated in M06-T02: `grep -qx 'published-artefacts: verified' .plan/work/M06-T05/result.md`
+- [x] Review: G's explicit yes naming 1.4.0 is recorded in DECISIONS.md with approver G: `grep -n -A8 '^## DEC-[0-9]* Release 1.4.0' .plan/DECISIONS.md | grep -q 'approver: G'`
+- [x] The signed tag `v1.4.0` points at the gated commit and is on `origin`: `git tag -v v1.4.0 && test "$(git rev-parse 'v1.4.0^{commit}')" = "$(sed -n 's/^reviewed: *\([0-9a-f]\{12,40\}\).*/\1/p' .plan/work/M06-T03/result.md | head -1)" && git ls-remote --exit-code --tags origin refs/tags/v1.4.0`
+- [x] The GitHub release `v1.4.0` carries the wheel and the sdist, and both, downloaded fresh, byte-match the hashes gated in M06-T02: `grep -qx 'published-artefacts: verified' .plan/work/M06-T05/result.md`
 
 ## Tasks
 | id | title | owner | size | tags | status |
@@ -28,8 +28,8 @@ Starts after every M00-M05 DoD item is ticked. The version name and publication 
 | M06-T01 | Write the 1.4.0 release notes and bump the version | terra | M | - | done |
 | M06-T02 | Run the pre-publication gates on the release candidate | luna | S | - | done |
 | M06-T03 | Pre-publication release gate validation | astra | S | gate | done |
-| M06-T04 | Tag and publish 1.4.0 after G's yes | orchestrator | S | gate | todo |
-| M06-T05 | Verify the published release | luna | S | - | todo |
+| M06-T04 | Tag and publish 1.4.0 after G's yes | orchestrator | S | gate | done |
+| M06-T05 | Verify the published release | luna | S | - | done |
 
 ## Acceptance criteria
 ### M06-T01 Write the 1.4.0 release notes and bump the version

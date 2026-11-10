@@ -94,3 +94,12 @@
 - why: both providers approve after two repair rounds; the 90,000-record report has no surviving name with peak memory 1.03 to 1.07 times the baseline (limit 1.15); every name the matcher cannot follow is reported, never silent.
 - consequences: M05-T03 merges; M05-T04 documents the boundary and its limits in the privacy reference and the CHANGELOG; masking names with middle initials or titles stays in BACKLOG Next.
 - approver: G
+
+## DEC-011 Release 1.4.0
+- date: 2026-11-10
+- status: approved
+- decision: G approves releasing Auditex 1.4.0 from the gated candidate 5843f0b4977c410f484502d424b6151d54d7be94 as a signed tag `v1.4.0` on that commit, pushed to origin, plus a GitHub release carrying exactly the gated wheel (sha256 cd66fe86c9723031f3d114e02c89faeb3eeb81480739780aa9bd87d9639b0497) and sdist (sha256 d41f154a116cf006839ac87d6dfb889f830ef4002258d03596106e33c7272554). No PyPI.
+- options: yes, release 1.4.0 | not yet
+- why: every pre-publication gate passed on the candidate (M06-T02) and astra's release gate returned ready (M06-T03).
+- consequences: M06-T04 tags and publishes; M06-T05 verifies the published files.
+- approver: G
