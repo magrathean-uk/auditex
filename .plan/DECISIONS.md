@@ -64,3 +64,21 @@
 - approver: G
 - amendment 1 (2026-11-11): the inventory and M07-T01 found round 7l already accepted. The kit was accepted offline on 8 Nov 2026 after a full offline run with exit 0 and a gate 22 SHIP from both providers with no high or medium finding, and the live kit is byte-identical to that accepted state today (365 files, frozen as `dt-r7l6-ro` in the kit, manifest sha256 109679e67da549ddc6c72bd751f1217fb146f31962a5bd5e2392c80958b1cb8c). The backlog line that listed "the 7l6 full offline suite and gate" as open was stale. What remains under this decision is one confirmation run of the full suite through the repaired driver (`M07-T02`, started by the orchestrator as the one heavy job) and the report to G and the tenant session. No milestone and no weight change are needed, and the seat priority this decision gave the kit ends when that run is started.
 
+## DEC-007 The held-out set's repair may change the twin definition
+- date: 2026-11-11
+- status: approved
+- decision: the review of the clean held-out set (REV-M02-T02) found four blocking defects: labels that the pinned rules do not reproduce from the row's own evidence, "not assessed" labels assigned without evaluating the masked input, rows that share their seed tenants and their missing-section gate with training rows although the twin count is zero, and conflicting labels removed instead of the key being repaired. The repair of M02-T02 may therefore also change `heldout/twin_definition.py` and `heldout/notes/**` in the AIRR kit (M02-T01's files), provided it states the recount of the old test set under the changed key and keeps the soundness check; the set is regenerated from seed tenants disjoint from the training pack's.
+- options: reopen M02-T01 as its own task first | let the one repair own both (chosen: the two are sequential, in one module, and the key and the set must agree)
+- why: every later score rests on this set; a key that is repaired separately from the set it guards would need a third pass.
+- consequences: M02-T01's recorded twin counts may change and are restated by the repair; the set's sha256 changes; M02-T03 and M03 read the definition only after the repaired set passes its review.
+- approver: auto
+
+## DEC-008 One kit change round from the trial tenant's live facts
+- date: 2026-11-11
+- status: approved
+- decision: the read-only checks on the trial tenant showed what the accepted kit needs before writes start. G decided three things. (1) MS.AAD.9.1 is the one named gap: the kit's Agent 365 licence requirement is removed (no licence in the tenant carries it and no expected result depends on it). (2) One kit change round now, through the offline gate: that removal; reuse of an already signed-in Exchange, Security and Compliance or Teams session so day one needs far fewer sign-ins; a refusal on an organisation not yet enabled for customisation treated as a definite refusal with mock cases; and a setting that names the Teams module version (the module fails to sign in on macOS from 7.9.0 on; 7.8.0 was observed to connect). (3) The tenant session may run the one-way organisation enable step by hand before the kit's Exchange and Defender scripts. G's words were the option picks "Name 9.1 the gap (Recommended)", "Yes, one round now (Recommended)" and "Yes, run it (Recommended)".
+- options: obtain Agent 365 | name 9.1 the gap; one round now | only what is unavoidable; run the enable step | not yet
+- why: nothing may be written to the tenant from kit source that has not passed its gate, and the trial ends about 10 Dec 2026, so the changes are gated once, together.
+- consequences: tasks M07-T06 onwards (the round, the full offline suite, a gate review by both providers, then the install of the accepted copy with the previous state kept); until that gate passes, the kit accepted on 8 Nov is the only state the tenant session may use; the kit stays outside this repository; a milestone and weights for this work follow in plan amendment 2; rounds 7m, 7n and 7o stay out of scope.
+- approver: G
+

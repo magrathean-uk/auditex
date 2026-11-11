@@ -1,84 +1,10 @@
-# M00-T01 result
-
-## Counts
-- Findings at the base commit 5cc8518 with the new rule set: 899 (521 I001, 101 UP045, 81 UP017, 57 B905, 47 UP035, 24 UP037, 16 B023, 11 UP006, 9 UP031, 9 B904, 8 UP034, 6 B007, 3 B033, 3 UP028, 2 B017, 1 UP012). After: 0 (`make lint`: All checks passed).
-- Safe autofixes: 797 (commit c86803d). Unsafe autofixes: 70, listed below (commit 09501f2). Follow-on safe UP032 fixes (7) from the UP031 rewrites.
-- Manual: 4 B007 renames to `_name` (the name is rebound before any later read), 1 UP031 rewritten by hand (`tests/explainer_checks/chk_e.py`: `%.2f`, `%d` on an int constant, `%r` become `:.2f`, `:d`, `!r`), 2 B017 tightened from `pytest.raises(Exception)` to `pytest.raises(Unavailable)` (`_seen_shape` raises only `Unavailable` through `_require`), 16 B023 on 12 lines and 9 B904 suppressed with a line-level `noqa` and a reason (each closure is called inside the iteration that defines it; adding `from err` would change `__cause__`).
-- Repair (commit 409ddb8): the I001 split of `src/azure_tenant_audit/run_files.py` left its statement-level `noqa: F401` on the first name only, so the safe F401 fix removed the re-exports `current_context` and `open_guarded_file` (43 failures in `tests/test_guarded_admission.py` on the first full run, 22578 passed). Each re-export now has its own line-level noqa. An AST comparison of every changed file against the base shows no other imported name removed; the rest are `typing` to `collections.abc` and `timezone` to `UTC` swaps.
-- No new file-level or directory-level ignore. The only per-file ignore is still `tenant-bootstrap/scripts/seed-workload-az.py` F811.
-- Pass count before: 22621 passed, 275 skipped, 7 deselected, 34 xfailed (`.plan/work/M00-T05/verify.log`, same tree as the base).
-- Pass count after: see `## Full suite` below.
-- Contract smoke: `make contract-smoke` passes; `compare-run-outputs.py`: all 43 digests match (baseline commit 6c8c3c5).
-
-## Unsafe fixes (70; locations at commit c86803d)
-
-- B905 `src/auditex/compare.py:82`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/auditex/compare.py:100`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/auditex/compare.py:120`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/auditex/compare.py:229`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/auditex/compare.py:244`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/auditex/scuba_projection.py:561`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/adapters/powershell_graph.py:104`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/autopilot.py:114`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/collectors/_endpoint_reads.py:141`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/collectors/_endpoint_reads.py:269`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/collectors/_endpoint_reads.py:335`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/collectors/app_consent.py:227`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/collectors/identity_governance.py:182`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/collectors/intune_depth.py:142`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/collectors/sharepoint_access.py:153`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/diffing.py:111`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/dns_lookup.py:194`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/findings.py:1719`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/identity_controls.py:671`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/identity_controls.py:690`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/output_redaction.py:1593`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/value_rules/defender_cascade.py:22`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `src/azure_tenant_audit/value_rules/defender_resolution.py:39`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- UP028 `tenant-bootstrap/scripts/identity_seed_az.py:137`: `for item in x: yield item` became `yield from x`; the paging generator is only iterated (no `.send` or `.throw` callers in the file), so the yielded items are identical.
-- UP028 `tenant-bootstrap/scripts/seed-workload-az.py:568`: `for item in x: yield item` became `yield from x`; the paging generator is only iterated (no `.send` or `.throw` callers in the file), so the yielded items are identical.
-- UP028 `tenant-bootstrap/scripts/verify-population-az.py:149`: `for item in x: yield item` became `yield from x`; the paging generator is only iterated (no `.send` or `.throw` callers in the file), so the yielded items are identical.
-- B905 `tenant-bootstrap/vendor/microsoft-skills/skills/mcp-builder/scripts/evaluation.py:268`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/explainer_checks/chk_e.py:167`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- UP031 `tests/explainer_checks/specifics.py:30`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- UP031 `tests/explainer_checks/specifics.py:37`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- UP031 `tests/explainer_checks/specifics.py:46`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- B905 `tests/test_api_observed_ledger.py:344`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_attack_graph.py:218`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_collection_coverage_fixes.py:528`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_collection_coverage_fixes.py:562`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_dns_scuba_records.py:390`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_exchange_defender_collector.py:117`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_http_verb_allowlist.py:518`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_http_verb_allowlist.py:519`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_intune_endpoint_collector.py:136`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_intune_endpoint_collector.py:421`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_optional_collection_reason.py:250`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:562`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:730`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:732`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:1027`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:1028`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:1059`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:1185`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:1215`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_read_boundaries.py:1615`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_redaction_person_names.py:194`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_redaction_scan_budget.py:86`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_review_v3_resume.py:149`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_scuba_projection.py:128`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_scuba_projection.py:2663`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_scubagear_export.py:666`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_scubagear_export.py:682`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B905 `tests/test_scubagear_export.py:686`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B007 `tests/test_scubagear_export.py:1122`: loop target prefixed with `_`; the name is not read after the loop (the later uses are a separate comprehension or a lambda keyword argument).
-- B905 `tests/test_scubagear_export.py:1280`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- UP031 `tests/test_targeted_collection_privacy_r2.py:97`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- UP031 `tests/test_targeted_collection_privacy_repair.py:83`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- UP031 `tests/test_targeted_collection_privacy_repair.py:119`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- UP031 `tests/test_targeted_collection_privacy_repair.py:122`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- B905 `tests/test_targeted_collection_replay.py:145`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- UP031 `tests/test_targeted_sample_sections.py:259`: `%` formatting became `str.format` then an f-string; every argument is a module-level `str` constant (or a joined `str`), so the text is identical.
-- B905 `tests/test_value_rules_s4.py:159`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
-- B007 `tests/test_value_rules_s6.py:224`: loop target prefixed with `_`; the name is not read after the loop (the later uses are a separate comprehension or a lambda keyword argument).
-- B905 `tests/test_writer_sinks_d3.py:281`: added `strict=False`, which is zip's default, so iteration stops at the shortest input exactly as before.
+## RESULT M00-T01
+status: done
+summary: Review item 1 is fixed. `.plan/work/M00-T01/unsafe-fixes.md` lists all 70 unsafe fixes, one line each with the file, base and head line, the rule, what changed and why behaviour is unchanged. The list is regenerated from Ruff 0.17.0 JSON at base 5cc8518 filtered to the unsafe fixes (57 B905, 8 UP031, 3 UP028, 2 B007).
+Each entry was checked. Every B905 site at head uses strict=False, which is zip's default, and no strict=True was added. UP031: the compiled regex patterns are identical in both trees, and the base and head string expressions evaluate equal. UP028: these generators are only used in for loops, never with send() or throw(). B007: an ast check shows the renamed loop names are never read. None shows a behaviour change, so there is no new commit and the head stays at 409ddb8.
+Review item 2 is answered, not run here: the full-suite pass with before and after pass, skip and fail counts comes from the orchestrator's tracked job at 409ddb8, as the brief directs. The same-pass-count criterion is open until that job reports.
+Review non-blocking item: the scope count is 403 Python files plus pyproject.toml (`git diff --name-only 5cc8518..HEAD`), not 399. All other criteria are met as recorded in result-1.md.
+changes: none in the repo (no new commit; branch head 409ddb8). Evidence file written: `.plan/work/M00-T01/unsafe-fixes.md`
+verification: `ruff check --no-cache .` at 409ddb8: pass. `make lint` at 409ddb8: pass. `make test` not run, by the brief; the orchestrator's tracked job runs it. `make contract-smoke` and compare-run-outputs were not re-run because the code has not changed since they passed at 409ddb8 in the previous round. `git status --porcelain`: empty.
+risks: The same-pass-count criterion depends on the orchestrator's full-suite job at 409ddb8. The B905 change in the vendored file `tenant-bootstrap/vendor/.../evaluation.py` needs Python 3.10 or later if that script is ever run outside the project's 3.11 floor.
+questions_for_g: none

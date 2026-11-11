@@ -1,0 +1,1 @@
+--task M07-T03 --role sol --brief .plan/work/M07-T03/brief-src.md --readonly --tags debug --account claude-5 --max-turns 120 --timeout 3600 --budget 20
