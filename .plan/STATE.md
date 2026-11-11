@@ -4,7 +4,7 @@ overall: 16% (was 14%)
 milestone: M00-foundation 54%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, 4,000 GPU-hour stage caps; no model in 1.5.0)
-last_checkpoint: 5082c06 2026-11-11T14:24:00Z
+last_checkpoint: f25e857 2026-11-11T15:38:08Z
 
 ## Next tasks
 - M00-T01 Widen the Ruff rule set to W, I, B and UP and clear its findings (codex)
@@ -23,12 +23,12 @@ last_checkpoint: 5082c06 2026-11-11T14:24:00Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 12% orchestrator
-claude-1 32% ok
+claude 15% orchestrator
+claude-1 34% ok
 claude-2 47% shared
-claude-3 22% ok
+claude-3 25% ok
 claude-4 86% hot
-claude-5 57% ok
+claude-5 59% ok
 codex 90% hot
-codex2 76% ok
+codex2 77% ok
 <!-- quota:end -->

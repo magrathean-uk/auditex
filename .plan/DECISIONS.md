@@ -82,3 +82,12 @@
 - consequences: tasks M07-T06 onwards (the round, the full offline suite, a gate review by both providers, then the install of the accepted copy with the previous state kept); until that gate passes, the kit accepted on 8 Nov is the only state the tenant session may use; the kit stays outside this repository; a milestone and weights for this work follow in plan amendment 2; rounds 7m, 7n and 7o stay out of scope.
 - approver: G
 
+
+## DEC-009 The v10 reproduction is read as a four-run mean
+- date: 2026-11-11
+- status: approved
+- decision: M01-T05's first run on the system scored 393 of 435 quantised (bar 400, recorded 403), while the original v10 checkpoint scored 402 through the same scorer and the pack is byte-identical, so the scorer and environment reproduce and the shortfall sits in the trained weights. One run cannot separate a real shortfall from run-to-run spread (about 6 rows standard error at this score). Set before any further run is scored: four runs of the unchanged recipe count (run 1, a second run on the same seed, two more on the next two seeds); `reproduction: pass` is written only when the mean quantised strict of the four is at least 400, every run has at most 5 applicability errors and the parity rule passes on the run nearest the mean, whose build is the one recorded. Otherwise `reproduction: fail` with every run's figures. No further run is added after scores are seen.
+- options: keep the single-run reading and fail on 393 | re-run until one run passes (rejected: picks on the test set) | a fixed four-run mean (chosen)
+- why: the reproduction qualifies the pipeline before large hours are spent; a single draw against a bar 3 rows under the recorded score answers that badly, and the spread is needed anyway for the noise band of the base comparison.
+- consequences: about 12 more GPU-hours inside the 48 GPU-hour stage cap; the measured spread goes to M02-T05's bar; a fail does not stop Track B by itself (the model's job is explanation text, verdicts come from rules) but is reported to G with the cause analysis.
+- approver: auto

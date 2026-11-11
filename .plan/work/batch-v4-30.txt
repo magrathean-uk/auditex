@@ -1,0 +1,1 @@
+--task M02-T02 --role sol --brief .plan/work/kit-brief-v4.md --branch --slug heldout-set --account claude-1 --max-turns 200 --timeout 7200 --budget 35 --var TITLE="Build and seal the clean held-out set" --var MILESTONE=.plan/milestones/M02-explainer-data-and-judging.md --var REVIEW=.plan/work/REV-M02-T02/for2-M02-T02.md

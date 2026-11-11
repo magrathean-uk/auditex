@@ -347,3 +347,11 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T14:06:48Z	M07-T04	sol	claude-3	claude-opus-5-5	high	readonly	0	521	4.3260	done	5082c06
 2026-11-11T14:07:18Z	EXP-pim72	terra	claude-3	claude-sonnet-5-5	medium	readonly	0	34	0.3990	done	5082c06
 2026-11-11T14:11:30Z	M07-T05	sol	claude-5	claude-opus-5-5	high	readonly	0	286	2.2557	done	5082c06
+2026-11-11T14:33:29Z	M02-T02	sol	claude-1	claude-opus-5-5	high	branch	0	6285	14.9785	done	task/M02-T02-heldout-set
+2026-11-11T14:37:04Z	M07-T07	sol	claude-5	claude-opus-5-5	high	readonly	0	297	2.6220	done	f25e857
+2026-11-11T14:46:30Z	REV-M02-T02	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	779		done	f25e857
+2026-11-11T15:06:57Z	M07-T08	sol	claude-5	claude-opus-5-5	xhigh	readonly	0	627	5.3617	done	f25e857
+2026-11-11T15:15:30Z	REV-M07-populator	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	636		done	f25e857
+2026-11-11T15:34:58Z	REV-M07-populator	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	888		done	f25e857
+2026-11-11T15:35:03Z	M01-T05	terra	claude-1	claude-sonnet-5-5	high	branch	124	10801		timeout	task/M01-T05-v10-repro
+2026-11-11T15:35:03Z	M02-T04	sol	claude-5	claude-opus-5-5	xhigh	branch	124	10801		timeout	task/M02-T04-judging-method
