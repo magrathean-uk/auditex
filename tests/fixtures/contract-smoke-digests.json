@@ -1,5 +1,5 @@
 {
-  "commit": "223fbaa5b082bed6f1bccb4740d8038ea6278431",
+  "commit": "6c8c3c5663a9333cc24033568ac596f14494e19c",
   "runs": {
     "ci-admin-set": {
       "findings/findings.json": "ad95f9f0a63e1632941c2889d7502334c8ced04763c14f0e1b4162a88f5cb28b",
@@ -45,12 +45,12 @@
     },
     "ci-projection-demo": {
       "explainer:policy_explanations": "0970f78d57a7a4ea474dda116b65ee716ec0c5bb3a080baa169b730a820b9063",
-      "findings/findings.json": "472c6c65327e92653bb46b6226edafb46d65871083dcdc2b9a30de37f50ad6f9",
+      "findings/findings.json": "5a1ff965684894e9d1c27a10ecdb7b342dfd9a2e7a27dacd90da8550e345b1df",
       "model_assessment.json": "96875f4557ca20aa9416dd72b60646a4466357084b291b4d4235544b858d0454",
       "projection:project_run.report": "67cd5a443592660b4558726c8b684d42bcc4e7f6b1491c7604e96bd367981295",
-      "reports/action-plan.json": "60d4071dcd547d6ee7de3a24e3ae0b1bf714a6f75a977636480042c9d8b52eae",
-      "reports/report-pack.json": "016a8da25ff7cd0ba9852086844a984e9e00ebf08413163ddb79fb82a292d274",
-      "summary.json": "3437eb8c508ec1af585e8e00b9469063d113708a5d20142b13e584ce3693c3b9",
+      "reports/action-plan.json": "cf9556d733009f5f5db69f1efb6c079306dd2acf280af66bff25f727c0985f9c",
+      "reports/report-pack.json": "c2c5ca31fa1f57a43a58187e5af7e38cf7b931c4f07748697da6c62eeba6128e",
+      "summary.json": "2a130d7e75bb460ba3aa9ef4d6a514bb8aaadf9d1ebff0c462fbc2681bf4bcbe",
       "summary.md": "5daf886e908a60c2c9d69bcc9dd722f0dac20791715fc352790aa8b995cac763"
     },
     "ci-update-rings-missing": {

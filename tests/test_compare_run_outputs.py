@@ -202,3 +202,36 @@ def test_recorded_fixture_is_complete():
             assert len(artefacts[art]) == 64, (name, art)
     projection = recorded["runs"][cro.PROJECTION_RUN]
     assert {cro.ASSESSMENT, "projection:project_run.report", "explainer:policy_explanations"} <= set(projection)
+
+
+def test_expiry_state_either_side_of_an_expiry_keeps_digests_equal(tmp_path):
+    before = _make_tree(tmp_path / "a", stamp="11", days=3)
+    after = _make_tree(tmp_path / "b", stamp="11", days=-3)
+    for tree, state in ((before, "expiring"), (after, "expired")):
+        for run in tree.iterdir():
+            path = run / "findings/findings.json"
+            rows = json.loads(path.read_text(encoding="utf-8"))
+            rows[0]["evidence"]["expiry_state"] = state
+            path.write_text(json.dumps(rows), encoding="utf-8")
+    digests = tmp_path / "digests.json"
+    assert cro.main(["--write", str(digests), str(before)]) == 0
+    assert cro.main(["--digests", str(digests), str(after)]) == 0
+
+
+def test_unrelated_state_field_is_still_compared(tmp_path, capsys):
+    base = _make_tree(tmp_path / "a", stamp="11")
+    digests = tmp_path / "digests.json"
+    cro.main(["--write", str(digests), str(base)])
+    other = _make_tree(tmp_path / "b", stamp="11")
+    path = other / "ci-google/findings/findings.json"
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    rows[0]["evidence"]["compliance_state"] = "noncompliant"
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    capsys.readouterr()
+    assert cro.main(["--digests", str(digests), str(other)]) == 1
+    assert "ci-google/findings/findings.json: differs" in capsys.readouterr().err
+
+
+def test_docstring_does_not_point_at_the_archived_design():
+    assert ".plan/work" not in (cro.__doc__ or "")
+    assert ".plan/work" not in SCRIPT.read_text(encoding="utf-8")

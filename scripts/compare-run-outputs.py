@@ -6,8 +6,8 @@
 or is missing, and on an empty or unreadable digest file.  RUNDIR is the directory holding
 the ``ci-*`` run directories (``outputs/ci-contract``).
 
-Volatile fields (run-time timestamps, run ids, durations, absolute paths, date-relative day counts) are normalised
-first; see ``.plan/work/M02-T01/design.md`` section 8.
+Volatile fields (run-time timestamps, run ids, durations, absolute paths, and values derived from the run date:
+credential expiry day counts and expiry states) are normalised first.
 """
 
 from __future__ import annotations
@@ -50,14 +50,16 @@ TIMESTAMP_KEYS = {"generated_at", "collected_at", "started_at", "completed_at", 
 DURATION_KEYS = {"duration_seconds", "latency_ms"}
 RUN_ID_KEYS = {"run_id"}
 PATH_KEYS = {"run_dir"}
-# Values derived from the current date (credential expiry day counts); see design.md section 8.
+# Values derived from the current date: credential expiry day counts and expiry states.
 RELATIVE_DAY_KEYS = {"expiry_days_remaining"}
+RELATIVE_STATE_KEYS = {"expiry_state"}
 TS_PLACEHOLDER = "<timestamp>"
 RUN_ID_PLACEHOLDER = "<run-id>"
 DURATION_PLACEHOLDER = "<duration>"
 PATH_PLACEHOLDER = "<path>"
 ROOT_PLACEHOLDER = "<root>"
 RELATIVE_DAYS_PLACEHOLDER = "<days-from-run-date>"
+RELATIVE_STATE_PLACEHOLDER = "<state-from-run-date>"
 
 # Run-time timestamps in free text (summary.md): only those carrying fractional seconds or an
 # explicit offset are written at run time; fixed sample-data stamps end in Z with no fraction.
@@ -117,6 +119,8 @@ def normalise(value: Any, prefixes: list[str], key: str | None = None) -> Any:
         return PATH_PLACEHOLDER
     if key in RELATIVE_DAY_KEYS and value is not None:
         return RELATIVE_DAYS_PLACEHOLDER
+    if key in RELATIVE_STATE_KEYS and value is not None:
+        return RELATIVE_STATE_PLACEHOLDER
     if isinstance(value, str):
         return _scrub_string(value, prefixes)
     return value
