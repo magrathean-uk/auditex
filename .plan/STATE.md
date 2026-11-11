@@ -4,7 +4,7 @@ overall: 33% (was 30%)
 milestone: M00-foundation 85%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 4636a4d 2026-11-11T19:54:19Z
+last_checkpoint: 07708b5 2026-11-11T20:03:27Z
 
 ## Next tasks
 - M00-T04 Re-run the gate chain on main after the M00 merges (luna)
@@ -23,7 +23,7 @@ last_checkpoint: 4636a4d 2026-11-11T19:54:19Z
 ## Quota snapshot
 <!-- quota:begin -->
 claude 29% orchestrator
-claude-1 41% ok
+claude-1 42% ok
 claude-2 47% shared
 claude-3 33% ok
 claude-4 86% hot

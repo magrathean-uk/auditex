@@ -1,0 +1,18 @@
+## RESULT REV-M07-T10-opus
+status: done
+summary: verdict: ship
+reviewed: c3e3e85acdfd, manifest check pass
+366 of 366 files match. dt-r7q equals dt-r7q-ro, the driver and guard are byte-equal to their originals, and no item-4 code remains.
+All sign-in and session code equals the baseline apart from the Teams module loader. Items 1, 2, 3 and 5 are byte-equal to dt-r7p-ro2. No blocking finding, one advisory.
+Evidence: .plan/work/REV-M07-T10-opus/evidence.md
+changes: .plan/work/REV-M07-T10-opus/evidence.md only; kit and repo untouched
+verification: shasum -c over the manifest: pass; diff -rq against 7l6 and 7p-ro2: pass (23 and 20 files, as the author's tables say); function-level comparison of _common.ps1: pass; construct hash recomputed: pass; JSON walk of expected verdicts: pass; added-string scan: pass
+risks: Nothing was executed here (read-only by brief), so case behaviour rests on the author's runs plus the separate full mock run; on macOS the example config's Teams 7.8.0 pin refuses if another MicrosoftTeams version is already loaded in the window, which is intended and fixed by opening a new window
+questions_for_g: none
+### Findings
+1. Session code: pass. populate/05 to 90, MockTenant.ps1, Run-Mock.ps1, shape-lint-allowlist.txt and pins.json are byte-equal to the baseline. Connect-DtGraph (_common.ps1:3031), Connect-DtExchange (:3114), Get-DtToken (:2879) and Initialize-DtRun (:112) equal the baseline. Connect-DtTeams (:3156) differs only by calling Import-DtTeamsModule (:3140). tools/Connect-DtShared.ps1 is absent. Test-KitConstructs.ps1 differs from the baseline only at :112, :257 and :275, with no allowed variable, command, type or member from item 4. DtShared appears only in the baseline's DtSharedSessionCommands. No defect.
+2. Kept items: pass. Every kept function equals dt-r7p-ro2. The 17 removed cases and 4 removed helpers are all item 4, and nothing in the kit still calls them. _schema.ps1 adds only TeamsModuleVersion, and 'refused' was already allowed (:461). LIMITS.md loses only section 7, and README.md only the fresh-window clause and the one-process section. No document sentence about the shared sign-in remains. No defect.
+3. 99-rollback.ps1: pass. The four lines (:64, :726, :731, :763) equal dt-r7p-ro2's item-2 lines, and the baseline disconnect loop is kept. The construct hash 12E9E639CED7 equals the sha256 of the 7q file. Lines :278 and :724 correctly accept only 'made'. Advisory: :736 and :737 say "absent-resolved intent" for a refused intent too; smallest fix is to word it "absent- or refused-resolved intent" in a later round.
+4. Tests: pass. All 498 baseline case ids are still present (518 now). The W9a, W11a, W13a, W14a, W14b and test_compare.py changes equal dt-r7p-ro2 (Agent 365 text only). The W12a vector path change still trips the construct rule. Expected verdicts are unchanged except the 9.1 licence and note text. No wildcard, and the allowlist is the baseline's. No defect.
+5. README:9-11 replication sentence: accurate. Licence (00-identity.ps1:281) and membership (:309) are modify writes that re-read first: a FAILED stops the script and a rerun picks up where it stopped. Role writes (:321, :334, :351) are creates, so any failure keeps their intent open, which matches "follows the open-intent steps". The cited heading is README:191 under Rollback. No defect.
+6. Hygiene and live risk: pass. The changed files add only public Microsoft URLs and mock ids, with no workstation path, tenant name or credential. The diff has no tenant-selection change. The refused path writes nothing and is rechecked by name in rollback. Teams version refusals happen before sign-in, and nothing in the diff can lock the operator out. No defect.
