@@ -334,3 +334,6 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T11:34:50Z	REV-PLAN-v4	codex	codex2	gpt-6.1-sol	high	readonly	0	218		done	task/PLAN-v4-plan-v4
 2026-11-11T11:38:17Z	PLAN-v4	sol	claude-5	claude-opus-5-5	xhigh	branch	0	165	1.1145	done	task/PLAN-v4-plan-v4
 2026-11-11T11:39:19Z	REV-PLAN-v4	codex	codex2	gpt-6.1-sol	high	readonly	0	61		done	task/PLAN-v4-plan-v4
+2026-11-11T11:47:42Z	INV4-kit7l-suite	luna	claude-5	claude-haiku-5-5	medium	readonly	0	190	0.2977	done	88b0e50
+2026-11-11T11:47:59Z	INV4-kit7l-state	luna	claude-3	claude-haiku-5-5	medium	readonly	0	207	0.2942	done	88b0e50
+2026-11-11T12:10:53Z	M07-T01	sol	claude-5	claude-opus-5-5	high	branch	0	1229	3.5606	done	task/M07-T01-kit-7l-freeze

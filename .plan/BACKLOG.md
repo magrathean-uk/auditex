@@ -15,6 +15,6 @@
 ## Later
 - Answer the SCuBA Google Workspace baselines from the Google provider (today an internal control map with no value-rule path).
 - Live-tenant work, parked until G raises it: certificate auth live acceptance (`wt/collect-certauth-1`), presets, IPPS, Teams coverage, the day-one run, `-Enforce`, and the SS 2.1 `TargetedUsersToProtect` live wire-shape gate.
-- Dummy-tenant kit: 7l6 full offline suite and gate, then 7m, 7n and 7o behind it; the 7m ancestry merge stays blocked without a common base.
+- Dummy-tenant kit: round 7l is accepted (8 Nov 2026: full offline run exit 0, gate 22 SHIP from both providers; verified unchanged on 11 Nov, DEC-006). Still parked: rounds 7m, 7n and 7o in their separate folders; the 7m merge stays blocked without a common base. The live run on the trial tenant belongs to the tenant session, on G's login.
 - Hosted CI or merging `wt/github-build-tags-20261108`, only if G asks.
 - Housekeeping, only with G: the worktrees and `wt/*` branches left by the pre-plan development rounds, and the development kit's superseded folders (ship-plan scratch tree, superseded v8 and v10 rounds, the cancelled V11 plan); triage and bring G an exact removal list or a script G runs.

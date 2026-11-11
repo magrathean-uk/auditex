@@ -54,3 +54,13 @@
 - consequences: one new task in M00 (plan amendment 1) with parser tests under the CLI rules; one refresh of the digest fixture; a small scope growth approved by G.
 - approver: G
 
+## DEC-006 Dummy-tenant kit round 7l comes into scope, ahead of everything
+- date: 2026-11-11
+- status: approved
+- decision: G created the trial tenant for the dummy-tenant kit; its trial period is short, and G holds every tenant write until kit round 7l is green. Round 7l to green (its remaining fixes, the full offline suite and the gate review) joins plan v4 as its own track and gets worker seats ahead of every new Isambard-AI and release task; tasks already running keep running. G's words were the option pick "Yes, ahead of everything".
+- options: alongside the AIRR track | ahead of everything (chosen) | keep the kit parked
+- why: the trial tenant expires before the allocation does, and nothing may be written to it until the kit's create and rollback paths pass their gate.
+- consequences: plan v4's non-goal "the dummy-tenant kit" is reversed for round 7l and its gate only; rounds 7m, 7n and 7o, and every live-tenant step, stay outside this plan (the tenant session runs the read-only checks and, after green, the writes, on G's login); kit code stays in the development kit, outside this repository, and its tasks write only `.plan/work/<id>/result.md` here; milestones and weights follow in plan amendment 2 after an inventory of the kit's real state; no tenant is contacted by any task of this plan.
+- approver: G
+- amendment 1 (2026-11-11): the inventory and M07-T01 found round 7l already accepted. The kit was accepted offline on 8 Nov 2026 after a full offline run with exit 0 and a gate 22 SHIP from both providers with no high or medium finding, and the live kit is byte-identical to that accepted state today (365 files, frozen as `dt-r7l6-ro` in the kit, manifest sha256 109679e67da549ddc6c72bd751f1217fb146f31962a5bd5e2392c80958b1cb8c). The backlog line that listed "the 7l6 full offline suite and gate" as open was stale. What remains under this decision is one confirmation run of the full suite through the repaired driver (`M07-T02`, started by the orchestrator as the one heavy job) and the report to G and the tenant session. No milestone and no weight change are needed, and the seat priority this decision gave the kit ends when that run is started.
+

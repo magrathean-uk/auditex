@@ -1,0 +1,1 @@
+--task M07-T01 --role sol --brief .plan/work/M07-T01/brief-src.md --branch --slug kit-7l-freeze --account claude-5 --max-turns 200 --timeout 5400 --budget 30
