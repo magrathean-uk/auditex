@@ -1,15 +1,15 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
 overall: 21% (was 20%)
-milestone: M00-foundation 62%
+milestone: M00-foundation 69%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, 4,000 GPU-hour stage caps; no model in 1.5.0)
-last_checkpoint: 182d9e8 2026-11-11T17:23:29Z
+last_checkpoint: 810b3cb 2026-11-11T17:26:31Z
 
 ## Next tasks
 - M00-T02 Make the value-rule contract test read the replay kit variable (codex)
-- M00-T03 Correct the stale gate lines in AGENTS.md and the runbook (terra)
 - M00-T06 Add an as-of date to offline runs and pass it in the contract smoke (codex)
+- M00-T04 Re-run the gate chain on main after the M00 merges (luna)
 
 ## Blockers
 - none

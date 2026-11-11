@@ -368,3 +368,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T16:58:42Z	REV-M07-populator	codex	codex2	gpt-6.1-sol	medium	readonly	0	57		done	ea774ff
 2026-11-11T17:19:33Z	M07-T09	terra	claude-1	claude-sonnet-5-5	high	readonly	0	314	0.9453	done	ea774ff
 2026-11-11T17:21:36Z	REV-M00-T01	sol	claude-1	claude-opus-5-5	high	readonly	0	1398	1.6956	done	task/M00-T01-ruff-wider
+2026-11-11T17:24:02Z	M00-T03	terra	claude-5	claude-sonnet-5-5	low	branch	0	25	0.1796	done	task/M00-T03-agents-gate-lines
+2026-11-11T17:25:34Z	M00-T02	terra	claude-1	claude-sonnet-5-5	low	branch	0	117	0.2119	done	task/M00-T02-contract-test-kit-var
