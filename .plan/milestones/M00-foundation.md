@@ -18,7 +18,7 @@ Plan v4 starts from a green `main`: the 1.4.0 gate chain still holds on an uncha
 - [x] Taint scan passes on the tracked tree: `bash scripts/oss-taint-scan.sh` (evidence: bash scripts/oss-taint-scan.sh)
 - [ ] Dependency audit over the base install and every declared extra exits 0: `make audit-deps`
 - [x] The contract-smoke outputs match the recorded digests, with date-derived values normalised: `make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract`
-- [ ] `make lint` runs the pinned Ruff check with E4, E7, E9, F, W, I, B and UP over the whole repository and passes: `grep -q '"W", "I", "B", "UP"' pyproject.toml && make lint`
+- [x] `make lint` runs the pinned Ruff check with E4, E7, E9, F, W, I, B and UP over the whole repository and passes: `grep -q '"W", "I", "B", "UP"' pyproject.toml && make lint`
 - [ ] The value-rule contract test reads the kit variable `make acceptance` uses and runs instead of skipping: `! grep -q 'getenv("AUDITEX_TEST_VALUE_RULE_VECTORS")' tests/test_value_rules_contract.py && test -f "$AUDITEX_TEST_VALUE_RULE_VECTORS_V391" && out=$(.venv/bin/python -m pytest tests/test_value_rules_contract.py -k all_external_final_vectors -rs -q) && ! printf '%s\n' "$out" | grep -q SKIPPED`
 - [ ] `AGENTS.md` describes `make lint` as compile plus Ruff and lists `make acceptance` and `make dist`; the runbook's publication section is not tied to 1.3.0: `! grep -q 'compileall only' AGENTS.md && grep -q 'make acceptance' AGENTS.md && ! grep -q 'Publication for 1.3.0' docs/development/runbook.md`
 - [ ] Every offline invocation in the `make contract-smoke` recipe (at least eight) carries `--as-of` with one shared literal `YYYY-MM-DD` date (no shell, make or computed value), and the outputs match the recorded digests with the wall clock on either side of a lifecycle date (DEC-005): `awk '/^contract-smoke:/{f=1;next} f&&/^[A-Za-z.]/{f=0} f&&/--offline/{n++; if(/#/ || gsub(/--as-of/,"&")!=1 || !match($0,/--as-of [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]([ ;]|$)/)) bad++; else d[substr($0,RSTART+8,10)]++} END{for(x in d)c++; exit !(n>=8 && !bad && c==1)}' Makefile && .venv/bin/python -m pytest tests/test_offline_as_of.py && make contract-smoke && .venv/bin/python scripts/compare-run-outputs.py --digests tests/fixtures/contract-smoke-digests.json outputs/ci-contract`
@@ -29,7 +29,7 @@ Plan v4 starts from a green `main`: the 1.4.0 gate chain still holds on an uncha
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M00-T05 | Make the output digest comparison pass on the unchanged tree | codex | S | debug | done |
-| M00-T01 | Widen the Ruff rule set to W, I, B and UP and clear its findings | codex | M | cross-cutting | todo |
+| M00-T01 | Widen the Ruff rule set to W, I, B and UP and clear its findings | codex | M | cross-cutting | done |
 | M00-T02 | Make the value-rule contract test read the replay kit variable | codex | S | mechanical | todo |
 | M00-T03 | Correct the stale gate lines in AGENTS.md and the runbook | terra | S | mechanical | todo |
 | M00-T06 | Add an as-of date to offline runs and pass it in the contract smoke | codex | M | - | todo |
