@@ -284,3 +284,13 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-10T07:53:37Z	PASS-critic	sol	claude-5	claude-opus-5-5	high	readonly	0	229	1.1195	done	main
 2026-11-10T07:56:41Z	PASS-verify	codex	codex2	gpt-6.1-sol	high	readonly	0	413		done	main
 2026-11-10T08:04:56Z	PASS-verify	codex	codex2	gpt-6.1-sol	high	readonly	0	225		done	main
+2026-11-11T07:54:02Z	INV4-scanners	luna	claude-2	claude-haiku-5-5	medium	readonly	0	75	0.0244	done	f250d50
+2026-11-11T07:54:03Z	INV4-explainer	luna	claude-3	claude-haiku-5-5	medium	readonly	0	76	0.0916	done	f250d50
+2026-11-11T07:54:16Z	INV4-delta	luna	claude-3	claude-haiku-5-5	medium	readonly	0	89	0.1492	done	f250d50
+2026-11-11T07:54:28Z	INV4-hygiene	luna	claude-5	claude-haiku-5-5	medium	readonly	0	101	0.0365	done	f250d50
+2026-11-11T07:54:49Z	INV4-trainer	luna	claude-1	claude-haiku-5-5	medium	readonly	0	122	0.0365	done	f250d50
+2026-11-11T07:54:50Z	INV4-bases	luna	claude-3	claude-haiku-5-5	medium	readonly	0	123	0.2123	done	f250d50
+2026-11-11T07:55:17Z	INV4-d5	luna	claude-1	claude-haiku-5-5	medium	readonly	0	150	0.0422	done	f250d50
+2026-11-11T07:58:39Z	INV4-kit-data	luna	claude-2	claude-haiku-5-5	medium	readonly	0	352	0.0287	done	f250d50
+2026-11-11T07:59:31Z	INV4-kit-chains	luna	claude-5	claude-haiku-5-5	medium	readonly	0	404	0.2598	done	f250d50
+2026-11-11T08:01:15Z	ASSESS-v4	terra	claude-3	claude-sonnet-5-5	medium	inplace	0	85	0.4451	done	main
