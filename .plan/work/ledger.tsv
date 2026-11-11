@@ -325,3 +325,6 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T10:42:50Z	M04-T01	sol	claude-1	claude-opus-5-5	xhigh	readonly	0	1058	5.0836	done	6c8c3c5
 2026-11-11T11:09:47Z	M01-T03	sol	claude-3	claude-opus-5-5	high	branch	0	2676	2.0626	done	task/M01-T03-kit-trainer
 2026-11-11T11:12:41Z	M02-T01	terra	claude-1	claude-sonnet-5-5	high	branch	0	150	0.2344	done	task/M02-T01-twin-definition
+2026-11-11T11:15:05Z	REV-M04-T01	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	291		done	fabad73
+2026-11-11T11:17:06Z	REV-M04-T01-sol	sol	claude-5	claude-opus-5-5	xhigh	readonly	0	412	2.3404	done	fabad73
+2026-11-11T11:18:18Z	REV-KIT-01	codex	codex2	gpt-6.1-sol	high	readonly	0	336		done	fabad73

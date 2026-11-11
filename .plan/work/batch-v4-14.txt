@@ -1,0 +1,1 @@
+--task M01-T03 --role sol --brief .plan/work/kit-brief-v4.md --branch --slug kit-trainer --account claude-5 --max-turns 150 --timeout 3600 --budget 25 --var TITLE="Build a standalone trainer, scorer and the kit-check verifier" --var MILESTONE=.plan/milestones/M01-airr-bring-up.md --var REVIEW=.plan/work/REV-KIT-01/for3-M01-T03.md

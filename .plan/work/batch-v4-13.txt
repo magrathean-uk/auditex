@@ -1,0 +1,1 @@
+--task M01-T04 --role terra --brief .plan/work/kit-run2-brief-v4.md --branch --slug airr-qualification --account claude-1 --tags debug --max-turns 250 --timeout 10800 --budget 15 --var TITLE="Build the environment and pass the qualification job on Isambard-AI" --var MILESTONE=.plan/milestones/M01-airr-bring-up.md --var GPU_CAP=24

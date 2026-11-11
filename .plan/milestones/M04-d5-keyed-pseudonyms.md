@@ -11,7 +11,7 @@ Track A. G approved the keyed per-run pseudonym scheme for 1.5.0 as its own mile
 Pseudonyms in shareable output come from a private per-run key instead of the run-path salt, so someone holding a shared report who knows or guesses the run folder name can no longer confirm a guessed name; the salt schemes are unified or each is documented; names written with middle initials or titles, and structural mapping keys equal to a person's name, are masked or counted within the same probe budget; the bundle contract, schemas and docs change together under a new `CONTRACT_VERSION`.
 
 ## Definition of Done
-- [ ] Review: G approved the keyed-pseudonym design (DECISIONS.md entry "D5 keyed pseudonym design", approver G, naming one digest strategy) after both providers reviewed it: `grep -A10 '^## DEC-[0-9]* D5 keyed pseudonym design' .plan/DECISIONS.md | grep -q '^- approver: G' && grep -A10 '^## DEC-[0-9]* D5 keyed pseudonym design' .plan/DECISIONS.md | grep -qE '^- digest-strategy: (seed|normalise)$'`
+- [x] Review: G approved the keyed-pseudonym design (DECISIONS.md entry "D5 keyed pseudonym design", approver G, naming one digest strategy) after both providers reviewed it: `grep -A10 '^## DEC-[0-9]* D5 keyed pseudonym design' .plan/DECISIONS.md | grep -q '^- approver: G' && grep -A10 '^## DEC-[0-9]* D5 keyed pseudonym design' .plan/DECISIONS.md | grep -qE '^- digest-strategy: (seed|normalise)$'`
 - [ ] Keyed pseudonyms, the D3 profiles, the scan budget, the projection and the export pass, including the new keyed-pseudonym tests: `.venv/bin/python -m pytest tests/test_redaction_keyed_pseudonyms.py tests/test_redaction_person_names.py tests/test_redaction_profiles_d3.py tests/test_redaction_scan_budget.py tests/test_notify_redaction.py tests/test_redaction_export_schemas.py tests/test_scuba_projection.py tests/test_scubagear_export.py`
 - [ ] `CONTRACT_VERSION` differs from 1.4.0's and contract smoke passes with the new schemas: `test "$(git show v1.4.0:src/azure_tenant_audit/contracts.py | grep '^CONTRACT_VERSION')" != "$(grep '^CONTRACT_VERSION' src/azure_tenant_audit/contracts.py)" && make contract-smoke`
 - [ ] Middle initials, titles and name-equal mapping keys are masked or counted within the probe budget: `.venv/bin/python -m pytest tests/test_redaction_person_names.py tests/test_redaction_scan_budget.py -k 'initial or title or mapping_key or budget'`
@@ -23,7 +23,7 @@ Pseudonyms in shareable output come from a private per-run key instead of the ru
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M04-T01 | Design the keyed per-run pseudonym scheme | sol | M | - | todo |
+| M04-T01 | Design the keyed per-run pseudonym scheme | sol | M | - | done |
 | M04-T02 | Record the pre-change HTML peak baseline and confirm the digests | codex | S | mechanical | todo |
 | M04-T03 | Implement keyed per-run pseudonyms and the contract change | codex | L | cross-cutting | todo |
 | M04-T04 | Mask middle initials, titles and name-equal mapping keys | codex | M | - | todo |

@@ -22,7 +22,7 @@ Before any large run: the held-out twin count is reconciled under one written de
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M02-T01 | Reconcile the held-out twin counts under one written definition | terra | S | - | todo |
+| M02-T01 | Reconcile the held-out twin counts under one written definition | terra | S | - | done |
 | M02-T02 | Build and seal the clean held-out set | codex | M | - | todo |
 | M02-T04 | Build, freeze and calibrate the judging method for free text | codex | M | hard | todo |
 | M02-T03 | Build the prose training data for the explainer job | codex | M | - | todo |

@@ -1,0 +1,1 @@
+--task REV-KIT-01 --role codex --model gpt-6.1-sol --account codex2 --readonly --tags debug --brief .plan/work/REV-KIT-01/brief-src-4.md

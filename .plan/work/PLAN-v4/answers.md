@@ -137,3 +137,12 @@ Track B, model re-training on Isambard-AI. Research tasks: the only repository o
   plan, not a ceiling (DEC-002). Stage caps stay as stop-and-report controls; the orchestrator
   resizes them within the allocation balance read at bring-up and shows G the table. The reserve
   needs no separate release.
+
+## Design gate (G, 11 Nov 2026)
+
+Asked after three review rounds of the keyed-pseudonym design by both providers. G's picks, recorded as DEC-004 and DEC-005:
+- The design: "Approve (Recommended)", with the last review round's fixes carried as amendments in DEC-004.
+- When a run gets its key: "At collection (Recommended)".
+- A run with no key (made by 1.4.0 or earlier): "Temporary key (Recommended)": it is masked with a key held in memory until
+  `auditex report prepare-key` is run once on it.
+- An `--as-of <date>` option for offline runs: "Yes, add it (Recommended)".

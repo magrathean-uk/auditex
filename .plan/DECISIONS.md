@@ -19,3 +19,38 @@
 - consequences: no change to scope, weights or percentage; the sum of the stage caps never exceeds the balance read on the system; a stage that reaches its cap still stops and reports; the budget look before M03-T01 stays as planned. This supersedes DEC-001's "hours beyond the stage caps" limit and the reserve's G-only release, nothing else.
 - approver: G
 - amendment 1 (2026-11-11): balance read by G on the awards portal: 20,000 GPU-hours allocated, 0 used, allocation ends 31 Jan 2027. reserve 384 -> 16,384 and total 4,000 -> 20,000. The working stage caps stay as they are until M01-T05 has measured what a run costs on the system; the budget look before M03-T01 then moves hours from the reserve into the prose, judging, basecmp and large stages.
+
+## DEC-003 Kit verifier: merge bar after two repair rounds
+- date: 2026-11-11
+- status: approved
+- decision: after two repair rounds the kit review (REV-KIT-01, kit interface hash fd568fabc6e1) has closed every finding on the trainer, the scorer, the verifier's discovery and the twin definition; each round still found new ways for the `usage` accounting check to pass on contradictory scheduler rows. The open-ended review stops here. `usage` gets one last change with a fixed bar: any export whose rows for one job or one start disagree with each other (elapsed time, allocation, generic against typed GPU counts) fails, and what it still cannot see is named in the kit's `bin/README.md`. The reviewer repeats only its recorded probes for items 14 and 15. From now on the GPU-hours of every Track B stage are also compared with the awards portal's used figure at each milestone close (`REV-M01-kit`, `REV-M02-kit`, `REV-M03-kit`), which is independent of the kit. M01-T04 starts now on the reviewed trainer; its usage is checked with the repaired verifier before M01 closes.
+- options: a third open review round before any GPU job | stop at a fixed bar, add the portal comparison and start the qualification job (chosen)
+- why: plan v3's lesson for adversarial checker work (two repair rounds, then a written merge bar); the portal figure is a check the kit cannot influence; the allocation has a fixed end.
+- consequences: the kit files' `SHA256SUMS` change once more with the `usage` fix; M02-T02, M02-T04 and M02-T05 also own `checks/SHA256SUMS` in the kit, because the verifier now refuses a check module the manifest does not list (files-line amendment, recorded here); run tasks keep `selection.json` out of public places or strip its paths, and the runbook says so.
+- approver: auto
+
+## DEC-004 D5 keyed pseudonym design
+- date: 2026-11-11
+- status: approved
+- approver: G
+- digest-strategy: seed
+- digest-exception: ci-projection-demo model_assessment.json and projection:project_run.report, for projection.redaction.strategy only
+- assessment-schema: enum in place, no dated copy
+- key-timing: at collection (design Q2 option A)
+- keyless-runs: masked with a key held in memory until `auditex report prepare-key` is run once (design Q3 option d)
+- test-update-rule: M04-T03 may change a test outside its files line only where the sole failure is (i) a pseudonym pinned from the run-path salt, (ii) an expected file set, tree or hash-manifest row gaining operator-inputs/, .gitignore, pseudonym.key or a key temporary, or (iii) the keyless-run behaviour chosen here; result.md lists each file and line with its reason; any other failure stops M04-T03 for a design note
+- decision: G approved the design in `.plan/work/M04-T01/design.md` at revision 3 (sha256 8b18c94ba27c), reviewed three times by both providers (`REV-M04-T01`, `REV-M04-T01-sol`). G's words were the option picks "Approve (Recommended)", "At collection (Recommended)", "Temporary key (Recommended)". Each run sealed by 1.5.0 gets a random 32-byte private key in `operator-inputs/pseudonym.key`; pseudonyms are HMAC-SHA256 of that key, cut to 16 hex, labelled keyed-hmac-sha256-v1; `CONTRACT_VERSION` becomes 2026-11-11.
+- amendments from the last review round, binding on M04-T03 and checked by its privacy reviews: (1) every lock error except "would block", "try again" and "interrupted" means storage without locking, raised before anything is written, with tests for the two errors Linux network storage returns, and that storage is named in the limits; (2) the key's temporary file is registered as private before its bytes are written and cannot be read through an ordinary guarded read or standard input by another process, tested with a paused creator; (3) a context keeps the first key it resolved for each run for the whole operation; (4) the durability limit covers every case where the folder cannot be flushed, and the run folder is flushed after `operator-inputs/` is created where the storage supports it; (5) descriptions and documentation cover every keyless run (made by 1.4.0 or earlier, copied without its private folder, or sealed on storage without locking) and make no claim about when MCP clients ask for approval; (6) orchestrator's product default: output made with a temporary key says that its pseudonyms are not stable across sessions and names `auditex report prepare-key`.
+- options: approve | one more design round; key at collection | on first shareable use; for keyless runs: temporary key | refuse until prepared | write the key silently | mark the tools as writing
+- why: the run-path salt lets someone who knows where an audit was saved confirm a guessed name; both reviewers found the function, the label and the seed strategy sound and recommended the key at collection; they split between refusing keyless runs and the temporary key, and the temporary key is the only option that never writes from a read-only tool and still reports runs on read-only or network storage.
+- consequences: the files lines of M04-T03 and M04-T05 widen as design section 13 lists for these answers (plan amendment 1); a new `auditex report prepare-key` command; pseudonyms made by 1.4.0 do not match those of 1.5.0; a 1.4.0 reader loses the explanations of a 1.5.0 run; the named limits of design section 17 stand.
+
+## DEC-005 An as-of date for offline runs
+- date: 2026-11-11
+- status: approved
+- decision: 1.5.0 adds a visible `--as-of <date>` option to offline runs. It fixes the date used for end-of-support, lifecycle, expiry and stale-sync findings, and `make contract-smoke` passes it, so the recorded digests stop depending on the day the check runs (the comparison broke on 10 Nov 2026 when a product passed its end-of-support date; M00-T05, `.plan/work/EXP-clock/result.md`). G's words were the option pick "Yes, add it (Recommended)".
+- options: add the option | keep refreshing the digests by hand at each lifecycle date
+- why: a release gate that fails on a calendar date is not a regression gate; the demo already fixes its date the same way.
+- consequences: one new task in M00 (plan amendment 1) with parser tests under the CLI rules; one refresh of the digest fixture; a small scope growth approved by G.
+- approver: G
+
