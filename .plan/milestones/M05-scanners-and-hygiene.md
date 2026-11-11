@@ -22,7 +22,7 @@ The read-boundary and HTTP scanner limits named in v3 DEC-008 and DEC-009 are cl
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
 | M05-T01 | Close the read-boundary scanner limits from v3 DEC-008 | codex | M | hard | todo |
-| M05-T02 | Close the HTTP scanner attribute-store limit from v3 DEC-009 | codex | M | - | todo |
+| M05-T02 | Close the HTTP scanner attribute-store limit from v3 DEC-009 | codex | M | - | done |
 | M05-T03 | Update the scanner limits tables in the privacy reference | terra | S | - | todo |
 | M05-T04 | Close the plan v3 review follow-ups | codex | M | - | todo |
 | M05-T05 | Confirm the vendored microsoft-skills entries and bring the deletion gate | terra | S | - | todo |
@@ -31,14 +31,14 @@ The read-boundary and HTTP scanner limits named in v3 DEC-008 and DEC-009 are cl
 ### M05-T01 Close the read-boundary scanner limits from v3 DEC-008
 - Merge bar (set before the work): any callee name the module rebinds (def, class, assignment, import) is unresolved for the read-only hand-off and transparent-conversion shortcuts, with planted cases for the `info` and `list` shadows (today only the nearest test exists); the binding union includes import, plain `with`, `def`, `class`, `except`, `match` and comprehension-walrus bindings; class-body names resolve in the class namespace. Each closed limit has a planted test; the fail-closed proven-literal rule stays. A further class found by review is a named limit for M05-T03.
 - Test citations of the scanner decision read "v2 DEC-011" (the live "DEC-011" is the 1.4.0 release).
-- Tier A (security): Codex authors; terra or sol reviews.
+- Tier A (security): one provider authors and the other reviews (amended by DEC-012: Opus authored, Codex reviews; the plan first named Codex as author).
 - verify: `.venv/bin/python -m pytest tests/test_read_boundaries.py && make test`
 - files: `tests/test_read_boundaries.py`
 
 ### M05-T02 Close the HTTP scanner attribute-store limit from v3 DEC-009
 - Merge bar (set before the work): a dotted import origin is trusted only when the module makes no attribute store to it, so `pathlib.Path = factory` followed by `pathlib.Path().open(...)` is unresolved and fails the suite, with a planted case; the fail-closed rule stays; a further class found by review is a named limit for M05-T03.
 - Test citations of the scanner decision read "v2 DEC-011".
-- Tier A (security): Codex authors; terra or sol reviews.
+- Tier A (security): one provider authors and the other reviews (amended by DEC-012: Opus authored, Codex reviews; the plan first named Codex as author).
 - verify: `.venv/bin/python -m pytest tests/test_http_verb_allowlist.py && make test`
 - files: `tests/test_http_verb_allowlist.py`
 

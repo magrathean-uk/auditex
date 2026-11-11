@@ -109,3 +109,12 @@
 - why: the model's job in this plan is explanation text, and rules decide every verdict; the reproduction was a pipeline qualification, and its real finding is the size of the run-to-run spread.
 - consequences: the M01 done item for the reproduction is amended to "measured and accepted"; M03's three-seed rule now covers every reported score; any public statement about v10's accuracy must quote the spread (372 to 393 in four fresh runs), not the single 403; the Hugging Face upload stays parked. DEC-009's four-run reading stands as the rule this was judged by.
 - approver: G
+
+## DEC-012 Scanner tasks: Opus authors, Codex reviews
+- date: 2026-11-11
+- status: approved
+- decision: for the two tier A scanner tasks (M05-T01, M05-T02) the provider lanes are swapped: Opus authors on a pool account and Codex reviews. The plan's task lines named Codex as author with a Claude reviewer. The rule that matters is unchanged and still checked at milestone close: the author and the reviewer are of different vendors, and the merge carries the review trailer for the exact commit.
+- options: keep Codex as author and wait for its capacity (both Codex accounts are near their working limit until 14 Nov 2026) | swap the lanes so the other provider still sees every tier A change (chosen)
+- why: Codex capacity left this week covers reviews, not authoring; waiting would idle the release path for three days.
+- consequences: the two task lines are amended; REV-M05-T01, whose only required change was this lane conflict, is refreshed against the amended line. Routing only: no acceptance bar, scope or product behaviour changes.
+- approver: auto (routing by capacity, the orchestrator's remit)
