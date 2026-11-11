@@ -63,3 +63,62 @@ and `.plan/archive/plan-v2/DECISIONS.md` (plan v2); do not re-ask them.
 - Fast-forward pushes of `main` are authorised for reviewed merges (machine records D2 and D9) and for
   plan checkpoints, which change only `.plan/` (plan v2 DEC-001), with gitleaks and a workstation-path
   scan over the new range. Tags, releases and new repositories are not.
+
+## Gate answers (G, 11 Nov 2026)
+
+Asked after the assessment (`.plan/work/assessment-v4.md`), each with a recommendation. G's picks:
+
+1. The model's job: "Richer explanations". The re-trained model writes fuller explanations and
+   remediation than the template explainer. G named the job now instead of having the architect
+   bring options. What follows from it:
+   - Verdicts still come only from value rules. The model never decides or changes a verdict; it
+     writes text for a verdict the rules have already given.
+   - The job needs prose training data and a way to judge free text. Choosing it supersedes the
+     5 Nov "no suite v2" ruling for this purpose: plan v4 builds the judging method before the
+     large runs.
+   - Orchestrator's reading, not G's words: the deterministic template explainer stays the shipped
+     default and the fallback. Whether a model explainer enters a product release, and how it
+     ships, is a later gate: the model track ends at a judged build with a recommendation, and the
+     architect lists the product-integration options as questions for G. Judging uses
+     deterministic checks and open-weight models run on the allocation; no paid API runs. The
+     Hugging Face upload stays parked until a build passes its bar.
+2. Base models: "Ministral, then compare (Recommended)". Reproduce with Ministral 3 8B as recorded,
+   then compare Ministral 3 14B, Gemma 4 31B and Qwen3.8-27B on the clean test set, adding Qwen 4
+   if it ships in time (not released on 11 Nov 2026, `.plan/work/INV4-bases/result.md`). EU-first
+   decides between bases inside the noise band. Base snapshots are fetched straight onto
+   Isambard-AI; none is downloaded onto G's workstation.
+3. D5 keyed pseudonyms: "Yes, own milestone (Recommended)". The keyed per-run pseudonym scheme is in
+   scope for 1.5.0 as its own milestone, with a privacy review by both providers. This approves the
+   bundle and contract-version change in principle (DEC-004); the design is reviewed before
+   implementation.
+4. Priority: "AIRR first (Recommended)". The model track gets worker seats first because the
+   allocation ends in late January 2027; the product release runs beside it as seats allow.
+
+## Scope the architect plans (orchestrator, from the handover and the gate answers)
+
+Track A, product release 1.5.0:
+- The keyed per-run pseudonym milestone (answer 3) and the D5 follow-up for middle initials and titles.
+- Scanner follow-ups (DEC-008, DEC-009), with the merge bar written into the criteria first.
+- Hygiene, as corrected by the assessment: the wider Ruff rule set measures 899 findings, about 796
+  auto-fixable, so it is one task and not its own round; the contract test that always skips (an
+  environment-name mismatch); the small review follow-ups; stale documentation lines (`AGENTS.md` on
+  `make lint`, the runbook's 1.3.0 publication line). Drop the explainer-fixtures item: the
+  fixtures exist. The vendored microsoft-skills entries: the assessment found the legal notices
+  name the directory, not the three entries; confirm that in the task, and any removal still goes
+  through the deletion gate.
+- A release milestone shaped like plan v3's M06. It stops at the approved candidate until G's yes
+  names the version.
+
+Track B, model re-training on Isambard-AI. Research tasks: the only repository output is
+`.plan/work/<id>/result.md`; code and data live in a new dated folder of the development kit:
+- An Isambard-AI runbook and bring-up, with G's login as a named step and the unknowns checked on
+  the system first (compute-node internet access, package versions, the data route).
+- A standalone trainer in the kit: the packs' trainer shims import a module that 1.4.0 removed.
+- One reproduction of the v10 build, to prove the pipeline.
+- A clean held-out set. The twin counts disagree (137 by the project's key, 318 by a looser match)
+  and are reconciled first.
+- The explainer job: prose training data, the judging method and the acceptance bar, then the
+  base-model comparison (answer 2) and the large runs.
+- A GPU-hour budget per stage, shown to G in the plan. No GPU-hours are spent before G approves the
+  plan v4 scope.
+- Every stage that needs G says so: a login, a look at the budget, the pick of the final build.
