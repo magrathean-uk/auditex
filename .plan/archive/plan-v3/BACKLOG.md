@@ -1,0 +1,24 @@
+# Backlog
+<!-- Triaged ideas and unscheduled tasks. Promotion into a milestone is a change-control event. -->
+
+## Now
+- none
+
+## Next
+- Model re-training on AIRR (G, 10 Nov 2026: "we can re-train this on AIRR, we got access now"). 1.4.0 retired the in-repo model layer and rules decide every verdict, so the model's job and how it is judged go to G at the plan v4 gate. G's facts (10 Nov): the allocation is on Isambard-AI, ends in late January 2027 and has plentiful hours to put to the best use; G logs in; Qwen 4 is expected soon and joins the base-model re-pick. The build is secured: a verified copy of the model file and the adapter archive is held on the external volume (10 Nov 2026; the adapter weights were hash-checked for the first time). The last build of record is Ministral 3 8B with LoRA checkpoint-500 on oracle pack v10 (403/435 alone, 419/435 with the rule pre-check); training code is recoverable from tag `v1.3.0`. Starting point: `.plan/work/PASS-model/result.md` and `.plan/work/PASS-airr/result.md`.
+- Keyed per-run pseudonym scheme for D5 masking (private per-run key, bundle change), replacing the run-path salt (DEC-004).
+- A wider Ruff rule set (W, I, B, UP) than the pre-commit hook's, and a format hook (orchestrator ruling, DEC-001): about 31,800 findings on the broader probe (INV3-lint); needs its own cleanup round.
+- Explainer fixtures named in `tests/test_explainer_fixtures.py:43` but absent at the top level of `tests/fixtures/explainer/` - confirm where they live or fix the test.
+- Vendored `tenant-bootstrap/vendor/microsoft-skills` entries with no code reference (ALL-SKILLS-CATALOG, microsoft-foundry, entra-agent-id) - removal changes G-owned legal notices.
+- `tests/test_value_rules_contract.py:266` still reads the stale `AUDITEX_TEST_VALUE_RULE_VECTORS` name and also needs `AUDITEX_TEST_VALUE_RULE_CATALOGUE`, which the v3.9.1 kit lacks, so it always skips (M01-T03); give it the kit name and a catalogue source, or retire it.
+- D5 follow-up: mask names written with middle initials or titles ("John A. Smith", "Dr. Jane Doe") by letting the matcher join one separator character followed by a space (REV-M05-T03-privacy suggestion; same probe budget). In 1.4.0 they are counted unmatched and stay readable in free text, and the note says so.
+- Read-boundary scanner (DEC-008 limits): treat any callee name the module rebinds (def, class, assignment, import) as unresolved for the read-only hand-off and transparent-conversion shortcuts, and include import, `with`, `def`, `class`, `except`, `match` and comprehension-walrus bindings in the binding union. Resolve class-body names in the class namespace (a launch in a class body reading a class-local name).
+- HTTP scanner (DEC-009 limit): dotted import origins are trusted without attribute stores, so rebinding `pathlib.Path = factory` where the factory returns an opener can leave `pathlib.Path().open(...)` classified as safe (REV-M04-T01).
+- Small follow-ups from the plan v3 reviews: `src/azure_tenant_audit/bundle_integrity.py:80` still names `model_assessment_prompts.jsonl` (M02-T05); the docs say "model view" for the projection (REV-M02-T05); `Redactor.text` keeps a dead `names` parameter, D5 test names cite review rounds, and a structural mapping key equal to a person's name is neither masked nor counted in the note (REV-M05-T03-privacy); `scripts/compare-run-outputs.py` does not validate the baseline's run and artefact inventory (REV-M02-T02) and still compares the date-derived `expiry_state` (M02-T02c); one hash-regression test also varies tar member times (REV-M01-T01).
+
+## Later
+- Answer the SCuBA Google Workspace baselines from the Google provider (today an internal control map).
+- Live-tenant work, parked until G raises it: certificate auth live acceptance (`wt/collect-certauth-1`), presets, IPPS, Teams coverage, the day-one run, `-Enforce`, and the SS 2.1 `TargetedUsersToProtect` live wire-shape gate.
+- Dummy-tenant kit: 7l6 full offline suite and gate, then 7m, 7n and 7o behind it; the 7m ancestry merge stays blocked without a common base.
+- Hosted CI or merging `wt/github-build-tags-20261108`, only if G asks.
+- Housekeeping, only with G: about 195 worktrees and 89 `wt/*` branches from the 5 to 8 Nov development remain on the external volume. Triage them (merged, superseded, still wanted) and bring G an exact removal list.

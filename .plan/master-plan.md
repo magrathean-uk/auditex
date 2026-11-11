@@ -1,63 +1,88 @@
-# Master plan - Auditex 1.4.0
+# Master plan - Auditex 1.5.0 and the explainer model research
 <!-- Hub document, max 150 lines. sol-architect writes it, the orchestrator makes small edits, G approves scope. -->
 
 ## Vision
-Auditex 1.4.0 is the release in which an IT administrator or consultant gets the same read-only, deterministic
-Microsoft 365 audit as 1.3.0 from a smaller, provable product: the parked local-model layer is gone, so every
-verdict and explanation visibly comes from value rules and the template; shareable output masks person names in
-free text and ids, not only in typed fields, without a memory blow-up on large tenants; anyone can rebuild the
-published wheel and sdist byte for byte and rerun the full 26,898-vector acceptance replay with one command; and
-the boundary scanners that prove the tool never writes to a tenant or reads content have fewer blind spots, with
-the rest written down. Nothing new reaches the tenant and nothing leaves the machine except to endpoints the
-operator configures.
+Auditex 1.5.0 is the release in which an IT administrator or consultant can hand a shareable report to a third
+party without that party being able to confirm a guessed name from the run folder name: pseudonyms come from a
+private per-run key, and names written with middle initials or titles are masked too. The boundary scanners that
+prove the tool never writes to a tenant or reads content close the limits plan v3 named, the codebase is held to a
+wider lint rule set, and the release stays read-only, deterministic and byte-reproducible. Beside it, the Isambard-AI
+allocation is put to use on the job G chose for a model: writing fuller explanations and remediation for verdicts
+the value rules already gave. That track ends with a judged build, a measured comparison of bases and a written
+recommendation, so G can decide on evidence whether a model explainer ever reaches the product.
 
 ## Target user
 IT administrators and consultants auditing their own or a customer's Microsoft 365 or Google Workspace tenant
 who need defensible, reproducible evidence without write access (wording confirmed by G for 1.3.0).
 
 ## Success criteria
-- `make lint` runs the pinned Ruff check over the whole repository with the pre-commit hook's rule set and target
-  version, and `make lint`, `make test`,
-  `make contract-smoke`, `make release-check` and `make audit-deps` exit 0 on the release commit.
-- Two plain `make dist` builds of the release commit give a byte-identical wheel and a byte-identical sdist, and
-  `scripts/check-reproducible-build.py` proves both (v2 DEC-019).
-- `make acceptance` verifies all three pinned kit hashes, runs the full v3.9.1 replay (26,898 vectors) and the
-  explainer acceptance suite, and passes at each milestone close from M02 and on the release commit; the replay is
-  no longer waived (v2 DEC-017). The kit stays in the machine records folder, outside git; no scheduled job.
-- No model module, model CLI command or flag, `model_train` extra, model script or model config remains, after G
-  approved the exact removal list; a normalised digest comparison of contract smoke shows report, projection and
-  explainer output unchanged, with no contract re-baseline (v2 DEC-004).
-- Shareable and customer-pack output mask the names of everyone in the run's own directory records in free text
-  and ids, with bounded per-record matching, an HTML peak on the frozen 90,000-record workload within the `main`
-  baseline plus 15 percent while masking runs, and approving privacy reviews from both providers (D6, DEC-001).
-- Every DEC-011 scanner limit is closed by a test or stated in the security and privacy reference.
-- The approved dead paths and the divergent `tenant-bootstrap/azure_tenant_audit/` copies are removed through the
-  deletion gate and recorded in CLEANUP.md; only the forwarder remains, a test proves it forwards to `src/`, and
-  `tenant-bootstrap/` is described in AGENTS.md.
-- Tier A changes (M01-T01, M02-T03, M02-T04, M04-T01, M04-T02, M05-T03, M06-T01) carry an approving other-vendor
-  review of the exact merged head, checked through the merge trailer and the ledger (ARCHITECTURE.md).
-- astra's release gate returns ready; the release gate compares wheel and sdist bytes; G's yes naming 1.4.0 is recorded; the signed tag `v1.4.0` and a GitHub
-  release with the wheel and sdist exist and the downloaded assets match the gated hashes. No PyPI.
+Track A, product release 1.5.0:
+- `make lint` enforces Ruff E4, E7, E9, F, W, I, B and UP over the whole repository, and `make lint`, `make test`,
+  `make contract-smoke`, `make acceptance` (full v3.9.1 replay, no skips, the value-rule contract test included),
+  `make release-check` and `make audit-deps` exit 0 on the release commit; two plain `make dist` builds are
+  byte-identical; the contract-smoke digest comparison passes, with digests changed only for pseudonym-bearing
+  artefacts in M04-T03.
+- Shareable output pseudonyms come from a private per-run key: knowing the run path reproduces no pseudonym, and
+  the key appears in no report, pack, export, notification, MCP output or log; G approved the design; privacy
+  reviews by both providers approve the merged heads; `CONTRACT_VERSION`, schemas and the output contract change
+  together and the notes say what it means for 1.4.0 bundles.
+- Names with middle initials or titles and name-equal mapping keys are masked or counted, with probes at most
+  tokens x 6 and the 90,000-record HTML peak within the baseline plus 15 percent.
+- The v3 DEC-008 and DEC-009 scanner limits are closed for planted cases under the fail-closed rule; any other class
+  is a named limit in the privacy reference.
+- The plan v3 review follow-ups are closed and the vendored microsoft-skills entries are settled by G's deletion gate.
+- astra's release gate returns ready on the gated candidate commit and G's yes names 1.5.0 and that commit; the signed
+  tag `v1.5.0` on `origin` has the local tag's object and commit; the GitHub release's wheel and sdist, downloaded
+  fresh, match the gated hashes. No PyPI.
+Track B, explainer model research on Isambard-AI (outside the repository):
+- A runbook with the system's checked facts, a standalone trainer that imports nothing from the product, and a v10
+  reproduction scoring at least 400 of 435 strict with at most 5 applicability errors.
+- A clean held-out set with zero twins under one written definition, sealed outside git.
+- A judging method for free text calibrated on planted defects, and an acceptance bar recorded before large runs.
+- Bases compared with a noise band and picked by the EU-first rule; one judged build scored once on the held-out
+  set; a recommendation with the product-integration options; G's pick recorded.
+- Every Track B result is reproduced by the kit's `kit-check` from hashed artefacts, and an other-vendor review
+  reruns it at each milestone close.
+- No model decides or changes a verdict; no paid API runs; GPU-hours per stage, every job included (failed and
+  retried ones too), stay within the caps G approved in the table below.
 
 ## Scope of 100 percent
-The 1.4.0 release built from the BACKLOG Next items of plan v2, which G approved as the next scope ("ok to all,
-continue dev until 100%"): a lint-enforced foundation; byte-reproducible `make dist` and a repeatable local
-acceptance run with the restored replay kit; retirement of the parked model layer through the deletion gate;
-the dead-code cleanup and the `tenant-bootstrap/` description and forwarder proof; the DEC-011 scanner
-follow-ups; D5-v2 person-name masking; then release notes, gates and, on G's yes naming 1.4.0, publication.
-100 percent means every DoD item in M00-M06 is ticked.
+Track A: the 1.5.0 release from G's gate answers - the wider Ruff set, the contract-test and gate-doc
+fixes, keyed per-run D5 pseudonyms with the middle-initial and title follow-up, the scanner follow-ups, the small
+review follow-ups and the release, which stops at the approved candidate until G's yes names 1.5.0. Track B: the
+explainer model research from bring-up to G's pick of a judged build (or of none). 100 percent means every DoD item
+in M00-M06 is ticked; the release does not wait for Track B.
 
 ## Non-goals
-- Live-tenant work of any kind (certificate auth live checks, presets, IPPS, Teams coverage, the day-one run,
-  `-Enforce`, the SS 2.1 live wire-shape gate) and the dummy-tenant kit rounds. Never raise the tenant.
-- Answering the SCuBA Google Workspace baselines; the Google provider stays an internal control map.
-- Merging `wt/redact-person-names` or the `wt/d5-*` branches; D5 is a redesign from `main` (D6).
-- Hosted CI; merging the Codex branch `wt/github-build-tags-20261108`; deleting `wt/*` branches or worktrees.
-- PyPI or any registry upload; any release other than 1.4.0 without G's yes naming it; any tenant write path.
-- Model training, base-model pulls, AIRR or Hugging Face upload (the layer is retired, not developed).
-- A wider Ruff rule set than the hook's E4, E7, E9 and F; workstation tooling issues (clean-development doctor).
-- A launchd or other scheduled acceptance job (G declined); acceptance runs at milestone close and the release gate.
+- Shipping a model explainer, a model download or any model code in 1.5.0; product integration is a later G gate.
+- Any verdict from a model; widening the rules' scope beyond the 102 SCuBA policies.
+- Training code in the product repository (v3 DEC-005); a new repository; the Hugging Face upload (parked until a
+  build passes its bar and G says yes); paid API runs; base snapshots on the workstation (they are fetched straight onto Isambard-AI).
+- Live-tenant work of any kind and the dummy-tenant kit; answering the SCuBA Google Workspace baselines.
+- Hosted CI; merging `wt/github-build-tags-20261108`; PyPI or any registry upload; any tenant write path.
+- A Ruff format hook; deleting kit folders, `wt/*` branches or worktrees; workstation tooling (clean-development).
 - Edits to G-owned legal files except text G approves verbatim.
+
+## Track B GPU-hour budget (caps, for G's approval)
+1 node-hour on Isambard-AI is 4 GPU-hours. A stage that reaches its cap stops and reports. Moving hours between
+stages or releasing the reserve needs a DEC entry G approves; only then does the orchestrator change that row's cap
+and its set-by DEC. The budget look before M03-T01 is the planned point. No hours before DEC-001 is approved.
+Stages: bringup (bring-up and qualification), repro (v10 reproduction), heldout (twins and held-out set, CPU only),
+prose (teacher-written training data), judging (judging method and bar), basecmp (base comparison), large (large
+runs), build (judged build). Tasks write `gpu-hours: <stage> <used>`; DoD predicates read the cap from this table and sum exactly (`bc`).
+
+| stage | tasks | cap | set by |
+|---|---|---|---|
+| bringup | M01-T02, M01-T04 | 32 | DEC-001 |
+| repro | M01-T05 | 64 | DEC-001 |
+| heldout | M02-T01, M02-T02 | 0 | DEC-001 |
+| prose | M02-T03 | 256 | DEC-001 |
+| judging | M02-T04, M02-T05 | 128 | DEC-001 |
+| basecmp | M03-T01 | 1,024 | DEC-001 |
+| large | M03-T02 | 2,048 | DEC-001 |
+| build | M03-T03 | 64 | DEC-001 |
+| reserve | - | 384 | DEC-001 |
+| total | - | 4,000 | DEC-001 |
 
 ## Architecture
 See ARCHITECTURE.md. Parallel work only across modules with different owners; sol agrees interfaces before any parallel dispatch.
@@ -66,36 +91,41 @@ See ARCHITECTURE.md. Parallel work only across modules with different owners; so
 <!-- milestones:begin -->
 | id | name | weight | % | status |
 |---|---|---|---|---|
-| M00 | foundation | 10 | 100 | done |
-| M01 | build-and-acceptance | 15 | 100 | done |
-| M02 | model-layer-retirement | 20 | 100 | done |
-| M03 | cleanup-and-bootstrap | 10 | 100 | done |
-| M04 | boundary-scanners | 10 | 100 | done |
-| M05 | d5-name-masking | 20 | 100 | done |
-| M06 | release-1-4-0 | 15 | 100 | done |
+| M00 | foundation | 8 | 50 | active |
+| M01 | airr-bring-up | 15 | 0 | planned |
+| M02 | explainer-data-and-judging | 15 | 0 | planned |
+| M03 | explainer-training | 17 | 0 | planned |
+| M04 | d5-keyed-pseudonyms | 18 | 0 | planned |
+| M05 | scanners-and-hygiene | 12 | 0 | planned |
+| M06 | release-1-5-0 | 15 | 0 | planned |
 <!-- milestones:end -->
 
-Order: M00 first (M00-T01 alone); read-only tasks (M01-T02, M02-T01, M03-T01, M05-T01) may run alongside it.
-Then, serialised on shared files: M01-T01 -> M01-T03 -> M02-T03 -> M02-T04 -> M02-T05 (`Makefile`, runbook,
-model guide); M02-T02 runs after M02-T01 and before M02-T03; M05-T02 after the frozen harness section of M05-T01.
-After M02-T05: M03-T02 -> M03-T03 -> M03-T04, and M04-T01, M04-T02 in parallel; M04-T03 after M03-T02 (shared
-`docs/reference/security-privacy.md`); then M05-T03 -> M05-T04; then M06. Only M03-T02 deletes bootstrap files.
+Priority (G): Track B gets worker seats first; Track A runs beside it as seats allow. Nothing starts before DEC-001.
+Track B: M01-T01 and M01-T03 in parallel; M01-T02 after G's login; then M01-T04 -> M01-T05. M02-T01 (CPU) may run
+beside M01; M02-T02 (CPU) after M02-T01 and M01-T03 (it needs `kit-check`); M01-T04 -> M02-T04 (freezes the checks)
+-> M02-T05; M02-T03 after M02-T04 and M02-T02; M03-T01 after M01-T05, M02-T03, the bar and the budget look; then
+M03-T02 -> M03-T03 -> M03-T04.
+Track A: M00-T05, then M00-T01 alone, then M00-T02 and M00-T03 in parallel, then M00-T04. M04-T01 (read-only design)
+may run during M00. After M00: M04-T02 -> M04-T03 (after G's design DEC) -> M04-T04 -> M04-T05; M05-T01 and M05-T02 in
+parallel beside M04; M05-T05 at any time after M00; M05-T03 after M05-T01, M05-T02 and M04-T05; M05-T04 after
+M04-T05 and M05-T03. M06 after M00, M04 and M05.
 
 ## Top risks
-1. Ruff findings sit in 54 files across modules; M00-T01 runs alone before parallel writers, or it collides
-   with every later branch.
-2. The replay kit was found only by one inventory slice and the plan session could not re-locate it; if
-   M01-T02 cannot find it, M01 and every milestone-close acceptance item wait on a G decision.
-3. Model-layer helpers feed the shipped report, projection and value-rule paths; removing them before
-   re-homing breaks 1.4.0. M02-T02 records normalised digests first; M02-T03 and M02-T04 must match them.
-4. D5 is the third attempt (D6): matching cost and HTML peak are the known failure modes, hence the frozen
-   harness interface, the person-bearing workload and the baseline before the change, and the design gate.
-5. Two deletion gates (M02, M03 with the bootstrap copies), the D5 design and the 1.4.0 yes wait on G;
-   dispatch keeps independent work moving while they wait.
-6. Removing the `model` command and extra changes the CLI surface in a minor release; the notes must say so.
-7. Plan v2 used the same task ids M00-M03; predicates bind to plan v3 merges, DEC ids and CLEANUP.md rows,
-   never to a work path alone. The repo is public: plan files, briefs and notes carry no workstation paths, credentials, live evidence or
-   sealed evaluation rows (the kit location stays outside git); gitleaks and the taint scan run before every push.
+1. Isambard-AI is aarch64 with unknown compute-node internet, wheel support for PEFT and bitsandbytes, and driver
+   versus CUDA wheel fit; M01-T02 checks all eight unknowns before any training, with containers as the fallback.
+2. Workers cannot log in; every run phase needs G's login. M01-T02 records how long a login lasts and the route
+   workers use, and run tasks are batched so one login covers a phase.
+3. The allocation has a fixed end and unused hours are lost; Track B has priority, and the caps keep the large runs
+   from eating the comparison.
+4. Judging free text is easy to get wrong: deterministic checks gate first, the judge is a different model family
+   from the candidate, calibrated on planted defects with position swap, and the bar is fixed before large runs.
+5. The keyed scheme is a bundle and contract change touching engine, product, schemas and docs; the design gate,
+   the digest gate (failing today on a date-derived field, fixed by M00-T05), both privacy reviews, the
+   1.4.0-bundle compatibility test and the current-version test edits in M04-T03 contain it.
+6. The wider Ruff set touches files in every module; M00-T01 runs alone before any other Track A writer.
+7. Task ids repeat plan v2 and v3 ids; predicates bind to merges after `v1.4.0` and plan v4 DEC entries, the old
+   work folders are archived, and milestone tags are `v4-Mxx`. The repository is public: result lines carry no
+   workstation paths, credentials, held-out rows or infrastructure names.
 
 ## Links
 STATE.md, ARCHITECTURE.md, milestones/, BACKLOG.md, DECISIONS.md, CLEANUP.md, RETRO.md
