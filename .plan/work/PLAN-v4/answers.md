@@ -122,3 +122,18 @@ Track B, model re-training on Isambard-AI. Research tasks: the only repository o
 - A GPU-hour budget per stage, shown to G in the plan. No GPU-hours are spent before G approves the
   plan v4 scope.
 - Every stage that needs G says so: a login, a look at the budget, the pick of the final build.
+
+## Scope approval and later rulings (G, 11 Nov 2026)
+
+- "Approved": plan v4 as written in DEC-001, both tracks, with the Track B GPU-hour stage caps
+  (4,000 in total, including the 384 reserve only G releases). Read as also accepting the
+  architect's recommendations: the teacher model for prose data is Mistral Small 4 run on the
+  allocation; where the D5 key lives returns at the M04 design gate; how a model explainer could
+  reach the product is decided at the build pick.
+- "Don't worry ever about 5Gb over downloads": downloads over 5 GB need no telling or asking first.
+  This supersedes every tell-first download line above and in DEC-001's consequences. Storage
+  routing is unchanged.
+- "The whole AIRR we have can be used for this project": the 4,000 GPU-hour total is the starting
+  plan, not a ceiling (DEC-002). Stage caps stay as stop-and-report controls; the orchestrator
+  resizes them within the allocation balance read at bring-up and shows G the table. The reserve
+  needs no separate release.

@@ -2,10 +2,19 @@
 <!-- ADR-lite. One entry per decision, newest last. Approver is G or auto (within the orchestrator's authority). -->
 
 ## DEC-001 Plan v4 adopted
-- date: <set by the orchestrator at G's approval>
-- status: proposed
+- date: 2026-11-11
+- status: approved
 - decision: plan v4 runs two tracks. Track A is release 1.5.0: the wider Ruff set, the contract-test and gate-doc fixes (including the contract-smoke digest comparison, which fails on the unchanged 1.4.0 tree on a date-derived field), keyed per-run D5 pseudonyms with the middle-initial and title follow-up (a bundle and `CONTRACT_VERSION` change, design to G first), the v3 DEC-008 and DEC-009 scanner follow-ups, the small review follow-ups, the microsoft-skills deletion gate and the release, stopping at the approved candidate until G's yes names 1.5.0. Track B is explainer model research on Isambard-AI (G's pick "Richer explanations"): bring-up and runbook, a standalone trainer in the kit, one v10 reproduction, a clean held-out set, prose data written by Mistral Small 4 run on the allocation, a judging method and bar, a base comparison (Ministral 3 8B and 14B, Gemma 4 31B, Qwen3.8-27B, Qwen 4 if released), large runs and a judged build with a recommendation, within a 4,000 GPU-hour budget split by stage (master-plan.md). Track B results count only when the kit's `kit-check` reproduces them from hashed artefacts and an other-vendor review reruns it; stage caps change only through a DEC G approves, written into the budget table's set-by column.
 - options: approve as written | approve with a different GPU-hour total or stage caps | approve Track A only | hold
 - why: G's gate answers (`.plan/work/PLAN-v4/answers.md`) set the model's job, the bases, the D5 milestone and AIRR-first priority; the assessment (`.plan/work/assessment-v4.md`) corrected the hygiene premises.
 - consequences: progress re-baselines from 100% (plan v3 closed) to 4% under the plan v4 scope and weights; plan v2 and v3 decisions stay binding, cited as "v2 DEC-nnn" and "v3 DEC-nnn"; verdicts come only from value rules and no model explainer enters 1.5.0; Track B writes only `.plan/work/<id>/result.md` in this repository; approving the plan does not approve a release, a new repository or hours beyond the stage caps (downloads of any size need no telling or asking first, G's later ruling; storage routing is unchanged); where the D5 key lives and the contract-smoke digest strategy are settled at the M04 design gate, and how a model explainer could reach the product at the build pick; G is asked at the login, the D5 design, the deletion gate, the budget look, the build pick and the 1.5.0 yes.
+- approver: G ("Approved", 11 Nov 2026, after the gate answers in `.plan/work/PLAN-v4/answers.md`)
+
+## DEC-002 The whole allocation is Track B's budget
+- date: 2026-11-11
+- status: approved
+- decision: the whole AIRR allocation on Isambard-AI may be used for this project. The 4,000 GPU-hour total in the master-plan budget table is the starting plan, not a ceiling. Stage caps stay as stop-and-report controls. Once M01-T02 has read the allocation balance, the orchestrator may raise or move stage caps within that balance: each resize is one amendment line under this entry (stage, old cap, new cap, balance read), written before the row's cap and set-by change, and G is shown the resized table. The reserve row needs no separate release.
+- options: keep the 4,000 total and the G-only reserve (DEC-001 as drafted) | the whole allocation with orchestrator-resized stage caps (chosen)
+- why: G, 11 Nov 2026: "The whole AIRR we have can be used for this project." Hours are not the limit; the allocation's end date is.
+- consequences: no change to scope, weights or percentage; the sum of the stage caps never exceeds the balance read on the system; a stage that reaches its cap still stops and reports; the budget look before M03-T01 stays as planned. This supersedes DEC-001's "hours beyond the stage caps" limit and the reserve's G-only release, nothing else.
 - approver: G

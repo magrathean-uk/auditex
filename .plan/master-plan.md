@@ -64,9 +64,10 @@ in M00-M06 is ticked; the release does not wait for Track B.
 - Edits to G-owned legal files except text G approves verbatim.
 
 ## Track B GPU-hour budget (caps, for G's approval)
-1 node-hour on Isambard-AI is 4 GPU-hours. A stage that reaches its cap stops and reports. Moving hours between
-stages or releasing the reserve needs a DEC entry G approves; only then does the orchestrator change that row's cap
-and its set-by DEC. The budget look before M03-T01 is the planned point. No hours before DEC-001 is approved.
+1 node-hour on Isambard-AI is 4 GPU-hours. A stage that reaches its cap stops and reports. G made the whole
+allocation available to this project (DEC-002), so the total below is the starting plan, not a ceiling: once M01-T02
+has read the allocation balance, the orchestrator resizes stage caps within it, writing an amendment line under
+DEC-002 first and then changing that row's cap and its set-by DEC, and shows G the table. The budget look before M03-T01 is the planned point. No hours before DEC-001 is approved.
 Stages: bringup (bring-up and qualification), repro (v10 reproduction), heldout (twins and held-out set, CPU only),
 prose (teacher-written training data), judging (judging method and bar), basecmp (base comparison), large (large
 runs), build (judged build). Tasks write `gpu-hours: <stage> <used>`; DoD predicates read the cap from this table and sum exactly (`bc`).
