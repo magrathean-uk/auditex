@@ -1,0 +1,32 @@
+## RESULT M02-T05
+status: done
+summary: Bar proposed, frozen in kit/judging/bar/bar.json and validated from the saved M02-T04 judgements and CPU work only; no GPU job and no system access were needed.
+Five rules: a deterministic floor, wins counted only in both orders with a margin above the mechanical good controls' band, judge flags only as a screen, a frozen 24-output human read, and three seeds with their spread.
+Validated: the template passes every frozen check on 501/501 held-out inputs; the template against itself sits at parity and fails the win part; the good controls (64.3, band 55.7-72.9) fail it although they would clear a plain 50 rule; every planted bad class fails.
+Finding: through the 1.4.0 value rules the sealed labels hold on 209/501 held-out rows (291 become not_assessed), so on this set the bar mostly scores what-to-collect explanations.
+Not validatable before a trained model exists: whether the win part is reachable, the seed spread, the human read and judge-human agreement.
+changes: kit/checks/bar.py (new) and its line in kit/checks/SHA256SUMS; kit/judging/bar/{README.md,bar.json,build_heldout_inputs.py,finalise.py,heldout-inputs.jsonl,human-rubric.md,human-sample.json,measures.json,tests/test_check_bar.py,SHA256SUMS} (new); kit/runs/usage/M02-T05/{jobs.json,SHA256SUMS} (cpu_only, no job); kit/runbook/README.md section 11 appended (brief step 6); .plan/work/M02-T05/notes.md
+verification: brief verify command on a scratch copy of this block under $TMPDIR: pass (exit 0); kit-check usage on it: pass (cpu_only, 0 GPU-hours); kit-check calibration and checks: pass; offline tests judging/bar/tests 13/13, judging/tests 17/17, checks/tests 54/54 OK
+risks: The held-out evidence is in provider-export form, so 291/501 inputs explain not_assessed; recommend the held-out owner re-express it in the product's collected form, or M03-T03 report per verdict state, before scoring (the bar's rules are unchanged by either). | The win part may be unreachable: every seed's lower edge must exceed 72.9 with a judge whose clean-text preference is weak and noisy (same scores on re-run 15/30); the lever is a larger mechanical control set to narrow that band (about 5 GPU-hours), decided before any M03 scoring. | kit-check trusts the held-out prompts (no 1.4.0 wheel in its environment); the REV-M02-kit reviewer rebuilds them with judging/bar/build_heldout_inputs.py and compares bytes; runbook section 9 still names the old checks hash (M02-T04 follow-up).
+questions_for_g: none
+### Findings
+bar-proposal: 1 floor - on every seed, no held-out output may state the verdict, a value, the policy or the references wrongly, or leave out a required template step (frozen checks 3241cf2c...), and at least 99 per cent must pass every frozen check.
+bar-proposal: 2 wins - the judge compares each output with the template in both orders; only a win in both orders is a win and only a loss in both is a loss, everything else is a tie worth half, and every seed's preference band must sit wholly above the band mechanical fuller text reaches (above 72.9 per cent).
+bar-proposal: 3 screen - judge flags only screen: no seed may have more than 14.3 per cent of outputs flagged, flagged outputs are read first in rule 4, and the flags are known to miss 16 of 227 planted defects in fuller text.
+bar-proposal: 4 human - the owner reads 24 outputs picked by a frame frozen now (3 seeds x 4 verdict states x one judge win and one not-win, flagged first) with a four-question rubric in under an hour; pass when none has a factual error and at least 22 are right on all four.
+bar-proposal: 5 seeds - at least three seeds per configuration; rules 1 to 3 hold for every seed, and every figure is reported as mean with its minimum and maximum.
+bar-sha256: ee64099a4b745e49668ad21147977cf639f6d17eec0542f58970f3103fcbe4fc
+bar-heldout-inputs: 501 rows; template passes every frozen check 501/501; rule verdict met 84, not_met 101, not_applicable 15, not_assessed 301; sealed label equals rule verdict 209/501
+bar-thresholds: win part needs every seed's preference band above 72.9 per cent; flag cap 14.3 per cent; floor 100 per cent on verdict, values, policy, completeness and 99 per cent on every check; seeds 3 at least
+bar-template-self: preference 50.0 per cent (band 50.0-50.0), wins 0, losses 0, ties 39/39 (one-order 0, inconsistent 0, both tie 39, unparsed 0), flagged 0/39; parity: passes the floor and the screen, fails the win part
+bar-good-controls: preference 64.3 per cent (band 55.7-72.9), wins 11, losses 1, ties 23/35 (one-order 13, inconsistent 1, both tie 9, unparsed 0), flagged 2/35; clears the plain 50 per cent rule; passes the floor and the screen, fails the win part
+bar-planted-deterministic: every class fails the floor (wrong-verdict 80/80, invented-value 158/158, wrong-policy 160/160, contradictory-step 80/80, missing-step 53/53, padding 80/80)
+bar-planted-judge: every class fails the win part and the screen (wrong-verdict preference 0.0 flagged 39/39, invented-value preference 0.0 flagged 39/39, wrong-policy preference 1.3 flagged 38/39, contradictory-step preference 0.0 flagged 39/39, padding preference 2.6 flagged 39/39)
+bar-planted-fuller: every class fails (wrong-verdict fails win+screen (checks 35/35, preference 2.9, flagged 35/35); invented-value fails win+screen (checks 35/35, preference 0.0, flagged 35/35); wrong-policy fails win+screen (checks 35/35, preference 1.4, flagged 34/35); contradictory-step fails win+screen (checks 35/35, preference 4.3, flagged 34/35); padding fails win+screen (checks 35/35, preference 14.3, flagged 30/35); missing-step fails floor+win+screen (checks 1/25, preference 4.0, flagged 24/25); misbound-value fails floor+win+screen (checks 0/27, preference 0.0, flagged 27/27))
+bar-screen-miss: flags miss 16/227 fuller-text defects (7.0 per cent; band 2.6-13.0); template winning both orders misses 29/227; frozen checks then flags miss 8/227
+bar-judge-rerun: unchanged pairs judged twice: good controls same scores 15/30 (preference 66.7 then 68.3), template copies tie 39/39 then 39/39
+bar-human-sample: 24 outputs per configuration (3 seeds x 4 verdict states x judge win or not), frame sha256 d85333209ef80228880cf13e15d867fa5e339b4b26ef63cfc59bcd7fc168d9de
+bar-not-validated: win-part reachability, the seed spread, the human read and judge-human agreement, and defects no planted class covers wait for a trained model
+gpu-hours: judging 0
+bar-validated: yes
+Details: .plan/work/M02-T05/notes.md and kit/judging/bar/README.md.
