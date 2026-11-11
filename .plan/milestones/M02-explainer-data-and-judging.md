@@ -2,7 +2,7 @@
 id: M02
 name: explainer-data-and-judging
 weight: 15
-status: planned
+status: active
 ---
 # M02 explainer-data-and-judging
 Track B, same rules as M01 (results only in `.plan/work/<id>/result.md`; code and data in the AIRR kit folder; `gpu-hours: <stage> <used>` per task; every measurement reproduced by `kit-check`). The explainer job is G's pick (gate answers): the model writes fuller explanations and remediation for a verdict the value rules already gave; it never decides or changes a verdict. Held-out and sealed rows never enter the public repository.

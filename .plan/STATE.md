@@ -1,13 +1,13 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 33% (was 30%)
-milestone: M00-foundation 85%
+overall: 34% (was 33%)
+milestone: M02-explainer-data-and-judging 57%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
-last_checkpoint: 07708b5 2026-11-11T20:03:27Z
+last_checkpoint: f9a272c 2026-11-11T22:24:29Z
 
 ## Next tasks
-- M00-T04 Re-run the gate chain on main after the M00 merges (luna)
+- M02-T03 Build the prose training data for the explainer job (codex)
 
 ## Blockers
 - none
@@ -22,12 +22,12 @@ last_checkpoint: 07708b5 2026-11-11T20:03:27Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 29% orchestrator
-claude-1 42% ok
-claude-2 47% shared
-claude-3 33% ok
+claude 34% orchestrator
+claude-1 44% ok
+claude-2 48% shared
+claude-3 36% ok
 claude-4 86% hot
-claude-5 63% ok
+claude-5 64% ok
 codex 91% hot
-codex2 81% ok
+codex2 82% ok
 <!-- quota:end -->
