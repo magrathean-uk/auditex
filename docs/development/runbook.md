@@ -119,7 +119,7 @@ The replay kit is three files in one folder: `vectors.jsonl`, `a2-vectors.jsonl`
 
 ### Publication
 
-Publication for 1.3.0 is the one G approved in DEC-001: a signed `v1.3.0` tag plus a GitHub release carrying the wheel and sdist from `make dist` (`gh release create v1.3.0 dist/*.whl dist/*.tar.gz`). There is no PyPI upload. Tagging and the release wait for G's explicit yes naming the version; a green `make release-check` is not approval.
+A release is a signed `vX.Y.Z` tag plus a GitHub release carrying the wheel and sdist from `make dist` (`gh release create vX.Y.Z dist/*.whl dist/*.tar.gz`). There is no PyPI upload. Tagging and the release wait for G's explicit yes naming the version; a green `make release-check` is not approval.
 
 ### Internal tools
 

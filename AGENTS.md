@@ -56,10 +56,12 @@ Python 3.11+. Claude Code reads this file through `CLAUDE.md`; Codex reads it di
 ```sh
 make install                          # editable install into .venv (may be a link; see Environment)
 .venv/bin/python -m pytest tests/test_cli.py -k offline   # focused tests while iterating
-make lint                             # compileall only, not a style check
+make lint                             # compileall plus the pinned Ruff check (E4, E7, E9, F, W, I, B, UP)
 make test                             # full suite
 make contract-smoke                   # rebuild outputs/ci-contract and validate the bundle
 python3 scripts/generate-rule-packs.py   # after rule changes; a test checks drift
+make acceptance                       # replay and explainer acceptance; needs AUDITEX_TEST_VALUE_RULE_VECTORS_V391
+make dist                             # reproducible wheel and sdist into dist/
 make release-check                    # lint, test, smoke, drift, taint scan, gitleaks
 gitleaks git --pre-commit --staged --redact --no-banner
 ```
