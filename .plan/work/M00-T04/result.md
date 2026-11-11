@@ -15,4 +15,4 @@ step audit-deps: exit 0 8s
 step acceptance: exit 0 227s
 pytest: 22825 passed, 256 skipped, 7 deselected, 34 xfailed, 0 failed
 gate-chain: pass
-Logs: /Users/bolyki/dev/source/auditex/.plan/work/M00-T04/gate/ (one run-job directory per step)
+Logs: .plan/work/M00-T04/gate/ (one run-job directory per step)
