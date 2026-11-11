@@ -1,0 +1,7 @@
+## RESULT M00-T02
+status: done
+summary: The contract test now loads `cell-catalogue.json` from the folder beside the vectors file as the independent reference, and falls back to the shipped catalogue only when that file is absent. The key-set assertion and the per-cell comparisons run against that reference. Kit file found: `value-rules-v391/cell-catalogue.json` (102 policies, a flat policy map with no `policies` wrapper), so the real kit takes the kit branch. The temporary copy of `vectors.jsonl` in an otherwise empty folder takes the fallback branch. Review items 1 and 2 are fixed. I left the Makefile line unchanged, as the brief says.
+changes: tests/test_value_rules_contract.py (commit ba64b7e)
+verification: On ba64b7e, kit variable set to the v391 `vectors.jsonl`: pytest pass, 192 tests, no skips. Variable unset: skips with `SKIPPED [1] tests/test_value_rules_contract.py:273: set AUDITEX_TEST_VALUE_RULE_VECTORS_V391 to the replay kit vectors.jsonl`. Variable pointing at a copy under `$TMPDIR/fb` (fallback branch): pass, 192 tests, no skips. `git status --porcelain` is empty. I did not run `make acceptance` or the full suite.
+risks: (1) The `$TMPDIR/fb` copy is left in place, since agents do not delete. (2) The kit catalogue is a flat map while the shipped file has a `policies` key, so a different kit layout would raise a KeyError rather than fall back. (3) `.venv` was already linked in the worktree.
+questions_for_g: none

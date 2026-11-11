@@ -1,0 +1,1 @@
+--task REV-M00-T02 --role sol --account claude-5 --brief .plan/work/REV-M00-T02/brief-src-2.md --readonly --sha task/M00-T02-contract-test-kit-var --tags mechanical --timeout 1800 --max-turns 60 --budget 6 --var TASK=M00-T02 --var MILESTONE=.plan/milestones/M00-foundation.md --var BRANCH=task/M00-T02-contract-test-kit-var
