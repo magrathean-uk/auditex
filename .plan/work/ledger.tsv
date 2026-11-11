@@ -384,3 +384,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T18:13:50Z	M05-T01	sol	claude-1	claude-opus-5-5	xhigh	branch	0	1383	4.8420	done	task/M05-T01-read-boundary-limits
 2026-11-11T18:15:57Z	REV-M05-T02	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	110		done	task/M05-T02-http-scanner-attr-store
 2026-11-11T18:18:41Z	REV-M05-T01	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	274		done	task/M05-T01-read-boundary-limits
+2026-11-11T18:21:14Z	REV-M05-T01	codex	codex2	gpt-6.1-sol	medium	readonly	0	62		done	task/M05-T01-read-boundary-limits
+2026-11-11T18:22:38Z	M00-T06	sol	claude-5	claude-opus-5-5	high	branch	0	597	1.0410	done	task/M00-T06-as-of-date

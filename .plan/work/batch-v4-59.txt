@@ -1,0 +1,1 @@
+--task REV-M05-T01 --role codex --model gpt-6.1-sol --account codex2 --brief .plan/work/REV-M05-T01/brief-src-2.md --readonly --sha task/M05-T01-read-boundary-limits --timeout 1800 --var TASK=M05-T01 --var MILESTONE=.plan/milestones/M05-scanners-and-hygiene.md --var BRANCH=task/M05-T01-read-boundary-limits

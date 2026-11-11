@@ -21,7 +21,7 @@ The read-boundary and HTTP scanner limits named in v3 DEC-008 and DEC-009 are cl
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M05-T01 | Close the read-boundary scanner limits from v3 DEC-008 | codex | M | hard | todo |
+| M05-T01 | Close the read-boundary scanner limits from v3 DEC-008 | codex | M | hard | done |
 | M05-T02 | Close the HTTP scanner attribute-store limit from v3 DEC-009 | codex | M | - | done |
 | M05-T03 | Update the scanner limits tables in the privacy reference | terra | S | - | todo |
 | M05-T04 | Close the plan v3 review follow-ups | codex | M | - | todo |

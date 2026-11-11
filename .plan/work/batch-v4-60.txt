@@ -1,0 +1,1 @@
+--task REV-M00-T06 --role sol --account claude-1 --brief .plan/work/REV-M00-T06/brief-src.md --readonly --sha task/M00-T06-as-of-date --tags hard --timeout 3600 --max-turns 150 --budget 25 --var TASK=M00-T06 --var MILESTONE=.plan/milestones/M00-foundation.md --var BRANCH=task/M00-T06-as-of-date
