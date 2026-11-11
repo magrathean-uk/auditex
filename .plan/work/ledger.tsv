@@ -337,3 +337,5 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T11:47:42Z	INV4-kit7l-suite	luna	claude-5	claude-haiku-5-5	medium	readonly	0	190	0.2977	done	88b0e50
 2026-11-11T11:47:59Z	INV4-kit7l-state	luna	claude-3	claude-haiku-5-5	medium	readonly	0	207	0.2942	done	88b0e50
 2026-11-11T12:10:53Z	M07-T01	sol	claude-5	claude-opus-5-5	high	branch	0	1229	3.5606	done	task/M07-T01-kit-7l-freeze
+2026-11-11T12:29:20Z	M02-T02	sol	claude-1	claude-opus-5-5	high	branch	0	2934	5.2594	done	task/M02-T02-heldout-set
+2026-11-11T12:34:10Z	M01-T04	terra	claude-1	claude-sonnet-5-5	high	branch	0	4424	3.1047	done	task/M01-T04-airr-qualification

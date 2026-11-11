@@ -1,10 +1,10 @@
 # STATE
 <!-- The only file read at every session start. Max 40 lines. Rewritten by checkpoint.sh and by small edits. -->
-overall: 14% (was 13%)
+overall: 16% (was 14%)
 milestone: M00-foundation 54%
 plan_version: v4
 release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, 4,000 GPU-hour stage caps; no model in 1.5.0)
-last_checkpoint: 88b0e50 2026-11-11T12:12:38Z
+last_checkpoint: 2656677 2026-11-11T12:35:11Z
 
 ## Next tasks
 - M00-T01 Widen the Ruff rule set to W, I, B and UP and clear its findings (codex)
@@ -28,7 +28,7 @@ claude-1 29% ok
 claude-2 46% shared
 claude-3 19% ok
 claude-4 86% hot
-claude-5 55% ok
+claude-5 56% ok
 codex 89% hot
 codex2 75% ok
 <!-- quota:end -->
