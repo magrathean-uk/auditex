@@ -91,3 +91,12 @@
 - why: the reproduction qualifies the pipeline before large hours are spent; a single draw against a bar 3 rows under the recorded score answers that badly, and the spread is needed anyway for the noise band of the base comparison.
 - consequences: about 12 more GPU-hours inside the 48 GPU-hour stage cap; the measured spread goes to M02-T05's bar; a fail does not stop Track B by itself (the model's job is explanation text, verdicts come from rules) but is reported to G with the cause analysis.
 - approver: auto
+
+## DEC-010 The shared sign-in leaves the gated kit round
+- date: 2026-11-11
+- status: acted on; reported to G, who may reverse it
+- decision: kit round 7p's item 4 (one sign-in per window reused by several scripts, DEC-008) is removed from this round. After one repair the two gate reviews of the frozen copy split: one ship, one do-not-ship on session ownership and cleanup in error paths (a failed census can make a script close a session it did not open; unreadable session ids can be left connected while cleanup reports complete). Both agree the other four items are sound and that no finding can write to the wrong tenant or lock the operator out. A new author builds round 7q from the accepted baseline plus items 1, 2, 3 and 5 only, with all sign-in and session code byte-identical to the accepted kit; then one diff-scoped confirmation by both providers and the full offline suite.
+- options: a second repair of the opener by another author (rejected for this round: each review round found new defects in the same new code, and a tier A gate needs both providers) | accept on the split verdict with the findings as stated limits (rejected: a stated property would be false) | cut the feature from the gated round (chosen; announced to G as the fallback before the re-review)
+- why: the live run needs the Agent 365 removal, the refusal handling and the Teams version pin; the shared sign-in is a convenience. New session code is the riskiest part of a kit that writes to a tenant that cannot be reset.
+- consequences: on the live run G signs in once per script and service, as with the accepted kit. The opener's code and its reviews stay in the 7p folder; bringing it back is its own task with its own gate, only if G asks.
+- approver: orchestrator under the announced fallback; G-level, listed for G

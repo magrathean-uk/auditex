@@ -3,8 +3,8 @@
 overall: 21% (was 20%)
 milestone: M00-foundation 69%
 plan_version: v4
-release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, 4,000 GPU-hour stage caps; no model in 1.5.0)
-last_checkpoint: 810b3cb 2026-11-11T17:26:31Z
+release_scope: 1.5.0 (wider Ruff set, contract-test and gate-doc fixes, keyed per-run D5 pseudonyms plus middle initials and titles, v3 DEC-008/009 scanner follow-ups, review follow-ups, microsoft-skills deletion gate, signed tag plus GitHub release on G's yes naming 1.5.0) beside Track B (explainer model research on Isambard-AI to a judged build and G's pick, stage caps inside the 20,000 GPU-hour allocation per DEC-002; no model in 1.5.0)
+last_checkpoint: d2fbe5e 2026-11-11T17:51:00Z
 
 ## Next tasks
 - M00-T02 Make the value-rule contract test read the replay kit variable (codex)
@@ -15,7 +15,7 @@ last_checkpoint: 810b3cb 2026-11-11T17:26:31Z
 - none
 
 ## Pending G decisions
-- none. DEC-001 (scope) and DEC-002 (the whole allocation is the budget) are approved. Next for G: the Isambard-AI login once M01-T01's runbook is ready, then the M04 design gate.
+- For G to confirm or change (logged by the orchestrator, G-level): DEC-003 (kit verifier accepted on a fixed bar after two repair rounds), DEC-007 (the held-out repair changed the twin definition), DEC-009 (v10 reproduction read as a four-run mean, set after run 1 scored 393 against 400), DEC-010 (shared sign-in cut from the kit round). Later: the explainer acceptance bar before any training run.
 
 ## Re-baselines
 - from 100% (plan v3 closed at 1.4.0) to 4% (plan v4 scope and weights, DEC-001, approved by G on 11 Nov 2026)
@@ -23,12 +23,12 @@ last_checkpoint: 810b3cb 2026-11-11T17:26:31Z
 
 ## Quota snapshot
 <!-- quota:begin -->
-claude 18% orchestrator
-claude-1 37% ok
+claude 20% orchestrator
+claude-1 38% ok
 claude-2 47% shared
-claude-3 29% ok
+claude-3 30% ok
 claude-4 86% hot
-claude-5 61% ok
+claude-5 62% ok
 codex 91% hot
-codex2 78% ok
+codex2 79% ok
 <!-- quota:end -->
