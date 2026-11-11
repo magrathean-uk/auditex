@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from .attack_graph import analyze_attack_graph
@@ -19,9 +20,11 @@ def _optional_fixture_provenance(bundle_metadata: dict[str, Any]) -> dict[str, A
     return dict(fixture_provenance) if isinstance(fixture_provenance, dict) else None
 
 
-def _attack_graph_for(normalized_snapshot: dict[str, dict[str, Any]] | None) -> dict[str, Any] | None:
+def _attack_graph_for(
+    normalized_snapshot: dict[str, dict[str, Any]] | None, *, now: datetime | None = None
+) -> dict[str, Any] | None:
     """Privilege-escalation graph analysis, or None when the run has no directory data."""
-    analysis = analyze_attack_graph(normalized_snapshot or {})
+    analysis = analyze_attack_graph(normalized_snapshot or {}, now=now)
     if not analysis["summary"].get("node_count"):
         return None
     return analysis
@@ -55,6 +58,8 @@ class ProviderFinalizePlan:
     trust_selected_collectors: list[str] | None = None
     bundle_metadata: dict[str, Any] = field(default_factory=dict)
     run_metadata: dict[str, Any] = field(default_factory=dict)
+    # An offline run's --as-of: the instant the attack graph judges credential expiry at. Live runs leave it None.
+    as_of: datetime | None = None
 
 
 def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
@@ -67,7 +72,7 @@ def write_provider_bundle(*, writer: Any, plan: ProviderFinalizePlan) -> None:
         evidence_paths=plan.evidence_paths,
         blocker_count=len(plan.blockers),
         privacy=plan.privacy,
-        attack_graph=_attack_graph_for(plan.normalized_snapshot),
+        attack_graph=_attack_graph_for(plan.normalized_snapshot, now=plan.as_of),
         normalized_snapshot=plan.normalized_snapshot,
         coverage_ledger=plan.coverage_ledger,
     )

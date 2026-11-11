@@ -209,3 +209,40 @@ def test_all_sensitive_sets_redact_unique_prefixes(flag, inline) -> None:
             assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == {"constructed-canary-argv-zz9"}
     if flag in _SENSITIVE_COMMAND_FLAGS:
         assert "constructed-canary-argv-zz9" not in str(scrub_google_command_line(argv))
+
+
+@pytest.mark.parametrize("abbreviation", ["--as-o", "--as", "--as-"])
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("entry", ["engine", "run", "google-run"])
+def test_as_of_abbreviations_are_refused_on_offline_runs(entry, abbreviation, inline, monkeypatch, tmp_path, capsys) -> None:
+    from azure_tenant_audit.output import AuditWriter
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("An abbreviated --as-of must be refused before any run starts")
+
+    monkeypatch.setattr(AuditWriter, "__init__", forbidden)
+    for name in ("run_offline", "run_live"):
+        monkeypatch.setattr(engine_cli, name, forbidden)
+    for name in ("run_google_offline", "run_google_live"):
+        monkeypatch.setattr(product_cli, name, forbidden)
+    monkeypatch.chdir(tmp_path)
+    main, prefix = {
+        "engine": (engine_cli.main, ["--offline"]),
+        "run": (product_cli.main, ["run", "--offline"]),
+        "google-run": (product_cli.main, ["google", "run", "--offline", "--domain", "example.com"]),
+    }[entry]
+    extra = [f"{abbreviation}=2026-11-11"] if inline else [abbreviation, "2026-11-11"]
+    with pytest.raises(SystemExit) as exc:
+        main([*prefix, *extra])
+    assert exc.value.code == 2
+    assert "error: invalid arguments" in capsys.readouterr().err
+    assert not list(tmp_path.rglob("run-manifest.json"))
+
+
+def test_as_of_carries_no_secret_and_stays_out_of_every_redaction_set() -> None:
+    assert "--as-of" not in SENSITIVE_FLAGS
+    argv = ["--offline", "--as-of", "2026-11-11", "--as-of=2026-11-12"]
+    for flags in (SENSITIVE_ARG_FLAGS, SENSITIVE_CLI_ARGS, SENSITIVE_ARGS, RESPONSE_SENSITIVE_ARGS, _SENSITIVE_COMMAND_FLAGS):
+        assert redact_argv(argv, sensitive_flags=flags) == argv
+        assert collect_sensitive_argv_values(argv, sensitive_flags=flags) == set()
+    assert scrub_google_command_line(argv) == argv

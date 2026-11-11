@@ -4,10 +4,11 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from collections.abc import Callable, Collection, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +131,31 @@ def _stale_sync_days(value: str) -> int:
     return days
 
 
+_AS_OF_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+# Every date-derived check survives this window: the widest offset is a 3650-day stale-sync window back and one
+# day forward, far from the datetime limits that 0001-01-01 and 9999-12-31 overflow.
+AS_OF_EARLIEST = "1970-01-01"
+AS_OF_LATEST = "2999-12-31"
+AS_OF_HELP = (
+    "Offline runs only: judge end of support, credential expiry, stale sync and the other date-derived checks "
+    f"at 12:00 UTC on this date (YYYY-MM-DD, from {AS_OF_EARLIEST} to {AS_OF_LATEST}) instead of now. "
+    "A live run refuses it."
+)
+
+
+def parse_as_of(value: str) -> datetime:
+    """``--as-of YYYY-MM-DD`` as 12:00 UTC on that day; any other text or a date outside the window is a usage error."""
+    try:
+        if not _AS_OF_PATTERN.fullmatch(value) or not AS_OF_EARLIEST <= value <= AS_OF_LATEST:
+            raise ValueError(value)
+        day = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"--as-of needs a calendar date written YYYY-MM-DD, from {AS_OF_EARLIEST} to {AS_OF_LATEST}"
+        ) from exc
+    return day.replace(hour=12, tzinfo=UTC)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = build_argument_parser(allow_abbrev=False, description="Run Microsoft tenant audit collection.")
     parser.add_argument("--version", action="version", version=package_version_line("azure-tenant-audit"))
@@ -224,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Named audit profile for expected permission shape and escalation guidance.",
     )
     parser.add_argument("--offline", action="store_true", help="Use offline sample bundle.")
+    parser.add_argument("--as-of", type=parse_as_of, default=None, metavar="YYYY-MM-DD", help=AS_OF_HELP)
     parser.add_argument("--sensitive-users", metavar="FILE", help="Local sensitive-user list (else AUDITEX_SENSITIVE_USERS_FILE); never uploaded or logged.")
     parser.add_argument("--partner-domains", metavar="FILE", help="Local partner-domain list (else AUDITEX_PARTNER_DOMAINS_FILE); never uploaded or logged.")
     parser.add_argument("--sample", default="examples/sample_audit_bundle/sample_result.json", help="Sample bundle path when offline.")
@@ -431,6 +458,7 @@ def run_offline(
                 ),
                 "replay_source": replay_source(sample_path, data=sample_bytes),
             },
+            as_of=as_of,
         ),
     )
     LOG.info("Offline sample written to %s", writer.run_dir)
@@ -1147,6 +1175,8 @@ def main(
     parsed_argv = list(argv if argv is not None else sys.argv[1:])
     args = parse_guarded(parser, parsed_argv)
     args._command_line = ["azure-tenant-audit", *parsed_argv]
+    if args.as_of is not None and not args.offline:
+        parser.error_prevalidated("--as-of applies only to offline runs (--offline)")
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s")
 
     if args.env:
@@ -1202,6 +1232,7 @@ def main(
             until=args.until,
             break_glass_accounts=offline_break_glass,
             stale_sync_days=args.stale_sync_days,
+            as_of=args.as_of,
             sensitive_users=sensitive_users,
             partner_domains=partner_domains,
         )

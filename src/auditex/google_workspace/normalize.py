@@ -240,12 +240,14 @@ def build_google_normalized_snapshot(
     result_rows: list[dict[str, Any]] | None = None,
     coverage_rows: list[dict[str, Any]] | None = None,
     top_limit: int | None = None,
+    as_of: datetime | None = None,
 ) -> dict[str, dict[str, Any]]:
+    """Normalise a Google Workspace run. ``as_of`` (offline ``--as-of``) is the instant date-derived values use."""
     diagnostics = diagnostics or []
     result_rows = result_rows or []
     coverage_rows = coverage_rows or []
     workspace_domain = str(domain or "").lower() or None
-    now = datetime.now(tz=UTC)
+    now = as_of or datetime.now(tz=UTC)
 
     users = [
         _record(

@@ -5,6 +5,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -373,6 +374,7 @@ def _write_google_bundle(
     command_line: list[str] | None = None,
     waiver_rows: list[dict[str, Any]] | None = None,
     replay: dict[str, Any] | None = None,
+    as_of: datetime | None = None,
 ) -> int:
     normalized_snapshot = build_google_normalized_snapshot(
         tenant_name=config.tenant_name,
@@ -384,12 +386,14 @@ def _write_google_bundle(
         result_rows=result_rows,
         coverage_rows=coverage_rows,
         top_limit=config.top or None,
+        as_of=as_of,
     )
     findings = build_google_findings(
         normalized_snapshot,
         diagnostics=diagnostics,
         stale_user_days=config.stale_user_days,
         stale_device_days=config.stale_device_days,
+        now=as_of,
     )
     if waiver_rows:
         # Same semantics as Microsoft 365: AND matching, finding_id or rule_id required, expired rows ignored.
@@ -473,6 +477,7 @@ def _write_google_bundle(
                 "sample_truncated": bool((normalized_snapshot.get("snapshot") or {}).get("sample_truncated")),
                 "truncated_sections": (normalized_snapshot.get("snapshot") or {}).get("truncated_sections", []),
             },
+            as_of=as_of,
         ),
     )
     return 1 if overall_status == "partial" else 0
@@ -490,7 +495,9 @@ def run_google_offline(
     waiver_file: Path | None = None,
     stale_user_days: int = DEFAULT_STALE_USER_DAYS,
     stale_device_days: int = DEFAULT_STALE_DEVICE_DAYS,
+    as_of: datetime | None = None,
 ) -> int:
+    """Replay a Google Workspace sample. ``as_of`` pins the instant date-derived findings are judged at."""
     # An unreadable or invalid waiver file stops the run before anything is written.
     try:
         waiver_rows = load_waivers(waiver_file) if waiver_file else []
@@ -586,6 +593,7 @@ def run_google_offline(
         command_line=[],
         waiver_rows=waiver_rows,
         replay=replay_source(target, data=sample_bytes),
+        as_of=as_of,
     )
 
 

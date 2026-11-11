@@ -204,6 +204,15 @@ auditex google run --offline \
   --out outputs/google
 ```
 
+Both offline runs take `--as-of YYYY-MM-DD`. It judges the date-derived checks (operating-system end of support, credential and auto-update expiry, stale sync, stale sign-in, password age and the privilege graph in the report pack) at 12:00 UTC on that date instead of now, so a replay reads the same whichever day it runs; `make contract-smoke` passes one fixed date. Without it the run uses the current date. A malformed date and `--as-of` on a live run are both refused with exit status 2. Waiver expiry stays on the current date on purpose, so an old `--as-of` can never bring an expired waiver back into force.
+
+```bash
+auditex run --offline --as-of 2026-11-11 \
+  --sample examples/sample_audit_bundle/endpoint_posture_result.json \
+  --tenant-name demo \
+  --out outputs/offline
+```
+
 ## Read A Run
 
 A completed run directory contains the contract artifacts. Start with:

@@ -4,6 +4,7 @@ import json
 import math
 import os
 from collections import Counter
+from contextvars import ContextVar
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -526,14 +527,12 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
 def _credential_expiry_state(
     end_date_time: Any, *, warning_days: int = _APP_CREDENTIAL_EXPIRY_WARNING_DAYS
 ) -> tuple[str | None, int | None]:
-    from datetime import datetime
-
     parsed = _parse_iso_datetime(end_date_time)
     if parsed is None:
         return None, None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
-    delta = parsed - datetime.now(tz=UTC)
+    delta = parsed - _utc_now()
     days = int(delta.total_seconds() // 86400)
     if delta.total_seconds() < 0:
         return "expired", days
@@ -597,8 +596,6 @@ def _is_credential_dormant(item: dict[str, Any]) -> bool:
     we cannot distinguish 'never signed in' from 'we never asked' and stay silent
     rather than flooding findings with false positives.
     """
-    from datetime import datetime, timedelta
-
     if not item.get("signin_data_available"):
         return False
     last_signin = _parse_iso_datetime(item.get("last_signin_at"))
@@ -607,7 +604,7 @@ def _is_credential_dormant(item: dict[str, Any]) -> bool:
         return False
     if created.tzinfo is None:
         created = created.replace(tzinfo=UTC)
-    one_year_ago = datetime.now(tz=UTC) - timedelta(days=365)
+    one_year_ago = _utc_now() - timedelta(days=365)
     if created > one_year_ago:
         return False
     if last_signin is None:
@@ -1163,7 +1160,7 @@ def _build_admin_resilience_findings(normalized_snapshot: dict[str, Any]) -> lis
             continue
         if last_password_change.tzinfo is None:
             last_password_change = last_password_change.replace(tzinfo=UTC)
-        if last_password_change >= datetime.now(tz=UTC) - timedelta(days=365):
+        if last_password_change >= _utc_now() - timedelta(days=365):
             continue
         affected = user.get("principal_name") or user.get("display_name") or principal_id
         findings.append(
@@ -2377,7 +2374,7 @@ def _is_stale_timestamp(value: Any, *, days: int = 90) -> bool:
         return False
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
-    return parsed < datetime.now(tz=UTC) - timedelta(days=days)
+    return parsed < _utc_now() - timedelta(days=days)
 
 
 def _build_inbox_rule_findings(item: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2532,7 +2529,7 @@ def _build_attack_path_findings(normalized_snapshot: dict[str, Any]) -> list[dic
     """
     findings: list[dict[str, Any]] = []
     admin_set_summary, _admin_rows = _effective_admins(normalized_snapshot)
-    for path in analyze_attack_graph(normalized_snapshot).get("paths") or []:
+    for path in analyze_attack_graph(normalized_snapshot, now=_utc_now()).get("paths") or []:
         if not path.get("finding_id"):
             continue
         rule_id = _attack_path_rule_id(path)
@@ -2933,8 +2930,12 @@ def _summary_record(normalized_snapshot: dict[str, Any], section: str, kind: str
     return next((row for row in _section_records(normalized_snapshot, section) if row.get("kind") == kind), None)
 
 
+# The instant an offline run is judged at (``--as-of``); unset, every read below takes the wall clock.
+_AS_OF: ContextVar[datetime | None] = ContextVar("findings_as_of", default=None)
+
+
 def _utc_now() -> datetime:
-    return datetime.now(tz=UTC)
+    return _AS_OF.get() or datetime.now(tz=UTC)
 
 
 def _device_base(device: dict[str, Any]) -> dict[str, Any]:
@@ -4221,6 +4222,32 @@ def build_findings(
     stale_guest_days: int | None = None,
     stale_sync_days: int | None = None,
     now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    # ``now`` pins every date-derived finding (credential expiry, stale sign-in and password age,
+    # stale sync, end of life); without it each read takes the wall clock as before.
+    token = _AS_OF.set(now) if now is not None else None
+    try:
+        return _build_findings(
+            diagnostics,
+            normalized_snapshot=normalized_snapshot,
+            waiver_file=waiver_file,
+            stale_guest_days=stale_guest_days,
+            stale_sync_days=stale_sync_days,
+            now=now,
+        )
+    finally:
+        if token is not None:
+            _AS_OF.reset(token)
+
+
+def _build_findings(
+    diagnostics: list[dict[str, Any]],
+    *,
+    normalized_snapshot: dict[str, Any] | None,
+    waiver_file: str | Path | None,
+    stale_guest_days: int | None,
+    stale_sync_days: int | None,
+    now: datetime | None,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
 

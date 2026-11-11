@@ -9,6 +9,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
+from azure_tenant_audit.cli import AS_OF_HELP, parse_as_of
 from azure_tenant_audit.cli import main as tenant_audit_main
 from azure_tenant_audit.cli_guard import RunArgumentRefusal, guarded_cli, parse_guarded
 from azure_tenant_audit.diffing import diff_run_directories
@@ -384,6 +385,7 @@ def _build_google_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", allow_abbrev=False, help="Run a Google Workspace audit.")
     _add_google_run_args(run)
     _add_google_findings_args(run)
+    run.add_argument("--as-of", type=parse_as_of, default=None, metavar="YYYY-MM-DD", help=AS_OF_HELP)
     return parser
 
 
@@ -1268,6 +1270,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] == "google":
         parser = _build_google_parser()
         args = parse_guarded(parser, argv[1:])
+        if getattr(args, "as_of", None) is not None and not args.offline:
+            parser.error_prevalidated("--as-of applies only to offline runs (--offline)")
         cfg = _google_config_from_args(args)
         if args.google_command == "doctor":
             payload = google_doctor(cfg)
@@ -1302,6 +1306,7 @@ def main(argv: list[str] | None = None) -> int:
                     waiver_file=cfg.waiver_file,
                     stale_user_days=cfg.stale_user_days,
                     stale_device_days=cfg.stale_device_days,
+                    as_of=args.as_of,
                 )
             return run_google_live(cfg, command_line=["auditex", *argv])
         return 2
