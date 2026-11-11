@@ -1,0 +1,1 @@
+--task M01-T02 --role terra --brief .plan/work/kit-run-brief-v4.md --branch --slug airr-bringup --account claude-3 --tags debug --max-turns 150 --timeout 5400 --var TITLE="Bring up Isambard-AI after G's login and check the unknowns on the system" --var MILESTONE=.plan/milestones/M01-airr-bring-up.md

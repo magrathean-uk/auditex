@@ -1,0 +1,4 @@
+--task REV-M00-T05 --role codex --model gpt-6.1-sol --account codex2 --template codex-review --readonly --sha task/M00-T05-digest-compare --tags debug --var TASK=M00-T05 --var MILESTONE=.plan/milestones/M00-foundation.md --var BRANCH=task/M00-T05-digest-compare
+--task REV-M04-T01 --role codex --model gpt-6.1-sol --account codex2 --readonly --tags hard --brief .plan/work/REV-M04-T01/brief-src.md
+--task REV-M04-T01-sol --role sol --account claude-5 --readonly --tags hard --brief .plan/work/REV-M04-T01-sol/brief-src.md
+--task REV-KIT-01 --role codex --model gpt-6.1-sol --account codex2 --readonly --tags debug --timeout 2700 --brief .plan/work/REV-KIT-01/brief-src.md

@@ -11,9 +11,9 @@ Track B. Research tasks: the only repository output is `.plan/work/<id>/result.m
 The Isambard-AI allocation is reachable through G's login, a runbook records the system's real facts instead of the old cluster's assumptions, a standalone trainer and the `kit-check` verifier in the AIRR kit folder run without the module 1.4.0 removed, and one reproduction of the v10 build on Isambard-AI scores inside the recorded gates, which proves the pipeline end to end.
 
 ## Definition of Done
-- [ ] The runbook and the porting list exist in the AIRR kit folder, and every unknown is listed with the check that settles it: `grep -qx 'runbook: written' .plan/work/M01-T01/result.md && test -s "$AIRR_KIT/runbook/README.md"`
-- [ ] Review: G ran the Isambard-AI login, and the route workers use after it (or the one command per stage G runs when no worker route exists) is recorded: `grep -qx 'login: confirmed' .plan/work/M01-T02/result.md`
-- [ ] The eight unknowns are checked on the system and written into the runbook (compute-node internet, login-node egress, Python and CUDA driver, aarch64 torch, PEFT, transformers and bitsandbytes, Apptainer images, storage quotas and purge rules, data route in and out): `grep -qx 'unknowns-checked: 8/8' .plan/work/M01-T02/result.md`
+- [x] The runbook and the porting list exist in the AIRR kit folder, and every unknown is listed with the check that settles it: `grep -qx 'runbook: written' .plan/work/M01-T01/result.md && test -s "$AIRR_KIT/runbook/README.md"`
+- [x] Review: G ran the Isambard-AI login, and the route workers use after it (or the one command per stage G runs when no worker route exists) is recorded: `grep -qx 'login: confirmed' .plan/work/M01-T02/result.md`
+- [x] The eight unknowns are checked on the system and written into the runbook (compute-node internet, login-node egress, Python and CUDA driver, aarch64 torch, PEFT, transformers and bitsandbytes, Apptainer images, storage quotas and purge rules, data route in and out): `grep -qx 'unknowns-checked: 8/8' .plan/work/M01-T02/result.md`
 - [ ] The standalone trainer passes its offline self-test and imports nothing from `auditex` or `azure_tenant_audit`, reproduced by the verifier: `"$AIRR_KIT/bin/kit-check" selftest --result .plan/work/M01-T03/result.md`
 - [ ] The qualification job passes on a GH200 node (DDP check, a short LoRA step, checkpoint save and reload, scoring smoke), with its scoring smoke reproduced: `grep -qx 'qualification: pass' .plan/work/M01-T04/result.md && "$AIRR_KIT/bin/kit-check" score runs/qualification --result .plan/work/M01-T04/result.md`
 - [ ] The v10 reproduction scores at least 400 of 435 strict with at most 5 applicability errors on test-v7, quantised, and passes quantised parity, recomputed from the saved predictions: `grep -qx 'reproduction: pass' .plan/work/M01-T05/result.md && "$AIRR_KIT/bin/kit-check" score runs/v10-repro --result .plan/work/M01-T05/result.md`
@@ -23,8 +23,8 @@ The Isambard-AI allocation is reachable through G's login, a runbook records the
 ## Tasks
 | id | title | owner | size | tags | status |
 |---|---|---|---|---|---|
-| M01-T01 | Write the Isambard-AI runbook and porting list in a new AIRR kit folder | terra | S | - | todo |
-| M01-T02 | Bring up Isambard-AI after G's login and check the unknowns on the system | terra | S | debug | todo |
+| M01-T01 | Write the Isambard-AI runbook and porting list in a new AIRR kit folder | terra | S | - | done |
+| M01-T02 | Bring up Isambard-AI after G's login and check the unknowns on the system | terra | S | debug | done |
 | M01-T03 | Build a standalone trainer, scorer and the kit-check verifier in the AIRR kit folder | codex | M | - | todo |
 | M01-T04 | Build the environment and pass the qualification job on Isambard-AI | terra | M | debug | todo |
 | M01-T05 | Reproduce the v10 build on Isambard-AI | terra | M | debug | todo |

@@ -300,3 +300,25 @@ utc	task	role	launcher	model	effort	placement	exit	seconds	cost_usd	status	branc
 2026-11-11T08:42:56Z	REV-PLAN-v4	codex	codex2	gpt-6.1-sol	high	readonly	0	327		done	task/PLAN-v4-plan-v4
 2026-11-11T08:51:11Z	PLAN-v4	sol	claude-1	claude-opus-5-5	xhigh	branch	0	468	2.8475	done	task/PLAN-v4-plan-v4
 2026-11-11T08:54:27Z	REV-PLAN-v4	codex	codex2	gpt-6.1-sol	high	readonly	0	195		done	task/PLAN-v4-plan-v4
+2026-11-11T08:59:41Z	M01-T01	terra	claude-1	claude-sonnet-5-5	medium	branch	0	81	0.3504	done	task/M01-T01-airr-runbook
+2026-11-11T09:01:27Z	M00-T05	terra	claude-5	claude-sonnet-5-5	high	branch	0	187	0.5835	done	task/M00-T05-digest-compare
+2026-11-11T09:04:19Z	M02-T01	terra	claude-5	claude-sonnet-5-5	medium	branch	0	359	0.7031	done	task/M02-T01-twin-definition
+2026-11-11T09:17:33Z	M01-T03	sol	claude-3	claude-opus-5-5	high	branch	0	1153	6.8573	done	task/M01-T03-kit-trainer
+2026-11-11T09:21:52Z	M04-T01	sol	claude-1	claude-opus-5-5	xhigh	readonly	0	1412	8.1449	done	6c8c3c5
+2026-11-11T09:25:41Z	REV-M00-T05	codex	codex2	gpt-6.1-sol	high	readonly	0	127		done	task/M00-T05-digest-compare
+2026-11-11T09:29:16Z	REV-KIT-01	codex	codex2	gpt-6.1-sol	high	readonly	0	342		done	6c8c3c5
+2026-11-11T09:31:01Z	REV-M04-T01	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	447		done	6c8c3c5
+2026-11-11T09:34:48Z	REV-M04-T01-sol	sol	claude-5	claude-opus-5-5	xhigh	readonly	0	674	4.3879	done	6c8c3c5
+2026-11-11T09:37:44Z	EXP-clock	terra	claude-5	claude-sonnet-5-5	medium	readonly	0	45	0.4561	done	6c8c3c5
+2026-11-11T09:38:09Z	M00-T05	terra	claude-5	claude-sonnet-5-5	high	branch	0	73	0.2812	done	task/M00-T05-digest-compare
+2026-11-11T09:46:47Z	M02-T01	terra	claude-1	claude-sonnet-5-5	high	branch	0	590	0.9598	done	task/M02-T01-twin-definition
+2026-11-11T09:47:11Z	M01-T02	terra	claude-3	claude-sonnet-5-5	high	branch	2	296	0.2762	blocked	task/M01-T02-airr-bringup
+2026-11-11T09:48:40Z	M01-T03	sol	claude-3	claude-opus-5-5	high	branch	0	704	3.7354	done	task/M01-T03-kit-trainer
+2026-11-11T10:12:26Z	M04-T01	sol	claude-1	claude-opus-5-5	xhigh	readonly	0	2127	10.1906	done	6c8c3c5
+2026-11-11T10:12:46Z	M01-T02	terra	claude-3	claude-sonnet-5-5	high	branch	1	298	0.4987	partial	task/M01-T02-airr-bringup
+2026-11-11T10:12:54Z	REV-M00-T05	codex	codex2	gpt-6.1-sol	high	readonly	0	25		done	task/M00-T05-digest-compare
+2026-11-11T10:18:53Z	REV-M04-T01	codex	codex2	gpt-6.1-sol	xhigh	readonly	0	384		done	6c8c3c5
+2026-11-11T10:19:20Z	REV-KIT-01	codex	codex2	gpt-6.1-sol	high	readonly	0	411		done	6c8c3c5
+2026-11-11T10:23:57Z	REV-M04-T01-sol	sol	claude-5	claude-opus-5-5	xhigh	readonly	0	688	4.1720	done	6c8c3c5
+2026-11-11T10:36:28Z	M02-T01	terra	claude-1	claude-sonnet-5-5	high	branch	1	677	0.3993	partial	task/M02-T01-twin-definition
+2026-11-11T10:40:02Z	M01-T02	terra	claude-3	claude-sonnet-5-5	high	branch	0	952	1.2126	done	task/M01-T02-airr-bringup
