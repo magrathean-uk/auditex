@@ -16,14 +16,14 @@ call expression, method, number of sites), and each entry names its transport cl
 or one more site inside an allow-listed function, fails until someone classifies it here. An entry
 that no longer matches anything also fails, so the list never grows wider than the code.
 
-The allow-list is the frozen M01-T02 inventory, section E (DEC-006), and nothing wider. Two sites
+The allow-list is the frozen M01-T02 inventory, section E (v2 DEC-006), and nothing wider. Two sites
 take a variable method but are GET-only behind a guard and are resolved to that guard in
 ``GET_ONLY_GUARDED`` instead of being allowed (inventory rows A8 and A9). A guarded entry, and an
 allow-list entry that names a guard, is bound to its exact number of sites and to the method flow:
 the site must pass the function's own method parameter, never rebound, and the function must apply
 the guard to that parameter first (or, for A9, hand it to a receiver typed as the guarded client).
 
-Opener and request values fail closed (DEC-009, closing the DEC-011 limits). Every ``.open`` call,
+Opener and request values fail closed (v3 DEC-009, closing the v2 DEC-011 limits). Every ``.open`` call,
 ``.open`` taken as a value and ``getattr(x, "open")`` has its receiver proved, through the binding
 union of every name it reads: every binding form (assignment, annotated assignment, walrus,
 parameter, default, import, ``def``, ``class``, loop, ``with``, ``except``, ``match``, unpacking,
@@ -31,7 +31,11 @@ augmented assignment, type parameter) in every scope of the module, so a ``globa
 rebinding is part of it, and every attribute store or class-body binding of the same name anywhere
 under ``src/``. The receiver is proved when every value in the union is a module or type in the
 closed ``_NON_OPENER_*`` tables, or an instance of such a type (a call of it, or a parameter
-annotated with it). A urllib opener in the union makes the call a ``VARIABLE`` site; anything else
+annotated with it). A dotted origin (``pathlib.Path``, imported or read as an attribute of an
+imported module) counts only when no module under ``src/`` stores an attribute named after a segment
+of its path past the root, whatever the store's receiver (``pathlib.Path = factory``,
+``setattr(x, "Path", f)``, a class-body ``Path``), and none calls ``setattr`` or ``delattr`` with a
+computed name. A urllib opener in the union makes the call a ``VARIABLE`` site; anything else
 (an untyped parameter, a container element, a call result, a loop or ``with`` target, a ``setattr``
 of the same name or a computed ``setattr`` anywhere, a module that writes its own namespace through
 ``globals()``, ``locals()``, ``vars()``, ``exec``, ``eval``, ``__dict__`` or a star import, a
@@ -154,7 +158,7 @@ _GOOGLE_AUTH = "src/auditex/google_workspace/auth.py"
 _GOOGLE_CLIENT = "src/auditex/google_workspace/client.py"
 _NOTIFY = "src/auditex/notify.py"
 
-# Frozen non-GET allow-list: transport-inventory section E (M01-T02, DEC-006). Do not widen it
+# Frozen non-GET allow-list: transport-inventory section E (M01-T02, v2 DEC-006). Do not widen it
 # without a new inventory row and decision; a site outside the eight transport classes needs sol.
 ALLOW_LIST: tuple[Allowed, ...] = (
     Allowed(_GRAPH, "GraphClient.app_token_for", "self.session.post", "POST", 1, 2, "A1",
@@ -454,6 +458,19 @@ class _Program:
             found |= owner.binding(binding, seen | {key})
         return found
 
+    def origin(self, dotted: str) -> set[Value]:
+        """An imported module or name, trusted only when no module stores an attribute on its path after the
+        root module (v3 DEC-009). The store's receiver is not resolved: ``pathlib.Path = factory``,
+        ``alias.Path = value``, ``setattr(x, "Path", value)`` or a class-body ``Path`` in any module, or a
+        ``setattr``/``delattr`` with a computed name anywhere, leaves ``pathlib.Path`` unresolved."""
+        segments = dotted.split(".")[1:]
+        stored = sorted(segment for segment in segments if segment in self.attributes)
+        if stored:
+            return _unresolved(f"{dotted!r} may be rebound: a module stores an attribute named {stored[0]!r}")
+        if segments and self.computed_attribute:
+            return _unresolved(f"{dotted!r} may be rebound by a setattr or delattr with a computed name")
+        return {("origin", dotted)}
+
 
 class _Namespace:
     """Every binding of every name in one module, for proving what an ``.open`` receiver holds.
@@ -550,7 +567,7 @@ class _Namespace:
     def binding(self, binding: Binding, seen: frozenset[tuple[object, str]]) -> set[Value]:
         kind, payload = binding
         if kind == "origin":
-            return {("origin", str(payload))}
+            return self.program.origin(str(payload))
         if kind == "value":
             return self.values(payload, seen)  # type: ignore[arg-type]
         if kind == "param":
@@ -599,7 +616,7 @@ class _Namespace:
                 return self.program.attribute(expr.attr, seen)
             bases = self.values(expr.value, seen)
             if all(kind == "origin" for kind, _ in bases):
-                return {("origin", f"{dotted}.{expr.attr}") for _, dotted in bases}
+                return set().union(*(self.program.origin(f"{dotted}.{expr.attr}") for _, dotted in bases))
             return _unresolved("an attribute of a value the scan cannot prove")
         if isinstance(expr, ast.Call):
             if _is_opener_constructor(expr, self.imports):
@@ -726,7 +743,7 @@ class _Scanner(ast.NodeVisitor):
         why = ""
         receiver = _open_receiver(node)
         if receiver is not None:
-            # An opener send, or an ``.open`` the scan must prove is not one (DEC-009: fail closed).
+            # An opener send, or an ``.open`` the scan must prove is not one (v3 DEC-009: fail closed).
             kind, why = self.namespace.receiver(receiver)
             if kind == "safe":
                 self.proven.append(f"{self.path}:{node.lineno} {ast.unparse(node.func)}")
@@ -1164,7 +1181,7 @@ def test_the_graph_dispatch_entry_needs_the_guard_on_the_sent_method() -> None:
     assert unclassified(scan_source(template.format(extra="        method = 'PATCH'\n", sent="method"), _GRAPH))
 
 
-# DEC-009: the two DEC-011 HTTP limits, closed for planted sources, and the fail-closed rule.
+# v3 DEC-009: the two v2 DEC-011 HTTP limits, closed for planted sources, and the fail-closed rule.
 
 
 def _plant(tmp_path: Path, **modules: str) -> Scan:
@@ -1353,6 +1370,61 @@ def test_an_attribute_set_from_another_module_joins_the_union(tmp_path: Path) ->
 def test_a_receiver_proved_not_to_be_an_opener_is_not_a_site(tmp_path: Path, source: str) -> None:
     scan = _plant(tmp_path, planted=source)
     assert scan.sites == [] and unclassified(scan) == []
+
+
+# v3 DEC-009 limit (REV-M04-T01): a dotted import origin is trusted only when no scanned module stores an
+# attribute on its path, so ``pathlib.Path = factory`` (a factory that returns an opener) leaves every
+# ``pathlib.Path`` receiver unresolved, however the store and the read are spelt.
+_FACTORY = "from urllib.request import build_opener\ndef factory(*args):\n    return build_opener()\n"
+_PATH_READERS = {
+    "attribute": "import pathlib\ndef read(name):\n    return pathlib.Path(name).open('https://x.test', data=b'x')\n",
+    "imported": "from pathlib import Path\ndef read(name):\n    return Path(name).open('https://x.test', data=b'x')\n",
+    "annotated": "import pathlib\ndef read(path: pathlib.Path):\n    return path.open('https://x.test', data=b'x')\n",
+    "value": "from pathlib import Path\ndef read(name):\n    send = Path(name).open\n"
+             "    return send('https://x.test', data=b'x')\n",
+    "getattr": "import pathlib\ndef read(name):\n"
+               "    return getattr(pathlib.Path(name), 'open')('https://x.test', data=b'x')\n",
+}
+_PATH_STORES = {
+    "assignment": "import pathlib\n" + _FACTORY + "pathlib.Path = factory\n",
+    "alias": "import pathlib as paths\n" + _FACTORY + "paths.Path = factory\n",
+    "setattr": "import pathlib\n" + _FACTORY + "setattr(pathlib, 'Path', factory)\n",
+    "dunder": "import pathlib\n" + _FACTORY + "pathlib.__setattr__('Path', factory)\n",
+    "parameter": "def wire(module, value):\n    module.Path = value\n",
+    "computed": "class Settings:\n    def set(self, name, value):\n        setattr(self, name, value)\n",
+}
+
+
+@pytest.mark.parametrize("reader", sorted(_PATH_READERS))
+def test_a_dotted_origin_is_proved_when_no_module_stores_on_its_path(tmp_path: Path, reader: str) -> None:
+    other = "class Box:\n    def __init__(self, label):\n        self.label = label\n"  # another name: no effect
+    scan = _plant(tmp_path, planted=_PATH_READERS[reader], other=other)
+    assert scan.sites == [] and unclassified(scan) == []
+
+
+@pytest.mark.parametrize("store", sorted(_PATH_STORES))
+@pytest.mark.parametrize("reader", sorted(_PATH_READERS))
+def test_an_attribute_store_on_a_dotted_origin_leaves_it_unresolved(tmp_path: Path, reader: str, store: str) -> None:
+    scan = _plant(tmp_path, planted=_PATH_READERS[reader], other=_PATH_STORES[store])
+    _fails_closed(scan, UNRESOLVED)
+    assert [site.method for site in scan.sites] == [UNRESOLVED]
+
+
+def test_a_dotted_origin_stored_in_its_own_module_is_unresolved(tmp_path: Path) -> None:
+    source = _PATH_STORES["assignment"] + "def read(name):\n    return pathlib.Path(name).open('https://x.test')\n"
+    _fails_closed(_plant(tmp_path, planted=source), UNRESOLVED)
+
+
+def test_a_store_on_any_segment_after_the_root_leaves_the_origin_unresolved(tmp_path: Path) -> None:
+    source = (
+        "import urllib.request\n"
+        "def send(url):\n"
+        "    director = urllib.request.OpenerDirector\n"
+        "    return director().open(url, data=b'x')\n"
+    )
+    assert [site.method for site in _plant(tmp_path / "alone", planted=source).sites] == [VARIABLE]
+    other = "import urllib\nurllib.request = None\n"
+    _fails_closed(_plant(tmp_path / "stored", planted=source, other=other), UNRESOLVED)
 
 
 # The fail-closed rule for request values: a urllib method the scan cannot prove is not GET.
